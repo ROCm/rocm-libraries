@@ -1,4 +1,4 @@
-// Copyright (c) 2018 - 2022 Advanced Micro Devices, Inc. All rights
+// Copyright (c) 2018 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -131,7 +131,7 @@ const std::vector<hipfftLibraryPropertyType> enum_helper<hipfftLibraryPropertyTy
 TEST(hipfftTest, Create1dPlan)
 {
     PROB_SKIP_UNITTEST();
-    hipfftHandle plan   = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan   = INVALID_HIPFFT_PLAN_HANDLE;
     size_t       length = 1024;
     ASSERT_EQ(hipfftPlan1d(&plan, length, HIPFFT_C2C, 1), HIPFFT_SUCCESS);
 
@@ -171,7 +171,7 @@ TEST(hipfftTest, CreatePlanMany)
 
     // inembed == null && onembed == null
     {
-        hipfftHandle plan_valid_1 = hipfft_params::INVALID_PLAN_HANDLE;
+        hipfftHandle plan_valid_1 = INVALID_HIPFFT_PLAN_HANDLE;
         ASSERT_EQ(hipfftCreate(&plan_valid_1), HIPFFT_SUCCESS);
         auto ret_hipfft = hipfftMakePlanMany(plan_valid_1,
                                              rank,
@@ -193,7 +193,7 @@ TEST(hipfftTest, CreatePlanMany)
 
     // inembed != null && onembed != null
     {
-        hipfftHandle plan_valid_2 = hipfft_params::INVALID_PLAN_HANDLE;
+        hipfftHandle plan_valid_2 = INVALID_HIPFFT_PLAN_HANDLE;
         ASSERT_EQ(hipfftCreate(&plan_valid_2), HIPFFT_SUCCESS);
         auto ret_hipfft = hipfftMakePlanMany(plan_valid_2,
                                              rank,
@@ -215,7 +215,7 @@ TEST(hipfftTest, CreatePlanMany)
 
     // inembed != null && onembed == null
     {
-        hipfftHandle plan_invalid_1 = hipfft_params::INVALID_PLAN_HANDLE;
+        hipfftHandle plan_invalid_1 = INVALID_HIPFFT_PLAN_HANDLE;
         ASSERT_EQ(hipfftCreate(&plan_invalid_1), HIPFFT_SUCCESS);
         auto ret_hipfft = hipfftMakePlanMany(plan_invalid_1,
                                              rank,
@@ -236,7 +236,7 @@ TEST(hipfftTest, CreatePlanMany)
 
     // inembed == null && onembed != null
     {
-        hipfftHandle plan_invalid_2 = hipfft_params::INVALID_PLAN_HANDLE;
+        hipfftHandle plan_invalid_2 = INVALID_HIPFFT_PLAN_HANDLE;
         ASSERT_EQ(hipfftCreate(&plan_invalid_2), HIPFFT_SUCCESS);
         auto ret_hipfft = hipfftMakePlanMany(plan_invalid_2,
                                              rank,
@@ -281,7 +281,7 @@ TEST(hipfftTest, CreatePlanMany64)
 
     // First test with a valid data layout
     {
-        hipfftHandle plan_valid = hipfft_params::INVALID_PLAN_HANDLE;
+        hipfftHandle plan_valid = INVALID_HIPFFT_PLAN_HANDLE;
         ASSERT_EQ(hipfftCreate(&plan_valid), HIPFFT_SUCCESS);
         auto ret_hipfft = hipfftMakePlanMany64(plan_valid,
                                                rank,
@@ -305,7 +305,7 @@ TEST(hipfftTest, CreatePlanMany64)
 #ifdef __HIP_PLATFORM_AMD__
     long long int n_invalid[3] = {nX, -nY, nZ};
     {
-        hipfftHandle plan_invalid_1 = hipfft_params::INVALID_PLAN_HANDLE;
+        hipfftHandle plan_invalid_1 = INVALID_HIPFFT_PLAN_HANDLE;
         ASSERT_EQ(hipfftCreate(&plan_invalid_1), HIPFFT_SUCCESS);
         auto ret_hipfft = hipfftMakePlanMany64(plan_invalid_1,
                                                rank,
@@ -327,7 +327,7 @@ TEST(hipfftTest, CreatePlanMany64)
 
     // invalid data layout (onembed array has a negative entry)
     {
-        hipfftHandle plan_invalid_2 = hipfft_params::INVALID_PLAN_HANDLE;
+        hipfftHandle plan_invalid_2 = INVALID_HIPFFT_PLAN_HANDLE;
         ASSERT_EQ(hipfftCreate(&plan_invalid_2), HIPFFT_SUCCESS);
         auto ret_hipfft = hipfftMakePlanMany64(plan_invalid_2,
                                                rank,
@@ -348,7 +348,7 @@ TEST(hipfftTest, CreatePlanMany64)
 
     // invalid data layout (batch is negative)
     {
-        hipfftHandle plan_invalid_3 = hipfft_params::INVALID_PLAN_HANDLE;
+        hipfftHandle plan_invalid_3 = INVALID_HIPFFT_PLAN_HANDLE;
         ASSERT_EQ(hipfftCreate(&plan_invalid_3), HIPFFT_SUCCESS);
         auto ret_hipfft = hipfftMakePlanMany64(plan_invalid_3,
                                                rank,
@@ -386,7 +386,7 @@ TEST(hipfftTest, hipfftGetSizeMany)
     int const  batch      = 1;
     size_t     workSize;
 
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     auto ret_hipfft = hipfftGetSizeMany(plan,
                                         rank,
@@ -423,7 +423,7 @@ TEST(hipfftTest, hipfftGetSizeMany64)
     long long int const batch      = 2;
     size_t              workSize;
 
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     auto ret_hipfft = hipfftGetSizeMany64(plan,
                                           rank,
@@ -445,7 +445,7 @@ TEST(hipfftTest, hipfftGetSizeMany64)
 TEST(hipfftTest, CheckBufferSizeC2C)
 {
     PROB_SKIP_UNITTEST();
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 1024;
     size_t workSize = 0;
@@ -462,7 +462,7 @@ TEST(hipfftTest, CheckBufferSizeC2C)
 TEST(hipfftTest, CheckBufferSizeR2C)
 {
     PROB_SKIP_UNITTEST();
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     // real forward transform cannot modify input, so we need to pick
     // a sufficiently small N such that rocFFT can fuse
@@ -491,7 +491,7 @@ TEST(hipfftTest, CheckBufferSizeR2C)
 TEST(hipfftTest, CheckBufferSizeC2R)
 {
     PROB_SKIP_UNITTEST();
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 2048;
     size_t workSize = 0;
@@ -517,7 +517,7 @@ TEST(hipfftTest, CheckBufferSizeC2R)
 TEST(hipfftTest, CheckBufferSizeD2Z)
 {
     PROB_SKIP_UNITTEST();
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     // real forward transform cannot modify input, so we need to pick
     // a sufficiently small N such that rocFFT can fuse
@@ -548,7 +548,7 @@ TEST(hipfftTest, CheckBufferSizeD2Z)
 TEST(hipfftTest, CheckBufferSizeZ2D)
 {
     PROB_SKIP_UNITTEST();
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 2048;
     size_t batch    = 1000;
@@ -577,7 +577,7 @@ TEST(hipfftTest, CheckBufferSizeZ2D)
 TEST(hipfftTest, CheckNullWorkBuffer)
 {
     PROB_SKIP_UNITTEST();
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 2048;
     size_t batch    = 1000;
@@ -604,7 +604,7 @@ TEST(hipfftTest, RunR2C)
 
     ASSERT_EQ(hipMemcpy(d_in, in, N * sizeof(hipfftReal), hipMemcpyHostToDevice), hipSuccess);
 
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t workSize;
     ASSERT_EQ(hipfftMakePlan1d(plan, N, HIPFFT_R2C, 1, &workSize), HIPFFT_SUCCESS);
@@ -682,13 +682,13 @@ TEST(hipfftTest, OutplaceOnly)
 
     ASSERT_EQ(hipMemcpy(d_in, in, N_in * sizeof(hipfftReal), hipMemcpyHostToDevice), hipSuccess);
 
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
 
     ASSERT_EQ(hipfftPlanMany(&plan, 1, &N_in, &N_in, 1, N_in, &N_out, 1, N_out, HIPFFT_R2C, 1),
               HIPFFT_SUCCESS);
 
-    ASSERT_EQ(plan == hipfft_params::INVALID_PLAN_HANDLE, false);
+    ASSERT_EQ(plan == INVALID_HIPFFT_PLAN_HANDLE, false);
 
     ASSERT_EQ(hipfftExecR2C(plan, d_in, d_out), HIPFFT_SUCCESS) << "hipfftExecR2C failed";
 

@@ -398,6 +398,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     # LDS barrier (the monolithic s_waitcnt is not selectable there).
     "s.wait.dscnt": "declare void @llvm.amdgcn.s.wait.dscnt(i16)",
     "s.wait.loadcnt": "declare void @llvm.amdgcn.s.wait.loadcnt(i16)",
+    "s.wait.storecnt": "declare void @llvm.amdgcn.s.wait.storecnt(i16)",
+    "s.wait.kmcnt": "declare void @llvm.amdgcn.s.wait.kmcnt(i16)",
+    "s.wait.expcnt": "declare void @llvm.amdgcn.s.wait.expcnt(i16)",
     # gfx1250 (gfx1250) async global<->LDS DMA + its dedicated ASYNC counter.
     # The gfx9 buffer/global load-to-LDS intrinsics are NOT selectable here.
     "s.wait.asynccnt": "declare void @llvm.amdgcn.s.wait.asynccnt(i16 immarg)",
@@ -2683,6 +2686,18 @@ class _Lowerer:
 
         For `vec=1` we still return `<1 x half>` (a one-element vector) so
         callers consistently see the same type; LLVM folds it to scalar.
+
+        On gfx1250 the load is marked ``volatile`` to prevent the AMDGPU
+        WMMA-aware backend pass from substituting ``ds_load_tr16_b128``
+        (transposed LDS read) in place of the plain sequential
+        ``ds_read_b128``.  The conv/GEMM kernels store LDS tiles row-major
+        for efficient coalesced writes; ``ds_load_tr16_b128`` assumes a
+        column-major (transposed) layout and produces wrong WMMA inputs when
+        the tile is row-major.  A volatile load is opaque to the substitution
+        and forces the plain ``ds_read_b128`` instruction, which reads
+        elements sequentially as stored.  The volatile fence cost is zero on
+        AMDGPU because LDS accesses are already sequentially consistent within
+        a wave; the only effect is blocking the unwanted rewrite.
         """
         smem = op.operands[0]
         indices = list(op.operands[1:])
@@ -2704,17 +2719,29 @@ class _Lowerer:
             2,  # type: ignore[attr-defined]
         )
         align = vec * elem_bytes
+        # gfx1250: mark 8-wide (128-bit) LDS loads volatile to block the WMMA-aware
+        # pass from substituting ds_load_tr16_b128 (transposed) in place of the plain
+        # sequential ds_read_b128.  Only 8-wide loads feed the 16x16x32 WMMA fragment
+        # (two back-to-back 8-wide loads build the <16 x half>); narrower loads never
+        # trigger this substitution.  Limiting volatile to vec==8 avoids marking every
+        # scalar LDS read volatile, which would block LLVM's CSE/hoisting and cause
+        # quadratic compilation time on large unrolled K-loops.
+        volatile = (
+            "volatile "
+            if vec == 8 and getattr(self._backend, "blocks_ds_load_tr16", False)
+            else ""
+        )
         if vec == 1:
             scalar = self._fresh("smem.s")
             self._current().emit(
-                f"  {scalar} = load {elem_ty}, ptr addrspace(3) {base}, align {align}"
+                f"  {scalar} = load {volatile}{elem_ty}, ptr addrspace(3) {base}, align {align}"
             )
             self._current().emit(
                 f"  {op.result.name} = insertelement <1 x {elem_ty}> undef, {elem_ty} {scalar}, i32 0"
             )
         else:
             self._current().emit(
-                f"  {op.result.name} = load <{vec} x {elem_ty}>, ptr addrspace(3) {base}, "
+                f"  {op.result.name} = load {volatile}<{vec} x {elem_ty}>, ptr addrspace(3) {base}, "
                 f"align {align}"
             )
 
@@ -3975,6 +4002,40 @@ class _Lowerer:
         self._need("s.barrier")
         self._current().emit(" call void @llvm.amdgcn.s.barrier()")
 
+    # ---- exec-mask manipulation (wavelet pipeline, MFMA targets) ----
+
+    def _op_tile_exec_and_saveexec(self, op: Op) -> None:
+        # s_and_saveexec_b64 dst, src: exec = exec & src; dst = old exec.
+        (mask,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = call i64 asm sideeffect"
+            f' "s_and_saveexec_b64 $0, $1", "=s,s"({self._operand_with_type(mask)})'
+        )
+
+    def _op_tile_exec_xor(self, op: Op) -> None:
+        # s_xor_b64 dst, exec, src: dst = exec XOR src (complement mask).
+        (saved,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = call i64 asm sideeffect"
+            f' "s_xor_b64 $0, exec, $1", "=s,s"({self._operand_with_type(saved)})'
+        )
+
+    def _op_tile_exec_or_saveexec(self, op: Op) -> None:
+        # s_or_saveexec_b64 dst, src: exec |= src; dst = old exec.
+        (compl,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = call i64 asm sideeffect"
+            f' "s_or_saveexec_b64 $0, $1", "=s,s"({self._operand_with_type(compl)})'
+        )
+
+    def _op_tile_exec_or(self, op: Op) -> None:
+        # s_or_b64 exec, exec, src: restore exec (void, side-effect only).
+        (saved,) = op.operands
+        self._current().emit(
+            f"  call void asm sideeffect"
+            f' "s_or_b64 exec, exec, $0", "s"({self._operand_with_type(saved)})'
+        )
+
     def _op_tile_sync_half_block(self, op: Op) -> None:
         # Half-block barrier: branch on the i32 selector; only the
         # ``then`` branch hits the s_barrier. This emits the AMDGPU pattern
@@ -4019,15 +4080,41 @@ class _Lowerer:
         self._current().emit(" call void @llvm.amdgcn.s.barrier()")
 
     def _op_tile_s_waitcnt(self, op: Op) -> None:
-        # gfx1250 (gfx1250): the split wait counters are inserted by the backend;
-        # the legacy s_waitcnt intrinsic is not selectable, so skip emission.
-        if not self._backend.emits_legacy_s_waitcnt:
-            return
-        # See rocke/_ir.py:s_waitcnt for the encoding contract.
-        self._need("s.waitcnt")
         vm = int(op.attrs.get("vmcnt", -1))
         lk = int(op.attrs.get("lgkmcnt", -1))
         ec = int(op.attrs.get("expcnt", -1))
+        if not self._backend.emits_legacy_s_waitcnt:
+            # gfx1250: monolithic s_waitcnt is not selectable; emit the split
+            # wait-counter intrinsics instead. Mapping:
+            #   vmcnt  → loadcnt  (drain pending global loads)
+            #            storecnt (drain pending global stores)
+            #   lgkmcnt → dscnt   (drain pending LDS ops)
+            #             kmcnt   (drain pending scalar memory ops, e.g. s_load)
+            #   expcnt → expcnt   (drain pending exports / VSRC writes)
+            # Without this, b.s_waitcnt(vmcnt=0) only drains loads and silently
+            # leaves stores / scalar-memory ops outstanding.
+            if vm >= 0:
+                self._need("s.wait.loadcnt")
+                self._current().emit(
+                    f"  call void @llvm.amdgcn.s.wait.loadcnt(i16 {vm})"
+                )
+                self._need("s.wait.storecnt")
+                self._current().emit(
+                    f"  call void @llvm.amdgcn.s.wait.storecnt(i16 {vm})"
+                )
+            if lk >= 0:
+                self._need("s.wait.dscnt")
+                self._current().emit(f"  call void @llvm.amdgcn.s.wait.dscnt(i16 {lk})")
+                self._need("s.wait.kmcnt")
+                self._current().emit(f"  call void @llvm.amdgcn.s.wait.kmcnt(i16 {lk})")
+            if ec >= 0:
+                self._need("s.wait.expcnt")
+                self._current().emit(
+                    f"  call void @llvm.amdgcn.s.wait.expcnt(i16 {ec})"
+                )
+            return
+        # See rocke/_ir.py:s_waitcnt for the encoding contract.
+        self._need("s.waitcnt")
         mask = self._backend.encode_waitcnt(vmcnt=vm, expcnt=ec, lgkmcnt=lk)
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
 
@@ -5201,6 +5288,72 @@ class _Lowerer:
 
         for i, line in enumerate(cur.lines):
             cur.lines[i] = line.replace("%IF_END", f"%{end_blk.label}")
+
+    def _op_scf_if_else(self, op: Op) -> None:
+        """Lower ``scf.if_else`` to a true LLVM if/else with a shared join block.
+
+        Both branches converge at the same ``if.end`` block, which is the
+        key property that keeps ``s_barrier`` calls alive through
+        ``simplifycfg``: LLVM cannot remove a barrier that is reachable
+        from both sides of a conditional branch (it cannot prove that
+        ``uniform-work-group-size`` guarantees both branches execute in
+        lock-step — only the hardware s_barrier semantic does).
+
+        LLVM IR shape::
+
+            br i1 %cond, label %if.then, label %if.else
+          if.then:
+            [then region]
+            br label %if.end
+          if.else:
+            [else region]
+            br label %if.end
+          if.end:
+            [continuation]
+        """
+        (cond,) = op.operands
+        then_region = op.regions[0]
+        else_region = op.regions[1]
+        cur = self._current()
+
+        # Allocate labels for then, else, and join blocks. We use a
+        # placeholder in the branch instruction and backpatch it (same
+        # trick as _op_scf_if for the %IF_END placeholder).
+        then_blk = self._new_block("if.then")
+        # Emit the conditional branch from the predecessor block.
+        cur.emit(
+            f"  br i1 {self._operand(cond)}, "
+            f"label %{then_blk.label}, label %IF_ELSE"
+        )
+        cur.terminated = True
+
+        # Lower then branch (then_blk is now _current).
+        self.lower_region(then_region)
+        then_last = self._current()
+        # then falls through to join; use another placeholder.
+        if not then_last.terminated:
+            then_last.emit("  br label %IF_END")
+            then_last.terminated = True
+
+        # Create else block (becomes _current).
+        else_blk = self._new_block("if.else")
+
+        # Lower else branch.
+        self.lower_region(else_region)
+        else_last = self._current()
+
+        # Create join block (becomes _current for subsequent ops).
+        end_blk = self._new_block("if.end")
+        if not else_last.terminated:
+            else_last.emit(f"  br label %{end_blk.label}")
+            else_last.terminated = True
+
+        # Backpatch placeholders in the predecessor and then blocks.
+        for blk in (cur, then_last):
+            for i, line in enumerate(blk.lines):
+                line = line.replace("%IF_ELSE", f"%{else_blk.label}")
+                line = line.replace("%IF_END", f"%{end_blk.label}")
+                blk.lines[i] = line
 
     def _op_scf_yield(self, op: Op) -> None:
         if not self._yield_stack:

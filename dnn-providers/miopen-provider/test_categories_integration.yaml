@@ -59,19 +59,19 @@ test_categories:
       - "full"
       - "all"
 
-  ffm_quick:
+  ffm-quick:
     description: "Fast-feedback mechanism (FFM) quick tier: one Smoke case per operation for rapid signal"
     test_patterns:
       - "Smoke/IntegrationGpuConvFwd2dFp32.Correctness/0"
       - "Smoke/IntegrationGpuBatchnormForwardInference2dFp32.Correctness/0"
-      - "Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness/0"
+      - "Smoke/IntegrationGpuActivationForwardFp32.Correctness/0"
       - "Smoke/IntegrationGpuReductionFp32.Correctness/0"
       - "Smoke/IntegrationGpuRMSNormFp32.Correctness/0"
       - "Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/mha"
     exclude: *common_excludes
     labels:
-      - "ffm_quick"
-      - "ffm_full"
+      - "ffm-quick"
+      - "ffm-full"
 
 exclude_gpu:
   exclude_gpu_gfx110X_windows:
@@ -82,6 +82,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "ffm-quick"
       - "ex_gpu_gfx110X"
 
 execution_settings:
@@ -96,3 +97,4 @@ execution_settings:
     standard: 2700
     comprehensive: 25200
     full: 28800
+    ffm-quick: 7200  # 2 hours
