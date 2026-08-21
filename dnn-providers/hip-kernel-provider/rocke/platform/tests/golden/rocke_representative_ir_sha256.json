@@ -778,9 +778,9 @@
           "gfx1151": 9,
           "gfx1201": 7,
           "gfx1250": 2,
-          "gfx90a": 4,
-          "gfx942": 12,
-          "gfx950": 56
+          "gfx90a": 5,
+          "gfx942": 14,
+          "gfx950": 58
         },
         "expected_failures": 0,
         "families": {
@@ -794,7 +794,7 @@
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 90
+        "ok_cases": 96
       }
     },
     "llvm22": {
@@ -1575,9 +1575,9 @@
           "gfx1151": 9,
           "gfx1201": 7,
           "gfx1250": 2,
-          "gfx90a": 4,
-          "gfx942": 12,
-          "gfx950": 56
+          "gfx90a": 5,
+          "gfx942": 14,
+          "gfx950": 58
         },
         "expected_failures": 0,
         "families": {
@@ -1591,7 +1591,7 @@
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 90
+        "ok_cases": 96
       }
     },
     "llvm23": {
@@ -2372,9 +2372,9 @@
           "gfx1151": 9,
           "gfx1201": 7,
           "gfx1250": 2,
-          "gfx90a": 4,
-          "gfx942": 12,
-          "gfx950": 56
+          "gfx90a": 5,
+          "gfx942": 14,
+          "gfx950": 58
         },
         "expected_failures": 0,
         "families": {
@@ -2388,7 +2388,7 @@
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 90
+        "ok_cases": 96
       }
     }
   },
