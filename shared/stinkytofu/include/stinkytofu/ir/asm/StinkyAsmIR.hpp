@@ -538,6 +538,11 @@ inline bool isAsyncMemOp(const StinkyInstruction& inst) {
     return isGlobalStoreAsyncFromLds(inst);
 }
 
+inline bool isVMem(const StinkyInstruction& inst) {
+    return isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) ||
+           isGLOBALOrAtomic(inst) || isAsyncMemOp(inst);
+}
+
 inline bool isDSRead(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_DSRead);
 }

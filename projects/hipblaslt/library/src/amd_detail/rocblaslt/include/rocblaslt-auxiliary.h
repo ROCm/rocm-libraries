@@ -114,6 +114,20 @@ rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
                                                int32_t*         sm_count_target);
 
 /*! \ingroup aux_module
+ *  \brief Set the handle-level uniform-summation-order request.
+ *  See hipblasLtSetUniformSummationOrder.
+ */
+rocblaslt_status rocblaslt_set_uniform_summation_order(rocblaslt_handle handle,
+                                                       int32_t          uniform_summation_order);
+
+/*! \ingroup aux_module
+ *  \brief Return the handle-level uniform-summation-order request.
+ *  See hipblasLtGetUniformSummationOrder.
+ */
+rocblaslt_status rocblaslt_get_uniform_summation_order(rocblaslt_handle handle,
+                                                       int32_t*         uniform_summation_order);
+
+/*! \ingroup aux_module
  *  \brief Create a descriptor for matrix
  *  \details
  *  \p rocblaslt_matrix_layout_create creates a matrix descriptor It initializes
@@ -421,12 +435,17 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
                                     rocblaslt::RocGemmType gemmType,
                                     int32_t                mode);
 
+void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
+                                rocblaslt::RocGemmType gemmType,
+                                bool                   value);
+
 rocblaslt_status
     rocblaslt_algo_get_heuristic_cpp(rocblaslt_handle       handle,
                                      rocblaslt::RocGemmType gemmType,
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
                                      const int32_t          streamKTileSchedulingMode,
+                                     const bool             uniformSummationOrder,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results);
 

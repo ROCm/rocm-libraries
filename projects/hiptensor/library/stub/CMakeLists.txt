@@ -102,6 +102,15 @@ function(create_hiptensor_stub_library)
         ${HIPTENSOR_STUB_DIR}/hiptensor_stub_special.cpp)
     add_library(hiptensor::hiptensor ALIAS hiptensor)
 
+    # The stub is the installed hiptensor.dll on Windows when device support is
+    # disabled, so it needs the same version metadata as the device library.
+    # version.rc is configured later in the root CMakeLists; configure_file runs
+    # at configure time, so the generated file exists by the build.
+    if(WIN32)
+        target_sources(hiptensor PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+        set_target_properties(hiptensor PROPERTIES LINKER_LANGUAGE CXX)
+    endif()
+
     target_compile_options(hiptensor PRIVATE ${CLANG_DRIVER_MODE})
     target_link_options(hiptensor PRIVATE ${CLANG_DRIVER_MODE})
     target_compile_definitions(hiptensor PRIVATE hiptensor_EXPORTS)
