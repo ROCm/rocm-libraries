@@ -1882,7 +1882,8 @@ namespace
     TEST(RowUniformityCoherenceGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrderCustomKernel)
     {
         auto solution = coherenceSteeringSolution();
-        solution->sizeMapping.customKernelName = "DummyCustomKernel";
+        solution->customKernel.name      = "DummyCustomKernel";
+        solution->customKernel.generated = false;
         auto device  = coherenceSteeringDevice();
         auto problem = coherenceGemm(512, 512, 8192);
 

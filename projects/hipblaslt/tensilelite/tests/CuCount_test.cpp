@@ -1087,7 +1087,8 @@ TEST(StreamKCoherenceGridSteeringTest, ForceTreeUnderUniformSummationOrderCustom
     // Custom kernels always resolve to tree; USO must not invent parallel.
     StreamK5AnalyticalEnv env;
     initSk3CoherenceSolution(env.solution);
-    env.solution.sizeMapping.customKernelName = "DummyCustomKernel";
+    env.solution.customKernel.name      = "DummyCustomKernel";
+    env.solution.customKernel.generated = false;
     env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
     env.device.skFixedGrid   = 0;
 
