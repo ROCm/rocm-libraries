@@ -502,11 +502,13 @@ class CDNA5ReadyQueue : public ReadyQueue {
     unsigned sccReadersLeft_ = 0;
 
     bool sccChainBlocks(const DAGNode* node) const {
+        if (!clusterBarrierEnabled()) return false;
         return openSccChain_ != 0 && node->handshakeBarrier;
     }
 
     // kRule3CrossLoop false: no-op (earliestClock unset).
     bool heldBackForLead(const DAGNode* node) const {
+        if (!clusterBarrierEnabled()) return false;
         return clock_ < node->earliestClock;
     }
 
@@ -1065,6 +1067,7 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
 // Open the chain on its def, close it on its last reader. Between those two picks
 // sccChainBlocks() holds back every workgroup barrier.
 void CDNA5ReadyQueue::noteSccChainIssue(DAGNode* node) {
+    if (!clusterBarrierEnabled()) return;
     if (node->sccChainId == 0) return;
 
     if (node->sccChainDef) {
@@ -1676,7 +1679,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         DAGNode* barrier = nullptr;
         if (promotedPhase_ == PromotePhase::Barrier) {
             barrier = extractForcedBarrier();  // removes the promoted (threshold-met) node
-        } else {
+        } else if (clusterBarrierEnabled()) {
             // Skip barriers held back by an open SCC chain; a later phase issues them
             // once the chain's last reader has gone out.
             for (DAGNode* cand : barrierQueue) {
@@ -1685,6 +1688,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                 break;
             }
             if (barrier) barrierQueue.erase(barrier);
+        } else {
+            barrier = barrierQueue.top();
+            barrierQueue.pop();
         }
         if (barrier) {
             updateWMMAStatus(barrier);
@@ -1718,7 +1724,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // applyClusterBarrierSccRule only locks chains whose readers can all issue without
     // the barrier going first, so a locked chain always has a reader to make progress
     // on and this should be unreachable; release rather than stall if that ever breaks.
-    if (openSccChain_ != 0 && !barrierQueue.empty()) {
+    if (clusterBarrierEnabled() && openSccChain_ != 0 && !barrierQueue.empty()) {
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] SCC chain " << openSccChain_
                              << " open but only barriers are ready; releasing the lock"
                                 " to keep the schedule progressing\n");

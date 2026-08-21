@@ -156,6 +156,13 @@ class ReadyQueue {
         return passCtx_;
     }
 
+    // Mirrors ModuleOptions::ClusterBarrier (wired in Gfx1250Backend as
+    // PassFeatureConfig::dagFeatures::clusterBarrier). When false, the DAG
+    // scheduler follows the pre-cluster-barrier path.
+    bool clusterBarrierEnabled() const {
+        return passCtx_.getPassFeatureConfig().dagFeatures.clusterBarrier;
+    }
+
     virtual ~ReadyQueue() = default;
 
     // Pick one node from the ready queue based on some strategy.

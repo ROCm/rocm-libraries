@@ -430,7 +430,7 @@ static void scheduleRegionWithMovableSideEffects(
             cumCycles[k] + (isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
     }
 
-    if (readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.clusterBarrier)
+    if (readyQueue.clusterBarrierEnabled())
         applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, cumCycles[regionSize]);
 
     // Pre-scan: assign dsReadPriority to each ds_read based on WMMA affinity
