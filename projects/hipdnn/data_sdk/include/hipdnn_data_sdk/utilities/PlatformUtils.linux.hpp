@@ -65,8 +65,28 @@ inline void unsetEnv(const char* var)
 /// @param path The path string to expand, e.g. as read from a config value or env var.
 /// @return @p path with a qualifying leading `~` replaced by `$HOME`, or @p path
 ///     unchanged if no leading `~` qualifies or `HOME` is unset/empty. Never throws.
-inline std::string expandUser(const std::string& path);
-// TODO(Stream A): implement in Phase 2
+inline std::string expandUser(const std::string& path)
+{
+    if(path.empty() || path.front() != '~')
+    {
+        return path;
+    }
+
+    // A leading '~' qualifies only alone or followed by a path separator; '~user' is left
+    // untouched.
+    if(path.size() > 1 && path[1] != '/')
+    {
+        return path;
+    }
+
+    const std::string home = getEnv("HOME");
+    if(home.empty())
+    {
+        return path;
+    }
+
+    return home + path.substr(1);
+}
 
 inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::path& b)
 {
