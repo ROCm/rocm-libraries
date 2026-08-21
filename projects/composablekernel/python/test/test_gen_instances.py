@@ -182,14 +182,7 @@ class TestGenInstances(unittest.TestCase):
 
 
 class TestDeterministicOrder(unittest.TestCase):
-    """Enumeration order must not depend on the filesystem.
-
-    The enumerators build their lists from `grep -R`, which walks directories in
-    readdir order: it differs per machine and changes on reinstall. Consumers that
-    sample a subset under a fixed seed (PyTorch Inductor draws
-    `ck_max_profiling_configs`) then pick the same *positions* out of
-    differently-ordered lists, i.e. different instances per machine from the same
-    wheel."""
+    """Enumeration order must not depend on the filesystem."""
 
     # Every grep-based enumerator. `ck_tile_universal_gemm` is intentionally absent:
     # it enumerates from an itertools product and is already deterministic.

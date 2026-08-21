@@ -137,6 +137,6 @@ def sorted_instances(op_instances):
     Consumers that sample a subset under a fixed seed (PyTorch Inductor draws
     `ck_max_profiling_configs`) therefore got a different subset per machine from
     the same wheel. `name()` embeds every template parameter, so it is a total
-    key. Duplicates are kept: dropping them would shift the sampled subset.
+    key.
     """
     return sorted(op_instances, key=lambda op: op.name())
