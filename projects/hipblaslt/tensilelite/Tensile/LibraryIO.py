@@ -785,6 +785,17 @@ def parseLibraryLogicList(data, srcFile="?"):
         rv["Library"]["indexOrder"] = None
         rv["Library"]["table"] = [0, len(data[5])]
         rv["Library"]["distance"] = None
+    elif libraryType == "FixedLinearArbiter":
+        if len(data) < 13 or not isinstance(data[12], dict):
+            printExit("FixedLinearArbiter logic requires an options mapping at index 12.")
+        rv["LibraryType"] = "FixedLinearArbiter"
+        rv["Library"] = data[12]
+    elif libraryType == "FixedLinearCatalog":
+        if len(data) < 13 or not isinstance(data[12], dict):
+            printExit("FixedLinearCatalog logic requires an options mapping at index 12.")
+        rv["LibraryType"] = "FixedLinearCatalog"
+        rv["Library"] = data[12]
+        rv["Library"]["table"] = [0, len(data[5])]
     else:
         rv["LibraryType"] = "Matching"
         rv["Library"] = {}

@@ -426,6 +426,8 @@ namespace TensileLite
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Range)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::FreeSize)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Prediction)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::FixedLinearArbiter)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::FixedLinearCatalog)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Experimental)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Others)}};
         return MatchingTag2String;
