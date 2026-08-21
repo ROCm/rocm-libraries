@@ -804,6 +804,62 @@ TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
            "test manager would then share one shard";
 }
 
+/// D4's cross-process acceptance criterion, in two halves.
+///
+/// The pair is driven by ctest, not by gtest: the writer runs in one process, exits, and
+/// the reader runs in a second process against the same shard, sequenced by
+/// FIXTURES_SETUP/FIXTURES_REQUIRED (see this suite's registration in
+/// plugin_sdk/tests/CMakeLists.txt). Neither half is meaningful alone, and running them
+/// in one process would prove nothing the same-process case above does not already --
+/// which is exactly why the criterion is written this way.
+///
+/// HIPDNN_CACHE_DIR is supplied by the ctest registration, shared between the two
+/// invocations, so neither half sets it. Both are DISABLED_ by default so a plain
+/// developer run of the suite skips them; ctest passes --gtest_also_run_disabled_tests.
+constexpr const char* CROSS_PROCESS_ENGINE = "test:CrossProcess";
+
+/// The fixed key both halves derive, so the reader looks for exactly what the writer laid
+/// down without either side persisting anything but the shard itself.
+WinnerKey crossProcessKey()
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    return WinnerKey{GraphContentKey{graph}, DeviceKey{suffixedDeviceProperties()}};
+}
+
+TEST(TestIngestorWinnerCacheCrossProcess, DISABLED_WriterLeavesARecordOnDisk)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_CACHE_DIR").empty())
+        << "the ctest registration must supply a shared cache directory";
+
+    const auto manager = makeNamedStateManager(CROSS_PROCESS_ENGINE);
+    manager->recordWinner(crossProcessKey(), recordFor(0x51, 4.25));
+
+    const auto path
+        = winnerCacheShardPath(CROSS_PROCESS_ENGINE, suffixedDeviceProperties().gcnArchName);
+    ASSERT_FALSE(path.empty());
+    EXPECT_TRUE(std::filesystem::exists(path))
+        << "the writer process left no shard for the reader process to find";
+}
+
+TEST(TestIngestorWinnerCacheCrossProcess, DISABLED_ReaderServesTheRecordTheWriterLeft)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_CACHE_DIR").empty())
+        << "the ctest registration must supply a shared cache directory";
+
+    // Nothing in this process ever recorded anything: a hit here can only have come from
+    // the file the writer process left behind.
+    const auto manager = makeNamedStateManager(CROSS_PROCESS_ENGINE);
+    const auto served = manager->winnerFor(crossProcessKey());
+
+    ASSERT_TRUE(served.has_value())
+        << "a record written by a separate process was not served in this one";
+    ASSERT_EQ(served->size(), 1U);
+    EXPECT_EQ(served->front().kernelId, testId(0x51));
+    EXPECT_DOUBLE_EQ(served->front().timeMs, 4.25);
+}
+
 } // namespace
 } // namespace hipdnn_plugin_sdk::ingestor::testing
 
