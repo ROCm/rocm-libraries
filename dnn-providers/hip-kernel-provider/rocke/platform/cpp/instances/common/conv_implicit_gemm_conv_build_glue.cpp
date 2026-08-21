@@ -125,7 +125,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     }
     /* Forward-conv-only: reject default epilogue when vec_c > 1 (auto-derived from K).
      * Python build_implicit_gemm_conv calls is_valid_spec which now checks:
-     *   _eff_vec_c = vector_size_c if set else default_vector_sizes(C,K,dtype_d)[2]
+     *   _eff_vec_c = vector_size_c if set else default_vector_sizes(cpg,kpg,dtype_d)[2]
      *   if _eff_vec_c > 1 and epilogue == "default": raise ValueError(...)
      * This gate is NOT part of rocke_implicit_gemm_conv_is_valid_spec because
      * wgrad calls that function with a dummy forward spec and uses a separate
@@ -139,7 +139,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
         else
         {
-            int _K = spec->problem.K;
+            int _K = rocke_conv_problem_kpg(&spec->problem);
             bool _is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
             if(_is_fp32_d)
                 _eff_vec_c = (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
