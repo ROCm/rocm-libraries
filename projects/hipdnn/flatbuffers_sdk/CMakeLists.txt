@@ -179,10 +179,11 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         _hipdnn_resolve_flatc_command(_cache_key_flatc _cache_key_flatc_dependency)
         add_custom_command(
             OUTPUT "${_cache_key_header}"
-            COMMAND ${CMAKE_COMMAND} -E env "${Python3_EXECUTABLE}"
+            COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_cache_key.py" --flatc
                     "${_cache_key_flatc}"
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_cache_key.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/default_flatc_version.txt"
                     ${_cache_key_schema_depends} ${_cache_key_flatc_dependency}
             COMMENT "Generating cachekey_generated.h from the FlatBuffers schemas"
             VERBATIM
