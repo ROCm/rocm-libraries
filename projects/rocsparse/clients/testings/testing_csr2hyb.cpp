@@ -325,10 +325,12 @@ void testing_csr2hyb_extra(const Arguments& arg)
 
     const int64_t expected_ell_nnz = static_cast<int64_t>(N) * static_cast<int64_t>(M);
     const int64_t csr_nnz          = static_cast<int64_t>(N) * static_cast<int64_t>(n_dense);
-    ASSERT_GT(expected_ell_nnz, static_cast<int64_t>(INT32_MAX))
-        << "test configuration must overflow a 32-bit ell_width * m product";
-    ASSERT_LT(csr_nnz, static_cast<int64_t>(INT32_MAX))
-        << "csr_nnz must fit a 32-bit csr_row_ptr in the default build";
+    // The test configuration must overflow a 32-bit ell_width * m product while
+    // keeping csr_nnz inside a 32-bit csr_row_ptr. unit_check_* only instantiates
+    // integer checks for 32-bit types, so the 64-bit guards are asserted as
+    // booleans (they hold => 1) to stay valid in both the test and bench builds.
+    unit_check_scalar<int32_t>(expected_ell_nnz > static_cast<int64_t>(INT32_MAX) ? 1 : 0, 1);
+    unit_check_scalar<int32_t>(csr_nnz < static_cast<int64_t>(INT32_MAX) ? 1 : 0, 1);
 
     rocsparse_local_handle    handle;
     rocsparse_local_mat_descr descr;
@@ -388,10 +390,11 @@ void testing_csr2hyb_extra(const Arguments& arg)
 
     // The ELL width is the dense row length, and ell_nnz is the true 64-bit
     // element count. Before the fix ell_nnz wrapped (small / negative) here.
-    ASSERT_EQ(N, dhyb->ell_width);
-    ASSERT_GT(dhyb->ell_nnz, static_cast<int64_t>(INT32_MAX))
-        << "ell_nnz wrapped: ell_width * m was truncated to 32-bit";
-    ASSERT_EQ(expected_ell_nnz, dhyb->ell_nnz);
+    unit_check_scalar<int32_t>(static_cast<int32_t>(N), static_cast<int32_t>(dhyb->ell_width));
+    // ell_nnz must be the true 64-bit element count; before the fix it wrapped
+    // (small / negative) because ell_width * m was truncated to 32-bit.
+    unit_check_scalar<int32_t>(dhyb->ell_nnz > static_cast<int64_t>(INT32_MAX) ? 1 : 0, 1);
+    unit_check_scalar<int32_t>(expected_ell_nnz == dhyb->ell_nnz ? 1 : 0, 1);
 
     // Memory-safety probe #1: the very last physical ELL slot (index ell_nnz-1)
     // must have been allocated and written. With ELL_IND(i, el, m, width) = el*m+i
@@ -403,7 +406,8 @@ void testing_csr2hyb_extra(const Arguments& arg)
                               dhyb->ell_col_ind + (expected_ell_nnz - 1),
                               sizeof(rocsparse_int),
                               hipMemcpyDeviceToHost));
-    ASSERT_EQ(-1, last_col) << "padding of the last ELL slot was not written";
+    // Padding sentinel (-1) of the last ELL slot must have been written.
+    unit_check_scalar<int32_t>(static_cast<int32_t>(-1), static_cast<int32_t>(last_col));
 
     // Memory-safety probe #2: a real (dense-row) entry whose physical ELL index
     // exceeds INT32_MAX. Row n_dense-1, ELL column N-1 -> idx = (N-1)*M + (n_dense-1)
@@ -411,9 +415,10 @@ void testing_csr2hyb_extra(const Arguments& arg)
     // wrapped and read the wrong slot; here it must return the true column.
     const int64_t probe_idx
         = static_cast<int64_t>(N - 1) * static_cast<int64_t>(M) + static_cast<int64_t>(n_dense - 1);
-    ASSERT_GT(probe_idx, static_cast<int64_t>(INT32_MAX));
+    unit_check_scalar<int32_t>(probe_idx > static_cast<int64_t>(INT32_MAX) ? 1 : 0, 1);
     rocsparse_int probe_col = -2;
     CHECK_HIP_ERROR(hipMemcpy(
         &probe_col, dhyb->ell_col_ind + probe_idx, sizeof(rocsparse_int), hipMemcpyDeviceToHost));
-    ASSERT_EQ(N - 1 + base, probe_col) << "ELL entry past the 2^31 index boundary is corrupted";
+    // ELL entry past the 2^31 index boundary must return the true CSR column.
+    unit_check_scalar<int32_t>(static_cast<int32_t>(N - 1 + base), static_cast<int32_t>(probe_col));
 }
