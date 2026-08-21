@@ -41,12 +41,27 @@ def test_add_common_arguments_global_parameters_eval():
     assert ("Bar", "baz") in args.global_parameters
 
 
+def test_add_common_arguments_global_parameters_accumulate():
+    # Repeated --global-parameters must accumulate, not clobber.
+    p = argparse.ArgumentParser()
+    M.addCommonArguments(p)
+    args = p.parse_args([
+        "--global-parameters", "KeepBuildTmp=True",
+        "--global-parameters", "CheckASMCodeSize=True",
+    ])
+    assert ("KeepBuildTmp", True) in args.global_parameters
+    assert ("CheckASMCodeSize", True) in args.global_parameters
+
+
 # ---------------------------------------------------------------------------
 # argUpdatedGlobalParameters
 # ---------------------------------------------------------------------------
 def _args(**over):
     base = dict(
         platform=None, RuntimeLanguage=None, CodeObjectVersion=None, debug=False,
+        # --validate-metadata: action="store_true", so a real argparse Namespace
+        # always carries this (default False) -- kept here for the same reason.
+        ValidateMetadata=False,
         client_lock=None, prebuilt_client=None, MXScaleFormat=0, global_parameters=[],
     )
     base.update(over)
@@ -57,6 +72,7 @@ def test_arg_updated_global_parameters_all_overrides(monkeypatch):
     monkeypatch.delenv("PyTestBuildArchNames", raising=False)
     args = _args(
         platform=2, RuntimeLanguage="HIP", CodeObjectVersion="5", debug=True,
+        ValidateMetadata=True,
         client_lock="/lock", prebuilt_client="/client", MXScaleFormat=1,
         global_parameters=[("K", "V")],
     )
@@ -65,10 +81,19 @@ def test_arg_updated_global_parameters_all_overrides(monkeypatch):
     assert rv["RuntimeLanguage"] == "HIP"
     assert rv["CodeObjectVersion"] == "5"
     assert rv["CMakeBuildType"] == "Debug"
+    assert rv["ValidateMetadata"] is True
     assert rv["ClientExecutionLockPath"] == "/lock"
     assert rv["PrebuiltClient"] == "/client"
     assert rv["MXScaleFormat"] == 1
     assert rv["K"] == "V"
+
+
+def test_arg_updated_global_parameters_validate_metadata_false_omitted(monkeypatch):
+    # store_true default (False) must NOT add a ValidateMetadata override --
+    # only an explicit --validate-metadata should touch globalParameters.
+    monkeypatch.delenv("PyTestBuildArchNames", raising=False)
+    rv = M.argUpdatedGlobalParameters(_args(ValidateMetadata=False))
+    assert "ValidateMetadata" not in rv
 
 
 def test_arg_updated_global_parameters_empty(monkeypatch):

@@ -8,6 +8,7 @@
 #include <variant>
 
 #include "GpuConvolutionFwdSignatureKey.hpp"
+#include "GpuPointwiseSignatureKey.hpp"
 #include "GpuSdpaFwdSignatureKey.hpp"
 
 namespace hipdnn_integration_tests::gpu_graph_executor::detail
@@ -16,7 +17,7 @@ namespace hipdnn_integration_tests::gpu_graph_executor::detail
 // Variant of all GPU plan signature key types.
 // Add new signature key types here as GPU plans are implemented.
 using GpuPlanRegistrySignatureKey
-    = std::variant<GpuConvolutionFwdSignatureKey, GpuSdpaFwdSignatureKey>;
+    = std::variant<GpuConvolutionFwdSignatureKey, GpuSdpaFwdSignatureKey, GpuPointwiseSignatureKey>;
 
 struct GpuPlanRegistrySignatureKeyHash
 {
