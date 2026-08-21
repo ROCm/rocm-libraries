@@ -70,24 +70,49 @@ endfunction()
 # ---------------------------------------------------------------------------
 # hkp_selected_arches(<out_var>)
 #   Normalize GPU_TARGETS (or AMDGPU_TARGETS) into a bare gfx arch list,
-#   stripping feature suffixes (gfx942:xnack-). Empty result is legal (install
-#   nothing, non-error). No intersection with a fixed fixture set: the tool
-#   compiles from authored sources for whatever arch is requested.
+#   stripping feature suffixes (gfx942:xnack-) and dropping anything that is not
+#   a concrete gfx name. Empty result is legal (install nothing, non-error). No
+#   intersection with a fixed fixture set: the tool compiles from authored
+#   sources for whatever arch is requested.
+#
+#   The only consumer of GPU_TARGETS in dnn-providers/. The sibling kpack
+#   producer, src/engines/asm_sdpa_engine/CMakeLists.txt, declares an explicit
+#   list instead because it globs prebuilt .co files; this step compiles from
+#   source and can target any real gfx, so it reads GPU_TARGETS.
+#
+#   Elsewhere in this repo a gfxNNX-style label is a selector matched against a
+#   concrete arch (shared/ctest/parse_test_categories.py,
+#   test/therock/test_runner.py, .github/scripts/amdgpu_family_matrix.py); here
+#   the value reaches hipcc's --offload-arch, where a family name is unusable
+#   rather than coarse. Hence drop-with-warning, not passthrough, and no
+#   family-to-arch expansion table.
 # ---------------------------------------------------------------------------
 function(hkp_selected_arches out_var)
     set(_targets "")
+    set(_source "")
     if(DEFINED GPU_TARGETS AND GPU_TARGETS)
         set(_targets ${GPU_TARGETS})
+        set(_source "GPU_TARGETS")
     elseif(DEFINED AMDGPU_TARGETS AND AMDGPU_TARGETS)
         set(_targets ${AMDGPU_TARGETS})
+        set(_source "AMDGPU_TARGETS")
     endif()
 
     set(_selected "")
     foreach(_arch IN LISTS _targets)
         string(REGEX REPLACE ":.*$" "" _bare "${_arch}")
-        if(_bare)
-            list(APPEND _selected "${_bare}")
+        if(NOT _bare)
+            continue()
         endif()
+        if(NOT _bare MATCHES "^gfx[0-9a-f]+$")
+            message(WARNING
+                "hkp: ignoring '${_arch}' from ${_source}; it is not a concrete gfx "
+                "architecture and cannot be passed to hipcc --offload-arch. Nothing "
+                "is packed for it. Name real gfx architectures in ${_source} to pack "
+                "for them.")
+            continue()
+        endif()
+        list(APPEND _selected "${_bare}")
     endforeach()
     list(REMOVE_DUPLICATES _selected)
     set(${out_var} "${_selected}" PARENT_SCOPE)
@@ -118,8 +143,15 @@ function(hkp_wire_production source_root arches hipcc kpack_python install_base)
     file(GLOB _source_inputs CONFIGURE_DEPENDS
          "${source_root}/*.json" "${source_root}/*.cpp")
     # Editing the tool's own sources must retrigger the pack step, else the
-    # install artifacts go stale against the current pipeline code.
-    file(GLOB _tool_sources CONFIGURE_DEPENDS "${HKP_PYTHON_ROOT}/hkp_pack/*.py")
+    # install artifacts go stale against the current pipeline code. The fetched
+    # rocm_kpack package counts: kpack_resolver.py imports it and it decides the
+    # archive format. FetchContent's source dir is name-derived, so moving
+    # HIPKERNELPROVIDER_KPACK_GIT_REF does not move this stamp -- without these
+    # inputs a `cmake --fresh` onto a new ref rebuilds the reader while the pack
+    # stamp survives, leaving an archive written by the old packer and read by the
+    # new one. That is the skew the single pin in RocmKpack.cmake exists to prevent.
+    file(GLOB _tool_sources CONFIGURE_DEPENDS
+         "${HKP_PYTHON_ROOT}/hkp_pack/*.py" "${kpack_python}/rocm_kpack/*.py")
 
     add_custom_command(
         OUTPUT "${_stamp}"
@@ -209,7 +241,9 @@ function(hkp_wire_demo source_root arches hipcc kpack_python stage_root)
     set(_pack_stamp "${_out_root}.stamp")
     file(GLOB _source_inputs CONFIGURE_DEPENDS
          "${source_root}/*.json" "${source_root}/*.cpp")
-    file(GLOB _tool_sources CONFIGURE_DEPENDS "${HKP_PYTHON_ROOT}/hkp_pack/*.py")
+    # Both halves of the packer, for the reason spelled out in hkp_wire_production.
+    file(GLOB _tool_sources CONFIGURE_DEPENDS
+         "${HKP_PYTHON_ROOT}/hkp_pack/*.py" "${kpack_python}/rocm_kpack/*.py")
 
     add_custom_command(
         OUTPUT "${_pack_stamp}"

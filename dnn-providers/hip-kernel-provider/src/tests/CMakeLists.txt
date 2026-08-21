@@ -131,6 +131,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPDNN_TEST_KPACK_ARCHIVE="${ROCM_KPACK_SOURCE_DIR}/runtime/tests/test_assets/test_zstd.kpack")
+
+    # The device cases above read the per-arch archive hkp_wire_demo() stages under
+    # HIPDNN_TEST_DESCRIPTOR_DIR, and that target is reachable only through ALL.
+    # Building this binary by name -- what `ninja check` does -- otherwise runs them
+    # against a directory that does not exist yet, and they skip rather than fail.
+    # Guarded for the same reason as the integration side: hkp_wire_demo() skips with
+    # a warning when hipcc is absent, and a hard dependency would make that fatal.
+    if(TARGET hkp_demo_packaging)
+        add_dependencies(hip_kernel_provider_tests hkp_demo_packaging)
+    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
