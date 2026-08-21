@@ -1,0 +1,110 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "default:release",
+      "displayName": "Configure release build with installation to /opt/rocm",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/rocm-clang.cmake",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "/opt/rocm"
+      }
+    },
+    {
+      "name": "python",
+      "displayName": "Release build with Python bindings and tests",
+      "inherits": "default:release",
+      "cacheVariables": {
+        "ORIGAMI_ENABLE_PYTHON": "ON",
+        "ORIGAMI_BUILD_TESTING": "ON",
+        "ORIGAMI_BUILD_FROM_SOURCE": "OFF"
+      }
+    },
+    {
+      "name": "dev",
+      "displayName": "Iterative development: build liborigami from source alongside the extension",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/rocm-clang.cmake",
+      "binaryDir": "${sourceDir}/build/dev",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "ORIGAMI_BUILD_FROM_SOURCE": "ON",
+        "ORIGAMI_ENABLE_PYTHON": "ON",
+        "ORIGAMI_PYTHON_ENABLE_WARNINGS": "ON"
+      }
+    },
+    {
+      "name": "dev:debug",
+      "inherits": "dev",
+      "displayName": "Iterative development, debug liborigami",
+      "binaryDir": "${sourceDir}/build/dev-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "dev:tests",
+      "inherits": "dev",
+      "displayName": "Iterative development plus the C++ and Python test suites",
+      "binaryDir": "${sourceDir}/build/dev-tests",
+      "cacheVariables": {
+        "ORIGAMI_BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "installed",
+      "displayName": "Build the extension against an installed liborigami",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/rocm-clang.cmake",
+      "binaryDir": "${sourceDir}/build/installed",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ORIGAMI_BUILD_FROM_SOURCE": "OFF",
+        "ORIGAMI_ENABLE_PYTHON": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "default:release",
+      "configurePreset": "default:release"
+    },
+    {
+      "name": "python",
+      "configurePreset": "python"
+    },
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "dev:debug",
+      "configurePreset": "dev:debug"
+    },
+    {
+      "name": "dev:tests",
+      "configurePreset": "dev:tests"
+    },
+    {
+      "name": "installed",
+      "configurePreset": "installed"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "python",
+      "configurePreset": "python",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "dev:tests",
+      "configurePreset": "dev:tests",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
