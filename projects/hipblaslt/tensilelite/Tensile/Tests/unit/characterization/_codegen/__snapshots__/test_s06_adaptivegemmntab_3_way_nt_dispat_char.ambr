@@ -2,7 +2,7 @@
 # name: test_s06_adaptivegemmntab_3_way_nt_dispat_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT64x16x32_MI16x16O4OP0cLWxdMvJe5luSjiCuUzDHzkO7JrwHCZhXFzd4=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT64x16x32_MI16x1xxT-jNfNB-9kUtYxFbwSYJQHU9xV82GWy5jQqsUY9ps=',
       'err': 0,
     }),
   ])
