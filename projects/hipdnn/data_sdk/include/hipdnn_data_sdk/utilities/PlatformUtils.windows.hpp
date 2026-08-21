@@ -76,8 +76,38 @@ inline void unsetEnv(const char* var)
 /// @return @p path with a qualifying leading `~` or `%USERPROFILE%` replaced by
 ///     `%USERPROFILE%`'s value, or @p path unchanged if no leading token qualifies or
 ///     `USERPROFILE` is unset/empty. Never throws.
-inline std::string expandUser(const std::string& path);
-// TODO(Stream A): implement in Phase 2
+inline std::string expandUser(const std::string& path)
+{
+    // A leading '~' qualifies only alone or followed by a path separator ('/' or '\\');
+    // '~user' is left untouched.
+    const bool hasLeadingTilde = !path.empty() && path.front() == '~'
+                                 && (path.size() == 1 || path[1] == '/' || path[1] == '\\');
+
+    // "%USERPROFILE%" is matched as a literal leading token, case-insensitively (Windows
+    // environment variable references are case-insensitive), followed by nothing, or by a
+    // path separator.
+    static const std::string kUserProfileToken = "%userprofile%";
+    const std::string lowerPath = toLower(path);
+    const bool hasLeadingToken
+        = lowerPath.size() >= kUserProfileToken.size()
+          && lowerPath.compare(0, kUserProfileToken.size(), kUserProfileToken) == 0
+          && (lowerPath.size() == kUserProfileToken.size() || path[kUserProfileToken.size()] == '/'
+              || path[kUserProfileToken.size()] == '\\');
+
+    if(!hasLeadingTilde && !hasLeadingToken)
+    {
+        return path;
+    }
+
+    const std::string userProfile = getEnv("USERPROFILE");
+    if(userProfile.empty())
+    {
+        return path;
+    }
+
+    const size_t tokenLength = hasLeadingTilde ? 1 : kUserProfileToken.size();
+    return userProfile + path.substr(tokenLength);
+}
 
 inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::path& b)
 {

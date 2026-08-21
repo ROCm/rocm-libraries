@@ -30,10 +30,13 @@ add_executable(
     types/TestPortableTypes.cpp
     types/TestUserDefinedLiterals.cpp
     utilities/TestAllocators.cpp
+    utilities/TestCacheRoot.cpp
     utilities/TestEngineNames.cpp
     utilities/TestFloats.cpp
+    utilities/TestLineStore.cpp
     utilities/TestMigratableMemory.cpp
     utilities/TestPackedFp4Tensor.cpp
+    utilities/TestPathSanitizer.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestScopedResource.cpp
     utilities/TestRaggedTensor.cpp
@@ -48,6 +51,20 @@ add_executable(
     utilities/TestVersionUtils.cpp
     utilities/TestVersion.cpp
     utilities/TestVisitor.cpp
+)
+
+# Standalone helper process for TestLineStore's two-process lock contention case -- see
+# LineStoreLockHelper.cpp. Not a gtest binary and not registered via add_hipdnn_test();
+# hipdnn_data_sdk_tests locates it at runtime through the baked HIPDNN_LINESTORE_LOCK_HELPER_PATH
+# below, so it works under any generator and picks up CMAKE_EXECUTABLE_SUFFIX on Windows.
+add_executable(LineStoreLockHelper utilities/LineStoreLockHelper.cpp)
+target_link_libraries(LineStoreLockHelper hipdnn_data_sdk)
+set_target_properties(
+    LineStoreLockHelper PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+)
+target_compile_definitions(
+    hipdnn_data_sdk_tests PRIVATE
+    HIPDNN_LINESTORE_LOCK_HELPER_PATH="$<TARGET_FILE:LineStoreLockHelper>"
 )
 
 target_compile_options(hipdnn_data_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})

@@ -3,16 +3,24 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/cachekey_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+
+#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+#include <nlohmann/json.hpp>
+#endif
 
 namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities
 {
@@ -85,6 +93,68 @@ public:
         return !(*this == other);
     }
 
+#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+    /// This key's JSON representation: one field, the retained graph bytes as base64.
+    /// Layer 3 embeds this object under its own field name in the JSON-Lines record;
+    /// this method knows nothing about that envelope or its version line -- both are
+    /// layer 3's, per D29's layering.
+    ///
+    /// An unusable key (no retained content) still serializes, as an empty base64
+    /// field; see `fromJson()` for how that round-trips.
+    nlohmann::json toJson() const
+    {
+        nlohmann::json json;
+        json[CONTENT_FIELD] = _content != nullptr ? encodeBase64(*_content) : std::string{};
+        return json;
+    }
+
+    /// Parses `toJson()`'s output back into a key. Fail-soft: a missing or mistyped
+    /// field, a payload that is not valid base64, or content that does not reverify
+    /// as a `Graph` flatbuffer all return `std::nullopt` rather than throwing or
+    /// handing back a key that could compare equal to something it is not. Callers
+    /// read `std::nullopt` as "decline this line."
+    ///
+    /// An empty content field round-trips to a default-constructed, unusable key --
+    /// the same state `retain()` produces for an `IGraph` with no bytes -- so it never
+    /// matches even itself, consistent with `operator==`'s existing contract for
+    /// unusable keys.
+    static std::optional<GraphContentKey> fromJson(const nlohmann::json& json) noexcept
+    {
+        try
+        {
+            if(!json.is_object())
+            {
+                return std::nullopt;
+            }
+            const auto contentField = json.find(CONTENT_FIELD);
+            if(contentField == json.end() || !contentField->is_string())
+            {
+                return std::nullopt;
+            }
+            auto decoded = decodeBase64(contentField->get<std::string>());
+            if(!decoded.has_value())
+            {
+                return std::nullopt;
+            }
+            if(decoded->empty())
+            {
+                return GraphContentKey{};
+            }
+            flatbuffers::Verifier verifier(decoded->data(), decoded->size());
+            if(!verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>())
+            {
+                return std::nullopt;
+            }
+            return GraphContentKey{
+                std::make_shared<const std::vector<uint8_t>>(std::move(*decoded))};
+        }
+        catch(const nlohmann::json::exception&)
+        {
+            return std::nullopt;
+        }
+    }
+#endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+
 protected:
     /// Test seam: forces a hash collision so a test can reach the structural
     /// comparison, which `operator==` otherwise short-circuits before.
@@ -94,7 +164,140 @@ protected:
     }
 
 private:
-    /// Copies the verified buffer: `IGraph` is a view this key does not own.
+#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+    static constexpr const char* CONTENT_FIELD = "content_base64";
+
+    /// Constructs directly from an already-verified `Graph` buffer: the JSON
+    /// deserialization path, which re-verifies the decoded bytes with
+    /// `flatbuffers::Verifier` before calling this -- the same contract `root()`
+    /// relies on for the `IGraph::bytes()` path. Never exposed publicly: every other
+    /// caller goes through the `IGraph` constructor.
+    explicit GraphContentKey(Content verifiedContent)
+        : _content(std::move(verifiedContent))
+        , _hash(fold())
+    {
+    }
+
+    static std::string encodeBase64(const std::vector<uint8_t>& bytes)
+    {
+        static constexpr std::string_view TABLE
+            = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string out;
+        out.reserve(((bytes.size() + 2) / 3) * 4);
+        size_t i = 0;
+        for(; i + 2 < bytes.size(); i += 3)
+        {
+            const uint32_t chunk = (static_cast<uint32_t>(bytes[i]) << 16U)
+                                   | (static_cast<uint32_t>(bytes[i + 1]) << 8U)
+                                   | static_cast<uint32_t>(bytes[i + 2]);
+            out.push_back(TABLE[(chunk >> 18U) & 0x3FU]);
+            out.push_back(TABLE[(chunk >> 12U) & 0x3FU]);
+            out.push_back(TABLE[(chunk >> 6U) & 0x3FU]);
+            out.push_back(TABLE[chunk & 0x3FU]);
+        }
+        const size_t remaining = bytes.size() - i;
+        if(remaining == 1)
+        {
+            const uint32_t chunk = static_cast<uint32_t>(bytes[i]) << 16U;
+            out.push_back(TABLE[(chunk >> 18U) & 0x3FU]);
+            out.push_back(TABLE[(chunk >> 12U) & 0x3FU]);
+            out.append("==");
+        }
+        else if(remaining == 2)
+        {
+            const uint32_t chunk = (static_cast<uint32_t>(bytes[i]) << 16U)
+                                   | (static_cast<uint32_t>(bytes[i + 1]) << 8U);
+            out.push_back(TABLE[(chunk >> 18U) & 0x3FU]);
+            out.push_back(TABLE[(chunk >> 12U) & 0x3FU]);
+            out.push_back(TABLE[(chunk >> 6U) & 0x3FU]);
+            out.push_back('=');
+        }
+        return out;
+    }
+
+    /// -1 for any byte outside the base64 alphabet, including padding: callers branch
+    /// on '=' themselves before reaching here.
+    static int decodeBase64Char(char c)
+    {
+        if(c >= 'A' && c <= 'Z')
+        {
+            return c - 'A';
+        }
+        if(c >= 'a' && c <= 'z')
+        {
+            return c - 'a' + 26;
+        }
+        if(c >= '0' && c <= '9')
+        {
+            return c - '0' + 52;
+        }
+        if(c == '+')
+        {
+            return 62;
+        }
+        if(c == '/')
+        {
+            return 63;
+        }
+        return -1;
+    }
+
+    /// `std::nullopt` for anything that is not exactly a sequence of complete,
+    /// correctly-padded 4-character groups: a wrong length, a non-alphabet character,
+    /// or a '=' anywhere but the last one or two positions of the final group. Never
+    /// throws.
+    static std::optional<std::vector<uint8_t>> decodeBase64(const std::string& text)
+    {
+        if(text.size() % 4 != 0)
+        {
+            return std::nullopt;
+        }
+        std::vector<uint8_t> out;
+        out.reserve((text.size() / 4) * 3);
+        for(size_t i = 0; i < text.size(); i += 4)
+        {
+            int pad = 0;
+            std::array<uint32_t, 4> vals{0, 0, 0, 0};
+            for(size_t k = 0; k < 4; ++k)
+            {
+                const char c = text[i + k];
+                if(c == '=')
+                {
+                    if(i + 4 != text.size() || (k != 2U && k != 3U))
+                    {
+                        return std::nullopt;
+                    }
+                    ++pad;
+                    continue;
+                }
+                if(pad > 0)
+                {
+                    return std::nullopt;
+                }
+                const int decoded = decodeBase64Char(c);
+                if(decoded < 0)
+                {
+                    return std::nullopt;
+                }
+                vals[k] = static_cast<uint32_t>(decoded);
+            }
+            const uint32_t chunk = (vals[0] << 18U) | (vals[1] << 12U) | (vals[2] << 6U) | vals[3];
+            out.push_back(static_cast<uint8_t>((chunk >> 16U) & 0xFFU));
+            if(pad < 2)
+            {
+                out.push_back(static_cast<uint8_t>((chunk >> 8U) & 0xFFU));
+            }
+            if(pad < 1)
+            {
+                out.push_back(static_cast<uint8_t>(chunk & 0xFFU));
+            }
+        }
+        return out;
+    }
+#endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+
+    /// Copies the verified buffer: `IGraph` is a view over storage this key does not
+    /// own, and the bytes are already the comparison's input format.
     static Content retain(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
     {
         const auto bytes = graph.bytes();

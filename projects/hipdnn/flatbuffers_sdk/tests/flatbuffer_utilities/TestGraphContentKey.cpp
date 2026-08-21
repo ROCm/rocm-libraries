@@ -5,6 +5,8 @@
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 
+#include <optional>
+
 #include "ContentCarryingTestGraph.hpp"
 
 namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing
@@ -635,6 +637,138 @@ TEST(TestGraphContentKey, StdHashAgreesWithTheKeysOwnHash)
 
     EXPECT_EQ(std::hash<GraphContentKey>{}(key), static_cast<size_t>(key.hash()));
 }
+
+#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+/// The JSON representation layer 3 will embed in a JSON-Lines record: one base64
+/// field carrying the retained graph bytes. This pins the round trip through it.
+TEST(TestGraphContentKey, JsonRoundTripPreservesEquality)
+{
+    const ContentCarryingTestGraph graph{Spec{}};
+    const auto original = keyFor(graph);
+
+    const auto restored = GraphContentKey::fromJson(original.toJson());
+
+    ASSERT_TRUE(restored.has_value());
+    EXPECT_EQ(original, *restored);
+}
+
+/// Guards against a codec that loses discriminating content: two keys that differ
+/// before serialization must still differ after a round trip through JSON.
+TEST(TestGraphContentKey, JsonRoundTripPreservesDiscriminatingContent)
+{
+    Spec narrow;
+    narrow.tensors[0].dims = {4, 8};
+    Spec wide;
+    wide.tensors[0].dims = {4, 16};
+
+    const auto narrowRestored
+        = GraphContentKey::fromJson(keyFor(ContentCarryingTestGraph{narrow}).toJson());
+    const auto wideRestored
+        = GraphContentKey::fromJson(keyFor(ContentCarryingTestGraph{wide}).toJson());
+
+    ASSERT_TRUE(narrowRestored.has_value());
+    ASSERT_TRUE(wideRestored.has_value());
+    EXPECT_NE(*narrowRestored, *wideRestored)
+        << "a codec that lost discriminating content would make these collide";
+}
+
+/// A field that is present but not valid base64 at all (wrong alphabet) must decline,
+/// never throw and never hand back a key.
+TEST(TestGraphContentKey, ANonBase64FieldDeclinesWithoutThrowing)
+{
+    auto json = keyFor(ContentCarryingTestGraph{Spec{}}).toJson();
+    json["content_base64"] = std::string("not valid base64!!!");
+
+    std::optional<GraphContentKey> restored;
+    EXPECT_NO_THROW(restored = GraphContentKey::fromJson(json));
+    EXPECT_FALSE(restored.has_value());
+}
+
+/// A field that is valid base64 alphabet but the wrong length (truncated mid-group)
+/// must decline the same way -- never throw, never a garbage key.
+TEST(TestGraphContentKey, ATruncatedBase64FieldDeclinesWithoutThrowing)
+{
+    auto json = keyFor(ContentCarryingTestGraph{Spec{}}).toJson();
+    const auto content = json["content_base64"].get<std::string>();
+    ASSERT_GT(content.size(), 4U);
+    json["content_base64"] = content.substr(0, content.size() - 1);
+
+    std::optional<GraphContentKey> restored;
+    EXPECT_NO_THROW(restored = GraphContentKey::fromJson(json));
+    EXPECT_FALSE(restored.has_value());
+}
+
+/// A missing field is as much a decline as a corrupted one.
+TEST(TestGraphContentKey, AMissingContentFieldDeclinesWithoutThrowing)
+{
+    const auto json = nlohmann::json::object();
+
+    std::optional<GraphContentKey> restored;
+    EXPECT_NO_THROW(restored = GraphContentKey::fromJson(json));
+    EXPECT_FALSE(restored.has_value());
+}
+
+/// Non-object JSON (e.g. a bare string or array line) declines the same way.
+TEST(TestGraphContentKey, NonObjectJsonDeclinesWithoutThrowing)
+{
+    const nlohmann::json json = "not an object";
+
+    std::optional<GraphContentKey> restored;
+    EXPECT_NO_THROW(restored = GraphContentKey::fromJson(json));
+    EXPECT_FALSE(restored.has_value());
+}
+
+/// Base64-decodable bytes that do not reverify as a `Graph` flatbuffer (garbage
+/// payload of the right shape) must also decline rather than hand back a key that
+/// looks usable but reads nonsense.
+TEST(TestGraphContentKey, ValidBase64OfNonGraphBytesDeclinesWithoutThrowing)
+{
+    nlohmann::json json;
+    json["content_base64"] = std::string("AAAAAAAAAAAAAAAAAAAAAAAA");
+
+    std::optional<GraphContentKey> restored;
+    EXPECT_NO_THROW(restored = GraphContentKey::fromJson(json));
+    EXPECT_FALSE(restored.has_value());
+}
+
+/// The "empty but keyed" flavor of an unkeyable-adjacent graph: `EmptyTestGraph` still
+/// retains real bytes and a non-zero hash (see `AnEmptyGraphKeysToANonZeroHash`), so it
+/// round-trips like any other usable key and two empties still match each other.
+TEST(TestGraphContentKey, AnEmptyGraphRoundTripsAndStillMatchesAnotherEmptyGraph)
+{
+    const EmptyTestGraph first(makeGraphId(0xD1));
+    const EmptyTestGraph second(makeGraphId(0xD2));
+
+    const auto restoredFirst = GraphContentKey::fromJson(GraphContentKey{first}.toJson());
+    const auto restoredSecond = GraphContentKey::fromJson(GraphContentKey{second}.toJson());
+
+    ASSERT_TRUE(restoredFirst.has_value());
+    ASSERT_TRUE(restoredSecond.has_value());
+    EXPECT_NE(restoredFirst->hash(), 0U);
+    EXPECT_EQ(*restoredFirst, *restoredSecond);
+}
+
+/// The genuinely unkeyable flavor: no retained bytes at all. `toJson()` still succeeds
+/// (an empty base64 field is well-formed, not corruption) but `fromJson()` must hand
+/// back a key consistent with `TwoUnkeyableGraphsDoNotMatchEachOther` -- unusable, hash
+/// 0, and not equal to another round-tripped unusable key or to itself.
+TEST(TestGraphContentKey, AnUnusableKeyRoundTripsToAnUnusableKeyThatMatchesNothing)
+{
+    const UnkeyableGraph graph;
+    const GraphContentKey original{graph};
+    ASSERT_FALSE(original.isUsable());
+
+    const auto restored = GraphContentKey::fromJson(original.toJson());
+
+    ASSERT_TRUE(restored.has_value())
+        << "an empty content field is well-formed JSON, not corruption";
+    EXPECT_FALSE(restored->isUsable());
+    EXPECT_EQ(restored->hash(), 0U);
+    EXPECT_NE(original, *restored)
+        << "absence of content is a permanent miss; round-tripping an unusable key must "
+           "not make it start matching, including matching the key it came from";
+}
+#endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 } // namespace
 } // namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing
