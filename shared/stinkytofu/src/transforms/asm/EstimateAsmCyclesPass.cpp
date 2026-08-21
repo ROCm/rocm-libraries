@@ -247,7 +247,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
         // std::cout << "[EstimateAsmCycles] Total Asm Cycles: " << totalCycles_ << "\n";
         // The preheader tail is outside the loop body the total is meant to describe, so a
         // run that models it must not overwrite the published figure.
-        if (!includePreLoopTail_) func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
+        if (!includePreLoopTail_)
+            func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
 
         return PreservedAnalyses::all();
     }
