@@ -44,6 +44,8 @@ class Descriptor:
 
     path: Path
     doc: dict
+    origin_root: Path | None = None
+    origin_index: int = 0
 
     @property
     def type(self):
@@ -56,7 +58,6 @@ class Descriptor:
 
 @dataclass
 class FlatInput:
-    root: Path
     descriptors: list = field(default_factory=list)
 
     def by_type(self, dtype):
@@ -182,6 +183,17 @@ def validate_hip_build(build, where):
                 )
 
 
+def validate_rocke_spec(spec, where):
+    """A rocke UKD's spec block is a JSON object; nothing more is required here.
+
+    Field-level correctness (the builder's spec dataclass) is a compile-time
+    concern validated by build_spec in the producer, not at load time. The
+    failure substring is stable ('invalid spec').
+    """
+    if not isinstance(spec, dict):
+        raise HkpPackError(f"{where} has invalid spec (not an object)")
+
+
 def _warn_nonbare_arch(archs, where, log):
     """Warn (non-fatal) on any arch entry that is not a plausible bare gfx name.
 
@@ -225,6 +237,9 @@ def _validate_ukd_fields(ukd, where, log=print):
         if "build" not in ks:
             raise HkpPackError(f"{where} has invalid build (absent)")
         validate_hip_build(ks["build"], where)
+    elif kind == "rocke":
+        _require(ks, ["source", "builder", "spec"], where)
+        validate_rocke_spec(ks["spec"], where)
     elif kind == "hsaco":
         _require(ks, ["file", "symbol"], where)
     elif kind == "kpack":
@@ -232,7 +247,7 @@ def _validate_ukd_fields(ukd, where, log=print):
     else:
         raise HkpPackError(
             f"{where} kernel_source has unsupported kind '{kind}' "
-            "(expected 'hip', 'hsaco', or 'kpack')"
+            "(expected 'hip', 'rocke', 'hsaco', or 'kpack')"
         )
 
 
@@ -247,20 +262,16 @@ def _validate_inline_ukd(ukd, kdp_path, log=print):
 
 
 def _validate_standalone_ukd(desc, log=print):
-    """A standalone `<name>.ukd.json` is authored in the same hip form as inline.
+    """A standalone `<name>.ukd.json` carries the same fields as an inline UKD.
 
-    Its optional `arch` narrows the shards it ships in (empty/omitted = wildcard,
-    applying to every referencing arch) and must be a subset of each referencing
-    KDP's arch, checked in _validate_references.
+    Kind-specific checks are delegated to _validate_ukd_fields, so a standalone
+    UKD may be hip or rocke. Its optional `arch` narrows the shards it ships in
+    (empty/omitted = wildcard, applying to every referencing arch) and must be a
+    subset of each referencing KDP's arch, checked in _validate_references.
     """
     doc = desc.doc
     where = f"standalone UKD {desc.path.name}"
     _validate_ukd_fields(doc, where, log)
-    if doc["kernel_source"]["kind"] != "hip":
-        raise HkpPackError(
-            f"{where} must be authored in hip form "
-            f"(got kind='{doc['kernel_source']['kind']}')"
-        )
 
 
 def _validate_kdp(desc, log=print):
@@ -344,11 +355,37 @@ def load_flat_input(root, log=print):
         if type_from_filename(jp) is None:
             log(f"skipping non-descriptor file {jp.name}")
             continue
-        desc = Descriptor(path=jp, doc=_read_json(jp))
+        desc = Descriptor(path=jp, doc=_read_json(jp), origin_root=root)
         _validate_shape(desc, log)
         descriptors.append(desc)
 
-    flat = FlatInput(root=root, descriptors=descriptors)
+    flat = FlatInput(descriptors=descriptors)
+    _reject_inline_standalone_collision(flat)
+    _reject_duplicate_ids(flat)
+    _validate_references(flat)
+    _warn_orphan_standalone_ukds(flat, log)
+    return flat
+
+
+def load_flat_inputs(roots, log=print):
+    """Load and merge one or more flat source folders into a single input set.
+
+    Each folder is loaded and per-descriptor structurally validated by
+    load_flat_input; every descriptor records the root it came from in
+    origin_root and its positional origin_index (the root's ordinal in the
+    passed order). The merged descriptor list then runs the whole-set validation
+    ONCE over the union so a duplicate id or dangling reference spanning roots is
+    caught. A hip UKD's source resolves against its own descriptor's origin_root,
+    letting two roots each carry an identically-named .cpp without colliding.
+    """
+    merged = []
+    for index, root in enumerate(roots):
+        flat = load_flat_input(root, log=log)
+        for desc in flat.descriptors:
+            desc.origin_index = index
+        merged.extend(flat.descriptors)
+
+    flat = FlatInput(descriptors=merged)
     _reject_inline_standalone_collision(flat)
     _reject_duplicate_ids(flat)
     _validate_references(flat)
