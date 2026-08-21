@@ -3499,7 +3499,7 @@ class TestPreloopReorderGR:
         assert isinstance(full_wgop, WaitGROp)
         assert full_wgop.wait_gr_counts is not None
         assert full_wgop.wait_gr_counts.use_num_gr_total, \
-            "Full-path wait_gr must use use_num_gr_total=True"
+            "Single-partition full-path wait_gr must use use_num_gr_total=True"
         assert isinstance(partial_wgop, WaitGROp)
         assert partial_wgop.force_drain, \
             "Partial-path wait_gr must use force_drain=True (vmcnt 0)"
@@ -3529,55 +3529,52 @@ class TestPreloopReorderGR:
         assert len(wait_gr_sources) == 2, \
             "Multi-DU reorder must also emit two wait_gr ops (full + partial paths)"
         full_wgop, partial_wgop = wait_gr_sources[0], wait_gr_sources[1]
-        assert isinstance(full_wgop, WaitGROp) and full_wgop.wait_gr_counts.use_num_gr_total, \
-            "Multi-DU full-path wait_gr must use use_num_gr_total=True"
+        assert isinstance(full_wgop, WaitGROp) and (
+            full_wgop.wait_gr_counts.use_num_gr_total or
+            full_wgop.wait_gr_counts.use_gr_placement_counts), \
+            "Multi-DU full-path wait_gr must use use_num_gr_total or use_gr_placement_counts"
         assert isinstance(partial_wgop, WaitGROp) and partial_wgop.force_drain, \
             "Multi-DU partial-path wait_gr must use force_drain=True"
 
-    def test_reorder_multi_partition_wait_gr_counts(self):
-        """Multi-partition: full-path WaitGROp carries partition counts and emitter
-        divides numGRTotal correctly so vmcnt = MT1-partition-0 load count only.
-
-        Uses a 2-partition-M split (partSizeM = numMFMATilesM/2 = 4 for 256x256 fp4).
-        The full-path WaitGROp must have numPartitionsM=2 and numPartitionsN=1.
-        The single-partition baseline must have numPartitionsM=1 / numPartitionsN=1.
+    def test_reorder_multi_partition_uses_gr_placement_counts(self):
+        """Multi-partition: full-path WaitGROp uses use_gr_placement_counts (not
+        use_num_gr_total), with A/B/SA/SB populated from actual mt1_ops GRPlacements.
+        Single-partition uses use_num_gr_total as before.
         """
         from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
 
         cfg_single = make_cfg_256x256_fp4(pgr=2)
-        assert cfg_single.numPartitionsM == 1 and cfg_single.numPartitionsN == 1
+        assert cfg_single.numPartitionsM == 1
 
         cfg_multi = make_cfg_256x256_fp4(pgr=2, partSizeM=4)
         assert cfg_multi.numPartitionsM == 2, \
             "Prerequisite: partSizeM=4 must produce 2 M-partitions for 256x256 fp4"
-        assert cfg_multi.numPartitionsN == 1
 
         def _full_wait_gr(cfg):
             sched = self._build(cfg)
             seq = self._op_sequence(sched)
             wg_sources = [s for t, s in seq if t == 'wait_gr']
             assert len(wg_sources) == 2
-            return wg_sources[0]  # full-path is first
+            return wg_sources[0]
 
-        # Single-partition: numPartitionsM/N default to 1
         single_wgop = _full_wait_gr(cfg_single)
         assert isinstance(single_wgop, WaitGROp)
-        assert single_wgop.wait_gr_counts.numPartitionsM == 1
-        assert single_wgop.wait_gr_counts.numPartitionsN == 1
+        assert single_wgop.wait_gr_counts.use_num_gr_total, \
+            "Single-partition full-path must use use_num_gr_total (fast path)"
+        assert not single_wgop.wait_gr_counts.use_gr_placement_counts
 
-        # Multi-partition: partition counts must be threaded through
         multi_wgop = _full_wait_gr(cfg_multi)
         assert isinstance(multi_wgop, WaitGROp)
-        assert multi_wgop.wait_gr_counts.numPartitionsM == 2, \
-            "Full-path WaitGROp must carry numPartitionsM=2 for 2-partition-M config"
-        assert multi_wgop.wait_gr_counts.numPartitionsN == 1
+        assert multi_wgop.wait_gr_counts.use_gr_placement_counts, \
+            "Multi-partition full-path must use use_gr_placement_counts"
+        assert not multi_wgop.wait_gr_counts.use_num_gr_total
+        # Partition 0 covers half the M tiles so A count < full-tile A count
+        assert multi_wgop.wait_gr_counts.A > 0, "MT1 partition-0 must have A GRPlacements"
+        assert multi_wgop.wait_gr_counts.B > 0, "MT1 partition-0 must have B GRPlacements"
 
     def test_reorder_multi_partition_emit_wait_gr_vlcnt(self):
-        """Emitter-level: multi-partition vlcnt == single-partition vlcnt / numPartitionsM.
-
-        Constructs a real InstructionEmitter with MagicMock tileInfos that expose
-        numGRTotal and loadRatioGR, then calls emit_wait_gr directly to verify the
-        emitted SWaitCntEx.vlcnt is halved for a 2-partition-M config vs single-partition.
+        """Emitter-level: use_gr_placement_counts path converts GRPlacements to
+        buffer_loads via ceil(count/loadRatioGR), correct for any partition geometry.
         """
         from unittest.mock import MagicMock
         from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
@@ -3585,14 +3582,14 @@ class TestPreloopReorderGR:
 
         cfg = make_cfg_256x256_fp4(pgr=2)
 
-        def _make_emitter(cfg):
+        def _make_emitter(cfg, loadRatioGR=1.0):
             tiA = MagicMock()
             tiA.numGRTotal = 8
-            tiA.loadRatioGR = 0.5   # grMap['A'] = max(1, int(1/0.5)) = 2; use_num_gr_total bypasses this
+            tiA.loadRatioGR = loadRatioGR
             tiA.subtileShape = [1, 1]
             tiB = MagicMock()
             tiB.numGRTotal = 8
-            tiB.loadRatioGR = 0.5
+            tiB.loadRatioGR = loadRatioGR
             tiB.subtileShape = [1, 1]
             emitter = InstructionEmitter(
                 writer=MagicMock(), kernel={}, config=cfg,
@@ -3603,25 +3600,25 @@ class TestPreloopReorderGR:
             emitter.tileInfoMap = {'A': tiA, 'B': tiB}
             return emitter
 
-        def _vlcnt(emitter, numPartitionsM, numPartitionsN):
+        def _vlcnt_placement(emitter, A, B):
             wgop = WaitGROp(wait_gr_counts=WaitGRCounts(
-                use_num_gr_total=True,
-                numPartitionsM=numPartitionsM,
-                numPartitionsN=numPartitionsN,
+                use_gr_placement_counts=True, A=A, B=B,
             ))
             instrs = emitter.emit_wait_gr(wgop)
             assert instrs, "emit_wait_gr returned no instructions"
             return instrs[0].vlcnt
 
-        emitter = _make_emitter(cfg)
-        vlcnt_single = _vlcnt(emitter, numPartitionsM=1, numPartitionsN=1)
-        vlcnt_multi  = _vlcnt(emitter, numPartitionsM=2, numPartitionsN=1)
+        # loadRatioGR=1.0: ceil(count/1) = count (buffer_loads == GRPlacements)
+        emitter1 = _make_emitter(cfg, loadRatioGR=1.0)
+        assert _vlcnt_placement(emitter1, A=7, B=8) == 15  # 7+8
 
-        # single: nA=8 + nB=8 = 16; multi (partM=2, partN=1): nA=4 + nB=8 = 12
-        assert vlcnt_single == 16, f"Expected 16 (8A+8B), got {vlcnt_single}"
-        assert vlcnt_multi  == 12, f"Expected 12 (4A+8B), got {vlcnt_multi}"
-        assert vlcnt_single - vlcnt_multi == 4, \
-            "Multi-partition vlcnt must be reduced by nA/numPartitionsM (=4)"
+        # loadRatioGR=0.5: ceil(count/0.5) = 2*count (2 loads per GRPlacement)
+        emitter2 = _make_emitter(cfg, loadRatioGR=0.5)
+        assert _vlcnt_placement(emitter2, A=4, B=4) == 16  # ceil(4/0.5)+ceil(4/0.5)=8+8
+
+        # loadRatioGR=2.0: ceil(count/2.0) (1 load per 2 GRPlacements, round up for odd)
+        emitter3 = _make_emitter(cfg, loadRatioGR=2.0)
+        assert _vlcnt_placement(emitter3, A=7, B=8) == 8   # ceil(7/2)+ceil(8/2)=4+4
 
 
 # Tool to visualize the scheduling steps on a real kernel configuration. Run with --interactive to step through each phase.
