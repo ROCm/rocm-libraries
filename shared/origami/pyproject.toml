@@ -8,24 +8,21 @@ requires = [
 ]
 build-backend = "scikit_build_core.build"
 
-# NOTE: Building this package requires ROCm/HIP to be installed on your system.
-# ROCm cannot be installed via pip and must be installed separately.
-# See: https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html
-# Ensure CMAKE_PREFIX_PATH includes ROCm (default: /opt/rocm)
+# NOTE: Building this package requires a ROCm install. The native Origami
+# library (liborigami + its CMake package) is first-class in ROCm, so a ROCm
+# install provides it.
 
 [project]
-name = "origami"
+name = "rocm-origami"
 dynamic = ["version"]
 description = "Analytical GEMM Solution Selection"
-readme = "../README.md"
-requires-python = ">=3.9"
+readme = "README.md"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Advanced Micro Devices, Inc."}
 ]
-dependencies = [
-    "nanobind>=2.0.0",
-]
+dependencies = []
 
 [project.optional-dependencies]
 test = [
@@ -36,44 +33,34 @@ test = [
 torch = ["torch>=2.0.0"]
 
 [tool.scikit-build]
-wheel.packages = ["src/origami"]
+wheel.packages = ["python/src/origami"]
 cmake.version = ">=3.25"
 build.verbose = true
-# CMake source directory - use current directory (python/) which contains CMakeLists.txt
-# The python/CMakeLists.txt will automatically build origami from parent directory
 cmake.source-dir = "."
-# CMake arguments
-# CMAKE_PREFIX_PATH and CMAKE_CXX_COMPILER should be set via environment variables
-# or passed via CMAKE_ARGS environment variable
-cmake.args = [
-    "-DCMAKE_BUILD_TYPE:STRING=Release",
-]
-# CMake defines - these can be overridden via environment
-# CMAKE_PREFIX_PATH will be used by python/CMakeLists.txt
-cmake.define = { }
-# Dynamic version from __init__.py
+build-dir = "build/{state}-{wheel_tag}"
+cmake.args = ["--preset=python"]
 metadata.version.provider = "scikit_build_core.metadata.regex"
-metadata.version.input = "src/origami/__init__.py"
+metadata.version.input = "python/src/origami/__init__.py"
 metadata.version.regex = '^__version__\s*=\s*["\x27](?P<value>[^"\x27]+)["\x27]'
 sdist.exclude = [
-    "../../*",
-    "../*",
-    "*.md",
-    "*.sh",
     "build/*",
     "*.egg-info/*",
+    "PYTHON_BUILD_LAYOUT_PLAN.md",
+    "SHARED_LIBRARY_ROLLOUT_PLAN.md",
 ]
 wheel.exclude = [
-    "../../*",
-    "../*",
     "*.md",
     "*.sh",
     "tests/*",
+    "csrc/*",
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/liborigami.so*",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["tests"]
+testpaths = ["python/tests"]
+pythonpath = ["python/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -87,3 +74,8 @@ addopts = [
     "--strict-markers",
 ]
 
+
+[[tool.scikit-build.overrides]]
+if.state = "editable"
+cmake.args = ["--preset=dev"]
+cmake.build-type = "RelWithDebInfo"
