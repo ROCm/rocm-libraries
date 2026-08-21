@@ -711,27 +711,27 @@ TEST(TestIngestorWinnerCacheStateManager, TwoDevicesOnOneArchShareAShardAndStayD
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedCacheDir cacheDir("coarse_shard");
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const auto small = suffixedDeviceProperties(228);
-    const auto large = suffixedDeviceProperties(304);
-    ASSERT_NE(DeviceKey{small}, DeviceKey{large});
+    const auto fewerUnits = suffixedDeviceProperties(228);
+    const auto moreUnits = suffixedDeviceProperties(304);
+    ASSERT_NE(DeviceKey{fewerUnits}, DeviceKey{moreUnits});
 
     {
         const auto manager = makeNamedStateManager("test:CoarseShard");
-        manager->recordWinner(keyFor(graph, small), recordFor(0x21, 1.0));
-        manager->recordWinner(keyFor(graph, large), recordFor(0x22, 2.0));
+        manager->recordWinner(keyFor(graph, fewerUnits), recordFor(0x21, 1.0));
+        manager->recordWinner(keyFor(graph, moreUnits), recordFor(0x22, 2.0));
     }
 
-    const auto path = winnerCacheShardPath("test:CoarseShard", small.gcnArchName);
-    ASSERT_EQ(path, winnerCacheShardPath("test:CoarseShard", large.gcnArchName));
+    const auto path = winnerCacheShardPath("test:CoarseShard", fewerUnits.gcnArchName);
+    ASSERT_EQ(path, winnerCacheShardPath("test:CoarseShard", moreUnits.gcnArchName));
     ASSERT_TRUE(std::filesystem::exists(path));
 
     const auto reader = makeNamedStateManager("test:CoarseShard");
-    const auto forSmall = reader->winnerFor(keyFor(graph, small));
-    const auto forLarge = reader->winnerFor(keyFor(graph, large));
-    ASSERT_TRUE(forSmall.has_value());
-    ASSERT_TRUE(forLarge.has_value());
-    EXPECT_EQ(forSmall->front().kernelId, testId(0x21));
-    EXPECT_EQ(forLarge->front().kernelId, testId(0x22));
+    const auto forFewerUnits = reader->winnerFor(keyFor(graph, fewerUnits));
+    const auto forMoreUnits = reader->winnerFor(keyFor(graph, moreUnits));
+    ASSERT_TRUE(forFewerUnits.has_value());
+    ASSERT_TRUE(forMoreUnits.has_value());
+    EXPECT_EQ(forFewerUnits->front().kernelId, testId(0x21));
+    EXPECT_EQ(forMoreUnits->front().kernelId, testId(0x22));
 }
 
 /// A shard written by a different build is declined rather than misread, and says so once.
