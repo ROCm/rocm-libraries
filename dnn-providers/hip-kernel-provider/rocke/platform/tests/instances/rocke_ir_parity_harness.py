@@ -406,23 +406,32 @@ def _pinned_attention_arch(arch):
     """Pin the *memoized runtime device arch* the D256 fast routes gate on.
 
     Those routes consult ``_resolve_attention_arch`` -- NOT any per-case argument
-    -- and the spec builder holds a *bound* import of it, so both bindings are
-    patched wholesale (per its docstring: "Tests that monkeypatch this function
-    replace it wholesale"). Without this a non-gfx950 host silently selects the
-    FALLBACK spec and the recorded sha becomes host-dependent.
+    -- so a non-gfx950 host would otherwise select the FALLBACK spec and the
+    recorded sha would become host-dependent. Two things are pinned, and the
+    second is the load-bearing one:
+
+    * the function is rebound wholesale on its defining module (per its
+      docstring: "Tests that monkeypatch this function replace it wholesale");
+    * ``_RESOLVED_ATTENTION_ARCH``, the process-wide memo the function returns
+      before doing anything else, is set too. The memo is what makes the pin
+      independent of *how* a consumer reached the resolver: the spec builder
+      goes through its ``attention_unified`` module handle today, but a bound
+      import anywhere would freeze the function reference and see only the memo.
+      This harness is installed standalone (``platform/CMakeLists.txt``) and run
+      by ``rocke_installed_golden_test.py`` without the library test tree, so it
+      cannot delegate that invariant to a guard test.
     """
-    import builders.common.attention_spec_builder as asb
     import kernels.common.attention_unified as au
 
     pin = lambda: arch  # noqa: E731
-    o_au, o_asb = au._resolve_attention_arch, asb._resolve_attention_arch
+    o_fn, o_memo = au._resolve_attention_arch, au._RESOLVED_ATTENTION_ARCH
     au._resolve_attention_arch = pin
-    asb._resolve_attention_arch = pin
+    au._RESOLVED_ATTENTION_ARCH = arch
     try:
         yield
     finally:
-        au._resolve_attention_arch = o_au
-        asb._resolve_attention_arch = o_asb
+        au._resolve_attention_arch = o_fn
+        au._RESOLVED_ATTENTION_ARCH = o_memo
 
 
 def build_attention_d256_gfx950(arch):
@@ -1575,6 +1584,48 @@ def cases():
                 "block_size": 16,
                 "num_kv_blocks": 32,
                 "sliding_window": 256,
+            },
+        ),
+        # --- Sinks ---
+        # Full-sink (use_sinks=True, no sliding window): D64 and D128, default + persistent
+        ("sinks_d64_sq512", {"use_sinks": True, "head_size": 64}),
+        ("sinks_d128_sq512", {"use_sinks": True}),
+        (
+            "persist_sinks_d64_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
+                "head_size": 64,
+            },
+        ),
+        (
+            "persist_sinks_d128_sq512",
+            {"persistent": True, "num_persistent": 256, "use_sinks": True},
+        ),
+        # SWA-sink (use_sinks=True + sliding_window>0): D64 and D128, default + persistent
+        (
+            "swa_sinks_d64_sq512",
+            {"use_sinks": True, "sliding_window": 128, "head_size": 64},
+        ),
+        ("swa_sinks_d128_sq512", {"use_sinks": True, "sliding_window": 128}),
+        (
+            "persist_swa_sinks_d64_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
+                "sliding_window": 128,
+                "head_size": 64,
+            },
+        ),
+        (
+            "persist_swa_sinks_d128_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
+                "sliding_window": 128,
             },
         ),
     ):
