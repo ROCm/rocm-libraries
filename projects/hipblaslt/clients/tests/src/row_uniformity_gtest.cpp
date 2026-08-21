@@ -33,7 +33,10 @@
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
-#include <mxDataGenerator/bf16.hpp>
+// dataTypeInfo.hpp is the umbrella; bf16.hpp includes it first, so including
+// bf16.hpp directly skips DGen::bf16 under #pragma once and the HIP compile
+// of this TU then fails looking up unqualified bf16.
+#include <mxDataGenerator/dataTypeInfo.hpp>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
