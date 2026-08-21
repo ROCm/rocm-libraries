@@ -170,6 +170,80 @@ TEST_F(TestLineStore, MultipleThreadsInOneProcessAppendWithoutCorruption)
     }
 }
 
+/// A shard whose path cannot be opened declines rather than throwing or yielding a
+/// half-open handle. A directory is the portable way to name something that exists and
+/// is not an openable file; the root-ignores-permissions problem makes chmod unreliable
+/// in a container.
+TEST_F(TestLineStore, AnUnopenablePathDeclines)
+{
+    const auto directoryPath = _shardPath.parent_path() / "not-a-file";
+    std::filesystem::create_directories(directoryPath);
+
+    auto [shard, status] = openLineStore(directoryPath, "v1");
+
+    EXPECT_FALSE(shard.has_value());
+    EXPECT_EQ(status, LineStoreStatus::OPEN_FAILED);
+}
+
+/// unlockLineStore on a shard that never took the lock is a no-op, not a double release.
+/// The write-back path calls it on early-return branches where the lock may not be held.
+TEST_F(TestLineStore, UnlockingAnUnlockedShardIsANoOp)
+{
+    auto [shard, status] = openLineStore(_shardPath, "v1");
+    ASSERT_EQ(status, LineStoreStatus::OK);
+
+    EXPECT_NO_THROW(unlockLineStore(*shard));
+    // Still usable afterwards: the no-op did not invalidate the handle.
+    EXPECT_EQ(lockLineStore(*shard), LineStoreStatus::OK);
+    EXPECT_NO_THROW(unlockLineStore(*shard));
+}
+
+/// A shard destroyed while it still holds the lock releases it. Without this the lock
+/// would outlive its owner and the next process would block forever on a shard whose
+/// holder had already exited normally.
+TEST_F(TestLineStore, DestroyingALockedShardReleasesTheLock)
+{
+    {
+        auto [shard, status] = openLineStore(_shardPath, "v1");
+        ASSERT_EQ(status, LineStoreStatus::OK);
+        ASSERT_EQ(lockLineStore(*shard), LineStoreStatus::OK);
+        EXPECT_EQ(appendLine(*shard, "written-under-a-lock-never-released"), LineStoreStatus::OK);
+        // No unlockLineStore(): the destructor is what must release it.
+    }
+
+    auto [shard, status] = openLineStore(_shardPath, "v1");
+    ASSERT_EQ(status, LineStoreStatus::OK);
+    EXPECT_EQ(lockLineStore(*shard), LineStoreStatus::OK)
+        << "the previous shard's destructor did not release the lock";
+    unlockLineStore(*shard);
+}
+
+/// Move assignment closes the handle the target already held rather than leaking it, and
+/// leaves the source safe to destroy.
+TEST_F(TestLineStore, MoveAssignmentTakesOverTheHandleAndClosesTheOldOne)
+{
+    // Its own file, removed first: the fixture directory is reused across cases in this
+    // suite, and a shard left by an earlier one would make this read see extra lines.
+    const auto otherPath = _shardPath.parent_path() / "move-assignment-target.jsonl";
+    std::filesystem::remove(otherPath);
+
+    auto [first, firstStatus] = openLineStore(_shardPath, "v1");
+    ASSERT_EQ(firstStatus, LineStoreStatus::OK);
+    ASSERT_EQ(appendLine(*first, "first-shard-line"), LineStoreStatus::OK);
+
+    auto [second, secondStatus] = openLineStore(otherPath, "v1");
+    ASSERT_EQ(secondStatus, LineStoreStatus::OK);
+    ASSERT_EQ(appendLine(*second, "second-shard-line"), LineStoreStatus::OK);
+
+    *first = std::move(*second);
+
+    // Reads now come from the moved-in shard, so the target's own handle was replaced.
+    const auto [records, readStatus] = readAllLines(*first, parseLine);
+    ASSERT_EQ(readStatus, LineStoreStatus::OK);
+    ASSERT_EQ(records.size(), 1U);
+    EXPECT_EQ(records.front(), "second-shard-line");
+}
+
 #if defined(__linux__)
 TEST_F(TestLineStore, TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce)
 {
