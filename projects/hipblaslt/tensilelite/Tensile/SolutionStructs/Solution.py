@@ -1893,6 +1893,9 @@ class Solution(collections.abc.Mapping):
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if state["ClusterDim"] != [1, 1]:
+        if state["ClusterDim"] == [16, 1]:
+          reject(state, printRejectionReason,
+                 "Currently ClusterDim = 16x1 is not supported")
         # WG-cluster support is StreamK==3-only: the cluster cooperative load is
         # derived from the SK3 tile schedule, and the dynamic (SK4) / hybrid (SK5)
         # work-queue modes have no cluster-load implementation, so a ClusterDim
