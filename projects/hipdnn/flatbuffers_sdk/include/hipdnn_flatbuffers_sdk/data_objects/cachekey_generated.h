@@ -46,8 +46,8 @@ public:
     }
 
 private:
-    static constexpr uint64_t OFFSET_BASIS = 1469598103934665603ULL;
-    static constexpr uint64_t PRIME        = 1099511628211ULL;
+    static constexpr uint64_t OFFSET_BASIS = 0xcbf29ce484222325ULL;
+    static constexpr uint64_t PRIME        = 0x100000001b3ULL;
 
     uint64_t _state = OFFSET_BASIS;
 };
@@ -62,6 +62,16 @@ class UidCanon
 public:
     UidCanon() = default;
 
+    /// A resolved reference carries its ordinal; an unresolved one
+    /// carries the raw uid instead. `resolved` is folded and compared
+    /// ahead of `value`, so the two can never alias each other no
+    /// matter the uid's value or the domain's size.
+    struct Fold
+    {
+        bool resolved;
+        int64_t value;
+    };
+
     using Domain = ::flatbuffers::Vector<::flatbuffers::Offset<TensorAttributes>>;
 
     explicit UidCanon(const Domain* domain)
@@ -70,29 +80,41 @@ public:
     }
 
     /// Linear scan: the vector is small and this keeps the traversal
-    /// allocation-free. An unresolvable uid folds to a sentinel outside the
-    /// ordinal range, so it never aliases a real tensor.
-    int64_t operator()(int64_t uid) const
+    /// allocation-free.
+    Fold operator()(int64_t uid) const
     {
-        if(_domain == nullptr)
+        if(_domain != nullptr)
         {
-            return UNRESOLVED;
-        }
-        for(uint32_t index = 0; index < _domain->size(); ++index)
-        {
-            if(_domain->Get(index)->uid() == uid)
+            for(uint32_t index = 0; index < _domain->size(); ++index)
             {
-                return static_cast<int64_t>(index);
+                if(_domain->Get(index)->uid() == uid)
+                {
+                    return Fold{true, static_cast<int64_t>(index)};
+                }
             }
         }
-        return UNRESOLVED;
+        return Fold{false, uid};
     }
 
 private:
-    static constexpr int64_t UNRESOLVED = -1;
-
     const Domain* _domain = nullptr;
 };
+
+inline void hashAppend(Hasher& hasher, UidCanon::Fold fold)
+{
+    hasher.tag(fold.resolved ? 1 : 0);
+    hasher.raw(fold.value);
+}
+
+inline bool operator==(UidCanon::Fold a, UidCanon::Fold b)
+{
+    return a.resolved == b.resolved && a.value == b.value;
+}
+
+inline bool operator!=(UidCanon::Fold a, UidCanon::Fold b)
+{
+    return !(a == b);
+}
 
 inline void hashAppend(Hasher& hasher, const Graph* value);
 inline bool logicallyEqual(const Graph* a, const Graph* b);
@@ -406,10 +428,10 @@ inline void hashAppend(Hasher& hasher, const BatchnormAttributes* value, const U
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->scale_tensor_uid()));
-    hasher.raw(canon(value->bias_tensor_uid()));
-    hasher.raw(canon(value->epsilon_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->scale_tensor_uid()));
+    hashAppend(hasher, canon(value->bias_tensor_uid()));
+    hashAppend(hasher, canon(value->epsilon_tensor_uid()));
     {
         const auto* items = value->peer_stats_tensor_uid();
         const uint32_t count = items == nullptr ? 0u : items->size();
@@ -417,7 +439,7 @@ inline void hashAppend(Hasher& hasher, const BatchnormAttributes* value, const U
         hasher.raw(count);
         for(uint32_t index = 0; index < count; ++index)
         {
-            hasher.raw(canon(items->Get(index)));
+            hashAppend(hasher, canon(items->Get(index)));
         }
     }
     {
@@ -425,7 +447,7 @@ inline void hashAppend(Hasher& hasher, const BatchnormAttributes* value, const U
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -433,7 +455,7 @@ inline void hashAppend(Hasher& hasher, const BatchnormAttributes* value, const U
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -441,16 +463,16 @@ inline void hashAppend(Hasher& hasher, const BatchnormAttributes* value, const U
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
-    hasher.raw(canon(value->y_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
     {
         const auto optional = value->mean_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -458,7 +480,7 @@ inline void hashAppend(Hasher& hasher, const BatchnormAttributes* value, const U
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -466,7 +488,7 @@ inline void hashAppend(Hasher& hasher, const BatchnormAttributes* value, const U
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -474,7 +496,7 @@ inline void hashAppend(Hasher& hasher, const BatchnormAttributes* value, const U
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
 }
@@ -621,14 +643,14 @@ inline void hashAppend(Hasher& hasher, const BatchnormBackwardAttributes* value,
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->dy_tensor_uid()));
-    hasher.raw(canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->dy_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
     {
         const auto optional = value->mean_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -636,10 +658,10 @@ inline void hashAppend(Hasher& hasher, const BatchnormBackwardAttributes* value,
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
-    hasher.raw(canon(value->scale_tensor_uid()));
+    hashAppend(hasher, canon(value->scale_tensor_uid()));
     {
         const auto* items = value->peer_stats_tensor_uid();
         const uint32_t count = items == nullptr ? 0u : items->size();
@@ -647,12 +669,12 @@ inline void hashAppend(Hasher& hasher, const BatchnormBackwardAttributes* value,
         hasher.raw(count);
         for(uint32_t index = 0; index < count; ++index)
         {
-            hasher.raw(canon(items->Get(index)));
+            hashAppend(hasher, canon(items->Get(index)));
         }
     }
-    hasher.raw(canon(value->dx_tensor_uid()));
-    hasher.raw(canon(value->dscale_tensor_uid()));
-    hasher.raw(canon(value->dbias_tensor_uid()));
+    hashAppend(hasher, canon(value->dx_tensor_uid()));
+    hashAppend(hasher, canon(value->dscale_tensor_uid()));
+    hashAppend(hasher, canon(value->dbias_tensor_uid()));
 }
 
 inline bool logicallyEqual(const BatchnormBackwardAttributes* a, const BatchnormBackwardAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -741,12 +763,12 @@ inline void hashAppend(Hasher& hasher, const BatchnormInferenceAttributes* value
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->mean_tensor_uid()));
-    hasher.raw(canon(value->inv_variance_tensor_uid()));
-    hasher.raw(canon(value->scale_tensor_uid()));
-    hasher.raw(canon(value->bias_tensor_uid()));
-    hasher.raw(canon(value->y_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->mean_tensor_uid()));
+    hashAppend(hasher, canon(value->inv_variance_tensor_uid()));
+    hashAppend(hasher, canon(value->scale_tensor_uid()));
+    hashAppend(hasher, canon(value->bias_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
 }
 
 inline bool logicallyEqual(const BatchnormInferenceAttributes* a, const BatchnormInferenceAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -794,13 +816,13 @@ inline void hashAppend(Hasher& hasher, const BatchnormInferenceAttributesVarianc
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->mean_tensor_uid()));
-    hasher.raw(canon(value->variance_tensor_uid()));
-    hasher.raw(canon(value->scale_tensor_uid()));
-    hasher.raw(canon(value->bias_tensor_uid()));
-    hasher.raw(canon(value->y_tensor_uid()));
-    hasher.raw(canon(value->epsilon_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->mean_tensor_uid()));
+    hashAppend(hasher, canon(value->variance_tensor_uid()));
+    hashAppend(hasher, canon(value->scale_tensor_uid()));
+    hashAppend(hasher, canon(value->bias_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
+    hashAppend(hasher, canon(value->epsilon_tensor_uid()));
 }
 
 inline bool logicallyEqual(const BatchnormInferenceAttributesVarianceExt* a, const BatchnormInferenceAttributesVarianceExt* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -852,9 +874,9 @@ inline void hashAppend(Hasher& hasher, const BlockScaleDequantizeAttributes* val
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->scale_tensor_uid()));
-    hasher.raw(canon(value->y_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->scale_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
     {
         const auto* items = value->block_size();
         const uint32_t count = items == nullptr ? 0u : items->size();
@@ -922,9 +944,9 @@ inline void hashAppend(Hasher& hasher, const BlockScaleQuantizeAttributes* value
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->y_tensor_uid()));
-    hasher.raw(canon(value->scale_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
+    hashAppend(hasher, canon(value->scale_tensor_uid()));
     hasher.raw(value->block_size());
     {
         const auto optional = value->axis();
@@ -1010,9 +1032,9 @@ inline void hashAppend(Hasher& hasher, const ConvolutionBwdAttributes* value, co
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->dy_tensor_uid()));
-    hasher.raw(canon(value->w_tensor_uid()));
-    hasher.raw(canon(value->dx_tensor_uid()));
+    hashAppend(hasher, canon(value->dy_tensor_uid()));
+    hashAppend(hasher, canon(value->w_tensor_uid()));
+    hashAppend(hasher, canon(value->dx_tensor_uid()));
     {
         const auto* items = value->pre_padding();
         const uint32_t count = items == nullptr ? 0u : items->size();
@@ -1161,9 +1183,9 @@ inline void hashAppend(Hasher& hasher, const ConvolutionFwdAttributes* value, co
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->w_tensor_uid()));
-    hasher.raw(canon(value->y_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->w_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
     {
         const auto* items = value->pre_padding();
         const uint32_t count = items == nullptr ? 0u : items->size();
@@ -1312,9 +1334,9 @@ inline void hashAppend(Hasher& hasher, const ConvolutionWrwAttributes* value, co
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->dy_tensor_uid()));
-    hasher.raw(canon(value->dw_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->dy_tensor_uid()));
+    hashAppend(hasher, canon(value->dw_tensor_uid()));
     {
         const auto* items = value->pre_padding();
         const uint32_t count = items == nullptr ? 0u : items->size();
@@ -1481,7 +1503,7 @@ inline void hashAppend(Hasher& hasher, const CustomOpAttributes* value, const Ui
         hasher.raw(count);
         for(uint32_t index = 0; index < count; ++index)
         {
-            hasher.raw(canon(items->Get(index)));
+            hashAppend(hasher, canon(items->Get(index)));
         }
     }
     {
@@ -1491,7 +1513,7 @@ inline void hashAppend(Hasher& hasher, const CustomOpAttributes* value, const Ui
         hasher.raw(count);
         for(uint32_t index = 0; index < count; ++index)
         {
-            hasher.raw(canon(items->Get(index)));
+            hashAppend(hasher, canon(items->Get(index)));
         }
     }
     {
@@ -1835,18 +1857,18 @@ inline void hashAppend(Hasher& hasher, const LayernormAttributes* value, const U
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->scale_tensor_uid()));
-    hasher.raw(canon(value->bias_tensor_uid()));
-    hasher.raw(canon(value->epsilon_tensor_uid()));
-    hasher.raw(canon(value->y_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->scale_tensor_uid()));
+    hashAppend(hasher, canon(value->bias_tensor_uid()));
+    hashAppend(hasher, canon(value->epsilon_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
     hasher.raw(value->normalized_dim_count());
     {
         const auto optional = value->mean_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -1854,7 +1876,7 @@ inline void hashAppend(Hasher& hasher, const LayernormAttributes* value, const U
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     hasher.raw(static_cast<int64_t>(value->forward_phase()));
@@ -1933,15 +1955,15 @@ inline void hashAppend(Hasher& hasher, const LayernormBackwardAttributes* value,
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->dy_tensor_uid()));
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->scale_tensor_uid()));
+    hashAppend(hasher, canon(value->dy_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->scale_tensor_uid()));
     {
         const auto optional = value->mean_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -1949,7 +1971,7 @@ inline void hashAppend(Hasher& hasher, const LayernormBackwardAttributes* value,
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -1957,12 +1979,12 @@ inline void hashAppend(Hasher& hasher, const LayernormBackwardAttributes* value,
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
-    hasher.raw(canon(value->dx_tensor_uid()));
-    hasher.raw(canon(value->dscale_tensor_uid()));
-    hasher.raw(canon(value->dbias_tensor_uid()));
+    hashAppend(hasher, canon(value->dx_tensor_uid()));
+    hashAppend(hasher, canon(value->dscale_tensor_uid()));
+    hashAppend(hasher, canon(value->dbias_tensor_uid()));
     hasher.raw(value->normalized_dim_count());
 }
 
@@ -2051,9 +2073,9 @@ inline void hashAppend(Hasher& hasher, const MatmulAttributes* value, const UidC
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->a_tensor_uid()));
-    hasher.raw(canon(value->b_tensor_uid()));
-    hasher.raw(canon(value->c_tensor_uid()));
+    hashAppend(hasher, canon(value->a_tensor_uid()));
+    hashAppend(hasher, canon(value->b_tensor_uid()));
+    hashAppend(hasher, canon(value->c_tensor_uid()));
 }
 
 inline bool logicallyEqual(const MatmulAttributes* a, const MatmulAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -2089,15 +2111,15 @@ inline void hashAppend(Hasher& hasher, const MoeGroupedMatmulAttributes* value, 
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->token_tensor_uid()));
-    hasher.raw(canon(value->weight_tensor_uid()));
-    hasher.raw(canon(value->first_token_offset_tensor_uid()));
+    hashAppend(hasher, canon(value->token_tensor_uid()));
+    hashAppend(hasher, canon(value->weight_tensor_uid()));
+    hashAppend(hasher, canon(value->first_token_offset_tensor_uid()));
     {
         const auto optional = value->token_index_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -2105,10 +2127,10 @@ inline void hashAppend(Hasher& hasher, const MoeGroupedMatmulAttributes* value, 
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
-    hasher.raw(canon(value->output_tensor_uid()));
+    hashAppend(hasher, canon(value->output_tensor_uid()));
     hasher.raw(static_cast<int64_t>(value->mode()));
     hasher.raw(value->top_k());
 }
@@ -2182,10 +2204,10 @@ inline void hashAppend(Hasher& hasher, const MoeGroupedMatmulBwdAttributes* valu
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->doutput_tensor_uid()));
-    hasher.raw(canon(value->token_tensor_uid()));
-    hasher.raw(canon(value->first_token_offset_tensor_uid()));
-    hasher.raw(canon(value->dweight_tensor_uid()));
+    hashAppend(hasher, canon(value->doutput_tensor_uid()));
+    hashAppend(hasher, canon(value->token_tensor_uid()));
+    hashAppend(hasher, canon(value->first_token_offset_tensor_uid()));
+    hashAppend(hasher, canon(value->dweight_tensor_uid()));
 }
 
 inline bool logicallyEqual(const MoeGroupedMatmulBwdAttributes* a, const MoeGroupedMatmulBwdAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -2291,13 +2313,13 @@ inline void hashAppend(Hasher& hasher, const PointwiseAttributes* value, const U
             hasher.raw(*optional);
         }
     }
-    hasher.raw(canon(value->in_0_tensor_uid()));
+    hashAppend(hasher, canon(value->in_0_tensor_uid()));
     {
         const auto optional = value->in_1_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -2305,10 +2327,10 @@ inline void hashAppend(Hasher& hasher, const PointwiseAttributes* value, const U
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
-    hasher.raw(canon(value->out_0_tensor_uid()));
+    hashAppend(hasher, canon(value->out_0_tensor_uid()));
     {
         const auto optional = value->swish_beta();
         hasher.tag(optional ? 1 : 0);
@@ -2420,16 +2442,16 @@ inline void hashAppend(Hasher& hasher, const RMSNormAttributes* value, const Uid
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->scale_tensor_uid()));
-    hasher.raw(canon(value->epsilon_tensor_uid()));
-    hasher.raw(canon(value->y_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->scale_tensor_uid()));
+    hashAppend(hasher, canon(value->epsilon_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
     {
         const auto optional = value->bias_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -2437,7 +2459,7 @@ inline void hashAppend(Hasher& hasher, const RMSNormAttributes* value, const Uid
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     hasher.raw(static_cast<int64_t>(value->forward_phase()));
@@ -2508,18 +2530,18 @@ inline void hashAppend(Hasher& hasher, const RMSNormBackwardAttributes* value, c
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->dy_tensor_uid()));
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->scale_tensor_uid()));
-    hasher.raw(canon(value->inv_rms_tensor_uid()));
-    hasher.raw(canon(value->dx_tensor_uid()));
-    hasher.raw(canon(value->dscale_tensor_uid()));
+    hashAppend(hasher, canon(value->dy_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->scale_tensor_uid()));
+    hashAppend(hasher, canon(value->inv_rms_tensor_uid()));
+    hashAppend(hasher, canon(value->dx_tensor_uid()));
+    hashAppend(hasher, canon(value->dscale_tensor_uid()));
     {
         const auto optional = value->dbias_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
 }
@@ -2582,8 +2604,8 @@ inline void hashAppend(Hasher& hasher, const ReductionAttributes* value, const U
     }
     hasher.tag(1);
     hasher.raw(static_cast<int64_t>(value->mode()));
-    hasher.raw(canon(value->in_tensor_uid()));
-    hasher.raw(canon(value->out_tensor_uid()));
+    hashAppend(hasher, canon(value->in_tensor_uid()));
+    hashAppend(hasher, canon(value->out_tensor_uid()));
     hasher.raw(value->is_deterministic());
 }
 
@@ -2624,14 +2646,14 @@ inline void hashAppend(Hasher& hasher, const ResampleBwdAttributes* value, const
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->dy_tensor_uid()));
-    hasher.raw(canon(value->dx_tensor_uid()));
+    hashAppend(hasher, canon(value->dy_tensor_uid()));
+    hashAppend(hasher, canon(value->dx_tensor_uid()));
     {
         const auto optional = value->index_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -2795,14 +2817,14 @@ inline void hashAppend(Hasher& hasher, const ResampleFwdAttributes* value, const
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->x_tensor_uid()));
-    hasher.raw(canon(value->y_tensor_uid()));
+    hashAppend(hasher, canon(value->x_tensor_uid()));
+    hashAppend(hasher, canon(value->y_tensor_uid()));
     {
         const auto optional = value->index_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -2978,16 +3000,16 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->q_tensor_uid()));
-    hasher.raw(canon(value->k_tensor_uid()));
-    hasher.raw(canon(value->v_tensor_uid()));
-    hasher.raw(canon(value->o_tensor_uid()));
+    hashAppend(hasher, canon(value->q_tensor_uid()));
+    hashAppend(hasher, canon(value->k_tensor_uid()));
+    hashAppend(hasher, canon(value->v_tensor_uid()));
+    hashAppend(hasher, canon(value->o_tensor_uid()));
     {
         const auto optional = value->attn_mask_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -2995,7 +3017,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3003,7 +3025,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3011,7 +3033,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3019,7 +3041,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3027,7 +3049,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3035,7 +3057,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3043,7 +3065,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3051,7 +3073,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3059,7 +3081,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3067,7 +3089,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3075,7 +3097,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3083,7 +3105,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3091,7 +3113,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3099,7 +3121,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3107,7 +3129,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3115,7 +3137,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3123,7 +3145,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3131,7 +3153,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3139,7 +3161,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3147,7 +3169,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3155,7 +3177,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3163,7 +3185,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3171,7 +3193,7 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3608,21 +3630,21 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         return;
     }
     hasher.tag(1);
-    hasher.raw(canon(value->q_tensor_uid()));
-    hasher.raw(canon(value->k_tensor_uid()));
-    hasher.raw(canon(value->v_tensor_uid()));
-    hasher.raw(canon(value->o_tensor_uid()));
-    hasher.raw(canon(value->do_tensor_uid()));
-    hasher.raw(canon(value->stats_tensor_uid()));
-    hasher.raw(canon(value->dq_tensor_uid()));
-    hasher.raw(canon(value->dk_tensor_uid()));
-    hasher.raw(canon(value->dv_tensor_uid()));
+    hashAppend(hasher, canon(value->q_tensor_uid()));
+    hashAppend(hasher, canon(value->k_tensor_uid()));
+    hashAppend(hasher, canon(value->v_tensor_uid()));
+    hashAppend(hasher, canon(value->o_tensor_uid()));
+    hashAppend(hasher, canon(value->do_tensor_uid()));
+    hashAppend(hasher, canon(value->stats_tensor_uid()));
+    hashAppend(hasher, canon(value->dq_tensor_uid()));
+    hashAppend(hasher, canon(value->dk_tensor_uid()));
+    hashAppend(hasher, canon(value->dv_tensor_uid()));
     {
         const auto optional = value->scale_tensor_uid();
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3630,7 +3652,7 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3638,7 +3660,7 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3646,7 +3668,7 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3654,7 +3676,7 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3662,7 +3684,7 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3670,7 +3692,7 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3678,7 +3700,7 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3686,7 +3708,7 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     {
@@ -3694,7 +3716,7 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     hasher.raw(value->alibi_mask());
@@ -3978,7 +4000,7 @@ inline void hashAppend(Hasher& hasher, const TensorAttributes* value, const UidC
         hasher.tag(optional ? 1 : 0);
         if(optional)
         {
-            hasher.raw(canon(*optional));
+            hashAppend(hasher, canon(*optional));
         }
     }
     hasher.raw(value->alignment());

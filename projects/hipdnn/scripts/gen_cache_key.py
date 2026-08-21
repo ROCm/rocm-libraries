@@ -44,6 +44,27 @@ INTEGER_BASE_TYPES = frozenset(
     ["Byte", "UByte", "Short", "UShort", "Int", "UInt", "Long", "ULong"]
 )
 
+# Reflection base types with a plain-scalar accessor: the return value itself is the
+# content, safe for `Hasher::raw`'s memcpy and for direct `!=` comparison. `Array`
+# (a fixed-length struct member) is deliberately excluded: its accessor returns a
+# pointer, which would satisfy `raw`'s trivially-copyable check while hashing and
+# comparing the address rather than the value.
+SCALAR_BASE_TYPES = frozenset(
+    [
+        "Bool",
+        "Byte",
+        "UByte",
+        "Short",
+        "UShort",
+        "Int",
+        "UInt",
+        "Long",
+        "ULong",
+        "Float",
+        "Double",
+    ]
+)
+
 # Roots to generate for, as (schema file, fully-qualified root table, output header).
 TARGETS = [
     (
@@ -488,8 +509,8 @@ class Emitter:
         self.w("    }")
         self.w("")
         self.w("private:")
-        self.w("    static constexpr uint64_t OFFSET_BASIS = 1469598103934665603ULL;")
-        self.w("    static constexpr uint64_t PRIME        = 1099511628211ULL;")
+        self.w("    static constexpr uint64_t OFFSET_BASIS = 0xcbf29ce484222325ULL;")
+        self.w("    static constexpr uint64_t PRIME        = 0x100000001b3ULL;")
         self.w("")
         self.w("    uint64_t _state = OFFSET_BASIS;")
         self.w("};")
@@ -497,7 +518,13 @@ class Emitter:
         self.emit_uid_canon()
 
     def emit_uid_canon(self):
-        """Emits the uid -> ordinal mapping the generated traversal folds through."""
+        """Emits the uid -> fold mapping the generated traversal folds through.
+
+        A `cache_uid` reference that fails to resolve must not alias any resolved
+        ordinal, nor any other unresolved reference: `Fold` tags which case produced
+        the value, so the tag -- not an assumption about the uid's range -- is what
+        keeps the two spaces disjoint.
+        """
         uid_accessor = "" if self.domain is None else self.domain[2]
         self.w(
             "/// Resolves a tensor uid to its ordinal in the domain vector, so the key"
@@ -511,15 +538,26 @@ class Emitter:
         self.w("public:")
         self.w("    UidCanon() = default;")
         self.w("")
+        self.w("    /// A resolved reference carries its ordinal; an unresolved one")
+        self.w("    /// carries the raw uid instead. `resolved` is folded and compared")
+        self.w("    /// ahead of `value`, so the two can never alias each other no")
+        self.w("    /// matter the uid's value or the domain's size.")
+        self.w("    struct Fold")
+        self.w("    {")
+        self.w("        bool resolved;")
+        self.w("        int64_t value;")
+        self.w("    };")
+        self.w("")
         if self.domain is None:
             # No domain, and therefore no `cache_uid` fields to resolve; emitted so the
             # traversal's signatures stay uniform across schemas.
-            self.w("    int64_t operator()(int64_t uid) const")
+            self.w("    Fold operator()(int64_t uid) const")
             self.w("    {")
-            self.w("        return uid;")
+            self.w("        return Fold{true, uid};")
             self.w("    }")
             self.w("};")
             self.w("")
+            self.emit_uid_fold_helpers()
             return
         element = self.domain[1]
         self.w(
@@ -532,31 +570,47 @@ class Emitter:
         self.w("    }")
         self.w("")
         self.w("    /// Linear scan: the vector is small and this keeps the traversal")
-        self.w(
-            "    /// allocation-free. An unresolvable uid folds to a sentinel outside the"
-        )
-        self.w("    /// ordinal range, so it never aliases a real tensor.")
-        self.w("    int64_t operator()(int64_t uid) const")
+        self.w("    /// allocation-free.")
+        self.w("    Fold operator()(int64_t uid) const")
         self.w("    {")
-        self.w("        if(_domain == nullptr)")
+        self.w("        if(_domain != nullptr)")
         self.w("        {")
-        self.w("            return UNRESOLVED;")
-        self.w("        }")
-        self.w("        for(uint32_t index = 0; index < _domain->size(); ++index)")
-        self.w("        {")
-        self.w(f"            if(_domain->Get(index)->{uid_accessor}() == uid)")
+        self.w("            for(uint32_t index = 0; index < _domain->size(); ++index)")
         self.w("            {")
-        self.w("                return static_cast<int64_t>(index);")
+        self.w(f"                if(_domain->Get(index)->{uid_accessor}() == uid)")
+        self.w("                {")
+        self.w("                    return Fold{true, static_cast<int64_t>(index)};")
+        self.w("                }")
         self.w("            }")
         self.w("        }")
-        self.w("        return UNRESOLVED;")
+        self.w("        return Fold{false, uid};")
         self.w("    }")
         self.w("")
         self.w("private:")
-        self.w("    static constexpr int64_t UNRESOLVED = -1;")
-        self.w("")
         self.w("    const Domain* _domain = nullptr;")
         self.w("};")
+        self.w("")
+        self.emit_uid_fold_helpers()
+
+    def emit_uid_fold_helpers(self):
+        # `Fold` carries tail padding after `resolved` (bool then int64_t), so
+        # `Hasher::raw` -- a memcpy over the whole object -- would read indeterminate
+        # bytes; fold each member explicitly instead.
+        self.w("inline void hashAppend(Hasher& hasher, UidCanon::Fold fold)")
+        self.w("{")
+        self.w("    hasher.tag(fold.resolved ? 1 : 0);")
+        self.w("    hasher.raw(fold.value);")
+        self.w("}")
+        self.w("")
+        self.w("inline bool operator==(UidCanon::Fold a, UidCanon::Fold b)")
+        self.w("{")
+        self.w("    return a.resolved == b.resolved && a.value == b.value;")
+        self.w("}")
+        self.w("")
+        self.w("inline bool operator!=(UidCanon::Fold a, UidCanon::Fold b)")
+        self.w("{")
+        self.w("    return !(a == b);")
+        self.w("}")
         self.w("")
 
     def emit_union(self, union_name):
@@ -632,7 +686,7 @@ class Emitter:
         self.w("    }")
         self.w("    hasher.tag(1);")
         for field in fields:
-            self.emit_hash_field(field)
+            self.emit_hash_field(field, short)
         self.w("}")
         self.w("")
 
@@ -650,12 +704,12 @@ class Emitter:
         self.w("        return false;")
         self.w("    }")
         for field in fields:
-            self.emit_equal_field(field)
+            self.emit_equal_field(field, short)
         self.w("    return true;")
         self.w("}")
         self.w("")
 
-    def emit_hash_field(self, field):
+    def emit_hash_field(self, field, owner):
         ftype = field["type"]
         base = ftype["base_type"]
         name = accessor(field["name"])
@@ -693,7 +747,7 @@ class Emitter:
                 self.w("                }")
                 self.w("            }")
             elif uid:
-                self.w("            hasher.raw(canon(items->Get(index)));")
+                self.w("            hashAppend(hasher, canon(items->Get(index)));")
             else:
                 self.w("            hasher.raw(items->Get(index));")
             self.w("        }")
@@ -724,9 +778,10 @@ class Emitter:
             self.w("        hasher.tag(optional ? 1 : 0);")
             self.w("        if(optional)")
             self.w("        {")
-            self.w(
-                f"            hasher.raw({'canon(*optional)' if uid else '*optional'});"
-            )
+            if uid:
+                self.w("            hashAppend(hasher, canon(*optional));")
+            else:
+                self.w("            hasher.raw(*optional);")
             self.w("        }")
             self.w("    }")
         elif ftype.get("index", -1) >= 0:
@@ -735,11 +790,16 @@ class Emitter:
             self.w(f"    hasher.raw(static_cast<int64_t>({get}));")
         elif uid:
             # Folded as the structural position it refers to, not the label.
-            self.w(f"    hasher.raw(canon({get}));")
-        else:
+            self.w(f"    hashAppend(hasher, canon({get}));")
+        elif base in SCALAR_BASE_TYPES:
             self.w(f"    hasher.raw({get});")
+        else:
+            raise SystemExit(
+                f"ERROR: '{owner}.{field['name']}' has unhandled base type '{base}'; "
+                "the generator has no rule to fold it"
+            )
 
-    def emit_equal_field(self, field):
+    def emit_equal_field(self, field, owner):
         ftype = field["type"]
         base = ftype["base_type"]
         name = accessor(field["name"])
@@ -846,11 +906,16 @@ class Emitter:
             self.w("    {")
             self.w("        return false;")
             self.w("    }")
-        else:
+        elif base in SCALAR_BASE_TYPES:
             self.w(f"    if({left} != {right})")
             self.w("    {")
             self.w("        return false;")
             self.w("    }")
+        else:
+            raise SystemExit(
+                f"ERROR: '{owner}.{field['name']}' has unhandled base type '{base}'; "
+                "the generator has no rule to fold it"
+            )
 
 
 # Fallback used when flatc's install tree lacks reflection.fbs (stock FlatBuffers

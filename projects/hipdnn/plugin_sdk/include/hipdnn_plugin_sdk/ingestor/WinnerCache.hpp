@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -71,9 +72,10 @@ struct WinnerKeyHash
 /// Does @p record carry a measurement for every kernel in @p kernels?
 ///
 /// One-directional: entries in @p record absent from @p kernels do not fail coverage,
-/// so a record wider than the current candidate set still serves. Shared by Check 1
-/// (whole catalog, in `sortedCatalog`) and Check 2 (knob-filtered, at the lookup site)
-/// so the two cannot disagree about what "covered" means (D15/D16).
+/// so a record wider than the current candidate set still serves. Used directly only by
+/// `orderIfFullyCovered` below and by tests; production coverage decisions go through
+/// that helper so coverage and orderability cannot be checked independently and drift
+/// apart.
 inline bool recordCovers(const WinnerRecord& record, const std::vector<KernelDefinition>& kernels)
 {
     return std::all_of(kernels.begin(), kernels.end(), [&record](const KernelDefinition& kernel) {
@@ -103,6 +105,28 @@ inline std::vector<KernelDefinition> orderByRecord(const WinnerRecord& record,
         {
             ordered.push_back(*match);
         }
+    }
+    return ordered;
+}
+
+/// Returns @p record's order over @p kernels only when the record both covers every
+/// kernel and orders every one of them; nullopt otherwise. The two conditions can
+/// diverge -- `recordCovers` matches by `kernelId` alone, `orderByRecord` requires the
+/// full `(kernelId, packId, dispatchId)` triple -- so an entry covered by id but whose
+/// pack has since moved must decline the whole record rather than silently serve the
+/// entries that still resolve. The sole coverage-plus-order decision point; every
+/// caller that needs to know if a record can serve a candidate set goes through this.
+inline std::optional<std::vector<KernelDefinition>>
+    orderIfFullyCovered(const WinnerRecord& record, const std::vector<KernelDefinition>& kernels)
+{
+    if(!recordCovers(record, kernels))
+    {
+        return std::nullopt;
+    }
+    auto ordered = orderByRecord(record, kernels);
+    if(ordered.size() != kernels.size())
+    {
+        return std::nullopt;
     }
     return ordered;
 }
