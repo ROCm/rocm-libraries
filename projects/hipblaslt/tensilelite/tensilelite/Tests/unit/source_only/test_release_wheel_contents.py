@@ -77,14 +77,8 @@ def test_release_source_staging_excludes_shared_build_state(tmp_path):
 
 def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_path):
     source_root = _isolated_source(tmp_path)
-    rocm_root = tmp_path / "rocm"
-    (rocm_root / ".info").mkdir(parents=True)
-    (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
-    environment = dict(
-        os.environ,
-        ROCM_PATH=str(rocm_root),
-        TENSILELITE_ROCM_VERSION="7.2.4",
-    )
+    environment = dict(os.environ, TENSILELITE_ROCM_VERSION="7.2.4")
+    environment.pop("ROCM_PATH", None)
 
     for mode, source, pattern in (
         ("canonical", source_root, "tensilelite-*.whl"),
@@ -222,10 +216,8 @@ def test_installer_removes_stale_wheel_owned_files_only(tmp_path):
 
 def test_compatibility_sdist_builds_a_self_contained_wheel(tmp_path):
     source_root = _isolated_source(tmp_path)
-    rocm_root = tmp_path / "rocm"
-    (rocm_root / ".info").mkdir(parents=True)
-    (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
-    environment = dict(os.environ, ROCM_PATH=str(rocm_root))
+    environment = dict(os.environ, TENSILELITE_ROCM_VERSION="7.2.4")
+    environment.pop("ROCM_PATH", None)
     sdist_dir = tmp_path / "sdist"
     wheel_dir = tmp_path / "wheel"
     sdist_dir.mkdir()

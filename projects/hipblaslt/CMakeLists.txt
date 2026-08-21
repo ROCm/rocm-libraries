@@ -802,7 +802,6 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
             --source "${_tensilelite_src}"
             --destination "${_tensilelite_canonical_source}"
         COMMAND ${CMAKE_COMMAND} -E env
-            "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
             "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
             -- "${Python3_EXECUTABLE}" -m pip wheel
             --disable-pip-version-check --no-build-isolation --no-deps
@@ -851,7 +850,6 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
             --source "${_tensilelite_src}"
             --destination "${_tensilelite_compatibility_source}"
         COMMAND ${CMAKE_COMMAND} -E env
-            "ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}"
             "TENSILELITE_ROCM_VERSION=${HIPBLASLT_BUILD_ROCM_VERSION}"
             -- "${Python3_EXECUTABLE}" -m pip wheel
             --disable-pip-version-check --no-build-isolation --no-deps
