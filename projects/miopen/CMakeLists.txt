@@ -52,9 +52,7 @@ if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
 endif()
 
-# Default to a ROCm Clang toolchain when the user hasn't supplied one. When we
-# provide the default, treat this as a standalone build and pull third-party
-# deps via FetchContent (see cmake/ThirdParty.cmake).
+# Default to a ROCm Clang toolchain when the user hasn't supplied one.
 #
 # CMake limitation: the toolchain file is processed *before* this CMakeLists.txt
 # is evaluated, so this assignment only takes effect on subsequent `cmake`
@@ -64,14 +62,17 @@ endif()
 if(NOT CMAKE_TOOLCHAIN_FILE AND NOT DEFINED ENV{CMAKE_TOOLCHAIN_FILE})
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
         CACHE FILEPATH "Toolchain file")
-    set(_MIOPEN_STANDALONE_DEFAULT ON)
-else()
-    set(_MIOPEN_STANDALONE_DEFAULT OFF)
 endif()
+
+# Fetching third-party dependencies over the network at configure time must be an
+# explicit opt-in: packaging builds (ROCm component build scripts, distro builds)
+# are hermetic and pre-stage every dependency on CMAKE_PREFIX_PATH. Deriving this
+# from the absence of a toolchain file silently turned every such build into a
+# downloading build. Developers building out of tree opt in with
+# -DMIOPEN_STANDALONE_BUILD=ON.
 option(MIOPEN_STANDALONE_BUILD
     "Fetch third-party dependencies via FetchContent for a standalone build"
-    ${_MIOPEN_STANDALONE_DEFAULT})
-unset(_MIOPEN_STANDALONE_DEFAULT)
+    OFF)
 
 project(MIOpen CXX)
 
@@ -168,11 +169,26 @@ endif()
 ############################################################
 # OPTION - MIOpen Backend
 # - HIP
+# The HIP capability probe must not inherit the caller's CMAKE_CXX_FLAGS. Warning
+# flags the compiler does not recognise -- or any -Werror the caller injected --
+# make the probe's test compile fail and turn a perfectly good HIP toolchain into
+# the FATAL_ERROR below. A one-shot packaging configure gets exactly one attempt,
+# so scrub the flags for the duration of the check and restore them after.
+set(_MIOPEN_SAVED_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+set(_MIOPEN_SAVED_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+set(CMAKE_CXX_FLAGS "")
+set(CMAKE_REQUIRED_FLAGS "")
 check_cxx_compiler_flag("--cuda-host-only -x hip" HAS_HIP)
+set(CMAKE_CXX_FLAGS "${_MIOPEN_SAVED_CXX_FLAGS}")
+set(CMAKE_REQUIRED_FLAGS "${_MIOPEN_SAVED_REQUIRED_FLAGS}")
+unset(_MIOPEN_SAVED_CXX_FLAGS)
+unset(_MIOPEN_SAVED_REQUIRED_FLAGS)
 if(HAS_HIP)
     set(MIOPEN_DEFAULT_BACKEND "HIP")
 else()
-    message(FATAL_ERROR "HIP compiler support is required but not detected.")
+    message(FATAL_ERROR "HIP compiler support is required but not detected. "
+                        "CMAKE_CXX_COMPILER='${CMAKE_CXX_COMPILER}' rejected "
+                        "'--cuda-host-only -x hip'.")
 endif()
 
 if(NOT WIN32)
@@ -340,18 +356,22 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
         if(MIOPEN_BUILD_CK)
             include(cmake/Dependencies.cmake)
 
-            execute_process (
-                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composablekernel' ${PROJECT_SOURCE_DIR}/requirements.txt"
-                OUTPUT_VARIABLE _match
-            )
-            if(_match)
+            # Pure-CMake check: shelling out to `bash -c "grep -P ..."` made the
+            # configure depend on bash and a PCRE-capable GNU grep being present.
+            file(STRINGS "${PROJECT_SOURCE_DIR}/requirements.txt" _ck_requirement
+                 REGEX "^[ \t]*\\.\\./composablekernel")
+            if(_ck_requirement)
                 message(STATUS "Found composablekernel in requirements.txt")
             else()
                 message(FATAL_ERROR "Could not find composablekernel in requirements.txt")
             endif()
+            unset(_ck_requirement)
             miopen_add_dependency(composable_kernel options NO_LOCAL)
         else()
-            find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
+            # REQUIRED: without it a missing CK package configures cleanly and then
+            # fails at generate time with an unresolved
+            # composable_kernel::device_conv_operations in src/ck_impl.
+            find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_conv_operations)
         endif()
     endif()
 
@@ -682,6 +702,16 @@ endfunction()
 
 function(install_kdb FILE_NAME COMPONENT_NAME)
     if(EXISTS "${FILE_NAME}")
+        # Guard against a placeholder standing in for the real artifact: a git-LFS
+        # pointer ("version https://git-lfs...") or a DVC stub is a small text file
+        # that would otherwise be handed to bzip2 and fail the build. Real bzip2
+        # archives start with the magic "BZh".
+        file(READ "${FILE_NAME}" __magic LIMIT 3)
+        if(NOT __magic STREQUAL "BZh")
+            list(APPEND DVC_MISSING_FILES ${FILE_NAME})
+            set(DVC_MISSING_FILES ${DVC_MISSING_FILES} PARENT_SCOPE)
+            return()
+        endif()
         unpack_db(${FILE_NAME})
         if( NOT ENABLE_ASAN_PACKAGING )
             if( NOT MIOPEN_TEST_DBSYNC )
@@ -731,6 +761,16 @@ set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDG
 
 # This list should be updated when a new KDB file is added to the project
 set(KDB_BZ2_FILES gfx942.kdb.bz2 gfx90a.kdb.bz2 gfx1030.kdb.bz2 gfx908.kdb.bz2 gfx906.kdb.bz2 gfx900.kdb.bz2)
+
+# CPack component per KDB file. Derived from KDB_BZ2_FILES so the two lists cannot
+# drift apart, and matching the "${gfx_target}kdb" names install_gpu_databases()
+# passes to install_kdb(). Without this, CPACK_COMPONENTS_ALL below expands empty
+# and the per-arch kdb packages are never produced.
+set(COMPONENT_LST)
+foreach(_kdb_file ${KDB_BZ2_FILES})
+    string(REPLACE ".kdb.bz2" "kdb" _kdb_component ${_kdb_file})
+    list(APPEND COMPONENT_LST ${_kdb_component})
+endforeach()
 
 foreach(_gfx_target ${MIOPEN_INSTALL_GPU_DATABASES})
     install_gpu_databases(${_gfx_target})
