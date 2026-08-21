@@ -498,13 +498,18 @@ class WaitGRCounts:
     SA: int = 0
     SB: int = 0
     # When True, emit_wait_gr resolves the count as
-    # tileInfoA.numGRTotal + tileInfoB.numGRTotal + SA_count + SB_count
-    # — the exact number of batch-1 buffer_load instructions in flight.
-    # Used by the PGR=2 preloop GR reorder.
+    # tileInfoA.numGRTotal / numPartitionsM + tileInfoB.numGRTotal / numPartitionsN + …
+    # — the exact number of MT1 (second-batch) buffer_load instructions in flight for
+    # partition 0 only.  Used by the PGR=2 preloop GR reorder.  numPartitionsM/N default
+    # to 1 so all single-partition callers are unaffected.
     use_num_gr_total: bool = False
+    numPartitionsM: int = 1
+    numPartitionsN: int = 1
 
     def __str__(self):
         if self.use_num_gr_total:
+            if self.numPartitionsM != 1 or self.numPartitionsN != 1:
+                return f"num_gr_total/partM{self.numPartitionsM}N{self.numPartitionsN}"
             return "num_gr_total"
         parts = []
         for t in ('A', 'B', 'SA', 'SB'):
@@ -3460,7 +3465,9 @@ class LogicalScheduler:
                        target='PreloopReorderPartial', rawLabel=True,
                        branchComment='partial K tile: skip MT1 GR prefetch'),
                 *mt1_ops,
-                WaitGROp(wait_gr_counts=WaitGRCounts(use_num_gr_total=True)),
+                WaitGROp(wait_gr_counts=WaitGRCounts(use_num_gr_total=True,
+                                                     numPartitionsM=cfg.numPartitionsM,
+                                                     numPartitionsN=cfg.numPartitionsN)),
                 self._make_reorder_branch_op('PreloopReorderJoin'),
                 self._make_reorder_label_op('PreloopReorderPartial'),
                 WaitGROp(wait_gr_counts=WaitGRCounts(), force_drain=True),
