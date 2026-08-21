@@ -35,7 +35,7 @@ bool hasVop3SourceModifier(const StinkyInstruction& inst, size_t srcIdx) {
     return false;
 }
 
-bool isSafeMovDstReg(const StinkyRegister& reg) {
+bool isSpecialControlReg(const StinkyRegister& reg) {
     if (!reg.isRegister()) return false;
     switch (reg.reg.type) {
         case RegType::SCC:
@@ -45,9 +45,9 @@ bool isSafeMovDstReg(const StinkyRegister& reg) {
         case RegType::EXEC:
         case RegType::EXEC_LO:
         case RegType::EXEC_HI:
-            return false;
-        default:
             return true;
+        default:
+            return false;
     }
 }
 
@@ -62,9 +62,10 @@ bool isEligibleMov(const StinkyInstruction& inst) {
     if (hasRegisterSourceModifier(dst) || hasRegisterSourceModifier(src)) return false;
     if (dst.reg.num != 1 || src.reg.num != 1) return false;
     if (isPseudoReg(dst) || isPseudoReg(src)) return false;
-    // Never optimize mov that writes exec/vcc/scc, because they affect lane-mask/condition state
-    // and are implicitly consumed by later instructions.
-    if (!isSafeMovDstReg(dst)) return false;
+    // Never optimize mov when either endpoint is exec/vcc/scc-style control state.
+    // - special src: prevents propagating snapshots (e.g. "save exec") into later uses.
+    // - special dst: prevents deleting/mutating explicit control-state writes.
+    if (isSpecialControlReg(src) || isSpecialControlReg(dst)) return false;
 
     return true;
 }
