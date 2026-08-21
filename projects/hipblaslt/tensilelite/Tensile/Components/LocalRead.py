@@ -512,6 +512,7 @@ class LocalReadMFMA(LocalRead):
         def pack2HiBits(dstPk, va, vb, comment=""):
             srcPk0 = va
             srcPk1 = vb
+            tmpSrcPk1 = None
             if writer.states.useTF32EmuInfSupport:
                 # TF32 Inf support:
                 # If an fp32 input is +/-Inf, the high-bits bf16 is Inf, so the low-bits
@@ -520,12 +521,22 @@ class LocalReadMFMA(LocalRead):
                 # emulation cross-terms then compute 0*Inf = NaN. Instead substitute a finite
                 # NONZERO value (1.0) for the high bits of Inf inputs. Then low = (Inf - 1) = Inf
                 # and the cross-terms become 1*Inf = Inf, so the accumulation stays Inf (not NaN).
+                # Redirect BOTH masked results to scratch regs so the original fp32
+                # inputs (va, vb) survive for pack4LowBitsStep1, which computes
+                # low = fp32(original) - fp32(highBF16). srcPk0 reuses the packed dst
+                # reg; srcPk1 needs its own scratch, otherwise the second v_cndmask
+                # writes back onto vb in place and the later low-bit subtraction reads
+                # the clobbered value (breaking Inf preservation for that element).
                 srcPk0 = dstPk # reuse dst reg to reduce vgpr usage
+                tmpSrcPk1 = writer.vgprPool.checkOut(1, "tf32 inf srcPk1 scratch")
+                srcPk1 = vgpr(tmpSrcPk1)
                 module.add(VCmpClassF32(dst=VCC(), src0=va, src1=vgpr(writer.states.startVgprInfCheck), comment="Check if input is Inf"))
                 module.add(VCndMaskB32(dst=srcPk0, src0=va, src1=1.0, src2=VCC(), comment="if input was inf, set high bits to 1.0 (finite nonzero) to avoid 0*inf=nan"))
                 module.add(VCmpClassF32(dst=VCC(), src0=vb, src1=vgpr(writer.states.startVgprInfCheck), comment="Check if input is Inf"))
                 module.add(VCndMaskB32(dst=srcPk1, src0=vb, src1=1.0, src2=VCC(), comment="if input was inf, set high bits to 1.0 (finite nonzero) to avoid 0*inf=nan"))
             module.add(VCvtPkF32toBF16(dst=dstPk, src0=srcPk0, src1=srcPk1, comment=comment))
+            if tmpSrcPk1 is not None:
+                writer.vgprPool.checkIn(tmpSrcPk1)
         # pack v0,v1
         pack2HiBits(dst0, v0, v1)
         commentStr = commentForSchedule1
