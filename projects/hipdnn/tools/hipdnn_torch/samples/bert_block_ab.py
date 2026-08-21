@@ -78,12 +78,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--ops", default="linear,layernorm,sdpa,gelu", help="overrides to route")
+    ap.add_argument(
+        "--ops", default="linear,layernorm,sdpa,gelu", help="overrides to route"
+    )
     args = ap.parse_args()
     ops = [o.strip() for o in args.ops.split(",") if o.strip()]
 
     if not hipdnn_torch.provider_ready():
-        print("provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr)
+        print(
+            "provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr
+        )
         return 1
 
     global torch
@@ -107,7 +111,11 @@ def main() -> int:
     )
     model = build_bert(torch, dim, heads, mlp, seq, layers, device, dtype)
     gen = torch.Generator(device="cpu").manual_seed(7)
-    x = torch.randn(batch, seq, dim, generator=gen, dtype=torch.float32).to(dtype).to(device)
+    x = (
+        torch.randn(batch, seq, dim, generator=gen, dtype=torch.float32)
+        .to(dtype)
+        .to(device)
+    )
     print(
         f"config  = BERT dim={dim} heads={heads} head_dim={dim // heads} mlp={mlp} "
         f"layers={layers}  input[{batch},{seq},{dim}] dtype={dtype} (bidirectional)"

@@ -102,7 +102,7 @@ per-operation shape constraints, per-framework notes (ComfyUI, Hugging Face
 Transformers, diffusers), the other ROCm attention backends, and the runnable samples —
 lives in the ``hipdnn_torch`` README:
 
-`projects/hipdnn/python/hipdnn_torch/README.md <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/python/hipdnn_torch/README.md>`_
+`projects/hipdnn/tools/hipdnn_torch/README.md <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/tools/hipdnn_torch/README.md>`_
 
 Start with the self-contained ``samples/minimal_block.py``, which builds a tiny
 transformer block, A/Bs it against native PyTorch, and prints the intercept report — no

@@ -205,7 +205,9 @@ def _torch_backend_path(torch) -> str:
     return hits[0]
 
 
-_dll_dir_cookies = []  # keep os.add_dll_directory handles alive for the process lifetime
+_dll_dir_cookies = (
+    []
+)  # keep os.add_dll_directory handles alive for the process lifetime
 
 
 def _add_dll_search_dirs(backend_path: str, providers: list) -> None:

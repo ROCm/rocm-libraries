@@ -152,7 +152,9 @@ class OpOverride:
             # native -- an unclaimed fused graph must not sink the matmul.
             try:
                 ranked = g.get_ranked_engine_ids([st.hipdnn.HeuristicMode.FALLBACK])
-            except Exception as err:  # noqa: BLE001 -- ranking probe failure == no engine
+            except (
+                Exception
+            ) as err:  # noqa: BLE001 -- ranking probe failure == no engine
                 raise NotApplicable(f"get_ranked_engine_ids raised: {err}")
             if not ranked:
                 raise NotApplicable(f"no engine applicable for {describe}")

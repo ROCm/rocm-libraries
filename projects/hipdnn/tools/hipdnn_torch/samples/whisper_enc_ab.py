@@ -91,12 +91,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--ops", default="linear,layernorm,sdpa,gelu", help="overrides to route")
+    ap.add_argument(
+        "--ops", default="linear,layernorm,sdpa,gelu", help="overrides to route"
+    )
     args = ap.parse_args()
     ops = [o.strip() for o in args.ops.split(",") if o.strip()]
 
     if not hipdnn_torch.provider_ready():
-        print("provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr)
+        print(
+            "provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr
+        )
         return 1
 
     global torch
@@ -108,7 +112,9 @@ def main() -> int:
     dim = int(os.environ.get("WHIS_DIM", "512"))
     heads = int(os.environ.get("WHIS_HEADS", "8"))
     mlp = int(os.environ.get("WHIS_MLP", "2048"))
-    mel_t = int(os.environ.get("WHIS_MEL", "800"))  # frames; conv2 stride-2 -> mel_t/2 tokens
+    mel_t = int(
+        os.environ.get("WHIS_MEL", "800")
+    )  # frames; conv2 stride-2 -> mel_t/2 tokens
     layers = int(os.environ.get("WHIS_LAYERS", "6"))
     batch = int(os.environ.get("WHIS_B", "1"))
     warmup = int(os.environ.get("WHIS_WARMUP", "3"))
@@ -121,7 +127,11 @@ def main() -> int:
     )
     model = build_whisper_enc(torch, n_mels, dim, heads, mlp, layers, device, dtype)
     gen = torch.Generator(device="cpu").manual_seed(320)
-    mel = torch.randn(batch, n_mels, mel_t, generator=gen, dtype=torch.float32).to(dtype).to(device)
+    mel = (
+        torch.randn(batch, n_mels, mel_t, generator=gen, dtype=torch.float32)
+        .to(dtype)
+        .to(device)
+    )
     print(
         f"config  = Whisper-enc dim={dim} heads={heads} head_dim={dim // heads} mlp={mlp} "
         f"layers={layers}  mel[{batch},{n_mels},{mel_t}] -> {mel_t // 2} tokens  dtype={dtype}"

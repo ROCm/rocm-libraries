@@ -91,7 +91,9 @@ def make_inputs(torch, batch, lat_h, lat_w, device, dtype):
     gen = torch.Generator(device="cpu").manual_seed(2024)
 
     def r(*shape):
-        return torch.randn(*shape, generator=gen, dtype=torch.float32).to(dtype).to(device)
+        return (
+            torch.randn(*shape, generator=gen, dtype=torch.float32).to(dtype).to(device)
+        )
 
     sample = r(batch, 4, lat_h, lat_w)
     ehs = r(batch, 77, 2048)  # cross-attn context (CLIP-L 768 + CLIP-G 1280 = 2048)
@@ -104,12 +106,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--ops", default="linear,conv2d,sdpa,silu", help="overrides to route")
+    ap.add_argument(
+        "--ops", default="linear,conv2d,sdpa,silu", help="overrides to route"
+    )
     args = ap.parse_args()
     ops = [o.strip() for o in args.ops.split(",") if o.strip()]
 
     if not hipdnn_torch.provider_ready():
-        print("provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr)
+        print(
+            "provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr
+        )
         return 1
 
     global torch
@@ -129,7 +135,9 @@ def main() -> int:
         f"  engine={os.environ.get('HIPDNN_TORCH_ENGINE', '(none)')}"
     )
     unet = build_unet(torch, device, dtype)
-    sample, timestep, ehs, added = make_inputs(torch, batch, lat_h, lat_w, device, dtype)
+    sample, timestep, ehs, added = make_inputs(
+        torch, batch, lat_h, lat_w, device, dtype
+    )
     print(
         f"config  = SDXL-base UNet  latent[{batch},4,{lat_h},{lat_w}] "
         f"(~{lat_h*8}x{lat_w*8}px)  ctx[{batch},77,2048]  dtype={dtype}"

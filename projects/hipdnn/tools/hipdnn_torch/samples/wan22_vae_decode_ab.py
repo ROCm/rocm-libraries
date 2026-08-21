@@ -75,7 +75,10 @@ def _stub_comfy_aimdo():
 def _add_comfyui_to_path():
     comfy = os.environ.get("COMFYUI_PATH")
     if not comfy:
-        print("COMFYUI_PATH is not set -- point it at a ComfyUI checkout.", file=sys.stderr)
+        print(
+            "COMFYUI_PATH is not set -- point it at a ComfyUI checkout.",
+            file=sys.stderr,
+        )
         return False
     comfy = os.path.expanduser(comfy)
     if not os.path.isdir(comfy):
@@ -97,10 +100,16 @@ def build_vae(torch, vae_path, dtype, device):
         from safetensors.torch import load_file
 
         p = os.path.expanduser(vae_path)
-        sd = load_file(p) if p.endswith(".safetensors") else torch.load(p, map_location="cpu")
+        sd = (
+            load_file(p)
+            if p.endswith(".safetensors")
+            else torch.load(p, map_location="cpu")
+        )
         for prefix in ("first_stage_model.", "vae."):
             if any(k.startswith(prefix) for k in sd):
-                sd = {k[len(prefix):]: v for k, v in sd.items() if k.startswith(prefix)}
+                sd = {
+                    k[len(prefix) :]: v for k, v in sd.items() if k.startswith(prefix)
+                }
         missing, unexpected = model.load_state_dict(sd, strict=False)
         loaded = f"real ({len(sd)} tensors; {len(missing)} missing, {len(unexpected)} unexpected)"
     return model.to(device=device, dtype=dtype).eval(), loaded
@@ -116,12 +125,16 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--ops", default="conv2d,conv3d,silu", help="overrides to route")
-    ap.add_argument("--vae", default=os.environ.get("WAN_VAE"), help="real Wan2.1 VAE weights")
+    ap.add_argument(
+        "--vae", default=os.environ.get("WAN_VAE"), help="real Wan2.1 VAE weights"
+    )
     args = ap.parse_args()
     ops = [o.strip() for o in args.ops.split(",") if o.strip()]
 
     if not hipdnn_torch.provider_ready():
-        print("provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr)
+        print(
+            "provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr
+        )
         return 1
     if not _add_comfyui_to_path():
         return 1
@@ -150,16 +163,28 @@ def main() -> int:
         from safetensors.torch import load_file
 
         lp = os.path.expanduser(latent_path)
-        obj = load_file(lp) if lp.endswith(".safetensors") else torch.load(lp, map_location="cpu")
-        latent = (obj if torch.is_tensor(obj) else next(iter(obj.values()))).to(dtype).to(device)
+        obj = (
+            load_file(lp)
+            if lp.endswith(".safetensors")
+            else torch.load(lp, map_location="cpu")
+        )
+        latent = (
+            (obj if torch.is_tensor(obj) else next(iter(obj.values())))
+            .to(dtype)
+            .to(device)
+        )
         print(f"latent  = real {tuple(latent.shape)} from {os.path.basename(lp)}")
     else:
         gen = torch.Generator(device="cpu").manual_seed(27995)
         latent = (
-            torch.randn(1, 4, fr, lh, lw, generator=gen, dtype=torch.float32).to(dtype).to(device)
+            torch.randn(1, 4, fr, lh, lw, generator=gen, dtype=torch.float32)
+            .to(dtype)
+            .to(device)
         )
         print(f"latent  = synthetic [1,4,{fr},{lh},{lw}] (Option 1)")
-    print(f"config  = Wan2.1 VAE (14B-T2V) weights={loaded}  target out {out_h}x{out_w}")
+    print(
+        f"config  = Wan2.1 VAE (14B-T2V) weights={loaded}  target out {out_h}x{out_w}"
+    )
     print(f"routing = {ops}")
     print()
 
@@ -180,10 +205,10 @@ def main() -> int:
         denom = float(y_native.abs().max().item()) or 1.0
         rel = max_err / denom
         # ROCM-27995 tell: the corruption showed as rel ~0.209 vs a healthy ~3e-5.
-        verdict = "OK " if rel < 8e-2 else "DIVERGENCE (possible ROCM-27995 solver defect)"
-        print(
-            f"native-vs-injected: {verdict} max_abs_err={max_err:.5f} rel={rel:.5f}"
+        verdict = (
+            "OK " if rel < 8e-2 else "DIVERGENCE (possible ROCM-27995 solver defect)"
         )
+        print(f"native-vs-injected: {verdict} max_abs_err={max_err:.5f} rel={rel:.5f}")
     else:
         print(
             f"correctness: NOT FINITE (native finite={fin_n}, injected finite={fin_o}) "

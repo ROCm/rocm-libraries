@@ -44,10 +44,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import hipdnn_torch  # noqa: E402
 
 _SHAPES = [
-    (1, 32, 32, 32, 64),       # small square
-    (1, 32, 64, 48, 64),       # asymmetric (cross-attn in miniature)
-    (1, 32, 4096, 4096, 64),   # LTX self-attention (the dominant cost)
-    (1, 32, 4096, 128, 64),    # LTX cross-attention
+    (1, 32, 32, 32, 64),  # small square
+    (1, 32, 64, 48, 64),  # asymmetric (cross-attn in miniature)
+    (1, 32, 4096, 4096, 64),  # LTX self-attention (the dominant cost)
+    (1, 32, 4096, 128, 64),  # LTX cross-attention
 ]
 
 
@@ -80,13 +80,30 @@ def _make_fa_triton(flash_attn_func):
         qt = q.transpose(1, 2).contiguous()
         kt = k.transpose(1, 2).contiguous()
         vt = v.transpose(1, 2).contiguous()
-        o = flash_attn_func(qt, kt, vt, dropout_p=0.0, softmax_scale=scale, causal=False)
+        o = flash_attn_func(
+            qt, kt, vt, dropout_p=0.0, softmax_scale=scale, causal=False
+        )
         return o.transpose(1, 2)
+
     return _fa
 
 
-def _bench_shape(torch, F, sdpa_kernel, SDPBackend, native_sdpa, fa_triton,
-                 b, h, sq, skv, d, dtype, warmup, iters):
+def _bench_shape(
+    torch,
+    F,
+    sdpa_kernel,
+    SDPBackend,
+    native_sdpa,
+    fa_triton,
+    b,
+    h,
+    sq,
+    skv,
+    d,
+    dtype,
+    warmup,
+    iters,
+):
     dev = torch.device("cuda")
     torch.manual_seed(0)
     q = torch.randn(b, h, sq, d, dtype=dtype, device=dev) * 0.1
@@ -105,8 +122,12 @@ def _bench_shape(torch, F, sdpa_kernel, SDPBackend, native_sdpa, fa_triton,
     try:
         got = _hipdnn_sdpa(torch, native_sdpa, q, k, v, scale).float()
         err = float((got - ref).abs().max().item())
-        ms = _time_ms(torch, lambda: _hipdnn_sdpa(torch, native_sdpa, q, k, v, scale),
-                      warmup, iters)
+        ms = _time_ms(
+            torch,
+            lambda: _hipdnn_sdpa(torch, native_sdpa, q, k, v, scale),
+            warmup,
+            iters,
+        )
         results["hipdnn"] = (ms, err, "OK")
     except Exception as e:  # noqa: BLE001
         results["hipdnn"] = (None, None, f"ERR ({type(e).__name__})")
@@ -126,16 +147,21 @@ def _bench_shape(torch, F, sdpa_kernel, SDPBackend, native_sdpa, fa_triton,
             results["fa-triton"] = (None, None, f"FAIL ({msg})")
 
     # torch's own SDPA backends
-    for label, be in (("math", SDPBackend.MATH),
-                      ("aotriton-flash", SDPBackend.FLASH_ATTENTION),
-                      ("aotriton-eff", SDPBackend.EFFICIENT_ATTENTION)):
+    for label, be in (
+        ("math", SDPBackend.MATH),
+        ("aotriton-flash", SDPBackend.FLASH_ATTENTION),
+        ("aotriton-eff", SDPBackend.EFFICIENT_ATTENTION),
+    ):
         try:
             with torch.no_grad(), sdpa_kernel([be]):
                 out = native_sdpa(q, k, v, scale=scale).float()
                 err = float((out - ref).abs().max().item())
-                ms = _time_ms(torch,
-                              lambda be=be: native_sdpa(q, k, v, scale=scale),
-                              warmup, iters)
+                ms = _time_ms(
+                    torch,
+                    lambda be=be: native_sdpa(q, k, v, scale=scale),
+                    warmup,
+                    iters,
+                )
             results[label] = (ms, err, "OK")
         except Exception as e:  # noqa: BLE001
             msg = (str(e).strip().splitlines() or [type(e).__name__])[0][:40]
@@ -164,8 +190,18 @@ def _probe(torch, F, sdpa_kernel, SDPBackend, native_sdpa, fa_triton):
     print("=== backend probe (bf16 B=1 H=32 S=256 D=64) ===")
     checks = [
         ("math", lambda: _run_be(native_sdpa, sdpa_kernel, SDPBackend.MATH, q, scale)),
-        ("aotriton-flash", lambda: _run_be(native_sdpa, sdpa_kernel, SDPBackend.FLASH_ATTENTION, q, scale)),
-        ("aotriton-eff", lambda: _run_be(native_sdpa, sdpa_kernel, SDPBackend.EFFICIENT_ATTENTION, q, scale)),
+        (
+            "aotriton-flash",
+            lambda: _run_be(
+                native_sdpa, sdpa_kernel, SDPBackend.FLASH_ATTENTION, q, scale
+            ),
+        ),
+        (
+            "aotriton-eff",
+            lambda: _run_be(
+                native_sdpa, sdpa_kernel, SDPBackend.EFFICIENT_ATTENTION, q, scale
+            ),
+        ),
         ("fa-triton", (lambda: fa_triton(q, q, q, scale)) if fa_triton else None),
         ("hipdnn", lambda: _hipdnn_sdpa(torch, native_sdpa, q, q, q, scale)),
     ]
@@ -190,8 +226,11 @@ def _run_be(native_sdpa, sdpa_kernel, be, q, scale):
 
 def main() -> int:
     if not hipdnn_torch.provider_ready():
-        print("provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO (see "
-              "../README.md).", file=sys.stderr)
+        print(
+            "provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO (see "
+            "../README.md).",
+            file=sys.stderr,
+        )
         return 1
 
     import torch
@@ -202,16 +241,23 @@ def main() -> int:
 
     try:
         from flash_attn import flash_attn_func
+
         fa_triton = _make_fa_triton(flash_attn_func)
     except Exception:  # noqa: BLE001
         fa_triton = None
 
     props = torch.cuda.get_device_properties(0)
-    print(f"device     = {torch.cuda.get_device_name(0)} "
-          f"({getattr(props, 'gcnArchName', '?')})")
-    print(f"torch      = {torch.__version__}  hip={getattr(torch.version, 'hip', None)}")
-    print(f"AOTRITON_EXPERIMENTAL = "
-          f"{os.environ.get('TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL')}")
+    print(
+        f"device     = {torch.cuda.get_device_name(0)} "
+        f"({getattr(props, 'gcnArchName', '?')})"
+    )
+    print(
+        f"torch      = {torch.__version__}  hip={getattr(torch.version, 'hip', None)}"
+    )
+    print(
+        f"AOTRITON_EXPERIMENTAL = "
+        f"{os.environ.get('TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL')}"
+    )
     print("  (* = fastest of the row; 'x of fastest' compares each to that)")
     print()
 
@@ -219,10 +265,26 @@ def main() -> int:
 
     warmup, iters = 10, 50
     for dtype in (torch.float16, torch.bfloat16):
-        print(f"=== {'f16' if dtype == torch.float16 else 'bf16 (LTX native dtype)'} ===")
+        print(
+            f"=== {'f16' if dtype == torch.float16 else 'bf16 (LTX native dtype)'} ==="
+        )
         for b, h, sq, skv, d in _SHAPES:
-            _bench_shape(torch, F, sdpa_kernel, SDPBackend, native_sdpa, fa_triton,
-                         b, h, sq, skv, d, dtype, warmup, iters)
+            _bench_shape(
+                torch,
+                F,
+                sdpa_kernel,
+                SDPBackend,
+                native_sdpa,
+                fa_triton,
+                b,
+                h,
+                sq,
+                skv,
+                d,
+                dtype,
+                warmup,
+                iters,
+            )
     return 0
 
 

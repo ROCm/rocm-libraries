@@ -53,7 +53,9 @@ def build_resnet50(torch, device, dtype):
             super().__init__()
             self.conv1 = nn.Conv2d(inp, planes, 1, bias=False)
             self.bn1 = nn.BatchNorm2d(planes)
-            self.conv2 = nn.Conv2d(planes, planes, 3, stride=stride, padding=1, bias=False)
+            self.conv2 = nn.Conv2d(
+                planes, planes, 3, stride=stride, padding=1, bias=False
+            )
             self.bn2 = nn.BatchNorm2d(planes)
             self.conv3 = nn.Conv2d(planes, planes * self.expansion, 1, bias=False)
             self.bn3 = nn.BatchNorm2d(planes * self.expansion)
@@ -88,7 +90,13 @@ def build_resnet50(torch, device, dtype):
             downsample = None
             if stride != 1 or self.inp != planes * Bottleneck.expansion:
                 downsample = nn.Sequential(
-                    nn.Conv2d(self.inp, planes * Bottleneck.expansion, 1, stride=stride, bias=False),
+                    nn.Conv2d(
+                        self.inp,
+                        planes * Bottleneck.expansion,
+                        1,
+                        stride=stride,
+                        bias=False,
+                    ),
                     nn.BatchNorm2d(planes * Bottleneck.expansion),
                 )
             out = [Bottleneck(self.inp, planes, stride, downsample)]
@@ -116,7 +124,9 @@ def main() -> int:
     ops = [o.strip() for o in args.ops.split(",") if o.strip()]
 
     if not hipdnn_torch.provider_ready():
-        print("provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr)
+        print(
+            "provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr
+        )
         return 1
 
     global torch
@@ -136,8 +146,14 @@ def main() -> int:
     )
     model = build_resnet50(torch, device, dtype)
     gen = torch.Generator(device="cpu").manual_seed(50)
-    x = torch.randn(batch, 3, img, img, generator=gen, dtype=torch.float32).to(dtype).to(device)
-    print(f"config  = ResNet-50 (bottleneck 3/4/6/3)  input[{batch},3,{img},{img}] dtype={dtype}")
+    x = (
+        torch.randn(batch, 3, img, img, generator=gen, dtype=torch.float32)
+        .to(dtype)
+        .to(device)
+    )
+    print(
+        f"config  = ResNet-50 (bottleneck 3/4/6/3)  input[{batch},3,{img},{img}] dtype={dtype}"
+    )
     print(f"routing = {ops}")
     print()
 

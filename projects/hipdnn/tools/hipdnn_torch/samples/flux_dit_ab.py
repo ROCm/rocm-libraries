@@ -112,7 +112,9 @@ def main() -> int:
     ops = [o.strip() for o in args.ops.split(",") if o.strip()]
 
     if not hipdnn_torch.provider_ready():
-        print("provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr)
+        print(
+            "provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr
+        )
         return 1
 
     global torch
@@ -135,8 +137,14 @@ def main() -> int:
     )
     model = build_flux_dit(torch, dim, heads, seq, layers, device, dtype)
     gen = torch.Generator(device="cpu").manual_seed(1234)
-    x = torch.randn(batch, seq, dim, generator=gen, dtype=torch.float32).to(dtype).to(device)
-    vec = torch.randn(batch, dim, generator=gen, dtype=torch.float32).to(dtype).to(device)
+    x = (
+        torch.randn(batch, seq, dim, generator=gen, dtype=torch.float32)
+        .to(dtype)
+        .to(device)
+    )
+    vec = (
+        torch.randn(batch, dim, generator=gen, dtype=torch.float32).to(dtype).to(device)
+    )
     print(
         f"config  = Flux-DiT dim={dim} heads={heads} head_dim={dim // heads} mlp={4*dim} "
         f"layers={layers}  tokens[{batch},{seq},{dim}] dtype={dtype} (QK-RMSNorm, adaLN-Zero)"

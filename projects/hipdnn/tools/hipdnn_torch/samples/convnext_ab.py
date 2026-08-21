@@ -99,12 +99,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--ops", default="conv2d,linear,layernorm,gelu", help="overrides to route")
+    ap.add_argument(
+        "--ops", default="conv2d,linear,layernorm,gelu", help="overrides to route"
+    )
     args = ap.parse_args()
     ops = [o.strip() for o in args.ops.split(",") if o.strip()]
 
     if not hipdnn_torch.provider_ready():
-        print("provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr)
+        print(
+            "provider/torch not ready -- set HIPDNN_TORCH_PROVIDER_SO.", file=sys.stderr
+        )
         return 1
 
     global torch
@@ -126,7 +130,11 @@ def main() -> int:
     )
     model = build_convnext(torch, dims, depths, device, dtype)
     gen = torch.Generator(device="cpu").manual_seed(96)
-    x = torch.randn(batch, 3, img, img, generator=gen, dtype=torch.float32).to(dtype).to(device)
+    x = (
+        torch.randn(batch, 3, img, img, generator=gen, dtype=torch.float32)
+        .to(dtype)
+        .to(device)
+    )
     print(
         f"config  = ConvNeXt dims={dims} depths={depths}  input[{batch},3,{img},{img}] "
         f"dtype={dtype} (depthwise conv, channels-last LN/MLP)"

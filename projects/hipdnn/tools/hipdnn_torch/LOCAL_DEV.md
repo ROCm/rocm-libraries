@@ -249,7 +249,7 @@ python -c "import hipdnn_torch; print(hipdnn_torch.provider_ready())"   # -> Tru
 
 **(b) Parity + routing, per op — the pytest suite:**
 ```bash
-cd "$INJ/projects/hipdnn/python/hipdnn_torch"
+cd "$INJ/projects/hipdnn/tools/hipdnn_torch"
 python -m pytest tests/ -q
 ```
 `tests/test_gates.py` runs on CPU (no GPU/provider needed) and pins the two legitimate

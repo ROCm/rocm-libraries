@@ -167,9 +167,7 @@ def main() -> int:
         f"select  = {os.environ.get('HIPDNN_TORCH_SELECT', 'default')}"
         f"  engine={os.environ.get('HIPDNN_TORCH_ENGINE', '(none)')}"
     )
-    model = build_llama(
-        torch, dim, heads, kv_heads, mlp, seq, layers, device, dtype
-    )
+    model = build_llama(torch, dim, heads, kv_heads, mlp, seq, layers, device, dtype)
     gen = torch.Generator(device="cpu").manual_seed(3)
     x = (
         torch.randn(batch, seq, dim, generator=gen, dtype=torch.float32)
