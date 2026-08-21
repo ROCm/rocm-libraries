@@ -33,7 +33,7 @@ class Mating:
         while it < self.max_iters:
             it += 1
             try:
-                for inda, indb in self.crossover(parents, n_offsprings):  # TODO
+                for inda, indb in self.crossover(parents, n_offsprings):
                     inda = self.mutation(inda)
                     if self.space.valid(inda):
                         offsprings.add(inda)
