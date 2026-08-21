@@ -527,7 +527,7 @@ TEST(TestIngestorBenchmarkPlan, BuffersAndWorkspaceArriveAtTheChosenSubPlanUnmod
 }
 
 // ---------------------------------------------------------------------------
-// Ranked capture and write-back (D6, D11)
+// Ranked capture and write-back
 // ---------------------------------------------------------------------------
 
 /// Supplies deterministic times through the Timer seam so ordering, omission and the

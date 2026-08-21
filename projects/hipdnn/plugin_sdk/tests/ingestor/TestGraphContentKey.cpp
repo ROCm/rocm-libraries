@@ -19,12 +19,12 @@ using Spec = ContentCarryingTestGraph::Spec;
 
 /// Two graphs are equal when a kernel measurement taken on one is valid for the other.
 ///
-/// This file is the field-set pin for the graph half of the key. The traversal is
-/// generated from `graph.fbs`, so a new field participates automatically; what codegen
-/// cannot decide is whether that participation is correct. A field that changes kernel
-/// behaviour needs a discriminates-on case here; one that does not needs
-/// `(cache_ignore)` and an equals-case; a tensor reference needs `(cache_uid)` and both
-/// -- equal under renumbering, unequal under rewiring.
+/// This file exercises every field the graph half of the key compares, one test per
+/// field, following `graph.fbs`'s traversal: a field that changes kernel behaviour gets
+/// a discriminates-on case; one that does not gets `(cache_ignore)` and an equals-case;
+/// a tensor reference gets `(cache_uid)` and both -- equal under renumbering, unequal
+/// under rewiring. Unlike `TestDeviceKey.cpp`'s structured-binding pin, nothing here
+/// forces a new schema field to get a case: this coverage is maintained by hand.
 GraphContentKey keyFor(const ContentCarryingTestGraph& graph)
 {
     return GraphContentKey{graph};
@@ -345,8 +345,8 @@ TEST(TestIngestorGraphContentKey, ADifferentNodeComputeDataTypeComparesUnequal)
     EXPECT_NE(keyFor(ContentCarryingTestGraph{asFloat}), keyFor(ContentCarryingTestGraph{asHalf}));
 }
 
-// Inside the union payload, not merely its discriminant: an ADD and a MUL are the same
-// node type and would collide on any key that stopped at attributes_type.
+// Inside the union payload rather than only its discriminant: an ADD and a MUL are the
+// same node type and would collide on any key that stopped at attributes_type.
 TEST(TestIngestorGraphContentKey, ADifferentPointwiseOperationComparesUnequal)
 {
     const Spec addition;

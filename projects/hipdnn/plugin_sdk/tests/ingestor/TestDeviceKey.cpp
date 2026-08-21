@@ -63,9 +63,9 @@ TEST(TestIngestorDeviceKey, ADifferentArchComparesUnequal)
     EXPECT_NE(DeviceKey{propertiesFor("gfx942")}, DeviceKey{propertiesFor("gfx950")});
 }
 
-// gcnArchName is raw and suffixed. The cache key is exact, deliberately: unlike the
-// pack-level arch gate, which PREFIX-matches, a measurement taken with one feature set is
-// not claimed to hold for another.
+// gcnArchName is raw and suffixed; the cache key compares it exactly, unlike the
+// pack-level arch gate, which PREFIX-matches: a measurement taken with one feature set
+// is not claimed to hold for another.
 TEST(TestIngestorDeviceKey, ASuffixedArchIsNotTheSameKeyAsItsBaseIdentifier)
 {
     EXPECT_NE(DeviceKey{propertiesFor("gfx942")},

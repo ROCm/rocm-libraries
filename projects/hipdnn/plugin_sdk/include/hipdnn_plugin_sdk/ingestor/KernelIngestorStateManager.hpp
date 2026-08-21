@@ -192,13 +192,12 @@ public:
     /// The ordered catalog and the state matching bound, from one lookup.
     ///
     /// A benchmarked record covering the whole catalog supplies a measured order and
-    /// `rank()` is never called; otherwise the heuristic orders it. This is Check 1;
-    /// Check 2 is the knob-filtered counterpart at the lookup site.
+    /// `rank()` is never called; otherwise the heuristic orders it.
     Catalog sortedCatalog(const MatchContext& context) const
     {
         Catalog catalog = catalogFor(context);
 
-        // A measured order is final; a heuristic one is provisional, so Check 1 runs
+        // A measured order is final; a heuristic one is provisional, so this lookup runs
         // again even when the catalog is already sorted -- a sweep can postdate the
         // memoized sort.
         if(catalog.isSorted && catalog.orderedFromRecord)
@@ -652,8 +651,8 @@ private:
         return true;
     }
 
-    /// Check 1: the measured order for @p context's graph and device, or nullopt when no
-    /// record covers @p entries and the caller must rank as it always has.
+    /// The measured order for @p context's graph and device, or nullopt when no record
+    /// covers @p entries and the caller must rank as it always has.
     ///
     /// Full coverage is required: a partial record cannot order the rest, and
     /// interleaving measured with unmeasured entries would not be a valid order.
