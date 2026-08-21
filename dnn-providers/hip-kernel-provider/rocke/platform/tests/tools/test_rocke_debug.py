@@ -144,6 +144,7 @@ def _tile_value(
     fragment_length=2,
     locations=("$v40", "$v41"),
     coordinates=None,
+    replication_factor=1,
 ):
     if coordinates is None:
         coordinates = [
@@ -153,17 +154,24 @@ def _tile_value(
             {"lane": 1, "slot": 1, "index": [1, 1]},
         ]
     return {
-        "name": "acc",
-        "dtype": "f32",
-        "shape": list(shape),
-        "storage_dtype": storage_dtype,
-        "locations": list(locations),
-        "layout": {
-            "name": "test.acc",
-            "role": "acc",
-            "wave_size": wave_size,
-            "fragment_length": fragment_length,
-            "coordinates": coordinates,
+        "logical": {
+            "name": "acc",
+            "dtype": "f32",
+            "shape": list(shape),
+            "layout": {
+                "name": "test.acc",
+                "role": "acc",
+                "wave_size": wave_size,
+                "fragment_length": fragment_length,
+                "replication_factor": replication_factor,
+                "packing": {"kind": "scalar", "elements_per_slot": 1},
+                "coordinates": coordinates,
+            },
+        },
+        "binding": {
+            "kind": "amdgpu_registers",
+            "storage_dtype": storage_dtype,
+            "locations": list(locations),
         },
     }
 
@@ -192,7 +200,7 @@ class TestLogicalValues(unittest.TestCase):
                 ["inactive_lane", "inactive_lane"],
             ],
         )
-        self.assertEqual(record["tile"][0][1]["machine_location"], "$v41")
+        self.assertEqual(record["tile"][0][1]["sources"][0]["machine_location"], "$v41")
 
     def test_packed_storage_elements_become_fragment_slots(self):
         value = _tile_value(
@@ -206,11 +214,14 @@ class TestLogicalValues(unittest.TestCase):
                 {"lane": 0, "slot": 1, "index": [0, 1]},
             ],
         )
-        value["dtype"] = "f16"
+        value["logical"]["dtype"] = "f16"
         record = rocke_debug.decode_logical_value(value, ((0x40003C00,),), exec_mask=1)
 
         self.assertEqual([cell["value"] for cell in record["tile"][0]], [1.0, 2.0])
-        self.assertEqual([cell["packed_index"] for cell in record["tile"][0]], [0, 1])
+        self.assertEqual(
+            [cell["sources"][0]["packed_index"] for cell in record["tile"][0]],
+            [0, 1],
+        )
 
     def test_fp8_collection_expands_four_slots(self):
         value = _tile_value(
@@ -223,7 +234,7 @@ class TestLogicalValues(unittest.TestCase):
                 {"lane": 0, "slot": slot, "index": [0, slot]} for slot in range(4)
             ],
         )
-        value["dtype"] = "fp8e4m3"
+        value["logical"]["dtype"] = "fp8e4m3"
         record = rocke_debug.decode_logical_value(value, ((0x7F7EB838,),), exec_mask=1)
 
         self.assertEqual(
@@ -270,7 +281,9 @@ class TestLogicalValues(unittest.TestCase):
             path.write_text(json.dumps(manifest), encoding="utf-8")
             loaded = rocke_debug.load_manifest(str(path))
 
-        self.assertEqual(rocke_debug.manifest_value(loaded, "acc")["dtype"], "f32")
+        self.assertEqual(
+            rocke_debug.manifest_value(loaded, "acc")["logical"]["dtype"], "f32"
+        )
         with self.assertRaisesRegex(ValueError, "exactly one"):
             rocke_debug.manifest_value(loaded, "missing")
 
@@ -289,9 +302,79 @@ class TestLogicalValues(unittest.TestCase):
             )
 
         duplicate = _tile_value()
-        duplicate["layout"]["coordinates"][1]["index"] = [0, 0]
-        with self.assertRaisesRegex(ValueError, "multiple physical sources"):
+        duplicate["logical"]["layout"]["coordinates"][1]["index"] = [0, 0]
+        with self.assertRaisesRegex(ValueError, "does not cover shape"):
             rocke_debug.decode_logical_value(duplicate, ((0, 0), (0, 0)))
+
+        wrong_factor = _tile_value(replication_factor=2)
+        with self.assertRaisesRegex(ValueError, "source multiplicity"):
+            rocke_debug.decode_logical_value(wrong_factor, ((0, 0), (0, 0)))
+
+    def test_equal_replicas_are_preserved_and_resolved(self):
+        value = _tile_value(
+            shape=(1, 1),
+            wave_size=2,
+            fragment_length=1,
+            locations=("$v40",),
+            replication_factor=2,
+            coordinates=[
+                {"lane": 0, "slot": 0, "index": [0, 0]},
+                {"lane": 1, "slot": 0, "index": [0, 0]},
+            ],
+        )
+        record = rocke_debug.decode_logical_value(
+            value, ((0x3F800000, 0x3F800000),), exec_mask=0b11
+        )
+
+        cell = record["tile"][0][0]
+        self.assertEqual(record["status"], "available")
+        self.assertEqual(cell["value"], 1.0)
+        self.assertEqual(cell["source_count"], 2)
+        self.assertEqual([source["lane"] for source in cell["sources"]], [0, 1])
+
+    def test_active_replica_mismatch_is_explicit(self):
+        value = _tile_value(
+            shape=(1, 1),
+            wave_size=2,
+            fragment_length=1,
+            locations=("$v40",),
+            replication_factor=2,
+            coordinates=[
+                {"lane": 0, "slot": 0, "index": [0, 0]},
+                {"lane": 1, "slot": 0, "index": [0, 0]},
+            ],
+        )
+        record = rocke_debug.decode_logical_value(
+            value, ((0x3F800000, 0x40000000),), exec_mask=0b11
+        )
+
+        self.assertEqual(record["status"], "replica_mismatch")
+        self.assertEqual(record["tile"][0][0]["status"], "replica_mismatch")
+        self.assertEqual(record["tile"][0][0]["value_text"], "<replica-mismatch>")
+        self.assertIn(
+            "observable replicas disagree", rocke_debug.values_human([record])
+        )
+
+    def test_inactive_replica_does_not_override_active_source(self):
+        value = _tile_value(
+            shape=(1, 1),
+            wave_size=2,
+            fragment_length=1,
+            locations=("$v40",),
+            replication_factor=2,
+            coordinates=[
+                {"lane": 0, "slot": 0, "index": [0, 0]},
+                {"lane": 1, "slot": 0, "index": [0, 0]},
+            ],
+        )
+        record = rocke_debug.decode_logical_value(
+            value, ((0x3F800000, 0x40000000),), exec_mask=0b01
+        )
+
+        cell = record["tile"][0][0]
+        self.assertEqual(record["status"], "available")
+        self.assertEqual(cell["value"], 1.0)
+        self.assertEqual(cell["active"], True)
 
 
 if __name__ == "__main__":

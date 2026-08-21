@@ -47,9 +47,9 @@ from .backend import (
 )
 from .debug_manifest import (
     DEBUG_MANIFEST_SCHEMA,
+    bind_logical_value,
     debug_manifest,
-    evaluate_layout,
-    logical_value_manifest,
+    register_value_binding,
 )
 from .ir import (
     BF16,
@@ -76,6 +76,11 @@ from .ir_serialize import (
     canonicalize,
     parse,
     serialize,
+)
+from .logical_value import (
+    evaluate_layout,
+    logical_value_description,
+    validate_layout_relation,
 )
 from .lower_cktile import (
     lower_implicit_gemm_conv_to_cktile,
@@ -119,10 +124,11 @@ __all__ = [
     "canonical_equal",
     "canonicalize",
     "canonicalize_region",
+    "bind_logical_value",
     "debug_manifest",
     "eliminate_dead_pure_ops",
     "evaluate_layout",
-    "logical_value_manifest",
+    "logical_value_description",
     "lower_implicit_gemm_conv_to_cktile",
     "lower_kernel_to_hip",
     "lower_kernel_to_llvm",
@@ -133,7 +139,9 @@ __all__ = [
     "parse",
     "print_ir",
     "resolve_backend",
+    "register_value_binding",
     "serialize",
     "verify",
+    "validate_layout_relation",
     "verify_or_raise",
 ]

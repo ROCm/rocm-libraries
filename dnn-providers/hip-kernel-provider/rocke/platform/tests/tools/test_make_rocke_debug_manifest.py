@@ -26,10 +26,10 @@ def test_builds_mfma_accumulator_manifest_from_arch_layout():
     )
 
     value = manifest["values"][0]
-    assert value["shape"] == [16, 16]
-    assert value["layout"]["name"] == "mfma_f32_16x16x16_f16.acc"
-    assert value["layout"]["role"] == "acc"
-    assert value["layout"]["coordinates"][0] == {
+    assert value["logical"]["shape"] == [16, 16]
+    assert value["logical"]["layout"]["name"] == "mfma_f32_16x16x16_f16.acc"
+    assert value["logical"]["layout"]["role"] == "acc"
+    assert value["logical"]["layout"]["coordinates"][0] == {
         "lane": 0,
         "slot": 0,
         "index": [0, 0],
@@ -68,7 +68,33 @@ def test_main_writes_deterministic_json(tmp_path):
     assert result == 0
     manifest = json.loads(output.read_text(encoding="utf-8"))
     assert manifest["schema"] == "rocke-debug-manifest/v1"
-    assert manifest["values"][0]["locations"] == ["$v40", "$v41", "$v42", "$v43"]
+    assert manifest["values"][0]["binding"]["locations"] == [
+        "$v40",
+        "$v41",
+        "$v42",
+        "$v43",
+    ]
+
+
+def test_builds_replicated_gfx11_operand_manifest():
+    manifest = make_manifest.build_manifest(
+        arch="gfx1151",
+        op_id="wmma_f32_16x16x16_f16",
+        role="a",
+        name="a",
+        dtype="f16",
+        storage_dtype="f16x2",
+        locations=[f"$v{index}" for index in range(8)],
+    )
+
+    layout = manifest["values"][0]["logical"]["layout"]
+    assert layout["replication_factor"] == 2
+    assert len(layout["coordinates"]) == 512
+    assert [
+        (entry["lane"], entry["slot"])
+        for entry in layout["coordinates"]
+        if entry["index"] == [0, 0]
+    ] == [(0, 0), (16, 0)]
 
 
 def test_rejects_unknown_operation(capsys):

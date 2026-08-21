@@ -22,6 +22,7 @@ import json
 import math
 import shlex
 import struct
+from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
@@ -32,6 +33,7 @@ DTYPES = ("f32", "f16x2", "bf16x2", "fp8e4m3x4", "bf8e5m2x4")
 FLOAT8_FORMATS = ("ocp", "fnuz")
 VALUE_STATUSES = (
     "available",
+    "replica_mismatch",
     "optimized_out",
     "location_unavailable",
     "inactive_lane",
@@ -271,7 +273,11 @@ def load_manifest(path: str) -> dict[str, Any]:
 
 def manifest_value(manifest: dict[str, Any], name: str) -> dict[str, Any]:
     """Return one uniquely named logical-value entry from ``manifest``."""
-    matches = [value for value in manifest["values"] if value.get("name") == name]
+    matches = [
+        value
+        for value in manifest["values"]
+        if value.get("logical", {}).get("name") == name
+    ]
     if len(matches) != 1:
         raise ValueError(
             f"debug manifest must contain exactly one value named {name!r}; "
@@ -280,12 +286,44 @@ def manifest_value(manifest: dict[str, Any], name: str) -> dict[str, Any]:
     return matches[0]
 
 
-def _validated_value_spec(value: dict[str, Any]) -> tuple[int, int, int]:
+def _expanded_indices(
+    index: list[int], packing: dict[str, Any]
+) -> list[tuple[int, int]]:
+    """Expand one physical slot's base coordinate into logical scalars."""
+    kind = packing.get("kind")
+    elements_per_slot = packing.get("elements_per_slot")
+    if kind == "scalar" and elements_per_slot == 1:
+        return [tuple(index)]
+    axis = packing.get("axis")
+    if (
+        kind != "contiguous"
+        or axis not in (0, 1)
+        or not isinstance(elements_per_slot, int)
+        or elements_per_slot <= 1
+    ):
+        raise ValueError(f"invalid layout packing {packing!r}")
+    expanded = []
+    for offset in range(elements_per_slot):
+        logical = list(index)
+        logical[axis] += offset
+        expanded.append(tuple(logical))
+    return expanded
+
+
+def _validated_value_spec(
+    value: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], int, int, int]:
     """Validate a logical-value manifest entry and return layout dimensions."""
-    if not isinstance(value.get("name"), str) or not value["name"]:
+    logical = value.get("logical")
+    binding = value.get("binding")
+    if not isinstance(logical, dict):
+        raise TypeError("manifest value has no logical description")
+    if not isinstance(binding, dict):
+        raise TypeError("manifest value has no physical binding")
+    if not isinstance(logical.get("name"), str) or not logical["name"]:
         raise ValueError("logical value name must be a non-empty string")
-    dtype = value.get("dtype")
-    storage_dtype = value.get("storage_dtype")
+    dtype = logical.get("dtype")
+    storage_dtype = binding.get("storage_dtype")
     if dtype not in ("f16", "bf16", "f32", "fp8e4m3", "bf8e5m2"):
         raise ValueError(f"unsupported logical dtype {dtype!r}")
     if storage_dtype not in DTYPES:
@@ -297,18 +335,18 @@ def _validated_value_spec(value: dict[str, Any]) -> tuple[int, int, int]:
             f"not {storage_dtype!r}"
         )
 
-    shape = value.get("shape")
+    shape = logical.get("shape")
     if (
         not isinstance(shape, list)
         or len(shape) != 2
         or any(not isinstance(extent, int) or extent <= 0 for extent in shape)
     ):
         raise ValueError(
-            f"value {value.get('name')!r} has invalid tile shape {shape!r}"
+            f"value {logical.get('name')!r} has invalid tile shape {shape!r}"
         )
-    layout = value.get("layout")
+    layout = logical.get("layout")
     if not isinstance(layout, dict):
-        raise TypeError(f"value {value.get('name')!r} has no layout object")
+        raise TypeError(f"value {logical.get('name')!r} has no layout object")
     if not isinstance(layout.get("name"), str) or not layout["name"]:
         raise ValueError("layout name must be a non-empty string")
     if layout.get("role") not in ("a", "b", "acc"):
@@ -319,8 +357,16 @@ def _validated_value_spec(value: dict[str, Any]) -> tuple[int, int, int]:
         raise ValueError(f"invalid layout wave size {wave_size!r}")
     if not isinstance(fragment_length, int) or fragment_length <= 0:
         raise ValueError(f"invalid layout fragment length {fragment_length!r}")
+    replication_factor = layout.get("replication_factor")
+    if not isinstance(replication_factor, int) or replication_factor <= 0:
+        raise ValueError(f"invalid layout replication factor {replication_factor!r}")
+    packing = layout.get("packing")
+    if not isinstance(packing, dict):
+        raise TypeError("layout packing must be an object")
 
-    locations = value.get("locations")
+    if binding.get("kind") != "amdgpu_registers":
+        raise ValueError(f"unsupported physical binding {binding.get('kind')!r}")
+    locations = binding.get("locations")
     if not isinstance(locations, list) or any(
         not isinstance(location, str) or not location for location in locations
     ):
@@ -341,13 +387,8 @@ def _validated_value_spec(value: dict[str, Any]) -> tuple[int, int, int]:
             f"layout has {len(coordinates)} coordinates; expected "
             f"{wave_size * fragment_length}"
         )
-    if len(coordinates) != shape[0] * shape[1]:
-        raise ValueError(
-            f"layout has {len(coordinates)} logical elements, but shape {shape!r} "
-            f"contains {shape[0] * shape[1]}"
-        )
     seen_physical = set()
-    seen_logical = set()
+    logical_sources: Counter[tuple[int, int]] = Counter()
     for coordinate in coordinates:
         if not isinstance(coordinate, dict):
             raise TypeError("every layout coordinate must be an object")
@@ -362,38 +403,64 @@ def _validated_value_spec(value: dict[str, Any]) -> tuple[int, int, int]:
             or not isinstance(index, list)
             or len(index) != 2
             or any(not isinstance(axis, int) for axis in index)
-            or not 0 <= index[0] < shape[0]
-            or not 0 <= index[1] < shape[1]
         ):
             raise ValueError(f"invalid layout coordinate {coordinate!r}")
         physical = (lane, slot)
-        logical = tuple(index)
         if physical in seen_physical:
             raise ValueError(f"duplicate physical layout coordinate {physical!r}")
-        if logical in seen_logical:
-            raise ValueError(
-                f"layout coordinate {logical!r} has multiple physical sources"
-            )
         seen_physical.add(physical)
-        seen_logical.add(logical)
-    return wave_size, fragment_length, packed_width
+        for logical_index in _expanded_indices(index, packing):
+            if not (
+                0 <= logical_index[0] < shape[0] and 0 <= logical_index[1] < shape[1]
+            ):
+                raise ValueError(
+                    f"layout coordinate {logical_index!r} is outside shape {shape!r}"
+                )
+            logical_sources[logical_index] += 1
+
+    expected_indices = {
+        (axis0, axis1) for axis0 in range(shape[0]) for axis1 in range(shape[1])
+    }
+    if set(logical_sources) != expected_indices:
+        missing = sorted(expected_indices - set(logical_sources))
+        raise ValueError(
+            f"layout does not cover shape {shape!r}; missing {missing[:4]!r}"
+        )
+    wrong_multiplicity = {
+        index: count
+        for index, count in logical_sources.items()
+        if count != replication_factor
+    }
+    if wrong_multiplicity:
+        sample = next(iter(sorted(wrong_multiplicity.items())))
+        raise ValueError(
+            f"layout source multiplicity does not match replication factor "
+            f"{replication_factor}; first mismatch {sample!r}"
+        )
+    return logical, binding, wave_size, fragment_length, packed_width
 
 
 def unavailable_value(
     value: dict[str, Any], status: str, detail: str
 ) -> dict[str, Any]:
     """Build an explicit unavailable logical-value record."""
-    if status not in VALUE_STATUSES or status in ("available", "inactive_lane"):
+    if status not in VALUE_STATUSES or status in (
+        "available",
+        "inactive_lane",
+        "replica_mismatch",
+    ):
         raise ValueError(f"invalid unavailable status {status!r}")
+    logical = value.get("logical") or {}
+    binding = value.get("binding") or {}
     return {
         "schema": VALUE_SCHEMA,
-        "name": value.get("name"),
-        "dtype": value.get("dtype"),
-        "shape": value.get("shape"),
+        "name": logical.get("name"),
+        "dtype": logical.get("dtype"),
+        "shape": logical.get("shape"),
         "status": status,
         "detail": detail,
-        "machine_locations": value.get("locations", []),
-        "layout": value.get("layout"),
+        "machine_locations": binding.get("locations", []),
+        "layout": logical.get("layout"),
         "elements": [],
         "tile": None,
     }
@@ -416,8 +483,12 @@ def decode_logical_value(
     float8_format: str = "ocp",
 ) -> dict[str, Any]:
     """Reconstruct a logical tile from lane-major physical register words."""
-    wave_size, fragment_length, packed_width = _validated_value_spec(value)
-    locations = value["locations"]
+    logical, binding, wave_size, fragment_length, packed_width = _validated_value_spec(
+        value
+    )
+    if logical["layout"]["packing"]["kind"] != "scalar":
+        raise ValueError("packed logical fragment slots are not yet decodable")
+    locations = binding["locations"]
     if len(raw_locations) != len(locations):
         raise ValueError(
             f"received {len(raw_locations)} physical locations; expected {len(locations)}"
@@ -430,14 +501,12 @@ def decode_logical_value(
 
     coordinate_by_physical = {
         (coordinate["lane"], coordinate["slot"]): coordinate["index"]
-        for coordinate in value["layout"]["coordinates"]
+        for coordinate in logical["layout"]["coordinates"]
     }
-    shape = value["shape"]
-    tile: list[list[dict[str, Any] | None]] = [
-        [None for _ in range(shape[1])] for _ in range(shape[0])
-    ]
+    shape = logical["shape"]
+    sources_by_index: dict[tuple[int, int], list[dict[str, Any]]] = {}
     elements = []
-    storage_dtype = value["storage_dtype"]
+    storage_dtype = binding["storage_dtype"]
     for location_index, (location, words) in enumerate(zip(locations, raw_locations)):
         for lane, word in enumerate(words):
             decoded = decode_word(
@@ -468,22 +537,76 @@ def decode_logical_value(
                     "value_text": scalar["value_text"],
                 }
                 elements.append(element)
-                tile[index[0]][index[1]] = element
+                sources_by_index.setdefault(tuple(index), []).append(element)
+
+    tile: list[list[dict[str, Any]]] = []
+    has_replica_mismatch = False
+    for row in range(shape[0]):
+        cells = []
+        for column in range(shape[1]):
+            index = [row, column]
+            sources = sources_by_index[(row, column)]
+            active_sources = [source for source in sources if source["active"] is True]
+            unknown_sources = [source for source in sources if source["active"] is None]
+            if active_sources:
+                comparable = active_sources
+                active = True
+            elif unknown_sources:
+                comparable = unknown_sources
+                active = None
+            else:
+                comparable = sources
+                active = False
+
+            representative = comparable[0]
+            agrees = all(
+                source["raw_bits"] == representative["raw_bits"]
+                for source in comparable[1:]
+            )
+            status = "inactive_lane" if active is False else "available"
+            if not agrees and active is not False:
+                status = "replica_mismatch"
+                has_replica_mismatch = True
+            cells.append(
+                {
+                    "index": index,
+                    "active": active,
+                    "status": status,
+                    "source_count": len(sources),
+                    "sources": sources,
+                    "raw_bits": representative["raw_bits"] if agrees else None,
+                    "raw_hex": representative["raw_hex"] if agrees else None,
+                    "class": representative["class"] if agrees else None,
+                    "sign": representative["sign"] if agrees else None,
+                    "value": representative["value"] if agrees else None,
+                    "value_text": (
+                        representative["value_text"] if agrees else "<replica-mismatch>"
+                    ),
+                }
+            )
+        tile.append(cells)
 
     return {
         "schema": VALUE_SCHEMA,
-        "name": value["name"],
-        "dtype": value["dtype"],
+        "name": logical["name"],
+        "dtype": logical["dtype"],
         "storage_dtype": storage_dtype,
         "float8_format": float8_format if "8" in storage_dtype else None,
         "shape": shape,
-        "status": "available",
-        "detail": None,
+        "status": "replica_mismatch" if has_replica_mismatch else "available",
+        "detail": ("observable replicas disagree" if has_replica_mismatch else None),
         "exec_mask": None if exec_mask is None else f"0x{exec_mask:x}",
         "machine_locations": locations,
         "layout": {
-            key: value["layout"][key]
-            for key in ("name", "role", "wave_size", "fragment_length")
+            key: logical["layout"][key]
+            for key in (
+                "name",
+                "role",
+                "wave_size",
+                "fragment_length",
+                "replication_factor",
+                "packing",
+            )
         },
         "elements": elements,
         "tile": tile,
@@ -500,9 +623,11 @@ def values_human(records: Sequence[dict[str, Any]]) -> str:
             f"{record.get('name')} {record.get('dtype')} [{shape}] "
             f"layout={layout.get('name', '?')} status={record['status']}"
         )
-        if record["status"] != "available":
+        if record["status"] not in ("available", "replica_mismatch"):
             lines.append(f"  {record.get('detail', '')}")
             continue
+        if record["status"] == "replica_mismatch":
+            lines.append(f"  {record['detail']}")
         lines.append("  locations: " + ", ".join(record["machine_locations"]))
         lines.append("  inactive lanes are prefixed with ~; unknown activity with ?")
         for row, cells in enumerate(record["tile"]):
@@ -616,7 +741,8 @@ if gdb is not None:
                 value = manifest_value(load_manifest(args.manifest), args.name)
                 raw_locations = []
                 try:
-                    for expression in value.get("locations", []):
+                    binding = value.get("binding") or {}
+                    for expression in binding.get("locations", []):
                         raw_locations.append(_gdb_words(gdb.parse_and_eval(expression)))
                 except (gdb.error, RuntimeError) as error:
                     message = str(error)

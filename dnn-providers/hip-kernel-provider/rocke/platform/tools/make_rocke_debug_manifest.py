@@ -24,7 +24,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from rocke.core import debug_manifest, logical_value_manifest
+from rocke.core import (
+    bind_logical_value,
+    debug_manifest,
+    logical_value_description,
+    register_value_binding,
+)
 from rocke.core.arch import ArchTarget, LayoutMap, MmaOp
 
 
@@ -52,16 +57,19 @@ def build_manifest(
     if op is None:
         raise ValueError(f"architecture {arch!r} has no MMA operation {op_id!r}")
     layout, shape = _layout_and_shape(op, role)
-    value = logical_value_manifest(
+    logical = logical_value_description(
         name=name,
         dtype=dtype,
         shape=shape,
         layout=layout,
         layout_name=f"{op_id}.{role}",
+    )
+    binding = register_value_binding(
         storage_dtype=storage_dtype,
         locations=locations,
+        fragment_length=layout.frag_len,
     )
-    return debug_manifest(value)
+    return debug_manifest(bind_logical_value(logical, binding))
 
 
 def _argument_parser() -> argparse.ArgumentParser:
