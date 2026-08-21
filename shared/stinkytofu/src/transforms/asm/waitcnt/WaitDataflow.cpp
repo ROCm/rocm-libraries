@@ -134,6 +134,42 @@ CounterKind classifyMemOp(const StinkyInstruction& inst) {
     return CK_Count;
 }
 
+// A new counter needs a WaitCountSpec field, an emitOneSpec() case, and a
+// waitReconstruction() entry. This tripwire fires if one is added without a
+// look at the other two.
+static_assert(CK_Count == 5, "adding a CounterKind means revisiting waitReconstruction()");
+
+WaitReconstruction waitReconstruction(const StinkyInstruction& inst) {
+    switch (inst.getUnifiedOpcode()) {
+        // One counter each, all emitted by emitOneSpec().
+        case GFX::s_wait_dscnt:
+        case GFX::s_wait_loadcnt:
+        case GFX::s_wait_kmcnt:
+        case GFX::s_wait_tensorcnt:
+        case GFX::s_wait_asynccnt:
+        // Both halves are tracked counters; emitOneSpec() rebuilds them as two
+        // separate waits, and conversion re-packs on the way back in.
+        case GFX::s_wait_loadcnt_dscnt:
+            return WaitReconstruction::WaitCntInsertion;
+
+        case GFX::s_wait_xcnt:
+            return WaitReconstruction::HazardPass;
+
+        // STOREcnt has no CounterKind, so nothing here can rebuild these. The
+        // packed form loses only its MEM half, but half a wait is not a wait.
+        // s_waitcnt can carry vscnt too; on gfx1250 legalizeWaitCnt splits it
+        // during conversion, so one reaching this far is hand-written IR.
+        case GFX::s_wait_storecnt:
+        case GFX::s_wait_storecnt_dscnt:
+        case GFX::s_waitcnt:
+            return WaitReconstruction::None;
+
+        // Fail safe: an unrecognised wait is preserved, never dropped.
+        default:
+            return WaitReconstruction::None;
+    }
+}
+
 int waitToDrain(CounterKind c, int countFrom) {
     if (countFrom <= 0) return WaitCountSpec::kUnused;
     if (defaultCounterPolicy(c).order == CounterOrder::OutOfOrder) return 0;

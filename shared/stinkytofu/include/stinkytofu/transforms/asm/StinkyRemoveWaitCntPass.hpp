@@ -30,30 +30,38 @@
 namespace stinkytofu {
 class Pass;
 
-/// Which wait opcodes StinkyRemoveWaitCntPass strips. The default is "all of
-/// them except the two below", so a wait survives only by opting out here.
+/// Policy knobs for StinkyRemoveWaitCntPass, layered on top of the pass's safety
+/// gate. The gate comes first and is not configurable: a wait is only ever a
+/// candidate for removal if some pass regenerates it, per
+/// `waitcnt::waitReconstruction()`. Anything naming STOREcnt therefore survives
+/// with no knob at all, and needs none until a store counter exists.
 ///
-/// This struct is the single place documenting *why* each exception exists;
-/// call sites should point here rather than restate it.
+/// These fields only narrow the candidates further. This struct is the single
+/// place documenting *why* each exception exists; call sites should point here
+/// rather than restate it.
 struct RemoveWaitCntOptions {
-    /// Also strip @c s_wait_tensorcnt. On by default so the insertion pass owns
+    /// Also strip `s_wait_tensorcnt`. On by default so the insertion pass owns
     /// every wait; turn it off to let that pass reuse the incoming ones.
     ///
-    /// @c s_wait_tensorcnt carries @c IF_WaitTensorCnt, a flag disjoint from
-    /// @c IF_WaitCnt, so it needs its own check -- @c isWaitCnt() misses it.
+    /// `s_wait_tensorcnt` carries `IF_WaitTensorCnt`, a flag disjoint from
+    /// `IF_WaitCnt`, so it needs its own check -- `isWaitCnt()` misses it.
     bool removeTensor = true;
 
-    /// Also strip @c s_wait_xcnt. Off by default because only the O3 path has a
-    /// hazard pass that re-places xcnt; elsewhere hand-authored drains must
-    /// survive. TensileLite emits @c s_wait_xcnt @c 0 ahead of a volatile/atomic
-    /// VMEM op, since XNACK-replay can reorder one past in-flight VMEM -- in
-    /// StreamK that is the release-side flag store, the acquire-side flag load,
-    /// and the work-queue atomic. TODO: drop this knob once a dedicated hazard
-    /// pass places those drains.
+    /// Also strip `s_wait_xcnt`. This is the one opcode whose regenerator is
+    /// `Gfx1250HazardPass` rather than the wait-count dataflow, so it clears the
+    /// safety gate on that pass's promise. Off by default because that pass
+    /// rebuilds from its own XNACK replay-group rules (atomic-after-memory, FLAT
+    /// and SMEM source overlap), not from where the drains originally sat:
+    /// TensileLite emits `s_wait_xcnt 0` ahead of any volatile/atomic VMEM op --
+    /// in StreamK the release-side flag store, the acquire-side flag load, and
+    /// the work-queue atomic, the first two of which are plain volatile MUBUF and
+    /// match no rule above. Enabled only where that risk is accepted for the
+    /// tighter placement. TODO: confirm the rule set covers volatile MUBUF, then
+    /// this knob can go away.
     bool removeXcnt = false;
 
-    /// Also strip @c s_wait_kmcnt. Off by default because wait-count insertion
-    /// is region-scoped: an @c s_load in the kernel prologue (argument preload)
+    /// Also strip `s_wait_kmcnt`. Off by default because wait-count insertion
+    /// is region-scoped: an `s_load` in the kernel prologue (argument preload)
     /// never enters its dataflow, so an in-region consumer would be left
     /// unguarded. TODO: drop this knob once insertion covers the whole kernel.
     bool removeKmcnt = false;
@@ -63,7 +71,7 @@ struct RemoveWaitCntOptions {
  * @brief Strip wait-counter instructions from a function.
  *
  * Runs over every basic block approved by
- * @c PassContext::shouldProcessBasicBlock. Precondition pass for
+ * `PassContext::shouldProcessBasicBlock`. Precondition pass for
  * StinkyWaitCntInsertionPass, which expects to own every emitted wait; see
  * docs/user/stinky-waitcnt-insertion-pass.md, section
  * "Companion: StinkyRemoveWaitCntPass".

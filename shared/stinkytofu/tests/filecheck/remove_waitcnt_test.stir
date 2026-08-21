@@ -1,12 +1,22 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyRemoveWaitCntPass --print-output
 #
-# Default policy: strip the waits the downstream insertion pass will re-derive,
-# and keep the two it cannot:
+# Removal is gated on waitcnt::waitReconstruction(): a wait is only stripped if
+# some pass puts it back. Under the default policy that leaves three groups.
+#
+# Stripped -- StinkyWaitCntInsertionPass re-derives them:
+#   s_wait_dscnt, s_wait_loadcnt, s_wait_asynccnt, s_wait_tensorcnt,
+#   s_wait_loadcnt_dscnt (both halves are tracked counters).
+#
+# Kept because NOTHING rebuilds them -- every opcode naming STOREcnt, which has
+# no CounterKind: s_wait_storecnt, s_wait_storecnt_dscnt (its MEM half), and the
+# legacy packed s_waitcnt (can carry vscnt).
+#
+# Kept by policy, though they are rebuildable:
 #   - s_wait_kmcnt: insertion is region-scoped, so an s_load in the kernel
 #     prologue (argument preload) never enters its dataflow and its in-region
 #     consumer would be left unguarded.
-#   - s_wait_xcnt: outside O3 no hazard pass owns xcnt placement yet, so
-#     hand-authored drains must survive.
+#   - s_wait_xcnt: rebuilt by Gfx1250HazardPass, not by the dataflow, so it is
+#     only stripped where that pass's placement is accepted (O3).
 #
 # A pass config is fixed per invocation, so each non-default policy needs its
 # own file: remove_waitcnt_{keep_tensor,kmcnt,xcnt}_test.stir.
@@ -14,24 +24,40 @@
 # The shouldProcessBasicBlock gate is not covered here: stinkytofu-opt always
 # runs with a default PassContext, which approves every block.
 
-#--- Every IF_WaitCnt opcode, plus s_wait_tensorcnt -- IF_WaitTensorCnt is a
-#--- disjoint flag, so the pass needs a separate branch for it.
-# CHECK-LABEL: @strips_every_waitcnt_opcode
+#--- Every reconstructable IF_WaitCnt opcode, plus s_wait_tensorcnt --
+#--- IF_WaitTensorCnt is a disjoint flag, so the pass needs a separate test for it.
+# CHECK-LABEL: @strips_every_reconstructable_opcode
 # CHECK: s_nop
 # CHECK-NEXT: v_add_f32
 # CHECK-NOT: s_wait
 
-st.func @strips_every_waitcnt_opcode() {
+st.func @strips_every_reconstructable_opcode() {
 ^entry:
   "st.s_nop"(0)
-  "st.s_waitcnt"(0)
   "st.s_wait_dscnt"(0)
   "st.s_wait_loadcnt"(0)
-  "st.s_wait_storecnt"(0)
   "st.s_wait_asynccnt"(0)
   "st.s_wait_loadcnt_dscnt"(0)
-  "st.s_wait_storecnt_dscnt"(0)
   "st.s_wait_tensorcnt"(0)
+  v0 = "st.v_add_f32"(v1, v2)
+}
+
+#--- STOREcnt is not modelled, so these must survive with no opt-in: stripping
+#--- one would drop a store drain (e.g. a StreamK release fence) that no pass can
+#--- put back. The dscnt drain between them proves this is not "keeps waits".
+# CHECK-LABEL: @preserves_unreconstructable_storecnt
+# CHECK: s_wait_storecnt
+# CHECK-NEXT: s_wait_storecnt_dscnt
+# CHECK-NEXT: s_waitcnt
+# CHECK-NEXT: v_add_f32
+# CHECK-NOT: s_wait_dscnt
+
+st.func @preserves_unreconstructable_storecnt() {
+^entry:
+  "st.s_wait_storecnt"(0)
+  "st.s_wait_storecnt_dscnt"(0)
+  "st.s_waitcnt"(0)
+  "st.s_wait_dscnt"(0)
   v0 = "st.v_add_f32"(v1, v2)
 }
 

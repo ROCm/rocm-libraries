@@ -13,8 +13,14 @@
 // Removal spans two *disjoint* instruction flag bits: IF_WaitCnt (s_wait_dscnt,
 // s_wait_loadcnt, s_wait_storecnt, s_wait_asynccnt, s_wait_kmcnt, s_wait_xcnt,
 // s_wait_loadcnt_dscnt, s_wait_storecnt_dscnt, s_waitcnt) and IF_WaitTensorCnt
-// (s_wait_tensorcnt alone). See shouldRemove() for the rule, and
-// RemoveWaitCntOptions for why individual opcodes are exempt.
+// (s_wait_tensorcnt alone).
+//
+// "Clean slate" is bounded by one rule: a wait may only be stripped if some
+// pass regenerates it. waitcnt::waitReconstruction() -- which lives with the
+// dataflow that does the regenerating -- is the single source of truth, and
+// shouldRemove() gates on it, so this pass cannot drop a guard the compiler has
+// no way to put back. See RemoveWaitCntOptions for the policy exemptions layered
+// on top.
 // ----------------------------------------------------------------------------
 
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
@@ -22,22 +28,33 @@
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/transforms/asm/waitcnt/WaitDataflow.hpp"
 
 namespace {
 using namespace stinkytofu;
 
-/// Every wait instruction is stripped except the opcodes listed here, each of
-/// which survives unless its option opts it in. See RemoveWaitCntOptions for
-/// why each exemption exists.
+/// Two gates, in order: a wait must be rebuildable at all, and then policy may
+/// still keep it. The first gate is what makes the pass safe by construction --
+/// there is no path here that strips a wait nothing regenerates.
 bool shouldRemove(const StinkyInstruction& inst, const RemoveWaitCntOptions& options) {
-    // Checked first: IF_WaitTensorCnt is disjoint from IF_WaitCnt, so the
-    // isWaitCnt() test below would miss s_wait_tensorcnt.
-    if (inst.is(InstFlag::IF_WaitTensorCnt)) return options.removeTensor;
-    if (!isWaitCnt(inst)) return false;
+    // IF_WaitTensorCnt is disjoint from IF_WaitCnt, so isWaitCnt() alone would
+    // miss s_wait_tensorcnt.
+    if (!isWaitCnt(inst) && !inst.is(InstFlag::IF_WaitTensorCnt)) return false;
 
-    switch (inst.getUnifiedOpcode()) {
-        case GFX::s_wait_xcnt:
+    switch (waitcnt::waitReconstruction(inst)) {
+        case waitcnt::WaitReconstruction::None:
+            return false;
+        case waitcnt::WaitReconstruction::HazardPass:
             return options.removeXcnt;
+        case waitcnt::WaitReconstruction::WaitCntInsertion:
+            break;
+    }
+
+    // Rebuildable, but kept anyway on request. Unlike the gate above, these are
+    // policy choices; see RemoveWaitCntOptions for each rationale.
+    switch (inst.getUnifiedOpcode()) {
+        case GFX::s_wait_tensorcnt:
+            return options.removeTensor;
         case GFX::s_wait_kmcnt:
             return options.removeKmcnt;
         default:

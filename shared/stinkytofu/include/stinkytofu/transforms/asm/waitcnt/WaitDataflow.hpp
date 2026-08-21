@@ -71,6 +71,30 @@ enum CounterKind { CK_DS = 0, CK_Load = 1, CK_KM = 2, CK_Tensor = 3, CK_Async = 
 /// `inst` is not tracked by the waitcnt pass.
 CounterKind classifyMemOp(const StinkyInstruction& inst);
 
+/// Who, if anyone, regenerates a given wait instruction after it is stripped.
+enum class WaitReconstruction {
+    /// StinkyWaitCntInsertionPass re-derives it from this dataflow. Every
+    /// counter in WaitCountSpec lands here.
+    WaitCntInsertion,
+    /// Gfx1250HazardPass re-derives it from its XNACK replay-group model, by its
+    /// own rules rather than from this dataflow. s_wait_xcnt only.
+    HazardPass,
+    /// Nothing rebuilds it, so stripping one silently drops the hazard it
+    /// guarded. Today: anything naming STOREcnt, which is not modelled.
+    None,
+};
+
+/// Classify a wait instruction by who can rebuild it.
+///
+/// This is the contract StinkyRemoveWaitCntPass is built on: it gates removal on
+/// this result, so there is no code path that strips a `None`. Unrecognised wait
+/// opcodes classify as `None`, making a newly added one preserved-by-default
+/// rather than silently dropped.
+///
+/// Keep in lockstep with StinkyWaitCntInsertionPass::emitOneSpec -- that
+/// function is what "WaitCntInsertion" promises.
+WaitReconstruction waitReconstruction(const StinkyInstruction& inst);
+
 /// Wait immediate that guarantees the op sitting `countFrom` positions from a
 /// queue's tail (i.e. PerPredQueue::countFrom(op), so 1 == tail) has completed.
 /// Returns kUnused for countFrom <= 0 (op not in flight).

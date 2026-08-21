@@ -33,7 +33,7 @@ A counter's FIFO must therefore hold **exactly** the ops that hardware counts on
 1. **Inflated immediate.** A store between a load and its consumer pushed the load one position further from the tail, so `countFrom - 1` came out one too high. For `buffer_load; buffer_store; consumer` the pass emitted `s_wait_loadcnt 1` when hardware `LOADcnt` was already 1 — the wait retired immediately and the consumer read an unloaded register.
 2. **Dropped wait.** `creditObservedWait` trims the queue to an observed immediate. Against a mixed queue `[load, store, store]`, an incoming `s_wait_loadcnt 2` kept the two stores and evicted the load, so the consumer saw nothing pending and got **no wait at all**.
 
-Both are pinned by `waitcnt_insertion_store_not_on_loadcnt_test.stir`. `STOREcnt` is not modelled today — the pass emits no `s_wait_storecnt`, and `StinkyRemoveWaitCntPass` strips incoming ones.
+Both are pinned by `waitcnt_insertion_store_not_on_loadcnt_test.stir`. `STOREcnt` is not modelled today: there is no `CounterKind` for it and the pass emits no `s_wait_storecnt`. Incoming store waits are therefore **preserved** rather than stripped — see "The reconstruction contract" below.
 
 ### Wait arithmetic
 
@@ -338,14 +338,26 @@ For each non-PHI instruction in program order:
 
 Per-pred queues are **not** collapsed at block exit.
 
+### The reconstruction contract
+
+`StinkyRemoveWaitCntPass` may only strip a wait that some pass regenerates. `waitcnt::waitReconstruction()` is the single source of truth and lives with this dataflow — the thing that does the regenerating — so the two cannot drift; the strip pass gates on its result and has no code path to remove a `None`. An unrecognised wait opcode classifies as `None`, so a newly added one is preserved by default rather than silently dropped.
+
+| Classification | Opcodes | Rebuilt by |
+|----------------|---------|------------|
+| `WaitCntInsertion` | `s_wait_dscnt`, `s_wait_loadcnt`, `s_wait_kmcnt`, `s_wait_tensorcnt`, `s_wait_asynccnt`, `s_wait_loadcnt_dscnt` | `emitOneSpec`, one field of `WaitCountSpec` each (the packed form splits into two) |
+| `HazardPass` | `s_wait_xcnt` | `Gfx1250HazardPass`, from its own XNACK replay-group rules |
+| `None` | `s_wait_storecnt`, `s_wait_storecnt_dscnt`, legacy `s_waitcnt` | nothing — all three can name `STOREcnt` |
+
+`RemoveWaitCntOptions` then narrows the candidates further, for reasons that are policy rather than safety: `s_wait_kmcnt` is kept because insertion is region-scoped, `s_wait_xcnt` because its regenerator places drains by different criteria, and `s_wait_tensorcnt` when the insertion pass should reuse the incoming ones. Blocks the strip pass skipped keep everything regardless.
+
 ### Existing waits in the input
 
-`StinkyRemoveWaitCntPass` does not hand the pass a fully clean slate: `s_wait_kmcnt` and (outside SIA4) `s_wait_xcnt` survive it, `s_wait_tensorcnt` survives when `RemoveWaitCntOptions::removeTensor` is false, and blocks the strip pass skipped keep everything. A wait already in the stream drains the hardware exactly like one the pass plans, so `observedWaitDrains` decodes it and `creditObservedWait` applies it: `trimQueues` on that counter plus `CounterEmitState::recordEmittedWait`, which is what stops a duplicate from being planned. A credited wait that is *too weak* for a later consumer does not suppress that consumer's wait, because `needsNewWait` compares against the required value.
+Because of the above, the pass never sees a fully clean slate. A wait already in the stream drains the hardware exactly like one the pass plans, so `observedWaitDrains` decodes it and `creditObservedWait` applies it: `trimQueues` on that counter plus `CounterEmitState::recordEmittedWait`, which is what stops a duplicate from being planned. A credited wait that is *too weak* for a later consumer does not suppress that consumer's wait, because `needsNewWait` compares against the required value.
 
 Decoding takes the counter from the **opcode** and the value from the **literal source operand**. `SWaitCntData` is not authoritative per instruction: `legalizeWaitCnt` splits one `s_waitcnt` into several `s_wait_*` and attaches the whole pre-split spec to the last member of the group and none to the others. The modifier is a fallback for the opcode's own counter only, used for hand-written IR that carries no literal. Two deliberate gaps:
 
 - **Out-of-order counters** — a nonzero existing `s_wait_kmcnt` is *not* credited, for the same reason `waitToDrain` never produces one: it names no particular load. Only a full drain counts.
-- **Undecodable waits** — `s_wait_storecnt`, `s_wait_xcnt`, the legacy packed `s_waitcnt`, and the storecnt half of `s_wait_storecnt_dscnt` credit nothing, since no tracked counter can be attributed. The failure mode is a redundant wait, never a missing one.
+- **Undecodable waits** — `s_wait_storecnt`, `s_wait_xcnt`, the legacy packed `s_waitcnt`, and the storecnt half of `s_wait_storecnt_dscnt` credit nothing, since no tracked counter can be attributed. The failure mode is a redundant wait, never a missing one. Note this is why the `None` group above is safe to preserve: an uncredited wait costs at most a duplicate drain.
 
 ---
 
