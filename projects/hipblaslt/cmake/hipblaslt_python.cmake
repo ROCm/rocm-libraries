@@ -37,10 +37,10 @@ function(hipblaslt_resolve_build_rocm_version output)
         elseif(THEROCK_ROCM_VERSION)
             set(_version "${THEROCK_ROCM_VERSION}")
         else()
-            # Temporary until TheRock forwards the ROCm version to hipBLASLt.
+            message(WARNING
+                "TheRock did not forward a ROCm package identity; using the "
+                "temporary 0.0.0 ROCm identity while validation is disabled")
             set(_version "0.0.0")
-            # message(FATAL_ERROR
-            #     "HIPBLASLT_ENABLE_THEROCK requires THEROCK_PACKAGE_VERSION or THEROCK_ROCM_VERSION")
         endif()
     else()
         hipblaslt_resolve_build_rocm_root(_root)
