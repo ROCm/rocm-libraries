@@ -35,6 +35,45 @@ bool hasVop3SourceModifier(const StinkyInstruction& inst, size_t srcIdx) {
     return false;
 }
 
+bool hasVop3pSourceModifier(const StinkyInstruction& inst, size_t srcIdx) {
+    const VOP3PModifiers* vop3p = inst.getModifier<VOP3PModifiers>();
+    if (!vop3p) return false;
+
+    auto hasNonZeroAt = [srcIdx](const std::vector<int>& values) {
+        return srcIdx < values.size() && values[srcIdx] != 0;
+    };
+    return hasNonZeroAt(vop3p->op_sel) || hasNonZeroAt(vop3p->op_sel_hi) ||
+           hasNonZeroAt(vop3p->byte_sel);
+}
+
+bool hasSdwaSourceModifier(const StinkyInstruction& inst, size_t srcIdx) {
+    const SDWAModifiers* sdwa = inst.getModifier<SDWAModifiers>();
+    if (!sdwa) return false;
+
+    if (srcIdx == 0) return sdwa->src0_sel != SDWAModifiers::SelectBit::SEL_NONE;
+    if (srcIdx == 1) return sdwa->src1_sel != SDWAModifiers::SelectBit::SEL_NONE;
+    return false;
+}
+
+bool hasTrue16SourceModifier(const StinkyInstruction& inst, size_t srcIdx) {
+    const True16Modifiers* true16 = inst.getModifier<True16Modifiers>();
+    if (!true16) return false;
+    if (srcIdx >= true16->getSrcCount()) return false;
+    return true16->getSrc(srcIdx) != HighBitSel::NONE;
+}
+
+bool hasMfmaSourceModifier(const StinkyInstruction& inst, size_t srcIdx) {
+    const MFMAModifiers* mfma = inst.getModifier<MFMAModifiers>();
+    if (!mfma || srcIdx > 2 || mfma->negBits.numSrcs == 0) return false;
+    return mfma->negBits.negLo[srcIdx] != 0 || mfma->negBits.negHi[srcIdx] != 0;
+}
+
+bool hasInstructionSourceModifier(const StinkyInstruction& inst, size_t srcIdx) {
+    return hasVop3SourceModifier(inst, srcIdx) || hasVop3pSourceModifier(inst, srcIdx) ||
+           hasSdwaSourceModifier(inst, srcIdx) || hasTrue16SourceModifier(inst, srcIdx) ||
+           hasMfmaSourceModifier(inst, srcIdx);
+}
+
 bool isSpecialControlReg(const StinkyRegister& reg) {
     if (!reg.isRegister()) return false;
     switch (reg.reg.type) {
@@ -270,7 +309,8 @@ class AsmMovePropagationPassImpl : public Pass {
                 if (!oldSrc.isRegister()) continue;
                 // Skip source operands that carry modifiers
                 // (inline reg modifiers or VOP3 source modifiers).
-                if (hasRegisterSourceModifier(oldSrc) || hasVop3SourceModifier(*inst, i)) continue;
+                if (hasRegisterSourceModifier(oldSrc) || hasInstructionSourceModifier(*inst, i))
+                    continue;
 
                 StinkyRegister newSrc = resolveMappedSrc(oldSrc);
                 if (hasRegisterSourceModifier(newSrc)) continue;
