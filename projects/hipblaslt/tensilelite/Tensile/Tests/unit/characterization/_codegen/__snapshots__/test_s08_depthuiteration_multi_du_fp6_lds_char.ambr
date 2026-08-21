@@ -2,7 +2,7 @@
 # name: test_s08_depthuiteration_multi_du_fp6_lds_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT32x32x1024_MI16WSwObnVxwJelBB2IUKiagWxz5338gc33N4Ia91svmHs=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT32x32x1024_MI16chd6d12-43Jg5jWwTwkBuGQiszrV8FChVGT6WM-wrbI=',
       'err': 0,
     }),
   ])
