@@ -175,10 +175,7 @@ namespace std
     {
         inline size_t operator()(TensileLite::ContractionProblemGemm const& problem) const
         {
-            // uniformSummationOrder() participates here and in operator== because
-            // solution lookups are cached on the problem and selection now depends
-            // on it: omitting it would hand a cached non-uniform selection to a
-            // caller that requested the mode.
+            // Cached lookups include this flag because selection depends on it.
             return TensileLite::hash_combine(problem.operationIdentifier(),
                                              problem.a(),
                                              problem.b(),

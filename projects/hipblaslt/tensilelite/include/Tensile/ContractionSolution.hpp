@@ -201,6 +201,12 @@ namespace TensileLite
         std::array<int, 2> waveGroup;
     };
 
+    struct CustomKernel
+    {
+        std::string name;
+        bool        generated = false;
+    };
+
     struct StreamKSettings
     {
         origami::reduction_t reduction = origami::reduction_t::tree;
@@ -410,14 +416,9 @@ namespace TensileLite
         // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
-        // Selection-time predicate for uniform summation order. Returns true
-        // when the mode is off, and otherwise false for solutions that can never
-        // produce row-uniform output. Only statically-knowable facts are tested:
-        // the resolved StreamK grid/reduction and the Synchronizer pointer do
-        // not exist until solve(), so this predicate is deliberately permissive
-        // about them and checkUniformSummationOrder() stays authoritative.
-        // Reject-and-continue, like streamKDynamicQueueSupported(). Wired into
-        // softwarePredicate() (SolutionLibrary.hpp).
+        // Selection-time filter for uniform summation order. Permissive about
+        // facts that only exist at solve(); checkUniformSummationOrder() is
+        // authoritative. Wired into softwarePredicate().
         bool                 uniformSummationOrderSupported(Problem const&  problem,
                                                             Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
@@ -707,7 +708,8 @@ namespace TensileLite
         std::shared_ptr<Predicates::Predicate<Hardware>> hardwarePredicate
             = std::make_shared<Predicates::True<Hardware>>();
 
-        SizeMapping sizeMapping;
+        SizeMapping  sizeMapping;
+        CustomKernel customKernel;
 
         InternalArgsSupport internalArgsSupport;
 
@@ -746,25 +748,9 @@ namespace TensileLite
                                                    Hardware const* hardware) const;
 
     private:
-        /**
-         * Authoritative launch gate for uniform summation order. No-op unless
-         * problem.getParams().uniformSummationOrder() is set; otherwise it
-         * validates the fully-resolved launch configuration and throws
-         * UniformSummationOrderError naming the offending condition. The
-         * validation is an allow-list rather than a deny-list, so a future
-         * scheduling variant or reduction mode is refused by default instead of
-         * being silently admitted.
-         *
-         * Call only once @p sk and @p resolvedGlobalAccumulation are final; see
-         * the call site in solve().
-         *
-         * @param gsu          Effective GSU for this launch (the user override
-         *                     when set, otherwise calculateAutoGSU()).
-         * @param synchronizer The Synchronizer/Flags pointer that will be packed
-         *                     for this launch. The device reads a null
-         *                     AddressFlags as a request for the parallel
-         *                     reduction path.
-         */
+        bool handwrittenCustomKernel() const;
+
+        // Launch gate. Call once sk and resolvedGlobalAccumulation are final.
         void checkUniformSummationOrder(Problem const&         problem,
                                         Hardware const&        hardware,
                                         StreamKSettings const& sk,

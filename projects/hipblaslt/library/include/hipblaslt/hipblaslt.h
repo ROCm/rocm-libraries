@@ -572,18 +572,9 @@ hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle,
  *  \brief Set the handle-level uniform-summation-order request.
  *
  *  \details
- *  Enables or disables uniform summation order for subsequent GEMMs that
- *  use this handle. ``0`` (the default) leaves the mode off; ``1`` enables
- *  it for every subsequent GEMM on this handle. Values outside ``{0, 1}``
- *  are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``.
- *
- *  A per-matmul-descriptor attribute
- *  (``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``) of ``0`` inherits
- *  this handle-level request; ``1`` enables that GEMM even when the handle
- *  is off. There is no per-GEMM opt-out once the handle is on.
- *
- *  The user must ensure thread safety when modifying handle state from
- *  multiple threads, the same as for any other handle-mutating helper.
+ *  Enables or disables uniform summation order for subsequent GEMMs on
+ *  this handle. ``0`` off (default), ``1`` on. See
+ *  ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
  *
  *  @param[in]
  *  handle                     hipBLASLt library context.

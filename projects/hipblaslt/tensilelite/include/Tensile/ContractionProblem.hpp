@@ -174,10 +174,7 @@ namespace TensileLite
             return m_streamKTileSchedulingMode;
         }
 
-        // Uniform summation order request, mirroring
-        // HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT: every row of D must
-        // be reduced in an identical summation order, so an A whose rows are all
-        // the same vector yields a bitwise-identical D row for every M index.
+        // HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
         void setUniformSummationOrder(bool uniformSummationOrder)
         {
             m_uniformSummationOrder = uniformSummationOrder;

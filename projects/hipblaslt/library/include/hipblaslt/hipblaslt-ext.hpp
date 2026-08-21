@@ -108,25 +108,9 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
 
         /*! \ingroup library_module
-         *  \brief Request a uniform summation order across the M dimension.
+         *  \brief Enable uniform summation order for this Gemm.
          *
-         *  \details
-         *  The ``hipblaslt_ext`` equivalent of
-         *  ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``. When enabled,
-         *  hipBLASLt guarantees that if every row of matrix A is the identical
-         *  vector, every row of the output matrix D is bitwise identical. This is
-         *  uniformity across the M dimension within a single run; it is **not**
-         *  run-to-run determinism. Defaults to ``false`` (inherit). ``true``
-         *  enables this Gemm even when the handle is off. To enable the mode for
-         *  every GEMM on a handle, use ``hipblasLtSetUniformSummationOrder``.
-         *  Enabling it restricts kernel selection and the launch configuration,
-         *  so it can reduce performance, and ``run()`` returns
-         *  ``HIPBLAS_STATUS_INVALID_VALUE`` when no uniform-safe configuration
-         *  exists for the resolved launch rather than silently producing a
-         *  non-uniform result.
-         *
-         *  @param[in]
-         *  value  ``true`` to enable this Gemm, ``false`` (default) to inherit.
+         *  See ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
          */
         HIPBLASLT_EXPORT void setUniformSummationOrder(bool value);
 

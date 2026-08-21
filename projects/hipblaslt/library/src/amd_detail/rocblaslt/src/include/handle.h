@@ -104,11 +104,7 @@ struct _rocblaslt_handle
     // non-zero, takes precedence over this handle-level value.
     int32_t sm_count_target = 0;
 
-    // Handle-level uniform-summation-order request. Set via
-    // hipblasLtSetUniformSummationOrder. 0 (default) means off; 1 enables
-    // uniform summation order for subsequent GEMMs on this handle. Values
-    // outside {0, 1} are rejected by the setter. There is no per-GEMM
-    // opt-out: a desc or preference of 0 inherits this handle value.
+    // Handle-level uniform-summation-order request. 0 off, 1 on; see hipblaslt.h.
     int32_t uniform_summation_order = 0;
 
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -226,10 +222,8 @@ struct _rocblaslt_matmul_desc
     // 1 = ON (force SK4 dynamic), 2 = AUTO (heuristic picks per launch).
     int32_t streamk_tile_scheduling_ext = 0;
 
-    // Uniform summation order request (HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT).
-    // 0 = inherit the handle-level request (default), 1 = on; values outside
-    // {0, 1} are rejected by the setter. See hipblaslt.h for the guarantee
-    // this offers the caller.
+    // Uniform summation order. 0 inherits the handle request; 1 enables.
+    // See hipblaslt.h for the guarantee.
     int32_t uniform_summation_order = 0;
 
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 

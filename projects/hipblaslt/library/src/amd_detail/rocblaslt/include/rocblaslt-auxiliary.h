@@ -115,35 +115,14 @@ rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
 
 /*! \ingroup aux_module
  *  \brief Set the handle-level uniform-summation-order request.
- *
- *  \details
- *  ``0`` (the default) leaves the mode off. ``1`` enables uniform
- *  summation order for subsequent GEMMs on this handle. Values outside
- *  ``{0, 1}`` are rejected with \c rocblaslt_status_invalid_value.
- *
- *  @param[in]
- *  handle                     the handle to the rocBLASLt library context.
- *  @param[in]
- *  uniform_summation_order    ``0`` (off) or ``1`` (on).
- *
- *  \retval rocblaslt_status_success            value stored.
- *  \retval rocblaslt_status_invalid_handle     \p handle is invalid.
- *  \retval rocblaslt_status_invalid_value      \p uniform_summation_order is not ``0`` or ``1``.
+ *  See hipblasLtSetUniformSummationOrder.
  */
 rocblaslt_status rocblaslt_set_uniform_summation_order(rocblaslt_handle handle,
                                                        int32_t          uniform_summation_order);
 
 /*! \ingroup aux_module
  *  \brief Return the handle-level uniform-summation-order request.
- *
- *  @param[in]
- *  handle                     the handle to the rocBLASLt library context.
- *  @param[out]
- *  uniform_summation_order    receives the previously stored value (``0`` if never set).
- *
- *  \retval rocblaslt_status_success            value returned.
- *  \retval rocblaslt_status_invalid_handle     \p handle is invalid.
- *  \retval rocblaslt_status_invalid_value      \p uniform_summation_order is null.
+ *  See hipblasLtGetUniformSummationOrder.
  */
 rocblaslt_status rocblaslt_get_uniform_summation_order(rocblaslt_handle handle,
                                                        int32_t*         uniform_summation_order);

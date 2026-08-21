@@ -2074,8 +2074,6 @@ namespace
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
 
-        // Consumed by ContractionSolution's StaggerU clamp, its selection-time
-        // filter and its launch gate.
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
         // set AmaxD

@@ -34,6 +34,14 @@
 #include <iostream>
 #include <rocblaslt.h>
 
+namespace
+{
+    bool uniformSummationOrderEnabled(hipblasLtHandle_t handle, bool pref)
+    {
+        return pref || (handle && static_cast<rocblaslt_handle>(handle)->uniform_summation_order);
+    }
+}
+
 namespace hipblaslt_ext
 {
     static_assert(sizeof(hipblasLtMatmulHeuristicResult_t) == sizeof(rocblaslt_matmul_heuristic_result),
@@ -807,7 +815,7 @@ namespace hipblaslt_ext
                                              m_data,
                                              pref.pimpl->workspace_bytes,
                                              m_streamk_tile_scheduling_mode,
-                                             m_uniform_summation_order,
+                                             uniformSummationOrderEnabled(m_handle, m_uniform_summation_order),
                                              requestedAlgoCount,
                                              *results));
         rocblaslt::Debug::Instance().markerStop();
@@ -822,10 +830,7 @@ namespace hipblaslt_ext
         auto                    gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
         applyUniformSummationOrder(
-            m_data,
-            gemmType,
-            m_uniform_summation_order
-                || (m_handle && ((rocblaslt_handle)m_handle)->uniform_summation_order));
+            m_data, gemmType, uniformSummationOrderEnabled(m_handle, m_uniform_summation_order));
         auto                    rocalgo  = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
         rocblaslt::RocTuningV2* tuning   = nullptr;
         auto                    status = RocBlasLtStatusToHIPStatus(rocblaslt_is_algo_supported_cpp(
@@ -847,10 +852,7 @@ namespace hipblaslt_ext
         auto gemmType  = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
         applyUniformSummationOrder(
-            m_data,
-            gemmType,
-            m_uniform_summation_order
-                || (m_handle && ((rocblaslt_handle)m_handle)->uniform_summation_order));
+            m_data, gemmType, uniformSummationOrderEnabled(m_handle, m_uniform_summation_order));
         auto rocalgo   = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
         auto roctuning = reinterpret_cast<rocblaslt::RocTuningV2*>(tuning.pimpl.get());
         auto status

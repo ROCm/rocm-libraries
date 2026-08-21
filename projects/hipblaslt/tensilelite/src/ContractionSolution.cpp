@@ -4308,16 +4308,18 @@ namespace TensileLite
         return false;
     }
 
+    bool ContractionSolution::handwrittenCustomKernel() const
+    {
+        return !customKernel.name.empty() && !customKernel.generated;
+    }
+
     bool ContractionSolution::uniformSummationOrderSupported(Problem const&  problem,
                                                              Hardware const& hardware) const
     {
         if(!problem.getParams().uniformSummationOrder())
             return true;
 
-        // Conservative simplification: a custom kernel is hand-written assembly
-        // whose summation order is not described by sizeMapping, so none are
-        // admitted. Admitting provably-safe custom kernels is planned separately.
-        if(!sizeMapping.customKernelName.empty())
+        if(handwrittenCustomKernel())
             return false;
 
         // Atomic fixup of partial tiles accumulates in arrival order.
@@ -4363,11 +4365,8 @@ namespace TensileLite
                 + "' cannot guarantee uniform summation order for this launch: " + reason);
         };
 
-        // Conservative simplification: a custom kernel is hand-written assembly
-        // whose summation order is not described by sizeMapping, so none are
-        // admitted. Admitting provably-safe custom kernels is planned separately.
-        if(!sizeMapping.customKernelName.empty())
-            reject("custom kernel " + sizeMapping.customKernelName
+        if(handwrittenCustomKernel())
+            reject("custom kernel " + customKernel.name
                    + " is not supported under uniform summation order");
 
         if(sizeMapping.streamK != 0)

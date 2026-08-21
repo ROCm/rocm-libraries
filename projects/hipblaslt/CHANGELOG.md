@@ -7,20 +7,12 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * Introduced a new API: hipBLASLt-ext::isSolutionSupported(). This API is used by new hipBLASLt integration from rocBLAS to check if a given solution is supported for a certain GPU and Problem Type. 
-* `HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT` and matching ext API
-  (`setUniformSummationOrder()` / `getUniformSummationOrder()`) opt into a
-  uniform summation order across `M`: when every row of `A` is the identical
-  vector, every row of `D` is bitwise identical within that run. This is not
-  run-to-run determinism and it can reduce performance. The `int32_t` attribute
-  accepts `0` (inherit the handle-level request, default) and `1` (on); other
-  values, and matmuls for which no configuration honors the guarantee, return
-  `HIPBLAS_STATUS_INVALID_VALUE`. Handle-level
-  `hipblasLtSetUniformSummationOrder()` / `hipblasLtGetUniformSummationOrder()`
-  enable the mode for subsequent GEMMs on that handle (`0` off, `1` on).
-  Effective enable is first-on-wins: preference true, desc `1`, or handle `1`.
-  There is no per-GEMM opt-out when the handle is on.
-  `hipblaslt-bench` `--uniform_summation_order` forwards into the matmul
-  descriptor (see `clients/bench/README.md`).
+* `HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT`,
+  `hipblaslt_ext::GemmPreference::setUniformSummationOrder`, and
+  `hipblasLtSetUniformSummationOrder` / `hipblasLtGetUniformSummationOrder`
+  opt into a uniform summation order across `M` (not run-to-run determinism).
+  See `hipblaslt.h`. `hipblaslt-bench --uniform_summation_order` forwards
+  the descriptor attribute.
 
 ## hipBLASLt 1.4.0
 
