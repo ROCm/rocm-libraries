@@ -582,14 +582,9 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
     EXPECT_EQ(reads.load(), 2000) << "the key exists throughout, so no read may miss";
 }
 
-/// A value no other live ScopedCacheDir shares, in this process or any other.
-///
-/// The suite runs from a shared temp directory, so two builds of this binary on one
-/// machine -- two CI jobs, or a developer beside one -- would otherwise pick the same
-/// path, and one process's remove_all() would delete a directory another was reading.
-/// A steady-clock reading separates concurrent processes; the counter separates two
-/// guards within one process, which a timestamp alone can collide on. Deliberately not
-/// getpid(): <unistd.h> does not exist on Windows, and this suite compiles there.
+/// A value no other live ScopedCacheDir shares, in this process or any other: a
+/// steady-clock reading separates concurrent processes, the counter separates two
+/// guards within one process. Not getpid(): <unistd.h> does not exist on Windows.
 inline std::string uniqueSuffix()
 {
     static std::atomic<uint64_t> s_counter{0};
@@ -598,9 +593,8 @@ inline std::string uniqueSuffix()
            + std::to_string(s_counter.fetch_add(1));
 }
 
-/// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime and
-/// restores the caller's value after, so the on-disk cases never read or write a real user
-/// cache and never observe each other's shards.
+/// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime
+/// and restores the caller's value after.
 class ScopedCacheDir
 {
 public:
@@ -667,9 +661,8 @@ WinnerRecord recordFor(uint8_t kernel, double timeMs)
     return WinnerRecord{entryFor(definitionFor(kernel), timeMs)};
 }
 
-/// Proves the codec plus the read-once path across two manager lifetimes. This is a
-/// same-process check: the genuine cross-PROCESS acceptance criterion (D4) is the paired
-/// ctest invocation in the integration phase, not this test.
+/// Proves the codec plus the read-once path across two manager lifetimes; the
+/// cross-process case is a separate ctest-driven pair below.
 TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroughTheShard)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -706,8 +699,7 @@ TEST(TestIngestorWinnerCache, TheArchShardComponentCarriesNoColon)
     EXPECT_EQ(archComponent, "gfx942");
     EXPECT_EQ(archComponent.find(':'), std::string::npos);
 
-    // The engine component is sanitized for the same reason: a conforming scoped name
-    // always contains a colon.
+    // The engine component is sanitized too: a conforming scoped name contains a colon.
     const auto engineComponent = path.parent_path().parent_path().filename().string();
     EXPECT_EQ(engineComponent.find(':'), std::string::npos);
 }
@@ -729,12 +721,10 @@ TEST(TestIngestorWinnerCacheStateManager, TwoDevicesOnOneArchShareAShardAndStayD
         manager->recordWinner(keyFor(graph, large), recordFor(0x22, 2.0));
     }
 
-    // One shard file, because both devices strip to the same base arch.
     const auto path = winnerCacheShardPath("test:CoarseShard", small.gcnArchName);
     ASSERT_EQ(path, winnerCacheShardPath("test:CoarseShard", large.gcnArchName));
     ASSERT_TRUE(std::filesystem::exists(path));
 
-    // Two records inside it, and each device is served its own.
     const auto reader = makeNamedStateManager("test:CoarseShard");
     const auto forSmall = reader->winnerFor(keyFor(graph, small));
     const auto forLarge = reader->winnerFor(keyFor(graph, large));
@@ -800,9 +790,8 @@ TEST(TestIngestorWinnerCacheStateManager, AMalformedLineCostsOnlyItself)
     EXPECT_EQ(served->front().kernelId, testId(0x31));
 }
 
-/// The opt-out that keeps every other test in this suite off the filesystem: a manager
-/// built without an engine name has no shard path to compose, so it neither reads nor
-/// writes even with a perfectly writable cache directory configured.
+/// A manager built without an engine name has no shard path to compose, so it neither
+/// reads nor writes even with a writable cache directory configured.
 TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -814,7 +803,6 @@ TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
     const auto manager = makeStateManager();
     manager->recordWinner(key, recordFor(0x41, 1.0));
 
-    // Served from memory, so the recording itself worked.
     EXPECT_TRUE(manager->winnerFor(key).has_value());
 
     EXPECT_TRUE(std::filesystem::is_empty(cacheDir.path()))
@@ -822,26 +810,14 @@ TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
            "test manager would then share one shard";
 }
 
-/// D4's cross-process acceptance criterion, in two halves.
+/// The pair below is driven by ctest, not gtest: the writer runs in one process, exits,
+/// and the reader runs in a second process against the same shard. Both are DISABLED_ by
+/// default so a plain developer run skips them; ctest passes
+/// --gtest_also_run_disabled_tests.
 ///
-/// The pair is driven by ctest, not by gtest: the writer runs in one process, exits, and
-/// the reader runs in a second process against the same shard, sequenced by
-/// FIXTURES_SETUP/FIXTURES_REQUIRED (see this suite's registration in
-/// plugin_sdk/tests/CMakeLists.txt). Neither half is meaningful alone, and running them
-/// in one process would prove nothing the same-process case above does not already --
-/// which is exactly why the criterion is written this way.
-///
-/// HIPDNN_CACHE_DIR is supplied by the ctest registration, shared between the two
-/// invocations, so neither half sets it. Both are DISABLED_ by default so a plain
-/// developer run of the suite skips them; ctest passes --gtest_also_run_disabled_tests.
-/// Check 1 must reach the shard when this process has recorded nothing.
-///
-/// The guard in front of it is an optimisation -- building a WinnerKey folds the whole
-/// graph buffer -- but it cannot be "is the in-memory cache empty", because after this
-/// change an empty in-memory cache no longer means there is nothing to find: the record
-/// may be on disk and simply not read yet. Verified by mutation: reverting that guard to
-/// a winnerCacheSize() check makes only this test fail, and every other case in this
-/// suite still passes, because they all record in-process first.
+/// This test pins that `mightHaveWinnerFor()` (not a bare in-memory-empty check) is what
+/// lets a cold manager reach the shard: reverting it to a `winnerCacheSize() == 0` guard
+/// makes only this test fail.
 TEST(TestIngestorWinnerCacheStateManager, AColdManagerOrdersACatalogFromTheShardAlone)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -886,8 +862,8 @@ TEST(TestIngestorWinnerCacheStateManager, AColdManagerOrdersACatalogFromTheShard
 
 constexpr const char* CROSS_PROCESS_ENGINE = "test:CrossProcess";
 
-/// The fixed key both halves derive, so the reader looks for exactly what the writer laid
-/// down without either side persisting anything but the shard itself.
+/// The fixed key both halves derive, so the reader looks for exactly what the writer
+/// laid down.
 WinnerKey crossProcessKey()
 {
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
@@ -916,8 +892,7 @@ TEST(TestIngestorWinnerCacheCrossProcess, DISABLED_ReaderServesTheRecordTheWrite
     ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_CACHE_DIR").empty())
         << "the ctest registration must supply a shared cache directory";
 
-    // Nothing in this process ever recorded anything: a hit here can only have come from
-    // the file the writer process left behind.
+    // Nothing recorded in this process, so a hit can only come from the writer's file.
     const auto manager = makeNamedStateManager(CROSS_PROCESS_ENGINE);
     const auto served = manager->winnerFor(crossProcessKey());
 

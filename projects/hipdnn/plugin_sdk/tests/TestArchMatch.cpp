@@ -89,15 +89,13 @@ TEST(TestPluginArchMatchPrefix, StripArchFeaturesOnTrailingColonYieldsBaseId)
 
 TEST(TestPluginArchMatchPrefix, StripArchFeaturesLeavesLlvmGenericTargetUnchanged)
 {
-    // "gfx9-4-generic" is an LLVM generic target name, not a feature-suffixed
-    // arch: it contains no ':', so it survives untouched.
+    // No ':', so it survives untouched.
     EXPECT_EQ(stripArchFeatures("gfx9-4-generic"), "gfx9-4-generic");
 }
 
 TEST(TestPluginArchMatchPrefix, StripArchFeaturesResultNeverContainsColon)
 {
-    // The result becomes a directory-path component; ':' is illegal in
-    // Windows filenames, so the extractor must never leave one behind.
+    // ':' is illegal in Windows filenames since the result becomes a path component.
     EXPECT_EQ(stripArchFeatures("gfx942:sramecc+:xnack-").find(':'), std::string_view::npos);
 }
 
