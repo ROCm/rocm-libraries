@@ -35,7 +35,8 @@ KernelDefinition makeKernelWithMetadata(MetadataValues metadata)
             DISPATCH_ID,
             KernelSource{KernelSourceKind::EMBEDDED_SOURCE, "Test.cpp", "TestKernel"},
             std::move(metadata),
-            /*priority=*/0};
+            /*priority=*/0,
+            /*arch=*/{}};
 }
 
 TEST(TestIngestorKernelDefinition, TryGetMetadataReturnsTheValueWhenPresent)

@@ -152,6 +152,9 @@ void IntegrationBundleVerificationHarness::runComparison()
     case VerificationMode::AUTO:
         runAutoMode();
         return;
+    case VerificationMode::GOLDEN_CHECK:
+        runGoldenCheckMode();
+        return;
     default:
         FAIL() << "Unknown verification mode";
         return;
@@ -293,6 +296,37 @@ void IntegrationBundleVerificationHarness::runAutoMode()
     }
 }
 
+void IntegrationBundleVerificationHarness::runGoldenCheckMode()
+{
+    if(!_bundle->hasGoldenOutputs)
+    {
+        skipUnverifiable("no golden data (verification-mode=golden-check)");
+        return;
+    }
+
+    OutputTensors cpuOutputs;
+    const RefRunResult result
+        = runReferenceCapturingOutputs(ReferenceExecutorType::CPU, cpuOutputs);
+    switch(result.status)
+    {
+    case RefStatus::CAPABILITY_MISS:
+        skipUnverifiable("CPU ref cannot run this op (golden-check): " + result.message);
+        return;
+    case RefStatus::RUNTIME_ERROR:
+        recordRefError("CPU ref errored (golden-check): " + result.message);
+        FAIL() << "CPU ref errored (golden-check): " << result.message;
+        return;
+    case RefStatus::RAN:
+        compareEach(cpuOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
+            return *_bundle->tensors->at(uid);
+        });
+        return;
+    default:
+        FAIL() << "Unknown RefStatus";
+        return;
+    }
+}
+
 // ---- inputs ----------------------------------------------------------------
 
 bool IntegrationBundleVerificationHarness::ensureInputsAvailable()
@@ -328,19 +362,6 @@ bool IntegrationBundleVerificationHarness::fillBundleInputs()
     if(!fillResult.filled)
     {
         skipUnverifiable(fillResult.reason);
-        return false;
-    }
-
-    auto missing = _inputFillRecipes.unfilled(leafInputUids);
-    if(!missing.empty())
-    {
-        std::ostringstream os;
-        os << "cannot fill:";
-        for(const int64_t uid : missing)
-        {
-            os << " uid=" << uid;
-        }
-        skipUnverifiable(os.str());
         return false;
     }
 
