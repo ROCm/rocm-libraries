@@ -66,13 +66,14 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: ROCm/rocm-systems
-          # rocm-systems develop HEAD (2026-08-19). Bumped from aa2fd80d (2026-08-04)
-          # to pick up ~76 rocjitsu commits incl. gfx1250 B0->A0 hotswap + hipblaslt
-          # fixes. Pin must stay >= #9262 (0c7288aef8) which introduced the
-          # hsa_hotswap_rocjitsu CMake target the build script requires; all 3 build
-          # targets (rocjitsu_bin, rocjitsu_shared, hsa_hotswap_rocjitsu) verified
-          # present at this SHA.
-          ref: 2ea54475d0b7f2e592a717f8bcc64787bd947385
+          # rocm-systems develop HEAD (2026-08-21). Bumped from 2ea54475 (2026-08-19)
+          # to pick up ~22 more rocjitsu commits incl. gfx1250 DS_LOAD_TR8_B64
+          # transpose/swmmac fixes, VOP+WMMA + block-scale wmma/mfma semantics, and
+          # B0 simulation revision. Pin must stay >= #9262 (0c7288aef8) which
+          # introduced the hsa_hotswap_rocjitsu CMake target the build script
+          # requires; all 3 build targets (rocjitsu_bin, rocjitsu_shared,
+          # hsa_hotswap_rocjitsu) verified present at this SHA.
+          ref: b4cf5bec82edede1b997fa7b1e0015a13de0235c
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
