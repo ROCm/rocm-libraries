@@ -60,3 +60,42 @@ target_link_libraries(
 
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# D4's cross-process criterion: one process writes a winner record, a SECOND process reads
+# it back. Two ctest invocations of the same binary, sequenced with
+# FIXTURES_SETUP/FIXTURES_REQUIRED, following the shape hipdnn/cmake/Tests.cmake:130-154
+# already uses. A single-process double-compute does not satisfy the criterion, and
+# MIOpen's ProcessAsync self-invocation was rejected as flaky, so this is the cheapest
+# honest form.
+#
+# Both halves are DISABLED_ in gtest so a developer running the suite by hand skips them
+# (they are meaningless individually); ctest opts in explicitly. RUN_SERIAL because they
+# share one shard file, and the shared HIPDNN_CACHE_DIR lives under the build tree so a
+# clean build starts from an empty cache.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(_disk_cache_cross_process_dir "${CMAKE_CURRENT_BINARY_DIR}/disk_cache_cross_process")
+
+    add_test(NAME DiskCacheCrossProcess_Setup
+             COMMAND ${CMAKE_COMMAND} -E rm -rf "${_disk_cache_cross_process_dir}")
+    set_tests_properties(DiskCacheCrossProcess_Setup PROPERTIES
+                         FIXTURES_SETUP DiskCacheCrossProcessClean)
+
+    add_test(NAME DiskCacheCrossProcess_Writer
+             COMMAND hipdnn_plugin_sdk_tests
+                     --gtest_also_run_disabled_tests
+                     --gtest_filter=TestIngestorWinnerCacheCrossProcess.DISABLED_WriterLeavesARecordOnDisk)
+    set_tests_properties(DiskCacheCrossProcess_Writer PROPERTIES
+                         RUN_SERIAL TRUE
+                         FIXTURES_REQUIRED DiskCacheCrossProcessClean
+                         FIXTURES_SETUP DiskCacheCrossProcessWritten
+                         ENVIRONMENT "HIPDNN_CACHE_DIR=${_disk_cache_cross_process_dir}")
+
+    add_test(NAME DiskCacheCrossProcess_Reader
+             COMMAND hipdnn_plugin_sdk_tests
+                     --gtest_also_run_disabled_tests
+                     --gtest_filter=TestIngestorWinnerCacheCrossProcess.DISABLED_ReaderServesTheRecordTheWriterLeft)
+    set_tests_properties(DiskCacheCrossProcess_Reader PROPERTIES
+                         RUN_SERIAL TRUE
+                         FIXTURES_REQUIRED "DiskCacheCrossProcessClean;DiskCacheCrossProcessWritten"
+                         ENVIRONMENT "HIPDNN_CACHE_DIR=${_disk_cache_cross_process_dir}")
+endif()
