@@ -150,6 +150,15 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
     if(HIPBLASLT_ENABLE_COVERAGE)
+        target_compile_options(
+            hipblaslt-test
+            PRIVATE
+                -g
+                -O0
+                -fprofile-instr-generate
+                -fcoverage-mapping
+        )
+        target_link_options(hipblaslt-test PRIVATE -fprofile-instr-generate)
         target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
         # For coverage testing, link against hipblaslt's object files to access internal symbols
         # This ensures we test the real library code, not stubs
