@@ -93,11 +93,13 @@ TEST(TestIngestorDeviceKey, StdHashAgreesWithTheKeysOwnHash)
     EXPECT_EQ(std::hash<DeviceKey>{}(key), static_cast<size_t>(key.hash()));
 }
 
-/// The hash narrows; the fields decide. Constructed so the two keys share a hash while
-/// describing different devices -- if `operator==` regressed to comparing the fold
-/// alone, a ranking measured on one device would be served for the other.
-TEST(TestIngestorDeviceKey, EqualHashesWithDifferentPropertiesStillCompareUnequal)
+/// The hash narrows; the fields decide. Each case forces the fold to agree and varies
+/// exactly one field, so a comparison that dropped that field would serve a ranking
+/// measured on one device for another. Varying the arch alone would not catch that:
+/// `gcnArchName` is the field a regressed comparison is likeliest to keep.
+class TestIngestorDeviceKeyCollision : public ::testing::TestWithParam<DeviceProperties>
 {
+protected:
     struct CollidingKey : DeviceKey
     {
         using DeviceKey::DeviceKey;
@@ -110,14 +112,34 @@ TEST(TestIngestorDeviceKey, EqualHashesWithDifferentPropertiesStillCompareUnequa
             return key;
         }
     };
+};
 
-    auto first = CollidingKey::with(propertiesFor("gfx942"), 0xABCD);
-    auto second = CollidingKey::with(propertiesFor("gfx950"), 0xABCD);
+TEST_P(TestIngestorDeviceKeyCollision, EqualHashesWithADifferingFieldStillCompareUnequal)
+{
+    auto baseline = CollidingKey::with(propertiesFor("gfx942"), 0xABCD);
+    auto variant = CollidingKey::with(GetParam(), 0xABCD);
 
-    ASSERT_EQ(first.hash(), second.hash()) << "the collision must actually be forced";
-    EXPECT_NE(static_cast<const DeviceKey&>(first), static_cast<const DeviceKey&>(second))
+    ASSERT_EQ(baseline.hash(), variant.hash()) << "the collision must actually be forced";
+    EXPECT_NE(static_cast<const DeviceKey&>(baseline), static_cast<const DeviceKey&>(variant))
         << "a hash collision with differing properties must resolve to a miss";
 }
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestIngestorDeviceKeyCollision,
+                         ::testing::Values(propertiesFor("gfx950"),
+                                           propertiesFor("gfx942", /*warpSize=*/32),
+                                           propertiesFor("gfx942", 64, /*computeUnits=*/228)),
+                         [](const ::testing::TestParamInfo<DeviceProperties>& info) {
+                             switch(info.index)
+                             {
+                             case 0:
+                                 return "ByArch";
+                             case 1:
+                                 return "ByWarpSize";
+                             default:
+                                 return "ByComputeUnits";
+                             }
+                         });
 
 } // namespace
 } // namespace hipdnn_plugin_sdk::ingestor::testing

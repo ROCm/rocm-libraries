@@ -639,6 +639,45 @@ TEST(TestIngestorGraphContentKey, StdHashAgreesWithTheKeysOwnHash)
     EXPECT_EQ(std::hash<GraphContentKey>{}(key), static_cast<size_t>(key.hash()));
 }
 
+/// A uid the domain cannot resolve folds its own value, tagged as unresolved. Folding
+/// every dangling reference to one shared sentinel instead would make these two graphs
+/// -- which point at different absent tensors -- compare equal and share a kernel.
+/// The generator test pins the emitted source; this pins the compiled behaviour.
+TEST(TestIngestorGraphContentKey, DanglingReferencesToDifferentUidsCompareUnequal)
+{
+    Spec first;
+    first.tensors
+        = {ContentCarryingTestGraph::TensorSpec{1}, ContentCarryingTestGraph::TensorSpec{2}};
+    first.tensors[0].raggedOffsetTensorUid = 900;
+
+    Spec second = first;
+    second.tensors[0].raggedOffsetTensorUid = 901;
+
+    const ContentCarryingTestGraph firstGraph{first};
+    const ContentCarryingTestGraph secondGraph{second};
+
+    EXPECT_NE(keyFor(firstGraph), keyFor(secondGraph));
+}
+
+/// An unresolved fold carries the raw uid, a resolved one carries an ordinal, and the
+/// two spaces must not overlap: uid 1 resolves to ordinal 0 here, so a dangling uid 0
+/// would collide with it if the resolved tag were dropped.
+TEST(TestIngestorGraphContentKey, ADanglingReferenceDoesNotAliasAResolvedOrdinal)
+{
+    Spec resolved;
+    resolved.tensors
+        = {ContentCarryingTestGraph::TensorSpec{1}, ContentCarryingTestGraph::TensorSpec{2}};
+    resolved.tensors[1].raggedOffsetTensorUid = 1;
+
+    Spec dangling = resolved;
+    dangling.tensors[1].raggedOffsetTensorUid = 0;
+
+    const ContentCarryingTestGraph resolvedGraph{resolved};
+    const ContentCarryingTestGraph danglingGraph{dangling};
+
+    EXPECT_NE(keyFor(resolvedGraph), keyFor(danglingGraph));
+}
+
 } // namespace
 } // namespace hipdnn_plugin_sdk::ingestor::testing
 
