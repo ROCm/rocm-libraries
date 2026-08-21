@@ -515,7 +515,7 @@ int main(int argc, char** argv) noexcept
                 for(auto& snapshot : snapshots)
                 {
                     snapshot["provenance"] = provenance;
-                    std::cout << "##support-snapshot:" << snapshot.dump() << std::endl;
+                    std::cout << "##support-snapshot:" << snapshot.dump() << '\n';
                 }
 
                 if(hipdnn_integration_tests::TestConfig::get().hasSupportObservationsDir())
@@ -529,7 +529,12 @@ int main(int argc, char** argv) noexcept
                         {
                             const auto arch = snapshot["target"]["arch"].get<std::string>();
                             const auto platform = snapshot["target"]["platform"].get<std::string>();
-                            const auto filename = arch + "_" + platform + ".snapshot.json";
+                            std::string filename;
+                            filename.reserve(arch.size() + 1 + platform.size() + 14);
+                            filename += arch;
+                            filename += '_';
+                            filename += platform;
+                            filename += ".snapshot.json";
                             std::ofstream out(outDir / filename);
                             if(!out.good())
                             {
