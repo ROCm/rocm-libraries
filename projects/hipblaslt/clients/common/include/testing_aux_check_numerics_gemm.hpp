@@ -49,7 +49,7 @@
 #include <vector>
 
 // MSVC CRT lacks POSIX setenv/unsetenv. Mirror the existing _putenv_s shim
-// pattern from shared/origami/tests/include/common.hpp:37 and
+// pattern from shared/origami/origami-cpp/tests/include/common.hpp:37 and
 // projects/hipblaslt/clients/common/src/utility.cpp:299 so existing
 // setenv/unsetenv call sites below stay portable. _putenv_s with an empty
 // value removes the variable on Windows, matching POSIX unsetenv semantics
