@@ -414,6 +414,73 @@ class CoalescedTileLoader:
                     v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
                     self._store_tile(b, smem_dst, row, col, v)
 
+    def fetch(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        descriptor: DescriptorFn,
+        rsrc: Optional[Value] = None,
+        ptr: Optional[Value] = None,
+    ) -> list:
+        """Fetch one tile from DRAM into registers; return opaque token list.
+
+        The returned list is passed unchanged to :meth:`store_fetched` to
+        write the registers into LDS.  Separating fetch from store lets the
+        caller overlap the DRAM fetch with computation (e.g. MFMA) between
+        the two calls — the CK Tile wavelet pattern.
+
+        Only ``use_buffer_rsrc=True`` is supported (the wavelet path never
+        uses the raw-ptr path).
+        """
+        if rsrc is None:
+            raise ValueError("CoalescedTileLoader.fetch: rsrc is required")
+
+        dtype = self.elem_dtype
+        elem_bytes = _ELEM_BYTES.get(dtype.name)
+        if elem_bytes is None:
+            raise ValueError(
+                f"CoalescedTileLoader: unsupported elem_dtype {dtype.name!r}"
+            )
+
+        c_threads = b.const_i32(self.block_size)
+        c_load_vec = b.const_i32(self.load_vec)
+        c_cols_per_vec = b.const_i32(self.cols_per_vec)
+        c_elem_bytes = b.const_i32(elem_bytes)
+        c0 = b.const_i32(0)
+        c_oob = b.const_i32(self.oob_sentinel)
+
+        # Each entry is (row, col, reg_value) so store_fetched can reconstruct
+        # the LDS address without re-running the descriptor.
+        fetched = []
+        for e in range(self.vecs_per_thread):
+            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            row = b.div(vec_idx, c_cols_per_vec)
+            col_v = b.mod(vec_idx, c_cols_per_vec)
+            col = b.mul(col_v, c_load_vec) if self.load_vec > 1 else col_v
+
+            off_elems, valid = descriptor(b, row, col)
+            off_bytes = b.mul(off_elems, c_elem_bytes)
+            safe = b.select(valid, off_bytes, c_oob) if valid is not None else off_bytes
+
+            if self.load_vec == 1:
+                v = b.buffer_load(rsrc, safe, c0, dtype)
+            else:
+                v = b.buffer_load_vN(rsrc, safe, c0, dtype, self.load_vec)
+            fetched.append((row, col, v))
+        return fetched
+
+    def store_fetched(
+        self,
+        b: IRBuilder,
+        *,
+        smem_dst: Value,
+        fetched: list,
+    ) -> None:
+        """Store a register tile (returned by :meth:`fetch`) into LDS."""
+        for row, col, v in fetched:
+            b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
+
 
 # ---------------------------------------------------------------------
 # Async DRAM -> LDS loader (runbook §6.3, the compv4 lever)
