@@ -91,13 +91,9 @@ from ci_utils import append_step_summary, set_github_output
 # than being silently ignored. Delete this entry, the `ci:demo-label-flag`
 # repository label, and the demo job in therock-multi-arch-ci.yml when the
 # demonstration is done.
-# TEMPORARY DELIBERATE SYNTAX ERROR - do not merge, revert immediately after
-# the run. The closing brace of the dict below is missing, so this module fails
-# to parse and the `label_flags` job exits non-zero before producing any output.
-# Everything downstream then resolves to "skipped", which is the exact shape the
-# summary job has to report as failed rather than green.
 LABEL_GATED_THEROCK_FLAGS: dict[str, list[str]] = {
     "ci:demo-label-flag": ["-DTHEROCK_FLAG_MIOPEN_ENABLE_HIPDNN_WRAPPER=ON"],
+}
 
 # Deliberately narrow, and it carries the whole safety argument for splicing
 # these tokens onto a shell command line in another repository:
