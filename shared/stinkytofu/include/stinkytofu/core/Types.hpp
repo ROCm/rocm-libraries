@@ -90,7 +90,8 @@ struct PassFeatureConfig {
         int mergeBarrierThreshold = 0;
         /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
         /// after the scheduler and plant SCC-clobbering handshakes around workgroup
-        /// barriers. Enables the scheduler's cluster-barrier SCC rule.
+        /// barriers. Enables the scheduler's cluster-barrier SCC rule and the
+        /// CDNA5ReadyQueue paths that enforce it (see ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
     };
 
