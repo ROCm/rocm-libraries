@@ -589,8 +589,7 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
     (base / "__init__.py").write_text("", encoding="utf-8")
     (base / "sub" / "__init__.py").write_text("", encoding="utf-8")
     (base / "sub" / "mod.py").write_text(
-        textwrap.dedent(
-            """
+        textwrap.dedent("""
             import dataclasses
 
             @dataclasses.dataclass
@@ -599,8 +598,7 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
 
             def build_stub(spec: StubSpec, *, arch="gfx950"):
                 return ("kernel", spec, arch)
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     if str(tmp_path) not in sys.path:

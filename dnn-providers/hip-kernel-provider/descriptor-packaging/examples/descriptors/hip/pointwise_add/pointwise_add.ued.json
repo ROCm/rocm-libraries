@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "ued-example-pointwise-add",
+  "name": "hkp_example:pointwise_add",
+  "heuristic": "uhd-example-pointwise-add",
+  "metadata": "kmd-example-pointwise-add"
+}

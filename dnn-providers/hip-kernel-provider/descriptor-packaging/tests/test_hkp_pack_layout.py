@@ -433,3 +433,85 @@ def test_failure_names_every_failed_arch(
     message = str(exc.value)
     assert "gfx942" in message and "gfx950" in message
     assert "2 of 2" in message
+
+
+# --- E. The shipped example tree -------------------------------------------
+EXAMPLE_ROOT = Path(__file__).resolve().parent.parent / "examples" / "descriptors"
+
+
+def test_example_tree_packs_both_producers(
+    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+):
+    """The in-repo example tree must actually drive both producers end to end.
+
+    This is the only thing in the repository that exercises the production path,
+    which is how a silent-empty install and a silent descriptor drop both
+    survived unnoticed. Packing the real committed tree -- not a fixture -- is
+    what keeps it honest: if the example rots, this fails.
+    """
+    results = run_pipeline(
+        source_root=EXAMPLE_ROOT,
+        arches=[ARCH],
+        out_root=tmp_path / "out",
+        hipcc=hipcc,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+    assert not results[ARCH].skipped
+
+    out = tmp_path / "out" / ARCH
+    kpack = out / "kpack" / f"hip_kernel_provider_{ARCH}.kpack"
+    assert kpack.is_file()
+    assert kpack.stat().st_size > 0, "an empty kpack is finding 3.9 reappearing"
+
+    # Authored subpaths are preserved verbatim into the shipped tree.
+    assert (out / "hip" / "pointwise_add" / "pointwise_add.kdp.json").is_file()
+    assert (
+        out / "rocKE" / "gfx942_tiled_attention" / "tiled_attention.kdp.json"
+    ).is_file()
+
+    # Both producers contributed, asserted via provenance rather than filename.
+    kinds = set()
+    for kdp in out.rglob("*.kdp.json"):
+        for ukd in _read(kdp)["kernelDescriptors"]:
+            if isinstance(ukd, str):
+                continue
+            kinds.add(ukd["provenance"]["origin_kind"])
+    assert kinds == {"hip", "rocke"}
+
+
+def test_example_tree_keeps_both_shared_filenames(
+    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+):
+    """Standing regression test for review 2.1.
+
+    The example tree deliberately reuses `shared.umd.json` across its two child
+    folders. A flat packer drops one silently; path preservation keeps both.
+    """
+    run_pipeline(
+        source_root=EXAMPLE_ROOT,
+        arches=[ARCH],
+        out_root=tmp_path / "out",
+        hipcc=hipcc,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+
+    shared = sorted((tmp_path / "out" / ARCH).rglob("shared.umd.json"))
+    assert len(shared) == 2, "both same-named descriptors must survive"
+    assert len({_read(p)["id"] for p in shared}) == 2
+
+
+@pytest.mark.quick
+def test_example_tree_is_self_consistent():
+    """Load-time validation of the committed tree, no toolchain required.
+
+    Catches a broken example on any box, including one with neither hipcc nor
+    comgr, so the tree cannot rot silently between full runs.
+    """
+    flat = load_flat_input(EXAMPLE_ROOT)
+
+    ids = [d.id for d in flat.descriptors]
+    assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
+    rel_dirs = {d.rel_dir.as_posix() for d in flat.kdps()}
+    assert rel_dirs == {"hip/pointwise_add", "rocKE/gfx942_tiled_attention"}

@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "umd-example-tiled-attention",
+  "name": "Example tiled-attention matcher",
+  "nodes": ["attention"],
+  "criteria": { "op": "attention" }
+}

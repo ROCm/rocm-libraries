@@ -684,6 +684,24 @@ function(hkp_register_tests rocm_kpack_dir hipcc hip_enabled rocke_comgr_lib)
             "hkp: the hip production producer is enabled but hipcc was not found.")
     endif()
 
+    # These were read from the environment (conftest.py:71,109) but declared
+    # nowhere, so the only way to arm the CI gate was an env var nothing
+    # documented. Declaring them as cache BOOLs makes the gate discoverable and
+    # settable with -D, symmetric with every other knob here.
+    #
+    # What they buy is durability, not coverage: the comgr and hipcc tiers pass
+    # today because the toolchains happen to be present. Their fixtures SKIP
+    # when a probe fails, so a ROCm wheel bump that moves or drops comgr would
+    # turn the tier green-by-skipping with nobody told. ON converts that skip
+    # into a hard failure.
+    set(HIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC OFF CACHE BOOL
+        "Fail (rather than skip) the hipcc-dependent packaging tests when hipcc \
+is unavailable. Set ON in CI so the tier cannot silently stop running.")
+    set(HIPKERNELPROVIDER_KPACK_REQUIRE_COMGR OFF CACHE BOOL
+        "Fail (rather than skip) the comgr-dependent rocKE packaging tests when \
+rocke/kernels or libamd_comgr are unavailable. Set ON in CI so the tier cannot \
+silently stop running.")
+
     # `python` resolves from PATH at test time; the ENVIRONMENT paths are
     # configure-time absolutes, valid because these entries run only in the
     # build tree on the configuring machine.
