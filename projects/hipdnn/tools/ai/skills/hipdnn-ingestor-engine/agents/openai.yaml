@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN Ingestor Engine"
+  short_description: "Generate and validate a kernel-ingestor descriptor bundle"
+  default_prompt: "Use hipdnn-ingestor-engine to turn a new kernel into a validated hipDNN generic-kernel-ingestor descriptor bundle (create flow), or to add a pack/kernel to an existing engine's descriptors (extend flow). Ask for the kernel sources first, infer as much as possible, confirm the rest in one batch, run the generator then the validator, and report what was and was not proven."
