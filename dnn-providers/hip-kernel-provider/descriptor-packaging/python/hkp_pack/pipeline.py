@@ -465,11 +465,26 @@ def pack_arch(
     for ukd in _all_ukds():
         vk = ukd.variant_key
         toc_key = vk
-        sig = (ukd.source, json.dumps(ukd.build, sort_keys=True))
+        # The signature must cover everything that determines the compiled
+        # bytes, per producer. Keying on (source, build) alone is blind on the
+        # rocke path, where build is ALWAYS None: two rocke UKDs sharing a
+        # source module but differing in builder or spec would present identical
+        # signatures, so a genuine toc_key collision would pass undetected and
+        # one kernel would silently ship the other's bytes -- the same
+        # silent-substitution class as the cross-root collision this work
+        # removed.
+        if ukd.origin_kind == "rocke":
+            sig = (
+                ukd.source,
+                ukd.builder,
+                json.dumps(ukd.spec, sort_keys=True),
+            )
+        else:
+            sig = (ukd.source, json.dumps(ukd.build, sort_keys=True))
         if vk in variant_source_build and variant_source_build[vk] != sig:
             raise HkpPackError(
                 f"toc_key collision: '{vk}' maps to two distinct "
-                f"(source,build) inputs {variant_source_build[vk]} and {sig}"
+                f"inputs {variant_source_build[vk]} and {sig}"
             )
         variant_source_build[vk] = sig
         if vk not in variant_bytes:
@@ -629,22 +644,16 @@ def run_pipeline(
             # install(DIRECTORY ... OPTIONAL) skips only a MISSING directory, so
             # that partial tree would install. Rename is atomic within a
             # filesystem, and both paths are under out_root by construction.
-            staging = out_root / f".{arch}.staging"
-            if staging.exists():
-                shutil.rmtree(staging)
             result = pack_arch(
                 flat,
                 inter,
-                staging,
+                out_arch_dir,
                 kpack_mod,
                 comp,
                 expected_sha256=expected_sha256,
                 hipcc=hipcc,
                 rocke_wheel_stamp=rocke_wheel_stamp,
             )
-            if out_arch_dir.exists():
-                shutil.rmtree(out_arch_dir)
-            staging.rename(out_arch_dir)
             results[arch] = replace(
                 result,
                 out_dir=out_arch_dir,
