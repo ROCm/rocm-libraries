@@ -14,6 +14,7 @@ set(HKP_CMAKE_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(HKP_PKG_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
 set(HKP_PYTHON_ROOT "${HKP_PKG_DIR}/python")
 set(HKP_TOOL "${HKP_PKG_DIR}/tools/hkp_pack.py")
+set(HKP_WHEEL_DIGEST_TOOL "${HKP_PKG_DIR}/tools/hkp_wheel_digest.py")
 set(HKP_FIXTURES "${HKP_PKG_DIR}/tests/fixtures")
 
 # The authored hip-form source root the integration suite's packaged artifact is built
@@ -121,7 +122,8 @@ endfunction()
 # ---------------------------------------------------------------------------
 # hkp_wire_production(SOURCE_ROOT <dir> ENABLE_ROCKE <bool> ARCHES <list>
 #                     HIPCC <path> ROCM_KPACK_DIR <dir> INSTALL_BASE <dir>
-#                     ROCKE_INTERP <path> ROCKE_COMGR_LIB <path>)
+#                     ROCKE_INTERP <path> ROCKE_COMGR_LIB <path>
+#                     ROCKE_WHEEL_STAMP <path>)
 #   Wire the production compile -> prune -> pack -> install DAG against the ONE
 #   authored source root. The root is walked recursively; child folders under it
 #   scope the content (hip/, rocKE/, per-integration folders) and each
@@ -134,13 +136,17 @@ endfunction()
 #   a location only: CMake cannot know which producers a tree needs without
 #   reading the descriptors. When ON the tool runs under ROCKE_INTERP
 #   (wheel-provisioned so `import rocke`/`kernels` resolve) and ROCKE_COMGR_LIB,
-#   if set, is forwarded to the tool environment.
+#   if set, is forwarded to the tool environment. ROCKE_WHEEL_STAMP is the wheel
+#   content digest: the pack step depends on it so that editing a kernel under
+#   rocke/library rebuilds the wheel, changes the digest, and RESTAGES the
+#   packaged artifacts. Without that edge the kpacks would keep shipping kernels
+#   compiled from stale wheel contents.
 #
 #   Empty ARCHES wires nothing.
 # ---------------------------------------------------------------------------
 function(hkp_wire_production)
     set(_one SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR INSTALL_BASE
-        ROCKE_INTERP ROCKE_COMGR_LIB)
+        ROCKE_INTERP ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
     if(NOT ARG_ARCHES)
@@ -173,9 +179,11 @@ function(hkp_wire_production)
     # out to hipcc and are interpreter-agnostic).
     set(_interp "${Python3_EXECUTABLE}")
     set(_interp_dep "")
+    set(_wheel_dep "")
     if(ARG_ENABLE_ROCKE)
         set(_interp "${ARG_ROCKE_INTERP}")
         set(_interp_dep "${ARG_ROCKE_INTERP}")
+        set(_wheel_dep "${ARG_ROCKE_WHEEL_STAMP}")
     endif()
 
     # ROCKE_COMGR_LIB overrides a shadowed System32 amd_comgr on Windows; forward
@@ -198,6 +206,7 @@ function(hkp_wire_production)
                 --rocm-kpack-dir "${ARG_ROCM_KPACK_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources} ${_interp_dep}
+                ${_wheel_dep}
         COMMENT "hkp: compiling + pruning + packing descriptors for ${ARG_ARCHES}"
         VERBATIM)
 
@@ -307,14 +316,33 @@ function(hkp_wire_demo source_root arches hipcc kpack_python stage_root)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_probe_rocke_importable(<out_ok>)
-#   Configure-time gate for a rocke production root: run the base interpreter
-#   with the in-tree rocke platform + library sources on PYTHONPATH and check
-#   that `import rocke, kernels` succeeds. A configure probe cannot use the
-#   build-time-only wheel interpreter, so it validates the source tree (the same
-#   trees the wheels are built from); a wheel-install failure surfaces at build.
+# hkp_probe_comgr_resolvable(<out_ok> <out_detail>)
+#   Configure-time gate for the rocKE producer, scoped to what is knowable at
+#   configure time.
+#
+#   An earlier version imported `rocke, kernels` from the SOURCE tree under the
+#   base interpreter. That validated a different mechanism than the build uses
+#   (the build imports from wheels installed in the hkp venv), so it could pass
+#   and the build then fail. The import check now runs where it belongs -- in
+#   the provisioned venv, as the last step of hkp_rocke_wheel_python_interp --
+#   because neither the venv nor the wheels exist until the build runs.
+#
+#   Scope caveat, measured: rocKE treats ROCKE_COMGR_LIB as a *candidate*, not
+#   an assertion (`runtime/comgr.py:66` -- `_candidate_lib_paths` iterates and
+#   the first loadable path wins). A bogus override therefore falls through to
+#   the system comgr and this probe still reports success. That is rocKE's
+#   resolution policy, not something to paper over here, and the probe's actual
+#   question -- "can this machine lower a kernel at all" -- is still answered
+#   correctly. Provenance (Phase 5.1) records the comgr that was really used,
+#   which is the right place to catch a wrong-but-loadable library.
+#
+#   What IS knowable at configure time is whether comgr can be resolved at all,
+#   and that is the common misconfiguration. Probing it here fails fast with a
+#   readable message instead of deep in a build. The probe reads the resolver
+#   from the source tree deliberately: it is asking about the machine's comgr,
+#   not about the wheels.
 # ---------------------------------------------------------------------------
-function(hkp_probe_rocke_importable out_ok)
+function(hkp_probe_comgr_resolvable out_ok out_detail)
     set(_rocke_root "${HKP_PKG_DIR}/../rocke")
     if(WIN32)
         set(_sep ";")
@@ -324,26 +352,101 @@ function(hkp_probe_rocke_importable out_ok)
     set(_pp "${_rocke_root}/platform/python${_sep}${_rocke_root}/library")
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${_pp}"
-                "${Python3_EXECUTABLE}" -c "import rocke, kernels"
+                "${Python3_EXECUTABLE}" -c
+                "from rocke.runtime import comgr; comgr._resolve_lib()"
         RESULT_VARIABLE _rc
-        OUTPUT_QUIET ERROR_QUIET)
+        OUTPUT_VARIABLE _out
+        ERROR_VARIABLE _err)
     if(_rc EQUAL 0)
         set(${out_ok} TRUE PARENT_SCOPE)
+        set(${out_detail} "" PARENT_SCOPE)
     else()
         set(${out_ok} FALSE PARENT_SCOPE)
+        string(STRIP "${_err}${_out}" _detail)
+        set(${out_detail} "${_detail}" PARENT_SCOPE)
     endif()
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_rocke_wheel_python_interp(<out_interp>)
+# hkp_rocke_wheel_stamp(<out_stamp>)
+#   Maintain a content digest of the rocke wheels, rewritten ONLY when the
+#   wheels' bytes change.
+#
+#   ROCKE_WHEEL_VERSION is pinned at 0.1.0 and never bumps, so the wheel
+#   filenames are constant and `pip wheel` rewrites both files every build.
+#   Keying the venv and the pack step on wheel mtime would therefore recompile
+#   every kernel for every arch on every build, even when the wheels are
+#   byte-identical. Keying on this stamp instead means a rebuild that produces
+#   identical wheels leaves the stamp's mtime untouched, and Ninja's restat
+#   (which CMake emits for add_custom_command OUTPUT edges) prunes everything
+#   downstream.
+#
+#   Declared as BYPRODUCTS rather than OUTPUT precisely because the script may
+#   legitimately not write it; an OUTPUT that the command sometimes leaves alone
+#   makes Ninja rerun the edge every build.
+# ---------------------------------------------------------------------------
+function(hkp_rocke_wheel_stamp out_stamp)
+    set(_stamp "${CMAKE_CURRENT_BINARY_DIR}/hkp-rocke-wheels.sha256")
+    set(_platform_wheel
+        "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
+    set(_library_wheel
+        "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
+
+    add_custom_target(hkp_rocke_wheel_digest ALL
+        BYPRODUCTS "${_stamp}"
+        COMMAND "${Python3_EXECUTABLE}" "${HKP_WHEEL_DIGEST_TOOL}"
+                --stamp "${_stamp}"
+                --wheel "${_platform_wheel}"
+                --wheel "${_library_wheel}"
+        DEPENDS "${_platform_wheel}" "${_library_wheel}"
+                "${HKP_WHEEL_DIGEST_TOOL}"
+        COMMENT "hkp: digesting rocke wheels"
+        VERBATIM)
+
+    set(${out_stamp} "${_stamp}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_rocke_wheel_python_interp(<out_interp> <wheel_stamp>)
 #   Provision a build-local interpreter carrying the rocke + rocke_library
 #   wheels (built by the rocke-wheels target, which requires
 #   HIPKERNELPROVIDER_ENABLE_ROCKE). The production tool imports rocke/kernels
 #   from these installed wheels rather than the editable dev venv. The venv
 #   interpreter is an add_custom_command OUTPUT so the production command can
 #   depend on it for build ordering.
+#
+#   The venv is HERMETIC:
+#     - no --system-site-packages: the dev venv inherits it to pick up the
+#       system ROCm torch, but torch is not a build dependency. Inheriting the
+#       system environment is how a build silently starts depending on whatever
+#       happens to be installed on the machine.
+#     - no `pip install --upgrade pip`: unconditional network access on every
+#       provisioning run, to install two local files.
+#     - --no-index: hermeticity enforced by the build rather than assumed.
+#     - --no-deps: rocke declares numpy>=1.24 and rocke-library declares rocke.
+#       Verified that the whole build path -- import rocke, import kernels,
+#       build_attention_dense, and the comgr entry rocke.helpers.compile_kernel
+#       -- works with neither installed; numpy is imported only by examples/,
+#       heuristics/, benchmark/ and runtime/, which lowering never touches. The
+#       dependency goes deliberately unsatisfied: nothing vendored, nothing
+#       fetched. Should a future kernel import numpy at build time, the failure
+#       is a loud ImportError naming the module rather than a silent pull from
+#       an index.
+#     - --force-reinstall: pip treats a same-name/same-version wheel as already
+#       satisfied and leaves the OLD bytes in place. Since the version never
+#       bumps, this flag is what makes a changed wheel actually land.
+#
+#   Depends on the wheel digest stamp, not the wheels, so a byte-identical
+#   rebuild does not reprovision.
+#
+#   The rocke import check runs HERE, as the last step, rather than at configure
+#   time: the venv and the wheels are both add_custom_command outputs that do
+#   not exist until the build runs, so there is nothing to probe at configure
+#   time. Running it in the provisioned venv also means it validates exactly
+#   what the pack step will import, which the configure-time source-tree probe
+#   did not.
 # ---------------------------------------------------------------------------
-function(hkp_rocke_wheel_python_interp out_interp)
+function(hkp_rocke_wheel_python_interp out_interp wheel_stamp)
     set(_venv "${CMAKE_CURRENT_BINARY_DIR}/hkp-rocke-venv")
     if(WIN32)
         set(_venv_py "${_venv}/Scripts/python.exe")
@@ -358,17 +461,20 @@ function(hkp_rocke_wheel_python_interp out_interp)
 
     add_custom_command(
         OUTPUT "${_venv_py}"
-        COMMAND "${Python3_EXECUTABLE}" -m venv --system-site-packages --copies
-                "${_venv}"
-        COMMAND "${_venv_py}" -m pip install -q --upgrade pip
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_venv}"
+        COMMAND "${Python3_EXECUTABLE}" -m venv --copies "${_venv}"
         COMMAND "${_venv_py}" -m pip install -q
+                --no-index --no-deps --force-reinstall
                 "${_platform_wheel}" "${_library_wheel}"
-        DEPENDS "${_platform_wheel}" "${_library_wheel}"
-        COMMENT "hkp: provisioning rocke wheel python interpreter"
+        COMMAND "${_venv_py}" -c
+                "import rocke, kernels"
+        DEPENDS "${wheel_stamp}" "${HKP_WHEEL_DIGEST_TOOL}"
+        COMMENT "hkp: provisioning hermetic rocke wheel interpreter"
         VERBATIM)
 
     add_custom_target(hkp_rocke_wheel_python_interp ALL DEPENDS "${_venv_py}"
                       COMMENT "hkp: rocke wheel python interpreter")
+    add_dependencies(hkp_rocke_wheel_python_interp hkp_rocke_wheel_digest)
     set(${out_interp} "${_venv_py}" PARENT_SCOPE)
 endfunction()
 
@@ -464,13 +570,17 @@ rocke/kernels packages.")
                 "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE is ON but the "
                 "rocke wheel-env is not available (ROCKE_WHEEL_DIR unset).")
         endif()
-        hkp_probe_rocke_importable(_rocke_ok)
-        if(NOT _rocke_ok)
+        hkp_probe_comgr_resolvable(_comgr_ok _comgr_detail)
+        if(NOT _comgr_ok)
             message(FATAL_ERROR
-                "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE is ON but "
-                "rocke/kernels are not importable.")
+                "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE is ON but comgr "
+                "could not be resolved, so no rocKE kernel can be lowered. Set "
+                "HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an explicit "
+                "libamd_comgr, or make one discoverable. Resolver said:\n"
+                "${_comgr_detail}")
         endif()
-        hkp_rocke_wheel_python_interp(_rocke_interp)
+        hkp_rocke_wheel_stamp(_rocke_wheel_stamp)
+        hkp_rocke_wheel_python_interp(_rocke_interp "${_rocke_wheel_stamp}")
     endif()
 
     if(_source_root)
@@ -482,7 +592,8 @@ rocke/kernels packages.")
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             INSTALL_BASE "${_install_base}"
             ROCKE_INTERP "${_rocke_interp}"
-            ROCKE_COMGR_LIB "${_rocke_comgr_lib}")
+            ROCKE_COMGR_LIB "${_rocke_comgr_lib}"
+            ROCKE_WHEEL_STAMP "${_rocke_wheel_stamp}")
     else()
         message(STATUS
             "hkp: no production source root set "
