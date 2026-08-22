@@ -63,8 +63,11 @@ resolved separately, from HIPKERNELPROVIDER_KPACK_RUNTIME_DIR")
     endif()
 
     message(FATAL_ERROR
-        "hkp: rocm_kpack could not be resolved (override with "
-        "HIPKERNELPROVIDER_ROCM_KPACK_DIR or ensure the pinned commit is fetchable). "
+        "hkp: rocm_kpack could not be resolved. Override the PACKER's copy with "
+        "-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR=<a rocm-kpack python/ dir>, or "
+        "ensure the pinned commit is fetchable. Note the reader is resolved "
+        "separately via HIPKERNELPROVIDER_KPACK_RUNTIME_DIR -- overriding only "
+        "one half points the packer and the runtime at different trees. "
         "rocm_kpack is required to pack; there is no skip path.")
 endfunction()
 
@@ -181,8 +184,14 @@ function(hkp_wire_production)
     # inputs a `cmake --fresh` onto a new ref rebuilds the reader while the pack
     # stamp survives, leaving an archive written by the old packer and read by the
     # new one. That is the skew the single pin in RocmKpack.cmake exists to prevent.
+    # NOTE `ARG_ROCM_KPACK_DIR`, not `kpack_python`: that name is a positional
+    # parameter of hkp_wire_demo, not of this function. CMake resolves an
+    # unset variable to the empty string, so the glob silently matched nothing
+    # and this DEPENDS edge did not exist -- exactly the staleness the comment
+    # above claims it prevents.
     file(GLOB _tool_sources CONFIGURE_DEPENDS
-         "${HKP_PYTHON_ROOT}/hkp_pack/*.py" "${kpack_python}/rocm_kpack/*.py")
+         "${HKP_PYTHON_ROOT}/hkp_pack/*.py"
+         "${ARG_ROCM_KPACK_DIR}/rocm_kpack/*.py")
 
     # The rocKE producer needs the wheel-provisioned interpreter so its UKDs
     # import; a hip-only pack runs under the base interpreter (hip compiles shell

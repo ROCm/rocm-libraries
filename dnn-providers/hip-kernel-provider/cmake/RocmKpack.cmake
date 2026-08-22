@@ -36,6 +36,36 @@
 
 include_guard(GLOBAL)
 
+# Enforce the pairing the comment above asks for. Leaving it to prose means the
+# failure mode is an archive written by one rocm-kpack and read by another --
+# silent until a format difference bites at dispatch, and very hard to attribute
+# back to a half-applied override. The two names are checked together, once,
+# before either tier resolves.
+#
+# The check is deliberately on "defined and non-empty" rather than on the
+# directories agreeing: PYTHON_DIR names <root>/python while RUNTIME_DIR names
+# <root>, and demanding a particular relationship between them would forbid the
+# legitimate case of a python/ tree relocated beside its source root.
+set(_kpack_py_set FALSE)
+set(_kpack_rt_set FALSE)
+if(DEFINED HIPKERNELPROVIDER_KPACK_PYTHON_DIR AND HIPKERNELPROVIDER_KPACK_PYTHON_DIR)
+    set(_kpack_py_set TRUE)
+endif()
+if(DEFINED HIPKERNELPROVIDER_KPACK_RUNTIME_DIR AND HIPKERNELPROVIDER_KPACK_RUNTIME_DIR)
+    set(_kpack_rt_set TRUE)
+endif()
+if(NOT _kpack_py_set STREQUAL _kpack_rt_set)
+    message(FATAL_ERROR
+        "rocm-kpack: HIPKERNELPROVIDER_KPACK_PYTHON_DIR (packer) and "
+        "HIPKERNELPROVIDER_KPACK_RUNTIME_DIR (reader) must be set together or "
+        "not at all. Setting one leaves the other on the pinned fetch, so the "
+        "packer and the runtime resolve DIFFERENT rocm-kpack trees -- the exact "
+        "format skew the shared pin exists to prevent.\n"
+        "  PYTHON_DIR  = '${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}'\n"
+        "  RUNTIME_DIR = '${HIPKERNELPROVIDER_KPACK_RUNTIME_DIR}'\n"
+        "Set both against one tree: RUNTIME_DIR=<root>, PYTHON_DIR=<root>/python.")
+endif()
+
 # The default ref is pinned to a known-good SHA for reproducible builds. Override
 # the ref to test a newer kpack: set HIPKERNELPROVIDER_KPACK_GIT_REF to any SHA,
 # tag, or branch (e.g. "main"), and HIPKERNELPROVIDER_KPACK_GIT_REPO to fetch from
