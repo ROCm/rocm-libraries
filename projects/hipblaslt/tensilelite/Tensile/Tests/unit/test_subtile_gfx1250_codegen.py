@@ -222,6 +222,49 @@ class TestGfx1250SubtileCodegen:
         assert "v_wmma_f32_16x16x4_f32" in asm
         assert ", 0" in asm  # acc2_imm=0
 
+    # -- scheduler preloop initD placement on the WMMA path --
+
+    def test_initd_preloop_op_wmma_zeroing_gfx1250(self):
+        """Scheduler preloop initD op zeros accumulators via WMMA on gfx1250."""
+        from types import SimpleNamespace
+        from Tensile.Components.Subtile.Kernel import TileInfo, selectDGeometry
+        from Tensile.Components.Subtile.LogicalScheduler import (
+            LogicalScheduler, SchedulerConfig, ReadGranularity, Pass,
+        )
+
+        kernel = _create_gfx1250_kernel(32, 32)
+        writer, tiA, tiB = _create_writer_gfx1250(kernel)
+        _setup_sgprs(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+
+        dTileInfo = TileInfo(selectDGeometry(kernel), 'D', writer, kernel)
+        dTileInfo.allocVgprTileRegisters_legacy(writer, kernel)
+
+        cfg = SchedulerConfig(
+            numMFMATilesM=tiA.localMMATileGrid[0],
+            numMFMATilesN=tiB.localMMATileGrid[0],
+            numSubIterK=tiA.localMMATileGrid[1],
+            lrA=ReadGranularity(mn=1, k=1),
+            lrB=ReadGranularity(mn=1, k=1),
+            grA=ReadGranularity(mn=1, k=2),
+            grB=ReadGranularity(mn=1, k=2),
+            pgr=2,
+        )
+        sched = LogicalScheduler(cfg)
+        sched.build(stop_after=Pass.EMIT)
+        preloop = sched.build_preloop()
+
+        initd_ops = [em.source for partition in preloop for group in partition
+                     for em in group
+                     if getattr(em.source, 'label', None) == 'initC_overlap']
+        assert len(initd_ops) == 1, "build_preloop must place exactly one initD op"
+
+        # Build the op against the gfx1250 writer (the scheduler's emit-time call).
+        emitter = SimpleNamespace(writer=writer, kernel=kernel, dtileInfo=dTileInfo)
+        asm = str(initd_ops[0].build(emitter))
+        assert "v_wmma_f32_16x16x4_f32" in asm, "gfx1250 preloop initD must use WMMA"
+        assert ", 0" in asm  # acc2_imm=0
+
     # -- globalReadLDSBufferSwap TDM path --
 
     @pytest.mark.parametrize("tc", ['A', 'B'])

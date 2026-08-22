@@ -37,6 +37,7 @@
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_mat_utils.hpp"
+#include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
 
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -89,22 +90,26 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          const void* const*     batch_A,
                                                          int64_t                ld_a,
                                                          int64_t                batch_stride_a,
+                                                         int64_t                batch_offset_a,
                                                          hipDataType            b_type,
                                                          const void*            B,
                                                          const void* const*     batch_B,
                                                          int64_t                ld_b,
                                                          int64_t                batch_stride_b,
+                                                         int64_t                batch_offset_b,
                                                          const void*            beta,
                                                          hipDataType            c_type,
                                                          const void*            C,
                                                          const void* const*     batch_C,
                                                          int64_t                ld_c,
                                                          int64_t                batch_stride_c,
+                                                         int64_t                batch_offset_c,
                                                          hipDataType            d_type,
                                                          void*                  D,
                                                          void* const*           batch_D,
                                                          int64_t                ld_d,
                                                          int64_t                batch_stride_d,
+                                                         int64_t                batch_offset_d,
                                                          void*                  E,
                                                          void* const*           batch_E,
                                                          int64_t                ld_e,
@@ -139,7 +144,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          hipblasLtBatchMode_t   batchMode,
                                                          int32_t                bias_stride,
                                                          int32_t                streamk_tile_scheduling_ext,
-                                                         int32_t                sm_count_target)
+                                                         int32_t                sm_count_target,
+                                                         int32_t                uniform_summation_order)
     : trans_a(trans_a)
     , trans_b(trans_b)
     , m(m)
@@ -152,12 +158,14 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , row_stride_a(1)
     , col_stride_a(ld_a)
     , batch_stride_a(batch_stride_a)
+    , batch_offset_a(batch_offset_a)
     , b_type(b_type)
     , B(B)
     , batch_B(batch_B)
     , row_stride_b(1)
     , col_stride_b(ld_b)
     , batch_stride_b(batch_stride_b)
+    , batch_offset_b(batch_offset_b)
     , beta(beta)
     , c_type(c_type)
     , C(C)
@@ -165,12 +173,14 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , row_stride_c(1)
     , col_stride_c(ld_c)
     , batch_stride_c(batch_stride_c)
+    , batch_offset_c(batch_offset_c)
     , d_type(d_type)
     , D(D)
     , batch_D(batch_D)
     , row_stride_d(1)
     , col_stride_d(ld_d)
     , batch_stride_d(batch_stride_d)
+    , batch_offset_d(batch_offset_d)
     , E(E)
     , batch_E(batch_E)
     , row_stride_e(1)
@@ -207,6 +217,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , bias_stride(bias_stride)
     , streamk_tile_scheduling_ext(streamk_tile_scheduling_ext)
     , sm_count_target(sm_count_target)
+    , uniform_summation_order(uniform_summation_order)
 {
     if(this->bias_type == HIPBLASLT_DATATYPE_INVALID)
     {
@@ -2063,6 +2074,8 @@ namespace
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
 
+        tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
+
         // set AmaxD
         tensileProblem.setOutputAmaxD(prob.amaxD != nullptr);
         tensileProblem.setAmaxD(compute_type, true);
@@ -2322,6 +2335,8 @@ namespace
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
 
+        tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
+
         // set E
         if(is_e_enabled(prob.epilogue))
         {
@@ -2415,6 +2430,23 @@ namespace
         inputs.batchB = reinterpret_cast<void const* const*>(prob.batch_B);
         inputs.batchC = reinterpret_cast<void const* const*>(prob.batch_C);
         inputs.batchD = reinterpret_cast<void* const*>(prob.batch_D);
+
+        // The batch offsets are specified by the user in elements; convert them to
+        // bytes here so the kernel/assembly can add them straight to byte addresses.
+        // Only data types whose element size is at least one byte are supported
+        // (sub-byte types such as fp4/fp6 are rejected during argument validation).
+        inputs.batchOffsetA
+            = prob.batch_offset_a
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.a_type)).elementSize);
+        inputs.batchOffsetB
+            = prob.batch_offset_b
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.b_type)).elementSize);
+        inputs.batchOffsetC
+            = prob.batch_offset_c
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.c_type)).elementSize);
+        inputs.batchOffsetD
+            = prob.batch_offset_d
+              * size_t(TensileLite::DataTypeInfo::Get(hip2TensileType(prob.d_type)).elementSize);
 
         // Set the GSU workspace
         inputs.ws            = prob.workspace;
@@ -2779,7 +2811,14 @@ namespace
             // The name of the current GPU platform
             std::string processor = rocblaslt_internal_get_arch_name();
 
-            const char* env = getenv("HIPBLASLT_TENSILE_LIBPATH");
+            // ROCM-26729 / SEC-00896: use the privilege-aware accessor so a
+            // process in a secure execution context cannot be redirected to an
+            // attacker-controlled code-object directory via inherited
+            // environment. Probe the privilege state once and reuse it for both
+            // the lookup and the suppression diagnostic.
+            const bool  is_privileged = rocblaslt_process_is_privileged();
+            const char* env
+                = rocblaslt_secure_getenv_impl("HIPBLASLT_TENSILE_LIBPATH", is_privileged);
             if(env)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -2792,6 +2831,17 @@ namespace
             }
             else
             {
+                if(rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TENSILE_LIBPATH",
+                                                              is_privileged))
+                {
+                    std::ostringstream msg;
+                    msg << "Ignoring HIPBLASLT_TENSILE_LIBPATH because the process is running "
+                           "in a secure execution context (set-uid/set-gid or another "
+                           "credential-changing exec, such as file capabilities); falling back "
+                           "to the default library location."
+                        << std::endl;
+                    log_error(__func__, msg.str());
+                }
                 // Find the location of librocblaslt.so
                 // Fall back on hard-coded path if static library or not found
                 std::optional<std::filesystem::path> default_lib_path;
@@ -2855,7 +2905,11 @@ namespace
             // library, and other threads trying to initialize library wait for it to
             // complete.
             static int once = [&] {
-                // Determine library path
+                // Determine library path. This is always the logical name with
+                // a single ".dat"/".yaml" extension, never ".dat.zlib": the
+                // loader resolves a compressed variant by appending ".zlib", and
+                // downstream filename parsing (initLibraryMapping, placeholder
+                // suffix derivation) assumes a single extension.
                 std::filesystem::path tensileLibPath;
                 if(lazyLoad)
                 {
@@ -3144,6 +3198,40 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
         {
             for(auto& g : data->problem.gemms)
                 g.setParams().setStreamKTileSchedulingMode(mode);
+        }
+    }
+}
+
+// Likewise for the uniform-summation-order request, applied before solution
+// ranking and before each isAlgoSupported query so the selection-time filter
+// and the launch gate see the same value. OR into any value already on the
+// problem so a default-false preference cannot clear a desc- or handle-level
+// enable.
+void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
+                                rocblaslt::RocGemmType gemmType,
+                                bool                   value)
+{
+    if(!gemmData)
+        return;
+    if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
+    {
+        auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+        if(data)
+        {
+            const bool existing = data->problem.getParams().uniformSummationOrder();
+            data->problem.setParams().setUniformSummationOrder(existing || value);
+        }
+    }
+    else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
+    {
+        auto data = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+        if(data)
+        {
+            for(auto& g : data->problem.gemms)
+            {
+                const bool existing = g.getParams().uniformSummationOrder();
+                g.setParams().setUniformSummationOrder(existing || value);
+            }
         }
     }
 }
@@ -3451,6 +3539,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 rocblaslt::Debug::Instance().logMarkerStop();
         }
     }
+    // Must precede the generic handler: a user-input rejection, not an internal
+    // failure.
+    catch(const TensileLite::UniformSummationOrderError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt_status_invalid_value;
+    }
     catch(const std::exception& e)
     {
 #if 0
@@ -3625,6 +3720,21 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
     return status;
 }
 
+// An explicit solution index skips softwarePredicate entirely, and the ext
+// GemmTuning splitK/wgm overrides reshape the launch after selection, so neither
+// is covered by the uniform-summation-order selection filter. Warn rather than
+// reject: the launch gate still runs, and a caller deliberately overriding the
+// heuristic should not be blocked.
+static void warnUniformSummationOrderBypass(const char* caller, bool hasTuning)
+{
+    std::ostringstream msg;
+    msg << "uniform summation order is enabled but this solution was selected by explicit index";
+    if(hasTuning)
+        msg << " with GemmTuning splitK/wgm overrides";
+    msg << "; the selection filter was bypassed";
+    log_error(caller, msg.str());
+}
+
 template <typename Tuning>
 rocblaslt_status makeArgument(rocblaslt_handle             handle,
                               const rocblaslt::RocGemmType gemmType,
@@ -3659,6 +3769,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
 
             data->algoIndex = *solutionIndex;
             auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+
+            if(data->problem.getParams().uniformSummationOrder())
+                warnUniformSummationOrderBypass(__func__, tuning != nullptr);
 
             if(tuning)
             {
@@ -3708,6 +3821,10 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->algoIndex = *solutionIndex;
             auto solution
                 = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
+
+            if(!data->problem.gemms.empty()
+               && data->problem.gemms[0].getParams().uniformSummationOrder())
+                warnUniformSummationOrderBypass(__func__, tuning != nullptr);
 
             if(tuning)
             {
@@ -3800,6 +3917,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             }
         }
         status = rocblaslt_status_success;
+    }
+    catch(const TensileLite::UniformSummationOrderError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt_status_invalid_value;
     }
     catch(const std::exception& e)
     {
@@ -4456,6 +4578,24 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
     int duplicated_counts = 0;
     for(auto solution : solutions)
     {
+        // Custom kernels don't support general batched mode (pointer arrays)
+        // Only check for ContractionProblemGemm (grouped gemm doesn't use batchMode)
+        if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
+        {
+            if(prob.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY
+               && !solution->sizeMapping.customKernelName.empty())
+            {
+                if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+                {
+                    std::ostringstream msg;
+                    msg << "Skipping custom kernel " << solution->sizeMapping.customKernelName
+                        << " - does not support batch_mode=POINTER_ARRAY" << std::endl;
+                    log_info(__func__, msg.str());
+                }
+                continue;
+            }
+        }
+
         //workaround: findAllSolutions should get all solutions without duplications
         bool duplicated_sol = false;
         for(int j = 0; j < i; j++)

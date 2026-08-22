@@ -39,12 +39,12 @@ recommended stack pins a recent, consistent ROCm:
 
 ```bash
 git clone <your-rocm-libraries-remote> rocm-libraries
-cd rocm-libraries/dnn-providers/hip-kernel-provider/rocKE
-export PYTHONPATH=Python          # the DSL lives under Python/rocke
+cd rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform
+export PYTHONPATH=python          # the DSL lives under python/rocke
 ```
 
-All commands below assume you are in the `rocKE/` directory with
-`PYTHONPATH=Python` unless noted.
+All commands below assume you are in the `rocke/platform/` directory with
+`PYTHONPATH=python` unless noted.
 
 ---
 
@@ -105,9 +105,9 @@ engine:
 # 1. engine archive (no GPU needed); the top-level CMakeLists builds rocke_core:
 cmake -S . -B /tmp/rocke_build -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/rocke_build --target rocke_core -j"$(nproc)"
-# 2. the pybind module (see Cpp/bindings/ for its CMake):
+# 2. the pybind module (see cpp/bindings/ for its CMake):
 #    build it into a dir, then put that dir on PYTHONPATH:
-export PYTHONPATH=Python:/path/to/rocke_engine_build_dir
+export PYTHONPATH=python:/path/to/rocke_engine_build_dir
 python -c "import rocke_engine; print('engine build_id:', rocke_engine.build_id())"
 ```
 
@@ -156,7 +156,7 @@ directory is on `PATH` (or copy the DLL beside your interpreter):
 
 ```bat
 set PATH=C:\Program Files\AMD\ROCm\<version>\bin;%PATH%
-set PYTHONPATH=Python
+set PYTHONPATH=python
 python -c "from rocke.runtime import comgr; print('comgr:', comgr._resolve_lib()._name)"
 ```
 
@@ -175,7 +175,7 @@ lowerer automatically (byte-identical), so the engine is optional on Windows too
 ### 4.5 Verify (Windows)
 
 ```bat
-set PYTHONPATH=Python
+set PYTHONPATH=python
 :: lowering only (no GPU): generate .ll for a kernel
 python -c "from rocke.instances.common.gemm_universal import *; from rocke.core.lower_llvm import lower_kernel_to_llvm; print('lowered ok')"
 ```
@@ -229,7 +229,7 @@ are working on that specific kernel path.
 | Symptom | Cause / fix |
 |---|---|
 | `do_action(COMPILE_SOURCE_TO_BC): status=1` | LLVM-flavor vs comgr-version mismatch — set `ROCKE_LLVM_FLAVOR=llvm22` for a ROCm 7.2 stack (§5). |
-| `No module named 'rocke'` | `PYTHONPATH` not pointing at `rocKE/Python`. |
+| `No module named 'rocke'` | `PYTHONPATH` not pointing at `rocke/platform/python`. |
 | `torch.cuda.is_available()` is `False` | Not in GPU device groups (§3.3). |
 | `cpp` backend silently uses Python | `rocke_engine` not built/on `PYTHONPATH`; build it (§3.4) and/or set `ROCKE_CPP_STRICT=1` to surface it. |
 | A persistent-kernel example hangs the compiler | Known on older comgr; use ROCm 7.2. |

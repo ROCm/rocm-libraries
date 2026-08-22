@@ -52,7 +52,7 @@ Coverage caveats:
 
 Every IR op must have explicit production lowering. Unsupported ops raise at lowering time.
 
-There are two interchangeable lowering engines reached through the same authoring API: the native Python lowerer (`core/lower_llvm.py`) and a C++ engine (the `Cpp/` port, reached via the `rocke_engine` binding). They emit byte-identical LLVM IR across every family. The active engine is selected by `core/backend.py::resolve_backend` (`ROCKE_BACKEND`, default `cpp`, falling back to the Python lowerer when the binding is not built); see `ir_lowering/` and `development/engine_parity.md`. The notes below apply to both engines.
+There are two interchangeable lowering engines reached through the same authoring API: the native Python lowerer (`core/lower_llvm.py`) and a C++ engine (the `cpp/` port, reached via the `rocke_engine` binding). They emit byte-identical LLVM IR across every family. The active engine is selected by `core/backend.py::resolve_backend` (`ROCKE_BACKEND`, default `cpp`, falling back to the Python lowerer when the binding is not built); see `ir_lowering/` and `development/engine_parity.md`. The notes below apply to both engines.
 
 HIP debug lowering is narrower than LLVM production lowering. CK Tile spec emission is narrower still and operates from selected specs, not `KernelDef`.
 
@@ -207,7 +207,7 @@ What does work for multi-GPU usage of the DSL:
 
  This pattern is verified end-to-end by `dsl_docs/development/verify_dsl_docs.py` on the GPU available to this box; the per-device launcher constructed under `torch.cuda.device(d)` correctly launches on that device.
 
-- **Torch-stream-aware launches**: `runtime/torch_module.py::resolve_stream(stream, device=None)` honors `torch.cuda.current_stream(device).cuda_stream`, so the standard pattern of allocating tensors and launching all under `torch.cuda.device(d):` interoperates with torch's caching allocator on the right device.
+- **Torch-stream-aware launches**: `runtime/torch_interop.py::resolve_stream(stream, device=None)` honors `torch.cuda.current_stream(device).cuda_stream`, so the standard pattern of allocating tensors and launching all under `torch.cuda.device(d):` interoperates with torch's caching allocator on the right device.
 
 - **Composing with `torch.distributed` (RCCL on ROCm)**: the user runs `torch.distributed.init_process_group(backend="nccl")` (PyTorch's "nccl" backend on ROCm is implemented by RCCL — `librccl.so`). DSL kernels then execute on each rank's local device; collectives (`torch.distributed.all_reduce`, `all_gather`, etc.) execute outside the DSL on a separate communication stream. The DSL never invokes RCCL itself.
 

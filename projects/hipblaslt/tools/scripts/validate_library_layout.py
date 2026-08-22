@@ -136,6 +136,14 @@ def validate(install_root: Path) -> List[str]:
 
         entries: Set[str] = {p.name for p in arch_dir.iterdir() if p.is_file()}
 
+        for fname in sorted(entries):
+            if fname.endswith(".dat") and (fname + ".zlib") in entries:
+                violations.append(
+                    f"both compressed and uncompressed payloads present in {arch_dir}: "
+                    f"{fname} and {fname}.zlib (stale .dat shadows the .zlib at runtime; "
+                    f"the producer must remove the uncompressed sibling)"
+                )
+
         for template in REQUIRED_PER_BASE_FILES:
             if not _has_required_file(entries, template, base):
                 violations.append(f"missing required file in {arch_dir}: {template.format(arch=base)}")

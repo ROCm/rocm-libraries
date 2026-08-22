@@ -10,12 +10,12 @@
 #                          AND kernel["StreamKAtomic"] == 0 (line 622 guard).
 #
 # StreamKFixupTreeReduction=1 enables the tree-reduction fixup strategy in
-# storeBranchesCommon (shared by StreamK=1,2,3). When set, a loop of tree-
-# structured partial-tile accumulation is emitted instead of the linear scan.
-# StreamK=2 (TwoTileOriginal) exercises storeBranchesCommon via the dispatch
-# at line 2537, which calls self.storeBranchesCommon().
-# StreamK=1 (Basic) also calls storeBranchesCommon (line 2369) as a fallback.
-# Using both modes here gives the tree-reduction code two entry points.
+# storeBranchesCommon (reached by StreamK=3 and StreamK=5). When set, a loop
+# of tree-structured partial-tile accumulation is emitted instead of the linear scan.
+# StreamK=3 (TwoTileDPFirst) calls storeBranchesCommon directly.
+# StreamK=5 (Hybrid) calls storeBranchesCommon for its static SK3 path.
+# StreamK=4 (Dynamic) has its own storeBranches and does NOT call storeBranchesCommon.
+# Using modes 3 and 5 here gives the tree-reduction code two entry points.
 #
 # StreamKAtomic must be 0 — the storeBranchesCommon early-returns at line 622
 # when StreamKAtomic is nonzero, so the tree-reduction body would be skipped.
@@ -29,7 +29,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # SGEMM NT, Batched, StreamK=[1,2], StreamKFixupTreeReduction=1
+  # SGEMM NT, Batched, StreamK=[3,5], StreamKFixupTreeReduction=1
   # StreamKAtomic=0 to pass the guard at line 622.
   # StreamKFixupTreeReduction=1 to enter the tree-reduction body at line 629.
   ########################################
@@ -51,7 +51,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 4, 4, 2, 2]
-        - StreamK: [1, 2]
+        - StreamK: [3, 5]
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [0]
         - StreamKFixupTreeReduction: [1]

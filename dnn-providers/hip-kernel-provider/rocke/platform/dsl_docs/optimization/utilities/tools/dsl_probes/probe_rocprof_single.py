@@ -18,7 +18,7 @@ Example (with rocprofv3 PMC counters):
 
     rocprofv3 -i metrics.txt -o run.csv --kernel-trace -- \\
         python probe_rocprof_single.py \\
-        --builder builders.gfx950.attention.parity_unified_attention:run_one \\
+        --builder builders.gfx950.attention.prefill.parity_unified_attention:run_one \\
         --problem-json /tmp/problem.json --iters 10
 
 If you just want a CUDA-event-timed single-process run that simulates
@@ -48,7 +48,7 @@ def _bootstrap_rocke() -> None:
         pass
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidate = parent / "Python"
+        candidate = parent / "python"
         if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return

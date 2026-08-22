@@ -10,6 +10,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
@@ -206,7 +207,7 @@ protected:
 
         PointwiseAttributes activAttrs;
         activAttrs.set_name("activation_forward");
-        activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        activAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
         activAttrs.set_compute_data_type(param.dataTypes[TypeKey::ACTIV_COMPUTE]);
         if(activTestCase.reluLowerClip.has_value())
         {
@@ -659,6 +660,35 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsuppo
         const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
+}
+
+TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdBiasActivGraph(
+        {4, 4, 4, 4},
+        {64, 16, 4, 1},
+        {4, 4, 1, 1},
+        {4, 1, 1, 1},
+        {4, 4, 4, 4},
+        {64, 16, 4, 1},
+        {0, 0},
+        {0, 0},
+        {1, 1},
+        {1, 1},
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+    EXPECT_FALSE(applicable);
 }
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForWrongNodeCountGraph)

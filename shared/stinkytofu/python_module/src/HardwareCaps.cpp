@@ -126,6 +126,7 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["v_pk_fmac_f16"] = tryAsm(isaName, ws, "v_pk_fma_f16 v47, v36, v34");
     rv["v_pk_add_f32"] = hasMnemonic(m, "v_pk_add_f32");
     rv["v_pk_mul_f32"] = hasMnemonic(m, "v_pk_mul_f32");
+    rv["v_pk_fma_f32"] = hasMnemonic(m, "v_pk_fma_f32");
     rv["v_mad_mix_f32"] = hasMnemonic(m, "v_mad_mix_f32");
     rv["v_fma_mix_f32"] = hasMnemonic(m, "v_fma_mix_f32");
     rv["v_dot2_f32_f16"] = hasMnemonic(m, "v_dot2_f32_f16");
@@ -162,7 +163,29 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
 
     rv["v_prng_b32"] = hasMnemonic(m, "v_prng_b32");
 
+    // FP8 stochastic-rounding pk8 conversion with scale: gated by PackData for
+    // gwvw%8==0 stores (mirrors rocisa hardware_caps.hpp HasScaleSRPk8Cvt,
+    // which probes "v_cvt_scalef32_sr_pk8_fp8_f32 v[0:1], v[0:7], v0, 1.0").
+    rv["HasScaleSRPk8Cvt"] =
+        tryAsm(isaName, ws, "v_cvt_scalef32_sr_pk8_fp8_f32 v[0:1], v[0:7], v0, 1.0");
+
+    // Non-SR pk8 f32->fp8/bf8 conversion with scale: PackData uses these for
+    // gwvw%8==0 stores (mirrors rocisa hardware_caps.hpp HasCvtScalePk8*F32).
+    rv["HasCvtScalePk8Fp8F32"] =
+        tryAsm(isaName, ws, "v_cvt_scalef32_pk8_fp8_f32 v[0:1], v[2:9], s0");
+    rv["HasCvtScalePk8Bf8F32"] =
+        tryAsm(isaName, ws, "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0");
+
+    // v_movrelsd_2_b32: indirect-VGPR-write move used by CompactLoopStore
+    // (mirrors rocisa hardware_caps.hpp HasMovRelsD2B32).
+    rv["HasMovRelsD2B32"] = hasMnemonic(m, "v_movrelsd_2_b32");
+
     rv["HasAtomicAdd"] = hasAnyMnemonic(m, {"buffer_atomic_add_f32"});
+
+    // Scalar-memory atomics (s_atomic_*): false on gfx12/gfx1250. The GSU and
+    // StreamK paths gate on asmCaps["HasSAtomic"] (mirrors rocisa
+    // hardware_caps.hpp which probes "s_atomic_dec s11, s[0:1]").
+    rv["HasSAtomic"] = tryAsm(isaName, ws, "s_atomic_dec s11, s[0:1]");
 
     // Modifier caps: test the actual modifier syntax via comgr
     rv["HasGLCModifier"] =
@@ -183,12 +206,29 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
          "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0, scope:SCOPE_DEV"});
     rv["HasNTModifier"] =
         tryAsm(isaName, ws, "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, nt");
+    // gfx1250 temporal-hint (th:) and non-volatile (nv) modifiers replace the
+    // legacy nt bit on buffer/global/flat memory ops.
+    rv["HasTHModifier"] = tryAsmAny(
+        isaName, ws,
+        {"buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 th:TH_LOAD_NT",
+         "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 th:TH_LOAD_NT"});
+    rv["HasNVModifier"] =
+        tryAsmAny(isaName, ws,
+                  {"buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 nv",
+                   "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 nv"});
+    rv["HasGlobalPrefetch"] =
+        tryAsm(isaName, ws, "global_prefetch_b8 v[0:1], off scope:SCOPE_SE th:TH_LOAD_NT");
     rv["HasMUBUFConst"] = tryAsmAny(isaName, ws,
                                     {"buffer_load_dword v40, v36, s[24:27], 1 offen offset:0",
                                      "buffer_load_b32 v40, v36, s[24:27], 1 offen offset:0"});
     rv["HasSCMPK"] = hasMnemonic(m, "s_cmpk_gt_u32");
 
     rv["HasNewBarrier"] = hasMnemonic(m, "s_barrier_wait");
+    rv["HasClusterBarrier"] = tryAsm(isaName, ws, "s_barrier_wait -3");
+    rv["HasWMMA_AccImmZero"] =
+        tryAsm(isaName, ws, "v_wmma_f32_16x16x32_bf16 v[0:7], v[8:15], v[8:15], 0");
+    rv["s_add_u64"] = tryAsm(isaName, ws, "s_add_u64 s[0:1], s[0:1], s[2:3]");
+    rv["v_add_nc_u64"] = tryAsm(isaName, ws, "v_add_nc_u64 v[0:1], v[2:3], v[4:5]");
     rv["HasTDM"] = hasMnemonic(m, "tensor_load_to_lds");
 
     rv["s_delay_alu"] = hasMnemonic(m, "s_delay_alu");
@@ -251,6 +291,7 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     rv["HasSchedMode"] = checkMajorIn(v[0], {12});
     rv["HasAccCD"] = checkInList(v, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(v, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
+    rv["MaxWavesPerSimd"] = rv["ArchAccUnifiedRegs"] ? 8 : 10;
     rv["CrosslaneWait"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
@@ -282,7 +323,7 @@ std::map<std::string, int> initRegCaps(const IsaVersion& v,
     std::map<std::string, int> rv;
 
     rv["MaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 256;
-    rv["MaxSgpr"] = 102;
+    rv["MaxSgpr"] = (v[0] == 12 && v[1] == 5) ? 106 : 102;
     rv["PhysicalMaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 512;
     rv["PhysicalMaxSgpr"] = 800;
     rv["maxLDSConstOffset"] = 65536;
@@ -309,6 +350,8 @@ std::map<std::string, int> initRegCaps(const IsaVersion& v,
     } else {
         rv["PhysicalMaxVgprCU"] = 0;
     }
+
+    rv["GlobalPrefetchSize"] = 256;
 
     return rv;
 }
@@ -337,6 +380,12 @@ CacheEntry g_hwcapsCache[kMaxArchs];
 }  // namespace
 
 HardwareCapsResult HardwareCaps::query(uint32_t major, uint32_t minor, uint32_t stepping) {
+    // Resolve by ISA tuple first. ``getGfxArchID`` asserts on unknown triples;
+    // callers such as ``caps.getCaps`` must get an empty result instead of
+    // aborting the Python interpreter.
+    const auto* info = ArchHelper::getInstance().getArchInfo(major, minor, stepping);
+    if (!info) return {};
+
     auto archID = getGfxArchID(major, minor, stepping);
     auto idx = static_cast<size_t>(archID);
     if (idx >= kMaxArchs) return {};

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 # Add CK DSL to path
-ROCKE_ROOT = Path(__file__).resolve().parents[3] / "Python"  # rocKE/Python
+ROCKE_ROOT = Path(__file__).resolve().parents[3] / "python"  # rocke/platform/python
 if str(ROCKE_ROOT) not in sys.path:
     sys.path.insert(0, str(ROCKE_ROOT))
 

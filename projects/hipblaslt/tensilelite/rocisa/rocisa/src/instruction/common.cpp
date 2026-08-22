@@ -197,7 +197,7 @@ void common_inst(nb::module_ m_common)
             return new rocisa::SMulHIU32(self);
         });
 
-    nb::class_<rocisa::SMulLOU32, rocisa::CommonInstruction>(m_common, "SMulLOU32")
+    nb::class_<rocisa::SMulF32, rocisa::CommonInstruction>(m_common, "SMulF32")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,
                       const InstructionInput&,
@@ -206,8 +206,67 @@ void common_inst(nb::module_ m_common)
              nb::arg("src0"),
              nb::arg("src1"),
              nb::arg("comment") = "")
-        .def("__deepcopy__", [](const rocisa::SMulLOU32& self, const nb::dict&) {
-            return new rocisa::SMulLOU32(self);
+        .def("__deepcopy__", [](const rocisa::SMulF32& self, const nb::dict&) {
+            return new rocisa::SMulF32(self);
+        });
+
+    nb::class_<rocisa::SAddF32, rocisa::CommonInstruction>(m_common, "SAddF32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SAddF32& self, const nb::dict&) {
+            return new rocisa::SAddF32(self);
+        });
+
+    nb::class_<rocisa::SCvtF32U32, rocisa::CommonInstruction>(m_common, "SCvtF32U32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SCvtF32U32& self, const nb::dict&) {
+            return new rocisa::SCvtF32U32(self);
+        });
+
+    nb::class_<rocisa::SCvtU32F32, rocisa::CommonInstruction>(m_common, "SCvtU32F32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SCvtU32F32& self, const nb::dict&) {
+            return new rocisa::SCvtU32F32(self);
+        });
+
+    nb::class_<rocisa::VSRcpF32, rocisa::CommonInstruction>(m_common, "VSRcpF32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VSRcpF32& self, const nb::dict&) {
+            return new rocisa::VSRcpF32(self);
+        });
+
+    nb::class_<rocisa::SMulU64, rocisa::CommonInstruction>(m_common, "SMulU64")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SMulU64& self, const nb::dict&) {
+            return new rocisa::SMulU64(self);
         });
 
     nb::class_<rocisa::SSubI32, rocisa::CommonInstruction>(m_common, "SSubI32")
@@ -819,6 +878,14 @@ void common_inst(nb::module_ m_common)
             return new rocisa::_SWaitStorecnt(self);
         });
 
+    nb::class_<rocisa::_SWaitAsynccnt, rocisa::Instruction>(m_common, "_SWaitAsynccnt")
+        .def(nb::init<int, const std::string&>(), nb::arg("asynccnt") = -1, nb::arg("comment") = "")
+        .def("getParams", &rocisa::_SWaitAsynccnt::getParams)
+        .def("__str__", &rocisa::_SWaitAsynccnt::toString)
+        .def("__deepcopy__", [](const rocisa::_SWaitAsynccnt& self, nb::dict&) {
+            return new rocisa::_SWaitAsynccnt(self);
+        });
+
     nb::class_<rocisa::_SWaitLoadcnt, rocisa::Instruction>(m_common, "_SWaitLoadcnt")
         .def(nb::init<int, const std::string&>(), nb::arg("loadcnt") = -1, nb::arg("comment") = "")
         .def("getParams", &rocisa::_SWaitLoadcnt::getParams)
@@ -1063,13 +1130,46 @@ void common_inst(nb::module_ m_common)
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
                       const InstructionInput&,
+                      std::optional<rocisa::VOP3PModifiers>,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src0"),
              nb::arg("src1"),
+             nb::arg("vop3")    = std::nullopt,
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VAddPKF32& self, nb::dict&) { return new rocisa::VAddPKF32(self); });
+
+    nb::class_<rocisa::_VFmaPKF32, rocisa::CommonInstruction>(m_common, "_VFmaPKF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::VOP3PModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("vop3")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::_VFmaPKF32& self, nb::dict&) {
+            return new rocisa::_VFmaPKF32(self);
+        });
+
+    nb::class_<rocisa::VFmaPKF32, rocisa::CompositeInstruction>(m_common, "VFmaPKF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VFmaPKF32& self, nb::dict&) { return new rocisa::VFmaPKF32(self); });
 
     nb::class_<rocisa::VAdd3U32, rocisa::CommonInstruction>(m_common, "VAdd3U32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,

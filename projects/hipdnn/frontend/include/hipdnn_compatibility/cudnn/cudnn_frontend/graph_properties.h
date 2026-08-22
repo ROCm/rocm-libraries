@@ -19,13 +19,52 @@
 
 #pragma once
 
+#include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
+#include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
+#include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
+#include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
+#include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
+#include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 {
 
-// hipDNN publishes cuDNN's `Tensor_attributes` spelling as a typedef; aliasing
-// it lets consumer code using that name resolve through the shim.
+using hipdnn_frontend::half;
+using hipdnn_frontend::graph::ScalarType;
 using hipdnn_frontend::graph::Tensor_attributes;
+using hipdnn_frontend::graph::TensorAttributes;
+using nv_bfloat16 = hipdnn_frontend::bfloat16;
+
+// Tier-1 node attribute types: each cuDNN v9
+// *_attributes class with an exact hipDNN counterpart is aliased 1:1 — zero
+// overhead, no wrapper. The matching Graph::* node method forwards straight to
+// the wrapped hipDNN graph (see detail/graph_wrapper.h).
+using hipdnn_frontend::graph::Batchnorm_attributes;
+using hipdnn_frontend::graph::Batchnorm_backward_attributes;
+using hipdnn_frontend::graph::Batchnorm_inference_attributes;
+using hipdnn_frontend::graph::Block_scale_dequantize_attributes;
+using hipdnn_frontend::graph::Block_scale_quantize_attributes;
+using hipdnn_frontend::graph::Conv_dgrad_attributes;
+using hipdnn_frontend::graph::Conv_fprop_attributes;
+using hipdnn_frontend::graph::Conv_wgrad_attributes;
+using hipdnn_frontend::graph::Layernorm_attributes;
+using hipdnn_frontend::graph::Layernorm_backward_attributes;
+using hipdnn_frontend::graph::Matmul_attributes;
+using hipdnn_frontend::graph::Pointwise_attributes;
+using hipdnn_frontend::graph::Reduction_attributes;
+using hipdnn_frontend::graph::Resample_attributes;
+using hipdnn_frontend::graph::Rmsnorm_attributes;
+using hipdnn_frontend::graph::Rmsnorm_backward_attributes;
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::graph

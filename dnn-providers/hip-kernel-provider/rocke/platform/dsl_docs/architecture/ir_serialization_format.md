@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Implemented on both engines (Python and C++) |
 | **Decision** | A separate, explicit machine format; `print_ir` stays human-only |
-| **Implementation** | Python: `rocke/core/ir_serialize.py` (`serialize` / `parse`), `rocke/core/verify.py`. C++: `Cpp/core/ir/serialize.cpp` (`rocke_ir_parse` and the serializer), header `Cpp/include/rocke/ir_serialize.h`. |
+| **Implementation** | Python: `rocke/core/ir_serialize.py` (`serialize` / `parse`), `rocke/core/verify.py`. C++: `cpp/core/ir/serialize.cpp` (`rocke_ir_parse` and the serializer), header `cpp/include/rocke/ir_serialize.h`. |
 | **Scope** | A fully round-trippable text encoding of a `KernelDef` (`rocke/core/ir.py`) |
 
 ---

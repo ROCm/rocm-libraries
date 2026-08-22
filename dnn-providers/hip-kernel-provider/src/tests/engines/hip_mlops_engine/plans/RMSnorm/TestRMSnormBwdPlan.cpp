@@ -289,9 +289,9 @@ TEST(TestRMSnormBwdPlanBFp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INNER_SIZE=150528"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTER_SIZE=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_STRIDE=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_X_TYPE=ushort"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_DY_TYPE=ushort"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_DX_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_X_TYPE=__bf16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_DY_TYPE=__bf16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_DX_TYPE=__bf16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }
@@ -324,6 +324,27 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedWorkgroupsThrows)
     // Number of workgroups exeeds UINT32_MAX
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({4, 4, 2, 1},
                                                                           {UINT32_MAX, 1, 2, 2});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_RMSNormBackwardAttributes();
+
+    RMSnormBwdParams params(attr, graph.getTensorMap());
+    RMSnormBwdPlan plan(std::move(params));
+
+    auto deviceProps = createTestDeviceProps();
+
+    EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestRMSnormBwdPlan, CompileWithUnsupportedDimensionThrows)
+{
+    const MockKernelCompiler mockCompiler;
+
+    // 3D tensor is not supported
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({12, 4, 1}, {1, 3, 4}, false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

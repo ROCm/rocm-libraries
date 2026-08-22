@@ -42,8 +42,18 @@ TEST(TestTypes, BehaviorNoteFromBackend)
     EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
               BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 
+    // Frontend and backend BehaviorNote numbering are independent. An unknown
+    // backend value must not be reinterpreted numerically: every value in this
+    // range would otherwise alias onto a valid, unrelated frontend enumerator.
     constexpr hipdnnBackendBehaviorNote_t UNKNOWN_NOTE = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1;
-    EXPECT_EQ(fromHipdnnBehaviorNote(UNKNOWN_NOTE), static_cast<BehaviorNote>(UNKNOWN_NOTE));
+    EXPECT_EQ(fromHipdnnBehaviorNote(UNKNOWN_NOTE), std::nullopt);
+
+    for(int raw = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT; raw <= 9; ++raw)
+    {
+        EXPECT_EQ(fromHipdnnBehaviorNote(static_cast<hipdnnBackendBehaviorNote_t>(raw)),
+                  std::nullopt)
+            << "Backend note " << raw << " must not alias onto a frontend enumerator";
+    }
 }
 
 TEST(TestTypes, IsKnownBehaviorNote)
@@ -69,11 +79,42 @@ TEST(TestTypes, BehaviorNoteToString)
                  "EXTERNAL_LIBRARY_DEPENDENCY");
     EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
                  "SUPPORTS_EXECUTION_PLAN_SERIALIZATION");
+    EXPECT_STREQ(to_string(BehaviorNote::NOT_SET), "NOT_SET");
+    EXPECT_STREQ(to_string(BehaviorNote::REQUIRES_FILTER_INT8x32_REORDER),
+                 "REQUIRES_FILTER_INT8x32_REORDER");
+    EXPECT_STREQ(to_string(BehaviorNote::REQUIRES_BIAS_INT8x32_REORDER),
+                 "REQUIRES_BIAS_INT8x32_REORDER");
+    EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_CUDA_GRAPH_NATIVE_API),
+                 "SUPPORTS_CUDA_GRAPH_NATIVE_API");
+    EXPECT_STREQ(to_string(BehaviorNote::CUBLASLT_DEPENDENCY), "CUBLASLT_DEPENDENCY");
     EXPECT_STREQ(to_string(static_cast<BehaviorNote>(-1)), "unknown");
 
     std::ostringstream oss;
     oss << BehaviorNote::SUPPORTS_GRAPH_CAPTURE;
     EXPECT_EQ(oss.str(), "SUPPORTS_GRAPH_CAPTURE");
+}
+
+TEST(TestTypes, NumericalNoteToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(NumericalNote::NOT_SET), "NOT_SET");
+    EXPECT_STREQ(to_string(NumericalNote::TENSOR_CORE), "TENSOR_CORE");
+    EXPECT_STREQ(to_string(NumericalNote::DOWN_CONVERT_INPUTS), "DOWN_CONVERT_INPUTS");
+    EXPECT_STREQ(to_string(NumericalNote::REDUCED_PRECISION_REDUCTION),
+                 "REDUCED_PRECISION_REDUCTION");
+    EXPECT_STREQ(to_string(NumericalNote::FFT), "FFT");
+    EXPECT_STREQ(to_string(NumericalNote::NONDETERMINISTIC), "NONDETERMINISTIC");
+    EXPECT_STREQ(to_string(NumericalNote::WINOGRAD), "WINOGRAD");
+    EXPECT_STREQ(to_string(NumericalNote::WINOGRAD_TILE_4x4), "WINOGRAD_TILE_4x4");
+    EXPECT_STREQ(to_string(NumericalNote::WINOGRAD_TILE_6x6), "WINOGRAD_TILE_6x6");
+    EXPECT_STREQ(to_string(NumericalNote::WINOGRAD_TILE_13x13), "WINOGRAD_TILE_13x13");
+    EXPECT_STREQ(to_string(NumericalNote::STRICT_NAN_PROP), "STRICT_NAN_PROP");
+    EXPECT_STREQ(to_string(static_cast<NumericalNote>(-1)), "unknown");
+
+    std::ostringstream oss;
+    oss << NumericalNote::STRICT_NAN_PROP;
+    EXPECT_EQ(oss.str(), "STRICT_NAN_PROP");
 }
 
 TEST(TestTypes, GetDataTypeEnumFromType)
@@ -87,6 +128,7 @@ TEST(TestTypes, GetDataTypeEnumFromType)
     EXPECT_EQ(getDataTypeEnumFromType<uint8_t>(), DataType::UINT8);
     EXPECT_EQ(getDataTypeEnumFromType<int32_t>(), DataType::INT32);
     EXPECT_EQ(getDataTypeEnumFromType<int8_t>(), DataType::INT8);
+    EXPECT_EQ(getDataTypeEnumFromType<fp4_e2m1>(), DataType::FP4_E2M1);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e4m3>(), DataType::FP8_E4M3);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e5m2>(), DataType::FP8_E5M2);
     EXPECT_EQ(getDataTypeEnumFromType<int64_t>(), DataType::INT64);
@@ -139,6 +181,191 @@ TEST(TestTypes, DataTypeCudnnCompatHasNoBackendMapping)
         EXPECT_EQ(toHipdnnDataType(dt), std::nullopt)
             << "Unexpected backend mapping for " << to_string(dt);
     }
+}
+
+// Value-pin regression tests: the aliased enums were renumbered so every
+// cuDNN-aliased enumerator's integer equals NVIDIA cuDNN frontend's value
+// (source compatibility for the cuDNN shim). These lock the exact integers
+// so an accidental reorder is caught at test time. hipDNN-only enumerators
+// are pinned to their own hipDNN values so a reorder still trips a test.
+TEST(TestTypes, EnumValuesMatchCudnnSmallEnums)
+{
+    using namespace hipdnn_frontend;
+
+    // ConvolutionMode_t
+    EXPECT_EQ(static_cast<int>(ConvolutionMode::NOT_SET), 0);
+    EXPECT_EQ(static_cast<int>(ConvolutionMode::CONVOLUTION), 1);
+    EXPECT_EQ(static_cast<int>(ConvolutionMode::CROSS_CORRELATION), 2);
+
+    // HeurMode_t (HeuristicMode)
+    EXPECT_EQ(static_cast<int>(HeuristicMode::A), 0);
+    EXPECT_EQ(static_cast<int>(HeuristicMode::B), 1);
+    EXPECT_EQ(static_cast<int>(HeuristicMode::FALLBACK), 2);
+    EXPECT_EQ(static_cast<int>(HeuristicMode::OPENSOURCE), 3);
+
+    // NumericalNote_t
+    EXPECT_EQ(static_cast<int>(NumericalNote::NOT_SET), 0);
+    EXPECT_EQ(static_cast<int>(NumericalNote::TENSOR_CORE), 1);
+    EXPECT_EQ(static_cast<int>(NumericalNote::DOWN_CONVERT_INPUTS), 2);
+    EXPECT_EQ(static_cast<int>(NumericalNote::REDUCED_PRECISION_REDUCTION), 3);
+    EXPECT_EQ(static_cast<int>(NumericalNote::FFT), 4);
+    EXPECT_EQ(static_cast<int>(NumericalNote::NONDETERMINISTIC), 5);
+    EXPECT_EQ(static_cast<int>(NumericalNote::WINOGRAD), 6);
+    EXPECT_EQ(static_cast<int>(NumericalNote::WINOGRAD_TILE_4x4), 7);
+    EXPECT_EQ(static_cast<int>(NumericalNote::WINOGRAD_TILE_6x6), 8);
+    EXPECT_EQ(static_cast<int>(NumericalNote::WINOGRAD_TILE_13x13), 9);
+    EXPECT_EQ(static_cast<int>(NumericalNote::STRICT_NAN_PROP), 10);
+
+    // ResampleMode_t
+    EXPECT_EQ(static_cast<int>(ResampleMode::NOT_SET), 0);
+    EXPECT_EQ(static_cast<int>(ResampleMode::AVGPOOL_EXCLUDE_PADDING), 1);
+    EXPECT_EQ(static_cast<int>(ResampleMode::AVGPOOL_INCLUDE_PADDING), 2);
+    EXPECT_EQ(static_cast<int>(ResampleMode::BILINEAR), 3);
+    EXPECT_EQ(static_cast<int>(ResampleMode::NEAREST), 4);
+    EXPECT_EQ(static_cast<int>(ResampleMode::MAXPOOL), 5);
+
+    // PaddingMode_t
+    EXPECT_EQ(static_cast<int>(PaddingMode::NOT_SET), 0);
+    EXPECT_EQ(static_cast<int>(PaddingMode::EDGE_VAL_PAD), 1);
+    EXPECT_EQ(static_cast<int>(PaddingMode::NEG_INF_PAD), 2);
+    EXPECT_EQ(static_cast<int>(PaddingMode::ZERO_PAD), 3);
+
+    // NormFwdPhase_t
+    EXPECT_EQ(static_cast<int>(NormFwdPhase::NOT_SET), 0);
+    EXPECT_EQ(static_cast<int>(NormFwdPhase::INFERENCE), 1);
+    EXPECT_EQ(static_cast<int>(NormFwdPhase::TRAINING), 2);
+
+    // ReductionMode_t
+    EXPECT_EQ(static_cast<int>(ReductionMode::NOT_SET), 0);
+    EXPECT_EQ(static_cast<int>(ReductionMode::ADD), 1);
+    EXPECT_EQ(static_cast<int>(ReductionMode::MUL), 2);
+    EXPECT_EQ(static_cast<int>(ReductionMode::MIN), 3);
+    EXPECT_EQ(static_cast<int>(ReductionMode::MAX), 4);
+    EXPECT_EQ(static_cast<int>(ReductionMode::AMAX), 5);
+    EXPECT_EQ(static_cast<int>(ReductionMode::AVG), 6);
+    EXPECT_EQ(static_cast<int>(ReductionMode::NORM1), 7);
+    EXPECT_EQ(static_cast<int>(ReductionMode::NORM2), 8);
+    EXPECT_EQ(static_cast<int>(ReductionMode::MUL_NO_ZEROS), 9);
+
+    // DiagonalAlignment_t
+    EXPECT_EQ(static_cast<int>(DiagonalAlignment::TOP_LEFT), 0);
+    EXPECT_EQ(static_cast<int>(DiagonalAlignment::BOTTOM_RIGHT), 1);
+
+    // AttentionImplementation_t
+    EXPECT_EQ(static_cast<int>(AttentionImplementation::AUTO), 0);
+    EXPECT_EQ(static_cast<int>(AttentionImplementation::COMPOSITE), 1);
+    EXPECT_EQ(static_cast<int>(AttentionImplementation::UNIFIED), 2);
+}
+
+TEST(TestTypes, EnumValuesMatchCudnnBehaviorNote)
+{
+    using namespace hipdnn_frontend;
+
+    // Shared with cuDNN BehaviorNote_t (source-compatible by value).
+    EXPECT_EQ(static_cast<int>(BehaviorNote::NOT_SET), 0);
+    EXPECT_EQ(static_cast<int>(BehaviorNote::RUNTIME_COMPILATION), 1);
+    EXPECT_EQ(static_cast<int>(BehaviorNote::REQUIRES_FILTER_INT8x32_REORDER), 2);
+    EXPECT_EQ(static_cast<int>(BehaviorNote::REQUIRES_BIAS_INT8x32_REORDER), 3);
+    EXPECT_EQ(static_cast<int>(BehaviorNote::SUPPORTS_CUDA_GRAPH_NATIVE_API), 4);
+    EXPECT_EQ(static_cast<int>(BehaviorNote::CUBLASLT_DEPENDENCY), 5);
+    // hipDNN-only notes (no cuDNN counterpart); pinned to hipDNN's own values
+    // so a reorder still trips this test.
+    EXPECT_EQ(static_cast<int>(BehaviorNote::REQUIRES_LAYOUT_TRANSFORM), 6);
+    EXPECT_EQ(static_cast<int>(BehaviorNote::SUPPORTS_GRAPH_CAPTURE), 7);
+    EXPECT_EQ(static_cast<int>(BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY), 8);
+    EXPECT_EQ(static_cast<int>(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION), 9);
+}
+
+TEST(TestTypes, EnumValuesMatchCudnnPointwise)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(static_cast<int>(PointwiseMode::NOT_SET), 0);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::ADD), 1);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::MUL), 2);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::SQRT), 3);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::MAX), 4);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::MIN), 5);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::RELU_FWD), 6);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::TANH_FWD), 7);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::SIGMOID_FWD), 8);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::ELU_FWD), 9);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::GELU_FWD), 10);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::SOFTPLUS_FWD), 11);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::SWISH_FWD), 12);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::RELU_BWD), 13);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::TANH_BWD), 14);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::SIGMOID_BWD), 15);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::ELU_BWD), 16);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::GELU_BWD), 17);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::SOFTPLUS_BWD), 18);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::SWISH_BWD), 19);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::ERF), 20);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::IDENTITY), 21);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::GELU_APPROX_TANH_BWD), 22);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::GELU_APPROX_TANH_FWD), 23);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::GEN_INDEX), 24);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::BINARY_SELECT), 25);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::EXP), 26);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::LOG), 27);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::NEG), 28);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::MOD), 29);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::POW), 30);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::ABS), 31);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::CEIL), 32);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::COS), 33);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::FLOOR), 34);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::RSQRT), 35);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::SIN), 36);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::LOGICAL_NOT), 37);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::TAN), 38);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::SUB), 39);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::ADD_SQUARE), 40);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::DIV), 41);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::CMP_EQ), 42);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::CMP_NEQ), 43);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::CMP_GT), 44);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::CMP_GE), 45);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::CMP_LT), 46);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::CMP_LE), 47);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::LOGICAL_AND), 48);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::LOGICAL_OR), 49);
+    EXPECT_EQ(static_cast<int>(PointwiseMode::RECIPROCAL), 50);
+    // hipDNN-only sentinel (not a cuDNN value); pinned to hipDNN's own value.
+    EXPECT_EQ(static_cast<int>(PointwiseMode::COUNT), 51);
+}
+
+TEST(TestTypes, EnumValuesMatchCudnnDataType)
+{
+    using namespace hipdnn_frontend;
+
+    // Shared with cuDNN DataType_t (source-compatible by value).
+    EXPECT_EQ(static_cast<int>(DataType::NOT_SET), 0);
+    EXPECT_EQ(static_cast<int>(DataType::FLOAT), 1);
+    EXPECT_EQ(static_cast<int>(DataType::DOUBLE), 2);
+    EXPECT_EQ(static_cast<int>(DataType::HALF), 3);
+    EXPECT_EQ(static_cast<int>(DataType::INT8), 4);
+    EXPECT_EQ(static_cast<int>(DataType::INT32), 5);
+    EXPECT_EQ(static_cast<int>(DataType::INT8x4), 6);
+    EXPECT_EQ(static_cast<int>(DataType::UINT8), 7);
+    EXPECT_EQ(static_cast<int>(DataType::UINT8x4), 8);
+    EXPECT_EQ(static_cast<int>(DataType::INT8x32), 9);
+    EXPECT_EQ(static_cast<int>(DataType::BFLOAT16), 10);
+    EXPECT_EQ(static_cast<int>(DataType::INT64), 11);
+    EXPECT_EQ(static_cast<int>(DataType::BOOLEAN), 12);
+    EXPECT_EQ(static_cast<int>(DataType::FP8_E4M3), 13);
+    EXPECT_EQ(static_cast<int>(DataType::FP8_E5M2), 14);
+    EXPECT_EQ(static_cast<int>(DataType::FAST_FLOAT_FOR_FP8), 15);
+    EXPECT_EQ(static_cast<int>(DataType::FP8_E8M0), 16);
+    EXPECT_EQ(static_cast<int>(DataType::FP4_E2M1), 17);
+    EXPECT_EQ(static_cast<int>(DataType::INT4), 18);
+    EXPECT_EQ(static_cast<int>(DataType::COMPLEX_FP32), 19);
+    EXPECT_EQ(static_cast<int>(DataType::COMPLEX_FP64), 20);
+    // hipDNN-only types (no cuDNN counterpart); pinned to hipDNN's own values.
+    EXPECT_EQ(static_cast<int>(DataType::FP6_E2M3), 22);
+    EXPECT_EQ(static_cast<int>(DataType::FP6_E3M2), 23);
+    EXPECT_EQ(static_cast<int>(DataType::FP8_E4M3_FNUZ), 24);
+    EXPECT_EQ(static_cast<int>(DataType::FP8_E5M2_FNUZ), 25);
 }
 
 TEST(TestTypes, PointwiseModeToString)
@@ -240,6 +467,16 @@ TEST(TestTypes, ResampleAndPaddingCudnnCompatHaveNoBackendMapping)
     EXPECT_EQ(toBackendResampleMode(ResampleMode::BILINEAR), std::nullopt);
     EXPECT_EQ(toBackendResampleMode(ResampleMode::NEAREST), std::nullopt);
     EXPECT_EQ(toBackendPaddingMode(PaddingMode::EDGE_VAL_PAD), std::nullopt);
+}
+
+TEST(TestTypes, PaddingNotSetRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toBackendPaddingMode(PaddingMode::NOT_SET), HIPDNN_PADDING_NOT_SET);
+    auto [paddingMode, error] = fromHipdnnPaddingMode(HIPDNN_PADDING_NOT_SET);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+    EXPECT_EQ(paddingMode, PaddingMode::NOT_SET);
 }
 
 TEST(TestTypes, DataTypeStreamOperator)
@@ -649,11 +886,16 @@ TEST(TestTypes, FromHipdnnDiagonalAlignmentRoundTrip)
 
     for(auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
     {
-        auto backend = toBackendDiagonalAlignment(alignment);
-        auto [roundTripped, err] = fromHipdnnDiagonalAlignment(backend);
+        auto backendOpt = toBackendDiagonalAlignment(alignment);
+        ASSERT_TRUE(backendOpt.has_value())
+            << "toBackendDiagonalAlignment failed for " << static_cast<int>(alignment);
+        auto [roundTripped, err] = fromHipdnnDiagonalAlignment(*backendOpt);
         EXPECT_TRUE(err.is_good());
         EXPECT_EQ(roundTripped, alignment);
     }
+
+    // An unmapped value is rejected rather than silently coerced to TOP_LEFT.
+    EXPECT_EQ(toBackendDiagonalAlignment(static_cast<DiagonalAlignment>(9999)), std::nullopt);
 }
 
 TEST(TestTypes, FromHipdnnAttentionImplementationValidValues)
@@ -696,11 +938,17 @@ TEST(TestTypes, FromHipdnnAttentionImplementationRoundTrip)
                      AttentionImplementation::COMPOSITE,
                      AttentionImplementation::UNIFIED})
     {
-        auto backend = toBackendAttentionImplementation(impl);
-        auto [roundTripped, err] = fromHipdnnAttentionImplementation(backend);
+        auto backendOpt = toBackendAttentionImplementation(impl);
+        ASSERT_TRUE(backendOpt.has_value())
+            << "toBackendAttentionImplementation failed for " << static_cast<int>(impl);
+        auto [roundTripped, err] = fromHipdnnAttentionImplementation(*backendOpt);
         EXPECT_TRUE(err.is_good());
         EXPECT_EQ(roundTripped, impl);
     }
+
+    // An unmapped value is rejected rather than silently coerced to AUTO.
+    EXPECT_EQ(toBackendAttentionImplementation(static_cast<AttentionImplementation>(9999)),
+              std::nullopt);
 }
 
 TEST(TestTypes, FromHipdnnPointwiseModeRoundTrip)
@@ -833,4 +1081,36 @@ TEST(TestTypes, ToBackendReductionModeNotSetReturnsNullopt)
     using namespace hipdnn_frontend;
 
     EXPECT_EQ(toBackendReductionMode(ReductionMode::NOT_SET), std::nullopt);
+}
+
+TEST(TestTypes, MoeGroupedMatmulModeRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(const auto mode :
+        {MoeGroupedMatmulMode::NONE, MoeGroupedMatmulMode::GATHER, MoeGroupedMatmulMode::SCATTER})
+    {
+        const auto backendMode = toBackendMoeGroupedMatmulMode(mode);
+        ASSERT_TRUE(backendMode.has_value());
+        const auto [roundTripped, error] = fromHipdnnMoeGroupedMatmulMode(*backendMode);
+        EXPECT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(roundTripped, mode);
+    }
+}
+
+TEST(TestTypes, ToBackendMoeGroupedMatmulModeNotSetReturnsNullopt)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toBackendMoeGroupedMatmulMode(MoeGroupedMatmulMode::NOT_SET), std::nullopt);
+}
+
+TEST(TestTypes, MoeGroupedMatmulModeUnknownValueReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    const auto [mode, error]
+        = fromHipdnnMoeGroupedMatmulMode(static_cast<hipdnnMoeGroupedMatmulMode_t>(9999));
+    EXPECT_EQ(mode, MoeGroupedMatmulMode::NOT_SET);
+    EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }

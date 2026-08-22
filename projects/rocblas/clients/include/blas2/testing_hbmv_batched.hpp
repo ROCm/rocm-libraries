@@ -74,7 +74,7 @@ void testing_hbmv_batched_bad_arg(const Arguments& arg)
         rocblas_int banded_matrix_row = K + 1;
 
         // Allocate device memory
-        DEVICE_MEMCHECK(device_batch_matrix<T>, dAb, (banded_matrix_row, N, lda, 1, batch_count));
+        DEVICE_MEMCHECK(device_batch_matrix<T>, dAb, (banded_matrix_row, N, lda, batch_count));
         DEVICE_MEMCHECK(device_batch_vector<T>, dx, (N, incx, batch_count));
         DEVICE_MEMCHECK(device_batch_vector<T>, dy, (N, incy, batch_count));
 

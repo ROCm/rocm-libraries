@@ -115,7 +115,7 @@ void LayernormValidator::validateNormalizedDim(const std::vector<int64_t>& ioTen
 
 // --- Component Validators
 
-void LayernormValidator::checkTensorIDLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
+void LayernormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
     // Skip tensors with embedded scalar values (epsilon, momentum) - they don't have layouts or dimensions to validate
     std::vector<TensorDescriptor> tensors;
@@ -124,7 +124,7 @@ void LayernormValidator::checkTensorIDLayoutsAndDimsSupported(const std::vector<
     for(const auto& id : tensorIds)
     {
         auto attr = _tensorMap.at(id);
-        if(attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
+        if(!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(attr))
         {
             tensors.emplace_back(attr);
         }
@@ -133,22 +133,6 @@ void LayernormValidator::checkTensorIDLayoutsAndDimsSupported(const std::vector<
     validateConsistentDimensions(tensors);
     validatePackedTensors(tensors);
     validateConsistentLayouts(tensors);
-}
-
-void LayernormValidator::checkTensorLayoutsAndDimsSupported()
-{
-    // Skip tensors with embedded scalar values (epsilon, momentum) - they don't have layouts or dimensions to validate
-    std::vector<int64_t> tensorIds;
-    tensorIds.reserve(_tensorMap.size());
-    for(const auto& [id, attr] : _tensorMap)
-    {
-        if(attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
-        {
-            tensorIds.emplace_back(id);
-        }
-    }
-
-    checkTensorIDLayoutsAndDimsSupported(tensorIds);
 }
 
 void LayernormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
@@ -258,7 +242,7 @@ void LayernormValidator::checkTensorConfigSupported(
         = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
     ioAndStatTensorIds.insert(ioAndStatTensorIds.end(), statTensorIds.begin(), statTensorIds.end());
 
-    checkTensorIDLayoutsAndDimsSupported(ioAndStatTensorIds);
+    checkTensorLayoutsAndDimsSupported(ioAndStatTensorIds);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
     validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);

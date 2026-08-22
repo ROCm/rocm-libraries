@@ -726,9 +726,9 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
         """
         if is_i4:
             byte_off = _magic_div(b, lane_d_base, 2)  # = tid
-            packed_k = b.global_load(K, b.add(k_row_base, byte_off), I8)
+            packed_k = b.global_load_i8(K, b.add(k_row_base, byte_off))
             lo_k, hi_k = _codebook_i4_pair_to_f32(b, cb_k, packed_k)
-            packed_v = b.global_load(V, b.add(v_row_base, byte_off), I8)
+            packed_v = b.global_load_i8(V, b.add(v_row_base, byte_off))
             v_lo, v_hi = _codebook_i4_pair_to_f32(b, cb_v, packed_v)
             return [lo_k, hi_k], [v_lo, v_hi]
         k_lane = _load_kv_lane_f32(

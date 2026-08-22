@@ -111,6 +111,11 @@ elseif(file STREQUAL "benchmark_device_segmented_reduce")
     set(list_across "\
 ${TUNING_TYPES};64 128 256;1 2 4 8 16" PARENT_SCOPE)
     set(output_pattern_suffix "@DataType@_@BlockSize@_@ItemsPerThread@" PARENT_SCOPE)
+elseif(file STREQUAL "benchmark_device_segmented_topk_air")
+    set(list_across_names "KeyType;ValueType;BlockSize;ItemsPerThread;RadixBits;AdaptCoeff;Limit" PARENT_SCOPE)
+    set(list_across "\
+${TUNING_TYPES};${LIMITED_TUNING_TYPES} rocprim::empty_type;256;2 3 4 5 6 10;8;256;32" PARENT_SCOPE)
+    set(output_pattern_suffix "@KeyType@_@ValueType@_@BlockSize@_@ItemsPerThread@_@RadixBits@_@AdaptCoeff@_@Limit@" PARENT_SCOPE)
 elseif(file STREQUAL "benchmark_device_transform")
     set(list_across_names "\
 DataType;BlockSize;" PARENT_SCOPE)

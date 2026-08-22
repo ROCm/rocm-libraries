@@ -772,6 +772,42 @@ def build_unified_attention_3d_tiled(
     cur_buf_init = b.const_i32(0)
     iter_args.append(("cur_buf", cur_buf_init))
 
+    # LICM hoist: per-reg invariants that are constant across all KV tiles.
+    # qp_r, qh_r, row_ok, and causal_lim depend only on CTA-level constants
+    # (qb_start_pos, kv_head_idx, context_len, cur_batch_q_len) and the
+    # per-thread row index — none of which change inside the KV loop.
+    # ALiBi slopes are per query-head: also loop-invariant. Hoisting them here
+    # mirrors the 2D kernel's hoist_* block (attention_tiled_2d.py:2851-2898)
+    # and avoids re-emitting the global loads and arithmetic every tile.
+    hoist_qp_r = []
+    hoist_qh_r = []
+    hoist_row_ok = []
+    hoist_causal_lim = []
+    for reg in range(4):
+        row = _mfma_16x16_c_row(b, tid, reg)
+        qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
+        qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
+        row_ok = b.land(
+            b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+        )
+        causal_lim = b.add(context_len, qp_r)
+        hoist_qp_r.append(qp_r)
+        hoist_qh_r.append(qh_r)
+        hoist_row_ok.append(row_ok)
+        hoist_causal_lim.append(causal_lim)
+
+    if USE_ALIBI:
+        hoist_alibi = []
+        for reg in range(4):
+            qh_r = hoist_qh_r[reg]
+            qh_ok = b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+            slope = b.masked_global_load(
+                alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
+            )
+            hoist_alibi.append(slope)
+    else:
+        hoist_alibi = None
+
     kvloop = b.scf_for_iter(
         tile_start, tile_end, b.const_i32(1), iter_args, iv_name="kv_tile"
     )
@@ -812,33 +848,16 @@ def build_unified_attention_3d_tiled(
         # QQ-bias before the select-with-(-inf) (equivalent to Triton's
         # post-select add for finite biases via IEEE -inf semantics, with
         # better robustness against compiler reordering).
-        if USE_ALIBI:
-            alibi_per_row = []
-            for reg in range(4):
-                row = _mfma_16x16_c_row(b, tid, reg)
-                qh_r = b.add(
-                    b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
-                )
-                qh_ok = b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-                slope = b.masked_global_load(
-                    alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
-                )
-                alibi_per_row.append(slope)
+        alibi_per_row = hoist_alibi  # None when USE_ALIBI is False
         masked = {}
         for reg in range(4):
-            row = _mfma_16x16_c_row(b, tid, reg)
-            qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
-            qh_r = b.add(
-                b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
-            )
-            row_ok = b.land(
-                b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-            )
+            qp_r = hoist_qp_r[reg]
+            row_ok = hoist_row_ok[reg]
+            causal_lim = hoist_causal_lim[reg]
             for n in range(QK_N_TILES):
                 col_abs = b.add(
                     b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))), lane_col
                 )
-                causal_lim = b.add(context_len, qp_r)
                 causal_ok = b.cmp_le(col_abs, causal_lim)
                 in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
                 m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)

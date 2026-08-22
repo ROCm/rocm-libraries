@@ -1,6 +1,6 @@
 # File Index
 
-A by-file map of the `rocke` package. Symbols listed are the primary public exports — see each file for the rest.
+A by-file map of the `rocke` package. Symbols listed are the primary contents (public exports, or the key internal helpers for whole-module-private files) — see each file for the rest.
 
 ## Top Level
 
@@ -20,7 +20,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary public expo
 | `core/ir.py` | Typed SSA IR. `Type`, `VectorType`, `PtrType`, `SmemType`; singletons (`I1`, `I8`, `I32`, `I64`, `F16`, `BF16`, `F32`, `FP8E4M3`, `BF8E5M2`); cache-hint constants (`CACHE_ALL`, `CACHE_GLOBAL`, `CACHE_STREAM`, `NON_TEMPORAL`); `Value`, `Op`, `Region`, `Param`, `KernelDef`; `IRBuilder`. IRBuilder methods added in : `cvt_bf8_to_f32`, `cvt_f32_to_{fp8, bf8, i8_sat}`, `clamp_f32`, `global_atomic_add`, `lds_atomic_add`. |
 | `core/ir_print.py` | `print_ir(kernel)` — MLIR-style textual IR dump. |
 | `core/passes.py` | `optimize_kernel`, `canonicalize_region`, `eliminate_dead_pure_ops`, `PassStats`. Conservative constant fold + CSE + DCE. |
-| `core/lower_llvm.py` | `lower_kernel_to_llvm(kernel) -> str`. The native Python AMDGPU LLVM IR emitter. Datalayout, intrinsic declarations, op-to-IR mapping. This is one of two interchangeable lowering engines — the C++ engine (`Cpp/`, reached through the `rocke_engine` extension) emits byte-identical LLVM IR; `core/backend.py` selects between them. The datalayout/intrinsics are LLVM-flavor-keyed (`llvm20` / `llvm22`) per ROCm version. |
+| `core/lower_llvm.py` | `lower_kernel_to_llvm(kernel) -> str`. The native Python AMDGPU LLVM IR emitter. Datalayout, intrinsic declarations, op-to-IR mapping. This is one of two interchangeable lowering engines — the C++ engine (`cpp/`, reached through the `rocke_engine` extension) emits byte-identical LLVM IR; `core/backend.py` selects between them. The datalayout/intrinsics are LLVM-flavor-keyed (`llvm20` / `llvm22`) per ROCm version. |
 | `core/backend.py` | `resolve_backend`, dual-engine lowering chokepoint (`python` native lowerer, `cpp` C++ engine, `both` differential assert). Default backend is `cpp` (`ROCKE_BACKEND`), auto-falling back to the native Python lowerer when the `rocke_engine` extension is not built. |
 | `core/ir_serialize.py` | `serialize` / round-trip of the `ck.dsl.ir/v1` artifact — the family-agnostic interchange the C++ engine lowers from. |
 | `core/arch/` | `ArchTarget`, `MmaOp`, `LayoutMap`, `known_arches`, the per-arch spec table (`arch_specs.json`), and the MFMA/WMMA layout-map SSOT. Supported targets: `gfx942`, `gfx950` (CDNA, wave64) and `gfx1151`, `gfx1201` (RDNA, wave32). |
@@ -32,9 +32,12 @@ A by-file map of the `rocke` package. Symbols listed are the primary public expo
 
 | Path | Primary contents |
 |-------------------------------|--------------------------------------------------------------------------------------------------------|
+| `runtime/runtime_coexistence.py` | `_candidate_lib_paths`, `_rocm_root_libdirs`, `_torch_bundled_lib`, ... . Which ROCm runtime we bind to, and whose (torch-bundled vs system). Shared by `comgr` + `hip_module`. |
+| `runtime/_ctypes_bind.py` | `_LazyFn`. Lazy ctypes function binder shared by `comgr` + `hip_module`. |
 | `runtime/comgr.py` | `build_hsaco_from_llvm_ir(ir_text, isa=..., options=...) -> (bytes, ComgrTimings)`. Ctypes over `libamd_comgr`. |
 | `runtime/hip_module.py` | `Runtime`, `Module`, `Event`, `HipError`. Ctypes over `libamdhip64`. Per-stream pending-args queue. |
-| `runtime/torch_module.py` | `pack_args`, `pack_args_kernelparams`, `resolve_stream`, `empty_workspace`, `launch_torch_kernel`. |
+| `runtime/packing.py` | `pack_args`, `pack_args_kernelparams`, `_as_ptr`. Torch-agnostic AMDGPU kernarg packing. |
+| `runtime/torch_interop.py` | `resolve_stream`, `empty_workspace`, `launch_torch_kernel`, `TorchLaunchSummary`. Torch-tensor launch glue. |
 | `runtime/launcher.py` | `KernelLauncher`, `PipelineLauncher`, `LaunchConfig`, `LaunchSummary`, `WorkspaceSpec`, `WorkspacePool`, `DeviceMem`, `time_launches`, `no_fence`, `synchronize_and_release`, `wait_stream_and_release`, `release_retained_for_stream`. |
 
 ## `helpers/` — Authoring Layer
@@ -186,10 +189,10 @@ Each `gen.py` wraps a generator from `rocke.examples` or `rocke.instances`. The 
 
 | Path | Purpose |
 |-----------------------------------------|----------------------------------------------------------------------|
-| `Python/rocke/README.md` | Package README. |
-| `Python/rocke/helpers/README.md` | Helper-layer reference (CK Tile parity table). |
-| `Python/rocke/TRANSFORM_DAG.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
+| `python/rocke/README.md` | Package README. |
+| `python/rocke/helpers/README.md` | Helper-layer reference (CK Tile parity table). |
+| `python/rocke/TRANSFORM_DAG.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
 | `dsl_docs/optimization/runbook_compliance.md` | Runbook section -> DSL primitive mapping, plus measured pass results. |
 | `dsl_docs/` | This documentation tree. |
-| `Python/rocke/examples/gfx950/attention/README.md` | Attention parity methodology and numbers. |
+| `python/rocke/examples/gfx950/attention/README.md` | Attention parity methodology and numbers. |
 | `gpu-op-optimization-runbook` Cursor skill | Long-form GPU optimization runbook referenced throughout. |

@@ -2,12 +2,32 @@
 # Aligned with rocJenkins job types (precheckin, extended, weekly) and Test Filter Standardization POC.
 # *quick* without *strided* is a proxy for smoke set until we use the smoke yaml.
 test_categories:
-  quick:
-    description: "Smoke - not the same as rocblas_smoke.yaml TODO (timeout: 30 min)"
+  ffm-quick:
+    description: "FFM NPI simulation tests for PR pipelines (target: < 2 hours on FFM runner) - quick level-1 tests only"
+    # rtest-driver enabled so patterns and exclude are not used
     test_patterns:
-      - "*quick*"
+      - "*known_bug*"
     exclude:
-      - "*strided*"
+      - "*known_bug*"
+    labels:
+      - "ffm-quick"
+
+  ffm-full:
+    description: "FFM NPI nightly tests (initially the same as ffm-quick; expand as capacity grows)"
+    # rtest-driver enabled so patterns and exclude are not used
+    test_patterns:
+      - "*known_bug*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "ffm-full"
+
+  quick:
+    description: "Smoke - rocblas_smoke.yaml with optional gtest filter refinements (timeout: 30 min)"
+    # rtest-driver enabled so patterns and exclude are not used
+    test_patterns:
+      - "*known_bug*"
+    exclude:
       - "*known_bug*"
     labels:
       - "quick"
@@ -15,9 +35,11 @@ test_categories:
 
   standard:
     description: "Precheckin - same as Jenkins precheckin (timeout: 2 hours)"
+    # rtest-driver enabled so patterns and exclude are not used
     test_patterns:
-      - "*quick*"
-      - "*pre_checkin*"
+      #- "*quick*"
+      #- "*pre_checkin*"
+      - "*known_bug*"
     exclude:
       - "*known_bug*"
     labels:
@@ -27,8 +49,10 @@ test_categories:
 
   comprehensive:
     description: "Extended - same as Jenkins extended/nightly (timeout: 8 hours)"
+    # rtest-driver enabled so patterns and exclude are not used
     test_patterns:
-      - "*nightly*"
+      # - "*nightly*"
+      - "*known_bug*"
     exclude:
       - "*known_bug*"
     labels:
@@ -38,13 +62,15 @@ test_categories:
 
   full:
     description: "Stress / weekly - same as Jenkins weekly (stress + HMM)"
+    # rtest-driver enabled so patterns and exclude are not used
     test_patterns:
     #  - "*stress*"
     #  - "*HMM*"
     # current CI use case currently does not match stress use case
-      - "*quick*"
-      - "*pre_checkin*"
-      - "*nightly*"
+    #  - "*quick*"
+    #  - "*pre_checkin*"
+    #  - "*nightly*"
+      - "*known_bug*"
     exclude:
       - "*known_bug*"
     labels:
@@ -62,7 +88,9 @@ execution_settings:
   default_timeout: 900
   timeout_multiplier: 1
   category_timeouts:
-    quick: 1800    # 30 min
-    standard: 7200    # 2 hours
-    comprehensive: 7200   # 2 hours
-    full: 28800       # 8 hours
+    ffm-quick: 7200     # 2 hours — hard FFM PR budget
+    ffm-full: 7200      # 2 hours — initially same as ffm-quick (expand as capacity grows)
+    quick: 1800         # 30 min (rocblas_smoke.yaml)
+    standard: 7200      # 2 hours
+    comprehensive: 7200 # 2 hours
+    full: 28800         # 8 hours

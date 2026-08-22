@@ -9,7 +9,7 @@
 > **Validation note**: Every code example, exercise, and command in this guide
 > has been run and verified on an AMD Instinct MI355X (gfx950, ROCm 7.0). All
 > custom kernels are bit-exact against their torch reference. Run commands from
-> the `rocKE/` directory with `export PYTHONPATH=Python`.
+> the `rocke/platform/` directory with `export PYTHONPATH=python`.
 
 ---
 
@@ -39,8 +39,8 @@ By the end of Week 1, you will:
 1. Set up your environment:
 ```bash
 # Run all commands from the rocKE root:
-cd <rocm-libraries-checkout>/dnn-providers/hip-kernel-provider/rocKE
-export PYTHONPATH=Python
+cd <rocm-libraries-checkout>/dnn-providers/hip-kernel-provider/rocke/platform
+export PYTHONPATH=python
 export PYTHONDONTWRITEBYTECODE=1
 
 # Verify ROCm sees your GPU (look for your gfx target, e.g. gfx950)
@@ -54,7 +54,7 @@ python3 -c "from rocke import *; print('CK DSL ready!')"
 > reports `CUDA: False`, your shell is missing the GPU device groups. Confirm
 > with `python3 -c "import torch; print(torch.cuda.is_available())"`. If the
 > import itself fails with `No module named 'rocke'`, you are not in
-> `rocKE/` or `PYTHONPATH=Python` is unset.
+> `rocke/platform/` or `PYTHONPATH=python` is unset.
 
 2. Run the validation suite to confirm everything works:
 ```bash
@@ -95,12 +95,12 @@ resource descriptors, and (5) why Value.__bool__ raises an error."
 **Study the example:**
 ```bash
 # Read the 2D add demo - simpler than full vector add
-cat Python/rocke/examples/common/distribution_2d_add_demo.py
+cat python/rocke/examples/common/distribution_2d_add_demo.py
 ```
 
 **Exercise 1: Build and run the demo**
 ```bash
-python Python/rocke/examples/common/distribution_2d_add_demo.py \
+python python/rocke/examples/common/distribution_2d_add_demo.py \
     --H 128 --W 256 --tile-m 32 --tile-n 64 --vec 8
 ```
 Expected output (bit-exact):
@@ -398,7 +398,7 @@ reusable, dispatchable kernel":
 Study the canonical small-op instance first — it's the simplest end-to-end
 example of all four parts:
 ```bash
-sed -n '1,120p' Python/rocke/instances/common/reduce.py   # docstring + spec
+sed -n '1,120p' python/rocke/instances/common/reduce.py   # docstring + spec
 cat dsl_docs/instances/small_ops.md          # the family doc
 ```
 
@@ -586,7 +586,7 @@ if __name__ == "__main__":
 - Study the reference implementation:
 ```bash
 # The cshuffle epilogue lives in the universal-GEMM builder. Grep for it:
-grep -n "cshuffle" Python/rocke/instances/common/gemm_universal.py
+grep -n "cshuffle" python/rocke/instances/common/gemm_universal.py
 ```
 
 **Key Concept:** C-shuffle optimizes the GEMM epilogue by:
@@ -690,8 +690,8 @@ Each D operand is `(param_name, op)` with `op` in `{"add", "mul"}`.
 
 **Study reference implementation:**
 ```bash
-sed -n '1,40p' Python/rocke/instances/common/gemm_multi_d.py   # docstring
-grep -n "GemmMultiDSpec\|d_operands" Python/rocke/instances/common/gemm_multi_d.py
+sed -n '1,40p' python/rocke/instances/common/gemm_multi_d.py   # docstring
+grep -n "GemmMultiDSpec\|d_operands" python/rocke/instances/common/gemm_multi_d.py
 ```
 
 > **Kernarg ABI gotcha** (called out in the source): the kernel param order is
@@ -785,8 +785,8 @@ Extend Exercise 6 to `E = (A*B + D0) * D1` by passing
 **Study the elementwise / quantization ops:**
 ```bash
 # Activation + quant ops available as standalone elementwise kernels:
-python Python/rocke/examples/common/ck_tile_parity.py --op relu
-cat Python/rocke/instances/common/add_rmsnorm2d_rdquant.py   # fused quant ref
+python python/rocke/examples/common/ck_tile_parity.py --op relu
+cat python/rocke/instances/common/add_rmsnorm2d_rdquant.py   # fused quant ref
 ```
 
 **AI-Assisted Design:**
@@ -810,8 +810,8 @@ Design the extension:
 - `dsl_docs/instances/attention.md`
 - Study example implementations:
 ```bash
-ls Python/rocke/examples/gfx1151/attention/
-cat Python/rocke/examples/gfx1151/attention/fmha_singlewave.py
+ls python/rocke/examples/gfx1151/attention/
+cat python/rocke/examples/gfx1151/attention/fmha_singlewave.py
 ```
 
 **Key Attention Patterns:**
@@ -1346,7 +1346,7 @@ After completing Week 3, choose your specialization path:
 ```bash
 cat dsl_docs/instances/index.md          # how instances are organized
 cat dsl_docs/development/extending.md     # adding a new instance
-ls  Python/rocke/instances/common/                     # the shipped instance set
+ls  python/rocke/instances/common/                     # the shipped instance set
 ```
 
 ### Path B: Architecture Specialization
@@ -1375,9 +1375,9 @@ cat dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md
 ```bash
 cat dsl_docs/fusion/overview.md
 # Real fused instances to study (epilogue fusion, fused norm+quant, fused conv):
-cat Python/rocke/instances/common/gemm_multi_d.py        # GEMM epilogue fusion
-cat Python/rocke/instances/common/add_rmsnorm2d_rdquant.py  # fused norm + quant
-ls  Python/rocke/instances/common/ | grep -E "fmha|fused|rmsnorm|moe"
+cat python/rocke/instances/common/gemm_multi_d.py        # GEMM epilogue fusion
+cat python/rocke/instances/common/add_rmsnorm2d_rdquant.py  # fused norm + quant
+ls  python/rocke/instances/common/ | grep -E "fmha|fused|rmsnorm|moe"
 ```
 
 ### Path D: Tooling & Infrastructure
@@ -1462,7 +1462,7 @@ Provide:
 **Week 1:**
 - *"HSACO compilation fails"* → Check ROCm version, verify `rocminfo`
 - *"Wrong results in vector add"* → Check index calculations, bounds checking
-- *"Import errors"* → Verify `PYTHONPATH=Python`
+- *"Import errors"* → Verify `PYTHONPATH=python`
 
 **Week 2:**
 - *"C-shuffle crashes"* → Check warp count, tile size alignment
@@ -1502,8 +1502,8 @@ Provide:
 
 ### Essential Commands
 ```bash
-# All commands run from rocKE/ with PYTHONPATH=Python
-export PYTHONPATH=Python
+# All commands run from rocke/platform/ with PYTHONPATH=python
+export PYTHONPATH=python
 
 # Verify setup
 python -c "from rocke import *; print('Ready')"
@@ -1527,7 +1527,7 @@ rocprof --stats python my_kernel.py
 
 ### Key File Locations
 ```
-Python/rocke/
+python/rocke/
 ├── core/ir.py                              # SSA IR and IRBuilder
 ├── core/lower_llvm.py                      # production LLVM lowering
 ├── core/ir_print.py                        # print_ir() (returns MLIR-style text)

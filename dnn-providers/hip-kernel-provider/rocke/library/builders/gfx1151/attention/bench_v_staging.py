@@ -24,7 +24,7 @@ written to ``v_staging_perf.csv``.
 
 Must run on a gfx1151 device.
 
-    PYTHONPATH=Python python3 -m builders.gfx1151.attention.bench_v_staging \
+    PYTHONPATH=python python3 -m builders.gfx1151.attention.bench_v_staging \
         --seqlen-q 512 --seqlen-k 512 --head-size 128 --heads 8 --batch 4
 """
 

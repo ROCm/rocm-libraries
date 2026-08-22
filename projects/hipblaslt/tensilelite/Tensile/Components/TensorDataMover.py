@@ -4,7 +4,7 @@ from ..Common import INDEX_CHARS
 from typing import Mapping, Optional
 from rocisa.code import Module
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
-    SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32, SMulLOU32
+    SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, MemTokenData
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
@@ -259,14 +259,12 @@ class TensorDataMoverLoad(TensorDataMover):
 
     @staticmethod
     def dataSizeShift(dtype: DataType, isMetadata: bool = False) -> int:
-        if isMetadata or dtype.isInt8() or dtype.is8bitFloat() or dtype.isFloat4() or dtype.is6bitFloat():
+        # TDM data_size is log2(element bytes), max 3 (8B).
+        numBytes = dtype.numBytes()
+        if isMetadata or numBytes <= 1:
             return 0
-        if dtype.isBFloat16() or dtype.isHalf():
-            return 1
-        if dtype.isSingle():
-            return 2
-        if dtype.isDouble():
-            return 3
+        if numBytes <= 8:
+            return int(log2(numBytes))
         raise AssertionError(f"unsupported dtype for TDM data_size: {dtype}")
 
     def setDataType(self, dtype: DataType, group1: str | int, isMetadata: bool = False) -> Module:

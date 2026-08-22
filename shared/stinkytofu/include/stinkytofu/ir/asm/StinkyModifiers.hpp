@@ -29,11 +29,14 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
+struct StinkyInstruction;
+
 // Enum for selecting high or low 16 bits in True16 instructions
 enum class HighBitSel : int { NONE = -1, LOW = 0, HIGH = 1 };
 
@@ -66,6 +69,9 @@ STINKYTOFU_EXPORT std::string matrixScaleFmtToStr(MatrixScaleFmt fmt);
 
 // Parse assembly string to MatrixScaleFmt enum.
 STINKYTOFU_EXPORT MatrixScaleFmt parseMatrixScaleFmt(std::string_view s);
+
+// Parse MX scale-select assembly string.
+STINKYTOFU_EXPORT int parseMatrixScaleSel(std::string_view s);
 
 enum class MUBUFScope : uint8_t {
     SCOPE_NONE = 0,
@@ -296,6 +302,7 @@ struct Modifier {
         VCC,
         SWAITCNT_DATA,
         SWAITTENSORCNT_DATA,
+        SWAITASYNCCNT_DATA,
         SWAITSTORECNT_DATA,
         SDELAYALU_DATA,
         SWAITALU_DATA,
@@ -305,6 +312,8 @@ struct Modifier {
         MATRIX_FMT,
         MEM_TOKEN,
         WMMA_POOL_INDEX,
+        CALL_TARGETS,
+        EXEC_GROUP,
     };
 
     Modifier(Type type) : type(type) {}
@@ -788,12 +797,33 @@ struct LabelData : public TypedModifier<LabelData> {
     uint16_t alignment;
 };
 
+/// Producer-authored names of callable bodies this `s_swappc_b64` may enter.
+/// Does not affect assembly text and must not be interpreted as CFG edges
+/// (unlike `LabelData` on direct branches / annotated `s_setpc_b64`).
+struct CallTargetData : public TypedModifier<CallTargetData> {
+    static constexpr Modifier::Type Type = Modifier::Type::CALL_TARGETS;
+
+    explicit CallTargetData(std::vector<std::string> callees = {})
+        : TypedModifier<CallTargetData>(), callees(std::move(callees)) {}
+
+    std::vector<std::string> callees;
+};
+
 struct SWaitTensorCntData : public TypedModifier<SWaitTensorCntData> {
     static constexpr Modifier::Type Type = Modifier::Type::SWAITTENSORCNT_DATA;
 
     SWaitTensorCntData(int8_t tlcnt = -1) : TypedModifier<SWaitTensorCntData>(), tlcnt(tlcnt) {}
 
     int8_t tlcnt;
+};
+
+struct SWaitAsyncCntData : public TypedModifier<SWaitAsyncCntData> {
+    static constexpr Modifier::Type Type = Modifier::Type::SWAITASYNCCNT_DATA;
+
+    SWaitAsyncCntData(int8_t asynccnt = -1)
+        : TypedModifier<SWaitAsyncCntData>(), asynccnt(asynccnt) {}
+
+    int8_t asynccnt;
 };
 
 struct SWaitStoreCntData : public TypedModifier<SWaitStoreCntData> {
@@ -1007,6 +1037,8 @@ struct MFMAModifiers : public TypedModifier<MFMAModifiers> {
 // instructions, the per-matrix scale numeric format (scaleFmtA/scaleFmtB).
 // Used both for assembly emission (matrix_a_fmt:..., matrix_a_scale_fmt:...)
 // and as the match key for cost-override entries in *_Instructions.def.
+// MX scale-select (matrix_a_scale:N / matrix_b_scale:N): which MX scale
+// slot the WMMA reads (0 = default lower half-wave, 1 = partner upper half-wave).
 struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::MATRIX_FMT;
 
@@ -1014,6 +1046,8 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     MatrixFmt fmtB = MatrixFmt::NONE;
     MatrixScaleFmt scaleFmtA = MatrixScaleFmt::NONE;
     MatrixScaleFmt scaleFmtB = MatrixScaleFmt::NONE;
+    int scaleSelA = 0;
+    int scaleSelB = 0;
 
     MatrixFmtModifiers() : TypedModifier<MatrixFmtModifiers>() {}
     MatrixFmtModifiers(MatrixFmt a, MatrixFmt b)
@@ -1025,9 +1059,15 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     bool isMXMFMA() const {
         return scaleFmtA != MatrixScaleFmt::NONE;
     }
-    // True when no format info is set (instance carries nothing useful).
+    // Must check all fields, to avoid a false "empty":
+    // e.g. v_wmma_scale_f32_32x16x128_f4 carries no fmtA/fmtB but is not really
+    // empty — it still sets scaleFmtA/scaleFmtB. Checking fmtA/fmtB alone would
+    // drop its matrix_*_scale_fmt. Likewise a non-zero scale-select (matrix_*_scale:1)
+    // is meaningful on its own and must not be treated as empty.
     bool empty() const {
-        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE;
+        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE &&
+               scaleFmtA == MatrixScaleFmt::NONE && scaleFmtB == MatrixScaleFmt::NONE &&
+               scaleSelA == 0 && scaleSelB == 0;
     }
 };
 
@@ -1057,6 +1097,17 @@ struct WmmaPoolData : public TypedModifier<WmmaPoolData> {
     uint32_t poolIndex = 0;
 
     explicit WmmaPoolData(uint32_t idx) : TypedModifier<WmmaPoolData>(), poolIndex(idx) {}
+};
+
+/// Holds raw (non-owning) pointers to the original instructions grouped into an
+/// ExecMaskGroup pseudo-instruction by collapseExecMaskedRegions().
+struct ExecGroupData : public TypedModifier<ExecGroupData> {
+    static constexpr Modifier::Type Type = Modifier::Type::EXEC_GROUP;
+
+    std::vector<StinkyInstruction*> children;
+
+    explicit ExecGroupData(std::vector<StinkyInstruction*> children)
+        : TypedModifier<ExecGroupData>(), children(std::move(children)) {}
 };
 
 }  // namespace stinkytofu

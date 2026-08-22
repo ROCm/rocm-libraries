@@ -105,7 +105,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ExtractsEpsilonValueCorrectly)
     const BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
 
     // Epsilon should be extracted as double
-    EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 }
 
 // ============================================================================
@@ -133,6 +133,46 @@ TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVariancePresent)
     EXPECT_EQ(params.mean()->uid(), bnAttrs->mean_tensor_uid());
     EXPECT_NE(params.invVariance(), nullptr);
     EXPECT_EQ(params.invVariance()->uid(), bnAttrs->inv_variance_tensor_uid());
+}
+
+TEST(TestBatchnormFwdTrainingActivParams, HandlesRunningStatsPresent)
+{
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(true, true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& bnNode = graph.getNode(0);
+    auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
+    ASSERT_NE(bnAttrs, nullptr);
+
+    const auto& activNode = graph.getNode(1);
+    auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
+    ASSERT_NE(activAttrs, nullptr);
+
+    const BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
+
+    EXPECT_TRUE(params.hasRunningStats());
+}
+
+TEST(TestBatchnormFwdTrainingActivParams, HandlesRunningStatsPresentNoMeanVar)
+{
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(false, true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& bnNode = graph.getNode(0);
+    auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
+    ASSERT_NE(bnAttrs, nullptr);
+
+    const auto& activNode = graph.getNode(1);
+    auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
+    ASSERT_NE(activAttrs, nullptr);
+
+    const BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
+
+    EXPECT_TRUE(params.hasRunningStats());
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVarianceMissing)
@@ -177,7 +217,7 @@ TEST(TestBatchnormFwdTrainingActivParams, HasRunningStatsReturnsFalseWhenNotProv
 // Missing Tensor Tests
 // ============================================================================
 
-TEST(TestBatchnormFwdTrainingActivParams, ThrowsStdOutOfRangeForMissingEpsilonTensor)
+TEST(TestBatchnormFwdTrainingActivParams, ThrowsHipdnnPluginExceptionForMissingEpsilonTensor)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -279,9 +319,11 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsStdOutOfRangeForMissingEpsilonTe
     auto* activAttrs = actNode.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttrs, nullptr);
 
-    // Constructor uses tensorMap.at() which throws std::out_of_range for missing key
+    // makeScalarOperand looks up the epsilon uid via tensorMap.find() and throws a
+    // HipdnnPluginException (not std::out_of_range) so the error carries a clear
+    // message and status code across the extern "C" plugin boundary.
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 std::out_of_range);
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -905,7 +947,6 @@ TEST(TestBatchnormFwdTrainingActivPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NODPP=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_USESAVED=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VECTORIZE=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_STASH_METHOD=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VARIANT=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NRN_OP_ID=3"));

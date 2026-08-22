@@ -54,6 +54,7 @@ Tests:
              HIPSPARSE_SPMM_COO_ALG2,
              HIPSPARSE_SPMM_COO_ALG3,
              HIPSPARSE_SPMM_COO_ALG4]
+  call_preprocess: [true, false]
 
 - name: spmm_coo
   category: pre_checkin
@@ -80,7 +81,8 @@ Tests:
   filename: [nos1,
              nos4, 
              nos5]
-
+  call_preprocess: [true]
+  
 - name: spmm_coo
   category: nightly
   function: spmm_coo
@@ -104,3 +106,4 @@ Tests:
              HIPSPARSE_SPMM_COO_ALG3,
              HIPSPARSE_SPMM_COO_ALG4]
   filename: [Chebyshev4]
+  call_preprocess: [true]

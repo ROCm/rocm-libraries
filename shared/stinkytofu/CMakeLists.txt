@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/modules/default_amdclang.cmake)
 endif()
 
@@ -71,6 +71,23 @@ set(STINKYTOFU_ARCHS_TO_BUILD "all"
 if (STINKYTOFU_ARCHS_TO_BUILD STREQUAL "all" )
     set(STINKYTOFU_ARCHS_TO_BUILD ${STINKYTOFU_ALL_ARCHS})
 endif()
+
+# An empty arch list yields an empty GfxArchID enum and a library with no architectures at all,
+# and a repeated entry reaches the compiler as a duplicate enumerator; both are quiet failures,
+# so catch them here. An unknown name fails later on its missing per-arch .def/.cpp files.
+if(NOT STINKYTOFU_ARCHS_TO_BUILD)
+    message(FATAL_ERROR
+        "STINKYTOFU_ARCHS_TO_BUILD is empty. Set it to \"all\" or to one or more of: "
+        "${STINKYTOFU_ALL_ARCHS}")
+endif()
+
+list(REMOVE_DUPLICATES STINKYTOFU_ARCHS_TO_BUILD)
+
+# Gfx1250 (v1) and Gfx1250v0 (v0) are two steppings of one ISA triple, {12,5,0}, but distinct
+# GfxArchID identities. They intentionally coexist in one library: downstream selects the per-arch
+# cost table by identity (threaded from the conversion entry as ModuleOptions.ArchName),
+# not by resolving the shared triple. The pipeline stays keyed on the triple and is shared. So the
+# pair is allowed here; the identity, not a first-match triple lookup, keeps their costs apart.
 
 foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
     list(APPEND STINKYTOFU_ARCHS "${arch}")
@@ -170,6 +187,26 @@ option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 # libstinkytofu when those deps are not on the loader's default search path.
 option(STINKYTOFU_INSTALL_RPATH_USE_LINK_PATH
     "Use link-dependency dirs as the installed libstinkytofu RPATH" OFF)
+
+# Unit tests default ON for standalone StinkyTofu builds and OFF when vendored as
+# a sub-project. This must be defined before stinkytofu_static is conditionally
+# created for shared-library test builds.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(_stinkytofu_build_tests_default ON)
+else()
+    set(_stinkytofu_build_tests_default OFF)
+endif()
+option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
+
+# The test suite names GfxArchID::Gfx1250 in roughly two dozen files, so it needs the v1 stepping
+# to be present. The default build (Gfx1250 + Gfx1250v0) satisfies that, and so does a Gfx1250-only
+# build; only a v0-*only* build lacks the enumerator and would fail in a pile of compile errors.
+if(STINKYTOFU_BUILD_TESTS AND NOT "Gfx1250" IN_LIST STINKYTOFU_ARCHS_TO_BUILD)
+    message(FATAL_ERROR
+        "The test suite is written against GfxArchID::Gfx1250, so it needs Gfx1250 in "
+        "STINKYTOFU_ARCHS_TO_BUILD (the default 'all' includes it). Add Gfx1250, or set "
+        "-DSTINKYTOFU_BUILD_TESTS=OFF for a v0-only build.")
+endif()
 
 # dladdr() used in IntrinsicRegistry.cpp requires -ldl
 # Threads required for std::call_once (separate libpthread on glibc < 2.34)
@@ -285,13 +322,6 @@ endif()
 ##===----------------------------------------------------------------------===##
 # Unit tests
 ##===----------------------------------------------------------------------===##
-# Option to build unit tests
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    set(_stinkytofu_build_tests_default ON)
-else()
-    set(_stinkytofu_build_tests_default OFF)
-endif()
-option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
 if(STINKYTOFU_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -347,12 +377,26 @@ install(FILES
 )
 
 # --------------------------------------------------------------------------- #
+# Documentation (Doxygen + Sphinx, published to Read the Docs)
+# --------------------------------------------------------------------------- #
+if(ROCmCMakeBuildTools_FOUND)
+    add_subdirectory(docs)
+else()
+    message(STATUS "ROCmCMakeBuildTools not found — skipping docs target.")
+endif()
+
+# --------------------------------------------------------------------------- #
 # clang-tidy
 # --------------------------------------------------------------------------- #
 option(ENABLE_CLANG_TIDY "Enable clang-tidy targets" OFF)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
-include(ClangTidy)
-add_clang_tidy_custom_target()
+# ClangTidy.cmake lives in the superbuild's cmake/modules, outside this
+# subproject. Only reach for it when the feature is actually requested, so a
+# standalone or partial checkout of shared/stinkytofu can still configure.
+if(ENABLE_CLANG_TIDY)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
+    include(ClangTidy)
+    add_clang_tidy_custom_target()
+endif()
 
 # Build-tree export so find_package() works without installing.
 # Write targets to stinkytofu-targets.cmake (not stinkytofuConfig.cmake) to
@@ -378,6 +422,7 @@ install(FILES
 #   *.cpp               -> "stinkytofu/Config/Config.h"
 #   ir/logical/LogicalOpcode.hpp -> "LogicalOpcodes_generated.inc"
 #   ir/asm/StinkyAsmIR.hpp       -> "hardware/gfxIsa.inc"
+#   *.cpp               -> "stinkytofu/Version.h"
 install(FILES
     ${PROJECT_BINARY_DIR}/include/Config/Archs.def
     DESTINATION include/stinkytofu/Config
@@ -402,7 +447,7 @@ install(DIRECTORY ${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/rocisa/
 )
 install(FILES
     ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h
-    DESTINATION include/stinkytofu
+    DESTINATION include/stinkytofu/stinkytofu
 )
 # Tablegen-generated file needed by the Python module when built standalone
 # against an installed stinkytofu.

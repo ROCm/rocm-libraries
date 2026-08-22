@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,6 @@
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
-#include "callback_map.h"
 #include "compute_scheme.h"
 #include "data_layout.h"
 #include "enum_printer.h"
@@ -51,6 +50,10 @@
 #include "rocfft_mpi.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
+
+#ifdef ROCFFT_RCCL_ENABLE
+#include "rccl_wrapper.h"
+#endif
 
 enum NodeType
 {
@@ -664,9 +667,6 @@ public:
     size_t           chirp_size            = 0;
     gpubuf_t<size_t> devKernArg;
 
-    // callback parameters
-    UserCallbacks callbacks;
-
     hipDeviceProp_t deviceProp = {};
     function_pool   pool;
 
@@ -946,7 +946,7 @@ public:
     // Assuming callbacks need to run on this node, return the
     // specific CallbackType for this node - takes into account
     // whether the node is treating real data as complex
-    CallbackType GetCallbackType(bool enable_callbacks) const;
+    CallbackType GetCallbackType() const;
 
 protected:
     virtual void BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) = 0;
@@ -1090,12 +1090,11 @@ struct MultiPlanItem
     // object's event is allocated and recorded on the stream when
     // the last piece of work is queued, so callers can wait on that
     // event to know when the work is complete.
-    virtual void ExecuteAsync(const rocfft_plan                       plan,
-                              void*                                   in_buffer[],
-                              void*                                   out_buffer[],
-                              const rocfft_execution_info_internal&   info,
-                              size_t                                  multiPlanIdx,
-                              const std::map<int, device_callback_t>& callbacks)
+    virtual void ExecuteAsync(const rocfft_plan                     plan,
+                              void*                                 in_buffer[],
+                              void*                                 out_buffer[],
+                              const rocfft_execution_info_internal& info,
+                              size_t                                multiPlanIdx)
         = 0;
 
     // wait for async operations to finish
@@ -1185,8 +1184,7 @@ struct CommPointToPoint : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1225,6 +1223,228 @@ private:
     // Event to signal when the async operations are finished.
     hipEvent_wrapper_t event;
 };
+
+#ifdef ROCFFT_RCCL_ENABLE
+// RCCL-based all-to-all communication for multi-GPU transpose.
+struct CommRCCLAllToAll : public MultiPlanItem
+{
+    // per-rank state for one all-to-all participant. Caller fills
+    // sendBuffer/recvBuffer; the constructor allocates the completion
+    // event. The collective runs on the comm-owned stream; the event is
+    // recorded on it after ncclGroupEnd so Wait() can sync on events like
+    // every other MultiPlanItem.
+    struct agent_t
+    {
+        BufferPtr          sendBuffer;
+        BufferPtr          recvBuffer;
+        hipEvent_wrapper_t event;
+    };
+
+    // _agents must be indexed by RCCL rank. The rocfft_rccl_comm_t type
+    // assigns ranks in sorted device-id order (this holds even for non-contiguous
+    // device sets such as {1, 3, 6}), so building the vector in the same
+    // order as _rccl.get_devices(), or equivalently in ascending device-id
+    // order, satisfies the contract.
+    CommRCCLAllToAll(const rocfft_rccl_comm_t& _rccl,
+                     rocfft_precision          _precision,
+                     rocfft_array_type         _arrayType,
+                     size_t                    _count_per_rank,
+                     std::vector<agent_t>      _agents)
+        : rccl(_rccl)
+        , precision(_precision)
+        , arrayType(_arrayType)
+        , count_per_rank(_count_per_rank)
+        , agents(std::move(_agents))
+    {
+        // single-process RCCL only, so the local rank is always 0;
+        // ExecutesOnRank() relies on this being set explicitly since
+        // the MultiPlanItem base does not default-initialize it
+        local_comm_rank = 0;
+
+        // validate caller-supplied agent count against the communicator
+        const auto nranks = rccl.num_ranks();
+        if(agents.size() != nranks)
+            throw std::invalid_argument(
+                "CommRCCLAllToAll: agents.size() (" + std::to_string(agents.size())
+                + ") must match rccl.num_ranks() (" + std::to_string(nranks) + ")");
+
+        // one completion event per device, on that device, so recording
+        // it on the comm stream is valid. The stream is comm-owned.
+        const auto devices = rccl.get_devices();
+        for(size_t r = 0; r < devices.size(); ++r)
+        {
+            rocfft_scoped_device scoped(devices[r]);
+            agents[r].event.alloc();
+        }
+    }
+
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx) override;
+    void Wait() override;
+
+    void Print(rocfft_ostream& os, const int indent) const override;
+
+    bool WritesToBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& a : agents)
+        {
+            if(ptr == a.recvBuffer)
+                return true;
+        }
+        return false;
+    }
+
+    // the collective consumes each per-agent send buffer.
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& a : agents)
+        {
+            if(ptr == a.sendBuffer)
+                return true;
+        }
+        return false;
+    }
+
+    // single-process RCCL: all participating devices belong to the local
+    // process, so the collective runs on local_comm_rank only.
+    bool ExecutesOnRank(int comm_rank) const override
+    {
+        return comm_rank == local_comm_rank;
+    }
+
+private:
+    const rocfft_rccl_comm_t& rccl;
+
+    const rocfft_precision  precision;
+    const rocfft_array_type arrayType;
+    const size_t            count_per_rank; // elements per rank (uniform)
+
+    // per-rank send/recv buffers, indexed by RCCL rank to
+    // match the ordering returned by rccl.get_devices().
+    std::vector<agent_t> agents;
+};
+
+// kind of point-to-point RCCL transfer issued by CommRCCLGrouped
+enum class rccl_op
+{
+    send,
+    recv
+};
+
+// RCCL-based grouped send/recv for non-uniform patterns
+struct CommRCCLGrouped : public MultiPlanItem
+{
+    CommRCCLGrouped(rocfft_rccl_comm_t& _rccl,
+                    rocfft_precision    _precision,
+                    rocfft_array_type   _arrayType)
+        : rccl(_rccl)
+        , precision(_precision)
+        , arrayType(_arrayType)
+    {
+    }
+
+    // transfer_kind is a non-type template parameter so call sites read
+    // as AddTransfer<rccl_op::send>(...) / AddTransfer<rccl_op::recv>(...)
+    // instead of using opaque true/false flags.
+    template <rccl_op transfer_kind>
+    void AddTransfer(rocfft_location_t peer_location,
+                     rocfft_location_t local_location,
+                     BufferPtr         buffer,
+                     size_t            offset,
+                     size_t            count,
+                     int               comm_rank)
+    {
+        Transfer t;
+        t.peer_location  = peer_location;
+        t.local_location = local_location;
+        t.buffer         = buffer;
+        t.offset         = offset;
+        t.count          = count;
+        t.op             = transfer_kind;
+
+        // completion event on the local device (only when the local
+        // endpoint is on this process); the launch stream is comm-owned.
+        if(local_location.comm_rank == comm_rank)
+        {
+            rocfft_scoped_device dev(local_location.device);
+            t.event.alloc();
+        }
+        transfers.push_back(std::move(t));
+    }
+
+    bool HasTransfers() const
+    {
+        return !transfers.empty();
+    }
+
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx) override;
+    void Wait() override;
+
+    void Print(rocfft_ostream& os, const int indent) const override;
+
+    bool WritesToBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& t : transfers)
+        {
+            if(t.op == rccl_op::recv && ptr == t.buffer)
+                return true;
+        }
+        return false;
+    }
+
+    // send transfers read from their pack buffer before launching the
+    // ncclSend; recv transfers do not read from t.buffer.
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& t : transfers)
+        {
+            if(t.op == rccl_op::send && ptr == t.buffer)
+                return true;
+        }
+        return false;
+    }
+
+    bool ExecutesOnRank(int comm_rank) const override
+    {
+        for(const auto& t : transfers)
+        {
+            if(t.local_location.comm_rank == comm_rank)
+                return true;
+        }
+        return false;
+    }
+
+private:
+    struct Transfer
+    {
+        // peer and local endpoints, both as (comm_rank, device) pairs;
+        // the peer's RCCL rank is derived at execution time from
+        // peer_location.device via rccl.get_rank().
+        rocfft_location_t peer_location;
+        rocfft_location_t local_location;
+        BufferPtr         buffer;
+        size_t            offset;
+        size_t            count;
+        rccl_op           op;
+        // per-transfer completion event (only for local endpoints). The
+        // send/recv runs on the comm-owned stream; the event is recorded
+        // on it after ncclGroupEnd so Wait() can sync on events.
+        hipEvent_wrapper_t event;
+    };
+
+    const rocfft_rccl_comm_t& rccl;
+    const rocfft_precision    precision;
+    const rocfft_array_type   arrayType;
+    std::vector<Transfer>     transfers;
+};
+#endif // ROCFFT_RCCL_ENABLE
 
 // This struct has a vector of ranks to scatter to.  Executing can
 // create an MPI group with those ranks.
@@ -1288,8 +1508,7 @@ struct CommScatter : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1398,8 +1617,7 @@ struct CommGather : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1508,8 +1726,7 @@ struct CommAllToAll : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
 
     void Wait() override;
 
@@ -1589,12 +1806,11 @@ struct ExecPlan : public MultiPlanItem
     BufferPtr outputPtr;
     BufferPtr workPtr;
 
-    void ExecuteAsync(const rocfft_plan                       plan,
-                      void*                                   in_buffer[],
-                      void*                                   out_buffer[],
-                      const rocfft_execution_info_internal&   info,
-                      size_t                                  multiPlanIdx,
-                      const std::map<int, device_callback_t>& callbacks) override;
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx) override;
 
     void Wait() override;
 

@@ -56,12 +56,12 @@ hipsparseStatus_t hipsparseDestroy(hipsparseHandle_t handle);
  *
  *  \details
  *  \p hipsparseGetErrorName takes a hipSPARSE status as input and first converts it to the matching backend
- *  status (either rocsparse_status or cusparseStatus_t). It then returns the string representation of this status
+ *  status (either \p rocsparse_status or \p cusparseStatus_t). It then returns the string representation of this status
  *  enum name. If the status is not recognized, the function returns "Unrecognized status code".
  *
- *  For example, hipsparseGetErrorName(HIPSPARSE_STATUS_SUCCESS) on a system with a rocSPARSE backend will
- *  return "rocsparse_status_success". On a system with a cuSPARSE backend this function would return
- *  "CUSPARSE_STATUS_SUCCESS".
+ *  For example, \p hipsparseGetErrorName( \ref HIPSPARSE_STATUS_SUCCESS) on a system with a rocSPARSE backend will
+ *  return \p rocsparse_status_success. On a system with a cuSPARSE backend this function would return
+ *  \p CUSPARSE_STATUS_SUCCESS.
  */
 HIPSPARSE_EXPORT
 const char* hipsparseGetErrorName(hipsparseStatus_t status);
@@ -71,7 +71,7 @@ const char* hipsparseGetErrorName(hipsparseStatus_t status);
  *
  *  \details
  *  \p hipsparseGetErrorString takes a hipSPARSE status as input and first converts it to the matching backend
- *  status (either rocsparse_status or cusparseStatus_t). It then returns the string description of this status.
+ *  status (either \p rocsparse_status or \p cusparseStatus_t). It then returns the string description of this status.
  *  If the status is not recognized, the function returns "Unrecognized status code".
  */
 HIPSPARSE_EXPORT

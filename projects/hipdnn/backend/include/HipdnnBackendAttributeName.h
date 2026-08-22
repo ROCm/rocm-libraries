@@ -57,6 +57,10 @@
  * - 3200-3299: Reduction operation attributes
  * - 3300-3399: Resample forward operation attributes
  * - 3400-3499: Shared resample descriptor attributes
+ * - 3500-3599: RMSNorm backward operation attributes
+ * - 3600-3699: Layernorm backward operation attributes
+ * - 3700-3799: MoE grouped matmul operation attributes
+ * - 3800-3899: MoE grouped matmul backward operation attributes
  * - 60000-60099: Knob info serialized value extension attributes
  * - 60100-60199: Knob choice serialized value extension attributes
  * - 60200-60299: Operation type extension attributes
@@ -459,8 +463,20 @@ typedef enum
     /** @brief Pass-by-value tensor data (extension) */
     HIPDNN_ATTR_TENSOR_VALUE_EXT = 1306,
 
-    /** @brief Read-only: whether a pass-by-value scalar is set on this tensor (extension) */
+    /** @brief Read-only: whether a pass-by-value scalar is set on this tensor */
     HIPDNN_ATTR_TENSOR_IS_BY_VALUE = 1307,
+
+    /** @brief Read-only alias of HIPDNN_ATTR_TENSOR_VALUE_EXT for cuDNN porting parity */
+    HIPDNN_ATTR_TENSOR_CONSTANT_VALUE = HIPDNN_ATTR_TENSOR_VALUE_EXT, // 1306
+
+    /** @brief Settable: whether this tensor is a runtime pass-by-value scalar (extension) */
+    HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT = 1308,
+
+    /** @brief Required byte alignment of the tensor's physical buffer pointer */
+    HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT = 1309,
+
+    /** @brief UID of the ragged-offset aux tensor for this tensor (int64_t, optional) */
+    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC = 1310,
 
     /** @} */
 
@@ -1193,7 +1209,24 @@ typedef enum
     /** @} */
 
     /**
-     * @name Shared Resample Descriptor Attributes (3400-3499)
+      * @name Resample Backward Operation Attributes (3408-3410)
+     * Attributes for HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Gradient of output tensor for backward resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC = 3408,
+
+    /** @brief Gradient of input tensor for backward resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC = 3409,
+
+    /** @brief Optional index tensor for max resample backward */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC = 3410,
+
+    /** @} */
+
+    /**
+      * @name Shared Resample Descriptor Attributes (3400-3407)
      * Attributes shared across resample operation descriptors (forward, backward).
      * These are set directly on the operation descriptor.
      * @{
@@ -1254,6 +1287,105 @@ typedef enum
 
     /** @brief Compute data type for rmsnorm backward */
     HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT = 3507,
+
+    /** @} */
+
+    /**
+     * @name Layernorm Backward Operation Attributes (3600-3699)
+     * Attributes for HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Output gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT = 3600,
+
+    /** @brief Input tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT = 3601,
+
+    /** @brief Scale tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT = 3602,
+
+    /** @brief Mean tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT = 3603,
+
+    /** @brief Inverse variance tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT = 3604,
+
+    /** @brief Epsilon tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT = 3605,
+
+    /** @brief Input gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT = 3606,
+
+    /** @brief Scale gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT = 3607,
+
+    /** @brief Bias gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT = 3608,
+
+    /** @brief Number of normalized dimensions for backward layernorm */
+    HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT = 3609,
+
+    /** @brief Compute type for backward layernorm */
+    HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT = 3610,
+
+    /** @} */
+
+    /**
+     * @name MoE Grouped Matmul Operation Attributes (3700-3799)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Token tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC = 3700,
+
+    /** @brief Expert weight tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_WEIGHT_DESC = 3701,
+
+    /** @brief First-token offset tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_FIRST_TOKEN_OFFSET_DESC = 3702,
+
+    /** @brief Optional source-token index tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC = 3703,
+
+    /** @brief Optional routed-token expert-index tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC = 3704,
+
+    /** @brief Output tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_OUTPUT_DESC = 3705,
+
+    /** @brief Routing mode */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE = 3706,
+
+    /** @brief Number of routed experts per token */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K = 3707,
+
+    /** @brief Math precision */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC = 3708,
+
+    /** @} */
+
+    /**
+     * @name MoE Grouped Matmul Backward Operation Attributes (3800-3899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Output gradient tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DOUTPUT_DESC = 3800,
+
+    /** @brief Token tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_TOKEN_DESC = 3801,
+
+    /** @brief First-token offset tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_FIRST_TOKEN_OFFSET_DESC = 3802,
+
+    /** @brief Expert weight gradient tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_DWEIGHT_DESC = 3803,
+
+    /** @brief Math precision */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_BWD_MATH_PREC = 3804,
 
     /** @} */
 

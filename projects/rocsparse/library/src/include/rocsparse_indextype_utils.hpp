@@ -34,7 +34,7 @@ namespace rocsparse
     struct indextype_traits;
 
     template <>
-    struct indextype_traits<rocsparse_indextype_u16>
+    struct indextype_traits<deprecated_rocsparse_indextype_u16>
     {
         using type_t = uint16_t;
     };

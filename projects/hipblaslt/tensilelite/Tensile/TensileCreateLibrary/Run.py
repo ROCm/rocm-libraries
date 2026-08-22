@@ -54,13 +54,13 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates
-from Tensile.Common.Capabilities import makeIsaInfoMap
+from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, gfxToCompilerTarget
+from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
-from Tensile.CustomYamlLoader import load_logic_gfx_arch
+from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
 from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriterBase import (
@@ -69,7 +69,11 @@ from Tensile.KernelWriterBase import (
 )
 from Tensile.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
 from Tensile.SolutionStructs import Solution
-from Tensile.SolutionStructs.Solution import mergeTypeMismatchCollector, printTypeMismatchSummary
+from Tensile.SolutionStructs.Solution import (
+    raiseIfTypeMismatches,
+    mergeTypeMismatchCollector,
+    resetTypeMismatchCollector,
+)
 from Tensile.verify_stinky_comment_vs_elf_text import verify_stinky_paths
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
@@ -839,14 +843,60 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             for _, lazyLib in lib.lazyLibraries.items():
                 yield from libraryIter(lazyLib)
 
-    for library in ParallelMap2(
+    def mergeTypeMismatchSnapshot(
+        aggregate: dict,
+        snapshot: dict,
+    ) -> None:
+        """Merge one parseLibraryLogicFile() mismatch snapshot into aggregate."""
+        for key, entry in snapshot.items():
+            target = aggregate.setdefault(key, {"count": 0, "values": set(), "files": set()})
+            target["count"] += entry["count"]
+            target["values"].update(entry["values"])
+            target["files"].update(entry["files"])
+
+    # parseLibraryLogicData() uses Solution.py's module-level type mismatch
+    # collector as a per-file scratch buffer: it resets the collector at parse
+    # start, builds the ProblemType/Solution objects, and returns a snapshot in
+    # the LibraryLogic tuple. ParallelMap2 can execute those parses in worker
+    # processes or in this process (notably when CpuThreads resolves to 1). In
+    # the in-process path, the scratch buffer is the same global collector this
+    # function can see, and after parsing it still contains the most recently
+    # parsed file's mismatches.
+    #
+    # Keep the run-level aggregate detached from that global collector while
+    # consuming parse results. Merging returned snapshots directly into the live
+    # collector would mix aggregate state with parser scratch state: a later
+    # parse can reset previously merged aggregate state, and the final file's
+    # snapshot can be double-counted. Once every logic file has been parsed,
+    # replace the global collector with this clean aggregate so
+    # raiseIfTypeMismatches() can format the existing fatal aggregate error.
+    typeMismatchAggregate: dict = {}
+    parsedLibraries = ParallelMap2(
         LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
-    ):
-        _, architectureName, _, _, _, newLibrary, typeMismatches = library
-        mergeTypeMismatchCollector(typeMismatches)
+    )
+    for library in parsedLibraries:
+        scheduleName, architectureName, _, _, _, newLibrary, typeMismatches = library
+        mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
 
         if architectureName == "":
             continue
+
+        # A silicon stepping cannot label a library. This name keys masterLibraries,
+        # while the writes are keyed by the ISA-derived name, so a stepping-named
+        # file is dropped there without a word and the build reports success having
+        # written nothing for it. Honoring the name instead would be no better: the
+        # runtime resolves libraries by the architecture the driver reports, so
+        # library/gfx1250v0/ is a directory nothing ever looks in. Tuned logic
+        # records the architecture; the stepping is a build-time capability
+        # distinction, selected by --architecture.
+        if architectureName in ARCH_COMPILER_TARGET:
+            raise ValueError(
+                f"Library logic '{scheduleName}' declares ArchitectureName "
+                f"'{architectureName}', which names a silicon stepping rather than an "
+                f"architecture. Record it as "
+                f"'{ARCH_COMPILER_TARGET[architectureName]}' and select the stepping "
+                f"at build time with --architecture={architectureName}."
+            )
 
         if architectureName in masterLibraries:
             nextSolIndex = masterLibraries[architectureName].merge(newLibrary, nextSolIndex)
@@ -855,8 +905,10 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             masterLibraries[architectureName].version = args["CodeObjectVersion"]
 
     # After all YAML files have been parsed and Solution objects created,
-    # print a summary of any type mismatches that were collected.
-    printTypeMismatchSummary(len(logicFiles))
+    # fail on any type mismatches that were collected.
+    resetTypeMismatchCollector()
+    mergeTypeMismatchCollector(typeMismatchAggregate)
+    raiseIfTypeMismatches()
 
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0
@@ -958,12 +1010,16 @@ def run():
         archs = arguments["Architecture"].split(";")
     else:
         archs = arguments["Architecture"].split("_")
-    archs = SUPPORTED_GFX if "all" in archs else archs
+    archs = expandAllArchitectures(archs)
     archs, requestedPredicateMap = splitArchsFromPredicates(archs)
 
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
+    applyArchCapOverrides(isaInfoMap, archs)
     assignGlobalParameters(arguments, isaInfoMap)
+
+    # gfx1250 v0/v1 share ISA (12,5,0); pass the concrete stepping name so StinkyTofu picks the right cost table.
+    globalParameters["StinkyTofuArchName"] = "gfx1250v0" if any(baseArchName(a) == "gfx1250v0" for a in archs) else ""
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
@@ -993,9 +1049,6 @@ def run():
         logicExtFormat = ".json"
     else:
         printExit(f"Unrecognized LogicFormat: {arguments['LogicFormat']}")
-
-    def archMatch(arch: str, archs: List[str]):
-        return (arch in archs) or any(a.startswith(arch) for a in archs)
 
     def validLogicFile(p: Path):
         return p.suffix == logicExtFormat and (
@@ -1053,7 +1106,10 @@ def run():
         kernels,
         kernelHelperObjs,
         kernelWriterAssembly,
-        archs,
+        # Compiler targets, not the requested names: these drive --offload-arch for
+        # the HIP helper kernels and the library layout, and both must agree with
+        # the ISA-derived names used for the per-architecture writes below.
+        [gfxToCompilerTarget(a) for a in archs],
         arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],
         removeTemporaries=not arguments["KeepBuildTmp"],

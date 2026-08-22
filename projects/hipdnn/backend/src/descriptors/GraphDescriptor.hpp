@@ -5,6 +5,7 @@
 
 #include "BackendDescriptor.hpp"
 #include "IGraphOperation.hpp"
+#include <array>
 #include <flatbuffers/detached_buffer.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -37,6 +38,11 @@ private:
     // Cleared by invalidateCache() when operations are mutated.
     flatbuffers::DetachedBuffer _graphSerializedBuffer;
 
+    // Stable identity of a logical finalized graph across serialization round trips.
+    // Deserialized copies preserve it, so it is not a unique live-object token; use it only to
+    // key state derived from immutable graph content. Newly generated values use UUID v4.
+    std::optional<std::array<uint8_t, 16>> _graphId;
+
     // Source of truth for the graph's operations. Populated via setOperations() (C-API flow)
     // or eagerly from deserializeGraph() (FlatBuffer flow).
     // Stored as IBackendDescriptor so getOperations() can pack them without cross-casting.
@@ -56,6 +62,12 @@ private:
 
     // Opt-in flag for overridable tensor shapes (RFC 0008).
     bool _isOverrideShapeEnabled = false;
+
+    // Cached "graph has a runtime pass-by-value tensor" flag, derived from
+    // min_required_engine_api_version whenever _graphSerializedBuffer is
+    // (re)built (see buildSerializedGraph()/deserializeGraph()) so
+    // isRuntimePassByValueEnabled() is O(1) instead of rescanning every tensor.
+    bool _isRuntimePassByValueEnabled = false;
 
     // Optional human-readable name for the graph, empty when unset.
     std::string _name;
@@ -138,6 +150,10 @@ public:
 
     virtual hipdnnHandle_t getHandle() const;
     virtual bool isOverrideShapeEnabled() const;
+
+    virtual bool hasRaggedTensors() const;
+    virtual bool hasNonDefaultTensorAlignment() const;
+    virtual bool isRuntimePassByValueEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

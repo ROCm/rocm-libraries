@@ -69,7 +69,7 @@ Two things to add:
 
 The dispatch picks `_op_<op.name.replace(".", "_")>`. Missing handlers raise `NotImplementedError`.
 
-There are two peer lowering engines: the native Python lowerer in `core/lower_llvm.py` and a C++ engine under `Cpp/` (which mirrors this tree, e.g. `Cpp/core/lower_llvm/`). They are required to emit byte-identical LLVM-IR, and the C++ engine is the default backend (`ROCKE_BACKEND=cpp`; it auto-falls back to the Python lowerer if its extension is not built). A new op/intrinsic must be added to **both** engines, or the differential byte-identity check (`ROCKE_BACKEND=both`, and the harness under `tests/instances/differential/`) will fail. Add the Python handler here, mirror it in the C++ engine, and confirm with `tools/check_byte_identity.py`.
+There are two peer lowering engines: the native Python lowerer in `core/lower_llvm.py` and a C++ engine under `cpp/` (which mirrors this tree, e.g. `cpp/core/lower_llvm/`). They are required to emit byte-identical LLVM-IR, and the C++ engine is the default backend (`ROCKE_BACKEND=cpp`; it auto-falls back to the Python lowerer if its extension is not built). A new op/intrinsic must be added to **both** engines, or the differential byte-identity check (`ROCKE_BACKEND=both`, and the harness under `tests/instances/differential/`) will fail. Add the Python handler here, mirror it in the C++ engine, and confirm with `tools/check_byte_identity.py`.
 
 ### 1.4 Optional HIP debug lowering in `core/lower_hip.py`
 

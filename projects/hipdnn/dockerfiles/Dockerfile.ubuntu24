@@ -46,27 +46,9 @@ RUN apt-get update && apt-get install -y \
     bison \
     flex \
     gh \
-    linux-tools-common \
-    linux-tools-generic \
     libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# linux-tools-{common,generic} provide the `perf` binary required by
-# dnn-benchmarking's `--perf` source (CPU cycles/IPC). Two runtime
-# gotchas the apt install can't fix:
-#
-#  * Container kernel mismatch — the perf wrapper dispatches to
-#    `perf_<kernel-version>`. If that build isn't present, perf
-#    complains and falls back; sometimes the user needs
-#    `apt install linux-tools-$(uname -r)` matching the host kernel.
-#  * Kernel-event collection (`cycles:k`) requires
-#    `/proc/sys/kernel/perf_event_paranoid <= 1`. Containers inherit
-#    the host value, so either run the container with
-#    `--cap-add=SYS_ADMIN` and `sysctl kernel.perf_event_paranoid=1`
-#    on the host first, or accept user-space-only counters
-#    (cycles:u / instructions:u — dnn-benchmarking records these
-#    unconditionally and surfaces the paranoid value next to the
-#    None kernel fields). See docs/troubleshooting.md.
 
 # Install DVC. The dvc.org/deb apt repo has been unreachable, so install the
 # official .deb package directly. It bundles all remote backends (incl. S3),
@@ -112,10 +94,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /workspace
 
 # ============================================================================
-# Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
-#
-# New path: uses install_rocm_from_artifacts.py for downloading ROCm artifacts.
-# Legacy path: uses wget/tar when deprecated args are set (backward compat).
+# Prebuilt stage - installs a current per-family multi-arch tarball through
+# TheRock's install_rocm_from_artifacts.py.
 #
 # Example: Default build (latest nightly for gfx94X-dcgpu):
 #   docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
@@ -125,15 +105,14 @@ WORKDIR /workspace
 #       --build-arg THEROCK_RELEASE=7.12.0a20260202 \
 #       -t hipdnn:prebuilt .
 #
-# Example: Different ASIC family:
+# Example: MI200 (gfx90a):
 #   docker build -f Dockerfile.ubuntu24 \
-#       --build-arg THEROCK_ASIC=gfx90X \
-#       --build-arg THEROCK_ASIC_VARIANT=dcgpu \
-#       -t hipdnn:prebuilt .
+#       --build-arg THEROCK_ARTIFACT_GROUP=gfx90a \
+#       -t hipdnn:prebuilt_gfx90a .
 #
-# Example: Full artifact group override:
+# Example: Full artifact group override (use multiarch only for all GPU kernel packs):
 #   docker build -f Dockerfile.ubuntu24 \
-#       --build-arg THEROCK_ARTIFACT_GROUP=gfx110X-all \
+#       --build-arg THEROCK_ARTIFACT_GROUP=multiarch \
 #       -t hipdnn:prebuilt .
 # ============================================================================
 FROM base AS install_therock_prebuilt
@@ -145,10 +124,6 @@ ARG THEROCK_RELEASE=latest
 # Full artifact group (combines ASIC and variant)
 ARG THEROCK_ARTIFACT_GROUP=$THEROCK_ASIC-$THEROCK_ASIC_VARIANT
 
-# Deprecated build args (kept for backward compatibility)
-ARG THEROCK_GIT_TAG=
-ARG THEROCK_PREBUILT_ID=
-ARG THEROCK_TARBALL=
 
 # Clone TheRock for build tools
 RUN git clone --depth 1 https://github.com/ROCm/TheRock.git /TheRock
@@ -157,23 +132,9 @@ WORKDIR /TheRock
 
 RUN python3 -m venv /venv && /venv/bin/pip install -r requirements.txt
 
-# Install ROCm - two paths:
-# 1. Legacy: any deprecated arg set → wget/tar (old method, no translation needed)
-# 2. New: install_rocm_from_artifacts.py
-# Priority: THEROCK_TARBALL > THEROCK_PREBUILT_ID > THEROCK_GIT_TAG
-RUN if [ -n "$THEROCK_TARBALL" ] || [ -n "$THEROCK_PREBUILT_ID" ] || [ -n "$THEROCK_GIT_TAG" ]; then \
-        echo "WARNING: Using deprecated build args. Migrate to THEROCK_RELEASE + THEROCK_ARTIFACT_GROUP." >&2; \
-        tarball="${THEROCK_TARBALL:-therock-dist-linux-${THEROCK_PREBUILT_ID:-$THEROCK_ARTIFACT_GROUP-$THEROCK_GIT_TAG}.tar.gz}"; \
-        echo "Downloading: $tarball"; \
-        mkdir -p /opt/rocm && \
-        wget --progress=dot:giga \
-            "https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/$tarball" \
-            -O "/tmp/$tarball" && \
-        tar -xf "/tmp/$tarball" -C /opt/rocm --strip-components=1 && \
-        rm "/tmp/$tarball"; \
-        version=$(echo "$tarball" | sed 's/^therock-dist-linux-//; s/\.tar\.gz$//' | rev | cut -d- -f1 | rev); \
-        echo "$version" > /opt/rocm/THEROCK_VERSION; \
-    elif [ "$THEROCK_RELEASE" = "latest" ]; then \
+# Install ROCm through TheRock's installer. It selects the appropriate current
+# multi-arch feed for a nightly or `.dev0+` release.
+RUN if [ "$THEROCK_RELEASE" = "latest" ]; then \
         echo "Installing latest nightly for $THEROCK_ARTIFACT_GROUP"; \
         /venv/bin/python build_tools/install_rocm_from_artifacts.py \
             --latest-release \

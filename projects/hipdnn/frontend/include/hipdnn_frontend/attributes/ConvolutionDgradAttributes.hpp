@@ -234,6 +234,24 @@ public:
     {
         return math_mode;
     }
+
+    /**
+     * @brief Custom CRTP hook for matching convolution attributes logically.
+     */
+    bool logicallyEqualsImpl(const ConvDgradAttributes& other) const
+    {
+        return (this->pre_padding == other.pre_padding)
+               && (this->post_padding == other.post_padding) && (this->stride == other.stride)
+               && (this->dilation == other.dilation) && (this->math_mode == other.math_mode);
+    }
+
+    /**
+     * @brief Custom CRTP hook for matching operational configurations strictly.
+     */
+    bool strictEqualsImpl(const ConvDgradAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
 
 typedef ConvDgradAttributes Conv_dgrad_attributes; ///< @brief Compatibility alias

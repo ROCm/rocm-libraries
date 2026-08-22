@@ -30,4 +30,31 @@ struct LayernormFpropTensorBundle : public hipdnn_test_sdk::utilities::GraphTens
     }
 };
 
+struct LayernormBpropTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
+{
+    LayernormBpropTensorBundle(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap,
+        unsigned int seed)
+        : hipdnn_test_sdk::utilities::GraphTensorBundle(tensorMap)
+    {
+        const auto& attributes = node.attributesAs<
+            hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes>();
+
+        randomizeTensor(attributes.dy_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.x_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.scale_tensor_uid(), 0.0f, 1.0f, seed);
+        if(attributes.mean_tensor_uid().has_value())
+        {
+            randomizeTensor(attributes.mean_tensor_uid().value(), 0.0f, 1.0f, seed);
+        }
+        if(attributes.inv_variance_tensor_uid().has_value())
+        {
+            randomizeTensor(attributes.inv_variance_tensor_uid().value(), 0.0f, 1.0f, seed);
+        }
+    }
+};
+
 }

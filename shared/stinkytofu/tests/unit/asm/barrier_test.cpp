@@ -1,1 +1,1 @@
-BarrierTest.cpp
+./BarrierTest.cpp

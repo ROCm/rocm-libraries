@@ -268,8 +268,7 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
        aligned in the horizontal or vertical access we lift the if condition out of the loop
        termination if the height/width is a multiple of the vert/horiz pixels, enabling SIMD
        vectorizatiom of the loop body.
-       These optimizations were being done automatically by the OpenCL compiler prior to porting to
-       HIP.
+       These optimizations help the compiler with SIMD vectorization.
     */
     constexpr bool is_vert_aligned        = (VERT_ALIGNED == 1);
     constexpr bool is_horiz_aligned       = (HORIZ_ALIGNED == 1);
@@ -324,6 +323,8 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
 {
     const int pix_id = blockIdx.x * GROUP_SIZE_X + threadIdx.x;
     const int batch  = blockIdx.z * group_size_z + threadIdx.z;
+    if(pix_id >= MAP_SZ_4)
+        return;
     ReadType accum(0);
     ReadType bot_in2[KERNEL_SIZE];
     ReadType bot_in[KERNEL_SIZE];

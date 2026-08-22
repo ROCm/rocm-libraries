@@ -22,8 +22,12 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <sstream>
 #include <string>
+#include <vector>
 
+#include "ModifierSerializer.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 
 using namespace stinkytofu;
@@ -151,9 +155,9 @@ TEST(ParseDppCtrlFromAsm, RowXmaskRoundTrip) {
 TEST(ParseDppCtrlFromAsm, InvalidReturnsNone) {
     EXPECT_EQ(parseDppCtrlFromAsm(""), DppCtrl::NONE);
     EXPECT_EQ(parseDppCtrlFromAsm("not_a_ctrl"), DppCtrl::NONE);
-    EXPECT_EQ(parseDppCtrlFromAsm("row_shl:0"), DppCtrl::NONE);   // 0 out of range [1..15]
-    EXPECT_EQ(parseDppCtrlFromAsm("row_shl:16"), DppCtrl::NONE);  // 16 out of range
-    EXPECT_EQ(parseDppCtrlFromAsm("row_bcast:7"), DppCtrl::NONE); // only 15/31 valid
+    EXPECT_EQ(parseDppCtrlFromAsm("row_shl:0"), DppCtrl::NONE);    // 0 out of range [1..15]
+    EXPECT_EQ(parseDppCtrlFromAsm("row_shl:16"), DppCtrl::NONE);   // 16 out of range
+    EXPECT_EQ(parseDppCtrlFromAsm("row_bcast:7"), DppCtrl::NONE);  // only 15/31 valid
     EXPECT_EQ(parseDppCtrlFromAsm("quad_perm:[]"), DppCtrl::NONE);
 }
 
@@ -171,7 +175,8 @@ TEST(MatrixFmt, ToStrAndParse) {
 }
 
 TEST(MatrixFmt, ParseRoundTrip) {
-    for (auto fmt : {MatrixFmt::FP8, MatrixFmt::BF8, MatrixFmt::FP6, MatrixFmt::BF6, MatrixFmt::FP4}) {
+    for (auto fmt :
+         {MatrixFmt::FP8, MatrixFmt::BF8, MatrixFmt::FP6, MatrixFmt::BF6, MatrixFmt::FP4}) {
         EXPECT_EQ(parseMatrixFmt(matrixFmtToStr(fmt)), fmt);
     }
 }
@@ -209,4 +214,68 @@ TEST(MatrixScaleFmt, ParseInvalidReturnsNone) {
     EXPECT_EQ(parseMatrixScaleFmt(""), MatrixScaleFmt::NONE);
     EXPECT_EQ(parseMatrixScaleFmt("3"), MatrixScaleFmt::NONE);
     EXPECT_EQ(parseMatrixScaleFmt("E8"), MatrixScaleFmt::NONE);
+}
+
+// ---------------------------------------------------------------------------
+// parseMatrixScaleSel — single-bit selector, capped to 0/1
+// ---------------------------------------------------------------------------
+
+TEST(MatrixScaleSel, ParseSelectBits) {
+    EXPECT_EQ(parseMatrixScaleSel("0"), 0);
+    EXPECT_EQ(parseMatrixScaleSel("1"), 1);
+    EXPECT_EQ(parseMatrixScaleSel(""), 0);
+}
+
+// ---------------------------------------------------------------------------
+// MatrixFmtModifiers::empty() — must account for scale-select
+// ---------------------------------------------------------------------------
+
+TEST(MatrixFmtModifiers, EmptyWhenAllFieldsUnset) {
+    EXPECT_TRUE(MatrixFmtModifiers{}.empty());
+}
+
+TEST(MatrixFmtModifiers, NonZeroScaleSelIsNotEmpty) {
+    // A scale-select of 1 is meaningful on its own (matrix_*_scale:1), so the
+    // modifier must not be dropped as empty even with no fmt/scaleFmt set.
+    MatrixFmtModifiers a;
+    a.scaleSelA = 1;
+    EXPECT_FALSE(a.empty());
+
+    MatrixFmtModifiers b;
+    b.scaleSelB = 1;
+    EXPECT_FALSE(b.empty());
+}
+
+// ---------------------------------------------------------------------------
+// CallTargetData serializer
+// ---------------------------------------------------------------------------
+
+TEST(CallTargetData, SerializeEscapesCalleeNames) {
+    CallTargetData data(
+        std::vector<std::string>{"label_Activation_Relu_VW1", "quote\"name", "back\\slash"});
+
+    std::ostringstream os;
+    EXPECT_TRUE(ModifierSerializer::serialize(data, os));
+    EXPECT_EQ(os.str(),
+              ", mod.call_targets = { callees = "
+              "[\"label_Activation_Relu_VW1\",\"quote\\\"name\",\"back\\\\slash\"] }");
+}
+
+TEST(CallTargetData, DeserializeParsesEscapedCalleeNames) {
+    Function func("call_targets_test");
+    BasicBlock* bb = func.createBasicBlock("entry");
+    AsmIRBuilder builder(*bb, GfxArchID::Gfx1250);
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_swappc_b64, GfxArchID::Gfx1250));
+
+    ParsedModifierDict modifiers;
+    modifiers["mod.call_targets"]["callees"] =
+        "[\"label_Activation_Relu_VW1\",\"quote\\\"name\",\"back\\\\slash\"]";
+    ModifierSerializer::deserialize(inst, modifiers);
+
+    const auto* data = inst->getModifier<CallTargetData>();
+    ASSERT_NE(data, nullptr);
+    ASSERT_EQ(data->callees.size(), 3u);
+    EXPECT_EQ(data->callees[0], "label_Activation_Relu_VW1");
+    EXPECT_EQ(data->callees[1], "quote\"name");
+    EXPECT_EQ(data->callees[2], "back\\slash");
 }

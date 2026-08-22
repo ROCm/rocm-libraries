@@ -8,14 +8,14 @@
 # (methodology-A missing ranges: 202, 316, 326-409, 464+) on gfx942.
 #
 # StreamK family sweep:
-#   - StreamK: [1, 2, 3]  -- SK modes 1, 2, 3 (mode 4 is dynamic; 0 disables SK)
+#   - StreamK: [3, 4, 5]  -- SK modes 3 (TwoTileDPFirst), 4 (Dynamic), 5 (Hybrid)
 #   - StreamKAtomic: [0, 1]  -- 1 requires SGEMM (f32) and triggers atomic SK path
 #   - StreamKXCCMapping: [0]  -- gfx942 XCC mapping; keep 0 to avoid XCC interactions
 #
 # ProblemType: SGEMM NT (f32), Batched=True (StridedBatched requirement for SK)
 # Large K (1024) to make SK meaningful.
-# limit=8 kernels: 3 SK modes x 2 atomic modes = 6 valid combos (SK=1+Atomic=1 allowed,
-# SK=2+Atomic=1 allowed, SK=3+Atomic=1 allowed per the validation code).
+# limit=8 kernels: 3 SK modes x 2 atomic modes = 6 valid combos (SK=3+Atomic=1 allowed,
+# SK=4+Atomic=1 allowed, SK=5+Atomic=1 allowed per the validation code).
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -28,7 +28,7 @@ BenchmarkProblems:
   ########################################
   # SGEMM (f32 in/out/compute) NT, Batched
   # StreamK family sweep for gfx942 coverage:
-  #   StreamK=[1,2,3] x StreamKAtomic=[0,1] => up to 6 combos (within limit=8)
+  #   StreamK=[3,4,5] x StreamKAtomic=[0,1] => up to 6 combos (within limit=8)
   # StreamKAtomic=1 requires SGEMM (f32) => this ProblemType works.
   ########################################
   -
@@ -49,7 +49,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 4, 4, 2, 2]
-        - StreamK: [1, 2, 3]
+        - StreamK: [3, 4, 5]
         - StreamKAtomic: [0, 1]
         - StreamKXCCMapping: [0]
         - PrefetchGlobalRead: [2]
