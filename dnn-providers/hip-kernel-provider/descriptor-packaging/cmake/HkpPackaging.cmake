@@ -451,6 +451,36 @@ function(hkp_rocke_wheel_stamp out_stamp)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_require_kpack_runtime(<interp> <what>)
+#   rocm_kpack is reached by putting a source tree on sys.path, so pip never
+#   resolves the msgpack/zstandard it declares. Any interpreter that runs the
+#   pack step therefore needs them present independently, and a hip-only pack
+#   runs under the BASE interpreter where nothing provisions anything.
+#
+#   Checked at configure time because the failure is otherwise a mid-build
+#   ImportError from inside a dependency, which reads as a packer bug rather
+#   than a missing dependency on the build machine.
+# ---------------------------------------------------------------------------
+function(hkp_require_kpack_runtime interp what)
+    execute_process(
+        COMMAND "${interp}" -c "import msgpack, zstandard"
+        RESULT_VARIABLE _rc
+        OUTPUT_QUIET
+        ERROR_VARIABLE _err)
+    if(NOT _rc EQUAL 0)
+        string(STRIP "${_err}" _err)
+        message(FATAL_ERROR
+            "hkp: ${what} cannot import rocm_kpack's runtime dependencies "
+            "(msgpack, zstandard), so the pack step would fail mid-build. "
+            "rocm_kpack is used from a source tree, so pip never installs the "
+            "dependencies it declares -- install them into the interpreter at "
+            "${interp}:\n"
+            "    ${interp} -m pip install 'msgpack>=1.0.0' 'zstandard>=0.20.0'\n"
+            "Python said: ${_err}")
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_rocke_wheel_python_interp(<out_interp> <wheel_stamp>)
 #   Provision a build-local interpreter carrying the rocke + rocke_library
 #   wheels (built by the rocke-wheels target, which requires
@@ -503,15 +533,31 @@ function(hkp_rocke_wheel_python_interp out_interp wheel_stamp)
     set(_library_wheel
         "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
 
+    # rocm_kpack's runtime dependencies. It is reached by putting a FetchContent
+    # SOURCE TREE on sys.path, never by pip-installing it, so nothing ever
+    # resolves the `msgpack>=1.0.0` / `zstandard>=0.20.0` it declares in its own
+    # pyproject.toml -- and `import rocm_kpack.kpack` fails without them. The
+    # previous venv used --system-site-packages and inherited whatever the host
+    # happened to have; making the venv hermetic removed that accident, so the
+    # dependency has to be declared here instead of relied upon.
+    #
+    # These come from the index, unlike the rocke wheels: they are third-party
+    # packages with no local artifact to install from. The install is scoped to
+    # exactly these two pinned-floor names, so the venv stays reproducible in
+    # everything that describes OUR code.
     add_custom_command(
         OUTPUT "${_venv_py}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_venv}"
         COMMAND "${Python3_EXECUTABLE}" -m venv --copies "${_venv}"
         COMMAND "${_venv_py}" -m pip install -q
+                "msgpack>=1.0.0" "zstandard>=0.20.0"
+        COMMAND "${_venv_py}" -m pip install -q
                 --no-index --no-deps --force-reinstall
                 "${_platform_wheel}" "${_library_wheel}"
+        # Probe what the pack step will actually import, in the interpreter it
+        # will actually use -- rocke/kernels AND the kpack stack.
         COMMAND "${_venv_py}" -c
-                "import rocke, kernels"
+                "import rocke, kernels, msgpack, zstandard"
         DEPENDS "${wheel_stamp}" "${HKP_WHEEL_DIGEST_TOOL}"
         COMMENT "hkp: provisioning hermetic rocke wheel interpreter"
         VERBATIM)
@@ -637,6 +683,15 @@ assertion: an unloadable path silently falls through to the next candidate.")
         endif()
         hkp_rocke_wheel_stamp(_rocke_wheel_stamp)
         hkp_rocke_wheel_python_interp(_rocke_interp "${_rocke_wheel_stamp}")
+    endif()
+
+    # A hip-only pack runs the tool under the BASE interpreter, which nothing
+    # provisions -- so it needs rocm_kpack's dependencies itself. The rocKE path
+    # gets them installed into its venv, and that venv is probed at build time
+    # as part of provisioning, so only this case needs checking here.
+    if(_source_root AND NOT _enable_rocke)
+        hkp_require_kpack_runtime("${Python3_EXECUTABLE}"
+            "the base interpreter (hip-only production packaging)")
     endif()
 
     if(_source_root)

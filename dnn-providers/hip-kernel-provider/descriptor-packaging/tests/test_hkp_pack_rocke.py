@@ -660,3 +660,60 @@ def test_real_gfx942_tiled_2d_is_accepted(rocke_importable):
     _require_spec_arch_signature(
         m.build_unified_attention_2d_tiled, "build_unified_attention_2d_tiled"
     )
+
+
+@pytest.mark.quick
+def test_rocke_toc_key_collision_is_detected(tmp_path, monkeypatch, rocm_kpack_dir):
+    """The collision guard must see rocke's real inputs, not (source, build).
+
+    rocke UKDs always have build=None, so a signature of (source, build) is
+    identical for every UKD sharing a source module. Two rocke UKDs differing in
+    builder or spec would then collide undetected and one would ship the other's
+    bytes -- the same silent-substitution class the layout work removed.
+    """
+    from hkp_pack import pipeline
+
+    src = _write_stub_pkg(tmp_path, _GOOD_STUB, pkg="collidepkg")
+    _patch_compiler(monkeypatch)
+    # Force both variants onto one key, which is what a real hash collision or a
+    # regressed key function would do.
+    monkeypatch.setattr(pipeline, "rocke_variant_key", lambda *a, **k: "COLLIDE")
+
+    root = tmp_path / "root"
+    root.mkdir()
+    kdp = {
+        "version": "0.1",
+        "id": "kdp-collide",
+        "name": "Collide",
+        "arch": [ARCH],
+        "matchers": [],
+        "engine": None,
+        "dispatch": None,
+        "kernelDescriptors": [
+            {
+                "version": "0.1",
+                "id": f"ukd-collide-{n}",
+                "name": f"Collide {n}",
+                "kernel_source": {
+                    "kind": "rocke",
+                    "source": src,
+                    "builder": "build_stub",
+                    "spec": {"n": n},
+                },
+                "metadata": {},
+                "priority": 0,
+            }
+            for n in (1, 2)
+        ],
+    }
+    (root / "collide.kdp.json").write_text(json.dumps(kdp), encoding="utf-8")
+
+    with pytest.raises(HkpPackError, match="toc_key collision"):
+        pipeline.run_pipeline(
+            source_root=root,
+            arches=[ARCH],
+            out_root=tmp_path / "out",
+            hipcc="hipcc-not-invoked",
+            rocm_kpack_dir=rocm_kpack_dir,
+            inter_root=tmp_path / "inter",
+        )

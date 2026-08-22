@@ -251,6 +251,11 @@ jobs:
           echo "Installing ROCm wheels from multi-arch nightlies (device: $DEVICE_TARGET)"
           pip install --index-url "https://rocm.nightlies.amd.com/whl-multi-arch/" "rocm[libraries,devel,device-$DEVICE_TARGET]"
 
+          # rocm_kpack is used from a source tree, so pip never resolves the
+          # msgpack/zstandard it declares. The descriptor-packaging tool imports
+          # it, so this lane needs them present in the configuring interpreter.
+          pip install "msgpack>=1.0.0" "zstandard>=0.20.0"
+
           echo "Initializing ROCm SDK"
           rocm-sdk init
 
