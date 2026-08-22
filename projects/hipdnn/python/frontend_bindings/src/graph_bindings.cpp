@@ -117,7 +117,7 @@ std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
                          const std::unordered_map<int64_t, uintptr_t>& variantPack,
                          uintptr_t workspace,
                          int64_t workspaceSize,
-                         AutotuneConfig config,
+                         const AutotuneConfig& config,
                          const AutotuneStorageConfig& storageConfig)
 {
     auto handlePtr = handle.attr("get")();
@@ -133,7 +133,7 @@ std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
     }
 
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+    void* workspacePtr = workspace != 0U ? reinterpret_cast<void*>(workspace) : nullptr;
 
     // Same rationale as autotunePy: benchmarking touches no Python object, so the GIL
     // can be released for the duration of what may be a minutes-long call.
