@@ -1,4 +1,4 @@
-// Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -328,6 +328,7 @@ void write_standalone_test_harness(const Function& f, const std::string& src)
     main_file << device_properties_h;
     main_file << gpubuf_h;
     main_file << hip_object_wrapper_h;
+    main_file << callback_h;
     main_file << rtc_kernel_h;
     main_file << rtc_kernel_cpp;
     main_file << rtc_test_harness_helper_cpp;

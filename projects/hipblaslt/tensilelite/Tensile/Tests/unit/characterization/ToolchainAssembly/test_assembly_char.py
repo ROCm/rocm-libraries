@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-import Tensile.Toolchain.Assembly as A
 from Tensile.TensileCreateLibrary.Run import KernelCompileGroup
 from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
 
@@ -75,8 +74,6 @@ def test_build_empty_kernels(tmp_path, snapshot):
     asmDir.mkdir(); destDir.mkdir()
     out = buildAssemblyCodeObjectFiles(_StubLinker(), _StubBundler(), [], destDir, asmDir)
     assert out == snapshot
-
-
 def test_compile_group_links_one_object_to_every_placement(tmp_path):
     asmDir, destDir = tmp_path / "asm", tmp_path / "dest"
     asmDir.mkdir(); destDir.mkdir()
@@ -95,26 +92,3 @@ def test_compile_group_links_one_object_to_every_placement(tmp_path):
     ]
     assert len(linker.calls) == 2
     assert all(files == [str(asmDir / "k0.o")] for files, _ in linker.calls)
-
-
-@pytest.mark.parametrize("validate", [False, True])
-def test_build_honors_validate_metadata(tmp_path, monkeypatch, validate):
-    """The ValidateMetadata global gates the build-time metadata check.
-
-    Guards the wiring only: validateCustomKernelMetadataAtBuild is stubbed so this
-    stays a pure unit test (no CustomKernels/ directory reads), and the assertion is
-    that the gate is honored in both directions and does not disturb the returned
-    code-object list.
-    """
-    asmDir, destDir = tmp_path / "asm", tmp_path / "dest"
-    asmDir.mkdir(); destDir.mkdir()
-
-    seen = []
-    monkeypatch.setattr(A, "validateCustomKernelMetadataAtBuild", lambda kernels: seen.append(len(kernels)))
-    monkeypatch.setitem(A.globalParameters, "ValidateMetadata", validate)
-
-    kernels = [_kernel("k0")]
-    out = buildAssemblyCodeObjectFiles(_StubLinker(), _StubBundler(), kernels, destDir, asmDir)
-
-    assert seen == ([1] if validate else [])
-    assert sorted(p.name for p in out) == ["TensileLibrary_gfx942.co"]

@@ -30,11 +30,8 @@ import subprocess
 from pathlib import Path
 from typing import List, Union, NamedTuple
 
-from Tensile.Common import ensurePath, print1, print2, printWarning
-from Tensile.Common.GlobalParameters import globalParameters
+from Tensile.Common import ensurePath, print2
 from Tensile.Common.Architectures import isaToGfx
-from Tensile.CustomKernels import validateCustomKernelMetadata
-from Tensile import CUSTOM_KERNEL_PATH
 from ..SolutionStructs import Solution
 
 from .Component import Assembler, Linker, Bundler
@@ -50,38 +47,6 @@ def makeAssemblyToolchain(assembler_path, bundler_path, co_version, build_id_kin
    linker = Linker(assembler_path, build_id_kind)
    bundler = Bundler(bundler_path)
    return AssemblyToolchain(compiler, linker, bundler)
-
-
-def validateCustomKernelMetadataAtBuild(kernels, directory=CUSTOM_KERNEL_PATH):
-    """Validates embedded metadata for all custom kernels in the build.
-
-    Logs warnings for kernels with missing or invalid custom.config and a
-    single summary line at the end.
-
-    Returns the number of validation issues found.
-    """
-    issues = 0
-    validated = set()
-
-    for k in kernels:
-        ck = k.get("CustomKernel", None)
-        if not ck or not ck.get("name"):
-            continue
-
-        name = ck["name"]
-        if name in validated:
-            continue
-        validated.add(name)
-
-        valid, msg = validateCustomKernelMetadata(name, directory)
-        if not valid:
-            printWarning(f"Metadata validation: {msg}")
-            issues += 1
-
-    if validated:
-        print1(f"Metadata: validated {len(validated)} custom kernel(s), {issues} issue(s)")
-
-    return issues
 
 
 def buildAssemblyCodeObjectFiles(
@@ -107,9 +72,6 @@ def buildAssemblyCodeObjectFiles(
 
     def representative(entry):
       return getattr(entry, "representative", entry)
-
-    if globalParameters["ValidateMetadata"]:
-        validateCustomKernelMetadataAtBuild([representative(entry) for entry in kernels])
 
     extObj = ".o"
     extCo = ".co"

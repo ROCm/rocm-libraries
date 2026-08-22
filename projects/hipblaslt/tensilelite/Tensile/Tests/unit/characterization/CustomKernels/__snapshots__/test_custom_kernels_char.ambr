@@ -5,6 +5,24 @@
     'beta',
   ])
 # ---
+# name: test_get_config_and_assembly_split
+  dict({
+    'assembly': '''
+      s_nop 0
+      s_endpgm
+  
+    ''',
+    'config': '''
+      
+      custom.config:
+        InternalSupportParams:
+          KernArgsVersion: 2
+      
+      
+  
+    ''',
+  })
+# ---
 # name: test_get_custom_kernel_config_ok
   dict({
     'CustomKernelName': 'k',
@@ -19,15 +37,6 @@
   dict({
     'InternalSupportParams': dict({
       'KernArgsVersion': 2,
-    }),
-  })
-# ---
-# name: test_read_embedded_yaml_parses_custom_config
-  dict({
-    'custom.config': dict({
-      'InternalSupportParams': dict({
-        'KernArgsVersion': 2,
-      }),
     }),
   })
 # ---
