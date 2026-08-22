@@ -14,6 +14,7 @@ and the comgr diagnostic.
 
 import hashlib
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -625,3 +626,105 @@ def test_hipcc_version_probe_is_best_effort():
     toolchain.hipcc_version.cache_clear()
     assert toolchain.hipcc_version(None) is None
     assert toolchain.hipcc_version("/nonexistent/hipcc") is None
+
+
+# --- G. The library field, resolved the way the runtime resolves it ---------
+def _resolve_library_like_runtime(descriptor_path, library):
+    """Mirror IngestorKernelCode.hpp's `originDirectory / library` join.
+
+    originDirectory is the parent of the descriptor FILE (DescriptorLoader.hpp
+    sets it from `path.parent_path()`), and the C++ applies weakly_canonical to
+    the join. os.path.normpath is the equivalent for a path that need not exist.
+    """
+    return Path(os.path.normpath(Path(descriptor_path).parent / library))
+
+
+def test_library_resolves_from_a_nested_descriptor(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+):
+    """A packed UKD's `library` must resolve against ITS OWN directory.
+
+    The runtime joins originDirectory (the descriptor's parent) with `library`.
+    Writing it arch-root-relative works only for a flat layout and silently
+    breaks the moment a descriptor nests -- which path preservation made the
+    normal case. The archive is written once per arch at the ARCH ROOT, so a
+    nested descriptor has to climb back out to reach it.
+    """
+    root = tmp_path / "root"
+    _nest(root, "hip/deep/deeper", main_fixture)
+
+    run_pipeline(
+        source_root=root,
+        arches=[ARCH],
+        out_root=tmp_path / "out",
+        hipcc=hipcc,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+
+    out = tmp_path / "out" / ARCH
+    checked = 0
+    for kdp in out.rglob("*.kdp.json"):
+        for ukd in _read(kdp)["kernelDescriptors"]:
+            if isinstance(ukd, str):
+                continue
+            ks = ukd["kernel_source"]
+            if ks.get("kind") != "kpack":
+                continue
+            resolved = _resolve_library_like_runtime(kdp, ks["library"])
+            assert resolved.is_file(), (
+                f"{kdp.relative_to(out)} declares library={ks['library']!r}, "
+                f"which resolves to {resolved} -- the runtime would fail to open it"
+            )
+            checked += 1
+    assert checked, "no kpack UKD was produced, so nothing was actually asserted"
+
+
+def test_library_resolves_for_a_flat_descriptor(
+    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
+):
+    # The flat case must keep working: it is the shape every pre-nesting
+    # descriptor has, and the one the original implementation got right.
+    root = tmp_path / "root"
+    shutil.copytree(empty_arch_fixture, root)
+
+    run_pipeline(
+        source_root=root,
+        arches=[ARCH],
+        out_root=tmp_path / "out",
+        hipcc=hipcc,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+
+    out = tmp_path / "out" / ARCH
+    kdp = out / "solo.kdp.json"
+    ks = _read(kdp)["kernelDescriptors"][0]["kernel_source"]
+    assert ks["library"] == f"kpack/hip_kernel_provider_{ARCH}.kpack"
+    assert _resolve_library_like_runtime(kdp, ks["library"]).is_file()
+
+
+@pytest.mark.quick
+def test_authored_kpack_folder_is_rejected(tmp_path, empty_arch_fixture):
+    """`kpack/` is where the archive lands; an authored folder cannot claim it.
+
+    Descriptors placed there would be written into the reserved directory
+    alongside the archive. Nothing corrupts today only because the archive is
+    written last -- a write-order accident, not a guarantee.
+    """
+    root = tmp_path / "root"
+    _nest(root, "kpack", empty_arch_fixture)
+
+    with pytest.raises(HkpPackError, match="reserved"):
+        load_flat_input(root)
+
+
+@pytest.mark.quick
+def test_kpack_folder_rejected_only_at_the_arch_root(tmp_path, empty_arch_fixture):
+    # Only the FIRST path segment is reserved: the archive lives at
+    # <arch>/kpack/, so hip/kpack/ is a different path and must stay legal.
+    root = tmp_path / "root"
+    _nest(root, "hip/kpack", empty_arch_fixture)
+
+    flat = load_flat_input(root)
+    assert {d.rel_dir.as_posix() for d in flat.kdps()} == {"hip/kpack"}

@@ -11,6 +11,13 @@ UED_TYPE = "ued"
 _GENERIC_TYPES = {"kmd", "ued", "umd", "udd", "uhd"}
 _ALL_TYPES = {KDP_TYPE, UKD_TYPE} | _GENERIC_TYPES
 
+# The per-arch archive directory, relative to an arch shard root. Reserved: the
+# packer writes the .kpack here and every packed UKD's `library` resolves into
+# it, so an authored folder of this name would collide with shipped output.
+# Defined here rather than in pipeline.py because the loader enforces it and
+# pipeline.py imports from this module.
+KPACK_DIR_NAME = "kpack"
+
 _SCALAR_TYPES = (str, int, float, bool)
 
 # A UED engine name is a scoped 'namespace:local' identifier (loader is
@@ -361,10 +368,24 @@ def load_flat_input(root, log=print):
         if type_from_filename(jp) is None:
             log(f"skipping non-descriptor file {jp.relative_to(root)}")
             continue
+        rel_dir = jp.parent.relative_to(root)
+        # `kpack/` at the arch root is where the archive itself is written, and
+        # `library` on every packed UKD is a path that ends there. An authored
+        # folder of that name lands descriptors inside the reserved directory,
+        # intermixed with the archive -- today they survive only because the
+        # archive happens to be written last. Refuse the name rather than depend
+        # on write order.
+        if rel_dir.parts and rel_dir.parts[0] == KPACK_DIR_NAME:
+            raise HkpPackError(
+                f"authored folder '{KPACK_DIR_NAME}/' is reserved: it is where "
+                f"the per-arch archive is written, and every packed UKD's "
+                f"'library' resolves into it. Rename it "
+                f"(offending descriptor: {jp.relative_to(root)})"
+            )
         desc = Descriptor(
             path=jp,
             doc=_read_json(jp),
-            rel_dir=jp.parent.relative_to(root),
+            rel_dir=rel_dir,
         )
         _validate_shape(desc, log)
         descriptors.append(desc)

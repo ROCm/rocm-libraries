@@ -13,6 +13,7 @@ from .hip_compile import (
 )
 from .rocke_compile import compile_rocke_variant, rocke_variant_key
 from .descriptors import (
+    KPACK_DIR_NAME,
     arch_matches,
     kdp_survives,
     load_flat_input,
@@ -93,8 +94,27 @@ def _kpack_filename(arch):
     return f"{GROUP_NAME}_{arch}.kpack"
 
 
-def _kpack_rel(arch):
-    return f"kpack/{_kpack_filename(arch)}"
+def _kpack_rel(arch, rel_dir=Path(".")):
+    """`library` for a descriptor living at `rel_dir` within the arch shard.
+
+    The runtime resolves this as `originDirectory / library`, where
+    originDirectory is the parent directory of the descriptor FILE
+    (`IngestorKernelCode.hpp:74-80`, and the contract is stated there: "library
+    is authored relative to the descriptor that declared it"). The archive
+    itself lives once per arch, at the arch root.
+
+    So a nested descriptor has to climb back out to the arch root before
+    descending into `kpack/`. A root-relative value happens to be correct only
+    when rel_dir is "." -- which is every flat layout, and is why this was not
+    caught until descriptors could nest.
+    """
+    rel_dir = Path(rel_dir)
+    prefix = (
+        ""
+        if rel_dir in (Path("."), Path(""))
+        else "/".join([".."] * len(rel_dir.parts)) + "/"
+    )
+    return f"{prefix}{KPACK_DIR_NAME}/{_kpack_filename(arch)}"
 
 
 def _kdp_header(doc):
@@ -375,7 +395,9 @@ def prune(flat, arch):
     )
 
 
-def _rewrite_ukd_kpack(ukd, arch, toc_key, sha256, toolchain_fields=None):
+def _rewrite_ukd_kpack(
+    ukd, arch, toc_key, sha256, toolchain_fields=None, rel_dir=Path(".")
+):
     """Rewrite a compiled UKD into shipped kpack form.
 
     `toolchain_fields` carries the fields describing what actually produced the kernel
@@ -405,7 +427,7 @@ def _rewrite_ukd_kpack(ukd, arch, toc_key, sha256, toolchain_fields=None):
         "name": ukd.name,
         "kernel_source": {
             "kind": "kpack",
-            "library": _kpack_rel(arch),
+            "library": _kpack_rel(arch, rel_dir),
             "toc_key": toc_key,
             "symbol": ukd.symbol,
             "sha256": sha256,
@@ -447,7 +469,7 @@ def pack_arch(
     """
     arch = inter.arch
     out_arch_dir = Path(out_arch_dir)
-    kpack_dir = out_arch_dir / "kpack"
+    kpack_dir = out_arch_dir / KPACK_DIR_NAME
     kpack_dir.mkdir(parents=True, exist_ok=True)
 
     standalone = list(inter.standalone_ukds.values())
@@ -546,6 +568,10 @@ def pack_arch(
                         e.variant_key,
                         variant_sha[e.variant_key],
                         toolchain_fields=_toolchain_for(e, hipcc, rocke_wheel_stamp),
+                        # An inline UKD ships INSIDE this KDP file, so the
+                        # runtime anchors its library on the KDP's directory,
+                        # not the UKD's own notion of where it came from.
+                        rel_dir=kdp.rel_dir,
                     )
                 )
         out_doc["kernelDescriptors"] = out_kds
@@ -566,6 +592,8 @@ def pack_arch(
             ukd.variant_key,
             variant_sha[ukd.variant_key],
             toolchain_fields=_toolchain_for(ukd, hipcc, rocke_wheel_stamp),
+            # A standalone UKD is its own file, so it anchors on its own dir.
+            rel_dir=ukd.rel_dir,
         )
         _write_text_at(
             out_arch_dir,
