@@ -35,15 +35,17 @@ def _split_arches(values):
 def _parse_args(argv):
     p = argparse.ArgumentParser(
         prog="hkp_pack",
-        description="Compile authored hip UKDs, prune per arch, and pack a "
-        "per-arch kpack release tree for the hip-kernel-provider.",
+        description="Compile authored hip and rocKE UKDs, prune per arch, and "
+        "pack a per-arch kpack release tree for the hip-kernel-provider.",
     )
     p.add_argument(
         "--source-root",
-        action="append",
-        default=[],
-        help="Flat authored source folder (KDP + generic JSON + HIP sources); "
-        "repeatable. All folders merge into one kpack per arch.",
+        required=True,
+        help="The authored source root (KDP + generic JSON + HIP sources). "
+        "Walked recursively; child folders scope the content (e.g. hip/, "
+        "rocKE/, per-integration folders) and each descriptor's authored "
+        "subpath is preserved into the staged and installed trees. Producer "
+        "selection is per-UKD on kernel_source.kind, not per-folder.",
     )
     p.add_argument(
         "--out-root",
@@ -79,11 +81,9 @@ def _parse_args(argv):
 
 def main(argv=None):
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    if not args.source_root:
-        raise HkpPackError("at least one --source-root is required")
     arches = _split_arches(args.arches)
     run_pipeline(
-        source_roots=[Path(r) for r in args.source_root],
+        source_root=Path(args.source_root),
         arches=arches,
         out_root=Path(args.out_root),
         hipcc=args.hipcc,

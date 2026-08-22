@@ -106,20 +106,27 @@ function(hkp_selected_arches out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_wire_production(HIP_ROOT <dir> ROCKE_ROOT <dir> ARCHES <list> HIPCC <path>
-#                     ROCM_KPACK_DIR <dir> INSTALL_BASE <dir> ROCKE_INTERP <path>
-#                     ROCKE_COMGR_LIB <path>)
-#   Wire the production compile -> prune -> pack -> install DAG against the
-#   enabled authored source roots. ONE tool process is invoked with a repeatable
-#   --source-root per enabled root (either may be empty), merging both producers
-#   into one kpack per arch. The hip root globs *.json + *.cpp for its co-located
-#   sources; the rocke root globs *.json only. When a rocke root is enabled the
-#   tool runs under ROCKE_INTERP (wheel-provisioned so `import rocke`/`kernels`
-#   resolve) and ROCKE_COMGR_LIB, if set, is forwarded to the tool environment.
+# hkp_wire_production(SOURCE_ROOT <dir> ENABLE_ROCKE <bool> ARCHES <list>
+#                     HIPCC <path> ROCM_KPACK_DIR <dir> INSTALL_BASE <dir>
+#                     ROCKE_INTERP <path> ROCKE_COMGR_LIB <path>)
+#   Wire the production compile -> prune -> pack -> install DAG against the ONE
+#   authored source root. The root is walked recursively; child folders under it
+#   scope the content (hip/, rocKE/, per-integration folders) and each
+#   descriptor's authored subpath is preserved into the staged and installed
+#   trees. Producer selection is per-UKD on kernel_source.kind, never per-folder,
+#   so one root feeds both producers into one kpack per arch.
+#
+#   ENABLE_ROCKE says whether the rocKE producer may run. It is a switch of its
+#   own rather than something inferred from the root, because the root now names
+#   a location only: CMake cannot know which producers a tree needs without
+#   reading the descriptors. When ON the tool runs under ROCKE_INTERP
+#   (wheel-provisioned so `import rocke`/`kernels` resolve) and ROCKE_COMGR_LIB,
+#   if set, is forwarded to the tool environment.
+#
 #   Empty ARCHES wires nothing.
 # ---------------------------------------------------------------------------
 function(hkp_wire_production)
-    set(_one HIP_ROOT ROCKE_ROOT ARCHES HIPCC ROCM_KPACK_DIR INSTALL_BASE
+    set(_one SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR INSTALL_BASE
         ROCKE_INTERP ROCKE_COMGR_LIB)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
@@ -132,19 +139,10 @@ function(hkp_wire_production)
     string(REPLACE ";" "," _arch_csv "${ARG_ARCHES}")
     set(_stamp "${_out_root}.stamp")
 
-    set(_src_args "")
-    set(_source_inputs "")
-    if(ARG_HIP_ROOT)
-        list(APPEND _src_args --source-root "${ARG_HIP_ROOT}")
-        file(GLOB _hip_inputs CONFIGURE_DEPENDS
-             "${ARG_HIP_ROOT}/*.json" "${ARG_HIP_ROOT}/*.cpp")
-        list(APPEND _source_inputs ${_hip_inputs})
-    endif()
-    if(ARG_ROCKE_ROOT)
-        list(APPEND _src_args --source-root "${ARG_ROCKE_ROOT}")
-        file(GLOB _rocke_inputs CONFIGURE_DEPENDS "${ARG_ROCKE_ROOT}/*.json")
-        list(APPEND _source_inputs ${_rocke_inputs})
-    endif()
+    # The authored root is a tree, not a flat folder: glob recursively so a
+    # descriptor added in any child folder retriggers the pack step.
+    file(GLOB_RECURSE _source_inputs CONFIGURE_DEPENDS
+         "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp")
 
     # Editing the tool's own sources must retrigger the pack step, else the
     # install artifacts go stale against the current pipeline code. The fetched
@@ -157,12 +155,12 @@ function(hkp_wire_production)
     file(GLOB _tool_sources CONFIGURE_DEPENDS
          "${HKP_PYTHON_ROOT}/hkp_pack/*.py" "${kpack_python}/rocm_kpack/*.py")
 
-    # A rocke root needs the wheel-provisioned interpreter so the rocke UKDs
+    # The rocKE producer needs the wheel-provisioned interpreter so its UKDs
     # import; a hip-only pack runs under the base interpreter (hip compiles shell
     # out to hipcc and are interpreter-agnostic).
     set(_interp "${Python3_EXECUTABLE}")
     set(_interp_dep "")
-    if(ARG_ROCKE_ROOT)
+    if(ARG_ENABLE_ROCKE)
         set(_interp "${ARG_ROCKE_INTERP}")
         set(_interp_dep "${ARG_ROCKE_INTERP}")
     endif()
@@ -179,7 +177,7 @@ function(hkp_wire_production)
         OUTPUT "${_stamp}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_out_root}"
         COMMAND ${_tool_cmd}
-                ${_src_args}
+                --source-root "${ARG_SOURCE_ROOT}"
                 --out-root "${_out_root}"
                 --arches "${_arch_csv}"
                 --hipcc "${ARG_HIPCC}"
@@ -363,14 +361,18 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_add_packaging()
-#   Independent production gates for a hip source root and a rocke source root.
-#   Each var: empty = that producer dormant; set-but-not-a-dir = fatal; set-and-
-#   directory = include that producer. Any of {hip, rocke, both, neither} is
-#   legal; when either is enabled ONE tool process packs both into one kpack per
-#   arch. Configure hard-fails only when a SET root's configure-discoverable
-#   toolchain is missing (hip -> hipcc; rocke -> the ENABLE_ROCKE + importable
-#   conjunction). The tests are wired regardless: they drive the fixture slice
-#   directly, never a production source root.
+#   Gate production packaging on ONE source root plus explicit per-producer
+#   switches. The root names a location; the switches say which producers may
+#   run. They are separate because a path cannot express producer intent —
+#   inferring it would mean CMake reading descriptor JSON to find out.
+#
+#   Root empty = production packaging dormant. Root set but not a directory =
+#   fatal. Root set with neither switch on = fatal, because it would otherwise
+#   pack nothing and silently install an empty tree. Configure hard-fails when an
+#   ON switch's configure-discoverable toolchain is missing (hip -> hipcc;
+#   rocke -> the ENABLE_ROCKE + wheel-env + importable conjunction). The tests
+#   are wired regardless: they drive the fixture slice directly, never a
+#   production source root.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -386,74 +388,82 @@ function(hkp_add_packaging)
     set(_install_base
         "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/arch_content/hip-kernel-provider/descriptors")
 
-    set(HIPKERNELPROVIDER_PRODUCTION_HIP_SOURCE_ROOT "" CACHE PATH
-        "Authored hip-source root the production pack step compiles from. \
-Empty leaves hip production packaging dormant; set to a real authored source \
-folder for a release build.")
-    set(HIPKERNELPROVIDER_PRODUCTION_ROCKE_SOURCE_ROOT "" CACHE PATH
-        "Authored rocke-source root the production pack step compiles from \
-(descriptors only; the kernel bodies resolve via the importable rocke/kernels \
-packages). Empty leaves rocke production packaging dormant.")
+    set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT "" CACHE PATH
+        "The authored source root the production pack step compiles from. \
+Walked recursively; child folders under it scope the content (hip/, rocKE/, \
+per-integration folders) and each descriptor's authored subpath is preserved \
+into the staged and installed trees. Empty leaves production packaging dormant.")
+    set(HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP OFF CACHE BOOL
+        "Allow the hip producer to run over the production source root. \
+Requires a configure-discoverable hipcc.")
+    set(HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE OFF CACHE BOOL
+        "Allow the rocKE producer to run over the production source root. \
+Requires HIPKERNELPROVIDER_ENABLE_ROCKE, the rocke wheel-env, and importable \
+rocke/kernels packages.")
 
-    set(_hip_root "")
-    if(HIPKERNELPROVIDER_PRODUCTION_HIP_SOURCE_ROOT)
-        if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_HIP_SOURCE_ROOT}")
+    set(_source_root "")
+    if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
+        if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
             message(FATAL_ERROR
-                "hkp: HIPKERNELPROVIDER_PRODUCTION_HIP_SOURCE_ROOT is set but is "
-                "not a directory: ${HIPKERNELPROVIDER_PRODUCTION_HIP_SOURCE_ROOT}")
+                "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is set but is "
+                "not a directory: ${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
         endif()
-        set(_hip_root "${HIPKERNELPROVIDER_PRODUCTION_HIP_SOURCE_ROOT}")
+        set(_source_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
     endif()
 
-    set(_rocke_root "")
-    if(HIPKERNELPROVIDER_PRODUCTION_ROCKE_SOURCE_ROOT)
-        if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_ROCKE_SOURCE_ROOT}")
-            message(FATAL_ERROR
-                "hkp: HIPKERNELPROVIDER_PRODUCTION_ROCKE_SOURCE_ROOT is set but "
-                "is not a directory: "
-                "${HIPKERNELPROVIDER_PRODUCTION_ROCKE_SOURCE_ROOT}")
-        endif()
-        set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_ROCKE_SOURCE_ROOT}")
-    endif()
-
-    # A set hip root requires the configure-discoverable hipcc.
-    if(_hip_root AND NOT HKP_HIPCC)
+    # A root with no producer enabled would pack nothing and install an empty
+    # tree — the silent-empty-package failure mode. Name both switches so the
+    # fix is obvious.
+    if(_source_root
+       AND NOT HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP
+       AND NOT HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE)
         message(FATAL_ERROR
-            "hkp: HIPKERNELPROVIDER_PRODUCTION_HIP_SOURCE_ROOT is set but hipcc "
-            "was not found (searched hipcc, hipcc.bat, hipcc.bin.exe). Ensure "
-            "the ROCm bin dir is on PATH.")
+            "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is set but no "
+            "producer is enabled — set HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP "
+            "and/or HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE, otherwise the "
+            "pack step would ship an empty tree.")
     endif()
 
-    # A set rocke root requires the full conjunction: ENABLE_ROCKE (which builds
-    # the wheels), the wheel-env available, and rocke/kernels importable. Any
-    # missing piece is a configure hard-fail naming what is missing.
+    # The hip producer requires the configure-discoverable hipcc.
+    if(_source_root AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP AND NOT HKP_HIPCC)
+        message(FATAL_ERROR
+            "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP is ON but hipcc was "
+            "not found (searched hipcc, hipcc.bat, hipcc.bin.exe). Ensure the "
+            "ROCm bin dir is on PATH or CMAKE_PROGRAM_PATH.")
+    endif()
+
+    # The rocKE producer requires the full conjunction: ENABLE_ROCKE (which
+    # builds the wheels), the wheel-env available, and rocke/kernels importable.
+    # Any missing piece is a configure hard-fail naming what is missing.
     set(_rocke_interp "")
     set(_rocke_comgr_lib "${ROCKE_COMGR_LIB}")
-    if(_rocke_root)
+    set(_enable_rocke OFF)
+    if(_source_root AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE)
+        set(_enable_rocke ON)
         if(NOT HIPKERNELPROVIDER_ENABLE_ROCKE)
             message(FATAL_ERROR
-                "hkp: a rocke production source root is set but "
+                "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE is ON but "
                 "HIPKERNELPROVIDER_ENABLE_ROCKE is OFF — enable it so the "
                 "rocke/kernels wheels are built and importable.")
         endif()
         if(NOT ROCKE_WHEEL_DIR)
             message(FATAL_ERROR
-                "hkp: a rocke production source root is set but the rocke "
-                "wheel-env is not available (ROCKE_WHEEL_DIR unset).")
+                "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE is ON but the "
+                "rocke wheel-env is not available (ROCKE_WHEEL_DIR unset).")
         endif()
         hkp_probe_rocke_importable(_rocke_ok)
         if(NOT _rocke_ok)
             message(FATAL_ERROR
-                "hkp: a rocke production source root is set but rocke/kernels "
-                "are not importable.")
+                "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE is ON but "
+                "rocke/kernels are not importable.")
         endif()
         hkp_rocke_wheel_python_interp(_rocke_interp)
     endif()
 
-    if(_hip_root OR _rocke_root)
+    if(_source_root)
         hkp_wire_production(
-            HIP_ROOT "${_hip_root}"
-            ROCKE_ROOT "${_rocke_root}"
+            SOURCE_ROOT "${_source_root}"
+            ENABLE_ROCKE "${_enable_rocke}"
             ARCHES "${_arches}"
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
@@ -463,9 +473,8 @@ packages). Empty leaves rocke production packaging dormant.")
     else()
         message(STATUS
             "hkp: no production source root set "
-            "(HIPKERNELPROVIDER_PRODUCTION_HIP_SOURCE_ROOT / "
-            "..._ROCKE_SOURCE_ROOT empty); production packaging dormant "
-            "(tests still run against the fixtures).")
+            "(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT empty); production "
+            "packaging dormant (tests still run against the fixtures).")
     endif()
 
     # The integration suite's packaged artifact, staged into the build tree rather than
@@ -477,12 +486,13 @@ packages). Empty leaves rocke production packaging dormant.")
                       "${_rocm_kpack_dir}" "${HIPDNN_DESCRIPTOR_BUILD_DIR}")
     endif()
 
-    hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_hip_root}"
+    hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}"
+                       "${HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP}"
                        "${_rocke_comgr_lib}")
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_register_tests(<rocm_kpack_dir> <hipcc> <hip_root> <rocke_comgr_lib>)
+# hkp_register_tests(<rocm_kpack_dir> <hipcc> <hip_enabled> <rocke_comgr_lib>)
 #   Register the pytest suite as two build-tree ctest entries running disjoint
 #   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
 #   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
@@ -490,18 +500,18 @@ endfunction()
 #   Python3_EXECUTABLE cannot import pytest the entries register DISABLED so
 #   they list as skipped, not absent.
 #
-#   Configure hard-fails on a missing hipcc only when a hip production root is
-#   set (a tests-only ingestor build configures clean on a bare box; the
+#   Configure hard-fails on a missing hipcc only when the hip producer is
+#   enabled (a tests-only ingestor build configures clean on a bare box; the
 #   compile-dependent tests self-skip via the hipcc/rocke fixtures, and CI
 #   hard-gates them via the REQUIRE_* env vars forwarded below).
 # ---------------------------------------------------------------------------
-function(hkp_register_tests rocm_kpack_dir hipcc hip_root rocke_comgr_lib)
+function(hkp_register_tests rocm_kpack_dir hipcc hip_enabled rocke_comgr_lib)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
         return()
     endif()
-    if(hip_root AND NOT hipcc)
+    if(hip_enabled AND NOT hipcc)
         message(FATAL_ERROR
-            "hkp: a hip production source root is set but hipcc was not found.")
+            "hkp: the hip production producer is enabled but hipcc was not found.")
     endif()
 
     # Runs under Python3_EXECUTABLE, the interpreter hkp_resolve_kpack proved

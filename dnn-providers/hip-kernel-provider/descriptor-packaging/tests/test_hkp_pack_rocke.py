@@ -32,7 +32,7 @@ def _copy_fixture(tmp_path, fixture):
 
 def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches=(ARCH,)):
     return run_pipeline(
-        source_roots=[source_root],
+        source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
         hipcc=hipcc,
@@ -198,7 +198,7 @@ def test_adapter_import_build_capture(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, _GOOD_STUB)
     name, data = _patch_compiler(monkeypatch)
     co, symbol = compile_rocke_variant(
-        tmp_path, src, "build_stub", {"n": 3, "label": "y"}, ARCH, tmp_path / "co"
+        src, "build_stub", {"n": 3, "label": "y"}, ARCH, tmp_path / "co"
     )
     assert symbol == name
     assert co.read_bytes() == data
@@ -211,7 +211,7 @@ def test_adapter_source_dotted_derivation(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, _GOOD_STUB, pkg="stubpkg2", sub="deep", mod="k")
     _patch_compiler(monkeypatch)
     co, symbol = compile_rocke_variant(
-        tmp_path, src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
+        src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
     )
     assert symbol == "stub_symbol"
 
@@ -221,7 +221,7 @@ def test_adapter_module_not_importable(tmp_path, monkeypatch):
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="module not importable"):
         compile_rocke_variant(
-            tmp_path, "does/not/exist.py", "build_stub", {}, ARCH, tmp_path / "co"
+            "does/not/exist.py", "build_stub", {}, ARCH, tmp_path / "co"
         )
 
 
@@ -230,9 +230,7 @@ def test_adapter_builder_not_found(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, _GOOD_STUB, pkg="stubpkg_bnf")
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="builder not found"):
-        compile_rocke_variant(
-            tmp_path, src, "no_such_builder", {"n": 1}, ARCH, tmp_path / "co"
-        )
+        compile_rocke_variant(src, "no_such_builder", {"n": 1}, ARCH, tmp_path / "co")
 
 
 @pytest.mark.quick
@@ -244,9 +242,7 @@ def test_adapter_spec_not_introspectable(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, body, pkg="stubpkg_noann")
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="spec type not introspectable"):
-        compile_rocke_variant(
-            tmp_path, src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
-        )
+        compile_rocke_variant(src, "build_stub", {"n": 1}, ARCH, tmp_path / "co")
 
 
 @pytest.mark.quick
@@ -258,9 +254,7 @@ def test_adapter_non_dataclass_spec_hint(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, body, pkg="stubpkg_int")
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="spec type not introspectable"):
-        compile_rocke_variant(
-            tmp_path, src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
-        )
+        compile_rocke_variant(src, "build_stub", {"n": 1}, ARCH, tmp_path / "co")
 
 
 @pytest.mark.quick
@@ -278,9 +272,7 @@ def test_adapter_bad_signature_no_arch(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, body, pkg="stubpkg_noarch")
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="builder signature must be"):
-        compile_rocke_variant(
-            tmp_path, src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
-        )
+        compile_rocke_variant(src, "build_stub", {"n": 1}, ARCH, tmp_path / "co")
 
 
 @pytest.mark.quick
@@ -298,9 +290,7 @@ def test_adapter_bad_signature_two_positional(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, body, pkg="stubpkg_two")
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="builder signature must be"):
-        compile_rocke_variant(
-            tmp_path, src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
-        )
+        compile_rocke_variant(src, "build_stub", {"n": 1}, ARCH, tmp_path / "co")
 
 
 @pytest.mark.quick
@@ -309,7 +299,7 @@ def test_adapter_unexpected_spec_field(tmp_path, monkeypatch):
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="unexpected spec field"):
         compile_rocke_variant(
-            tmp_path, src, "build_stub", {"n": 1, "bogus": 2}, ARCH, tmp_path / "co"
+            src, "build_stub", {"n": 1, "bogus": 2}, ARCH, tmp_path / "co"
         )
 
 
@@ -318,9 +308,7 @@ def test_adapter_invalid_spec_missing_field(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, _GOOD_STUB, pkg="stubpkg_miss")
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="invalid spec for StubSpec"):
-        compile_rocke_variant(
-            tmp_path, src, "build_stub", {"label": "y"}, ARCH, tmp_path / "co"
-        )
+        compile_rocke_variant(src, "build_stub", {"label": "y"}, ARCH, tmp_path / "co")
 
 
 @pytest.mark.quick
@@ -342,9 +330,7 @@ def test_adapter_invalid_spec_post_init(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, body, pkg="stubpkg_pi")
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="invalid spec for StubSpec"):
-        compile_rocke_variant(
-            tmp_path, src, "build_stub", {"n": -1}, ARCH, tmp_path / "co"
-        )
+        compile_rocke_variant(src, "build_stub", {"n": -1}, ARCH, tmp_path / "co")
 
 
 @pytest.mark.quick
@@ -364,9 +350,7 @@ def test_adapter_arch_not_supported(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, body, pkg="stubpkg_arch")
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="arch not supported by builder"):
-        compile_rocke_variant(
-            tmp_path, src, "build_stub", {"n": 1}, "gfx942", tmp_path / "co"
-        )
+        compile_rocke_variant(src, "build_stub", {"n": 1}, "gfx942", tmp_path / "co")
 
 
 @pytest.mark.quick
@@ -381,9 +365,7 @@ def test_adapter_comgr_failure_wrapped(tmp_path, monkeypatch):
         rocke_compile, "_load_compiler", lambda: (_boom, _FakeComgrError)
     )
     with pytest.raises(HkpPackError, match="comgr compile failed"):
-        compile_rocke_variant(
-            tmp_path, src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
-        )
+        compile_rocke_variant(src, "build_stub", {"n": 1}, ARCH, tmp_path / "co")
 
 
 @pytest.mark.quick
@@ -401,9 +383,7 @@ def test_adapter_builder_call_failure_wrapped(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, body, pkg="stubpkg_bcall")
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="builder call failed") as excinfo:
-        compile_rocke_variant(
-            tmp_path, src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
-        )
+        compile_rocke_variant(src, "build_stub", {"n": 1}, ARCH, tmp_path / "co")
     assert "ValueError" in str(excinfo.value)
 
 
@@ -415,9 +395,7 @@ def test_adapter_module_import_raises_wrapped(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, body, pkg="stubpkg_imperr")
     _patch_compiler(monkeypatch)
     with pytest.raises(HkpPackError, match="module not importable"):
-        compile_rocke_variant(
-            tmp_path, src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
-        )
+        compile_rocke_variant(src, "build_stub", {"n": 1}, ARCH, tmp_path / "co")
 
 
 # --- C. rocke variant identity (quick, comgr-free) --------------------------
@@ -521,7 +499,6 @@ def test_rocke_compile_variant_real(tmp_path, rocke_available, rocke_ukd):
     )
 
     co, symbol = compile_rocke_variant(
-        tmp_path,
         rocke_ukd.source,
         rocke_ukd.builder,
         dict(rocke_ukd.spec),
@@ -587,3 +564,53 @@ def test_rocke_arch_scoping(
     assert ukd["provenance"]["origin_kind"] == "rocke"
     # gfx942 has no applicable UKD: the shard is skipped entirely.
     assert not (tmp_path / "out" / "gfx942").exists()
+
+
+# --- comgr self-diagnosing error (quick, comgr-free) ------------------------
+@pytest.mark.quick
+def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
+    from hkp_pack import rocke_compile
+
+    base = tmp_path / "diagpkg"
+    (base / "sub").mkdir(parents=True)
+    (base / "__init__.py").write_text("", encoding="utf-8")
+    (base / "sub" / "__init__.py").write_text("", encoding="utf-8")
+    (base / "sub" / "mod.py").write_text(
+        textwrap.dedent(
+            """
+            import dataclasses
+
+            @dataclasses.dataclass
+            class StubSpec:
+                n: int
+
+            def build_stub(spec: StubSpec, *, arch="gfx950"):
+                return ("kernel", spec, arch)
+            """
+        ),
+        encoding="utf-8",
+    )
+    if str(tmp_path) not in sys.path:
+        sys.path.insert(0, str(tmp_path))
+
+    class _FakeComgrError(Exception):
+        pass
+
+    def _boom(kernel, *, arch, capture_ir_text=False):
+        raise _FakeComgrError("codegen exploded")
+
+    monkeypatch.setattr(
+        rocke_compile, "_load_compiler", lambda: (_boom, _FakeComgrError)
+    )
+    monkeypatch.setattr(
+        rocke_compile, "_resolved_comgr_path", lambda: "/fake/path/amd_comgr.dll"
+    )
+    with pytest.raises(HkpPackError, match="comgr loaded from /fake/path") as excinfo:
+        rocke_compile.compile_rocke_variant(
+            "diagpkg/sub/mod.py",
+            "build_stub",
+            {"n": 1},
+            "gfx950",
+            tmp_path / "co",
+        )
+    assert "ROCKE_COMGR_LIB" in str(excinfo.value)

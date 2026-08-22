@@ -35,7 +35,7 @@ def built(tmp_path_factory, main_fixture, hipcc, rocm_kpack_dir):
     """Compile + prune + pack the main fixture once for the 3-arch matrix."""
     base = tmp_path_factory.mktemp("built")
     results = run_pipeline(
-        source_roots=[main_fixture],
+        source_root=main_fixture,
         arches=ARCHES,
         out_root=base / "out",
         hipcc=hipcc,
@@ -186,7 +186,7 @@ def test_prn3_exact_post_prune_set(built):
 def test_prn4_empty_arch_skip(tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir):
     logs = []
     results = run_pipeline(
-        source_roots=[empty_arch_fixture],
+        source_root=empty_arch_fixture,
         arches=["gfx942", "gfx950"],
         out_root=tmp_path / "out",
         hipcc=hipcc,
@@ -325,7 +325,7 @@ def test_self_describing_ukd(built, rocm_kpack_dir):
 # --- D. Negatives: compile-spec --------------------------------------------
 def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches=("gfx942",)):
     return run_pipeline(
-        source_roots=[source_root],
+        source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
         hipcc=hipcc,
@@ -403,7 +403,7 @@ def test_neg_sha256_mismatch(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
     with pytest.raises(HkpPackError, match="sha256 mismatch"):
         # An expected digest that cannot match the freshly compiled blob.
         run_pipeline(
-            source_roots=[main_fixture],
+            source_root=main_fixture,
             arches=["gfx942"],
             out_root=tmp_path / "out",
             hipcc=hipcc,
@@ -421,15 +421,13 @@ def test_neg_toc_key_collision(
 
     # Force every variant to collapse to one toc_key while (source,build) stay
     # distinct -> the collision guard must hard-fail.
-    monkeypatch.setattr(
-        pipeline, "hip_variant_key", lambda source, build, origin_index=0: "COLLIDE"
-    )
+    monkeypatch.setattr(pipeline, "hip_variant_key", lambda source, build: "COLLIDE")
     from hkp_pack import hip_compile as compile_mod
 
     monkeypatch.setattr(
         compile_mod,
         "hip_variant_key",
-        lambda source, build, origin_index=0: "COLLIDE",
+        lambda source, build: "COLLIDE",
     )
     with pytest.raises(HkpPackError, match="toc_key collision"):
         _run(src, tmp_path, hipcc, rocm_kpack_dir)
@@ -447,7 +445,7 @@ def test_cli1_single_arch(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
 @pytest.mark.quick
 def test_cli2_empty_gpu_targets(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
     results = run_pipeline(
-        source_roots=[main_fixture],
+        source_root=main_fixture,
         arches=[],
         out_root=tmp_path / "out",
         hipcc=hipcc,
@@ -521,7 +519,7 @@ def test_determinism_same_variant_twice(tmp_path, main_fixture, hipcc, rocm_kpac
         return result
 
     run_pipeline(
-        source_roots=[main_fixture],
+        source_root=main_fixture,
         arches=["gfx942"],
         out_root=tmp_path / "out1",
         hipcc=hipcc,
@@ -529,7 +527,7 @@ def test_determinism_same_variant_twice(tmp_path, main_fixture, hipcc, rocm_kpac
         inter_root=tmp_path / "inter1",
     )
     run_pipeline(
-        source_roots=[main_fixture],
+        source_root=main_fixture,
         arches=["gfx942"],
         out_root=tmp_path / "out2",
         hipcc=hipcc,
@@ -1039,7 +1037,7 @@ def test_empty_pruned_kdp_is_logged(tmp_path, main_fixture, hipcc, rocm_kpack_di
     p.write_text(json.dumps(doc), encoding="utf-8")
     logs = []
     run_pipeline(
-        source_roots=[src],
+        source_root=src,
         arches=["gfx950"],
         out_root=tmp_path / "out",
         hipcc=hipcc,
@@ -1076,7 +1074,7 @@ def test_nonbare_arch_warns_but_packs(tmp_path, main_fixture, hipcc, rocm_kpack_
     p.write_text(json.dumps(doc), encoding="utf-8")
     logs = []
     results = run_pipeline(
-        source_roots=[src],
+        source_root=src,
         arches=["gfx942"],
         out_root=tmp_path / "out",
         hipcc=hipcc,
