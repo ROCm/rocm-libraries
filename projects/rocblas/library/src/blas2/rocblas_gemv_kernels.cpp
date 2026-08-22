@@ -94,9 +94,11 @@ inline bool rocblas_gemvt_skinny_n(rocblas_operation transA, rocblas_int m, rocb
 // has had a two-stage split since it was added; this is the same idea applied
 // to the non-transposed side, splitting n across gridDim.y.
 //
-// Columns per split. Fixed rather than derived from the launch shape so that
-// rocblas_internal_gemv_kernel_workspace_size stays a pure function of
-// (transA, m, n, batch_count) and cannot disagree with the launcher.
+// Target columns per split. This determines the split count; the kernel then
+// divides n evenly across that many blocks, so the final slice cannot be empty.
+// Keeping the count independent of the launch shape lets
+// rocblas_internal_gemv_kernel_workspace_size remain a pure function of
+// (transA, m, n, batch_count) and keeps it in agreement with the launcher.
 constexpr int rocblas_gemvn_sm_chunk()
 {
     return 4096;
