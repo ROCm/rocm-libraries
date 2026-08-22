@@ -25,6 +25,7 @@
 #include "rocsparse-debugging.h"
 #include "rocsparse_clients_envariables.hpp"
 #include "rocsparse_data.hpp"
+#include "rocsparse_getenv.hpp"
 #include "rocsparse_parse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
 #include "rocsparse_test_listeners.hpp"
@@ -264,16 +265,16 @@ int main(int argc, char** argv)
     // [==========] 149 tests from 53 test cases ran. (1 ms total)
     // [  PASSED  ] 149 tests.
     //
-    auto gtest_listener = getenv("GTEST_LISTENER");
+    auto gtest_listener = rocsparse_clients::get_environment_variable("GTEST_LISTENER");
 
-    if(!gtest_listener || strcmp(gtest_listener, "VERBOSE_PASS_IN_LOG") != 0)
+    if(!gtest_listener || *gtest_listener != "VERBOSE_PASS_IN_LOG")
     {
         // If the GTEST_LISTENER environment variable is not set to "VERBOSE_PASS_IN_LOG",
         // we use the configurable_event_listener to capture output.
         // This listener will redirect the output to a stringstream and print it only if a test fails.
         // listeners.Append(new rocsparse_clients::configurable_event_listener(default_printer));
         auto listener = new rocsparse_clients::configurable_event_listener(default_printer);
-        if(gtest_listener && !strcmp(gtest_listener, "NO_PASS_LINE_IN_LOG"))
+        if(gtest_listener && *gtest_listener == "NO_PASS_LINE_IN_LOG")
         {
             listener->showTestNames = listener->showSuccesses = listener->showInlineFailures
                 = false;

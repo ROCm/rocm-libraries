@@ -827,7 +827,9 @@ set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE STRING "List of AM
 set(KDB_BZ2_FILES gfx942.kdb.bz2 gfx90a.kdb.bz2 gfx1030.kdb.bz2 gfx908.kdb.bz2 gfx906.kdb.bz2 gfx900.kdb.bz2)
 
 foreach(_gfx_target ${MIOPEN_INSTALL_GPU_DATABASES})
-    install_gpu_databases(${_gfx_target})
+    if(_gfx_target IN_LIST GPU_TARGETS)
+        install_gpu_databases(${_gfx_target})
+    endif()
 endforeach()
 
 if(DVC_MISSING_FILES)

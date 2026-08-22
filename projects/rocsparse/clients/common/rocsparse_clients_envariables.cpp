@@ -23,6 +23,7 @@
 
 #include "rocsparse_clients_envariables.hpp"
 #include "rocsparse-types.h"
+#include "rocsparse_getenv.hpp"
 #include <iostream>
 #include <mutex>
 constexpr rocsparse_clients_envariables::var_bool rocsparse_clients_envariables::s_var_bool_all[];
@@ -60,12 +61,12 @@ static bool rocsparse_getenv(const char* name, bool& defined, T& val);
 template <>
 bool rocsparse_getenv<bool>(const char* name, bool& defined, bool& val)
 {
-    val                    = false;
-    const char* getenv_str = getenv(name);
-    defined                = (getenv_str != nullptr);
+    val             = false;
+    auto getenv_str = rocsparse_clients::get_environment_variable(name);
+    defined         = getenv_str.has_value();
     if(defined)
     {
-        auto getenv_int = atoi(getenv_str);
+        auto getenv_int = atoi(getenv_str->c_str());
         if((getenv_int != 0) && (getenv_int != 1))
         {
             std::cerr << "rocsparse error, invalid environment variable " << name
@@ -88,11 +89,11 @@ bool rocsparse_getenv<bool>(const char* name, bool& defined, bool& val)
 template <>
 bool rocsparse_getenv<std::string>(const char* name, bool& defined, std::string& val)
 {
-    const char* getenv_str = getenv(name);
-    defined                = (getenv_str != nullptr);
+    auto getenv_str = rocsparse_clients::get_environment_variable(name);
+    defined         = getenv_str.has_value();
     if(defined)
     {
-        val = getenv_str;
+        val = *getenv_str;
     }
     return true;
 }

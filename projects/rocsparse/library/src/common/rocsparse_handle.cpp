@@ -23,6 +23,7 @@
 
 #include "rocsparse_handle.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_getenv.hpp"
 #include "rocsparse_logging.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -66,14 +67,14 @@ _rocsparse_handle::_rocsparse_handle()
 #endif
 
         // Layer mode
-        char* str_layer_mode;
-        if((str_layer_mode = getenv("ROCSPARSE_LAYER")) == NULL)
+        auto str_layer_mode = rocsparse::get_environment_variable("ROCSPARSE_LAYER");
+        if(!str_layer_mode.has_value())
         {
             layer_mode = rocsparse_layer_mode_none;
         }
         else
         {
-            layer_mode = (rocsparse_layer_mode)(atoi(str_layer_mode));
+            layer_mode = (rocsparse_layer_mode)(atoi(str_layer_mode->c_str()));
         }
 
         // Obtain size for coomv device buffer

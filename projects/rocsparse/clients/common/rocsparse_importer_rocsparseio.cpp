@@ -22,6 +22,7 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse_getenv.hpp"
 #include "rocsparse_importer_rocsparseio.hpp"
 
 #define ROCSPARSE_CHECK_ROCSPARSEIO(iostatus_)  \
@@ -147,8 +148,8 @@ inline rocsparseio_type type_tconvert<rocsparse_double_complex>()
 rocsparse_importer_rocsparseio::~rocsparse_importer_rocsparseio()
 {
 
-    const char* env = getenv("GTEST_LISTENER");
-    if(!env || strcmp(env, "NO_PASS_LINE_IN_LOG"))
+    auto env = rocsparse_clients::get_environment_variable("GTEST_LISTENER");
+    if(!env || *env != "NO_PASS_LINE_IN_LOG")
     {
         std::cout << "Import done." << std::endl;
     }
@@ -163,8 +164,8 @@ rocsparse_importer_rocsparseio::rocsparse_importer_rocsparseio(const std::string
     : m_filename(filename_)
 {
 
-    const char* env = getenv("GTEST_LISTENER");
-    if(!env || strcmp(env, "NO_PASS_LINE_IN_LOG"))
+    auto env = rocsparse_clients::get_environment_variable("GTEST_LISTENER");
+    if(!env || *env != "NO_PASS_LINE_IN_LOG")
     {
         std::cout << "Opening file '" << this->m_filename << "' ... " << std::endl;
     }
