@@ -117,16 +117,23 @@ inline int rocblas_gemvn_sm_split_count(rocblas_int n)
 }
 
 // Largest m the split is used for. gemvn tiles the output as
-// (m - 1) / (DIM_X * 4) + 1, so this is "at most 8 output tiles": below it the
-// grid cannot fill the card and the split is a large win, above it the
-// single-stage kernel already saturates and the extra pass is a small loss.
-// Measured on gfx1100 against the transposed path on the same contraction:
-// 15.4x at m = 32, 9.7x at 128, 4.8x at 256, 2.4x at 512, 1.31x at 1024, and
-// -3% at m = 1328 (11 tiles), which is why the boundary sits here.
+// (m - 1) / (DIM_X * 4) + 1 for real/complex-float types, and
+// (m - 1) / DIM_X + 1 for double-complex (one quarter as many tiles).
+// Below the crossover the grid cannot fill the device and the split is a
+// large win; above it the arch-tuned single-stage kernel already saturates
+// and the extra reduction pass is a small loss.
+//
+// For m=1024, the split preempts the CDNA-tuned 512-thread kernel already
+// fast at that size. Therefore, we set the crossover to 512 for all real
+// and complex-float types, where the performance gains are solid across all
+// the archs. For double-complex the block formula uses DIM_X (not DIM_X*4),
+// so the equivalent tile count is reached at m=256.
 template <typename T>
 inline size_t rocblas_gemvn_sm_crossover()
 {
-    return 1024;
+    if constexpr(std::is_same_v<T, rocblas_double_complex>)
+        return 256;
+    return 512;
 }
 
 // Below this the reduction is not long enough to cover a second launch.
@@ -317,7 +324,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             }
 #undef gemvn_sm_mn_batched_KARGS
         }
-        else if(workspace && !i64_incs && rocblas_gemvn_skinny_m<Ti>(transA, m, n))
+        else if(workspace && !i64_incs && rocblas_gemvn_skinny_m<To>(transA, m, n))
         {
             // Skinny m: split the n reduction across gridDim.y so the launch is
             // sized by the work rather than by the output length, then reduce.

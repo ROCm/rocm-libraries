@@ -29,13 +29,15 @@ Definitions:
 
   - &skinny_m_matrix_size_range
     # transA == N, short output and long reduction: the split applies for
-    # m <= 1024 with at least 2^20 elements. The last two rows sit deliberately
-    # outside the gate so the unsplit path is covered by the same cases.
+    # m <= 512 (m <= 256 for double-complex) with at least 2^20 elements.
+    # Boundary rows sit deliberately outside the gate so the unsplit path is
+    # covered by the same cases.
     - { M:    40, N:  81920, lda:    40, stride_a:  3276800 }
     - { M:    63, N: 131071, lda:    64, stride_a:  8388544 }
-    - { M:  1024, N:   2048, lda:  1024, stride_a:  2097152 }
+    - { M:   256, N:   4096, lda:   256, stride_a:  1048576 } # zc crossover
+    - { M:   512, N:   2048, lda:   512, stride_a:  1048576 } # real/c crossover
     - { M:   300, N:   4099, lda:   301, stride_a:  1233799 } # n not a multiple of the split chunk
-    - { M:  1025, N:   2048, lda:  1025, stride_a:  2099200 } # m above the crossover
+    - { M:   513, N:   2048, lda:   513, stride_a:  1050624 } # m above the real/c crossover
     - { M:     7, N:  20480, lda:     7, stride_a:   143360 } # below the element floor
 
   - &double_buffered_loads_size_range
