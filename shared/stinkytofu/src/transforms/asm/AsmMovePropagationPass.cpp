@@ -344,6 +344,12 @@ class AsmMovePropagationPassImpl : public Pass {
         // 2) invalidate mappings killed by current instruction defs
         // 3) if current instruction is an eligible mov, add its new mapping
         for (StinkyInstruction* inst : instructions) {
+            // Treat call as a hard barrier: do not propagate mappings across callee boundary.
+            if (isCall(*inst)) {
+                moveMap.clear();
+                continue;
+            }
+
             for (size_t i = 0; i < inst->getNumSrcRegs(); ++i) {
                 const StinkyRegister& oldSrc = inst->getSrcReg(i);
                 if (!oldSrc.isRegister()) continue;
@@ -382,6 +388,13 @@ class AsmMovePropagationPassImpl : public Pass {
         std::unordered_map<RegLaneKey, NextEvent, RegLaneKeyHash> nextEvents;
         for (size_t i = instructions.size(); i-- > 0;) {
             StinkyInstruction* inst = instructions[i];
+            // Calls are liveness barriers for this local cleanup:
+            // never infer mov-deadness across a call boundary.
+            if (isCall(*inst)) {
+                nextEvents.clear();
+                continue;
+            }
+
             if (isEligibleMov(*inst)) {
                 const StinkyRegister& dst = inst->getDestReg(0);
                 const StinkyRegister& src = inst->getSrcReg(0);
