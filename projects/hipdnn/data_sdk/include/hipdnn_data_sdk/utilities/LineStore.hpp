@@ -785,28 +785,39 @@ inline std::pair<std::optional<LineStoreShard>, LineStoreStatus>
         return {std::nullopt, LineStoreStatus::LOCK_FAILED};
     }
 
-    const auto content = detail::readAllLineStoreBytes(entry->handle);
-    if(!content)
+    // Everything between here and the release allocates against a shard with no size
+    // bound, so it is wrapped: an escaping bad_alloc would leave the exclusive lock held
+    // for the life of the process, wedging every later writer, including other processes.
+    try
     {
-        detail::releaseLineStoreLock(*entry);
-        return {std::nullopt, LineStoreStatus::IO_ERROR};
-    }
-
-    const auto lines = detail::splitLineStoreLines(*content);
-    if(lines.empty())
-    {
-        // Empty, or a torn first write that never reached its newline. Either way there
-        // is no readable version line yet, so stamp one.
-        if(!detail::appendRawLineStoreLine(entry->handle, expectedVersion))
+        const auto content = detail::readAllLineStoreBytes(entry->handle);
+        if(!content)
         {
             detail::releaseLineStoreLock(*entry);
             return {std::nullopt, LineStoreStatus::IO_ERROR};
         }
+
+        const auto lines = detail::splitLineStoreLines(*content);
+        if(lines.empty())
+        {
+            // Empty, or a torn first write that never reached its newline. Either way
+            // there is no readable version line yet, so stamp one.
+            if(!detail::appendRawLineStoreLine(entry->handle, expectedVersion))
+            {
+                detail::releaseLineStoreLock(*entry);
+                return {std::nullopt, LineStoreStatus::IO_ERROR};
+            }
+        }
+        else if(lines.front() != expectedVersion)
+        {
+            detail::releaseLineStoreLock(*entry);
+            return {std::nullopt, LineStoreStatus::VERSION_MISMATCH};
+        }
     }
-    else if(lines.front() != expectedVersion)
+    catch(const std::exception&)
     {
         detail::releaseLineStoreLock(*entry);
-        return {std::nullopt, LineStoreStatus::VERSION_MISMATCH};
+        return {std::nullopt, LineStoreStatus::IO_ERROR};
     }
 
     detail::releaseLineStoreLock(*entry);
