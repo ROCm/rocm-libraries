@@ -740,7 +740,7 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 * When generating the project, CMake will warn about a clang-format or clang-tidy mismatch. That's okay for now but it can be resolved by installing the missing version of the toolchain to a parallel directory and setting the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) variable accordingly.
 * Generating the project files may take longer than on Linux, but should complete within a few minutes.
 * You may want to limit the number of threads used by Ninja when building hipDNN so that your computer is not bogged-down by the build. You can use the `ninja -j` option to set the number of threads to something smaller than the number of threads available on your CPU.
-* To reduce build time, the `-DENABLE_CLANG_TIDY=OFF` option can be used to disable clang-tidy check during development. Similarly the `-DENABLE_CLANG_FORMAT=OFF` option can be used to disable clang-format.
+* clang-tidy is **off by default on Windows** because it roughly doubles build time. Pass `-DENABLE_CLANG_TIDY=ON` to run it before pushing a branch; it is expected to be clean. Two checks are dropped on Windows only (`bugprone-exception-escape` and `performance-noexcept-move-constructor`) because the Microsoft STL makes them fire on code that is clean against libstdc++ — see the WIN32 block in `cmake/ClangTidy.cmake`. On Linux clang-tidy is on by default and `-DENABLE_CLANG_TIDY=OFF` reduces build time during development. `-DENABLE_CLANG_FORMAT=OFF` does the same for clang-format on both platforms.
 
 ## Troubleshooting
 
