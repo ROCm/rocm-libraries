@@ -356,6 +356,50 @@ def test_mixed_hip_rocke_one_kpack_per_arch(
             assert ks["symbol"].encode("ascii") in blob
 
 
+def test_non_hkp_failure_still_leaves_no_partial_tree(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+):
+    """Staging must protect the output even when no cleanup handler runs.
+
+    run_pipeline's `except HkpPackError` tidies up after an expected failure, so
+    it alone makes an in-place write look safe. It does not run for a
+    MemoryError, a TypeError from a bug, or a SIGKILL -- and pack_arch creates
+    <out>/kpack/ before it validates anything. Only staging-then-rename makes
+    the output directory safe against a failure nobody caught, which is the
+    actual reason to do it.
+    """
+    from hkp_pack import pipeline
+
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+
+    def crash(flat, inter, out_arch_dir, *a, **kw):
+        # Create the output dir the way pack_arch does, then die in a way
+        # run_pipeline does not catch.
+        Path(out_arch_dir / "kpack").mkdir(parents=True, exist_ok=True)
+        raise RuntimeError("uncaught failure mid-pack")
+
+    monkeypatch.setattr(pipeline, "pack_arch", crash)
+
+    out_root = tmp_path / "out"
+    with pytest.raises(RuntimeError, match="uncaught failure"):
+        pipeline.run_pipeline(
+            source_root=root,
+            arches=[ARCH],
+            out_root=out_root,
+            hipcc=hipcc,
+            rocm_kpack_dir=rocm_kpack_dir,
+            inter_root=tmp_path / "inter",
+        )
+
+    # The shipped path must not exist. A staging directory may survive -- it is
+    # never installed, and leaving it aids debugging -- but <out>/<arch> must be
+    # absent so install(DIRECTORY ... OPTIONAL) skips the arch entirely.
+    assert not (
+        out_root / ARCH
+    ).exists(), "an uncaught failure left a partial arch tree that install() would ship"
+
+
 # --- D. Per-arch atomicity and isolation ------------------------------------
 def test_failed_arch_leaves_no_partial_tree(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch

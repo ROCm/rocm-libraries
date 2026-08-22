@@ -644,16 +644,22 @@ def run_pipeline(
             # install(DIRECTORY ... OPTIONAL) skips only a MISSING directory, so
             # that partial tree would install. Rename is atomic within a
             # filesystem, and both paths are under out_root by construction.
+            staging = out_root / f".{arch}.staging"
+            if staging.exists():
+                shutil.rmtree(staging)
             result = pack_arch(
                 flat,
                 inter,
-                out_arch_dir,
+                staging,
                 kpack_mod,
                 comp,
                 expected_sha256=expected_sha256,
                 hipcc=hipcc,
                 rocke_wheel_stamp=rocke_wheel_stamp,
             )
+            if out_arch_dir.exists():
+                shutil.rmtree(out_arch_dir)
+            staging.rename(out_arch_dir)
             results[arch] = replace(
                 result,
                 out_dir=out_arch_dir,
