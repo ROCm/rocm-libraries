@@ -22,6 +22,7 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse_getenv.hpp"
 #include "rocsparse_importer_rocalution.hpp"
 
 template <typename T>
@@ -117,8 +118,8 @@ rocsparse_status rocsparse_importer_rocalution::import_sparse_csx(
     rocsparse_direction* dir, J* m, J* n, I* nnz, rocsparse_index_base* base)
 {
 
-    const char* env = getenv("GTEST_LISTENER");
-    if(!env || strcmp(env, "NO_PASS_LINE_IN_LOG"))
+    auto env = rocsparse_clients::get_environment_variable("GTEST_LISTENER");
+    if(!env || *env != "NO_PASS_LINE_IN_LOG")
     {
         std::cout << "Opening file '" << this->m_filename << "' ... " << std::endl;
     }
@@ -185,8 +186,8 @@ rocsparse_status rocsparse_importer_rocalution::import_sparse_csx(I* ptr, J* ind
         delete this->m_info_csx.in;
         this->m_info_csx.in = nullptr;
         {
-            const char* env = getenv("GTEST_LISTENER");
-            if(!env || strcmp(env, "NO_PASS_LINE_IN_LOG"))
+            auto env = rocsparse_clients::get_environment_variable("GTEST_LISTENER");
+            if(!env || *env != "NO_PASS_LINE_IN_LOG")
             {
                 std::cout << "Import done." << std::endl;
             }
@@ -239,8 +240,8 @@ rocsparse_status rocsparse_importer_rocalution::import_sparse_csx(I* ptr, J* ind
         delete this->m_info_csx.in;
         this->m_info_csx.in = nullptr;
         {
-            const char* env = getenv("GTEST_LISTENER");
-            if(!env || strcmp(env, "NO_PASS_LINE_IN_LOG"))
+            auto env = rocsparse_clients::get_environment_variable("GTEST_LISTENER");
+            if(!env || *env != "NO_PASS_LINE_IN_LOG")
             {
                 std::cout << "Import done." << std::endl;
             }
