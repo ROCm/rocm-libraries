@@ -1,24 +1,19 @@
 {
-  "version": "0.1",
-  "id": "kdp-example-pointwise-add",
-  "name": "Example pointwise add",
-  "arch": [
-    "gfx942"
-  ],
+  "version": "1.0",
+  "id": "6ded9548-0adb-54c0-b7ae-2ea56c95b6ba",
+  "name": "hkp_example:pointwise_add",
+  "arch": ["gfx942"],
   "matchers": [
-    "umd-example-pointwise-add",
-    "umd-example-shared-hip"
+    "b8fa1bc3-b608-501a-bd2d-4e619974282e",
+    "a9a415b2-7f6d-52c4-a0cc-0ab3e9920d1f"
   ],
-  "engine": "ued-example-pointwise-add",
-  "dispatch": "udd-example-pointwise-add",
+  "engine": "4ec4821e-bcc7-58eb-ab6a-323bf33e7739",
+  "dispatch": "11ae57ea-0f82-5dd5-af34-f8362e1e9c22",
   "kernelDescriptors": [
     {
-      "version": "0.1",
-      "id": "ukd-example-pointwise-add-f32-b256",
-      "name": "Example PointwiseAdd f32 block256",
-      "arch": [
-        "gfx942"
-      ],
+      "version": "1.0",
+      "id": "d1e7f0a2-5c39-5b84-9f6e-8a4b2c17d905",
+      "name": "example_pointwise_add.f32_block256",
       "kernel_source": {
         "kind": "hip",
         "source": "PointwiseAdd.cpp",
@@ -31,8 +26,9 @@
         }
       },
       "metadata": {
+        "block_size": 256,
         "dtype": "FLOAT",
-        "block_size": 256
+        "operation": "ADD"
       },
       "priority": 0
     }

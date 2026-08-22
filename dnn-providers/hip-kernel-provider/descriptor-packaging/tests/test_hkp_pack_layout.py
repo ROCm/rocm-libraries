@@ -728,3 +728,113 @@ def test_kpack_folder_rejected_only_at_the_arch_root(tmp_path, empty_arch_fixtur
 
     flat = load_flat_input(root)
     assert {d.rel_dir.as_posix() for d in flat.kdps()} == {"hip/kpack"}
+
+
+# --- H. The example tree must satisfy the RUNTIME's schema ------------------
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+RUNTIME_FIXTURE = (
+    Path(__file__).resolve().parent.parent.parent
+    / "src/integration_tests/kernel_ingestor_engine/fixtures/packaged"
+)
+
+
+def _descriptor_files(root):
+    return sorted(p for p in Path(root).rglob("*.json"))
+
+
+@pytest.mark.quick
+def test_example_tree_uses_the_runtime_descriptor_version():
+    """Every descriptor must be major version 1, which is what the loader reads.
+
+    `DescriptorLoader.hpp` gates each type on a major/minor and this build reads
+    major 1 (UKD_VERSION_MAJOR). An earlier version of this tree was authored at
+    "0.1" -- copied from tests/fixtures/, which is packer-only test data and
+    never passes through the C++ loader -- so the whole tree was unloadable
+    while every packer test still passed.
+    """
+    for path in _descriptor_files(EXAMPLE_ROOT):
+        version = _read(path).get("version")
+        assert (
+            isinstance(version, str) and "." in version
+        ), f"{path.name}: missing or malformed version {version!r}"
+        assert version.split(".")[0] == "1", (
+            f"{path.name}: version {version!r} is not major 1; the loader "
+            "rejects it outright"
+        )
+
+
+@pytest.mark.quick
+def test_example_tree_ids_are_uuids():
+    """Descriptor ids are UUIDs; the loader cross-references packs by them."""
+    for path in _descriptor_files(EXAMPLE_ROOT):
+        did = _read(path).get("id")
+        assert isinstance(did, str) and _UUID_RE.match(
+            did
+        ), f"{path.name}: id {did!r} is not a UUID"
+
+
+@pytest.mark.quick
+def test_example_tree_field_shape_matches_the_runtime_fixture():
+    """Per descriptor type, carry the fields the runtime fixture carries.
+
+    `fixtures/packaged/` is the tree the C++ integration test actually loads and
+    dispatches, so it is the authority on shape. Comparing against it catches an
+    invented field set -- the failure that shipped here once already, where UDD
+    had `grid`/`block`/`args` instead of `dispatch_symbol` and UMD had
+    `criteria`/`nodes` instead of `match_symbol`.
+    """
+    if not RUNTIME_FIXTURE.is_dir():
+        pytest.skip(f"runtime fixture not present at {RUNTIME_FIXTURE}")
+
+    def shapes(root):
+        out = {}
+        for path in _descriptor_files(root):
+            kind = path.name.split(".")[-2]
+            out.setdefault(kind, set()).update(_read(path).keys())
+        return out
+
+    fixture = shapes(RUNTIME_FIXTURE)
+    example = shapes(EXAMPLE_ROOT)
+
+    for kind, required in fixture.items():
+        if kind not in example:
+            # The example need not exercise every descriptor type the fixture
+            # does (it has no standalone UKD, for instance).
+            continue
+        missing = required - example[kind]
+        assert not missing, (
+            f"example {kind} descriptors omit {sorted(missing)}, which the "
+            f"runtime fixture carries -- the loader will not resolve them"
+        )
+
+
+@pytest.mark.quick
+def test_example_tree_native_symbols_are_registered():
+    """Symbols the descriptors name must exist in a compiled native pack.
+
+    A descriptor can only resolve to something the C++ side registered. Naming
+    an unregistered symbol produces a tree that packs cleanly and then fails to
+    dispatch -- the packer has no way to know the difference.
+    """
+    packs_dir = (
+        Path(__file__).resolve().parent.parent.parent
+        / "src/engines/kernel_ingestor_engine/packs"
+    )
+    if not packs_dir.is_dir():
+        pytest.skip(f"native packs not present at {packs_dir}")
+
+    registered = set()
+    for cpp in packs_dir.glob("*.cpp"):
+        registered.update(re.findall(r'"(hipkernel\.[\w.]+)"', cpp.read_text()))
+    assert registered, "no native symbols found; the scan is broken, not the tree"
+
+    named = set()
+    for path in _descriptor_files(EXAMPLE_ROOT):
+        doc = json.dumps(_read(path))
+        named.update(re.findall(r'"(hipkernel\.[\w.]+)"', doc))
+
+    unknown = named - registered
+    assert not unknown, (
+        f"example descriptors name unregistered native symbols {sorted(unknown)}; "
+        f"registered: {sorted(registered)}"
+    )
