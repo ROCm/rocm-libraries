@@ -373,12 +373,6 @@ namespace TensileLite
         std::array<int, 2> waveGroup;
     };
 
-    struct CustomKernel
-    {
-        std::string name;
-        bool        generated = false;
-    };
-
     struct StreamKSettings
     {
         origami::reduction_t reduction = origami::reduction_t::tree;

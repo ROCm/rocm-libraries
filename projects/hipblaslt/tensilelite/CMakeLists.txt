@@ -91,9 +91,10 @@ if(TENSILELITE_ENABLE_HOST)
     # mxDataGenerator supplies the gfx950 pre-swizzled MX scale padding helper behind
     # the StrideScaleA1/StrideScaleB1 custom-kernel semantics. Treat it as optional:
     # HIPBLASLT_ENABLE_MXDATAGENERATOR is OFF on Windows, and shared/mxdatagenerator
-    # is absent from checkouts that vendor only projects/hipblaslt (hipSPARSELt CI),
-    # so probe for it instead of hard-requiring it.
+    # is absent from checkouts that vendor only projects/hipblaslt, so probe for it
+    # instead of hard-requiring it.
     set(TENSILELITE_HOST_MXDATAGENERATOR ${HIPBLASLT_ENABLE_MXDATAGENERATOR})
+    set(_mxdatagen_target roc::mxDataGenerator)
     if(TENSILELITE_HOST_MXDATAGENERATOR AND NOT TARGET roc::mxDataGenerator)
         set(_mxdatagen_src "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator")
         if(HIPBLASLT_ENABLE_THEROCK)
@@ -101,8 +102,20 @@ if(TENSILELITE_ENABLE_HOST)
             if(NOT mxDataGenerator_FOUND)
                 set(TENSILELITE_HOST_MXDATAGENERATOR OFF)
             endif()
-        elseif(EXISTS "${_mxdatagen_src}/CMakeLists.txt")
-            add_subdirectory("${_mxdatagen_src}" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
+        elseif(EXISTS "${_mxdatagen_src}/lib/include/mxDataGenerator/PreSwizzle.hpp")
+            # Consume the header-only helper directly rather than add_subdirectory()ing
+            # mxDataGenerator: its CMakeLists emits install() rules unconditionally and
+            # EXCLUDE_FROM_ALL does not suppress them, so vendoring it here republishes
+            # its 25 headers and 3 package files from whatever install tree embeds this
+            # subdirectory. hipSPARSELt embeds it, which put those files in TheRock's
+            # blas artifact alongside support's own copy (rocm-libraries#11105).
+            find_package(OpenMP REQUIRED)
+            add_library(tensilelite-mxdatagenerator-headers INTERFACE)
+            target_include_directories(tensilelite-mxdatagenerator-headers
+                INTERFACE $<BUILD_INTERFACE:${_mxdatagen_src}/lib/include>)
+            target_link_libraries(tensilelite-mxdatagenerator-headers
+                INTERFACE OpenMP::OpenMP_CXX)
+            set(_mxdatagen_target tensilelite-mxdatagenerator-headers)
         else()
             set(TENSILELITE_HOST_MXDATAGENERATOR OFF)
         endif()
@@ -123,7 +136,7 @@ if(TENSILELITE_ENABLE_HOST)
     )
 
     if(TENSILELITE_HOST_MXDATAGENERATOR)
-        target_link_libraries(tensilelite-host PRIVATE roc::mxDataGenerator)
+        target_link_libraries(tensilelite-host PRIVATE ${_mxdatagen_target})
         target_compile_definitions(tensilelite-host PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
     endif()
 
