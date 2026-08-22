@@ -25,6 +25,11 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_logging.hpp"
 
+#ifdef _WIN32
+// Windows.h defines that preprocessor macro for internal use
+#undef near
+#endif
+
 namespace rocsparse
 {
 

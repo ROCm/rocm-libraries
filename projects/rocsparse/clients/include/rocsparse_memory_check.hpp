@@ -29,6 +29,8 @@
 
 #pragma once
 
+#include "rocsparse_getenv.hpp"
+
 #include <cstddef>
 #include <hip/hip_runtime.h>
 #include <iostream>
@@ -39,6 +41,7 @@
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
 
@@ -160,8 +163,9 @@ namespace rocsparse_memory_check
                 g_memory_detected            = true;
 
                 // Only print if ROCSPARSE_VERBOSE_MEMORY is set
-                const char* verbose_env = std::getenv("ROCSPARSE_VERBOSE_MEMORY");
-                if(verbose_env != nullptr && verbose_env[0] != '0')
+                auto verbose_env
+                    = rocsparse_clients::get_environment_variable("ROCSPARSE_VERBOSE_MEMORY");
+                if(verbose_env.has_value() && (*verbose_env)[0] != '0')
                 {
                     std::cout << "========================================" << std::endl;
                     std::cout << "Memory Detection Results:" << std::endl;

@@ -27,6 +27,7 @@
 #include <fstream>
 #include <string>
 
+#include "rocsparse_getenv.hpp"
 #include "rocsparse_handle.hpp"
 
 #if defined(ROCSPARSE_BUILT_WITH_ROCTX)
@@ -70,13 +71,14 @@ namespace rocsparse
     {
         *log_os = &std::cerr;
 
-        char const* environment_variable_value = getenv(environment_variable_name.c_str());
+        auto environment_variable_value
+            = rocsparse::get_environment_variable(environment_variable_name);
 
-        if(environment_variable_value != NULL)
+        if(environment_variable_value.has_value())
         {
             // if environment variable is set, open file at logfile_pathname contained in the
             // environment variable
-            std::string logfile_pathname = (std::string)environment_variable_value;
+            std::string logfile_pathname = *environment_variable_value;
             log_ofs->open(logfile_pathname);
 
             // if log_ofs is open, then stream to log_ofs, else log_os is already
