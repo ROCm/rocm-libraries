@@ -925,7 +925,9 @@ typedef enum
     HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED
     = 2, ///< graphDescriptor is unfinalized, or the graph/device could not be keyed.
     HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES
-    = 3 ///< engineIdsInRankOrder was null or engineIdCount was 0.
+    = 3, ///< engineIdsInRankOrder was null or engineIdCount was 0.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED
+    = 4 ///< The cache already held this exact ranking, so nothing was written.
 } hipdnnAutotuneCacheWriteOutcome_ext_t;
 
 /*!

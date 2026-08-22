@@ -97,12 +97,14 @@ def test_autotune_cache_write_outcome_enum():
         hipdnn.AutotuneCacheWriteOutcome.DECLINED_DISABLED.name,
         hipdnn.AutotuneCacheWriteOutcome.DECLINED_UNKEYABLE.name,
         hipdnn.AutotuneCacheWriteOutcome.NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE.name,
+        hipdnn.AutotuneCacheWriteOutcome.UNCHANGED.name,
     }
     assert names == {
         "WRITTEN",
         "DECLINED_DISABLED",
         "DECLINED_UNKEYABLE",
         "NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE",
+        "UNCHANGED",
     }
     assert (
         hipdnn.AutotuneCacheWriteOutcome.WRITTEN

@@ -1103,7 +1103,31 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
             const std::vector<int64_t> order(engineIdsInRankOrder,
                                              engineIdsInRankOrder + engineIdCount);
 
-            hipdnn_backend::heuristics::config::exactCacheStore().put(*cacheKey, {}, order, order);
+            // Report what the store actually did. The optimistic WRITTEN set at entry is a
+            // default for the paths that never reach here; a record identical to one already on
+            // disk writes nothing, and saying otherwise would make the outcome a lie precisely
+            // where a caller is relying on it to tell writes apart from no-ops.
+            const auto writeStatus = hipdnn_backend::heuristics::config::exactCacheStore().put(
+                *cacheKey, {}, order, order);
+            if(outcome != nullptr)
+            {
+                switch(writeStatus)
+                {
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::WRITTEN:
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
+                    break;
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::UNCHANGED:
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED;
+                    break;
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::UNAVAILABLE:
+                    // The shard could not be opened, locked, or read. The cache is best-effort,
+                    // so this stays a success with a decline rather than an error.
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+                    break;
+                default:
+                    break;
+                }
+            }
 
             LOG_API_SUCCESS(apiName, "wrote engine ranking with {} engines", engineIdCount);
         }

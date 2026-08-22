@@ -9,6 +9,7 @@ This document describes the environment variables and runtime configuration opti
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
   - [Caching](#caching)
+  - [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)
   - [Logging Variables](#logging-variables)
   - [MIOpen Plugin Logging](#miopen-plugin-logging)
   - [Test Configuration](#test-configuration)
@@ -205,7 +206,7 @@ export HIPDNN_FORCE_BENCHMARKING=0
 
 #### HIPDNN_CACHE_DIR
 
-The root directory hipDNN writes its on-disk caches to. Today one feature uses it: the kernel ingestor's winner cache, which persists the ranking a benchmarking run measured so a later process can reuse it instead of re-benchmarking.
+The root directory hipDNN writes its on-disk caches to. Two features share it today: the kernel ingestor's winner cache, which persists the ranking a benchmarking run measured so a later process can reuse it instead of re-benchmarking, and the autotune exact-match ranking cache (see below).
 
 | Value      | Description                                            |
 |------------|--------------------------------------------------------|
@@ -214,7 +215,7 @@ The root directory hipDNN writes its on-disk caches to. Today one feature uses i
 
 A leading `~` (and, on Windows, a leading `%USERPROFILE%`) is expanded; every other character is left alone, so an embedded `~` is never substituted. If the relevant home variable is unset or empty, the value is used verbatim rather than being redirected somewhere unexpected. Relative paths resolve against the current working directory. The directory is created if it does not exist.
 
-Each feature owns a child directory beneath the root, so caches never collide: the ingestor's winner cache lives under `ingestor-winners/`, further split per hipDNN version, per engine, and per GPU architecture.
+Each feature owns a child directory beneath the root, so caches never collide: the ingestor's winner cache lives under `ingestor-winners/`, further split per hipDNN version, per engine, and per GPU architecture; the autotune exact-match ranking cache lives under `autotune-rankings/`, further split per `data_sdk` library version (see below).
 
 **Example:**
 ```bash
@@ -232,6 +233,12 @@ export HIPDNN_CACHE_DIR=$PWD/.hipdnn-cache
 - Cache entries are stamped with the hipDNN version that produced them, so an upgrade does not read measurements taken by a different build. Stale directories from older versions are not removed automatically; deleting the cache root is always safe.
 - Two checkouts, or two CI jobs, that should not share measurements need different values here. Records are keyed by graph content and device, not by checkout.
 - The winner cache is append-only and is never compacted, so a long-lived cache directory grows with the number of distinct graphs benchmarked.
+- A lookup alone can create a file: `openLineStore()` opens (creating it if absent) the shard
+  file and writes its version-stamp line before the caller learns whether the key it is querying
+  has a record in it. A pure read miss therefore still leaves a version-stamped, otherwise-empty
+  shard behind. This is a property of the shared `LineStore` layer underneath every disk cache --
+  both the ingestor winner cache and the autotune ranking cache do it -- not something specific
+  to one subtree.
 
 #### HIPDNN_DISABLE_CACHE
 
@@ -259,6 +266,60 @@ export HIPDNN_DISABLE_CACHE=1
 - Takes precedence over `HIPDNN_CACHE_DIR`: both set is not an error, but the disable wins.
 - Read once per `cacheRoot()` call, not cached across the process, so it can be toggled
   between runs without restarting anything long-lived.
+
+### Autotune Ranking Cache (`autotune-rankings/`)
+
+The second `HIPDNN_CACHE_DIR` consumer: the exact-match engine-ranking record consulted by the
+`SelectionHeuristic::Config` built-in policy and gated by `HIPDNN_DISABLE_EXACT_ENGINE_CACHE`
+(above). It persists the engine order an exhaustive autotune run measured, keyed on the (graph,
+device) pair that produced it, so a later process facing the identical graph on the identical
+device can reuse the ranking instead of re-benchmarking.
+
+**On-disk layout:**
+`$HIPDNN_CACHE_DIR/autotune-rankings/<data_sdk-version>/<combined-key-hex>.jsonl` -- one shard
+file per key, named by the hex encoding of a 64-bit hash of the serialized graph's
+cache-relevant content concatenated with a 64-bit hash of the serialized device properties. The
+graph hash ignores fields the schema marks `(cache_ignore)` and resolves `(cache_uid)` tensor
+references positionally, so two graphs that differ only there share a shard.
+
+The directory component is the `data_sdk` library's version string
+(`MAJOR.MINOR.PATCH.TWEAK`), where `TWEAK` is the short git commit hash the build was configured
+from (or the literal `unknown` if that git command failed at configure time). A rebuild from a
+different commit therefore reads and writes a different subdirectory: a field-deployed cache can
+never be misread by a newer build, but a developer who rebuilds every few minutes will rarely see
+a hit at all, since every rebuild starts that commit's subtree empty.
+
+**A re-tune now refreshes the record instead of being ignored.** Writing a ranking identical to
+what a shard already holds for that key is a no-op. Writing a ranking that measured the same
+engines in a different order appends a new line -- lookups resolve multiple lines for one key
+last-line-wins, so the newest measurement is what a later process sees. The one write that is
+*not* accepted as a refresh: one whose sampled-engine set is a strict subset of what the shard
+already has recorded (e.g. a run scoped with an engine filter) is declined outright, so a
+narrower sweep can never regress a full-coverage record to one that then fails every later
+lookup.
+
+**Decline modes visible in `HIPDNN_LOG_LEVEL=info` logging**, each with its own distinguishable
+`[BuiltInConfig] policyFinalize:` log fragment:
+
+| Log fragment                            | Meaning                                                            |
+|------------------------------------------|---------------------------------------------------------------------|
+| `disabled`                              | `HIPDNN_DISABLE_EXACT_ENGINE_CACHE` is set; lookup skipped entirely |
+| `unkeyable (no device properties set)`  | The descriptor never had device properties set                     |
+| `unkeyable (empty graph or device view)`| The serialized graph or device buffer was empty                    |
+| `exact-match cache miss`                | The (graph, device) key has no shard record                        |
+| `exact-match cache unavailable` (warn)  | The shard could not be opened, locked, or read, or its version line did not match this build |
+| `rejected -- unsampled`                 | A live candidate engine was never sampled by the stored ranking     |
+| `declined -- fewer than 2 candidates`   | Fewer than two ids remain after filtering the stored order to live candidates |
+| `hit (exact)`                           | Every stored id is a live candidate; the stored order applies unchanged |
+| `hit (partial)`                         | The stored order applies after dropping sampled-but-now-absent ids  |
+
+Every one of these is a fall-through, not an error: on any decline the outer heuristic loop
+simply continues to the fuzzy `HIPDNN_HEUR_CONFIG_PATH` rules and static ordering, exactly as if
+the exact-match cache did not exist.
+
+**Deleting `autotune-rankings/` is always safe.** Every read path above fails soft to "consult
+the fuzzy rules instead" -- there is no path that treats a missing, empty, or unreadable shard as
+an error. The next matching graph simply autotunes and repopulates it.
 
 ### Logging Variables
 

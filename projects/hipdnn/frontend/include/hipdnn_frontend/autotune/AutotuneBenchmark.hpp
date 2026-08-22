@@ -116,6 +116,10 @@ inline AutotuneResult makeBenchmarkResult(int64_t engineId,
     result.workspaceSize = compiledWorkspaceSize;
     result.engineName
         = engineName.empty() ? ::hipdnn_frontend::detail::resolveEngineName(engineId) : engineName;
+    // This candidate is entering the timing loop, so it counts as measured whatever the
+    // outcome. makeNonBenchmarkedResult() leaves the flag false for everything that never
+    // gets that far.
+    result.benchmarked = true;
     result.modeUsed = config.mode;
     result.strategyUsed = config.strategy;
 

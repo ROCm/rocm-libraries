@@ -3921,20 +3921,28 @@ public:
      * @brief Restricted "oracle best" autotune: measures and caches the true best engine
      *        order for this exact graph.
      *
-     * @c config.mode and the priming benchmarking knob are forced to
-     * TuneMode::EXHAUSTIVE and are not caller-overridable. This overload accepts no
-     * sweep/variant parameter; populate candidates via
-     * add_engine_configs()/add_all_engines()/add_engine() before calling.
+     * @c config.mode and @c config.primingFailurePolicy are both forced -- to
+     * TuneMode::EXHAUSTIVE and PrimingFailurePolicy::BENCHMARK_UNPRIMED -- and are not
+     * caller-overridable. This overload accepts no sweep/variant parameter; populate
+     * candidates via add_engine_configs()/add_all_engines()/add_engine() before calling.
      *
-     * On success, the succeeded engines' ranked order (fastest first) is written to the
-     * exact-match autotune cache, keyed on this graph's serialized content and the
-     * handle's device. A cache-write failure is logged but does not fail this call.
+     * Because priming failures do not abort the sweep, a persisted ranking may contain
+     * engines that were measured without priming and are therefore ranked conservatively:
+     * a slow-but-primed engine can outrank a fast-but-unprimed one. Every engine in the
+     * record was really measured, so this is a wrong-order risk, not a wrong-answer one,
+     * and per-result @c ranExhaustive says which engines were primed.
+     *
+     * On success the ranked order is written to the exact-match autotune cache, keyed on
+     * this graph's serialized content and the handle's device: succeeded engines fastest
+     * first, followed by any engine that was measured and failed, so that a permanently
+     * failing engine cannot wedge the cache. A cache-write failure is logged but does not
+     * fail this call.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
      * @param workspace Pointer to workspace memory
      * @param workspaceSize Maximum allowed workspace size in bytes
-     * @param config Autotuning configuration; @c mode is overridden to EXHAUSTIVE
+     * @param config Autotuning configuration; @c mode and @c primingFailurePolicy are overridden
      * @param storageConfig File output parameters (empty filePath = no file output)
      * @param[out] results Per-engine benchmarking results (optional)
      * @param[out] cacheWriteOutcome This run's exact-match cache write outcome (optional)
@@ -3956,6 +3964,15 @@ public:
         }
 
         config.mode = TuneMode::EXHAUSTIVE;
+        // Overridden for the same reason as the mode: one engine failing to prime must not deny
+        // a ranking for every graph on the machine. Aborting yields no record at all, so the
+        // next run re-tunes from scratch and, with the broken engine still installed, aborts
+        // again -- the cost compounds. An engine measured without priming is ranked
+        // conservatively, which is a wrong-order risk rather than a wrong-answer one, and a
+        // later sweep that primes successfully supersedes it. Note the codebase already mixes
+        // primed and unprimed measurements: an engine that does not expose the benchmarking knob
+        // is skipped with no policy consultation at all.
+        config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
 
         std::vector<AutotuneResult> localResults;
         std::vector<AutotuneResult>& resultsOut = results != nullptr ? *results : localResults;
@@ -3963,6 +3980,18 @@ public:
         HIPDNN_CHECK_ERROR(autotuneImpl(
             handle, variantPack, workspace, workspaceSize, config, storageConfig, &resultsOut));
 
+        // Ranked survivors first, then engines that were measured and failed.
+        //
+        // The failures have to be in this list, not just conceptually "sampled". The read path
+        // checks every live candidate against the record's sampled set and rejects the entry
+        // outright if one is missing, so an engine that is installed and always fails would
+        // wedge the cache permanently. It then applies a second gate requiring the stored order
+        // to be the same size as the live candidate set, which is why marking them sampled
+        // without also ranking them merely trades one rejection for another.
+        //
+        // Ranking them last is also the honest answer: they were measured, and they lost. The
+        // read path only reaches them if every better engine also fails to build, which is
+        // exactly where the ordinary fallback would have put them.
         std::vector<int64_t> order;
         order.reserve(resultsOut.size());
         for(const auto& result : resultsOut)
@@ -3972,11 +4001,22 @@ public:
                 order.push_back(result.engineId);
             }
         }
+        const size_t succeededCount = order.size();
+        for(const auto& result : resultsOut)
+        {
+            if(!result.succeeded && result.benchmarked)
+            {
+                order.push_back(result.engineId);
+            }
+        }
 
         AutotuneCacheWriteOutcome outcome
             = AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE;
 
-        if(!order.empty())
+        // Gated on a real winner, not on `order` being non-empty: a sweep in which every engine
+        // was measured and failed produces a non-empty order of nothing but failures, and
+        // caching that would serve a ranking with no usable entry in it.
+        if(succeededCount > 0)
         {
             if(hasValidGraphDesc())
             {
@@ -3999,6 +4039,10 @@ public:
                 else if(backendOutcome == HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_DISABLED)
                 {
                     outcome = AutotuneCacheWriteOutcome::DECLINED_DISABLED;
+                }
+                else if(backendOutcome == HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED)
+                {
+                    outcome = AutotuneCacheWriteOutcome::UNCHANGED;
                 }
                 else
                 {
