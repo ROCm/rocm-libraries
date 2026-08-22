@@ -76,5 +76,20 @@ latter takes a keyword-only `tuning: Gfx942DenseTuning` that no descriptor can
 set, so the packer refuses it by design. That refusal has its own regression test
 (`test_real_gfx942_attention_dense_is_refused`); this tree covers the happy path.
 
+**The rocKE half borrows the pointwise pack's native symbols, and that bounds what
+this tree proves.** A descriptor only resolves to something a compiled native pack
+registered, and today that is `hipkernel.pointwise.*` and `hipkernel.conv.*` — there
+is no rocKE/attention pack. So this tree proves the **packaging** path for rocKE:
+authored descriptor → comgr-lowered kernel → kpack archive → install layout, with the
+per-UKD `kind` dispatch exercised for real. It does **not** prove a rocKE-specific
+runtime dispatch; that needs a native pack nobody has written yet. Writing one is the
+next step toward a true rocKE end-to-end.
+
+The descriptors here are authored against the schema the C++ loader enforces, taken
+from `src/integration_tests/kernel_ingestor_engine/fixtures/packaged/` rather than
+from `descriptor-packaging/tests/fixtures/`. The latter is packer-only test data that
+never passes through `DescriptorLoader.hpp`, and modelling this tree on it once
+produced a tree that packed cleanly and could not be loaded at all.
+
 gfx942 rather than gfx950 because `hipdnn-linux-superbuild` — the lane that can
 gate this — builds gfx942.
