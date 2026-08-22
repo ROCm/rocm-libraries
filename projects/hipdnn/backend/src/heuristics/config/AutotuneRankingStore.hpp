@@ -9,6 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -37,16 +38,28 @@ enum class RankingLookupStatus
     UNAVAILABLE,
 };
 
+/// Outcome of IAutotuneRankingStore::put().
+///
+/// UNCHANGED is not a failure: the shard already held this exact ranking, so there was
+/// nothing to write. Callers that report a write to the user must distinguish it from
+/// WRITTEN, or they claim to have persisted something they did not.
+enum class RankingWriteStatus
+{
+    WRITTEN,
+    UNCHANGED,
+    UNAVAILABLE,
+};
+
 /// Abstract exact-match record store; concatenates key and deviceKey internally.
 class IAutotuneRankingStore
 {
 public:
     virtual ~IAutotuneRankingStore() = default;
 
-    virtual void put(const std::vector<uint8_t>& key,
-                     const std::vector<uint8_t>& deviceKey,
-                     const std::vector<int64_t>& sampledEngineIds,
-                     const std::vector<int64_t>& order)
+    virtual RankingWriteStatus put(const std::vector<uint8_t>& key,
+                                   const std::vector<uint8_t>& deviceKey,
+                                   const std::vector<int64_t>& sampledEngineIds,
+                                   const std::vector<int64_t>& order)
         = 0;
 
     /// Sets *outStatus to HIT, MISS, or UNAVAILABLE; the return value is nullopt for both.
@@ -138,60 +151,102 @@ inline std::optional<DecodedRecord> decodeRecordLine(std::string_view line,
 
 /// File-backed exact-match ranking store built on LineStore. On-disk layout:
 /// $HIPDNN_CACHE_DIR/autotune-rankings/<data_sdk-version>/<combined-key-hex>.jsonl, one shard per
-/// (graph, device) key. Every failure fails soft: get() returns nullopt and put() does nothing;
-/// nothing here throws.
+/// (graph, device) key. Every failure fails soft: get() returns nullopt and put() reports
+/// UNAVAILABLE; nothing here throws.
 class FileAutotuneRankingStore : public IAutotuneRankingStore
 {
 public:
-    void put(const std::vector<uint8_t>& key,
-             const std::vector<uint8_t>& deviceKey,
-             const std::vector<int64_t>& sampledEngineIds,
-             const std::vector<int64_t>& order) override
+    /// Appends @p order under the (key, deviceKey) pair unless the shard already holds that exact
+    /// ranking.
+    ///
+    /// A shard may hold several lines for one key; get() resolves them last-line-wins, so
+    /// appending a newer line is how a record is replaced. Without that, a record would be
+    /// permanent: once an engine is installed that the stored ranking never measured, the read
+    /// path's C\S rule rejects the entry on every lookup, and re-tuning could never repair it.
+    ///
+    /// @return UNCHANGED if the shard's current ranking for this key already matches, so nothing
+    ///     was written; WRITTEN if a line was appended; UNAVAILABLE if the shard could not be
+    ///     opened, locked, or read.
+    RankingWriteStatus put(const std::vector<uint8_t>& key,
+                           const std::vector<uint8_t>& deviceKey,
+                           const std::vector<int64_t>& sampledEngineIds,
+                           const std::vector<int64_t>& order) override
     {
         const std::string combinedKeyHex = combinedKey(key, deviceKey);
         const auto shardPath = shardPathFor(combinedKeyHex);
         if(!shardPath.has_value())
         {
-            return;
+            return RankingWriteStatus::UNAVAILABLE;
         }
 
         auto [shard, openStatus]
             = hipdnn_data_sdk::utilities::openLineStore(*shardPath, detail::shardVersion());
         if(openStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK || !shard.has_value())
         {
-            return;
+            return RankingWriteStatus::UNAVAILABLE;
         }
 
         if(hipdnn_data_sdk::utilities::lockLineStore(*shard)
            != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
         {
-            return;
+            return RankingWriteStatus::UNAVAILABLE;
         }
 
-        // Re-reads under the lock and adopts an existing record for this key instead of appending a
-        // duplicate, guarding against two processes racing the same miss.
+        // Read-then-append is one critical section under the shard's own lock: the racing writer
+        // may be another process, which _winnerCacheMutex-style in-process locking cannot see.
         const auto [existing, readStatus]
             = hipdnn_data_sdk::utilities::readAllLines(*shard, [&](std::string_view line) {
                   return detail::decodeRecordLine(line, detail::shardVersion());
               });
-        if(readStatus == hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+        if(readStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
         {
-            for(const auto& record : existing)
+            hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+            return RankingWriteStatus::UNAVAILABLE;
+        }
+
+        // Compare against the LAST line for this key, mirroring get()'s last-line-wins merge.
+        // Once a shard can hold a superseded line, the first match is stale, and comparing
+        // against it would adopt a record the reader has already replaced.
+        const detail::DecodedRecord* current = nullptr;
+        for(const auto& record : existing)
+        {
+            if(record.combinedKeyHex == combinedKeyHex)
             {
-                if(record.combinedKeyHex == combinedKeyHex)
-                {
-                    hipdnn_data_sdk::utilities::unlockLineStore(*shard);
-                    return;
-                }
+                current = &record;
+            }
+        }
+
+        if(current != nullptr)
+        {
+            if(current->entry.sampledEngineIds == sampledEngineIds && current->entry.order == order)
+            {
+                // Byte-identical ranking. This is also the racing-writer case the re-read exists
+                // for: two processes that raced the same miss measured the same engines and
+                // produced the same order, so the loser has nothing to add.
+                hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+                return RankingWriteStatus::UNCHANGED;
+            }
+
+            if(isStrictSubset(sampledEngineIds, current->entry.sampledEngineIds))
+            {
+                // A deliberately narrowed sweep (engineIdFilter) measured fewer engines than the
+                // stored record covers. Letting it win would replace a usable full-coverage
+                // ranking with one that rejects on every later lookup, permanently de-optimising
+                // the machine through an otherwise legitimate call.
+                hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+                return RankingWriteStatus::UNCHANGED;
             }
         }
 
         CachedEntry entry;
         entry.sampledEngineIds = sampledEngineIds;
         entry.order = order;
-        hipdnn_data_sdk::utilities::appendLine(*shard,
-                                               detail::encodeRecordLine(combinedKeyHex, entry));
+        const auto appendStatus = hipdnn_data_sdk::utilities::appendLine(
+            *shard, detail::encodeRecordLine(combinedKeyHex, entry));
         hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+        return appendStatus == hipdnn_data_sdk::utilities::LineStoreStatus::OK
+                   ? RankingWriteStatus::WRITTEN
+                   : RankingWriteStatus::UNAVAILABLE;
     }
 
     std::optional<CachedEntry> get(const std::vector<uint8_t>& key,
@@ -252,6 +307,23 @@ public:
     }
 
 private:
+    /// Is every id in @p candidate also in @p superset, with @p superset strictly larger?
+    ///
+    /// Order-insensitive: `sampledEngineIds` is a set in meaning, and the sweep that produced it
+    /// may enumerate engines in any order. Sized for a handful of engines, so the quadratic scan
+    /// is cheaper than sorting copies.
+    static bool isStrictSubset(const std::vector<int64_t>& candidate,
+                               const std::vector<int64_t>& superset)
+    {
+        if(candidate.size() >= superset.size())
+        {
+            return false;
+        }
+        return std::all_of(candidate.begin(), candidate.end(), [&superset](int64_t id) {
+            return std::find(superset.begin(), superset.end(), id) != superset.end();
+        });
+    }
+
     static std::string combinedKey(const std::vector<uint8_t>& key,
                                    const std::vector<uint8_t>& deviceKey)
     {
