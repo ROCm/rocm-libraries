@@ -239,6 +239,69 @@ TEST_F(TestGpuHipdnnBackendWriteRanking, EnabledCacheReportsWritten)
     EXPECT_EQ(outcome, HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN);
 }
 
+/// A second write of a ranking already on disk must report UNCHANGED, not WRITTEN.
+///
+/// The outcome enum exists so a caller can tell whether its measurement reached the cache;
+/// reporting WRITTEN having written nothing defeats the only reason the parameter is there.
+///
+/// Falsifying mutation: assign HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN unconditionally in
+/// hipdnnBackendWriteEngineRankingResults_ext instead of mapping the store's status, i.e.
+/// the behaviour before this change.
+TEST_F(TestGpuHipdnnBackendWriteRanking, RewritingAnIdenticalRankingReportsUnchanged)
+{
+    auto graph = makeFinalizedGraph();
+    const std::array<int64_t, 2> order = {5, 6};
+
+    auto outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES;
+    ASSERT_EQ(hipdnnBackendWriteEngineRankingResults_ext(
+                  &_handle, graph.get(), order.data(), order.size(), &outcome),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(outcome, HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN);
+
+    outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES;
+    EXPECT_EQ(hipdnnBackendWriteEngineRankingResults_ext(
+                  &_handle, graph.get(), order.data(), order.size(), &outcome),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(outcome, HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED);
+}
+
+/// A ranking that differs from the stored one supersedes it and reports WRITTEN.
+///
+/// Falsifying mutation: restore put()'s early return whenever a record for the key exists --
+/// the second call then reports UNCHANGED and the stored order stays {5, 6}.
+TEST_F(TestGpuHipdnnBackendWriteRanking, RewritingADifferentRankingReportsWrittenAndSupersedes)
+{
+    auto graph = makeFinalizedGraph();
+    const std::array<int64_t, 2> first = {5, 6};
+    const std::array<int64_t, 3> second = {7, 5, 6};
+
+    auto outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES;
+    ASSERT_EQ(hipdnnBackendWriteEngineRankingResults_ext(
+                  &_handle, graph.get(), first.data(), first.size(), &outcome),
+              HIPDNN_STATUS_SUCCESS);
+
+    outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES;
+    EXPECT_EQ(hipdnnBackendWriteEngineRankingResults_ext(
+                  &_handle, graph.get(), second.data(), second.size(), &outcome),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(outcome, HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN);
+    auto graphDesc = graph->asDescriptor<GraphDescriptor>();
+    graphDesc->buildSerializedGraph();
+    const auto serializedGraph = graphDesc->getSerializedGraph();
+
+    const auto devProps = hipdnn_backend::heuristics::queryDeviceProperties(&_handle);
+    const auto devicePropsSerialized
+        = hipdnn_backend::heuristics::serializeDeviceProperties(devProps);
+    const hipdnnPluginConstData_t devicePropsWrapper
+        = hipdnn_backend::heuristics::wrapSerializedDeviceProperties(devicePropsSerialized);
+
+    const auto cacheKey = deriveCacheKey(serializedGraph, devicePropsWrapper);
+    ASSERT_TRUE(cacheKey.has_value());
+    const auto entry = exactCacheStore().get(*cacheKey, {});
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->order, (std::vector<int64_t>{7, 5, 6}));
+}
+
 // The file-backed store makes cross-.so process-local statics irrelevant: both this
 // binary and libhipdnn_backend.so read and write the same shard file on disk.
 TEST_F(TestGpuHipdnnBackendWriteRanking, WrittenRankingIsVisibleThroughTheCExport)
