@@ -1,8 +1,6 @@
 {
-  "version": "0.1",
-  "id": "udd-example-pointwise-add",
-  "name": "Example pointwise-add dispatch",
-  "grid": [1, 1, 1],
-  "block": ["block_size", 1, 1],
-  "args": ["ptr", "ptr", "ptr", "scalar"]
+  "version": "1.0",
+  "id": "11ae57ea-0f82-5dd5-af34-f8362e1e9c22",
+  "name": "example pointwise dispatch",
+  "dispatch_symbol": "hipkernel.pointwise.dispatch"
 }
