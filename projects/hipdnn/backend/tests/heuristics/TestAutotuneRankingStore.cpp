@@ -25,9 +25,10 @@
 
 #if defined(__linux__)
 #include <sys/stat.h>
+#include <unistd.h> // geteuid: the read-only-parent case is a no-op as root
 #endif
 
-#if defined(HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_PATH) && !defined(_WIN32)
+#if defined(HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_NAME) && !defined(_WIN32)
 #include <sys/wait.h>
 #endif
 
@@ -331,9 +332,56 @@ TEST_F(TestAutotuneRankingStore, MalformedLineIsSkippedNotFatal)
     EXPECT_EQ(entryB->sampledEngineIds, (std::vector<int64_t>{5}));
 }
 
+/// A cache root that cannot be created must make put()/get() decline cleanly rather than
+/// throw. Two independent ways to make it uncreatable, because they fail differently:
+///
+///  - a path whose parent is a regular file: mkdir returns ENOTDIR, which is a type
+///    error and is enforced against every uid including root. This is the case CI
+///    actually exercises, since its containers run as root (`--user 0:0`).
+///  - a read-only parent directory: mkdir returns EACCES, which root bypasses entirely.
+///    Skipped under root rather than silently asserting nothing -- a run as root would
+///    otherwise see the write succeed and the lookup hit, which is exactly how this test
+///    failed in CI while passing on every developer machine.
+TEST_F(TestAutotuneRankingStore, CacheRootUnderARegularFileDeclinesReadAndWriteWithoutThrowing)
+{
+    _cacheDirEnv.reset();
+    std::error_code ignored;
+    std::filesystem::remove_all(_cacheDir, ignored);
+    std::filesystem::create_directories(_cacheDir);
+
+    const auto occupied = _cacheDir / "not_a_directory";
+    {
+        std::ofstream(occupied) << "occupied";
+    }
+
+    // Parent is a regular file, so this can never be created -- as root or otherwise.
+    const auto target = occupied / "subcache";
+    _cacheDirEnv
+        = std::make_unique<ScopedEnvironmentVariableSetter>("HIPDNN_CACHE_DIR", target.string());
+
+    FileAutotuneRankingStore store;
+    const std::vector<uint8_t> key{9};
+    const std::vector<uint8_t> deviceKey{};
+
+    EXPECT_NO_THROW(store.put(key, deviceKey, {1}, {1}));
+
+    RankingLookupStatus status = RankingLookupStatus::HIT;
+    std::optional<CachedEntry> entry;
+    EXPECT_NO_THROW(entry = store.get(key, deviceKey, &status));
+    EXPECT_FALSE(entry.has_value());
+    EXPECT_EQ(status, RankingLookupStatus::UNAVAILABLE);
+}
+
 #if defined(__linux__)
 TEST_F(TestAutotuneRankingStore, UnwritableCacheRootDeclinesReadAndWriteWithoutThrowing)
 {
+    if(::geteuid() == 0)
+    {
+        GTEST_SKIP() << "runs as root, which ignores the directory permissions this case "
+                        "depends on; CacheRootUnderARegularFileDeclines... covers the same "
+                        "contract in a way root cannot bypass";
+    }
+
     // cacheRoot() fails soft under a read-only parent; put()/get() must decline cleanly.
     _cacheDirEnv.reset();
     std::error_code ignored;
@@ -364,19 +412,39 @@ TEST_F(TestAutotuneRankingStore, UnwritableCacheRootDeclinesReadAndWriteWithoutT
 // --- Cross-process oracle -------------------------------------------------------------
 //
 // Persistence across process boundaries is unobservable within a single test process,
-// so these drive a real second OS process via AutotuneCrossProcessHelper (path baked in
-// as HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_PATH). They also prove that two structurally
-// identical graphs with differently-numbered tensors derive the same cache key.
-#if defined(HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_PATH) && !defined(_WIN32)
+// so these drive a real second OS process via the cross-process helper. They also prove
+// that two structurally identical graphs with differently-numbered tensors derive the
+// same cache key.
+#if defined(HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_NAME) && !defined(_WIN32)
 namespace
 {
+/// Resolves the helper beside this test binary (see CMakeLists.txt for why only the
+/// filename is baked in as HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_NAME: an absolute build
+/// tree path does not survive CI installing the tests and running them from the prefix).
+std::filesystem::path resolveHelperPath()
+{
+    std::error_code exeError;
+    const auto selfPath = std::filesystem::read_symlink("/proc/self/exe", exeError);
+    if(exeError)
+    {
+        return {};
+    }
+    return selfPath.parent_path() / HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_NAME;
+}
+
 /// Runs the helper and returns {exit code, stdout}.
 std::pair<int, std::string>
     runHelper(const std::string& mode, int64_t uid, int64_t dim, const std::string& engineIdsCsv)
 {
-    const std::string command = std::string(HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_PATH) + " " + mode
-                                + " " + std::to_string(uid) + " " + std::to_string(dim) + " '"
-                                + engineIdsCsv + "'";
+    const auto helperPath = resolveHelperPath();
+    if(helperPath.empty() || !std::filesystem::exists(helperPath))
+    {
+        // Distinguishable from a helper that ran and failed: -2 means never launched.
+        return {-2, {}};
+    }
+
+    const std::string command = helperPath.string() + " " + mode + " " + std::to_string(uid) + " "
+                                + std::to_string(dim) + " '" + engineIdsCsv + "'";
 
     std::string output;
     FILE* pipe = ::popen(command.c_str(), "r");
@@ -425,4 +493,4 @@ TEST_F(TestAutotuneRankingStore, DifferentGraphMissesAcrossProcesses)
     const auto read = runHelper("read", 7, 4096, "");
     EXPECT_EQ(read.first, 3) << "a structurally different graph must miss, not hit";
 }
-#endif // HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_PATH && !_WIN32
+#endif // HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_NAME && !_WIN32
