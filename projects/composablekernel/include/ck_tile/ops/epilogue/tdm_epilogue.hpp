@@ -158,4 +158,114 @@ struct TdmEpilogue
     };
 };
 
+namespace impl {
+
+// Row-major kM x kN staging descriptor, and the wave-linear read distribution a
+// TDM descriptor can be derived from. Same shape as the ones TdmEpilogue builds
+// inline above; that copy is deliberately left alone because TdmEpilogue has
+// many users (grouped convolution codegen, the GEMM and MX-GEMM tests) that
+// cannot be exercised from here.
+template <index_t kBlockSize, index_t kMPerBlock, index_t kNPerBlock>
+CK_TILE_DEVICE constexpr auto tdm_wave_linear_distr()
+{
+    static_assert(kBlockSize % get_warp_size() == 0,
+                  "kBlockSize must be a multiple of the wave size");
+    constexpr index_t waveNum = kBlockSize / get_warp_size();
+    static_assert(kMPerBlock % waveNum == 0, "kMPerBlock must split evenly across waves");
+
+    return make_static_tile_distribution(
+        tile_distribution_encoding<sequence<>,
+                                   tuple<sequence<waveNum, kMPerBlock / waveNum>,
+                                         sequence<kNPerBlock>>,
+                                   tuple<sequence<1>>,
+                                   tuple<sequence<0>>,
+                                   sequence<1, 2>,
+                                   sequence<1, 0>>{},
+        bool_constant<true>{});
+}
+
+template <typename ODataType, index_t kMPerBlock, index_t kNPerBlock>
+CK_TILE_DEVICE auto tdm_row_major_lds_view(void* p)
+{
+    constexpr auto desc =
+        make_naive_tensor_descriptor(make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}),
+                                     make_tuple(number<kNPerBlock>{}, number<1>{}));
+    return make_tensor_view<address_space_enum::lds>(static_cast<ODataType*>(p), desc);
+}
+
+} // namespace impl
+
+// Write **two** accumulator tiles back to global memory through LDS and TDM
+// stores, sharing a single barrier. Used by fmha bwd for dK and dV, where it
+// replaces the default epilogue's per-thread buffer stores and removes the
+// waterfall-guarded store loop entirely.
+//
+// This cannot be expressed as a TdmEpilogue/Default2DEpilogue instantiation:
+// the kernel invokes an epilogue once per output tensor, whereas the whole
+// point here is to cast both tiles and then issue both transfers, so that they
+// are in flight together behind one barrier.
+//
+// The two tiles get **separate** staging buffers on purpose. Sharing one makes
+// the second cast wait on the first TDM store draining (tensorcnt 0).
+//
+// Measured caveat: on its own this is a loss at causal fmha bwd (-1.65%); it
+// only pays with expert scheduling mode enabled (+0.98%), because the barriers
+// the TDM path needs are what that mode lets the compiler schedule around.
+//
+// Requires kMPerBlock * (kNPerBlockA + kNPerBlockB) * sizeof(ODataType) bytes at
+// p_smem, and that no other wave still needs its previous contents.
+template <typename ODataType,
+          index_t kBlockSize,
+          index_t kMPerBlock,
+          index_t kNPerBlockA,
+          index_t kNPerBlockB,
+          typename ADramWindow,
+          typename BDramWindow,
+          typename AAccTile,
+          typename BAccTile>
+CK_TILE_DEVICE void tdm_store_2d_pair(ADramWindow& a_dram_window,
+                                      const AAccTile& a_acc_tile,
+                                      BDramWindow& b_dram_window,
+                                      const BAccTile& b_acc_tile,
+                                      void* p_smem)
+{
+    auto* p_a = static_cast<char*>(p_smem);
+    auto* p_b = p_a + kMPerBlock * kNPerBlockA * sizeof(ODataType);
+
+    auto a_lds = impl::tdm_row_major_lds_view<ODataType, kMPerBlock, kNPerBlockA>(p_a);
+    auto b_lds = impl::tdm_row_major_lds_view<ODataType, kMPerBlock, kNPerBlockB>(p_b);
+
+    auto a_in = make_tile_window(a_lds,
+                                 make_tuple(number<kMPerBlock>{}, number<kNPerBlockA>{}),
+                                 {0, 0},
+                                 a_acc_tile.get_tile_distribution());
+    auto b_in = make_tile_window(b_lds,
+                                 make_tuple(number<kMPerBlock>{}, number<kNPerBlockB>{}),
+                                 {0, 0},
+                                 b_acc_tile.get_tile_distribution());
+
+    auto a_out = make_tile_window(
+        a_lds,
+        make_tuple(number<kMPerBlock>{}, number<kNPerBlockA>{}),
+        {0, 0},
+        impl::tdm_wave_linear_distr<kBlockSize, kMPerBlock, kNPerBlockA>());
+    auto b_out = make_tile_window(
+        b_lds,
+        make_tuple(number<kMPerBlock>{}, number<kNPerBlockB>{}),
+        {0, 0},
+        impl::tdm_wave_linear_distr<kBlockSize, kMPerBlock, kNPerBlockB>());
+
+    TDMConfig tdm_config;
+
+    // Drain any TDM store still using this smem, and barrier before overwriting.
+    s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
+
+    store_tile(a_in, cast_tile<ODataType>(a_acc_tile));
+    store_tile(b_in, cast_tile<ODataType>(b_acc_tile));
+    block_sync_lds();
+
+    store_tile_tdm(tdm_config, a_dram_window, a_out);
+    store_tile_tdm(tdm_config, b_dram_window, b_out);
+}
+
 } // namespace ck_tile
