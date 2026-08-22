@@ -173,13 +173,30 @@ function(hkp_wire_production)
         set(_wheel_dep "${ARG_ROCKE_WHEEL_STAMP}")
     endif()
 
+    # Tool environment. Two backend pins belong here, alongside the in-process
+    # ones the producer sets:
+    #
+    #   ROCKE_BACKEND=python   -- belt to the producer's backend= kwarg. The
+    #     kwarg is not threaded down; compile_kernel MUTATES os.environ around
+    #     the call because lower_kernel_via_backend calls resolve_backend() with
+    #     no argument. Setting the env var directly makes the pin survive that
+    #     indirection changing.
+    #   ROCKE_CPP_STRICT=1     -- turns a silent cpp->python degradation into a
+    #     hard BackendError at the point of failure. Verified this does NOT fire
+    #     on an explicit python request (which is what we pin), while it does
+    #     still raise on an actual cpp fallback, so the two compose.
+    #
+    # ROCKE_CPP_QUIET_FALLBACK is deliberately NOT set: silencing the warning is
+    # the failure mode being fixed.
+    #
     # ROCKE_COMGR_LIB overrides a shadowed System32 amd_comgr on Windows; forward
-    # it into the tool environment when set (runtime resolution, no find_library).
-    set(_tool_cmd "${_interp}" "${HKP_TOOL}")
+    # it when set (runtime resolution, no find_library).
+    set(_tool_env "ROCKE_BACKEND=python" "ROCKE_CPP_STRICT=1")
     if(ARG_ROCKE_COMGR_LIB)
-        set(_tool_cmd "${CMAKE_COMMAND}" -E env
-            "ROCKE_COMGR_LIB=${ARG_ROCKE_COMGR_LIB}" "${_interp}" "${HKP_TOOL}")
+        list(APPEND _tool_env "ROCKE_COMGR_LIB=${ARG_ROCKE_COMGR_LIB}")
     endif()
+    set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env}
+        "${_interp}" "${HKP_TOOL}")
 
     add_custom_command(
         OUTPUT "${_stamp}"

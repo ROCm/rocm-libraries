@@ -96,6 +96,25 @@ def _probe_rocke():
 
 
 @pytest.fixture(scope="session")
+def rocke_importable():
+    """Session gate for rocke tests that need the CORPUS but not comgr.
+
+    Signature and predicate guards introspect real builders without lowering
+    anything, so gating them on comgr would needlessly skip them on a box that
+    has rocke but no working comgr. Kept separate from rocke_available for that
+    reason.
+    """
+    try:
+        import kernels  # noqa: F401
+        import rocke  # noqa: F401
+    except Exception as exc:
+        if os.environ.get("HIPKERNELPROVIDER_KPACK_REQUIRE_COMGR"):
+            pytest.fail(f"rocke/kernels not importable: {exc}")
+        pytest.skip(f"rocke/kernels not importable: {exc}")
+    return True
+
+
+@pytest.fixture(scope="session")
 def rocke_available():
     """Session gate for the comgr-dependent rocke tests.
 

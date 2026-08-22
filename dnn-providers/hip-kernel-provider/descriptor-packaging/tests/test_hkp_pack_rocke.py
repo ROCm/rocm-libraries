@@ -169,15 +169,24 @@ class _FakeComgrError(Exception):
 
 
 def _patch_compiler(monkeypatch, name="stub_symbol", data=b"ELF\x00stub_symbol\x00"):
+    """Stub the comgr entry, recording the backend the producer requested.
+
+    The recorder exists so a test can assert the producer PINS the backend
+    rather than merely tolerating one. Without it, dropping the pin would leave
+    every one of these tests green.
+    """
     from hkp_pack import rocke_compile
 
-    def _fake_compile(kernel, *, arch, capture_ir_text=False):
+    seen = {}
+
+    def _fake_compile(kernel, *, arch, capture_ir_text=False, backend=None):
+        seen["backend"] = backend
         return _FakeArtifact(name, data)
 
     monkeypatch.setattr(
         rocke_compile, "_load_compiler", lambda: (_fake_compile, _FakeComgrError)
     )
-    return name, data
+    return name, data, seen
 
 
 _GOOD_STUB = """
@@ -196,13 +205,17 @@ _GOOD_STUB = """
 @pytest.mark.quick
 def test_adapter_import_build_capture(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, _GOOD_STUB)
-    name, data = _patch_compiler(monkeypatch)
+    name, data, seen = _patch_compiler(monkeypatch)
     co, symbol = compile_rocke_variant(
         src, "build_stub", {"n": 3, "label": "y"}, ARCH, tmp_path / "co"
     )
     assert symbol == name
     assert co.read_bytes() == data
     assert co.name.startswith("mod_") and co.suffix == ".co"
+    # The producer must PIN the lowering backend rather than inherit rocke's
+    # default: the wheel has no C++ engine, so an unpinned request degrades to
+    # Python via a fallback and the artifact misreports which engine built it.
+    assert seen["backend"] == "python"
 
 
 @pytest.mark.quick
@@ -358,7 +371,7 @@ def test_adapter_comgr_failure_wrapped(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, _GOOD_STUB, pkg="stubpkg_comgr")
     from hkp_pack import rocke_compile
 
-    def _boom(kernel, *, arch, capture_ir_text=False):
+    def _boom(kernel, *, arch, capture_ir_text=False, backend=None):
         raise _FakeComgrError("codegen exploded")
 
     monkeypatch.setattr(
@@ -596,7 +609,7 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
     class _FakeComgrError(Exception):
         pass
 
-    def _boom(kernel, *, arch, capture_ir_text=False):
+    def _boom(kernel, *, arch, capture_ir_text=False, backend=None):
         raise _FakeComgrError("codegen exploded")
 
     monkeypatch.setattr(
@@ -614,3 +627,38 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
             tmp_path / "co",
         )
     assert "ROCKE_COMGR_LIB" in str(excinfo.value)
+
+
+# --- real-corpus guards (rocke importable, no comgr needed) -----------------
+@pytest.mark.quick
+def test_real_gfx942_attention_dense_is_refused(rocke_importable):
+    """The corpus's one genuine unsuppliable-parameter case must be refused.
+
+    gfx942's build_attention_dense takes a keyword-only
+    `tuning: Gfx942DenseTuning = _DEFAULT_TUNING` that no descriptor can set, so
+    packing it would silently freeze a performance knob. This asserts against
+    the real builder rather than a stub, so the guard cannot rot away from the
+    thing it protects.
+    """
+    from kernels.gfx942 import attention_dense as m
+
+    from hkp_pack.rocke_compile import _require_spec_arch_signature
+
+    with pytest.raises(HkpPackError, match="tuning"):
+        _require_spec_arch_signature(m.build_attention_dense, "build_attention_dense")
+
+
+@pytest.mark.quick
+def test_real_gfx942_tiled_2d_is_accepted(rocke_importable):
+    """The builder Phase 6's example tree uses must pass the gate.
+
+    Pairs with the refusal above: the gate has to be narrow enough that real
+    kernels remain packageable, not just strict.
+    """
+    from kernels.gfx942 import attention_tiled_2d as m
+
+    from hkp_pack.rocke_compile import _require_spec_arch_signature
+
+    _require_spec_arch_signature(
+        m.build_unified_attention_2d_tiled, "build_unified_attention_2d_tiled"
+    )
