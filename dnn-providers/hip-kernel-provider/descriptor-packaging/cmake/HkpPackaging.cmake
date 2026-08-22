@@ -238,7 +238,7 @@ function(hkp_wire_production)
                 --arches "${_arch_csv}"
                 --hipcc "${ARG_HIPCC}"
                 --inter-root "${_inter_root}"
-                --rocm-kpack-dir "${ARG_ROCM_KPACK_DIR}"
+                --kpack-python-dir "${ARG_ROCM_KPACK_DIR}"
                 ${_wheel_stamp_arg}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources} ${_interp_dep}
