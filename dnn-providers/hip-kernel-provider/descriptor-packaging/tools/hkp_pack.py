@@ -76,6 +76,13 @@ def _parse_args(argv):
         help="Path to the rocm-kpack 'python' directory (overrides any "
         "installed rocm_kpack).",
     )
+    p.add_argument(
+        "--rocke-wheel-stamp",
+        default=None,
+        help="Path to the rocke wheel content-digest stamp. Its digest is "
+        "recorded in each rocKE UKD's provenance, so a shipped kernel names "
+        "the wheel that produced it.",
+    )
     return p.parse_args(argv)
 
 
@@ -89,6 +96,7 @@ def main(argv=None):
         hipcc=args.hipcc,
         rocm_kpack_dir=args.rocm_kpack_dir,
         inter_root=Path(args.inter_root) if args.inter_root else None,
+        rocke_wheel_stamp=args.rocke_wheel_stamp,
     )
     return 0
 

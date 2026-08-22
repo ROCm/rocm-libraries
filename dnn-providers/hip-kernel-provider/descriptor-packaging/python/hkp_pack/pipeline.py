@@ -5,6 +5,7 @@ import shutil
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from . import toolchain
 from .hip_compile import (
     compile_hip_variant,
     hip_source_relpath,
@@ -374,7 +375,15 @@ def prune(flat, arch):
     )
 
 
-def _rewrite_ukd_kpack(ukd, arch, toc_key, sha256):
+def _rewrite_ukd_kpack(ukd, arch, toc_key, sha256, toolchain_fields=None):
+    """Rewrite a compiled UKD into shipped kpack form.
+
+    `toolchain_fields` carries the fields describing what actually produced the kernel
+    (hipcc version, resolved comgr, rocKE wheel digest) as opposed to what the
+    descriptor asked for. Merged into provenance rather than the variant key: in
+    the key, a wheel bump would rename every rocKE artifact including ones it
+    could not affect.
+    """
     if ukd.origin_kind == "rocke":
         provenance = {
             "origin_kind": "rocke",
@@ -389,6 +398,8 @@ def _rewrite_ukd_kpack(ukd, arch, toc_key, sha256):
             "entry": ukd.entry,
             "build": ukd.build,
         }
+    if toolchain_fields:
+        provenance.update(toolchain_fields)
     doc = {
         "id": ukd.id,
         "name": ukd.name,
@@ -410,7 +421,23 @@ def _rewrite_ukd_kpack(ukd, arch, toc_key, sha256):
     return doc
 
 
-def pack_arch(flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=None):
+def _toolchain_for(ukd, hipcc, rocke_wheel_stamp):
+    """Toolchain provenance for one UKD, dispatched on its producer."""
+    if ukd.origin_kind == "rocke":
+        return toolchain.rocke_provenance(rocke_wheel_stamp)
+    return toolchain.hip_provenance(hipcc)
+
+
+def pack_arch(
+    flat,
+    inter,
+    out_arch_dir,
+    kpack_mod,
+    comp,
+    expected_sha256=None,
+    hipcc=None,
+    rocke_wheel_stamp=None,
+):
     """Pack a pruned intermediate arch into the shipped kpack release tree.
 
     Each distinct (source,build) variant .co is packed once under its own
@@ -499,7 +526,11 @@ def pack_arch(flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=None):
             else:
                 out_kds.append(
                     _rewrite_ukd_kpack(
-                        e, arch, e.variant_key, variant_sha[e.variant_key]
+                        e,
+                        arch,
+                        e.variant_key,
+                        variant_sha[e.variant_key],
+                        toolchain_fields=_toolchain_for(e, hipcc, rocke_wheel_stamp),
                     )
                 )
         out_doc["kernelDescriptors"] = out_kds
@@ -515,7 +546,11 @@ def pack_arch(flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=None):
     # surviving KDPs referenced it (compile_intermediate only records those).
     for ukd in standalone:
         out_doc = _rewrite_ukd_kpack(
-            ukd, arch, ukd.variant_key, variant_sha[ukd.variant_key]
+            ukd,
+            arch,
+            ukd.variant_key,
+            variant_sha[ukd.variant_key],
+            toolchain_fields=_toolchain_for(ukd, hipcc, rocke_wheel_stamp),
         )
         _write_text_at(
             out_arch_dir,
@@ -545,6 +580,7 @@ def run_pipeline(
     rocm_kpack_dir=None,
     inter_root=None,
     expected_sha256=None,
+    rocke_wheel_stamp=None,
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
@@ -603,6 +639,8 @@ def run_pipeline(
                 kpack_mod,
                 comp,
                 expected_sha256=expected_sha256,
+                hipcc=hipcc,
+                rocke_wheel_stamp=rocke_wheel_stamp,
             )
             if out_arch_dir.exists():
                 shutil.rmtree(out_arch_dir)

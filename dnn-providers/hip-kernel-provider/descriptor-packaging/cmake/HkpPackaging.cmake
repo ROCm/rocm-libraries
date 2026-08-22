@@ -208,6 +208,14 @@ function(hkp_wire_production)
     set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env}
         "${_interp}" "${HKP_TOOL}")
 
+    # Record the wheel digest in each rocKE UKD's provenance, so a shipped
+    # kernel names the wheel that produced it. Only meaningful when the rocKE
+    # producer is on; the hip half has no wheel.
+    set(_wheel_stamp_arg "")
+    if(ARG_ENABLE_ROCKE AND ARG_ROCKE_WHEEL_STAMP)
+        set(_wheel_stamp_arg --rocke-wheel-stamp "${ARG_ROCKE_WHEEL_STAMP}")
+    endif()
+
     add_custom_command(
         OUTPUT "${_stamp}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_out_root}"
@@ -218,6 +226,7 @@ function(hkp_wire_production)
                 --hipcc "${ARG_HIPCC}"
                 --inter-root "${_inter_root}"
                 --rocm-kpack-dir "${ARG_ROCM_KPACK_DIR}"
+                ${_wheel_stamp_arg}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources} ${_interp_dep}
                 ${_wheel_dep}

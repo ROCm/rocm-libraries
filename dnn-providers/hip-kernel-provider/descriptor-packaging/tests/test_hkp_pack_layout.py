@@ -515,3 +515,69 @@ def test_example_tree_is_self_consistent():
     assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
     rel_dirs = {d.rel_dir.as_posix() for d in flat.kdps()}
     assert rel_dirs == {"hip/pointwise_add", "rocKE/gfx942_tiled_attention"}
+
+
+# --- F. Toolchain provenance ------------------------------------------------
+def test_provenance_records_the_toolchain_that_built_each_kernel(
+    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+):
+    """Authored fields say what was asked for; these say what answered.
+
+    Without them two builds of byte-identical descriptors are indistinguishable
+    after the fact, even though a hipcc, comgr, or rocKE wheel change may be the
+    whole difference between them.
+    """
+    stamp = tmp_path / "wheels.sha256"
+    stamp.write_text("deadbeefcafe\n", encoding="utf-8")
+
+    run_pipeline(
+        source_root=EXAMPLE_ROOT,
+        arches=[ARCH],
+        out_root=tmp_path / "out",
+        hipcc=hipcc,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+        rocke_wheel_stamp=stamp,
+    )
+
+    by_kind = {}
+    for kdp in (tmp_path / "out" / ARCH).rglob("*.kdp.json"):
+        for ukd in _read(kdp)["kernelDescriptors"]:
+            if isinstance(ukd, str):
+                continue
+            by_kind[ukd["provenance"]["origin_kind"]] = ukd["provenance"]
+
+    # hip records the compiler that ran.
+    assert "hipcc_version" in by_kind["hip"]
+    # rocke records the comgr that was actually LOADED (not merely requested --
+    # rocke falls through an unloadable override silently) and the wheel digest
+    # the build keyed its staleness on.
+    assert by_kind["rocke"]["rocke_wheel_sha256"] == "deadbeefcafe"
+    assert by_kind["rocke"]["comgr_path"]
+
+    # Producer-specific fields must not bleed across.
+    assert "hipcc_version" not in by_kind["rocke"]
+    assert "comgr_path" not in by_kind["hip"]
+
+
+@pytest.mark.quick
+def test_wheel_digest_absent_stamp_is_not_fatal(tmp_path):
+    """Provenance is a record, not a gate.
+
+    A hip-only build has no wheel stamp at all; that must degrade to omitting
+    the field rather than failing the pack.
+    """
+    from hkp_pack import toolchain
+
+    toolchain.wheel_digest.cache_clear()
+    assert toolchain.wheel_digest(None) is None
+    assert toolchain.wheel_digest(tmp_path / "does-not-exist") is None
+
+
+@pytest.mark.quick
+def test_hipcc_version_probe_is_best_effort():
+    from hkp_pack import toolchain
+
+    toolchain.hipcc_version.cache_clear()
+    assert toolchain.hipcc_version(None) is None
+    assert toolchain.hipcc_version("/nonexistent/hipcc") is None
