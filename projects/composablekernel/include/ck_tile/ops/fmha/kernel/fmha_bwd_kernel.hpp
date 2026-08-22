@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline_selector.hpp"
 
@@ -1914,8 +1915,24 @@ struct FmhaBwdDQDKDVKernel
             }
 #endif
 
+#if CK_TILE_FMHA_BWD_TDM_DKDV_STORE
+            // dK/dV go out through LDS + TDM stores instead of per-thread buffer
+            // stores. Reuses the pipeline's smem, which already dominates
+            // GetSmemSize(); dK and dV get separate staging buffers so both
+            // transfers can be in flight.
+            static_assert(std::is_same_v<typename KGradEpiloguePipeline::ODataType,
+                                         typename VGradEpiloguePipeline::ODataType>,
+                          "TDM dK/dV store assumes a single output type");
+            tdm_store_2d_pair<typename KGradEpiloguePipeline::ODataType,
+                              kBlockSize,
+                              FmhaPipeline::kN0,
+                              FmhaPipeline::kQKHeaddim,
+                              FmhaPipeline::kVHeaddim>(
+                dk_dram_window, dk_acc_tile, dv_dram_window, dv_acc_tile, smem_ptr);
+#else
             KGradEpiloguePipeline{}(dk_dram_window, dk_acc_tile, nullptr);
             VGradEpiloguePipeline{}(dv_dram_window, dv_acc_tile, nullptr);
+#endif
         }
         else
         {
