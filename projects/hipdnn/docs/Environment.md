@@ -182,10 +182,39 @@ export HIPDNN_CACHE_DIR=$PWD/.hipdnn-cache
 ```
 
 **Notes:**
-- Caching is **on by default**. Pointing the variable at an unwritable or empty location is the simplest way to turn it off: every cache read and write degrades to no caching, logged once, and the computation proceeds exactly as it would with no cache at all.
+- Caching is **on by default**. Setting `HIPDNN_CACHE_DIR` to an empty string does **not**
+  disable caching -- an empty value is treated as unset and the per-user default applies,
+  leaving the cache enabled. Use `HIPDNN_DISABLE_CACHE` (below) to turn it off.
 - Cache entries are stamped with the hipDNN version that produced them, so an upgrade does not read measurements taken by a different build. Stale directories from older versions are not removed automatically; deleting the cache root is always safe.
 - Two checkouts, or two CI jobs, that should not share measurements need different values here. Records are keyed by graph content and device, not by checkout.
 - The winner cache is append-only and is never compacted, so a long-lived cache directory grows with the number of distinct graphs benchmarked.
+
+#### HIPDNN_DISABLE_CACHE
+
+Turns hipDNN's on-disk caching off entirely, regardless of `HIPDNN_CACHE_DIR`. This is the
+dedicated kill switch: no directory is created, no cache file is opened, and every consumer
+falls back to its in-memory-only behavior (e.g. the kernel ingestor re-benchmarks every
+process instead of reusing a persisted ranking).
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | No effect. Caching follows `HIPDNN_CACHE_DIR` as described above (the default) |
+| `1`, `true`, `on`, `yes`, `enable`, `enabled` | Disable on-disk caching |
+| Any other value | Ignored; treated as unset (fails open, not silently on) |
+
+Values are case-insensitive and tolerant of surrounding whitespace, matching
+`HIPDNN_FORCE_BENCHMARKING`'s parsing.
+
+**Example:**
+```bash
+# Disable the on-disk cache for one run, e.g. to force a clean re-benchmark
+export HIPDNN_DISABLE_CACHE=1
+```
+
+**Notes:**
+- Takes precedence over `HIPDNN_CACHE_DIR`: both set is not an error, but the disable wins.
+- Read once per `cacheRoot()` call, not cached across the process, so it can be toggled
+  between runs without restarting anything long-lived.
 
 ### Logging Variables
 
