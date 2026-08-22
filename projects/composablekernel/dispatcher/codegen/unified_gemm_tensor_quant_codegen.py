@@ -54,7 +54,11 @@ from codegen_common import (
     TileConfig,
     emit_generated_header_preamble,
     emit_single_kernel_include_footer,
+    make_tensor_quant_kernel_name,
     run_codegen_cli,
+    # Re-exported for gemm_tensor_quant_utils.py / tests, which import it from
+    # this module; not called here.
+    tensor_quant_effective_epilogue,  # noqa: F401
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -117,60 +121,11 @@ TENSOR_QUANT_SCHEDULER_TO_CK = QUANT_SCHEDULER_TO_CK
 # =============================================================================
 # Kernel name construction (shared by codegen + utils so they stay byte-exact)
 # =============================================================================
-
-
-def make_tensor_quant_kernel_name(
-    variant_key: str,
-    layout: str,
-    pipeline: str,
-    epilogue: str,
-    scheduler: str,
-    tile_m: int,
-    tile_n: int,
-    tile_k: int,
-    warp_m: int,
-    warp_n: int,
-    warp_k: int,
-    warp_tile_m: int,
-    warp_tile_n: int,
-    warp_tile_k: int,
-) -> str:
-    """Return the canonical TensorQuant kernel name used as KERNEL_NAME.
-
-    The epilogue segment reflects the epilogue the codegen actually emits
-    (computed from tile params via tensor_quant_effective_epilogue) so the name
-    always matches the compiled kernel.
-    """
-    effective_epilogue = tensor_quant_effective_epilogue(tile_n, warp_n, warp_tile_n)
-    parts = [
-        "gemm_tensor_quant",
-        variant_key,
-        layout,
-        pipeline,
-        effective_epilogue,
-        scheduler,
-        f"{tile_m}x{tile_n}x{tile_k}",
-        f"{warp_m}x{warp_n}x{warp_k}",
-        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
-    ]
-    return "_".join(parts)
-
-
-def tensor_quant_effective_epilogue(tile_n: int, warp_n: int, warp_tile_n: int) -> str:
-    """Return the epilogue tag the codegen will emit for the given tile params.
-
-    Mirrors run_gemm_quant_example.inc TensorQuant path:
-        TiledPermuteN = GemmConfig::TiledMMAPermuteN   (BQuantGroupSize::kN==1 always here)
-    For GemmConfigQuantDecode, TiledMMAPermuteN is false, so this returns
-    "cshuffle".  We still compute N_Repeat parity to stay future-proof if a
-    caller supplies a preshuffle-style config with TiledMMAPermuteN semantics.
-
-    NOTE: TensorQuant configs (GemmConfigQuantDecode) hardcode TiledMMAPermuteN=false,
-    so this always returns "cshuffle" for the supported set.
-    """
-    # GemmConfigQuantDecode.TiledMMAPermuteN == false (inherited GemmConfigBase),
-    # so the tensor path always selects CShuffleEpilogue.
-    return "cshuffle"
+#
+# Both builders now live in codegen_common alongside the other quant families;
+# they are imported at the top of this module and re-exported here so that
+# gemm_tensor_quant_utils.py and tests/test_tensor_quant_bridge.py, which import
+# them from this module, keep working unchanged.
 
 
 # =============================================================================

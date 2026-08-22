@@ -404,6 +404,83 @@ QUANT_SCHEDULER_TO_CK = {
 
 
 # ============================================================================
+# Shared quant kernel-name / epilogue construction
+# ============================================================================
+#
+# Every block-scale quant family builds its KERNEL_NAME from the same skeleton
+# and selects its epilogue from the same rule; only the prefix, the quant-group
+# segments, the trailing flags, and one per-family boolean differ. The two
+# helpers below hold that shared shape. The per-family public functions that
+# follow are thin wrappers over them, kept as separate names because each is
+# imported by name from both a codegen module and a runtime utils module -- the
+# codegen<->runtime kernel-name contract is byte-exact, and collapsing the names
+# has bitten this module before (see the shadowing NOTE further down).
+
+
+def quant_effective_epilogue(
+    tile_n: int,
+    warp_n: int,
+    warp_tile_n: int,
+    quant_group_n: int,
+    tiled_mma_permute_n: bool = False,
+) -> str:
+    """Return the epilogue tag ("permute_n" / "cshuffle") the codegen will emit.
+
+    Mirrors the epilogue selection in run_gemm_quant_example.inc:208-252:
+      TiledPermuteN = (BQuantGroupSize::kN > 1) ? false : GemmConfig::TiledMMAPermuteN
+      GemmEpilogue  = TiledPermuteN ? PermuteNEpilogue : CShuffleEpilogue
+    and the PreshuffleB configs' override TiledMMAPermuteN = (N_Repeat % 2 == 0),
+    where N_Repeat = TileN / (WarpN * WarpTileN).
+
+    ``tiled_mma_permute_n`` is the GemmConfig-level flag, which is a property of
+    the config struct rather than of tile geometry -- GemmConfigBase sets it
+    false and only the PreshuffleB configs override it (gemm_utils.hpp:214-215).
+    Each family passes its own value; see the wrappers below.
+    """
+    n_repeat = tile_n // (warp_n * warp_tile_n)
+    use_permute_n = tiled_mma_permute_n and (n_repeat % 2 == 0) and (quant_group_n == 1)
+    return "permute_n" if use_permute_n else "cshuffle"
+
+
+def make_quant_kernel_name(
+    *,
+    prefix: str,
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    group_segments: Sequence[str] = (),
+    flags: Sequence[Tuple[bool, str]] = (),
+) -> str:
+    """Join the canonical quant KERNEL_NAME segments.
+
+    ``epilogue`` must already be the EFFECTIVE epilogue (what the codegen emits),
+    not the user-requested one -- resolve it via quant_effective_epilogue at the
+    call site. ``group_segments`` are pre-formatted quant-group strings such as
+    ``"qg1x1x128"``; ``flags`` are ``(condition, segment)`` pairs appended in
+    order when the condition holds.
+    """
+    parts = [
+        prefix,
+        variant_key,
+        layout,
+        pipeline,
+        epilogue,
+        scheduler,
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+        *group_segments,
+    ]
+    parts.extend(segment for cond, segment in flags if cond)
+    return "_".join(parts)
+
+
+# ============================================================================
 # BQuant kernel name construction
 # ============================================================================
 
@@ -433,9 +510,10 @@ def bquant_effective_epilogue(
 
     Returns "permute_n" when PermuteNEpilogue is selected, "cshuffle" otherwise.
     """
-    n_repeat = tile_n // (warp_n * warp_tile_n)
-    use_permute_n = preshuffle_b and (n_repeat % 2 == 0) and (quant_group_n == 1)
-    return "permute_n" if use_permute_n else "cshuffle"
+    return quant_effective_epilogue(
+        tile_n, warp_n, warp_tile_n, quant_group_n,
+        tiled_mma_permute_n=preshuffle_b,
+    )
 
 
 def make_bquant_kernel_name(
@@ -469,26 +547,24 @@ def make_bquant_kernel_name(
     (single-problem) BQuant bridge already in tree; the plain non-grouped
     ``gemm_bquant`` bridge under 38_block_scale_gemm passes ``"gemm_bquant"``.
     """
-    effective_epilogue = bquant_effective_epilogue(
-        tile_n, warp_n, warp_tile_n, quant_group_n, preshuffle_b
+    return make_quant_kernel_name(
+        prefix=name_prefix,
+        variant_key=variant_key,
+        layout=layout,
+        pipeline=pipeline,
+        epilogue=bquant_effective_epilogue(
+            tile_n, warp_n, warp_tile_n, quant_group_n, preshuffle_b
+        ),
+        scheduler=scheduler,
+        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
+        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
+        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        group_segments=(f"qg{quant_group_m}x{quant_group_n}x{quant_group_k}",),
+        flags=(
+            (preshuffle_b, "preshuffleb"),
+            (preshuffle_bquant, "preshufflebq"),
+        ),
     )
-    parts = [
-        name_prefix,
-        variant_key,
-        layout,
-        pipeline,
-        effective_epilogue,
-        scheduler,
-        f"{tile_m}x{tile_n}x{tile_k}",
-        f"{warp_m}x{warp_n}x{warp_k}",
-        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
-        f"qg{quant_group_m}x{quant_group_n}x{quant_group_k}",
-    ]
-    if preshuffle_b:
-        parts.append("preshuffleb")
-    if preshuffle_bquant:
-        parts.append("preshufflebq")
-    return "_".join(parts)
 
 
 # ============================================================================
@@ -516,18 +592,17 @@ def make_rowcolquant_kernel_name(
     epilogue is always CShuffle.  The ``epilogue`` argument is therefore accepted
     for call-site symmetry with the BQuant helper but always emitted verbatim.
     """
-    parts = [
-        "gemm_rowcolquant",
-        variant_key,
-        layout,
-        pipeline,
-        epilogue,
-        scheduler,
-        f"{tile_m}x{tile_n}x{tile_k}",
-        f"{warp_m}x{warp_n}x{warp_k}",
-        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
-    ]
-    return "_".join(parts)
+    return make_quant_kernel_name(
+        prefix="gemm_rowcolquant",
+        variant_key=variant_key,
+        layout=layout,
+        pipeline=pipeline,
+        epilogue=epilogue,
+        scheduler=scheduler,
+        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
+        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
+        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+    )
 
 
 # ============================================================================
@@ -566,10 +641,14 @@ def aquant_effective_epilogue(
     (the PermuteN condition is driven by B-side tile geometry, regardless of
     which side is quantised).  Returns "permute_n" when PermuteNEpilogue is
     selected, "cshuffle" otherwise.
+
+    Note the unconditional ``tiled_mma_permute_n=True``: unlike the BQuant helper
+    this family has no preshuffle gate, so parity alone decides. Preserved
+    as-is -- see TestQuantEffectiveEpilogue, which pins the asymmetry.
     """
-    n_repeat = tile_n // (warp_n * warp_tile_n)
-    use_permute_n = (n_repeat % 2 == 0) and (quant_group_n == 1)
-    return "permute_n" if use_permute_n else "cshuffle"
+    return quant_effective_epilogue(
+        tile_n, warp_n, warp_tile_n, quant_group_n, tiled_mma_permute_n=True,
+    )
 
 
 def make_aquant_kernel_name(
@@ -591,22 +670,19 @@ def make_aquant_kernel_name(
     Both AQuantKernelConfig (utils) and AQuantKernelSpec (codegen) delegate to
     this function so the two sides are guaranteed to stay byte-exact.
     """
-    effective_epilogue = aquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n)
-    parts = [
-        "grouped_gemm_aquant",
-        variant_key,
-        layout,
-        pipeline,
-        effective_epilogue,
-        scheduler,
-        f"{tile_m}x{tile_n}x{tile_k}",
-        f"{warp_m}x{warp_n}x{warp_k}",
-        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
-        f"aqg{quant_group_m}x{quant_group_n}x{quant_group_k}",
-    ]
-    if preshuffle_aq:
-        parts.append("preshuffleaq")
-    return "_".join(parts)
+    return make_quant_kernel_name(
+        prefix="grouped_gemm_aquant",
+        variant_key=variant_key,
+        layout=layout,
+        pipeline=pipeline,
+        epilogue=aquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n),
+        scheduler=scheduler,
+        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
+        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
+        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        group_segments=(f"aqg{quant_group_m}x{quant_group_n}x{quant_group_k}",),
+        flags=((preshuffle_aq, "preshuffleaq"),),
+    )
 
 
 # ============================================================================
@@ -629,11 +705,10 @@ def abquant_effective_epilogue(
     PermuteNEpilogue — both must always use CShuffleEpilogue (TiledMMAPermuteN=false
     in the C++ test fixtures for both GemmConfigEightWaves and GemmConfigPreshuffleB_ABQuant_Prefill).
     """
-    if pipeline in ("eightwaves", "preshuffleb"):
-        return "cshuffle"
-    n_repeat = tile_n // (warp_n * warp_tile_n)
-    use_permute_n = (n_repeat % 2 == 0) and (bquant_group_n == 1)
-    return "permute_n" if use_permute_n else "cshuffle"
+    return quant_effective_epilogue(
+        tile_n, warp_n, warp_tile_n, bquant_group_n,
+        tiled_mma_permute_n=pipeline not in ("eightwaves", "preshuffleb"),
+    )
 
 
 def make_abquant_kernel_name(
@@ -661,29 +736,29 @@ def make_abquant_kernel_name(
     Both ABQuantKernelConfig (utils) and ABQuantKernelSpec (codegen) delegate
     to this function so the two sides are guaranteed to stay byte-exact.
     """
-    effective_epilogue = abquant_effective_epilogue(tile_n, warp_n, warp_tile_n, bquant_group_n, pipeline)
-    parts = [
-        "grouped_gemm_abquant",
-        variant_key,
-        layout,
-        pipeline,
-        effective_epilogue,
-        scheduler,
-        f"{tile_m}x{tile_n}x{tile_k}",
-        f"{warp_m}x{warp_n}x{warp_k}",
-        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
-        f"aqg{aquant_group_m}x{aquant_group_n}x{aquant_group_k}",
-        f"bqg{bquant_group_m}x{bquant_group_n}x{bquant_group_k}",
-    ]
-    if preshuffle_b:
-        parts.append("preshuffleb")
-    if preshuffle_aq:
-        parts.append("preshuffleaq")
-    if preshuffle_bq:
-        parts.append("preshufflebq")
-    if transpose_c:
-        parts.append("transposec")
-    return "_".join(parts)
+    return make_quant_kernel_name(
+        prefix="grouped_gemm_abquant",
+        variant_key=variant_key,
+        layout=layout,
+        pipeline=pipeline,
+        epilogue=abquant_effective_epilogue(
+            tile_n, warp_n, warp_tile_n, bquant_group_n, pipeline
+        ),
+        scheduler=scheduler,
+        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
+        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
+        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        group_segments=(
+            f"aqg{aquant_group_m}x{aquant_group_n}x{aquant_group_k}",
+            f"bqg{bquant_group_m}x{bquant_group_n}x{bquant_group_k}",
+        ),
+        flags=(
+            (preshuffle_b, "preshuffleb"),
+            (preshuffle_aq, "preshuffleaq"),
+            (preshuffle_bq, "preshufflebq"),
+            (transpose_c, "transposec"),
+        ),
+    )
 
 
 # Non-grouped gemm_aquant kernel name construction
@@ -712,9 +787,11 @@ def gemm_aquant_effective_epilogue(
     epilogue. The parameters are accepted for signature symmetry with the bquant
     helper and to keep the door open for future permute-N aquant configs.
     """
-    # AQuant configs never enable TiledMMAPermuteN, so the epilogue is always cshuffle.
-    _ = (tile_n, warp_n, warp_tile_n, quant_group_n)
-    return "cshuffle"
+    # AQuant configs never enable TiledMMAPermuteN, so the epilogue is always
+    # cshuffle -- tiled_mma_permute_n=False short-circuits the parity check.
+    return quant_effective_epilogue(
+        tile_n, warp_n, warp_tile_n, quant_group_n, tiled_mma_permute_n=False,
+    )
 
 
 def make_gemm_aquant_kernel_name(
@@ -743,22 +820,21 @@ def make_gemm_aquant_kernel_name(
 
     The ``epilogue`` parameter is accepted for call-site compatibility but not used.
     """
-    effective_epilogue = gemm_aquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n)
-    parts = [
-        "gemm_aquant",
-        variant_key,
-        layout,
-        pipeline,
-        effective_epilogue,
-        scheduler,
-        f"{tile_m}x{tile_n}x{tile_k}",
-        f"{warp_m}x{warp_n}x{warp_k}",
-        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
-        f"qg{quant_group_m}x{quant_group_n}x{quant_group_k}",
-    ]
-    if preshuffle_aquant:
-        parts.append("preshufflequant")
-    return "_".join(parts)
+    return make_quant_kernel_name(
+        prefix="gemm_aquant",
+        variant_key=variant_key,
+        layout=layout,
+        pipeline=pipeline,
+        epilogue=gemm_aquant_effective_epilogue(
+            tile_n, warp_n, warp_tile_n, quant_group_n
+        ),
+        scheduler=scheduler,
+        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
+        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
+        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        group_segments=(f"qg{quant_group_m}x{quant_group_n}x{quant_group_k}",),
+        flags=((preshuffle_aquant, "preshufflequant"),),
+    )
 
 
 # ============================================================================
@@ -810,32 +886,92 @@ def make_gemm_abquant_kernel_name(
     # (N_Repeat % 2 == 0). The compv3 (GemmConfigABQuantPrefill /
     # GemmConfigPreshuffleBQuantPrefill) and eight_waves (GemmConfig*EightWaves)
     # configs inherit TiledMMAPermuteN=false from GemmConfigBase -> always CShuffle.
+    #
+    # KNOWN DEFECT, preserved here deliberately: the call below does not forward
+    # ``preshuffle_b``, so bquant_effective_epilogue sees its default False and
+    # both arms of this branch yield "cshuffle" -- permute_n is unreachable for
+    # this family. Pinned by TestQuantKernelNames.
+    # test_gemm_abquant_never_emits_permute_n; fixing it changes emitted kernel
+    # names and needs its own commit, not this refactor.
     if preshuffle_b and not eight_waves:
         effective_epilogue = bquant_effective_epilogue(
             tile_n, warp_n, warp_tile_n, bquant_group_n
         )
     else:
         effective_epilogue = "cshuffle"
-    parts = [
-        "gemm_abquant",
-        variant_key,
-        layout,
-        pipeline,
-        effective_epilogue,
-        scheduler,
-        f"{tile_m}x{tile_n}x{tile_k}",
-        f"{warp_m}x{warp_n}x{warp_k}",
-        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
-        f"aqg1x1x{aquant_group_k}",
-        f"bqg1x{bquant_group_n}x{bquant_group_k}",
-    ]
-    if preshuffle_b:
-        parts.append("preshuffleb")
-    if preshuffle_bquant:
-        parts.append("preshufflebq")
-    if eight_waves:
-        parts.append("eightwaves")
-    return "_".join(parts)
+    return make_quant_kernel_name(
+        prefix="gemm_abquant",
+        variant_key=variant_key,
+        layout=layout,
+        pipeline=pipeline,
+        epilogue=effective_epilogue,
+        scheduler=scheduler,
+        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
+        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
+        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        group_segments=(
+            f"aqg1x1x{aquant_group_k}",
+            f"bqg1x{bquant_group_n}x{bquant_group_k}",
+        ),
+        flags=(
+            (preshuffle_b, "preshuffleb"),
+            (preshuffle_bquant, "preshufflebq"),
+            (eight_waves, "eightwaves"),
+        ),
+    )
+
+
+# TensorQuant kernel name construction
+# ============================================================================
+# Moved here from unified_gemm_tensor_quant_codegen.py, which was the last quant
+# family still defining its name builder locally -- and the only one whose utils
+# module imported the builder from the codegen module rather than from here. The
+# codegen module re-exports both names, so existing importers are unaffected.
+
+
+def tensor_quant_effective_epilogue(tile_n: int, warp_n: int, warp_tile_n: int) -> str:
+    """Return the epilogue tag the codegen will emit for TensorQuant kernels.
+
+    Mirrors run_gemm_quant_example.inc's TensorQuant path:
+        TiledPermuteN = GemmConfig::TiledMMAPermuteN   (BQuantGroupSize::kN==1 always here)
+    TensorQuant uses GemmConfigQuantDecode, which inherits TiledMMAPermuteN=false
+    from GemmConfigBase, so this always returns "cshuffle" for the supported set.
+    """
+    # quant_group_n is fixed at 1 for TensorQuant (a single scalar scale), and
+    # tiled_mma_permute_n=False short-circuits the parity check regardless.
+    return quant_effective_epilogue(
+        tile_n, warp_n, warp_tile_n, quant_group_n=1, tiled_mma_permute_n=False,
+    )
+
+
+def make_tensor_quant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,  # ignored -- actual epilogue computed via tensor_quant_effective_epilogue
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+) -> str:
+    """Return the canonical TensorQuant kernel name used as KERNEL_NAME.
+
+    The epilogue segment reflects the epilogue the codegen actually emits
+    (computed from tile params via tensor_quant_effective_epilogue) so the name
+    always matches the compiled kernel. TensorQuant has no quant-group segment:
+    the scale is a single scalar for the whole tensor.
+    """
+    return make_quant_kernel_name(
+        prefix="gemm_tensor_quant",
+        variant_key=variant_key,
+        layout=layout,
+        pipeline=pipeline,
+        epilogue=tensor_quant_effective_epilogue(tile_n, warp_n, warp_tile_n),
+        scheduler=scheduler,
+        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
+        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
+        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+    )
 
 
 # ============================================================================
