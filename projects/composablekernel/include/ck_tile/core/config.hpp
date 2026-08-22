@@ -331,6 +331,16 @@
 #define CK_TILE_USE_PK_F32_TO_16BIT_TILE_CAST 1
 #endif
 
+// Write fmha bwd dK/dV back through LDS + TDM stores rather than the default
+// epilogue's per-thread buffer stores; see ck_tile::tdm_store_2d_pair.
+// NOTE: this only pays with expert scheduling mode enabled (gfx12-only builds
+// turn that on in the top-level CMakeLists). Without it, causal fmha bwd is
+// 1.65% SLOWER, because the barriers the TDM path needs are what that mode
+// lets the compiler schedule around.
+#ifndef CK_TILE_FMHA_BWD_TDM_DKDV_STORE
+#define CK_TILE_FMHA_BWD_TDM_DKDV_STORE 1
+#endif
+
 #ifndef CK_TILE_USE_SUBDWORD_TILE_CAST
 #define CK_TILE_USE_SUBDWORD_TILE_CAST 0
 #endif
