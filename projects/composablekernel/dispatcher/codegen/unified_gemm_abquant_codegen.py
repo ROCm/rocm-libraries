@@ -43,6 +43,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from codegen_common import (
+    QUANT_LAYOUT_TO_CK,
+    QUANT_SCHEDULER_TO_CK,
+    TileConfig,
     make_gemm_abquant_kernel_name,
     bquant_effective_epilogue,
     emit_generated_header_preamble,
@@ -92,10 +95,7 @@ _FP8_BLOCKSCALE_VARIANTS = {"fp8", "bf8"}
 
 # Layout strings supported: only rcr (RowMajor A, ColMajor B, RowMajor C).
 # CLayout must be RowMajor (static_assert in gemm_calc_quant).
-ABQUANT_LAYOUT_TO_CK = {
-    "r": "ck_tile::tensor_layout::gemm::RowMajor",
-    "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
-}
+ABQUANT_LAYOUT_TO_CK = QUANT_LAYOUT_TO_CK
 
 # ABQuant pipeline map (mirrors the ABQuantPipeline selection in
 # run_gemm_quant_example.inc lines 191-196):
@@ -118,10 +118,7 @@ ABQUANT_BASE_PIPELINE_MAP = {
     "eightwaves":  "ck_tile::BaseGemmPipelineAgBgCrCompV3",
 }
 
-ABQUANT_SCHEDULER_TO_CK = {
-    "intrawave": "ck_tile::GemmPipelineScheduler::Intrawave",
-    "interwave": "ck_tile::GemmPipelineScheduler::Interwave",
-}
+ABQUANT_SCHEDULER_TO_CK = QUANT_SCHEDULER_TO_CK
 
 
 # =============================================================================
@@ -129,26 +126,9 @@ ABQUANT_SCHEDULER_TO_CK = {
 # =============================================================================
 
 
-@dataclass
-class ABQuantTileConfig:
-    tile_m: int
-    tile_n: int
-    tile_k: int
-    warp_m: int
-    warp_n: int
-    warp_k: int
-    warp_tile_m: int
-    warp_tile_n: int
-    warp_tile_k: int
-
-    def is_valid(self) -> bool:
-        if self.tile_m <= 0 or self.tile_n <= 0 or self.tile_k <= 0:
-            return False
-        return (
-            self.tile_m % (self.warp_m * self.warp_tile_m) == 0
-            and self.tile_n % (self.warp_n * self.warp_tile_n) == 0
-            and self.tile_k % (self.warp_k * self.warp_tile_k) == 0
-        )
+# Was a verbatim redeclaration of codegen_common.TileConfig, fields and
+# is_valid() alike. Aliased rather than renamed so call sites read unchanged.
+ABQuantTileConfig = TileConfig
 
 
 @dataclass

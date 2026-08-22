@@ -377,6 +377,33 @@ def needs_pipeline_expansion(config: dict) -> bool:
 
 
 # ============================================================================
+# Block-scale quant type mappings
+# ============================================================================
+#
+# The quant kernel headers are emitted with CK_TILE_SINGLE_KERNEL_INCLUDE and
+# carry no `using namespace ck_tile`, so every type they name must be FULLY
+# QUALIFIED. That makes these maps deliberately distinct from
+# CommonTypeMappings.GEMM_LAYOUT_TO_CK / .SCHEDULER_TO_CK, whose values are
+# unqualified for the in-namespace GEMM codegen. Do not "unify" the two: they
+# emit different C++ and only one of them compiles in a quant header.
+#
+# QUANT_SCHEDULER_TO_CK also omits CommonTypeMappings' "default" key -- the
+# quant sweeps only ever produce "intrawave" / "interwave", and an unmapped key
+# should raise KeyError at codegen time rather than emit a silently wrong
+# scheduler.
+
+QUANT_LAYOUT_TO_CK = {
+    "r": "ck_tile::tensor_layout::gemm::RowMajor",
+    "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
+}
+
+QUANT_SCHEDULER_TO_CK = {
+    "intrawave": "ck_tile::GemmPipelineScheduler::Intrawave",
+    "interwave": "ck_tile::GemmPipelineScheduler::Interwave",
+}
+
+
+# ============================================================================
 # BQuant kernel name construction
 # ============================================================================
 

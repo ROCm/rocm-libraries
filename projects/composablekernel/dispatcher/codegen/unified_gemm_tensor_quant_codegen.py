@@ -49,6 +49,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from codegen_common import (
+    QUANT_LAYOUT_TO_CK,
+    QUANT_SCHEDULER_TO_CK,
+    TileConfig,
     emit_generated_header_preamble,
     emit_single_kernel_include_footer,
     run_codegen_cli,
@@ -93,10 +96,7 @@ TENSOR_QUANT_VARIANTS: Dict[str, Dict[str, str]] = {
 # Layout strings supported: only rcr (RowMajor A, ColumnMajor B, RowMajor C).
 # run_gemm_quant_example.inc only dispatches a_layout=="R" && b_layout=="C" for
 # these fp8/bf8 types, and CLayout is static_asserted to RowMajor.
-TENSOR_QUANT_LAYOUT_TO_CK = {
-    "r": "ck_tile::tensor_layout::gemm::RowMajor",
-    "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
-}
+TENSOR_QUANT_LAYOUT_TO_CK = QUANT_LAYOUT_TO_CK
 
 # TensorQuant uses the regular (non-quant) compute pipeline; only compv3 is
 # emitted by GemmConfigQuantDecode (Scheduler=Intrawave).
@@ -111,10 +111,7 @@ TENSOR_QUANT_BASE_PIPELINE_MAP = {
     "compv3": "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
 }
 
-TENSOR_QUANT_SCHEDULER_TO_CK = {
-    "intrawave": "ck_tile::GemmPipelineScheduler::Intrawave",
-    "interwave": "ck_tile::GemmPipelineScheduler::Interwave",
-}
+TENSOR_QUANT_SCHEDULER_TO_CK = QUANT_SCHEDULER_TO_CK
 
 
 # =============================================================================
@@ -181,26 +178,9 @@ def tensor_quant_effective_epilogue(tile_n: int, warp_n: int, warp_tile_n: int) 
 # =============================================================================
 
 
-@dataclass
-class TensorQuantTileConfig:
-    tile_m: int
-    tile_n: int
-    tile_k: int
-    warp_m: int
-    warp_n: int
-    warp_k: int
-    warp_tile_m: int
-    warp_tile_n: int
-    warp_tile_k: int
-
-    def is_valid(self) -> bool:
-        if self.tile_m <= 0 or self.tile_n <= 0 or self.tile_k <= 0:
-            return False
-        return (
-            self.tile_m % (self.warp_m * self.warp_tile_m) == 0
-            and self.tile_n % (self.warp_n * self.warp_tile_n) == 0
-            and self.tile_k % (self.warp_k * self.warp_tile_k) == 0
-        )
+# Was a verbatim redeclaration of codegen_common.TileConfig, fields and
+# is_valid() alike. Aliased rather than renamed so call sites read unchanged.
+TensorQuantTileConfig = TileConfig
 
 
 @dataclass

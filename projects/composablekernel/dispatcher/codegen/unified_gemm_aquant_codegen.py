@@ -42,6 +42,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from codegen_common import (
+    QUANT_LAYOUT_TO_CK,
+    QUANT_SCHEDULER_TO_CK,
+    TileConfig,
     make_gemm_aquant_kernel_name,
     gemm_aquant_effective_epilogue,
     emit_generated_header_preamble,
@@ -101,10 +104,7 @@ AQUANT_VARIANTS: Dict[str, Dict[str, str]] = {
 }
 
 # Layout characters -> CK layout type.
-AQUANT_LAYOUT_TO_CK = {
-    "r": "ck_tile::tensor_layout::gemm::RowMajor",
-    "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
-}
+AQUANT_LAYOUT_TO_CK = QUANT_LAYOUT_TO_CK
 
 # The 3-char layout tag encodes (A, B, C).  C is always RowMajor for quant kernels
 # (static_assert in gemm_calc_quant).  The AQ layout is derived from the Old-TE
@@ -133,10 +133,7 @@ AQUANT_BASE_PIPELINE_MAP = {
     "compv3": "ck_tile::BaseGemmPipelineAgBgCrCompV3",
 }
 
-AQUANT_SCHEDULER_TO_CK = {
-    "intrawave": "ck_tile::GemmPipelineScheduler::Intrawave",
-    "interwave": "ck_tile::GemmPipelineScheduler::Interwave",
-}
+AQUANT_SCHEDULER_TO_CK = QUANT_SCHEDULER_TO_CK
 
 
 # =============================================================================
@@ -144,26 +141,9 @@ AQUANT_SCHEDULER_TO_CK = {
 # =============================================================================
 
 
-@dataclass
-class AQuantTileConfig:
-    tile_m: int
-    tile_n: int
-    tile_k: int
-    warp_m: int
-    warp_n: int
-    warp_k: int
-    warp_tile_m: int
-    warp_tile_n: int
-    warp_tile_k: int
-
-    def is_valid(self) -> bool:
-        if self.tile_m <= 0 or self.tile_n <= 0 or self.tile_k <= 0:
-            return False
-        return (
-            self.tile_m % (self.warp_m * self.warp_tile_m) == 0
-            and self.tile_n % (self.warp_n * self.warp_tile_n) == 0
-            and self.tile_k % (self.warp_k * self.warp_tile_k) == 0
-        )
+# Was a verbatim redeclaration of codegen_common.TileConfig, fields and
+# is_valid() alike. Aliased rather than renamed so call sites read unchanged.
+AQuantTileConfig = TileConfig
 
 
 @dataclass

@@ -49,6 +49,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from codegen_common import (
+    QUANT_LAYOUT_TO_CK,
+    QUANT_SCHEDULER_TO_CK,
+    TileConfig,
     make_bquant_kernel_name,
     bquant_effective_epilogue,
     emit_generated_header_preamble,
@@ -144,10 +147,7 @@ MX_VARIANTS = {"mx_bf16bf16", "mx_bf16bf8", "mx_bf16fp4"}
 # Layout strings supported: only rcr (RowMajor A, ColMajor B, RowMajor C) --
 # the standard GEMM layout the Old-TE bquant examples exercise (a_layout=R,
 # b_layout=C in run_gemm_example_prec_type).
-BQUANT_LAYOUT_TO_CK = {
-    "r": "ck_tile::tensor_layout::gemm::RowMajor",
-    "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
-}
+BQUANT_LAYOUT_TO_CK = QUANT_LAYOUT_TO_CK
 
 # Pipeline map for BQuant kernels.
 #   "compv3"       -> BQuantGemmPipelineAgBgCrCompV3    (non-preshuffle + preshufflebq)
@@ -167,10 +167,7 @@ BQUANT_BASE_PIPELINE_MAP = {
     "microscale":  "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
 }
 
-BQUANT_SCHEDULER_TO_CK = {
-    "intrawave": "ck_tile::GemmPipelineScheduler::Intrawave",
-    "interwave": "ck_tile::GemmPipelineScheduler::Interwave",
-}
+BQUANT_SCHEDULER_TO_CK = QUANT_SCHEDULER_TO_CK
 
 
 # =============================================================================
@@ -178,26 +175,9 @@ BQUANT_SCHEDULER_TO_CK = {
 # =============================================================================
 
 
-@dataclass
-class BQuantTileConfig:
-    tile_m: int
-    tile_n: int
-    tile_k: int
-    warp_m: int
-    warp_n: int
-    warp_k: int
-    warp_tile_m: int
-    warp_tile_n: int
-    warp_tile_k: int
-
-    def is_valid(self) -> bool:
-        if self.tile_m <= 0 or self.tile_n <= 0 or self.tile_k <= 0:
-            return False
-        return (
-            self.tile_m % (self.warp_m * self.warp_tile_m) == 0
-            and self.tile_n % (self.warp_n * self.warp_tile_n) == 0
-            and self.tile_k % (self.warp_k * self.warp_tile_k) == 0
-        )
+# Was a verbatim redeclaration of codegen_common.TileConfig, fields and
+# is_valid() alike. Aliased rather than renamed so call sites read unchanged.
+BQuantTileConfig = TileConfig
 
 
 @dataclass

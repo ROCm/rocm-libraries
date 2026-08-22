@@ -42,6 +42,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from codegen_common import (
+    QUANT_LAYOUT_TO_CK,
+    QUANT_SCHEDULER_TO_CK,
+    TileConfig,
     make_rowcolquant_kernel_name,
     emit_generated_header_preamble,
     emit_single_kernel_include_footer,
@@ -76,10 +79,7 @@ ROWCOLQUANT_VARIANTS: Dict[str, Dict[str, str]] = {
 # Layout strings supported: only rcr (RowMajor A, ColMajor B, RowMajor C).
 # gemm_quant_rowcol.cpp only registers the a_layout=="R" && b_layout=="C" path,
 # and gemm_calc_quant static_asserts CLayout == RowMajor.
-ROWCOLQUANT_LAYOUT_TO_CK = {
-    "r": "ck_tile::tensor_layout::gemm::RowMajor",
-    "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
-}
+ROWCOLQUANT_LAYOUT_TO_CK = QUANT_LAYOUT_TO_CK
 
 # For RowColQuant the pipeline is the plain compute pipeline (not a quant pipeline);
 # the quantization is folded in through GemmRowColTensorQuantPipelineProblem.
@@ -94,10 +94,7 @@ ROWCOLQUANT_BASE_PIPELINE_MAP = {
     "compv3": "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
 }
 
-ROWCOLQUANT_SCHEDULER_TO_CK = {
-    "intrawave": "ck_tile::GemmPipelineScheduler::Intrawave",
-    "interwave": "ck_tile::GemmPipelineScheduler::Interwave",
-}
+ROWCOLQUANT_SCHEDULER_TO_CK = QUANT_SCHEDULER_TO_CK
 
 
 # =============================================================================
@@ -105,26 +102,9 @@ ROWCOLQUANT_SCHEDULER_TO_CK = {
 # =============================================================================
 
 
-@dataclass
-class RowColQuantTileConfig:
-    tile_m: int
-    tile_n: int
-    tile_k: int
-    warp_m: int
-    warp_n: int
-    warp_k: int
-    warp_tile_m: int
-    warp_tile_n: int
-    warp_tile_k: int
-
-    def is_valid(self) -> bool:
-        if self.tile_m <= 0 or self.tile_n <= 0 or self.tile_k <= 0:
-            return False
-        return (
-            self.tile_m % (self.warp_m * self.warp_tile_m) == 0
-            and self.tile_n % (self.warp_n * self.warp_tile_n) == 0
-            and self.tile_k % (self.warp_k * self.warp_tile_k) == 0
-        )
+# Was a verbatim redeclaration of codegen_common.TileConfig, fields and
+# is_valid() alike. Aliased rather than renamed so call sites read unchanged.
+RowColQuantTileConfig = TileConfig
 
 
 @dataclass
