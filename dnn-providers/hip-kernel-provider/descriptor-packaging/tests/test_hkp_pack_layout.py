@@ -16,6 +16,7 @@ import hashlib
 import json
 import re
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -353,3 +354,82 @@ def test_mixed_hip_rocke_one_kpack_per_arch(
             assert blob is not None
             assert hashlib.sha256(blob).hexdigest() == ks["sha256"]
             assert ks["symbol"].encode("ascii") in blob
+
+
+# --- D. Per-arch atomicity and isolation ------------------------------------
+def test_failed_arch_leaves_no_partial_tree(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+):
+    """A failing arch must leave NO directory behind, not an empty one.
+
+    pack_arch creates <out>/kpack/ before it validates anything, so an in-place
+    write leaves a present-but-empty arch dir on failure. install(DIRECTORY ...
+    OPTIONAL) skips only a MISSING directory, so that partial tree would install
+    -- shipping an arch with no kernels in it.
+    """
+    from hkp_pack import pipeline
+
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+
+    real_pack = pipeline.pack_arch
+    calls = {"n": 0}
+
+    def flaky_pack(flat, inter, out_arch_dir, *a, **kw):
+        calls["n"] += 1
+        if inter.arch == "gfx950":
+            # Fail AFTER pack_arch has created its output dir, which is what
+            # makes the partial tree possible in the first place.
+            Path(out_arch_dir / "kpack").mkdir(parents=True, exist_ok=True)
+            raise HkpPackError("induced failure on gfx950")
+        return real_pack(flat, inter, out_arch_dir, *a, **kw)
+
+    monkeypatch.setattr(pipeline, "pack_arch", flaky_pack)
+
+    out_root = tmp_path / "out"
+    with pytest.raises(HkpPackError, match="gfx950"):
+        pipeline.run_pipeline(
+            source_root=root,
+            arches=["gfx942", "gfx950"],
+            out_root=out_root,
+            hipcc=hipcc,
+            rocm_kpack_dir=rocm_kpack_dir,
+            inter_root=tmp_path / "inter",
+        )
+
+    # The good arch survived...
+    assert (out_root / "gfx942" / "kpack").is_dir()
+    assert any((out_root / "gfx942" / "kpack").iterdir())
+    # ...and the failed one left nothing at all, not an empty shell.
+    assert not (out_root / "gfx950").exists()
+    # No staging residue either.
+    assert not list(out_root.glob(".*staging"))
+
+
+def test_failure_names_every_failed_arch(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+):
+    """Exit non-zero listing which arches failed -- a silent 0 would hide it."""
+    from hkp_pack import pipeline
+
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+
+    def always_fail(flat, inter, out_arch_dir, *a, **kw):
+        raise HkpPackError(f"induced {inter.arch}")
+
+    monkeypatch.setattr(pipeline, "pack_arch", always_fail)
+
+    with pytest.raises(HkpPackError) as exc:
+        pipeline.run_pipeline(
+            source_root=root,
+            arches=["gfx942", "gfx950"],
+            out_root=tmp_path / "out",
+            hipcc=hipcc,
+            rocm_kpack_dir=rocm_kpack_dir,
+            inter_root=tmp_path / "inter",
+        )
+
+    message = str(exc.value)
+    assert "gfx942" in message and "gfx950" in message
+    assert "2 of 2" in message

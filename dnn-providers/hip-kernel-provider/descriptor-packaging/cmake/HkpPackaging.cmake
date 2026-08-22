@@ -149,7 +149,17 @@ function(hkp_wire_production)
         ROCKE_INTERP ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
+    # A production root is set (the caller only reaches here when it is), so the
+    # user asked for packaging and is about to get nothing. Silence here means a
+    # fully-configured release build installs an empty descriptor tree and says
+    # so nowhere -- the same silent-empty class as finding 3.9, just reached
+    # through the arch list instead of the descriptor set.
     if(NOT ARG_ARCHES)
+        message(WARNING
+            "hkp: a production source root is set but no GPU architectures are "
+            "selected, so descriptor packaging will produce and install "
+            "NOTHING. Set GPU_TARGETS (or AMDGPU_TARGETS) to the arches you "
+            "want packed.")
         return()
     endif()
 
@@ -367,8 +377,16 @@ function(hkp_probe_comgr_resolvable out_ok out_detail)
         set(_sep ":")
     endif()
     set(_pp "${_rocke_root}/platform/python${_sep}${_rocke_root}/library")
+    # Probe under the SAME override the build will use, so configure and build
+    # ask the same question. Without this a machine that only resolves comgr via
+    # the override would fail configure despite being correctly configured.
+    set(_probe_env "PYTHONPATH=${_pp}")
+    if(HIPKERNELPROVIDER_ROCKE_COMGR_LIB)
+        list(APPEND _probe_env
+             "ROCKE_COMGR_LIB=${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
+    endif()
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${_pp}"
+        COMMAND "${CMAKE_COMMAND}" -E env ${_probe_env}
                 "${Python3_EXECUTABLE}" -c
                 "from rocke.runtime import comgr; comgr._resolve_lib()"
         RESULT_VARIABLE _rc
@@ -568,11 +586,23 @@ rocke/kernels packages.")
             "ROCm bin dir is on PATH or CMAKE_PROGRAM_PATH.")
     endif()
 
+    set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
+        "Explicit libamd_comgr for the rocKE producer to load. Forwarded into \
+ROCKE_COMGR_LIB for the pack step and the ctest entries. Needed on Windows, \
+where a System32 amd_comgr.dll can shadow the ROCm one; empty lets rocke \
+resolve normally. Note rocke treats this as the first CANDIDATE, not an \
+assertion: an unloadable path silently falls through to the next candidate.")
+
     # The rocKE producer requires the full conjunction: ENABLE_ROCKE (which
     # builds the wheels), the wheel-env available, and rocke/kernels importable.
     # Any missing piece is a configure hard-fail naming what is missing.
     set(_rocke_interp "")
-    set(_rocke_comgr_lib "${ROCKE_COMGR_LIB}")
+    # ROCKE_COMGR_LIB is rocke's RUNTIME environment variable (comgr.py:66,99,
+    # core.cpp:471). Nothing in this repository ever set() or option()s it, so
+    # reading it here was reading an always-empty variable and the forwarding
+    # below was unreachable. Take the value from a cache variable of our own and
+    # forward THAT into the environment rocke reads.
+    set(_rocke_comgr_lib "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
     set(_enable_rocke OFF)
     if(_source_root AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE)
         set(_enable_rocke ON)

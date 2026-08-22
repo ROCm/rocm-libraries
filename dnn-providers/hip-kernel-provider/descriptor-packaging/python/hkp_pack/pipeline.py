@@ -2,7 +2,7 @@ import copy
 import hashlib
 import json
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .hip_compile import (
@@ -586,13 +586,31 @@ def run_pipeline(
             inter = compile_intermediate(
                 flat, source_root, arch, hipcc, inter_root / arch, log=log
             )
-            results[arch] = pack_arch(
+            # Stage this arch into a sibling temp dir and rename it into place
+            # only once pack_arch returns cleanly. pack_arch creates
+            # <out>/kpack/ before it validates anything, so writing in place
+            # leaves a present-but-empty arch directory behind on failure -- and
+            # install(DIRECTORY ... OPTIONAL) skips only a MISSING directory, so
+            # that partial tree would install. Rename is atomic within a
+            # filesystem, and both paths are under out_root by construction.
+            staging = out_root / f".{arch}.staging"
+            if staging.exists():
+                shutil.rmtree(staging)
+            result = pack_arch(
                 flat,
                 inter,
-                out_arch_dir,
+                staging,
                 kpack_mod,
                 comp,
                 expected_sha256=expected_sha256,
+            )
+            if out_arch_dir.exists():
+                shutil.rmtree(out_arch_dir)
+            staging.rename(out_arch_dir)
+            results[arch] = replace(
+                result,
+                out_dir=out_arch_dir,
+                kpack_path=out_arch_dir / "kpack" / _kpack_filename(arch),
             )
         except HkpPackError as exc:
             # One arch failing must not destroy the other arches' work: a
@@ -603,6 +621,12 @@ def run_pipeline(
             # intermediate dir stays for debugging -- build-only, never shipped.
             failures[arch] = str(exc)
             log(f"ERROR: {arch} failed: {exc}")
+            # Discard the half-written staging dir AND any previous good output
+            # for this arch: shipping a stale shard beside fresh ones would be a
+            # subtler lie than shipping none.
+            staging = out_root / f".{arch}.staging"
+            if staging.exists():
+                shutil.rmtree(staging)
             if out_arch_dir.exists():
                 shutil.rmtree(out_arch_dir)
             results[arch] = ArchResult(
