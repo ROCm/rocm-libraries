@@ -22,8 +22,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # Validate mode 0 on the required subtile path. Modes 1-3 reject
-  # UseSubtileImpl and run in the gfx1250 launch-only test.
+  # Validate mode 0 on the required MXFP4 subtile path.
   # TN transpose only
   #######################################
   -
@@ -43,7 +42,7 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # Test debug modes
+    - # Subtile mode-0 correctness
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
