@@ -24,7 +24,9 @@
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
@@ -172,6 +174,75 @@ struct ExecuteCase
     int iterations;
 };
 
+/// How many times the composite plan has resolved a winner, counted from the plugin's
+/// selection log. BenchmarkPlan emits exactly one of these per sampling sweep.
+size_t countSelectionLogs(const hipdnn_test_sdk::utilities::LogRecorderBase& recorder)
+{
+    const auto logs = recorder.getRecordedLogs();
+    return static_cast<size_t>(std::count_if(logs.begin(), logs.end(), [](const auto& log) {
+        return log.message.find("benchmarking selected kernel") != std::string::npos;
+    }));
+}
+
+/// Captures plugin logs for one test and restores every piece of process-global state it
+/// touched. Both the global log level and the user callback registration outlive the
+/// test otherwise: a raised level changes what later tests emit, and a callback keyed on
+/// a destroyed fixture would stay registered. Manual teardown at the end of the body is
+/// not enough, because an early ASSERT return skips it.
+class ScopedPluginLogCapture
+{
+public:
+    explicit ScopedPluginLogCapture(void* userHandle)
+        : _userHandle(userHandle)
+    {
+        const auto levelRead = hipdnn_frontend::getGlobalLogLevel(_previousLevel);
+        EXPECT_EQ(levelRead.code, ErrorCode::OK) << levelRead.err_msg;
+
+        const auto registered = setCallback(HIPDNN_SEV_INFO);
+        EXPECT_EQ(registered.code, ErrorCode::OK) << registered.err_msg;
+        _registered = registered.code == ErrorCode::OK;
+
+        const auto levelSet = hipdnn_frontend::setGlobalLogLevel(HIPDNN_SEV_INFO);
+        EXPECT_EQ(levelSet.code, ErrorCode::OK) << levelSet.err_msg;
+    }
+
+    ~ScopedPluginLogCapture()
+    {
+        if(_registered)
+        {
+            static_cast<void>(setCallback(HIPDNN_SEV_OFF));
+        }
+        static_cast<void>(hipdnn_frontend::setGlobalLogLevel(_previousLevel));
+    }
+
+    ScopedPluginLogCapture(const ScopedPluginLogCapture&) = delete;
+    ScopedPluginLogCapture& operator=(const ScopedPluginLogCapture&) = delete;
+    ScopedPluginLogCapture(ScopedPluginLogCapture&&) = delete;
+    ScopedPluginLogCapture& operator=(ScopedPluginLogCapture&&) = delete;
+
+    hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder() const
+    {
+        return _recorder;
+    }
+
+private:
+    hipdnn_frontend::Error setCallback(hipdnnSeverity_t minLevel) const
+    {
+        return hipdnn_frontend::setUserLogCallback(
+            hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+            minLevel,
+            hipdnn_frontend::LogCallbackMode::SYNC,
+            _userHandle);
+    }
+
+    // Declared before the recorder so the recorder's own saved-level restore runs first.
+    hipdnnSeverity_t _previousLevel = HIPDNN_SEV_OFF;
+    void* _userHandle;
+    bool _registered = false;
+    mutable hipdnn_test_sdk::utilities::IsolatedLogRecorder _recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+};
+
 } // namespace
 
 class IntegrationGpuKernelIngestor
@@ -210,6 +281,34 @@ protected:
     void buildAndCompile(Graph& graph)
     {
         buildAndCompile(graph, engineId());
+    }
+
+    /// Like buildAndCompile(), but drives create_execution_plan_ext() with explicit
+    /// knob settings instead of create_execution_plans()'s heuristic default path.
+    /// That is the only way to set global.benchmarking, which add_engine_sweep() and
+    /// the default heuristic path both strip.
+    void buildAndCompileWithKnobs(Graph& graph,
+                                  int64_t pinnedEngineId,
+                                  const std::vector<KnobSetting>& knobSettings)
+    {
+        graph.set_preferred_engine_id_ext(pinnedEngineId);
+
+        auto result = graph.build_operation_graph(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        std::vector<int64_t> rankedEngineIds;
+        result = graph.get_ranked_engine_ids(rankedEngineIds);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_FALSE(rankedEngineIds.empty());
+
+        result = graph.create_execution_plan_ext(rankedEngineIds.front(), knobSettings);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph.check_support();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph.build_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
 
     /// Builds fresh CPU/GPU tensor bundles for `graph`, executes once on GPU, verifies
@@ -334,16 +433,29 @@ TEST_F(IntegrationGpuKernelIngestor, ReportsAKnobWhoseValuesComeFromTheCatalog)
     std::vector<Knob> knobs;
     result = graph->get_knobs_for_engine(engineId(), knobs);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    ASSERT_EQ(knobs.size(), 1U);
-    EXPECT_EQ(knobs[0].knobId(), BLOCK_SIZE_KNOB);
+
+    // Two knobs: the engine's own block_size, plus the benchmarking knob every
+    // descriptor-backed engine advertises out-of-band. Found by name rather than by
+    // index, since the out-of-band knob is prepended.
+    ASSERT_EQ(knobs.size(), 2U);
+    const auto blockSizeKnob = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
+        return knob.knobId() == BLOCK_SIZE_KNOB;
+    });
+    ASSERT_NE(blockSizeKnob, knobs.end());
+    EXPECT_NE(std::find_if(knobs.begin(),
+                           knobs.end(),
+                           [](const Knob& knob) {
+                               return knob.knobId() == hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME;
+                           }),
+              knobs.end());
 
     // The HALF kernel is pruned for this FLOAT graph.
-    const auto* constraint = dynamic_cast<const IntConstraint*>(knobs[0].constraint());
+    const auto* constraint = dynamic_cast<const IntConstraint*>(blockSizeKnob->constraint());
     ASSERT_NE(constraint, nullptr);
     const auto& validValues = constraint->getValidValues();
     EXPECT_EQ(validValues, (std::unordered_set<int64_t>{64, 256}));
 
-    const auto* defaultValue = std::get_if<int64_t>(&knobs[0].defaultValue());
+    const auto* defaultValue = std::get_if<int64_t>(&blockSizeKnob->defaultValue());
     ASSERT_NE(defaultValue, nullptr);
     EXPECT_EQ(*defaultValue, 256);
 }
@@ -378,6 +490,69 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
     {
         executeAndVerify(*graph, workspace.get(), static_cast<unsigned int>(iteration));
     }
+}
+
+// global.benchmarking: the composite plan built when the knob is set
+
+/// Drives global.benchmarking=1 through the frontend against the shipped pointwise
+/// pack, verifying the numerical result against the CPU reference and confirming from
+/// the plugin's own logs that the composite plan actually ran a sampling sweep and
+/// resolved a winner once.
+///
+/// Which candidate wins is deliberately not asserted: the two block-size-64/256 FLOAT
+/// candidates surviving knob filtering for this graph may be indistinguishable within
+/// noise, and either winner is correct so long as it produces the right answer. What
+/// must hold is that benchmarking happened at all -- otherwise the case would pass
+/// identically with the feature removed.
+TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
+{
+    const ScopedPluginLogCapture capture(this);
+    auto& recorder = capture.recorder();
+
+    auto graph = buildPointwiseAddGraph();
+
+    std::vector<KnobSetting> knobSettings;
+    knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{1});
+    buildAndCompileWithKnobs(*graph, engineId(), knobSettings);
+
+    int64_t workspaceSize = 0;
+    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+
+    // buildPlan() took the benchmarking branch rather than the single-plan one, and it
+    // had more than one candidate to choose between: a one-candidate sweep would prove
+    // nothing about selection.
+    EXPECT_TRUE(recorder.hasLogContaining("will benchmark"))
+        << "buildPlan() did not take the benchmarking branch. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("will benchmark 1 candidate(s)"))
+        << "expected more than one candidate to benchmark. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+
+    // The first execute() samples every candidate; the second reuses the cached winner.
+    // Both must produce the correct result, and executeAndVerify() re-randomizes and
+    // re-checks each time.
+    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+
+    EXPECT_TRUE(recorder.hasLogContaining("benchmarking selected kernel"))
+        << "the sampling sweep did not resolve a winner. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+
+    const size_t selectionsAfterFirstExecute = countSelectionLogs(recorder);
+    ASSERT_EQ(selectionsAfterFirstExecute, 1U)
+        << "expected exactly one selection sweep. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+
+    executeAndVerify(*graph, workspace.get(), /*seed=*/1);
+
+    // The winner is resolved once for the plan's life: a second execute() must reuse it
+    // rather than re-sample.
+    EXPECT_EQ(countSelectionLogs(recorder), selectionsAfterFirstExecute)
+        << "the second execute() re-sampled instead of reusing the winner. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+
+    // The capture guard restores the global log level and unregisters the callback,
+    // including on an early ASSERT return above.
 }
 
 TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectly)
