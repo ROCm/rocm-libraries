@@ -544,10 +544,37 @@ if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 500500000)
   endif()
 endif()
 if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600140090)
-  check_cxx_compiler_flag("-mllvm -enable-post-misched=0" HAS_ENABLE_POST_MISCHED)
-  if(HAS_ENABLE_POST_MISCHED)
-    message(STATUS "Adding the enable-post-misched=0 compiler flag")
-    add_compile_options("SHELL: -mllvm -enable-post-misched=0")
+  # Post-RA scheduling was turned off globally in a39d1d9885 (2024-04), bundled
+  # with a ROCm 6.1 upgrade and with no stated reason. On gfx12 leaving it off
+  # costs real performance: re-enabling it is worth +6.2%/+5.3% on fmha bwd
+  # d=128 bf16, and it composes with expert scheduling mode (which is what makes
+  # WAVE_SCHED_MODE[1:0]=2 safe, by having LLVM insert the s_wait_alu guards) for
+  # +8.9%/+8.5% together. Measured on gfx1250.
+  #
+  # add_compile_options is global, so this only flips for a build that targets
+  # gfx12 exclusively -- the older architectures were never re-measured and keep
+  # the historical setting.
+  set(CK_GFX12_ONLY_BUILD OFF)
+  if(GPU_TARGETS MATCHES "gfx12" AND NOT GPU_TARGETS MATCHES "gfx9|gfx10|gfx11")
+    set(CK_GFX12_ONLY_BUILD ON)
+  endif()
+  if(CK_GFX12_ONLY_BUILD)
+    check_cxx_compiler_flag("-mllvm -enable-post-misched=1" HAS_ENABLE_POST_MISCHED_ON)
+    if(HAS_ENABLE_POST_MISCHED_ON)
+      message(STATUS "gfx12-only build: enabling post-RA scheduling")
+      add_compile_options("SHELL: -mllvm -enable-post-misched=1")
+    endif()
+    check_cxx_compiler_flag("-mllvm -amdgpu-expert-scheduling-mode" HAS_EXPERT_SCHED_MODE)
+    if(HAS_EXPERT_SCHED_MODE)
+      message(STATUS "gfx12-only build: enabling expert scheduling mode")
+      add_compile_options("SHELL: -mllvm -amdgpu-expert-scheduling-mode")
+    endif()
+  else()
+    check_cxx_compiler_flag("-mllvm -enable-post-misched=0" HAS_ENABLE_POST_MISCHED)
+    if(HAS_ENABLE_POST_MISCHED)
+      message(STATUS "Adding the enable-post-misched=0 compiler flag")
+      add_compile_options("SHELL: -mllvm -enable-post-misched=0")
+    endif()
   endif()
 endif()
 set(check-coerce)
