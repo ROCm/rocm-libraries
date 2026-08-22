@@ -5,12 +5,16 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .hip_compile import compile_hip_variant, hip_variant_key
+from .hip_compile import (
+    compile_hip_variant,
+    hip_source_relpath,
+    hip_variant_key,
+)
 from .rocke_compile import compile_rocke_variant, rocke_variant_key
 from .descriptors import (
     arch_matches,
     kdp_survives,
-    load_flat_inputs,
+    load_flat_input,
     reachable_generic_ids,
 )
 from .errors import HkpPackError
@@ -46,6 +50,7 @@ class StandaloneUKD(InlineUKD):
     """
 
     filename: str = ""
+    rel_dir: Path = Path(".")
 
 
 @dataclass
@@ -53,6 +58,7 @@ class ArchKDP:
     id: str
     filename: str
     header: dict
+    rel_dir: Path = Path(".")
     ukds: list = field(default_factory=list)
     # Ordered kernelDescriptors output spec: each element is either an InlineUKD
     # (rewritten inline in the shipped KDP) or a str (a standalone-UKD id ref,
@@ -115,8 +121,8 @@ def _ukd_extra(ukd):
 def _compile_ukd_variant(
     ukd,
     where,
-    origin_root,
-    origin_index,
+    source_root,
+    rel_dir,
     arch,
     hipcc,
     inter_arch_dir,
@@ -125,14 +131,12 @@ def _compile_ukd_variant(
 ):
     """Compile one UKD variant for arch, deduped into variant_co per kind.
 
-    Dispatches on kernel_source.kind: hip resolves its source against
-    origin_root (the root this UKD's descriptor loaded from) and keys on
-    (source, build, origin_index), the positional ordinal of that root, so two
-    roots carrying an identically named source at the same relative path but
-    different bytes stay distinct. rocke keys on (source, builder, spec) and is
-    origin-independent (the source is a dotted module resolved by import), so
-    origin_root/origin_index are accepted only for signature uniformity. Returns
-    (variant_key, symbol, record_fields).
+    Dispatches on kernel_source.kind — producer selection is per-UKD, never
+    per-folder. hip resolves its source relative to the descriptor that named it
+    (`source_root / rel_dir / source`) and keys on (source, build). rocke keys on
+    (source, builder, spec) and is location-independent (its source is a dotted
+    module resolved by import), so source_root/rel_dir are accepted only for
+    signature uniformity. Returns (variant_key, symbol, record_fields).
     """
     ks = ukd["kernel_source"]
     kind = ks["kind"]
@@ -140,16 +144,16 @@ def _compile_ukd_variant(
     if kind == "hip":
         entry = ks["entry"]
         build = ks["build"]
-        vk = hip_variant_key(source, build, origin_index)
+        vk = hip_variant_key(hip_source_relpath(rel_dir, source), build)
         if vk not in variant_co:
             variant_co[vk] = compile_hip_variant(
                 hipcc,
-                origin_root,
+                source_root,
+                rel_dir,
                 source,
                 build,
                 arch,
                 inter_arch_dir,
-                key_origin_index=origin_index,
             )
             variant_symbol[vk] = entry
         symbol = entry
@@ -167,7 +171,7 @@ def _compile_ukd_variant(
         vk = rocke_variant_key(source, builder, spec)
         if vk not in variant_co:
             co_path, captured = compile_rocke_variant(
-                origin_root, source, builder, spec, arch, inter_arch_dir
+                source, builder, spec, arch, inter_arch_dir
             )
             variant_co[vk] = co_path
             variant_symbol[vk] = captured
@@ -185,7 +189,28 @@ def _compile_ukd_variant(
     return vk, symbol, fields
 
 
-def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
+def _dest_at(base, rel_dir, name):
+    """Destination for an authored file, preserving its subpath under base.
+
+    The authored subpath is meaningful: it scopes producers and integrations in
+    the source tree, and the staged and installed trees mirror it verbatim. Two
+    descriptors cannot share a path within the single source root, so the
+    destination is unique by construction — no de-duplication or renaming.
+    """
+    dest = Path(base) / rel_dir / name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def _write_bytes_at(base, rel_dir, name, data):
+    _dest_at(base, rel_dir, name).write_bytes(data)
+
+
+def _write_text_at(base, rel_dir, name, text):
+    _dest_at(base, rel_dir, name).write_text(text, encoding="utf-8")
+
+
+def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=print):
     """Compile every hip UKD in the KDPs targeting arch and stage a per-arch tree.
 
     Writes inter_arch_dir with: hsaco-form KDP JSON (inline UKDs rewritten
@@ -208,7 +233,9 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
     for kdp in flat.kdps():
         doc = kdp.doc
         if not arch_matches(doc, arch):
-            (inter_arch_dir / kdp.path.name).write_bytes(kdp.path.read_bytes())
+            _write_bytes_at(
+                inter_arch_dir, kdp.rel_dir, kdp.path.name, kdp.path.read_bytes()
+            )
             continue
 
         new_doc = copy.deepcopy(doc)
@@ -232,8 +259,8 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
                 vk, symbol, fields = _compile_ukd_variant(
                     sukd,
                     where,
-                    sdesc.origin_root,
-                    sdesc.origin_index,
+                    source_root,
+                    sdesc.rel_dir,
                     arch,
                     hipcc,
                     inter_arch_dir,
@@ -249,6 +276,7 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
                     variant_key=vk,
                     extra=_ukd_extra(sukd),
                     filename=sdesc.path.name,
+                    rel_dir=sdesc.rel_dir,
                     **fields,
                 )
                 continue
@@ -261,8 +289,8 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
             vk, symbol, fields = _compile_ukd_variant(
                 ukd,
                 where,
-                kdp.origin_root,
-                kdp.origin_index,
+                source_root,
+                kdp.rel_dir,
                 arch,
                 hipcc,
                 inter_arch_dir,
@@ -296,21 +324,30 @@ def compile_intermediate(flat, arch, hipcc, inter_arch_dir, log=print):
             log(f"KDP {kdp.path.name}: all UKDs filtered out for {arch}, dropping")
             continue
         new_doc["kernelDescriptors"] = new_kds
-        (inter_arch_dir / kdp.path.name).write_text(
-            json.dumps(new_doc, indent=2) + "\n", encoding="utf-8"
+        _write_text_at(
+            inter_arch_dir,
+            kdp.rel_dir,
+            kdp.path.name,
+            json.dumps(new_doc, indent=2) + "\n",
         )
         arch_kdps.append(
             ArchKDP(
                 id=doc.get("id"),
                 filename=kdp.path.name,
                 header=_kdp_header(doc),
+                rel_dir=kdp.rel_dir,
                 ukds=ukds,
                 entries=entries,
             )
         )
 
     for generic in flat.generics():
-        (inter_arch_dir / generic.path.name).write_bytes(generic.path.read_bytes())
+        _write_bytes_at(
+            inter_arch_dir,
+            generic.rel_dir,
+            generic.path.name,
+            generic.path.read_bytes(),
+        )
 
     return IntermediateArch(
         arch=arch,
@@ -466,8 +503,11 @@ def pack_arch(flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=None):
                     )
                 )
         out_doc["kernelDescriptors"] = out_kds
-        (out_arch_dir / kdp.filename).write_text(
-            json.dumps(out_doc, indent=2) + "\n", encoding="utf-8"
+        _write_text_at(
+            out_arch_dir,
+            kdp.rel_dir,
+            kdp.filename,
+            json.dumps(out_doc, indent=2) + "\n",
         )
 
     # A standalone UKD stays its own file in the shard, rewritten to kpack form
@@ -477,20 +517,28 @@ def pack_arch(flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=None):
         out_doc = _rewrite_ukd_kpack(
             ukd, arch, ukd.variant_key, variant_sha[ukd.variant_key]
         )
-        (out_arch_dir / ukd.filename).write_text(
-            json.dumps(out_doc, indent=2) + "\n", encoding="utf-8"
+        _write_text_at(
+            out_arch_dir,
+            ukd.rel_dir,
+            ukd.filename,
+            json.dumps(out_doc, indent=2) + "\n",
         )
 
     prune_result = prune(flat, arch)
     for generic in flat.generics():
         if generic.id in prune_result.reachable_generic_ids:
-            (out_arch_dir / generic.path.name).write_bytes(generic.path.read_bytes())
+            _write_bytes_at(
+                out_arch_dir,
+                generic.rel_dir,
+                generic.path.name,
+                generic.path.read_bytes(),
+            )
 
     return ArchResult(arch=arch, out_dir=out_arch_dir, kpack_path=kpack_path)
 
 
 def run_pipeline(
-    source_roots,
+    source_root,
     arches,
     out_root,
     hipcc,
@@ -501,12 +549,14 @@ def run_pipeline(
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
 
-    Loads and merges every source folder once, then for each arch compiles the
-    targeting KDPs' variants, prunes, and packs. Each hip UKD's source resolves
-    against its own root, and all roots' descriptors combine into one kpack per
-    arch. An arch with no surviving KDP is skipped cleanly (no folder, no kpack)
-    and logged with 'no kernels for <arch>, skipping'. Empty arch list installs
-    nothing (exit 0).
+    Loads the one source root once — recursively, preserving each descriptor's
+    authored subpath — then for each arch compiles the targeting KDPs' variants,
+    prunes, and packs. Producer selection is per-UKD on `kernel_source.kind`, so
+    hip and rocKE descriptors coexist under one root (in child folders that scope
+    them) and combine into one kpack per arch. A hip UKD's source resolves
+    relative to the descriptor that named it. An arch with no surviving KDP is
+    skipped cleanly (no folder, no kpack) and logged with 'no kernels for <arch>,
+    skipping'. Empty arch list installs nothing (exit 0).
     """
     out_root = Path(out_root)
     results = {}
@@ -514,7 +564,7 @@ def run_pipeline(
         return results
 
     kpack_mod, comp = load_kpack(rocm_kpack_dir)
-    flat = load_flat_inputs(source_roots, log=log)
+    flat = load_flat_input(source_root, log=log)
 
     if inter_root is None:
         inter_root = out_root.parent / "hkp-intermediate"
@@ -531,7 +581,9 @@ def run_pipeline(
                 arch=arch, out_dir=out_arch_dir, kpack_path=None, skipped=True
             )
             continue
-        inter = compile_intermediate(flat, arch, hipcc, inter_root / arch, log=log)
+        inter = compile_intermediate(
+            flat, source_root, arch, hipcc, inter_root / arch, log=log
+        )
         results[arch] = pack_arch(
             flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=expected_sha256
         )

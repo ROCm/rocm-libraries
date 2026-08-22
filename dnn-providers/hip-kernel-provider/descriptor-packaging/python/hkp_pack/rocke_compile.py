@@ -147,16 +147,16 @@ def _module_from_source(source):
     return ".".join(stem.split("/"))
 
 
-def compile_rocke_variant(source_root, source, builder, spec, arch, out_dir):
+def compile_rocke_variant(source, builder, spec, arch, out_dir):
     """Compile one rocke UKD variant for one arch, returning (co_path, symbol).
 
-    Imports the builder module named by `source` (resolved via the importable
-    `kernels` package, not the `source_root` folder, which is accepted only for
-    signature symmetry with the hip producer), resolves `builder`, introspects
-    and constructs its spec dataclass from the UKD `spec` dict, calls the builder
-    for a KernelDef, and lowers it via rocke's comgr `compile_kernel`. Writes the
-    HSACO to <rocke_variant_key>.co and returns that path plus the captured launch
-    symbol (`artifact.kernel_name`). Every deviation is a hard HkpPackError.
+    Imports the builder module named by `source` — a dotted module path resolved
+    through the importable `kernels` package, never a file path under the source
+    root — resolves `builder`, introspects and constructs its spec dataclass from
+    the UKD `spec` dict, calls the builder for a KernelDef, and lowers it via
+    rocke's comgr `compile_kernel`. Writes the HSACO to <rocke_variant_key>.co and
+    returns that path plus the captured launch symbol (`artifact.kernel_name`).
+    Every deviation is a hard HkpPackError.
     """
     dotted = _module_from_source(source)
     try:

@@ -44,8 +44,7 @@ class Descriptor:
 
     path: Path
     doc: dict
-    origin_root: Path | None = None
-    origin_index: int = 0
+    rel_dir: Path = Path(".")
 
     @property
     def type(self):
@@ -334,58 +333,43 @@ def _validate_shape(desc, log=print):
 
 
 def load_flat_input(root, log=print):
-    """Load and structurally validate every *.json descriptor in a flat folder.
+    """Load and structurally validate every *.json descriptor under a root.
 
-    root holds the authored source folder: KDP files (with inline hip UKDs), any
-    standalone `<name>.ukd.json` files a KDP references by Id, and the by-Id
-    generic files (UMD/UED/UDD/KMD/UHD), plus the HIP sources the UKDs name.
-    Each descriptor's type is derived from its `<name>.<type>.json`
-    filename. A `*.json` whose name carries no type token (not `<name>.<type>.json`)
+    Walks the root recursively: a descriptor's authored subpath is meaningful
+    and is carried through to the staged and installed layouts. Loads the KDPs
+    (with inline hip UKDs), standalone `<name>.ukd.json` files a KDP references
+    by Id, and the by-Id generic files (UMD/UED/UDD/KMD/UHD), plus the HIP
+    sources the UKDs name. Each descriptor's type is derived from its
+    `<name>.<type>.json` filename. A `*.json` whose name carries no type token
     is not one of ours: warn and skip it rather than aborting the pack, so an
     incidental file in the source folder is tolerated. Raises HkpPackError on any
     malformed / missing-field / unknown-type / dangling-reference descriptor that
     IS type-tagged.
+
+    There is exactly ONE root. Child folders under it scope the content (a
+    `hip/` tree and a `rocKE/` tree, per-integration folders beneath those);
+    producer selection is per-UKD on `kernel_source.kind`, never per-root. Two
+    descriptors therefore cannot share a path, so the filesystem itself enforces
+    the uniqueness that a multi-root merge had to check for.
     """
     root = Path(root)
     if not root.is_dir():
         raise HkpPackError(f"input folder does not exist: {root}")
 
     descriptors = []
-    for jp in sorted(root.glob("*.json")):
+    for jp in sorted(root.rglob("*.json")):
         if type_from_filename(jp) is None:
-            log(f"skipping non-descriptor file {jp.name}")
+            log(f"skipping non-descriptor file {jp.relative_to(root)}")
             continue
-        desc = Descriptor(path=jp, doc=_read_json(jp), origin_root=root)
+        desc = Descriptor(
+            path=jp,
+            doc=_read_json(jp),
+            rel_dir=jp.parent.relative_to(root),
+        )
         _validate_shape(desc, log)
         descriptors.append(desc)
 
     flat = FlatInput(descriptors=descriptors)
-    _reject_inline_standalone_collision(flat)
-    _reject_duplicate_ids(flat)
-    _validate_references(flat)
-    _warn_orphan_standalone_ukds(flat, log)
-    return flat
-
-
-def load_flat_inputs(roots, log=print):
-    """Load and merge one or more flat source folders into a single input set.
-
-    Each folder is loaded and per-descriptor structurally validated by
-    load_flat_input; every descriptor records the root it came from in
-    origin_root and its positional origin_index (the root's ordinal in the
-    passed order). The merged descriptor list then runs the whole-set validation
-    ONCE over the union so a duplicate id or dangling reference spanning roots is
-    caught. A hip UKD's source resolves against its own descriptor's origin_root,
-    letting two roots each carry an identically-named .cpp without colliding.
-    """
-    merged = []
-    for index, root in enumerate(roots):
-        flat = load_flat_input(root, log=log)
-        for desc in flat.descriptors:
-            desc.origin_index = index
-        merged.extend(flat.descriptors)
-
-    flat = FlatInput(descriptors=merged)
     _reject_inline_standalone_collision(flat)
     _reject_duplicate_ids(flat)
     _validate_references(flat)
