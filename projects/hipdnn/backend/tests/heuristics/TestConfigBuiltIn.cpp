@@ -1432,11 +1432,11 @@ TEST_F(TestConfigBuiltInExactCache, NoDevicePropertiesDeclinesExactCacheAndFalls
 
 // ---- Permutation invariant, asserted on every accept path ----
 
-class PermutationInvariantConfigBuiltIn : public TestConfigBuiltInExactCache
+class TestPermutationInvariantConfigBuiltIn : public TestConfigBuiltInExactCache
 {
 };
 
-TEST_F(PermutationInvariantConfigBuiltIn, ExactMatchIsPermutationOfCandidates)
+TEST_F(TestPermutationInvariantConfigBuiltIn, ExactMatchIsPermutationOfCandidates)
 {
     const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
     const std::vector<int64_t> candidates{
@@ -1453,7 +1453,7 @@ TEST_F(PermutationInvariantConfigBuiltIn, ExactMatchIsPermutationOfCandidates)
         std::is_permutation(sorted.begin(), sorted.end(), candidates.begin(), candidates.end()));
 }
 
-TEST_F(PermutationInvariantConfigBuiltIn, MissingEngineResultIsPermutationOfCandidates)
+TEST_F(TestPermutationInvariantConfigBuiltIn, MissingEngineResultIsPermutationOfCandidates)
 {
     const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
     seedExactCache(graph,
@@ -1509,7 +1509,7 @@ std::string joinCapturedLines(const std::vector<std::pair<hipdnnSeverity_t, std:
 }
 } // namespace
 
-class ExactCacheLoggingConfigBuiltIn : public TestConfigBuiltInExactCache
+class TestExactCacheLoggingConfigBuiltIn : public TestConfigBuiltInExactCache
 {
 protected:
     void SetUp() override
@@ -1533,7 +1533,7 @@ protected:
     std::vector<std::pair<hipdnnSeverity_t, std::string>> _capturedLines;
 };
 
-TEST_F(ExactCacheLoggingConfigBuiltIn, DisabledLogLineIsDistinguishable)
+TEST_F(TestExactCacheLoggingConfigBuiltIn, DisabledLogLineIsDistinguishable)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disableEnv(
         DISABLE_EXACT_CACHE_ENV, "1");
@@ -1545,7 +1545,7 @@ TEST_F(ExactCacheLoggingConfigBuiltIn, DisabledLogLineIsDistinguishable)
         << joinCapturedLines(_capturedLines);
 }
 
-TEST_F(ExactCacheLoggingConfigBuiltIn, MissLogLineIsDistinguishable)
+TEST_F(TestExactCacheLoggingConfigBuiltIn, MissLogLineIsDistinguishable)
 {
     setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID});
     setSerializedGraph(buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES));
@@ -1555,7 +1555,7 @@ TEST_F(ExactCacheLoggingConfigBuiltIn, MissLogLineIsDistinguishable)
         << joinCapturedLines(_capturedLines);
 }
 
-TEST_F(ExactCacheLoggingConfigBuiltIn, UnavailableLogLineIsDistinguishableFromMiss)
+TEST_F(TestExactCacheLoggingConfigBuiltIn, UnavailableLogLineIsDistinguishableFromMiss)
 {
     // Corrupting the version line simulates a decline distinct from an ordinary cache miss.
     const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
@@ -1589,7 +1589,7 @@ TEST_F(ExactCacheLoggingConfigBuiltIn, UnavailableLogLineIsDistinguishableFromMi
         << joinCapturedLines(_capturedLines);
 }
 
-TEST_F(ExactCacheLoggingConfigBuiltIn, RejectUnsampledLogLineIsDistinguishable)
+TEST_F(TestExactCacheLoggingConfigBuiltIn, RejectUnsampledLogLineIsDistinguishable)
 {
     const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
     seedExactCache(graph, {MIOPEN_ENGINE_ID}, {MIOPEN_ENGINE_ID});
@@ -1602,7 +1602,7 @@ TEST_F(ExactCacheLoggingConfigBuiltIn, RejectUnsampledLogLineIsDistinguishable)
         << joinCapturedLines(_capturedLines);
 }
 
-TEST_F(ExactCacheLoggingConfigBuiltIn, RejectDegenerateLogLineIsDistinguishable)
+TEST_F(TestExactCacheLoggingConfigBuiltIn, RejectDegenerateLogLineIsDistinguishable)
 {
     const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
     seedExactCache(graph, {MIOPEN_ENGINE_ID}, {MIOPEN_ENGINE_ID});
@@ -1615,7 +1615,7 @@ TEST_F(ExactCacheLoggingConfigBuiltIn, RejectDegenerateLogLineIsDistinguishable)
         << joinCapturedLines(_capturedLines);
 }
 
-TEST_F(ExactCacheLoggingConfigBuiltIn, HitExactLogLineIsDistinguishable)
+TEST_F(TestExactCacheLoggingConfigBuiltIn, HitExactLogLineIsDistinguishable)
 {
     const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
     seedExactCache(
@@ -1629,7 +1629,7 @@ TEST_F(ExactCacheLoggingConfigBuiltIn, HitExactLogLineIsDistinguishable)
         << joinCapturedLines(_capturedLines);
 }
 
-TEST_F(ExactCacheLoggingConfigBuiltIn, HitWithDropsLogLineIsDistinguishable)
+TEST_F(TestExactCacheLoggingConfigBuiltIn, HitWithDropsLogLineIsDistinguishable)
 {
     const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
     seedExactCache(graph,
@@ -1644,7 +1644,7 @@ TEST_F(ExactCacheLoggingConfigBuiltIn, HitWithDropsLogLineIsDistinguishable)
         << joinCapturedLines(_capturedLines);
 }
 
-TEST_F(ExactCacheLoggingConfigBuiltIn, FuzzyMatchedLogLineIsDistinguishable)
+TEST_F(TestExactCacheLoggingConfigBuiltIn, FuzzyMatchedLogLineIsDistinguishable)
 {
     const TempJsonOverrideFile json(DETERMINISTIC_RULE_JSON);
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,

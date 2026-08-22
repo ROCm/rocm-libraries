@@ -94,7 +94,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                          RUN_SERIAL TRUE
                          FIXTURES_REQUIRED DiskCacheCrossProcessClean
                          FIXTURES_SETUP DiskCacheCrossProcessWritten
-                         ENVIRONMENT "${_disk_cache_cross_process_env}")
+                         ENVIRONMENT "${_disk_cache_cross_process_env}"
+                         # A filter matching zero tests still exits 0 ("[  PASSED  ] 0
+                         # tests"), so a rename or move of the DISABLED_ test above would
+                         # silently turn this into a no-op pass. Require gtest's own
+                         # "ran exactly one" summary line instead of trusting the exit code.
+                         PASS_REGULAR_EXPRESSION "\\[==========\\] 1 test from 1 test suite ran\\.")
 
     add_test(NAME DiskCacheCrossProcess_Reader
              COMMAND hipdnn_plugin_sdk_tests
@@ -103,7 +108,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set_tests_properties(DiskCacheCrossProcess_Reader PROPERTIES
                          RUN_SERIAL TRUE
                          FIXTURES_REQUIRED "DiskCacheCrossProcessClean;DiskCacheCrossProcessWritten"
-                         ENVIRONMENT "${_disk_cache_cross_process_env}")
+                         ENVIRONMENT "${_disk_cache_cross_process_env}"
+                         PASS_REGULAR_EXPRESSION "\\[==========\\] 1 test from 1 test suite ran\\.")
 
     # One call per test: the helper forwards its arguments positionally to the parser,
     # which takes a single explicit test name.

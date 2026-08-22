@@ -44,7 +44,8 @@ void autotuneBindings(nb::module_& m)
                AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE)
         .value("WRITTEN", AutotuneCacheWriteOutcome::WRITTEN)
         .value("DECLINED_DISABLED", AutotuneCacheWriteOutcome::DECLINED_DISABLED)
-        .value("DECLINED_UNKEYABLE", AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE);
+        .value("DECLINED_UNKEYABLE", AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE)
+        .value("UNCHANGED", AutotuneCacheWriteOutcome::UNCHANGED);
 
     // Bind the concrete knob constraints. The C++ ConstraintKind discriminator exists
     // so -fno-rtti callers can downcast; Python gets the concrete type instead and

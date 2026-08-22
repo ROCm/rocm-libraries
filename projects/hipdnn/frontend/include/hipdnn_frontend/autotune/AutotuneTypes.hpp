@@ -88,7 +88,10 @@ enum class AutotuneCacheWriteOutcome
     DECLINED_DISABLED,
     /// The write-back API was called but declined: the graph descriptor was not
     /// finalized, or the graph/device pair could not be reduced to a cache key.
-    DECLINED_UNKEYABLE
+    DECLINED_UNKEYABLE,
+    /// The cache already held this exact ranking, so nothing was written. Not a failure:
+    /// a re-tune that measured the same order has nothing to add.
+    UNCHANGED
 };
 
 /// Get the string representation of an AutotuneCacheWriteOutcome
@@ -104,6 +107,8 @@ inline const char* autotuneCacheWriteOutcomeToString(AutotuneCacheWriteOutcome o
         return "DECLINED_DISABLED";
     case AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE:
         return "DECLINED_UNKEYABLE";
+    case AutotuneCacheWriteOutcome::UNCHANGED:
+        return "UNCHANGED";
     default:
         return "UNKNOWN";
     }
@@ -210,6 +215,18 @@ struct AutotuneResult
     // --- Status ---
     int rank = -1; ///< 0-based ranking (0 = fastest); -1 for failed engines
     bool succeeded = false; ///< Whether this engine succeeded benchmarking
+
+    /// true if this engine reached the timing loop, whether or not it produced a usable
+    /// measurement. Distinct from @ref succeeded, which is false for two very different
+    /// reasons: an engine that was measured and failed, and one that was never measured
+    /// at all (excluded by engineIdFilter, deselected, over the workspace ceiling, or
+    /// failed to compile).
+    ///
+    /// Only the first belongs in a cache record's sampled-engine set. Recording the
+    /// second would let a later run that lifts a filter get a hit on a ranking that never
+    /// measured the re-admitted engine.
+    bool benchmarked = false;
+
     std::string errorMessage; ///< Empty if no error; describes bemchmarking failure otherwise
 
     int64_t workspaceSize = 0; ///< Workspace bytes used by this engine

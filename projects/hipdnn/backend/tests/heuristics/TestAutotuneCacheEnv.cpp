@@ -20,21 +20,21 @@ namespace
 constexpr const char* DISABLE_ENV = "HIPDNN_DISABLE_EXACT_ENGINE_CACHE";
 } // namespace
 
-TEST(AutotuneCacheEnv, UnsetReturnsFalse)
+TEST(TestAutotuneCacheEnv, UnsetReturnsFalse)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(DISABLE_ENV);
 
     EXPECT_FALSE(exactCacheDisabled());
 }
 
-TEST(AutotuneCacheEnv, TruthyValueReturnsTrue)
+TEST(TestAutotuneCacheEnv, TruthyValueReturnsTrue)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(DISABLE_ENV, "1");
 
     EXPECT_TRUE(exactCacheDisabled());
 }
 
-TEST(AutotuneCacheEnv, EmptyOrWhitespaceOnlyReturnsFalse)
+TEST(TestAutotuneCacheEnv, EmptyOrWhitespaceOnlyReturnsFalse)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(DISABLE_ENV, "   ");
 
@@ -42,7 +42,7 @@ TEST(AutotuneCacheEnv, EmptyOrWhitespaceOnlyReturnsFalse)
 }
 
 // Presence alone must not disable the cache; the value is checked against a literal set.
-TEST(AutotuneCacheEnv, ExplicitlyFalsyValuesLeaveCacheEnabled)
+TEST(TestAutotuneCacheEnv, ExplicitlyFalsyValuesLeaveCacheEnabled)
 {
     for(const char* value : {"0", "false", "off", "no", "disable", "disabled"})
     {
@@ -52,7 +52,7 @@ TEST(AutotuneCacheEnv, ExplicitlyFalsyValuesLeaveCacheEnabled)
     }
 }
 
-TEST(AutotuneCacheEnv, TruthySpellingsAreAccepted)
+TEST(TestAutotuneCacheEnv, TruthySpellingsAreAccepted)
 {
     for(const char* value : {"1", "true", "on", "yes", "enable", "enabled", "TRUE", " on "})
     {
@@ -62,7 +62,7 @@ TEST(AutotuneCacheEnv, TruthySpellingsAreAccepted)
     }
 }
 
-TEST(AutotuneCacheEnv, UnrecognizedValueLeavesCacheEnabled)
+TEST(TestAutotuneCacheEnv, UnrecognizedValueLeavesCacheEnabled)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(DISABLE_ENV, "maybe");
 
