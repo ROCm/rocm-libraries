@@ -570,6 +570,7 @@ def run_pipeline(
         inter_root = out_root.parent / "hkp-intermediate"
     inter_root = Path(inter_root)
 
+    failures = {}
     for arch in arches:
         surviving = [k for k in flat.kdps() if kdp_survives(k.doc, flat, arch)]
         out_arch_dir = out_root / arch
@@ -581,10 +582,41 @@ def run_pipeline(
                 arch=arch, out_dir=out_arch_dir, kpack_path=None, skipped=True
             )
             continue
-        inter = compile_intermediate(
-            flat, source_root, arch, hipcc, inter_root / arch, log=log
-        )
-        results[arch] = pack_arch(
-            flat, inter, out_arch_dir, kpack_mod, comp, expected_sha256=expected_sha256
+        try:
+            inter = compile_intermediate(
+                flat, source_root, arch, hipcc, inter_root / arch, log=log
+            )
+            results[arch] = pack_arch(
+                flat,
+                inter,
+                out_arch_dir,
+                kpack_mod,
+                comp,
+                expected_sha256=expected_sha256,
+            )
+        except HkpPackError as exc:
+            # One arch failing must not destroy the other arches' work: a
+            # wildcard-arch UKD hitting an arch-restricted builder should shrink
+            # one shard, not fail every shard. The failed arch's staged output is
+            # discarded rather than left half-written, so install(... OPTIONAL)
+            # skips it cleanly instead of shipping a partial tree. Its
+            # intermediate dir stays for debugging -- build-only, never shipped.
+            failures[arch] = str(exc)
+            log(f"ERROR: {arch} failed: {exc}")
+            if out_arch_dir.exists():
+                shutil.rmtree(out_arch_dir)
+            results[arch] = ArchResult(
+                arch=arch, out_dir=out_arch_dir, kpack_path=None, skipped=True
+            )
+
+    if failures:
+        # Non-zero exit with partial output: the build fails loudly, but a
+        # developer can still inspect what did succeed. Exiting 0 here would
+        # resurrect the silent-empty-package class of defect.
+        detail = "; ".join(f"{a}: {r}" for a, r in sorted(failures.items()))
+        raise HkpPackError(
+            f"packing failed for {len(failures)} of {len(arches)} arch(es) "
+            f"[{detail}]. Arches that succeeded were written; the failed arches' "
+            "output was discarded."
         )
     return results
