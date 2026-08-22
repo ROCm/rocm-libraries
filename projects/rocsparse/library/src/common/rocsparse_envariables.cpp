@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_envariables.hpp"
+#include "rocsparse_getenv.hpp"
 #include <iostream>
 //
 //
@@ -31,11 +32,11 @@ static bool rocsparse_getenv(const char* name, T& val);
 template <>
 bool rocsparse_getenv<bool>(const char* name, bool& val)
 {
-    val                    = false;
-    const char* getenv_str = getenv(name);
-    if(getenv_str != nullptr)
+    val             = false;
+    auto getenv_str = rocsparse::get_environment_variable(name);
+    if(getenv_str.has_value())
     {
-        auto getenv_int = atoi(getenv_str);
+        auto getenv_int = atoi(getenv_str->c_str());
         if((getenv_int != 0) && (getenv_int != 1))
         {
             std::cerr << "rocsparse error, invalid environment variable " << name
