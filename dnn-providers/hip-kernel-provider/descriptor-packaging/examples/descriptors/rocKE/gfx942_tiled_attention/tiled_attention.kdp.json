@@ -1,0 +1,43 @@
+{
+  "version": "0.1",
+  "id": "kdp-example-tiled-attention",
+  "name": "Example tiled attention (gfx942)",
+  "arch": [
+    "gfx942"
+  ],
+  "matchers": [
+    "umd-example-tiled-attention",
+    "umd-example-shared-rocke"
+  ],
+  "engine": "ued-example-tiled-attention",
+  "dispatch": "udd-example-tiled-attention",
+  "kernelDescriptors": [
+    {
+      "version": "0.1",
+      "id": "ukd-example-tiled-attention-gfx942",
+      "name": "Example unified attention 2d tiled (gfx942)",
+      "arch": [
+        "gfx942"
+      ],
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false
+        }
+      },
+      "metadata": {
+        "family": "attention_tiled_2d"
+      },
+      "priority": 0
+    }
+  ]
+}

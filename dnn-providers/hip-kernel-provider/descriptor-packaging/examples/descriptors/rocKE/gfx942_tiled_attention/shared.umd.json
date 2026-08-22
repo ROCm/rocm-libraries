@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "umd-example-shared-rocke",
+  "name": "Shared-filename matcher (rocKE half)",
+  "nodes": ["attention"],
+  "criteria": { "dtype_matches_graph": true }
+}

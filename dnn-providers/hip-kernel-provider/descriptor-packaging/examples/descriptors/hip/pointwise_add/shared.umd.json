@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "umd-example-shared-hip",
+  "name": "Shared-filename matcher (hip half)",
+  "nodes": ["pointwise"],
+  "criteria": { "dtype_matches_graph": true }
+}

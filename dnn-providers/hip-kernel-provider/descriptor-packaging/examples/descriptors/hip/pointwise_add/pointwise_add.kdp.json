@@ -1,0 +1,40 @@
+{
+  "version": "0.1",
+  "id": "kdp-example-pointwise-add",
+  "name": "Example pointwise add",
+  "arch": [
+    "gfx942"
+  ],
+  "matchers": [
+    "umd-example-pointwise-add",
+    "umd-example-shared-hip"
+  ],
+  "engine": "ued-example-pointwise-add",
+  "dispatch": "udd-example-pointwise-add",
+  "kernelDescriptors": [
+    {
+      "version": "0.1",
+      "id": "ukd-example-pointwise-add-f32-b256",
+      "name": "Example PointwiseAdd f32 block256",
+      "arch": [
+        "gfx942"
+      ],
+      "kernel_source": {
+        "kind": "hip",
+        "source": "PointwiseAdd.cpp",
+        "entry": "PointwiseAdd",
+        "build": {
+          "defines": {
+            "HKP_EXAMPLE_POINTWISE_ADD_TYPE": "float",
+            "HKP_EXAMPLE_POINTWISE_ADD_BLOCK_SIZE": 256
+          }
+        }
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "block_size": 256
+      },
+      "priority": 0
+    }
+  ]
+}

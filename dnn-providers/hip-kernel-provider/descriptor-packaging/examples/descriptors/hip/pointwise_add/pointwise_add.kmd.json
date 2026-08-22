@@ -1,0 +1,9 @@
+{
+  "version": "0.1",
+  "id": "kmd-example-pointwise-add",
+  "name": "Example pointwise-add metadata",
+  "fields": [
+    { "name": "dtype", "type": "string" },
+    { "name": "block_size", "type": "int" }
+  ]
+}

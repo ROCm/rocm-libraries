@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "ued-example-tiled-attention",
+  "name": "hkp_example:tiled_attention",
+  "heuristic": "uhd-example-tiled-attention",
+  "metadata": "kmd-example-tiled-attention"
+}
