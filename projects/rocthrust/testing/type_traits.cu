@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,10 +15,11 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/__cccl_config.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
+#include <thrust/detail/config.h>
+
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
+#include <thrust/functional.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -30,10 +31,10 @@
 
 #include <unittest/unittest.h>
 
-#if THRUST_COMPILER(GCC, >=, 7)
+#if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
 // This header pulls in an unsuppressable warning on GCC 6
 #  include _THRUST_STD_INCLUDE(complex)
-#endif // THRUST_COMPILER(GCC, >=, 7)
+#endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
 #include _THRUST_STD_INCLUDE(tuple)
 #include _THRUST_STD_INCLUDE(utility)
 
@@ -59,14 +60,23 @@ void TestIsContiguousIterator()
 
   using HostIteratorTuple = thrust::tuple<HostVector::iterator, HostVector::iterator>;
 
-  using ConstantIterator  = thrust::constant_iterator<int>;
-  using CountingIterator  = thrust::counting_iterator<int>;
-  using TransformIterator = thrust::transform_iterator<::internal::identity, HostVector::iterator>;
-  using ZipIterator       = thrust::zip_iterator<HostIteratorTuple>;
+  using ConstantIterator = thrust::constant_iterator<int>;
+  using CountingIterator = thrust::counting_iterator<int>;
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  using TransformIterator1 = thrust::transform_iterator<thrust::identity<int>, HostVector::iterator>;
+  THRUST_SUPPRESS_DEPRECATED_POP
+  using TransformIterator2 = thrust::transform_iterator<::internal::identity, HostVector::iterator>;
+  using ZipIterator        = thrust::zip_iterator<HostIteratorTuple>;
 
   ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<ConstantIterator>::value, false);
   ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<CountingIterator>::value, false);
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<TransformIterator>::value, false);
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVHPC
+  // thrust::identity creates a deprecated warning that could not be worked around
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<TransformIterator1>::value, false);
+  THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVHPC
+  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<TransformIterator2>::value, false);
   ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<ZipIterator>::value, false);
 }
 DECLARE_UNITTEST(TestIsContiguousIterator);
@@ -191,19 +201,20 @@ static_assert(thrust::is_trivially_relocatable<NonTriviallyCopyable>::value, "")
 void TestTriviallyRelocatable()
 {
   static_assert(thrust::is_trivially_relocatable<int>::value, "");
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
   static_assert(thrust::is_trivially_relocatable<__half>::value, "");
   static_assert(thrust::is_trivially_relocatable<int1>::value, "");
   static_assert(thrust::is_trivially_relocatable<int2>::value, "");
   static_assert(thrust::is_trivially_relocatable<int3>::value, "");
   static_assert(thrust::is_trivially_relocatable<int4>::value, "");
-#  if !defined(THRUST_DISABLE_INT128_SUPPORT) && (defined(__linux__) || defined(__LP64__)) \
-    && ((THRUST_COMPILER(NVRTC) && defined(__CUDACC_RTC_INT128__)) || defined(__SIZEOF_INT128__))
+#if !(THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC                                          \
+      || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC && !defined(__CUDACC_RTC_INT128__)) \
+      || (defined(__NVCC__) && __CUDACC_VER_MAJOR__ * 100 + __CUDACC_VER_MINOR__ < 1105)         \
+      || !defined(__SIZEOF_INT128__))
   static_assert(thrust::is_trivially_relocatable<__int128>::value, "");
-#  endif // !defined(THRUST_DISABLE_INT128_SUPPORT) && (defined(__linux__) || defined(__LP64__))
-         // && ((THRUST_COMPILER(NVRTC) && defined(__CUDACC_RTC_INT128__)) || defined(__SIZEOF_INT128__))
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-#if THRUST_COMPILER(GCC, >=, 7)
+#endif // (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC &&
+       // !defined(__CUDACC_RTC_INT128__)) || (defined(__NVCC__) && __CUDACC_VER_MAJOR__ * 100 + __CUDACC_VER_MINOR__ <
+       // 1105) || !defined(__SIZEOF_INT128__))
+#if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
   static_assert(thrust::is_trivially_relocatable<thrust::complex<float>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::complex<float>>::value, "");
   static_assert(thrust::is_trivially_relocatable<thrust::pair<int, thrust::complex<float>>>::value, "");
@@ -211,7 +222,7 @@ void TestTriviallyRelocatable()
   static_assert(thrust::is_trivially_relocatable<thrust::tuple<int, thrust::complex<float>, char>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, _THRUST_STD::complex<float>, char>>::value,
                 "");
-#endif // THRUST_COMPILER(GCC, >=, 7)
+#endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
   static_assert(thrust::is_trivially_relocatable<
                   _THRUST_STD::tuple<thrust::pair<int, thrust::tuple<int, _THRUST_STD::tuple<>>>,

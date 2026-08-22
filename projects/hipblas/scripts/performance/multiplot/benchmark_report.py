@@ -15,19 +15,27 @@ CSV format: optional device preamble, then repeated blocks of a header line star
 with \"function,\" followed by one data line.
 
 Default layout: {base}/blas{L}/{tag}/*.csv
+With ``--tag-parent``: column A uses {base}/{tag_a}/blas{L}/ (no arch subfolder).
+With ``--a-tree`` / ``--b-tree``: CSVs under {base}/{tree}/blas{L}/ only (no extra arch subfolder;
+``--a-blas-subdir`` / ``--b-blas-subdir`` are labels / plot naming only when a tree is set).
 Optional overrides: --col-a-blas1 RELPATH --col-b-blas1 RELPATH (relative to --base), etc.
+Each BLAS level is optional: missing ``blas{L}/`` on both sides is skipped (no section).
+Use ``--no-blas1``, ``--no-blas2``, or ``--no-blas3`` to exclude a level explicitly.
 
 Output uses GitHub-flavored **Markdown pipe tables**. Tables are split into at most **12** data rows
 each, labeled *part N of M* when split; rows for the same **function** are never split across tables.
 After **a_type**, **blas1** omits **uplo**,
 **transA**, and **transB**; **blas2** shows **uplo** and **transA** only (no **transB** column);
-**blas3** shows all three. When exactly one column tag matches a **gfx**
-arch name, a **% ratio** column (``gfx_tag/other_tag %``) reports (gfx mean / other mean) × 100 before the two mean columns.
+When exactly one column tag matches a **gfx**
+arch name, the ratio numerator is that gfx tag; otherwise it is column A.
+The **% ratio** column reports (numerator mean / denominator mean) × 100 before the two mean columns.
 
 After the tables, an optional **Plots** section lists PNGs from
-`blasL/{tag_a}_{tag_b}/plots_perf_vs_perf/` (see `plot.py` ``--perf_vs_perf``) in **s**, **d**, **c**, **z**
+``plot.py`` perf-vs-perf output in **s**, **d**, **c**, **z**
 order (real f32, real f64, complex f32, complex f64). At most **four** PNGs from the same function group
 (prefix) share a page; additional images start a new page (page break) so figures stay larger.
+With **-o/--output** (and without **--embed**), PNGs are copied under
+``{report_stem}_img/blas{L}/`` beside the Markdown file and referenced with relative paths.
 With **--embed**, plot PNGs are inlined as
 ``data:image/png;base64,...`` URIs so the Markdown file is self-contained.
 
@@ -43,6 +51,7 @@ import csv
 import html
 import io
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -50,7 +59,7 @@ import sys
 from collections import defaultdict
 from itertools import groupby
 from pathlib import Path
-from typing import DefaultDict, Iterator, List, Optional, Tuple
+from typing import DefaultDict, Iterator, List, Optional, Sequence, Tuple
 
 # Shown when transA / uplo / transB column is absent in the CSV.
 COL_PLACEHOLDER = "—"
@@ -81,41 +90,39 @@ def is_gfx_arch_label(label: str) -> bool:
     return bool(re.match(r"^gfx[\w.-]*$", s, re.IGNORECASE))
 
 
-def gfx_to_other_ratio_pct(label_a: str, label_b: str, ma: float, mb: float) -> str:
-    """
-    (mean_gfx / mean_non_gfx) * 100 as a percentage string, when exactly one column is gfx.
-    Otherwise COL_PLACEHOLDER.
-    """
+def _ratio_column_num_den(label_a: str, label_b: str) -> Tuple[str, str]:
+    """Numerator/denominator labels for the % column (gfx tag first when exactly one side is gfx)."""
     ga = is_gfx_arch_label(label_a)
     gb = is_gfx_arch_label(label_b)
-    if ga == gb:
-        return COL_PLACEHOLDER
+    if ga and not gb:
+        return label_a, label_b
+    if gb and not ga:
+        return label_b, label_a
+    return label_a, label_b
+
+
+def column_ratio_pct(label_a: str, label_b: str, ma: float, mb: float) -> str:
+    """(mean numerator / mean denominator) × 100; matches ``gfx_ratio_column_header`` ordering."""
+    num_label, den_label = _ratio_column_num_den(label_a, label_b)
     try:
         if ma != ma or mb != mb:
             return COL_PLACEHOLDER
     except TypeError:
         return COL_PLACEHOLDER
-    if ga and not gb:
-        if mb == 0:
-            return COL_PLACEHOLDER
-        return f"{(ma / mb) * 100:.0f}%"
-    if gb and not ga:
-        if ma == 0:
-            return COL_PLACEHOLDER
-        return f"{(mb / ma) * 100:.0f}%"
-    return COL_PLACEHOLDER
+    mean_num, mean_den = (ma, mb) if num_label == label_a else (mb, ma)
+    if mean_den == 0:
+        return COL_PLACEHOLDER
+    return f"{(mean_num / mean_den) * 100:.0f}%"
+
+
+def gfx_to_other_ratio_pct(label_a: str, label_b: str, ma: float, mb: float) -> str:
+    """Alias for :func:`column_ratio_pct` (kept for callers/tests)."""
+    return column_ratio_pct(label_a, label_b, ma, mb)
 
 
 def gfx_ratio_column_header(label_a: str, label_b: str) -> str:
-    """Column title for (gfx / other) × 100 %, e.g. ``gfx950/other %``."""
-    ga = is_gfx_arch_label(label_a)
-    gb = is_gfx_arch_label(label_b)
-    if ga and not gb:
-        num, den = label_a, label_b
-    elif gb and not ga:
-        num, den = label_b, label_a
-    else:
-        num, den = label_a, label_b
+    """Column title for (numerator / denominator) × 100 %, e.g. ``gfx950/B200_OP %``."""
+    num, den = _ratio_column_num_den(label_a, label_b)
     return f"{md_escape_cell(num)}/{md_escape_cell(den)} %"
 
 
@@ -143,8 +150,92 @@ def fmt_mean_gflops(val: float) -> str:
     return s
 
 
-def _default_dir_for_tag(base: Path, blas_num: int, tag: str) -> Path:
+def _default_dir_for_tag(
+    base: Path,
+    blas_num: int,
+    tag: str,
+    *,
+    tag_parent: bool = False,
+    blas_subdir: Optional[str] = None,
+) -> Path:
+    if tag_parent or blas_subdir:
+        path = base / tag / f"blas{blas_num}"
+        if blas_subdir:
+            path = path / blas_subdir
+        return path
     return base / f"blas{blas_num}" / tag
+
+
+def _normalize_blas_subdir(
+    base: Path,
+    blas_num: int,
+    root: str,
+    tag: str,
+    blas_subdir: Optional[str],
+) -> Optional[str]:
+    """
+    Map CLI arch subdir to on-disk folder under {root}/blas{L}/.
+
+    - Redundant subdir (``B200`` + ``--a-blas-subdir B200``) -> flat ``{root}/blas{L}/``.
+    - Product label as subdir (``--b-blas-subdir MI355X``) -> ``gfx950`` when present.
+    """
+    if not blas_subdir:
+        return None
+    level_dir = base / root / f"blas{blas_num}"
+    if (level_dir / blas_subdir).is_dir():
+        return blas_subdir
+    if blas_subdir in (root, tag) and level_dir.is_dir() and any(level_dir.glob("*.csv")):
+        return None
+    if blas_subdir == tag:
+        for alt in ("gfx950", "gfx90a"):
+            if (level_dir / alt).is_dir():
+                return alt
+    return blas_subdir
+
+
+def _dir_for_explicit_tree(base: Path, blas_num: int, tree_tag: str) -> Path:
+    """``{base}/{tree}/blas{L}/`` — tree contains only blas1, blas2, blas3 (no arch subfolder)."""
+    candidates = [tree_tag]
+    if len(tree_tag) > 1 and tree_tag.endswith("X"):
+        candidates.append(tree_tag[:-1])
+    for root in candidates:
+        path = base / root / f"blas{blas_num}"
+        if path.is_dir():
+            return path.resolve()
+    return (base / tree_tag / f"blas{blas_num}").resolve()
+
+
+def _resolve_filesystem_tree_tag(
+    base: Path,
+    blas_num: int,
+    tag: str,
+    *,
+    tree_tag: Optional[str],
+    tag_parent: bool,
+    blas_subdir: Optional[str],
+) -> str:
+    """Directory name under --base (may differ from display tag, e.g. MI355 vs MI355X)."""
+    if not (tag_parent or blas_subdir):
+        return tree_tag or tag
+
+    def _level_ok(root: str) -> bool:
+        norm = _normalize_blas_subdir(base, blas_num, root, tag, blas_subdir)
+        path = _default_dir_for_tag(
+            base,
+            blas_num,
+            root,
+            tag_parent=tag_parent or bool(norm),
+            blas_subdir=norm,
+        )
+        return path.is_dir()
+
+    if _level_ok(tag):
+        return tag
+    if len(tag) > 1 and tag.endswith("X"):
+        alt = tag[:-1]
+        if _level_ok(alt):
+            return alt
+    return tree_tag or tag
 
 
 def _first_col_idx(header: List[str], name: str) -> Optional[int]:
@@ -368,7 +459,7 @@ def _benchmark_report_table_lines(
             "| --- | --- | ---: | ---: | ---: |",
         ]
         for fn, at, tr, up, tb, ma, mb in rows:
-            pct = gfx_to_other_ratio_pct(label_a, label_b, ma, mb)
+            pct = column_ratio_pct(label_a, label_b, ma, mb)
             lines.append(
                 f"| {md_escape_cell(fn)} | {md_escape_cell(at)} | {pct} | {fmt_mean_gflops(ma)} | {fmt_mean_gflops(mb)} |"
             )
@@ -380,7 +471,7 @@ def _benchmark_report_table_lines(
             "| --- | --- | :-: | :-: | ---: | ---: | ---: |",
         ]
         for fn, at, tr, up, tb, ma, mb in rows:
-            pct = gfx_to_other_ratio_pct(label_a, label_b, ma, mb)
+            pct = column_ratio_pct(label_a, label_b, ma, mb)
             lines.append(
                 f"| {md_escape_cell(fn)} | {md_escape_cell(at)} | {md_escape_cell(up)} | {md_escape_cell(tr)} | {pct} | {fmt_mean_gflops(ma)} | {fmt_mean_gflops(mb)} |"
             )
@@ -391,7 +482,7 @@ def _benchmark_report_table_lines(
         "| --- | --- | :-: | :-: | :-: | ---: | ---: | ---: |",
     ]
     for fn, at, tr, up, tb, ma, mb in rows:
-        pct = gfx_to_other_ratio_pct(label_a, label_b, ma, mb)
+        pct = column_ratio_pct(label_a, label_b, ma, mb)
         lines.append(
             f"| {md_escape_cell(fn)} | {md_escape_cell(at)} | {md_escape_cell(up)} | {md_escape_cell(tr)} | {md_escape_cell(tb)} | {pct} | {fmt_mean_gflops(ma)} | {fmt_mean_gflops(mb)} |"
         )
@@ -463,13 +554,74 @@ def resolve_dir(
     blas_num: int,
     tag: str,
     override: Optional[str],
+    *,
+    tree_tag: Optional[str] = None,
+    tag_parent: bool = False,
+    blas_subdir: Optional[str] = None,
 ) -> Path:
     if override:
         return (base / override).resolve()
-    return _default_dir_for_tag(base, blas_num, tag).resolve()
+    if tree_tag:
+        return _dir_for_explicit_tree(base, blas_num, tree_tag)
+    root = _resolve_filesystem_tree_tag(
+        base,
+        blas_num,
+        tag,
+        tree_tag=None,
+        tag_parent=tag_parent,
+        blas_subdir=blas_subdir,
+    )
+    norm_subdir = _normalize_blas_subdir(base, blas_num, root, tag, blas_subdir)
+    return _default_dir_for_tag(
+        base,
+        blas_num,
+        root,
+        tag_parent=tag_parent or bool(norm_subdir),
+        blas_subdir=norm_subdir,
+    ).resolve()
 
 
-# plot.py saves e.g. dot_axpy_scal_f32_r.png under blas1/tag1_tag2/plots_perf_vs_perf/
+def _iter_blas_levels(
+    base: Path,
+    tag_a: str,
+    tag_b: str,
+    enabled_blas: Tuple[bool, bool, bool],
+    col_a_blas: Tuple[Optional[str], Optional[str], Optional[str]],
+    col_b_blas: Tuple[Optional[str], Optional[str], Optional[str]],
+    *,
+    tag_parent_a: bool,
+    tree_a: Optional[str],
+    tree_b: Optional[str],
+    col_a_blas_subdir: Optional[str],
+    col_b_blas_subdir: Optional[str],
+) -> Iterator[Tuple[int, Path, Path]]:
+    """Yield (level, dir_a, dir_b) for enabled levels with at least one data directory on disk."""
+    for n in (1, 2, 3):
+        if not enabled_blas[n - 1]:
+            continue
+        dir_a = resolve_dir(
+            base,
+            n,
+            tag_a,
+            col_a_blas[n - 1],
+            tree_tag=tree_a,
+            tag_parent=tag_parent_a or bool(col_a_blas_subdir),
+            blas_subdir=col_a_blas_subdir,
+        )
+        dir_b = resolve_dir(
+            base,
+            n,
+            tag_b,
+            col_b_blas[n - 1],
+            tree_tag=tree_b,
+            blas_subdir=col_b_blas_subdir,
+        )
+        if not dir_a.is_dir() and not dir_b.is_dir():
+            continue
+        yield n, dir_a, dir_b
+
+
+# plot.py saves e.g. dot_axpy_scal_f32_r.png under B200_gfx950/blas1/plots_perf_vs_perf/
 PNG_SUFFIX = re.compile(
     r"^(?P<prefix>.+)_(?P<fp>f(?:16|32|64))_(?P<rc>[rc])\.png$",
     re.IGNORECASE,
@@ -477,7 +629,26 @@ PNG_SUFFIX = re.compile(
 
 _FP_SORT = {"f16": 0, "f32": 1, "f64": 2}
 
+_GEMM_TRANS_RANK = {"NN": 0, "NT": 1, "TN": 2, "TT": 3}
+
 MAX_PNGS_PER_FUNCTION_GROUP_PAGE = 4
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+# plot.py batch groupings (same as benchmark_plot.sh).
+_PLOT_GROUPS: dict[int, List[List[str]]] = {
+    1: [["dot", "axpy", "scal", "nrm2"]],
+    2: [
+        ["hemv", "her2", "hpr2", "her", "hpr", "hpmv"],
+        ["gemv", "trmv", "tpmv", "tbmv"],
+        ["ger", "syr", "spr", "syr2", "spr2"],
+    ],
+    3: [
+        ["gemm", "trmm", "symm"],
+        ["gemm", "syrk", "syrkx", "syr2k"],
+        ["gemm", "hemm", "herk", "herkx", "her2k"],
+    ],
+}
 
 
 def _plot_image_sort_key(fp: str, rc: str) -> Tuple[int, str, str]:
@@ -487,6 +658,13 @@ def _plot_image_sort_key(fp: str, rc: str) -> Tuple[int, str, str]:
 def _fp_sort_key(fp: str) -> Tuple[int, str]:
     k = fp.lower()
     return (_FP_SORT.get(k, 99), k)
+
+
+def _plot_prefix_sort_key(prefix: str) -> Tuple[int, int, str]:
+    m = re.match(r"^gemm_(NN|NT|TN|TT)$", prefix, re.IGNORECASE)
+    if m:
+        return (0, _GEMM_TRANS_RANK.get(m.group(1).upper(), 99), prefix.lower())
+    return (1, 0, prefix.lower())
 
 
 def _dot_rel_prefix(uri: str) -> str:
@@ -501,16 +679,17 @@ def _dot_rel_prefix(uri: str) -> str:
 
 def _rel_for_report(asset: Path, report_out: Optional[Path], base: Path) -> str:
     ar = asset.resolve()
+    anchors: List[Path] = []
     if report_out is not None:
-        mp = report_out.parent.resolve()
+        anchors.append(report_out.parent.resolve())
+    anchors.append(base.resolve())
+    for ap in anchors:
         try:
-            return _dot_rel_prefix(str(ar.relative_to(mp)))
+            return _dot_rel_prefix(str(ar.relative_to(ap)))
         except ValueError:
-            pass
-    try:
-        return _dot_rel_prefix(str(ar.relative_to(base.resolve())))
-    except ValueError:
-        return _dot_rel_prefix(str(ar))
+            continue
+    fallback = (report_out.parent if report_out else base).resolve()
+    return _dot_rel_prefix(os.path.relpath(str(ar), str(fallback)))
 
 
 def _png_data_uri(path: Path) -> str:
@@ -520,15 +699,40 @@ def _png_data_uri(path: Path) -> str:
     return f"data:image/png;base64,{b64}"
 
 
+def _report_img_root(report_out: Path) -> Path:
+    """Directory beside the report: ``{stem}_img`` (e.g. ``report2_img`` for ``report2.md``)."""
+    return report_out.parent / f"{report_out.stem}_img"
+
+
+def _stage_plot_png_for_report(
+    img_path: Path,
+    *,
+    report_out: Path,
+    img_root: Path,
+    blas_num: int,
+) -> str:
+    """Copy PNG into ``{stem}_img/blas{L}/``; return relative URI for ``<img src>``."""
+    dest = img_root / f"blas{blas_num}" / img_path.name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(img_path, dest)
+    return _dot_rel_prefix(str(dest.relative_to(report_out.parent.resolve())))
+
+
 def _img_src_for_report(
     asset: Path,
     report_out: Optional[Path],
     base: Path,
     *,
     embed: bool,
+    img_root: Optional[Path] = None,
+    blas_num: Optional[int] = None,
 ) -> str:
     if embed:
         return _png_data_uri(asset)
+    if report_out is not None and img_root is not None and blas_num is not None:
+        return _stage_plot_png_for_report(
+            asset, report_out=report_out, img_root=img_root, blas_num=blas_num
+        )
     return _rel_for_report(asset, report_out, base)
 
 
@@ -562,6 +766,237 @@ def _index_plots(plot_dir: Path) -> DefaultDict[Tuple[str, str], Dict[str, Path]
     return by
 
 
+def _plot_pair_folder(
+    tag_a: str,
+    tag_b: str,
+    *,
+    label_a: Optional[str] = None,
+    label_b: Optional[str] = None,
+    plots_pair: Optional[str] = None,
+    col_a_blas_subdir: Optional[str] = None,
+    col_b_blas_subdir: Optional[str] = None,
+    plot_tag1: Optional[str] = None,
+    plot_tag2: Optional[str] = None,
+) -> str:
+    """Perf-vs-perf output folder name (must match plot.py)."""
+    if plots_pair:
+        return plots_pair
+    first = plot_tag1 or label_a or col_a_blas_subdir or tag_a
+    second = plot_tag2 or label_b or col_b_blas_subdir or tag_b
+    return f"{first}_{second}"
+
+
+def _plot_pair_candidates(
+    tag_a: str,
+    tag_b: str,
+    *,
+    label_a: Optional[str] = None,
+    label_b: Optional[str] = None,
+    plots_pair: Optional[str] = None,
+    col_a_blas_subdir: Optional[str] = None,
+    col_b_blas_subdir: Optional[str] = None,
+) -> List[str]:
+    """Folder names to probe for existing plot PNG trees."""
+    primary = _plot_pair_folder(
+        tag_a,
+        tag_b,
+        label_a=label_a,
+        label_b=label_b,
+        plots_pair=plots_pair,
+        col_a_blas_subdir=col_a_blas_subdir,
+        col_b_blas_subdir=col_b_blas_subdir,
+    )
+    seen = {primary}
+    out = [primary]
+    for name in (
+        f"{tag_a}_{tag_b}",
+        f"{tag_a}_{col_b_blas_subdir or tag_b}",
+        f"{label_a or tag_a}_{label_b or tag_b}",
+    ):
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def _plot_search_roots(base: Path, plots_base: Optional[Path]) -> List[Path]:
+    """Directories to search for plot PNGs (never implicit parent of --base)."""
+    roots: List[Path] = []
+    for p in (base, plots_base):
+        if p is None:
+            continue
+        rp = p.resolve()
+        if rp not in roots:
+            roots.append(rp)
+    return roots
+
+
+def _resolved_plot_dir(
+    base: Path,
+    blas_num: int,
+    plot_pair: str,
+    plot_subdir: str,
+    *,
+    plots_base: Optional[Path] = None,
+    pair_candidates: Optional[Sequence[str]] = None,
+) -> Optional[Path]:
+    """Existing plot directory for one BLAS level, or None."""
+    pairs: List[str] = [plot_pair]
+    if pair_candidates:
+        for name in pair_candidates:
+            if name not in pairs:
+                pairs.append(name)
+    for root in _plot_search_roots(base, plots_base):
+        for pair in pairs:
+            found = _plot_dir_for_level(root, blas_num, pair, plot_subdir)
+            if found.is_dir():
+                return found
+    return None
+
+
+def _plot_tag2_for_cli(
+    label_b: Optional[str],
+    col_b_blas_subdir: Optional[str],
+    tag_b: str,
+) -> Optional[str]:
+    pt2 = label_b or col_b_blas_subdir or tag_b
+    return pt2 if pt2 != tag_b else None
+
+
+def _run_plot_py_group(
+    *,
+    base: Path,
+    blas_num: int,
+    functions: Sequence[str],
+    tag_a: str,
+    tag_b: str,
+    label_a: Optional[str],
+    label_b: Optional[str],
+    tag_parent_a: bool,
+    tree_a: Optional[str],
+    tree_b: Optional[str],
+    col_a_blas_subdir: Optional[str],
+    col_b_blas_subdir: Optional[str],
+    combine_gemm_trans: bool = False,
+) -> None:
+    cmd: List[str] = [
+        sys.executable,
+        str(SCRIPT_DIR / "plot.py"),
+        "--base",
+        str(base.resolve()),
+        "-l",
+        f"blas{blas_num}",
+        "-t",
+        tag_a,
+        "--tag2",
+        tag_b,
+        "--perf_vs_perf",
+    ]
+    if tag_parent_a:
+        cmd.append("--tag-parent")
+    if tree_a:
+        cmd.extend(["--a-tree", tree_a])
+    if tree_b:
+        cmd.extend(["--b-tree", tree_b])
+    if col_a_blas_subdir:
+        cmd.extend(["--a-blas-subdir", col_a_blas_subdir])
+    if col_b_blas_subdir:
+        cmd.extend(["--b-blas-subdir", col_b_blas_subdir])
+    la = label_a or tag_a
+    lb = label_b or tag_b
+    if la != tag_a:
+        cmd.extend(["--label-a", la])
+    if lb != tag_b:
+        cmd.extend(["--label-b", lb])
+    pt2 = _plot_tag2_for_cli(label_b, col_b_blas_subdir, tag_b)
+    if pt2:
+        cmd.extend(["--plot-tag2", pt2])
+    if blas_num >= 2:
+        cmd.extend(["--label1", "M", "--label2", "N"])
+    if combine_gemm_trans:
+        cmd.append("--combine-gemm-trans")
+    for fn in functions:
+        cmd.extend(["-f", fn])
+    print(f"benchmark_report: running plot.py blas{blas_num} ({' '.join(functions)})", file=sys.stderr)
+    subprocess.run(cmd, cwd=str(SCRIPT_DIR), check=False)
+
+
+def _clear_plot_level_dir(base: Path, blas_num: int, plot_pair: str, plot_subdir: str) -> None:
+    """Remove stale PNGs before regenerating a level."""
+    primary = (base / plot_pair / f"blas{blas_num}" / plot_subdir).resolve()
+    legacy = (base / f"blas{blas_num}" / plot_pair / plot_subdir).resolve()
+    for path in (primary, legacy):
+        if path.is_dir():
+            shutil.rmtree(path)
+
+
+def generate_perf_plots_if_missing(
+    base: Path,
+    blas_num: int,
+    *,
+    plot_pair: str,
+    tag_a: str,
+    tag_b: str,
+    label_a: Optional[str],
+    label_b: Optional[str],
+    plot_subdir: str,
+    plots_base: Optional[Path],
+    pair_candidates: Sequence[str],
+    tag_parent_a: bool,
+    tree_a: Optional[str],
+    tree_b: Optional[str],
+    col_a_blas_subdir: Optional[str],
+    col_b_blas_subdir: Optional[str],
+    refresh_plots: bool = True,
+    combine_gemm_trans: bool = False,
+) -> None:
+    existing = _resolved_plot_dir(
+        base,
+        blas_num,
+        plot_pair,
+        plot_subdir,
+        plots_base=plots_base,
+        pair_candidates=pair_candidates if not refresh_plots else None,
+    )
+    if existing is not None and not refresh_plots:
+        return
+    if refresh_plots or existing is None:
+        _clear_plot_level_dir(base, blas_num, plot_pair, plot_subdir)
+    groups = _PLOT_GROUPS.get(blas_num, [])
+    for group in groups:
+        _run_plot_py_group(
+            base=base,
+            blas_num=blas_num,
+            functions=group,
+            tag_a=tag_a,
+            tag_b=tag_b,
+            label_a=label_a,
+            label_b=label_b,
+            tag_parent_a=tag_parent_a,
+            tree_a=tree_a,
+            tree_b=tree_b,
+            col_a_blas_subdir=col_a_blas_subdir,
+            col_b_blas_subdir=col_b_blas_subdir,
+            combine_gemm_trans=combine_gemm_trans,
+        )
+
+
+def _plot_dir_for_level(
+    base: Path,
+    blas_num: int,
+    plot_pair: str,
+    plot_subdir: str,
+) -> Path:
+    """Same layout as plot.py --perf_vs_perf: {pair}/blas{L}/plots_subdir/ (legacy fallback)."""
+    primary = (base / plot_pair / f"blas{blas_num}" / plot_subdir).resolve()
+    legacy = (base / f"blas{blas_num}" / plot_pair / plot_subdir).resolve()
+    if primary.is_dir():
+        return primary
+    if legacy.is_dir():
+        return legacy
+    return primary
+
+
 def benchmark_report_plots_section(
     base: Path,
     tag_a: str,
@@ -570,15 +1005,98 @@ def benchmark_report_plots_section(
     report_out: Optional[Path],
     *,
     embed: bool = False,
+    label_a: Optional[str] = None,
+    label_b: Optional[str] = None,
+    plots_pair: Optional[str] = None,
+    tag_parent_a: bool = False,
+    tree_a: Optional[str] = None,
+    tree_b: Optional[str] = None,
+    col_a_blas_subdir: Optional[str] = None,
+    col_b_blas_subdir: Optional[str] = None,
+    generate_plots: bool = True,
+    plots_base: Optional[Path] = None,
+    refresh_plots: bool = True,
+    enabled_blas: Tuple[bool, bool, bool] = (True, True, True),
+    col_a_blas: Tuple[Optional[str], Optional[str], Optional[str]] = (None, None, None),
+    col_b_blas: Tuple[Optional[str], Optional[str], Optional[str]] = (None, None, None),
+    combine_gemm_trans: bool = False,
 ) -> str:
     """
     Sequential HTML images per function group, ordered s, d, c, z (f32_r, f64_r, f32_c, f64_c).
     """
+    levels = list(
+        _iter_blas_levels(
+            base,
+            tag_a,
+            tag_b,
+            enabled_blas,
+            col_a_blas,
+            col_b_blas,
+            tag_parent_a=tag_parent_a,
+            tree_a=tree_a,
+            tree_b=tree_b,
+            col_a_blas_subdir=col_a_blas_subdir,
+            col_b_blas_subdir=col_b_blas_subdir,
+        )
+    )
+    if not levels:
+        return ""
+    pair = _plot_pair_folder(
+        tag_a,
+        tag_b,
+        label_a=label_a,
+        label_b=label_b,
+        plots_pair=plots_pair,
+        col_a_blas_subdir=col_a_blas_subdir,
+        col_b_blas_subdir=col_b_blas_subdir,
+        plot_tag2=_plot_tag2_for_cli(label_b, col_b_blas_subdir, tag_b),
+    )
+    pair_candidates = _plot_pair_candidates(
+        tag_a,
+        tag_b,
+        label_a=label_a,
+        label_b=label_b,
+        plots_pair=plots_pair,
+        col_a_blas_subdir=col_a_blas_subdir,
+        col_b_blas_subdir=col_b_blas_subdir,
+    )
+    if generate_plots:
+        for blas_num, _dir_a, _dir_b in levels:
+            generate_perf_plots_if_missing(
+                base,
+                blas_num,
+                plot_pair=pair,
+                tag_a=tag_a,
+                tag_b=tag_b,
+                label_a=label_a,
+                label_b=label_b,
+                plot_subdir=plot_subdir,
+                plots_base=plots_base,
+                pair_candidates=pair_candidates,
+                tag_parent_a=tag_parent_a,
+                tree_a=tree_a,
+                tree_b=tree_b,
+                col_a_blas_subdir=col_a_blas_subdir,
+                col_b_blas_subdir=col_b_blas_subdir,
+                refresh_plots=refresh_plots,
+                combine_gemm_trans=combine_gemm_trans,
+            )
+    img_root: Optional[Path] = None
+    if report_out is not None and not embed:
+        img_root = _report_img_root(report_out.resolve())
+        if img_root.is_dir():
+            shutil.rmtree(img_root)
     src_note = (
         "PNG figures are embedded inline (base64 data URIs)."
         if embed
-        else f"Figures from `blasL/{tag_a}_{tag_b}/{plot_subdir}/` (same layout as `plot.py` with "
-        f"`--perf_vs_perf`)."
+        else (
+            f"Figures in `./{report_out.stem}_img/blasL/` next to this report."
+            if img_root is not None
+            else (
+                f"Figures from `{pair}/blasL/{plot_subdir}/` "
+                f"(same layout as `plot.py` with `--perf_vs_perf`; generate with matching `--tag1` / `--tag2`)."
+            )
+        )
     )
     parts: List[str] = [
         "## Plots",
@@ -588,12 +1106,46 @@ def benchmark_report_plots_section(
         "",
     ]
 
-    for blas_num in (1, 2, 3):
-        plot_dir = (base / f"blas{blas_num}" / f"{tag_a}_{tag_b}" / plot_subdir).resolve()
+    for blas_num, _dir_a, _dir_b in levels:
+        plot_dir = _resolved_plot_dir(
+            base,
+            blas_num,
+            pair,
+            plot_subdir,
+            plots_base=plots_base,
+            pair_candidates=pair_candidates,
+        )
         parts.append(f"### blas{blas_num}")
         parts.append("")
-        if not plot_dir.is_dir():
-            parts.append(f"*No directory `{plot_dir}`*")
+        if plot_dir is None:
+            extra_flags = ""
+            if tree_a:
+                extra_flags += f" --a-tree {tree_a}"
+            if tree_b:
+                extra_flags += f" --b-tree {tree_b}"
+            if col_a_blas_subdir:
+                extra_flags += f" --a-blas-subdir {col_a_blas_subdir}"
+            if col_b_blas_subdir:
+                extra_flags += f" --b-blas-subdir {col_b_blas_subdir}"
+            if tag_parent_a:
+                extra_flags += " --tag-parent"
+            la = label_a or tag_a
+            lb = label_b or tag_b
+            if la != tag_a:
+                extra_flags += f" --label-a {la}"
+            if lb != tag_b:
+                extra_flags += f" --label-b {lb}"
+            plot_tag2 = label_b or col_b_blas_subdir or tag_b
+            if plot_tag2 != tag_b:
+                extra_flags += f" --plot-tag2 {plot_tag2}"
+            expected = _plot_dir_for_level(base, blas_num, pair, plot_subdir)
+            parts.append(
+                f"*No directory `{expected}`* — generate plots first, e.g. "
+                f"`./benchmark_plot.sh --benchmark false --plot true "
+                f"--level1 true --level2 true --level3 true "
+                f"--tag1 {tag_a} --tag2 {tag_b} --perf_vs_perf true"
+                f"{extra_flags}`"
+            )
             parts.append("")
             continue
 
@@ -605,7 +1157,10 @@ def benchmark_report_plots_section(
             parts.append("")
             continue
 
-        keys = sorted(indexed.keys(), key=lambda t: (t[0].lower(), _fp_sort_key(t[1])))
+        keys = sorted(
+            indexed.keys(),
+            key=lambda t: (_plot_prefix_sort_key(t[0]), _fp_sort_key(t[1])),
+        )
         for prefix, group in groupby(keys, key=lambda t: t[0]):
             parts.append(f"#### `{html.escape(prefix, quote=False)}`")
             parts.append("")
@@ -630,7 +1185,14 @@ def benchmark_report_plots_section(
                 alt = f"{prefix} {letter}" if letter else f"{prefix} {fp}_{rc}"
                 parts.append(
                     _html_img(
-                        _img_src_for_report(img_path, report_out, base, embed=embed),
+                        _img_src_for_report(
+                            img_path,
+                            report_out,
+                            base,
+                            embed=embed,
+                            img_root=img_root,
+                            blas_num=blas_num,
+                        ),
                         alt,
                     )
                 )
@@ -654,6 +1216,17 @@ def benchmark_report_text(
     include_plots: bool = True,
     report_out: Optional[Path] = None,
     embed: bool = False,
+    tag_parent_a: bool = False,
+    tree_a: Optional[str] = None,
+    tree_b: Optional[str] = None,
+    col_a_blas_subdir: Optional[str] = None,
+    col_b_blas_subdir: Optional[str] = None,
+    plots_pair: Optional[str] = None,
+    generate_plots: bool = True,
+    plots_base: Optional[Path] = None,
+    refresh_plots: bool = True,
+    enabled_blas: Tuple[bool, bool, bool] = (True, True, True),
+    combine_gemm_trans: bool = False,
 ) -> str:
     """Assemble full benchmark report Markdown."""
     out_lines: List[str] = [
@@ -662,19 +1235,47 @@ def benchmark_report_text(
         f"Base: `{base}`",
         "",
     ]
-    for n in (1, 2, 3):
-        oa = col_a_blas[n - 1]
-        ob = col_b_blas[n - 1]
-        dir_a = resolve_dir(base, n, tag_a, oa)
-        dir_b = resolve_dir(base, n, tag_b, ob)
+    for n, dir_a, dir_b in _iter_blas_levels(
+        base,
+        tag_a,
+        tag_b,
+        enabled_blas,
+        col_a_blas,
+        col_b_blas,
+        tag_parent_a=tag_parent_a,
+        tree_a=tree_a,
+        tree_b=tree_b,
+        col_a_blas_subdir=col_a_blas_subdir,
+        col_b_blas_subdir=col_b_blas_subdir,
+    ):
         out_lines.append(benchmark_report_section(n, dir_a, dir_b, label_a, label_b))
 
     if include_plots:
-        out_lines.append(
-            benchmark_report_plots_section(
-                base, tag_a, tag_b, plots_subdir, report_out, embed=embed
-            )
+        plots_md = benchmark_report_plots_section(
+            base,
+            tag_a,
+            tag_b,
+            plots_subdir,
+            report_out,
+            embed=embed,
+            label_a=label_a,
+            label_b=label_b,
+            plots_pair=plots_pair,
+            tag_parent_a=tag_parent_a,
+            tree_a=tree_a,
+            tree_b=tree_b,
+            col_a_blas_subdir=col_a_blas_subdir,
+            col_b_blas_subdir=col_b_blas_subdir,
+            generate_plots=generate_plots,
+            plots_base=plots_base,
+            refresh_plots=refresh_plots,
+            enabled_blas=enabled_blas,
+            col_a_blas=col_a_blas,
+            col_b_blas=col_b_blas,
+            combine_gemm_trans=combine_gemm_trans,
         )
+        if plots_md.strip():
+            out_lines.append(plots_md)
 
     return "\n".join(out_lines).rstrip() + "\n"
 
@@ -713,6 +1314,17 @@ def benchmark_report(
     plots_subdir: str = "plots_perf_vs_perf",
     no_plots: bool = False,
     embed: bool = False,
+    tag_parent_a: bool = False,
+    tree_a: Optional[str] = None,
+    tree_b: Optional[str] = None,
+    col_a_blas_subdir: Optional[str] = None,
+    col_b_blas_subdir: Optional[str] = None,
+    plots_pair: Optional[str] = None,
+    generate_plots: bool = True,
+    plots_base: Optional[Path] = None,
+    refresh_plots: bool = True,
+    enabled_blas: Tuple[bool, bool, bool] = (True, True, True),
+    combine_gemm_trans: bool = False,
 ) -> int:
     """Build report, write Markdown (or stdout), optionally emit PowerPoint via pandoc."""
     label_a = label_a or tag_a
@@ -729,6 +1341,17 @@ def benchmark_report(
         include_plots=not no_plots,
         report_out=output,
         embed=embed,
+        tag_parent_a=tag_parent_a,
+        tree_a=tree_a,
+        tree_b=tree_b,
+        col_a_blas_subdir=col_a_blas_subdir,
+        col_b_blas_subdir=col_b_blas_subdir,
+        plots_pair=plots_pair,
+        generate_plots=generate_plots,
+        plots_base=plots_base,
+        refresh_plots=refresh_plots,
+        enabled_blas=enabled_blas,
+        combine_gemm_trans=combine_gemm_trans,
     )
     if output:
         output.write_text(text, encoding="utf-8")
@@ -756,10 +1379,49 @@ def main() -> int:
         "--base",
         type=Path,
         default=script_parent,
-        help="Root containing blas1/, blas2/, blas3/ (or override paths).",
+        help="Root directory for benchmark result trees.",
     )
-    p.add_argument("--a", dest="tag_a", required=True, help="Column A tag (folder name under blasL/).")
-    p.add_argument("--b", dest="tag_b", required=True, help="Column B tag (folder name under blasL/).")
+    p.add_argument(
+        "--tag-parent",
+        action="store_true",
+        help="Column A only: use {base}/{tag_a}/blas{L}/ instead of {base}/blas{L}/{tag_a}/.",
+    )
+    p.add_argument(
+        "--a-tree",
+        default=None,
+        metavar="DIR",
+        help="Column A data folder under --base: {tree}/blas{L}/ only (no arch subfolder under blasL).",
+    )
+    p.add_argument(
+        "--b-tree",
+        default=None,
+        metavar="DIR",
+        help="Column B data folder under --base: {tree}/blas{L}/ only (no arch subfolder under blasL).",
+    )
+    p.add_argument(
+        "--a-blas-subdir",
+        default=None,
+        metavar="NAME",
+        help="Column A arch label; with --a-tree, does not add a path level (use {tree}/blas{L}/).",
+    )
+    p.add_argument(
+        "--b-blas-subdir",
+        default=None,
+        metavar="NAME",
+        help="Column B arch label; with --b-tree, does not add a path level. Without --b-tree, uses {tag}/blas{L}/NAME/.",
+    )
+    p.add_argument(
+        "--a",
+        dest="tag_a",
+        required=True,
+        help="Column A tag (--tag-parent: top-level folder under --base).",
+    )
+    p.add_argument(
+        "--b",
+        dest="tag_b",
+        required=True,
+        help="Column B tag (default {base}/blas{L}/{tag_b}/; with --b-blas-subdir, parent folder).",
+    )
     p.add_argument(
         "--label-a",
         default=None,
@@ -783,6 +1445,26 @@ def main() -> int:
             metavar="RELPATH",
             help=f"Override directory for column B blas{n} (relative to --base).",
         )
+    p.add_argument(
+        "--no-blas1",
+        action="store_true",
+        help="Skip blas1 tables and plots.",
+    )
+    p.add_argument(
+        "--no-blas2",
+        action="store_true",
+        help="Skip blas2 tables and plots.",
+    )
+    p.add_argument(
+        "--no-blas3",
+        action="store_true",
+        help="Skip blas3 tables and plots.",
+    )
+    p.add_argument(
+        "--combine-gemm-trans",
+        action="store_true",
+        help="Pass --combine-gemm-trans to plot.py (single chart per type, all trans pairs).",
+    )
     p.add_argument("-o", "--output", type=Path, default=None, help="Write Markdown to this file (default: stdout).")
     p.add_argument(
         "--ppt",
@@ -795,6 +1477,12 @@ def main() -> int:
         default=None,
         metavar="PATH",
         help="Output .pptx path for --ppt (default: same path as -o with .pptx extension).",
+    )
+    p.add_argument(
+        "--plots-pair",
+        default=None,
+        metavar="NAME",
+        help="Plot folder under blasL/ (default: {tag_a}_{label_b or tag_b}, e.g. B200_OP_gfx950).",
     )
     p.add_argument(
         "--plots-subdir",
@@ -811,6 +1499,23 @@ def main() -> int:
         "--embed",
         action="store_true",
         help="Inline plot PNGs as base64 data URIs in the Markdown (self-contained file).",
+    )
+    p.add_argument(
+        "--plots-base",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Also search this directory for plot PNG trees (default: --base and its parent).",
+    )
+    p.add_argument(
+        "--no-generate-plots",
+        action="store_true",
+        help="Do not run plot.py when PNG folders are missing (only embed existing plots).",
+    )
+    p.add_argument(
+        "--no-refresh-plots",
+        action="store_true",
+        help="Keep existing perf-vs-perf PNGs under --base (default: delete and regenerate each run).",
     )
     args = p.parse_args()
     if args.ppt and not args.output:
@@ -833,6 +1538,17 @@ def main() -> int:
         plots_subdir=args.plots_subdir,
         no_plots=args.no_plots,
         embed=args.embed,
+        tag_parent_a=args.tag_parent,
+        tree_a=args.a_tree,
+        tree_b=args.b_tree,
+        col_a_blas_subdir=args.a_blas_subdir,
+        col_b_blas_subdir=args.b_blas_subdir,
+        plots_pair=args.plots_pair,
+        generate_plots=not args.no_generate_plots,
+        plots_base=args.plots_base,
+        refresh_plots=not args.no_refresh_plots,
+        enabled_blas=(not args.no_blas1, not args.no_blas2, not args.no_blas3),
+        combine_gemm_trans=args.combine_gemm_trans,
     )
 
 

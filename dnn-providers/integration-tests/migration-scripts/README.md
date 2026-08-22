@@ -40,6 +40,53 @@ VERIFIED at behavior level — every C++ PASS has a bundle that also PASSes
 graph can round-trip perfectly on disk yet fail to run — Hop D is what makes
 "turn off the C++ tests, lose nothing" a checked fact rather than a hope.
 
+### Quick path: convert one existing C++ test (no full pipeline needed)
+
+Hops B–D (`place_bundles.py`, `verify_migration.py`, `diff_coverage.py`) exist
+to migrate a whole suite in bulk with a byte- and behavior-level proof. For
+**one** test, skip them and go straight from capture to import — two steps:
+
+```bash
+# Step 1: Capture — dump the graph(s) for just this test
+./build/bin/hipdnn_integration_tests --capture-bundles /tmp/captured \
+    --gtest_filter='Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/*'
+
+# Step 2: Import — merge each captured graph into the bundle tree
+for graph in /tmp/captured/*/*/*.json; do
+    [[ "$graph" == *.meta.json ]] && continue
+    python3 migration-scripts/import_graph.py \
+        --graph "$graph" \
+        --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
+        --meta reference_source="c++ integration suite: $(basename "$(dirname "$graph")")"
+done
+```
+
+`import_graph.py` is idempotent and dedup-aware (see Step 5 below): it
+appends a new sweep case if a matching topology already exists, creates a
+new template+sweep if not, and reports `DUPLICATE` if the exact case is
+already bundled. Verify each printed `--gtest_filter` line runs and passes
+as a bundle case, then delete the C++ `TEST_P`/`INSTANTIATE_TEST_SUITE_P`
+registration for that case.
+
+**This produces a graph-only bundle** — `--capture-bundles` dumps the graph
+topology only, never golden output tensors, so `import_graph.py` has nothing
+to attach as `.tensors.dvc`/`.bin`. Golden data is optional (see [RFC 0011
+§4.1](../../../projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md));
+a graph-only case still runs and is verified against the GPU/CPU reference
+executor. Generate and commit golden tensors separately (a per-op generator
+script, see `integration-test-bundles/README.md`) only if you want the more
+sensitive golden-comparison mode for that case too.
+
+**Note:** `import_graph.py` does not read the `.meta.json` sidecar that
+`--capture-bundles` writes next to each graph — pass `--seed` and
+`--meta inputs=<json>` explicitly (copy the values out of the `.meta.json`)
+if you need the imported case's seed/input-range metadata to match the
+original C++ test exactly.
+
+Use the full pipeline below instead when migrating many tests/suites at
+once and you want the Hop C/D byte- and behavior-level proof that nothing
+was lost.
+
 ## How to Run
 
 ### Prerequisites
@@ -47,13 +94,13 @@ graph can round-trip perfectly on disk yet fail to run — Hop D is what makes
 Build the integration test binary (no GPU required for Layers 1-3):
 
 ```bash
-cmake --build build --target integration_tests
+cmake --build build --target hipdnn_integration_tests
 ```
 
 ### Automated: Full pipeline
 
 ```bash
-migration-scripts/run_capture_pipeline.sh build/bin/integration_tests
+migration-scripts/run_capture_pipeline.sh build/bin/hipdnn_integration_tests
 ```
 
 This runs Hops A–D plus the supporting checks in sequence. Pass
@@ -64,7 +111,7 @@ This runs Hops A–D plus the supporting checks in sequence. Pass
 #### Step 1: Census — see what exists
 
 ```bash
-python3 migration-scripts/census.py build/bin/integration_tests
+python3 migration-scripts/census.py build/bin/hipdnn_integration_tests
 ```
 
 Runs `--gtest_list_tests` and classifies every test case as `graph`
@@ -73,7 +120,7 @@ Runs `--gtest_list_tests` and classifies every test case as `graph`
 #### Step 2: Capture (Hop A) — serialize C++ graphs as JSON
 
 ```bash
-./build/bin/integration_tests --capture-bundles captured_bundles \
+./build/bin/hipdnn_integration_tests --capture-bundles captured_bundles \
     --gtest_filter='*IntegrationGpu*'
 ```
 
@@ -94,7 +141,7 @@ captured_bundles/{SuiteName}/{CaseName}/{CaseName}.meta.json
 ```bash
 python3 migration-scripts/place_bundles.py \
     --capture-dir captured_bundles \
-    --output-dir dnn-providers/integration-tests/integration_test_bundles
+    --output-dir dnn-providers/integration-tests/integration-test-bundles
 ```
 
 Groups captured graphs by **structure** (node types + wiring + tensor
@@ -107,7 +154,7 @@ Use `find_case.py` to query cases by any parameter (see below).
 python3 migration-scripts/verify_migration.py \
     --census census.json \
     --capture-dir captured_bundles \
-    --bundle-dir integration_test_bundles
+    --bundle-dir integration-test-bundles
 ```
 
 Three-way reconciliation: census count == captured count == placed count,
@@ -118,7 +165,7 @@ plus per-case byte-exact comparison of graph AND metadata (seed, inputs).
 ```bash
 python3 migration-scripts/import_graph.py \
     --graph path/to/graph.json \
-    --bundle-dir integration_test_bundles/ \
+    --bundle-dir integration-test-bundles/ \
     --meta reference_source="c++ integration suite: Suite.Case"
 ```
 
@@ -198,7 +245,7 @@ New tests should be added directly as bundle cases — no C++ needed.
 ```bash
 python3 migration-scripts/import_graph.py \
     --graph new_conv.json \
-    --bundle-dir integration_test_bundles/
+    --bundle-dir integration-test-bundles/
 ```
 
 What happens:
@@ -216,7 +263,7 @@ What happens:
 
 ```
   appended case '1_16_3_3_bfp16_nhwc_dil1x1_prepad1x1_postpad1x1' to
-    integration_test_bundles/quick/ConvolutionFwd/Default/sweep.json
+    integration-test-bundles/quick/ConvolutionFwd/Default/sweep.json
 ```
 
 That case id is the gtest name — it appears in CI logs, `--gtest_filter`,
@@ -249,7 +296,7 @@ integration tests provably loses no coverage for graph+GPU-plugin tests.
 ```bash
 python3 migration-scripts/diff_coverage.py \
     --cpp /tmp/cpp.json --bundle /tmp/bundle.json \
-    --bundle-dir integration_test_bundles
+    --bundle-dir integration-test-bundles
 ```
 
 ## Field Mapping — What Gets Bundled and Where
@@ -261,9 +308,9 @@ python3 migration-scripts/diff_coverage.py \
 | Tensor strides | `generateStrides()` | sweep `values.tensors[uid].strides` | Per-case |
 | data_type | `getDataTypeEnumFromType<T>()` | sweep `values.tensors[uid].data_type` | Per-case |
 | Node attrs | `ConvFpropAttributes` etc. | sweep `values.attributes.<key>` | Per-case, only if varies |
-| Seed | `synthesis().setGlobalSeed()` | sweep `case.metadata.seed` | Per-case metadata |
-| Distribution/range | `SynthesisConfig.fills()` | sweep `case.metadata.inputs.{uid}` | Per-case metadata |
-| Per-op defaults | `SynthesizeInputs.cpp` | **NOT stored** | Re-derived from topology |
+| Seed | `inputFillRecipes().setGlobalSeed()` | sweep `case.metadata.seed` | Per-case metadata |
+| Distribution/range | `InputFillRecipes.fills()` | sweep `case.metadata.inputs.{uid}` | Per-case metadata |
+| Per-op defaults | `FillInputs.cpp` | **NOT stored** | Re-derived from topology |
 | Provenance | (new) | sweep `case.metadata.reference_source` | Per-case metadata |
 
 ## Scripts

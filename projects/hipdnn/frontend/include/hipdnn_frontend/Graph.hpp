@@ -91,6 +91,8 @@
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/MoeGroupedMatmulBwdAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
@@ -128,11 +130,14 @@
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
+#include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
+#include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/ResampleBwdNode.hpp>
 #include <hipdnn_frontend/node/ResampleFwdNode.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
@@ -2405,7 +2410,18 @@ public:
         notes.reserve(backendNotes.size());
         for(auto note : backendNotes)
         {
-            notes.push_back(fromHipdnnBehaviorNote(note));
+            // A note this frontend does not recognize is dropped rather than
+            // surfaced: a newer backend may define notes past this frontend's
+            // range, and reporting them would require inventing a meaning.
+            if(const auto mapped = fromHipdnnBehaviorNote(note); mapped.has_value())
+            {
+                notes.push_back(*mapped);
+            }
+            else
+            {
+                HIPDNN_FE_LOG_INFO(
+                    "Skipping behavior note unknown to this frontend: " << static_cast<int>(note));
+            }
         }
 
         return {ErrorCode::OK, ""};
@@ -5415,6 +5431,124 @@ public:
         return c;
     }
 
+    /**
+     * @brief Performs forward mixture-of-experts grouped matrix multiplication.
+     *
+     * `token`, `weight`, and `firstTokenOffset` are always required. Routing tensors
+     * are mode-dependent: `tokenIndex` is required for `GATHER` and `SCATTER`;
+     * `tokenKs` and a positive `top_k` not exceeding the expert count are required
+     * for `SCATTER`.
+     *
+     * @param token Token activations.
+     * @param weight Per-expert weight matrices, shaped `[experts, K, N]`.
+     * @param firstTokenOffset First routed-token offset for every batch/expert pair.
+     * @param tokenIndex Source-token index, or `nullptr` for `NONE`.
+     * @param tokenKs Expert index for each routed token, or `nullptr` unless `SCATTER`.
+     * @param attributes Routing configuration including mode and top_k.
+     * @return Output tensor.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes>
+        moe_grouped_matmul(std::shared_ptr<TensorAttributes> token,
+                           std::shared_ptr<TensorAttributes> weight,
+                           std::shared_ptr<TensorAttributes> firstTokenOffset,
+                           std::shared_ptr<TensorAttributes> tokenIndex,
+                           std::shared_ptr<TensorAttributes> tokenKs,
+                           MoeGroupedMatmulAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("MoeGroupedMatmul_" + std::to_string(_sub_nodes.size()));
+        }
+        if(token->get_name().empty())
+        {
+            token->set_name(attributes.get_name() + "::TOKEN");
+        }
+        if(weight->get_name().empty())
+        {
+            weight->set_name(attributes.get_name() + "::WEIGHT");
+        }
+        if(firstTokenOffset->get_name().empty())
+        {
+            firstTokenOffset->set_name(attributes.get_name() + "::FIRST_TOKEN_OFFSET");
+        }
+        if(tokenIndex && tokenIndex->get_name().empty())
+        {
+            tokenIndex->set_name(attributes.get_name() + "::TOKEN_INDEX");
+        }
+        if(tokenKs && tokenKs->get_name().empty())
+        {
+            tokenKs->set_name(attributes.get_name() + "::TOKEN_KS");
+        }
+
+        auto output = outputTensor(attributes.get_name() + "::OUTPUT");
+        attributes.set_token(std::move(token));
+        attributes.set_weight(std::move(weight));
+        attributes.set_first_token_offset(std::move(firstTokenOffset));
+        attributes.set_token_index(std::move(tokenIndex));
+        attributes.set_token_ks(std::move(tokenKs));
+        attributes.set_output(output);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<MoeGroupedMatmulNode>(std::move(attributes), graph_attributes));
+        return output;
+    }
+
+    /**
+     * @brief Performs backward mixture-of-experts grouped matrix multiplication.
+     *
+     * Computes `dweight` from `dOutput`, `token`, and `firstTokenOffset`. NONE-mode
+     * routing only — there is no mode/top_k/token-index/token-ks support. `dweight` is
+     * shaped `[firstTokenOffset.dim[0], token.dim[2], dOutput.dim[2]]`; leaving its
+     * dimensions unset infers that shape, and supplying them validates against it.
+     *
+     * @param dOutput Output gradient, shaped `[1, tokens, N]`.
+     * @param token Token activations, shaped `[1, tokens, K]`.
+     * @param firstTokenOffset First routed-token offset for every expert, shaped `[experts, 1, 1]`.
+     * @param attributes Operation configuration.
+     * @return Weight gradient tensor.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes>
+        moe_grouped_matmul_bwd(std::shared_ptr<TensorAttributes> dOutput,
+                               std::shared_ptr<TensorAttributes> token,
+                               std::shared_ptr<TensorAttributes> firstTokenOffset,
+                               MoeGroupedMatmulBwdAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("MoeGroupedMatmulBwd_" + std::to_string(_sub_nodes.size()));
+        }
+        // Null tensors are tolerated here so the error surfaces from pre_validate_node() as a
+        // missing-input error rather than a crash while auto-naming.
+        if(dOutput && dOutput->get_name().empty())
+        {
+            dOutput->set_name(attributes.get_name() + "::DOUTPUT");
+        }
+        if(token && token->get_name().empty())
+        {
+            token->set_name(attributes.get_name() + "::TOKEN");
+        }
+        if(firstTokenOffset && firstTokenOffset->get_name().empty())
+        {
+            firstTokenOffset->set_name(attributes.get_name() + "::FIRST_TOKEN_OFFSET");
+        }
+
+        auto dweight = outputTensor(attributes.get_name() + "::DWEIGHT");
+
+        attributes.set_doutput(std::move(dOutput));
+        attributes.set_token(std::move(token));
+        attributes.set_first_token_offset(std::move(firstTokenOffset));
+        attributes.set_dweight(dweight);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<MoeGroupedMatmulBwdNode>(std::move(attributes), graph_attributes));
+
+        return dweight;
+    }
+
     /** @brief Add a custom operation to the graph
      *
      * Custom ops let users coordinate directly with plugins without requiring
@@ -5723,6 +5857,49 @@ public:
             std::make_shared<ResampleFwdNode>(std::move(attributes), graph_attributes));
 
         return y;
+    }
+
+    /**
+     * @brief Add a resample backward (pooling gradient) operation to the graph
+     *
+     * @param dy: Input gradient tensor
+     * @param attributes: Resample backward operation attributes
+     * @param index: Optional max-pool index tensor produced by resample_fwd
+     * @return dx: Output gradient tensor
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> resample_bwd(std::shared_ptr<TensorAttributes> dy,
+                                                   ResampleBwdAttributes attributes,
+                                                   std::shared_ptr<TensorAttributes> index
+                                                   = nullptr)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("ResampleBwd_" + std::to_string(_sub_nodes.size()));
+        }
+        if(dy->get_name().empty())
+        {
+            dy->set_name(attributes.get_name() + "::DY");
+        }
+        if(index && index->get_name().empty())
+        {
+            index->set_name(attributes.get_name() + "::INDEX");
+        }
+
+        auto dx = outputTensor(attributes.get_name() + "::DX");
+
+        attributes.set_dy(std::move(dy));
+        if(index)
+        {
+            attributes.set_index(std::move(index));
+        }
+        attributes.set_dx(dx);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ResampleBwdNode>(std::move(attributes), graph_attributes));
+
+        return dx;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

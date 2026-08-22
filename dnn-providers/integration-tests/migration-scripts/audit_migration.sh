@@ -13,13 +13,13 @@
 #
 # Usage:
 #   audit_migration.sh [work_dir] [bundle_dir]
-#   (defaults: work_dir=/tmp/almiopen2279, bundle_dir=../integration_test_bundles)
+#   (defaults: work_dir=/tmp/almiopen2279, bundle_dir=../integration-test-bundles)
 #
 set -uo pipefail
 
 WORK="${1:-/tmp/almiopen2279}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUNDLE_DIR="${2:-$(cd "$SCRIPT_DIR/.." && pwd)/integration_test_bundles}"
+BUNDLE_DIR="${2:-$(cd "$SCRIPT_DIR/.." && pwd)/integration-test-bundles}"
 
 FAIL=0
 pass() { echo "  ✅ $*"; }

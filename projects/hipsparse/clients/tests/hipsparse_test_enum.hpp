@@ -23,7 +23,7 @@
 * ************************************************************************ */
 #pragma once
 #include "hipsparse_arguments.hpp"
-#include <hipsparse/hipsparse-version.h>
+#include <hipsparse/hipsparse-config.h>
 template <std::size_t N, typename T>
 static constexpr std::size_t countof2(T (&)[N])
 {
@@ -127,6 +127,7 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(roti) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(scatter) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sctr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(sddmm_batched_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sddmm_coo_aos) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sddmm_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sddmm_csc) \
@@ -135,6 +136,7 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(sparse_to_dense_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sparse_to_dense_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sparse_to_dense_csr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(spgeam_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spgemm_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spgemmreuse_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmat_descr) \

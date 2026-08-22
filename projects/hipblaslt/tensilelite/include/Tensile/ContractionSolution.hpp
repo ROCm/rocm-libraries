@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -200,6 +201,12 @@ namespace TensileLite
         std::array<int, 2> waveGroup;
     };
 
+    struct CustomKernel
+    {
+        std::string name;
+        bool        generated = false;
+    };
+
     struct StreamKSettings
     {
         origami::reduction_t reduction = origami::reduction_t::tree;
@@ -214,6 +221,22 @@ namespace TensileLite
     {
         size_t globalAccumulation = 0;
     };
+
+    /**
+     * Thrown when a launch requests uniform summation order but the resolved
+     * kernel configuration is not row-uniform. A distinct type so the rocblaslt
+     * host layer can map it to rocblaslt_status_invalid_value; a generic
+     * exception would be swallowed and reported as an internal error.
+     */
+    class UniformSummationOrderError : public std::runtime_error
+    {
+    public:
+        explicit UniformSummationOrderError(const std::string& what)
+            : std::runtime_error(what)
+        {
+        }
+    };
+
     /**
      * Represents a single kernel or set of kernels that can perform a single
      * tensor contraction.
@@ -227,7 +250,7 @@ namespace TensileLite
         using Problem             = ContractionProblemGemm;
         using Inputs              = ContractionInputs;
         using GroupedInputs       = ContractionGroupedInputs;
-        using WGMParamsCache      = CacheMap<std::tuple<int32_t, size_t, size_t>, Problem>;
+        using WGMParamsCache      = CacheMap<std::tuple<int32_t, size_t, size_t, size_t>, Problem>;
         using StaggerUParamsCache = CacheMap<std::tuple<size_t, size_t, size_t>, Problem>;
 
         /**
@@ -393,6 +416,11 @@ namespace TensileLite
         // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
+        // Selection-time filter for uniform summation order. Permissive about
+        // facts that only exist at solve(); checkUniformSummationOrder() is
+        // authoritative. Wired into softwarePredicate().
+        bool                 uniformSummationOrderSupported(Problem const&  problem,
+                                                            Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -493,6 +521,7 @@ namespace TensileLite
                         int32_t                             autoWGM,
                         size_t                              autoWGMXCC,
                         size_t                              autoWGMXCCCHUNK,
+                        size_t                              autoWGMXCCSPLITK,
                         size_t                              autoStaggerUMapping,
                         size_t                              autoStaggerU,
                         size_t                              autoStaggerUStrideShift,
@@ -538,7 +567,7 @@ namespace TensileLite
                                       KA&                      args,
                                       StreamKSettings const&   sk,
                                       uint32_t                 autoGsuVal,
-                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;                                      
+                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -668,7 +697,7 @@ namespace TensileLite
         bool                         kernelArgsLog   = false;
         mutable int                  isFallbackCUSol = -1; // -1:unset, 0:false, 1:true
         mutable WGMParamsCache       wgmParamsCache
-            = WGMParamsCache(std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX));
+            = WGMParamsCache(std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX));
         mutable StaggerUParamsCache staggerUParamsCache
             = StaggerUParamsCache(std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX));
 
@@ -679,7 +708,8 @@ namespace TensileLite
         std::shared_ptr<Predicates::Predicate<Hardware>> hardwarePredicate
             = std::make_shared<Predicates::True<Hardware>>();
 
-        SizeMapping sizeMapping;
+        SizeMapping  sizeMapping;
+        CustomKernel customKernel;
 
         InternalArgsSupport internalArgsSupport;
 
@@ -700,9 +730,9 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        std::tuple<int32_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,
-                                                             Hardware const* hardware,
-                                                             uint32_t        skgrid) const;
+        std::tuple<int32_t, size_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,
+                                                                     Hardware const* hardware,
+                                                                     uint32_t        skgrid) const;
         std::tuple<size_t, size_t, size_t>  calculateAutoStaggerU(Problem const&  problem,
                                                                   Hardware const* hardware,
                                                                   uint32_t        skgrid,
@@ -716,6 +746,17 @@ namespace TensileLite
         origami::data_type_t getOrigamiDatatype(Problem const&  problem) const;
         AdaptiveGemmNTAB calculateAdaptiveGemmNTAB(Problem const&  problem,
                                                    Hardware const* hardware) const;
+
+    private:
+        bool handwrittenCustomKernel() const;
+
+        // Launch gate. Call once sk and resolvedGlobalAccumulation are final.
+        void checkUniformSummationOrder(Problem const&         problem,
+                                        Hardware const&        hardware,
+                                        StreamKSettings const& sk,
+                                        size_t                 resolvedGlobalAccumulation,
+                                        uint32_t               gsu,
+                                        void const*            synchronizer) const;
     };
 
     template <typename TAct>

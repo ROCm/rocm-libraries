@@ -28,6 +28,7 @@ import pandas as pd
 from geko import bench, library, logger, optim, search, _set_log_level
 from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe
 from geko.bench.utils import update_lib_source
+from geko.config_generator.constants import VALID_BACKENDS
 from geko.constants import SUPPORTED_ARCH
 from geko.schemas import GemmConfig, RunState
 from geko.utils import parse_devices
@@ -177,13 +178,15 @@ def run_search(
     if devices is None:
         devices = list(range(8))  # Default to all 8 devices if not specified
     devices = parse_devices(devices)
-    output_dir = workdir / "final_libs"
+    final_output_dir = workdir / "final_libs"
+    full_output_dir = workdir / "full_libs"
 
     logger.info("Starting search...")
     logger.info(f"hipBLASLt path: '{hipblaslt_path}'")
     logger.info(f"Log file: '{log_file}'")
     logger.info(f"Working directory: '{workdir}'")
-    logger.info(f"Output directory: '{output_dir}'")
+    logger.info(f"Final output directory: '{final_output_dir}'")
+    logger.info(f"Full output directory: '{full_output_dir}'")
     logger.info(f"Keep threshold: {keep_thr}")
     logger.info(f"Performance threshold: {up_thr}")
 
@@ -245,11 +248,13 @@ def run_search(
 
     if results_dir.is_dir():
         shutil.rmtree(results_dir)
-    if output_dir.is_dir():
-        shutil.rmtree(output_dir)
+    if final_output_dir.is_dir():
+        shutil.rmtree(final_output_dir)
+    if full_output_dir.is_dir():
+        shutil.rmtree(full_output_dir)
 
     logger.info("Analyzing results...")
-    res = optim.analyze(
+    res, full_df = optim.analyze(
         hipblaslt_path,
         lib_dir,
         results_dir,
@@ -264,8 +269,16 @@ def run_search(
 
     if res is not None:
         logger.info("Creating remapped libraries...")
-        library.from_dataframe(res, lib_dir).dump(output_dir)
-        logger.info(f"Final remapped library available in: '{output_dir}'")
+        library.from_dataframe(res, lib_dir, type_override="Equality").dump(final_output_dir)
+        logger.info(f"Final remapped library available in: '{final_output_dir}'")
+
+    logger.info("Creating full optimized libraries...")
+    library.from_full_dataframe(
+        full_df, lib_dir, 
+        match_table_path,
+        type_override="Equality"
+    ).dump(full_output_dir)
+    logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
     logger.info("Search workflow completed successfully!")
     state.optimized = True
@@ -279,6 +292,7 @@ def run_configure(
     keep_thr: float = 0,
     arch: str = "gfx950",
     backend: str = "ductile",
+    search_space: str | None = None,
     workdir: str = "workdir",
     verbose: int = 1,
     bench_freq: bool = False,
@@ -297,6 +311,7 @@ def run_configure(
         keep_thr: Minimum grouped % of total time to keep a GEMM row.
         arch: Target gfx string in constants.SUPPORTED_ARCH.
         backend: "ductile" or "tensile".
+        search_space: "heuristic", "generic", or None (auto from backend).
         workdir: Created if missing; holds run_state.json and outputs above.
         verbose: Logger level via _set_log_level.
         bench_freq: Forwarded to bench.log.summarize when keep_thr > 0
@@ -324,8 +339,8 @@ def run_configure(
     if arch not in SUPPORTED_ARCH:
         raise ValueError(f"Must be one of {SUPPORTED_ARCH}")
 
-    if backend.lower() not in ("ductile", "tensile"):
-        raise ValueError("'backend' must be one of ('ductile', 'tensile')")
+    if backend.lower() not in VALID_BACKENDS:
+        raise ValueError(f"'backend' must be one of {VALID_BACKENDS}")
 
     hipblaslt_path, log_file, workdir, state, state_path = _prepare_workflow_context(
         hipblaslt_path, log_file, workdir, verbose
@@ -337,6 +352,7 @@ def run_configure(
     logger.info(f"Backend: '{backend}'")
     logger.info(f"Working directory: '{workdir}'")
     logger.info(f"Keep threshold: {keep_thr}")
+    logger.info(f"Search space: {search_space}")
 
     _, uniq_df = bench.log.summarize(
         hipblaslt_path,
@@ -365,6 +381,7 @@ def run_configure(
         tuning_dir,
         arch=arch,
         backend=backend,
+        search_space=search_space,
     )
     n_configs = len(gemm_configs)
 
@@ -431,12 +448,14 @@ def run_optimize(
     if devices is None:
         devices = list(range(8))  # Default to all 8 devices if not specified
     devices = parse_devices(devices)
-    output_dir = workdir / "final_libs"
+    final_output_dir = workdir / "final_libs"
+    full_output_dir = workdir / "full_libs"
 
     logger.info("Starting optimization phase...")
     logger.info(f"hipBLASLt path: '{hipblaslt_path}'")
     logger.info(f"Working directory: '{workdir}'")
-    logger.info(f"Output directory: '{output_dir}'")
+    logger.info(f"Final output directory: '{final_output_dir}'")
+    logger.info(f"Full output directory: '{full_output_dir}'")
     logger.info(f"Devices: {devices}")
     logger.info(f"Jobs per device: {n_slots}")
     logger.info(f"Performance threshold: {up_thr}")
@@ -501,13 +520,15 @@ def run_optimize(
     if results_dir.is_dir():
         shutil.rmtree(results_dir)
 
-    if output_dir.is_dir():
-        shutil.rmtree(output_dir)
+    if final_output_dir.is_dir():
+        shutil.rmtree(final_output_dir)
+    if full_output_dir.is_dir():
+        shutil.rmtree(full_output_dir)
 
     log_summary = workdir / "summary.csv"
 
     logger.info("Analyzing results...")
-    res = optim.analyze(
+    res, full_df = optim.analyze(
         hipblaslt_path,
         lib_dir,
         results_dir,
@@ -527,8 +548,18 @@ def run_optimize(
 
     if res is not None:
         logger.info("Creating optimized libraries...")
-        library.from_dataframe(res, lib_dir, type_override="Equality").dump(output_dir)
-        logger.info(f"Final optimized library available in: '{output_dir}'")
+        library.from_dataframe(res, lib_dir, type_override="Equality").dump(final_output_dir)
+        logger.info(f"Final optimized library available in: '{final_output_dir}'")
+
+    logger.info("Creating full optimized libraries...")
+    match_table_path = hipblaslt_path / "build/release/device-library/MatchTable.yaml"
+    library.from_full_dataframe(
+        full_df, 
+        lib_dir,
+        match_table_path,
+        type_override="Equality"
+    ).dump(full_output_dir)
+    logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
     logger.info("Optimization workflow completed successfully!")
 
