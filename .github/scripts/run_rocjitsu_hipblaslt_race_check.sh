@@ -139,11 +139,36 @@ if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
   exit 1
 fi
 
-# The fetched compiler artifact installs the host OpenMP runtime here.
-LLVM_HOST_RUNTIME_DIR="${ROCM_PATH}/lib/llvm/lib/x86_64-unknown-linux-gnu"
-if [[ ! -f "${LLVM_HOST_RUNTIME_DIR}/libomp.so" ]]; then
-  echo "OpenMP runtime not found: ${LLVM_HOST_RUNTIME_DIR}/libomp.so" >&2
+# The compiler artifact layout depends on whether TheRock enables LLVM's host
+# per-target runtime directories. Prefer the flat lib/llvm/lib layout, then the
+# matching host-triple directory when per-target runtime directories are used.
+LLVM_RUNTIME_ROOT="${ROCM_PATH}/lib/llvm/lib"
+if [[ ! -d "${LLVM_RUNTIME_ROOT}" ]]; then
+  echo "LLVM runtime directory not found: ${LLVM_RUNTIME_ROOT}" >&2
   exit 1
+fi
+
+LIBOMP_CANDIDATES=(
+  "${LLVM_RUNTIME_ROOT}/libomp.so"
+  "${LLVM_RUNTIME_ROOT}/$(uname -m)-unknown-linux-gnu/libomp.so"
+)
+LIBOMP_PATH=""
+for candidate in "${LIBOMP_CANDIDATES[@]}"; do
+  if [[ -e "${candidate}" ]]; then
+    LIBOMP_PATH="${candidate}"
+    break
+  fi
+done
+
+if [[ -z "${LIBOMP_PATH}" ]]; then
+  echo "OpenMP runtime not found at either expected path:" >&2
+  printf "  %s\n" "${LIBOMP_CANDIDATES[@]}" >&2
+  exit 1
+fi
+LLVM_HOST_RUNTIME_DIR="$(dirname "${LIBOMP_PATH}")"
+LLVM_RUNTIME_LIBRARY_PATH="${LLVM_RUNTIME_ROOT}"
+if [[ "${LLVM_HOST_RUNTIME_DIR}" != "${LLVM_RUNTIME_ROOT}" ]]; then
+  LLVM_RUNTIME_LIBRARY_PATH="${LLVM_RUNTIME_LIBRARY_PATH}:${LLVM_HOST_RUNTIME_DIR}"
 fi
 
 select_rocjitsu_target
@@ -161,7 +186,7 @@ mkdir -p "${RACE_REPORT_DIR}"
 # that use it to find the ROCm install root.
 export ROCM_PATH
 export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
-export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROCM_PATH}/lib/llvm/lib:${LLVM_HOST_RUNTIME_DIR}:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${LLVM_RUNTIME_LIBRARY_PATH}:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="${TENSILELITE_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "ROCM_PATH=${ROCM_PATH}"
@@ -174,6 +199,7 @@ echo "HIPBLASLT_BENCH=${HIPBLASLT_BENCH}"
 echo "TENSILELITE_ROOT=${TENSILELITE_ROOT}"
 echo "TENSILE_DRIVER=${TENSILE_DRIVER}"
 echo "TENSILELITE_CLIENT=${TENSILELITE_CLIENT}"
+echo "LIBOMP_PATH=${LIBOMP_PATH}"
 echo "RACE_REPORT_DIR=${RACE_REPORT_DIR}"
 echo "PATH=${PATH}"
 echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"

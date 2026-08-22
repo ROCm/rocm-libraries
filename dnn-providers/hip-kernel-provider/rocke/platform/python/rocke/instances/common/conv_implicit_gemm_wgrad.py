@@ -572,8 +572,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         )
 
     if family == "wmma":
-        if atom != (16, 16, 16):
-            return False, f"WMMA wgrad supports only 16x16x16 (got {atom}) on {arch}"
+        # 16x16x16 is the RDNA WMMA hero (gfx1151/gfx1201); 16x16x32 is the
+        # gfx1250 hero (its only fp16/bf16 WMMA atom -- there is no 16x16x16 on
+        # gfx1250). Both feed the same emit_wmma_phase fragment machinery
+        # (a_frag_len 8 vs 16, assembled from 8-wide ds_read chunks).
+        if atom not in ((16, 16, 16), (16, 16, 32)):
+            return False, (
+                f"WMMA wgrad supports only 16x16x16 or 16x16x32 (got {atom}) on {arch}"
+            )
         if spec.pipeline != "mem":
             return False, (
                 f"WMMA wgrad supports only the 'mem' pipeline "
@@ -815,23 +821,74 @@ def build_implicit_gemm_conv_wgrad(
     ]
 
     threads = spec.block_size
-    # A (dY, NHWK) and B (X, NHWC) are loaded along the K_wg (reduction) axis by
-    # CoalescedTileLoader.  In NHWK the stride between adjacent K_wg positions is K
-    # (= output channels); in NHWC it is C (= input channels).  Neither is 1, so
-    # buffer_load_vN would read consecutive *channel* values at the same spatial
-    # position rather than the intended next spatial position.  Force vec=1 for both
-    # operands regardless of what the auto-picker or the caller requests.
-    # TODO: Enable vec size large than 1
+    # A (dY, NHWK) and B (X, NHWC) have their GEMM reduction axis K_wg = N*Ho*Wo,
+    # which is NOT the stride-1 tensor axis: in NHWK the stride between adjacent
+    # K_wg positions is K, in NHWC it is C.  A naive vectorised load along K_wg
+    # would read consecutive *channel* values at one spatial position instead of
+    # the next spatial position (wrong data) -- hence the historical vec=1.
+    #
+    # The stride-1 axis is instead the GEMM *free* axis: k_out (= M) for dY and
+    # the inner C of N_wg for X.  So vectorise the global load along that free
+    # (row) axis and transpose it into the row-major (M/N, K) LDS tile on store
+    # (CoalescedTileLoader vector_axis="row").  The transpose-on-store fills the
+    # SAME row-major (M/N, K) LDS tile the scalar path produced (identical LDS
+    # contents; only the load/store instructions differ), so the MMA consumer --
+    # MFMA or WMMA -- reads it unchanged.
+    #
+    # Enabled for every sync path (MFMA and WMMA); only the async
+    # (raw_ptr_buffer_load_lds) path is excluded, because it writes
+    # lane-contiguous LDS and cannot host a transpose-on-store.  Correctness
+    # requires the free-axis vector to stay within one stride-1 run -- vec_a | K
+    # (dY's k_out is contiguous over the whole K dim) and vec_b | C (an X vector
+    # must not cross a (y,x) filter boundary) -- and choose_vec additionally
+    # enforces even tile distribution.  When a width > 1 is not admissible the
+    # loader falls back to the scalar vector_axis="col" path, keeping those
+    # configs byte-identical.
+    axis_a = axis_b = "col"
     load_vec_a = 1
     load_vec_b = 1
+    if not spec.async_dma:
 
-    # dY descriptor: (k_wg_red, k_out=m_wg) → NHWK offset
-    # k_wg_red is the K-loop reduction index (= output position m_fwd).
-    # m_wg is the M tile index (= output channel k_out).
-    dY_desc = make_dy_descriptor(p, dtype=spec.data.dtype_a)
-    # X descriptor: reuse make_a_descriptor (same NHWC conv address map).
-    # In the wgrad GEMM: row = k_wg_red (output position), col = n_wg (filter+chan).
-    X_desc = make_x_wgrad_descriptor(p, dtype=spec.data.dtype_b)
+        def _free_axis_vec(chan: int, dtype: str) -> int:
+            widths = (8, 4, 2, 1) if dtype != "fp32" else (4, 2, 1)
+            return next(v for v in widths if chan % v == 0)
+
+        va = CoalescedTileLoader.choose_vec(
+            tile_rows=block_m,
+            tile_cols=block_k,
+            block_size=threads,
+            max_vec=_free_axis_vec(p.kpg, spec.data.dtype_a),
+            vector_axis="row",
+        )
+        vb = CoalescedTileLoader.choose_vec(
+            tile_rows=block_n,
+            tile_cols=block_k,
+            block_size=threads,
+            max_vec=_free_axis_vec(p.cpg, spec.data.dtype_b),
+            vector_axis="row",
+        )
+        if va > 1:
+            load_vec_a, axis_a = va, "row"
+        if vb > 1:
+            load_vec_b, axis_b = vb, "row"
+
+    # For pointwise (Y=X=1, stride 1, pad 0) all descriptors collapse to flat
+    # 2-D address arithmetic — no unmerge/embed/pad, just multiply+add:
+    #   dY: offset = k_wg * K + k_out   (NHWK with M=N*Ho*Wo pre-multiplied)
+    #   X:  offset = k_wg * C + n_wg    (NHWC, n_wg == c directly)
+    #   dW: offset = k_out * C + n_wg   (KC, n_wg == c directly)
+    if p.is_pointwise:
+        dY_desc = None
+        X_desc = None
+        _c_K_ir = b.const_i32(p.kpg)
+        _c_C_ir = b.const_i32(p.cpg)
+        _c_wgM_ir = b.const_i32(wg_M)
+        _c_wgN_ir = b.const_i32(wg_N)
+        _c_wgK_ir = b.const_i32(wg_K)
+    else:
+        dY_desc = make_dy_descriptor(p, dtype=spec.data.dtype_a)
+        X_desc = make_x_wgrad_descriptor(p, dtype=spec.data.dtype_b)
+        _c_K_ir = _c_C_ir = _c_wgM_ir = _c_wgN_ir = _c_wgK_ir = None
 
     dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
     x_buf_rsrc = make_buffer_resource(b, X, num_bytes=X_bytes)
@@ -843,18 +900,25 @@ def build_implicit_gemm_conv_wgrad(
     k_off_capture: List[Optional[Value]] = [None]
 
     def dy_descriptor(b_: IRBuilder, row: Value, col: Value):
-        # row = tile-local M index → k_out = block_m_off + row
-        # col = tile-local K index → k_wg_red = k_off + col
         k_out = b_.add(block_m_off_v, row)
         k_wg_red = b_.add(k_off_capture[0], col)
+        if p.is_pointwise:
+            # Flat: offset = k_wg_red * K + k_out
+            off = b_.add(b_.mul(k_wg_red, _c_K_ir), k_out)
+            kred_ok = b_.cmp_lt(k_wg_red, _c_wgK_ir)
+            kout_ok = b_.cmp_lt(k_out, _c_wgM_ir)
+            return off, b_.land(kred_ok, kout_ok)
         return dY_desc.offset(b_, k_wg=k_wg_red, k_out=k_out)
 
     def x_descriptor(b_: IRBuilder, row: Value, col: Value):
-        # B-tile layout: row = tile-local N index (filter+chan), col = tile-local K index (output pos).
         k_val = b_.add(block_n_off_v, row)  # N_wg: filter+channel position
-        m_val = b_.add(
-            k_off_capture[0], col
-        )  # K_wg: output spatial position (reduction)
+        m_val = b_.add(k_off_capture[0], col)  # K_wg: output spatial position
+        if p.is_pointwise:
+            # Flat: offset = k_wg * C + n_wg (n_wg == c for 1x1)
+            off = b_.add(b_.mul(m_val, _c_C_ir), k_val)
+            kwg_ok = b_.cmp_lt(m_val, _c_wgK_ir)
+            nwg_ok = b_.cmp_lt(k_val, _c_wgN_ir)
+            return off, b_.land(kwg_ok, nwg_ok)
         return X_desc.offset(b_, m=m_val, k=k_val)
 
     if spec.async_dma:
@@ -883,6 +947,7 @@ def build_implicit_gemm_conv_wgrad(
             block_size=threads,
             load_vec=load_vec_a,
             elem_dtype=ir_dtype_a,
+            vector_axis=axis_a,
         )
         b_sync_loader = CoalescedTileLoader(
             tile_rows=block_n,
@@ -890,6 +955,7 @@ def build_implicit_gemm_conv_wgrad(
             block_size=threads,
             load_vec=load_vec_b,
             elem_dtype=ir_dtype_b,
+            vector_axis=axis_b,
         )
 
     schedule = SchedulePolicy.for_pipeline(
@@ -1306,10 +1372,17 @@ def _emit_wgrad_direct_epilogue(
     linear byte offset via :func:`make_dw_descriptor`.
     """
     p = spec.problem
-    dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+    if p.is_pointwise:
+        _c_N = b.const_i32(_wg_N(p))
 
-    def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        return dW_desc.offset(b_, k_out=m_val, n_wg=n_val)
+        def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
+
+    else:
+        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+
+        def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return dW_desc.offset(b_, k_out=m_val, n_wg=n_val)
 
     DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
         b,
@@ -1343,7 +1416,8 @@ def _emit_wgrad_direct_epilogue_wmma(
 
     c_M = b.const_i32(_wg_M(p))
     c_N = b.const_i32(_wg_N(p))
-    dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+    _c_wgN_wmma = b.const_i32(_wg_N(p)) if p.is_pointwise else None
+    dW_desc = None if p.is_pointwise else make_dw_descriptor(p, dtype=spec.data.dtype_d)
     c_map = op.c_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
@@ -1371,7 +1445,10 @@ def _emit_wgrad_direct_epilogue_wmma(
                 ok = b.land(m_ok, n_ok)
 
                 v_f32 = b.vec_extract(acc, i)
-                dw_off_elems, _ = dW_desc.offset(b, k_out=m_val, n_wg=n_val)
+                if p.is_pointwise:
+                    dw_off_elems = b.add(b.mul(m_val, _c_wgN_wmma), n_val)
+                else:
+                    dw_off_elems, _ = dW_desc.offset(b, k_out=m_val, n_wg=n_val)
                 dw_off_bytes = b.mul(dw_off_elems, b.const_i32(_elem_bytes))
                 safe_off = b.select(ok, dw_off_bytes, b.const_i32((1 << 31) - 1))
                 if _fp32_out:
@@ -1398,10 +1475,17 @@ def _emit_wgrad_cshuffle_epilogue(
     via :func:`make_dw_descriptor`.
     """
     p = spec.problem
-    dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+    if p.is_pointwise:
+        _c_N = b.const_i32(_wg_N(p))
 
-    def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        return dW_desc.offset(b_, k_out=m_val, n_wg=n_val)
+        def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
+
+    else:
+        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+
+        def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return dW_desc.offset(b_, k_out=m_val, n_wg=n_val)
 
     _cshuffle_kwargs: dict = {"out_dtype": spec.data.dtype_d}
     if spec.vector_size_c is not None:

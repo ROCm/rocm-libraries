@@ -190,26 +190,4 @@ ActivationParams mapPointwiseModeToMiopenActivation(
                                                        "Unsupported activation operation");
     }
 }
-
-std::string getDeviceArch(hipStream_t stream)
-{
-    hipDevice_t deviceId = -1;
-    auto status = hipStreamGetDevice(stream, &deviceId);
-    if(status != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "hipStreamGetDevice failed: "
-                                                           + std::to_string(status));
-    }
-    hipDeviceProp_t props;
-    status = hipGetDeviceProperties(&props, deviceId);
-    if(status != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "hipGetDeviceProperties failed: "
-                                                           + std::to_string(status));
-    }
-    const std::string archStr(props.gcnArchName);
-    return archStr.substr(0, archStr.find(':'));
-}
 }

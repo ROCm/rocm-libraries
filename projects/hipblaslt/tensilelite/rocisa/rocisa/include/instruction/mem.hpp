@@ -339,7 +339,7 @@ namespace rocisa
         {
             std::string dstStr     = dst ? dst->toString() + ", " : "";
             auto        soffsetStr = InstructionInputToString(soffset);
-            if(getAsmCaps()["HasMUBUFConst"])
+            if(capOrDefault(getAsmCaps(), "HasMUBUFConst"))
             {
                 return dstStr + vaddr->toString() + ", " + saddr->toString() + ", " + soffsetStr;
             }
@@ -763,7 +763,7 @@ namespace rocisa
         std::string getArgStr() const
         {
             auto soffsetStr = InstructionInputToString(soffset);
-            if(getAsmCaps()["HasMUBUFConst"])
+            if(capOrDefault(getAsmCaps(), "HasMUBUFConst"))
             {
                 return srcData->toString() + ", " + vaddr->toString() + ", " + saddr->toString()
                        + ", " + soffsetStr;
@@ -2479,6 +2479,129 @@ namespace rocisa
         }
     };
 
+    struct GlobalStoreAsyncFromLdsInstruction : public GLOBALStoreInstruction
+    {
+        GlobalStoreAsyncFromLdsInstruction(InstType                                  instType,
+                                           const std::shared_ptr<RegisterContainer>& vaddr,
+                                           const std::shared_ptr<RegisterContainer>& dsaddr,
+                                           const std::shared_ptr<RegisterContainer>& saddr,
+                                           std::optional<GLOBALModifiers> modifier = std::nullopt,
+                                           const std::string&             comment  = "")
+            : GLOBALStoreInstruction(instType, vaddr, dsaddr, saddr, modifier, comment)
+        {
+            instStr = "global_store_async_from_lds_";
+        }
+
+        GlobalStoreAsyncFromLdsInstruction(const GlobalStoreAsyncFromLdsInstruction& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = preStr() + " " + getArgStr();
+            if(modifier)
+            {
+                kStr += modifier->toString();
+            }
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {vaddr, srcData}, nullptr);
+            return kStr;
+        }
+    };
+
+    struct GlobalStoreAsyncFromLdsB8 : public GlobalStoreAsyncFromLdsInstruction
+    {
+        GlobalStoreAsyncFromLdsB8(const std::shared_ptr<RegisterContainer>& vaddr,
+                                  const std::shared_ptr<RegisterContainer>& dsaddr,
+                                  const std::shared_ptr<RegisterContainer>& saddr,
+                                  std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                                  const std::string&                        comment  = "")
+            : GlobalStoreAsyncFromLdsInstruction(InstType::INST_B8, vaddr, dsaddr, saddr, modifier,
+                                                 comment)
+        {
+        }
+
+        GlobalStoreAsyncFromLdsB8(const GlobalStoreAsyncFromLdsB8& other)
+            : GlobalStoreAsyncFromLdsInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreAsyncFromLdsB8>(*this);
+        }
+    };
+
+    struct GlobalStoreAsyncFromLdsB32 : public GlobalStoreAsyncFromLdsInstruction
+    {
+        GlobalStoreAsyncFromLdsB32(const std::shared_ptr<RegisterContainer>& vaddr,
+                                   const std::shared_ptr<RegisterContainer>& dsaddr,
+                                   const std::shared_ptr<RegisterContainer>& saddr,
+                                   std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                                   const std::string&                        comment  = "")
+            : GlobalStoreAsyncFromLdsInstruction(InstType::INST_B32, vaddr, dsaddr, saddr, modifier,
+                                                 comment)
+        {
+        }
+
+        GlobalStoreAsyncFromLdsB32(const GlobalStoreAsyncFromLdsB32& other)
+            : GlobalStoreAsyncFromLdsInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreAsyncFromLdsB32>(*this);
+        }
+    };
+
+    struct GlobalStoreAsyncFromLdsB64 : public GlobalStoreAsyncFromLdsInstruction
+    {
+        GlobalStoreAsyncFromLdsB64(const std::shared_ptr<RegisterContainer>& vaddr,
+                                   const std::shared_ptr<RegisterContainer>& dsaddr,
+                                   const std::shared_ptr<RegisterContainer>& saddr,
+                                   std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                                   const std::string&                        comment  = "")
+            : GlobalStoreAsyncFromLdsInstruction(InstType::INST_B64, vaddr, dsaddr, saddr, modifier,
+                                                 comment)
+        {
+        }
+
+        GlobalStoreAsyncFromLdsB64(const GlobalStoreAsyncFromLdsB64& other)
+            : GlobalStoreAsyncFromLdsInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreAsyncFromLdsB64>(*this);
+        }
+    };
+
+    struct GlobalStoreAsyncFromLdsB128 : public GlobalStoreAsyncFromLdsInstruction
+    {
+        GlobalStoreAsyncFromLdsB128(const std::shared_ptr<RegisterContainer>& vaddr,
+                                    const std::shared_ptr<RegisterContainer>& dsaddr,
+                                    const std::shared_ptr<RegisterContainer>& saddr,
+                                    std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                                    const std::string&                        comment  = "")
+            : GlobalStoreAsyncFromLdsInstruction(InstType::INST_B128, vaddr, dsaddr, saddr, modifier,
+                                                 comment)
+        {
+        }
+
+        GlobalStoreAsyncFromLdsB128(const GlobalStoreAsyncFromLdsB128& other)
+            : GlobalStoreAsyncFromLdsInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreAsyncFromLdsB128>(*this);
+        }
+    };
+
     struct DSLoadU8 : public DSLoadInstruction
     {
         DSLoadU8(const std::shared_ptr<RegisterContainer>& dst,
@@ -3855,7 +3978,7 @@ namespace rocisa
             , s_addr(s_addr)
             , gm(gm)
         {
-            if(getAsmCaps()["HasGlobalPrefetch"])
+            if(capOrDefault(getAsmCaps(), "HasGlobalPrefetch"))
             {
                 setInst("global_prefetch_b8");
             }

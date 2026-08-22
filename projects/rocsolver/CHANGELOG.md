@@ -6,6 +6,15 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* Cholesky QR methods for computing the QR factorization of a tall rectangular matrix
+    - CHOLQR (with batched and strided\_batched versions)
+    - CHOLQR_64 (with batched and strided\_batched versions)
+* Hessenberg reduction auxiliary routine
+    * LAHR2
+* 64-bit APIs for existing functions:
+    - LARFT_64
+
 ### Changed
 ### Removed
 ### Optimized
