@@ -168,8 +168,14 @@ function(hkp_wire_production)
     # inputs a `cmake --fresh` onto a new ref rebuilds the reader while the pack
     # stamp survives, leaving an archive written by the old packer and read by the
     # new one. That is the skew the single pin in RocmKpack.cmake exists to prevent.
+    # NOTE `ARG_ROCM_KPACK_DIR`, not `kpack_python`: that name is a positional
+    # parameter of hkp_wire_demo, not of this function. CMake resolves an
+    # unset variable to the empty string, so the glob silently matched nothing
+    # and this DEPENDS edge did not exist -- exactly the staleness the comment
+    # above claims it prevents.
     file(GLOB _tool_sources CONFIGURE_DEPENDS
-         "${HKP_PYTHON_ROOT}/hkp_pack/*.py" "${kpack_python}/rocm_kpack/*.py")
+         "${HKP_PYTHON_ROOT}/hkp_pack/*.py"
+         "${ARG_ROCM_KPACK_DIR}/rocm_kpack/*.py")
 
     # The rocKE producer needs the wheel-provisioned interpreter so its UKDs
     # import; a hip-only pack runs under the base interpreter (hip compiles shell
