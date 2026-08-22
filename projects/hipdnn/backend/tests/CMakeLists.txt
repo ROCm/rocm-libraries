@@ -153,7 +153,7 @@ target_link_libraries(
 # Not a gtest binary and not registered via add_hipdnn_test(); hipdnn_backend_tests
 # locates it at runtime through the baked HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_PATH below.
 add_executable(AutotuneCrossProcessHelper heuristics/AutotuneCrossProcessHelper.cpp)
-target_link_libraries(AutotuneCrossProcessHelper hipdnn_backend_private)
+target_link_libraries(AutotuneCrossProcessHelper Threads::Threads hipdnn_backend_private)
 target_compile_definitions(AutotuneCrossProcessHelper PRIVATE HIPDNN_BACKEND_COMPILATION)
 target_compile_options(AutotuneCrossProcessHelper PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
