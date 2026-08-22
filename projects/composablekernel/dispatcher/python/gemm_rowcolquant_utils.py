@@ -57,6 +57,46 @@ if _codegen_dir not in sys.path:
 from codegen_common import make_rowcolquant_kernel_name  # noqa: E402
 
 _DEFAULT_HIPCC    = "hipcc"
+
+# --- Tile-Engine perf flags (parity fix): authoritative develop TE flag set ---
+import os as _os_teflags
+import subprocess as _sp_teflags
+
+
+def _coerce_flag_ok(hipcc):
+    """True iff local clang accepts -mllvm -amdgpu-coerce-illegal-types=1.
+    ROCm7.2 clang>=22 removed it and aborts the compile, so gate on it."""
+    try:
+        r = _sp_teflags.run(
+            [hipcc, "-x", "hip", "-c", "-mllvm",
+             "-amdgpu-coerce-illegal-types=1", "-", "-o", "/dev/null"],
+            input="int main(){return 0;}", text=True,
+            capture_output=True, timeout=60)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _te_perf_flags(hipcc):
+    """Authoritative develop Tile-Engine -mllvm perf flag set (5 flags).
+    Source: composablekernel/CMakeLists.txt L521/L528/L535/L546/L547.
+    Without these, hipcc -O3 register allocation on the block-scale hot loops
+    spills to scratch and collapses occupancy -> bridge slower than the
+    byte-identical Old-TE kernel. Off only if CK_BRIDGE_NO_TE_FLAGS=1."""
+    if _os_teflags.environ.get("CK_BRIDGE_NO_TE_FLAGS") == "1":
+        return []
+    flags = [
+        "-fno-offload-uniform-block",
+        "-mllvm", "--lsr-drop-solution=1",
+        "-mllvm", "-enable-post-misched=0",
+        "-mllvm", "-amdgpu-early-inline-all=true",
+        "-mllvm", "-amdgpu-function-calls=false",
+    ]
+    if _coerce_flag_ok(hipcc):
+        flags += ["-mllvm", "-amdgpu-coerce-illegal-types=1"]
+    return flags
+# --- end Tile-Engine perf flags ---
+
 _DEFAULT_GFX_ARCH = "gfx950"
 
 
@@ -582,6 +622,7 @@ def _compile_rowcolquant_kernel(
                    f"--offload-arch={gfx_arch}",
                    f"-DGFX_ARCH=\"{gfx_arch}\"",
                    *arch_defines,
+                   *_te_perf_flags(hipcc),
                    "-include", str(hpp_path),
                    str(_CTYPES_LIB_SRC),
                    "-o", str(obj_path)]

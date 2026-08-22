@@ -181,9 +181,16 @@ class AQuantKernelSpec:
     double_smem_buffer: bool = False
     pad_m: bool = False
     pad_n: bool = False
-    pad_k: bool = True
+    pad_k: bool = False
     block_size: int = 256
     k_block_per_cu: int = 1
+    # Epilogue variant the sweep asked for. Old-TE's aquant instance builder emits
+    # DefaultGemm2DEpilogue for "default" and CShuffleEpilogue for "cshuffle"
+    # (populate_default_gemm_aquant / populate_cshuffle_gemm_aquant). Both are valid
+    # for QuantGemmKernel<..., AQuantGrouped>; the bridge must match whichever the
+    # matched Old-TE stem uses or the CShuffle LDS-staging path spills (+scratch) and
+    # runs ~2x slower on large tiles (the mem_default regression).
+    epilogue: str = "cshuffle"
 
     @property
     def pipeline_key(self) -> str:
@@ -197,7 +204,7 @@ class AQuantKernelSpec:
             variant_key=self.variant_key,
             layout=self.layout,
             pipeline=self.pipeline_key,
-            epilogue="cshuffle",
+            epilogue=self.epilogue,
             scheduler=self.scheduler,
             tile_m=t.tile_m, tile_n=t.tile_n, tile_k=t.tile_k,
             warp_m=t.warp_m, warp_n=t.warp_n, warp_k=t.warp_k,
@@ -248,15 +255,39 @@ class AQuantKernelHeaderGenerator:
         double_smem_buffer = str(spec.double_smem_buffer).lower()
 
         # AQuant configs never enable TiledMMAPermuteN (see gemm_aquant_effective_epilogue),
-        # so the epilogue is always CShuffle. Kept as a computed value for parity with
-        # the bquant codegen and to fail loudly if the assumption ever changes.
+        # so the PermuteN epilogue is never used. The remaining choice is CShuffle vs
+        # DefaultGemm2D, driven by the sweep's "epilogue" trait -- Old-TE emits
+        # DefaultGemm2DEpilogue for "default" and CShuffleEpilogue for "cshuffle"
+        # (tile_engine gemm_instance_builder populate_{default,cshuffle}_gemm_aquant).
+        # Emitting CShuffle for a "default" stem adds an LDS-staging shuffle + scratch
+        # spill that runs ~2x slower on large tiles, so we must mirror the trait.
         use_permute_n_epilogue = (
             gemm_aquant_effective_epilogue(t.tile_n, t.warp_n, t.warp_tile_n, spec.quant_group_n)
             == "permute_n"
         )
         assert not use_permute_n_epilogue, "AQuant does not support PermuteN epilogue"
 
-        epilogue_block = f"""\
+        if spec.epilogue == "default":
+            # Mirror populate_default_gemm_aquant: DefaultGemm2DEpilogueProblem takes
+            # kPadM/kPadN (not MWave/NWave) and no CShuffle LDS staging.
+            epilogue_block = f"""\
+            using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<
+                ck_tile::DefaultGemm2DEpilogueProblem<
+                    typename PipelineProblem::AComputeDataType,
+                    typename PipelineProblem::BComputeDataType,
+                    ck_tile::tuple<>,
+                    AccDataType,
+                    CDataType,
+                    ck_tile::tuple<>,
+                    {ns}::CLayout,
+                    ck_tile::element_wise::PassThrough,
+                    TilePartitioner::MPerBlock,
+                    TilePartitioner::NPerBlock,
+                    kPadM, kPadN,
+                    WarpTileM, WarpTileN, WarpTileK,
+                    TransposeC>>;"""
+        else:
+            epilogue_block = f"""\
             using GemmEpilogue = ck_tile::CShuffleEpilogue<
                 ck_tile::CShuffleEpilogueProblem<
                     typename PipelineProblem::AComputeDataType,
@@ -331,7 +362,7 @@ struct {struct} {{
         ck_tile::sequence<WarpM, WarpN, WarpK>,
         ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
 
-    using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
+    using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>;
 
     using GemmTraits = ck_tile::TileGemmQuantTraits<
         kPadM, kPadN, kPadK,
@@ -466,7 +497,15 @@ def _default_config(gfx_arch: str = "gfx950") -> dict:
     return {
         "variant_keys": ["fp8", "bf8", "fp8i4", "bf8i4"],
         "layouts": ["rcr", "rrr", "crr", "ccr"],
-        "scheduler": "interwave",
+        "epilogues": ["cshuffle", "default"],
+        # Old-TE never emits an interwave mem/decode kernel: gemm_validation_utils
+        # AQUANT_TRAIT_UNSUPPORTED_COMBINATIONS marks ("mem","default","interwave")
+        # and ("mem","cshuffle","interwave") as unsupported for every layout, so the
+        # aquant mem pipeline is always Intrawave. Emitting Interwave here produces a
+        # kernel that (a) matches no Old-TE stem and (b) takes the Interwave LDS path
+        # that spills ~600B scratch and runs ~20-26% slower on the ccr access pattern
+        # (the ccr mem regression). Mirror Old-TE: mem/decode = intrawave.
+        "scheduler": "intrawave",
         "tile_configs": [
             # GemmConfigQuantDecodeInterwave: M=16, N=64, K=256/sizeof(PrecType)=256
             {"tile_m": 16, "tile_n": 64, "tile_k": 256,
@@ -479,7 +518,7 @@ def _default_config(gfx_arch: str = "gfx950") -> dict:
         ],
         "pad_m": False,
         "pad_n": False,
-        "pad_k": True,
+        "pad_k": False,
         "block_size": 256,
         "k_block_per_cu": 1,
         "double_smem_buffer": False,
@@ -490,22 +529,39 @@ def _default_config(gfx_arch: str = "gfx950") -> dict:
 def _build_specs(config: dict) -> List[AQuantKernelSpec]:
     specs = []
     preshuffle_aquant = config.get("preshuffle_aquant", False)
-    # Decode config uses Interwave; preshufflequant uses Intrawave (GemmConfigBase default).
-    default_scheduler = "intrawave" if preshuffle_aquant else "interwave"
+    # Both aquant pipelines use Intrawave: preshufflequant uses Intrawave
+    # (GemmConfigBase default) and the decode/mem path is Intrawave too -- Old-TE
+    # marks every mem+interwave and compv3+interwave trait combination unsupported
+    # (gemm_validation_utils AQUANT_TRAIT_UNSUPPORTED_COMBINATIONS), so there is no
+    # interwave aquant kernel on the Old-TE side to pair against. An explicit
+    # "scheduler" in the config still wins (the harness passes the Old-TE stem's
+    # scheduler through verbatim); this only fixes the unattended default.
+    default_scheduler = "intrawave"
     scheduler = config.get("scheduler", default_scheduler)
     pad_m     = config.get("pad_m", False)
     pad_n     = config.get("pad_n", False)
-    pad_k     = config.get("pad_k", True)
+    pad_k     = config.get("pad_k", False)
     block_size         = config.get("block_size", 256)
     k_block_per_cu     = config.get("k_block_per_cu", 1)
     double_smem_buffer = config.get("double_smem_buffer", False)
+    # Epilogue trait cross-product. Old-TE's default_config sweeps
+    # ["cshuffle", "default"]; the two produce distinct kernels (CShuffleEpilogue
+    # vs DefaultGemm2DEpilogue) so the bridge must generate both to match every
+    # Old-TE stem. Back-compat default is cshuffle-only when unset.
+    epilogues = config.get("epilogues")
+    if epilogues is None:
+        epilogues = [config.get("epilogue", "cshuffle")]
 
-    for variant_key, layout, tile_dict, qg in itertools.product(
+    for variant_key, layout, tile_dict, qg, epilogue in itertools.product(
         config.get("variant_keys", ["fp8"]),
         config.get("layouts", ["rcr"]),
         config.get("tile_configs", []),
         config.get("quant_groups", [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}]),
+        epilogues,
     ):
+        if epilogue not in ("cshuffle", "default"):
+            log.warning("Unknown epilogue %s -- skipping", epilogue)
+            continue
         if variant_key not in AQUANT_VARIANTS:
             log.warning("Unknown variant_key %s -- skipping", variant_key)
             continue
@@ -547,6 +603,7 @@ def _build_specs(config: dict) -> List[AQuantKernelSpec]:
             pad_k=pad_k,
             block_size=block_size,
             k_block_per_cu=k_block_per_cu,
+            epilogue=epilogue,
         ))
 
     return specs

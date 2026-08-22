@@ -396,7 +396,7 @@ struct {struct} {{
         ck_tile::sequence<WarpM, WarpN, WarpK>,
         ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
 
-    using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
+    using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>;
 
     // Config exposing the member names ck_tile::shuffle_b / shuffle_b_permuteN
     // expect (N_Warp, N_Warp_Tile, K_Warp_Tile, N_Tile). Used by the ctypes lib
