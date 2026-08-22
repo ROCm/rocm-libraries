@@ -68,6 +68,45 @@ protected:
 
     std::filesystem::path _cacheDir;
     std::unique_ptr<ScopedEnvironmentVariableSetter> _cacheDirEnv;
+
+    /// Counts record lines in this test's shard, reading the file directly rather than through
+    /// the store.
+    ///
+    /// A store-mediated count cannot see a duplicate append at all: get() collapses several
+    /// lines for one key to the last, so the very thing these tests pin -- whether a second line
+    /// was written -- is invisible from that side. The version line is line 0 and is excluded.
+    size_t countRecordLines(const std::vector<uint8_t>& key,
+                            const std::vector<uint8_t>& deviceKey) const
+    {
+        (void)key;
+        (void)deviceKey;
+        size_t lines = 0;
+        std::error_code ignored;
+        for(const auto& entry : std::filesystem::recursive_directory_iterator(_cacheDir, ignored))
+        {
+            if(!entry.is_regular_file() || entry.path().extension() != ".jsonl")
+            {
+                continue;
+            }
+            std::ifstream shard(entry.path());
+            std::string line;
+            bool first = true;
+            while(std::getline(shard, line))
+            {
+                if(first)
+                {
+                    // The version stamp, not a record.
+                    first = false;
+                    continue;
+                }
+                if(!line.empty())
+                {
+                    ++lines;
+                }
+            }
+        }
+        return lines;
+    }
 };
 
 TEST_F(TestAutotuneRankingStore, PutThenGetReturnsTheSameEntry)
@@ -117,19 +156,105 @@ TEST_F(TestAutotuneRankingStore, DifferentDeviceKeySameGraphKeyDoesNotCollide)
 
 TEST_F(TestAutotuneRankingStore, PutTwiceForSameKeyLastWriteWins)
 {
-    // put() declines a second write once any record for the key exists; the first
-    // write is what a reader observes.
+    // A record is not permanent: a later sweep that measured something different supersedes it,
+    // resolved last-line-wins by get(). Without this, an engine added after the first tune would
+    // make the stored record fail the read path's C\S check on every lookup, forever, with
+    // re-tuning unable to repair it.
+    //
+    // Falsifying mutation: restore put()'s early return whenever a record for the key exists.
     FileAutotuneRankingStore store;
     const std::vector<uint8_t> key{7, 7};
     const std::vector<uint8_t> deviceKey{1};
 
-    store.put(key, deviceKey, {1, 2}, {2, 1});
-    store.put(key, deviceKey, {1, 2, 3}, {3, 1, 2});
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2}, {2, 1}), RankingWriteStatus::WRITTEN);
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2, 3}, {3, 1, 2}), RankingWriteStatus::WRITTEN);
 
     const auto entry = store.get(key, deviceKey);
     ASSERT_TRUE(entry.has_value());
-    EXPECT_EQ(entry->sampledEngineIds, (std::vector<int64_t>{1, 2}));
-    EXPECT_EQ(entry->order, (std::vector<int64_t>{2, 1}));
+    EXPECT_EQ(entry->sampledEngineIds, (std::vector<int64_t>{1, 2, 3}));
+    EXPECT_EQ(entry->order, (std::vector<int64_t>{3, 1, 2}));
+}
+
+TEST_F(TestAutotuneRankingStore, PutOfAnIdenticalRankingWritesNothing)
+{
+    // The racing-writer case the re-read under the lock exists for: two processes that raced the
+    // same miss measure the same engines and produce the same order, so the loser has nothing to
+    // add. Reported as UNCHANGED rather than WRITTEN, since nothing reached the shard.
+    //
+    // Falsifying mutation: drop the equality check and always append -- the shard gains a second
+    // line and the status becomes WRITTEN.
+    FileAutotuneRankingStore store;
+    const std::vector<uint8_t> key{8, 8};
+    const std::vector<uint8_t> deviceKey{1};
+
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2}, {2, 1}), RankingWriteStatus::WRITTEN);
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2}, {2, 1}), RankingWriteStatus::UNCHANGED);
+
+    EXPECT_EQ(countRecordLines(key, deviceKey), 1U);
+}
+
+TEST_F(TestAutotuneRankingStore, PutOfANewOrderOverTheSameEngineSetSupersedes)
+{
+    // The case set-equality on sampledEngineIds would wrongly decline. A re-tune of the same
+    // engines can legitimately produce a different ranking -- priming succeeded this time, a
+    // plugin shipped a faster kernel, the clock regime changed -- and that is new information.
+    //
+    // Falsifying mutation: compare only sampledEngineIds instead of the order too.
+    FileAutotuneRankingStore store;
+    const std::vector<uint8_t> key{9, 9};
+    const std::vector<uint8_t> deviceKey{1};
+
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2, 3}, {1, 2, 3}), RankingWriteStatus::WRITTEN);
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2, 3}, {3, 2, 1}), RankingWriteStatus::WRITTEN);
+
+    const auto entry = store.get(key, deviceKey);
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->order, (std::vector<int64_t>{3, 2, 1}));
+}
+
+TEST_F(TestAutotuneRankingStore, PutOfAStrictSubsetIsDeclined)
+{
+    // A deliberately narrowed sweep (engineIdFilter) measured fewer engines than the stored
+    // record covers. Letting it win would replace a usable full-coverage ranking with one that
+    // rejects on every later lookup -- permanently de-optimising the machine through an
+    // otherwise legitimate API call.
+    //
+    // Falsifying mutation: remove the isStrictSubset() guard.
+    FileAutotuneRankingStore store;
+    const std::vector<uint8_t> key{10, 10};
+    const std::vector<uint8_t> deviceKey{1};
+
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2, 3}, {1, 2, 3}), RankingWriteStatus::WRITTEN);
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2}, {2, 1}), RankingWriteStatus::UNCHANGED);
+
+    const auto entry = store.get(key, deviceKey);
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->sampledEngineIds, (std::vector<int64_t>{1, 2, 3}));
+    EXPECT_EQ(countRecordLines(key, deviceKey), 1U);
+}
+
+TEST_F(TestAutotuneRankingStore, PutComparesAgainstTheLastLineNotTheFirst)
+{
+    // Once a shard can hold a superseded line, the first match is stale. put() must compare
+    // against whatever get() would return -- the last line -- or it adopts a record the reader
+    // has already replaced, and a genuine re-measurement is silently dropped.
+    //
+    // Falsifying mutation: break out of the scan on the first matching key. The third put then
+    // compares {1,2} against the stale first line, finds them equal, and reports UNCHANGED.
+    FileAutotuneRankingStore store;
+    const std::vector<uint8_t> key{11, 11};
+    const std::vector<uint8_t> deviceKey{1};
+
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2}, {1, 2}), RankingWriteStatus::WRITTEN);
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2}, {2, 1}), RankingWriteStatus::WRITTEN);
+    ASSERT_EQ(countRecordLines(key, deviceKey), 2U);
+
+    // Byte-identical to the FIRST line, different from the last: must be written.
+    EXPECT_EQ(store.put(key, deviceKey, {1, 2}, {1, 2}), RankingWriteStatus::WRITTEN);
+
+    const auto entry = store.get(key, deviceKey);
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->order, (std::vector<int64_t>{1, 2}));
 }
 
 TEST_F(TestAutotuneRankingStore, VersionMismatchReportsUnavailableNotMiss)
