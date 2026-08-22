@@ -1,0 +1,5 @@
+## Splice point 4b: .../kernel_ingestor_engine/IngestorPacks.cpp:15-18
+## Add this row to the s_packs table. Both this edit AND the IngestorPacks.hpp
+## declaration edit (ingestor_packs.hpp.txt) are required -- see that fragment's
+## header for why.
+        {"{{ config.engine.name }}", &{{ config.register_symbols_fn }}},

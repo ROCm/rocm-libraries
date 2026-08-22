@@ -1,0 +1,17 @@
+## Splice point 1: dnn-providers/hip-kernel-provider/CMakeLists.txt:335
+## Append these lines (one per descriptor file, relative to .../descriptors/) to the
+## existing HIPDNN_DESCRIPTOR_FILES list. Do not replace the list -- append.
+{% set slug = config.engine.slug %}
+    {{ slug }}/{{ slug }}.kmd.json
+    {{ slug }}/{{ slug }}.ued.json
+    {{ slug }}/{{ slug }}.udd.json
+{% if config.engine.has_heuristic %}
+    {{ slug }}/{{ slug }}.uhd.json
+{% endif %}
+    {{ slug }}/kernel_dtype_matches_graph.umd.json
+{% for pack in config.packs %}
+    {{ slug }}/{{ slug }}_{{ pack.name }}.kdp.json
+{% if config.is_multi_pack %}
+    {{ slug }}/operation_is_{{ pack.discriminator }}.umd.json
+{% endif %}
+{% endfor %}

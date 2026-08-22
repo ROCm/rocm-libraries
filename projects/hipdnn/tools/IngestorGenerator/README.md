@@ -1,0 +1,275 @@
+# hipDNN IngestorGenerator
+
+Generates a hipDNN generic-kernel-ingestor descriptor bundle -- KMD/UED/UMD/UHD/UDD/KDP
+JSON, a native-symbol stub, complete pack-shape census tests, a matcher-test stub, and
+six CMake/registration text fragments -- from a YAML config. Modeled on
+`projects/hipdnn/tools/DescriptorGenerator`'s conventions, with two deliberate
+deviations: `undefined=StrictUndefined` on the Jinja2 environment (an unset UUID
+cross-reference fails loudly at generation time, not as a confusing empty-string
+rejection at load time), and a required `--force` flag to overwrite a non-empty output
+directory (the extend flow points this tool at a *live* descriptor directory that may
+hold hand-filled `graph_match`/matcher bodies).
+
+This tool has **no CMake/CI hookup**, matching `DescriptorGenerator`'s own convention:
+its correctness gate is running `pytest` (below), not a build.
+
+## Prerequisites
+
+- Python 3.10+
+- PyYAML >= 6.0
+- Jinja2 >= 3.1
+
+## Setup
+
+```bash
+cd projects/hipdnn/tools/IngestorGenerator
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+## Usage
+
+```bash
+# Preview what would be generated, without writing anything or creating the
+# output directory.
+.venv/bin/python generate.py \
+    --config configs/scale_add.yaml \
+    --output-dir /tmp/scale-add-bundle \
+    --dry-run
+
+# Generate for real.
+.venv/bin/python generate.py \
+    --config configs/scale_add.yaml \
+    --output-dir /tmp/scale-add-bundle
+
+# Regenerate over an existing, non-empty output directory (the extend flow) --
+# --force is REQUIRED, or generate.py exits 1 without touching anything.
+.venv/bin/python generate.py \
+    --config configs/scale_add.yaml \
+    --output-dir /tmp/scale-add-bundle \
+    --force
+```
+
+Exit codes: `0` success; `1` on a `ConfigError` or a template-rendering failure;
+`2` from argparse itself on a bad flag.
+
+## Output
+
+```
+<output-dir>/
+  descriptors/<engine_slug>/
+    <slug>.kmd.json                 # KMD -- the engine's per-kernel metadata schema
+    <slug>.ued.json                 # UED -- the engine descriptor
+    <slug>.udd.json                 # UDD -- dispatch symbol
+    <slug>.uhd.json                 # UHD -- only when engine.heuristic != "none"
+    kernel_dtype_matches_graph.umd.json   # the one shared kernel-scoped matcher
+    <slug>.kdp.json                 # single-pack engine: one KDP named after the slug
+    <slug>_<pack>.kdp.json          # multi-pack engine: one KDP per pack
+    operation_is_<disc>.umd.json    # multi-pack engine ONLY -- one operation-scoped
+                                     # UMD per pack. A single-pack engine emits ZERO of
+                                     # these; see "UMD policy" below.
+  packs/<Name>Native.cpp            # native-symbol stub (graph_match/kernel_match/
+                                     # score/dispatch bodies are all `// TODO`)
+  tests/Test<Name>Packs.cpp         # COMPLETE pack-shape census -- not a stub
+  tests/Test<Name>Matchers.cpp      # matcher-test stub (fixture shape only)
+  fragments/*.txt                   # 6 CMake/registration fragments, see below
+```
+
+### UMD policy
+
+A UMD is emitted **only** for genuine per-pack narrowing. Topology/shape/dtype
+applicability belongs in the UED's `graph_match`, not a UMD -- PR #10839 deleted eight
+UMDs that existed only to carry a topology gate. Concretely:
+
+- A **single-pack** engine gets **zero** graph-scoped UMDs. Its one pack's
+  `matchers[]` names only the shared kernel-scoped dtype matcher.
+- A **multi-pack** engine gets **one** graph-scoped operation-matcher UMD per pack
+  (each pack's config entry must set a unique `discriminator`), plus the same one
+  shared kernel-scoped matcher every pack references.
+
+### Native-symbol stub shape
+
+`packs/<Name>Native.cpp` uses `constexpr std::string_view` symbol constants at the top
+of an anonymous namespace and `scope.add(std::string(CONST), &fn)` calls in
+`register<Name>Symbols()` -- the exact form `hipdnn_validate_descriptors`'s
+`--native-source` check resolves (it looks for named constants referenced from that
+function, not inline string literals). The `graph_match` stub's doc comment carries,
+verbatim, the warning that returning `std::nullopt` empties the **whole** engine's
+catalog and skips every remaining pack (`KernelIngestorStateManager.hpp:450-455`) --
+the widest blast radius in the system.
+
+### Matcher-test stub
+
+`tests/Test<Name>Matchers.cpp` constructs its `DeviceProperties` fixture **by value**,
+never by querying the host (`hipGetDeviceProperties`/`getDeviceProperties()`), with a
+comment explaining why: a test that queries the host is vacuous on every arch except
+whatever happens to be running CI (`TestAsmSdpaForwardMatchers.cpp:27-33`).
+
+### Pack-shape census test
+
+`tests/Test<Name>Packs.cpp` is **complete**, not a stub. It reads the descriptors this
+engine actually ships via `discoverDescriptorSets()` (the same helper
+`PointwiseTestGraphs.hpp`'s `loadedSet()` wraps) rather than a hand-built twin, so a
+broken *shipped* descriptor -- a missing pack, a dropped knob, a wrong kernel count --
+fails this fast suite instead of surfacing only in the slow GPU integration suite.
+
+## The five CMake/registration splice points
+
+`fragments/*.txt` are text for a human (or the driving skill's extend flow) to
+hand-apply; **nothing here is auto-applied**. Each fragment names its own splice point
+in a leading comment:
+
+| Fragment | Splices into |
+|---|---|
+| `cmake_descriptor_files.txt` | `dnn-providers/hip-kernel-provider/CMakeLists.txt`'s `HIPDNN_DESCRIPTOR_FILES` list |
+| `cmake_ingestor_kernels.txt` | `.../kernel_ingestor_engine/IngestorKernels.cmake`'s `HIPDNN_INGESTOR_PACK_KERNELS` list |
+| `cmake_target_sources.txt` | `.../kernel_ingestor_engine/CMakeLists.txt`'s `target_sources(hip_kernel_provider_impl ...)` block |
+| `ingestor_packs.hpp.txt` | `.../kernel_ingestor_engine/IngestorPacks.hpp` -- the `register<Name>Symbols` declaration |
+| `ingestor_packs.cpp.txt` | `.../kernel_ingestor_engine/IngestorPacks.cpp` -- the `s_packs` table row |
+| `cmake_test_sources.txt` | `.../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt`'s `target_sources(hip_kernel_provider_tests ...)` block |
+
+**Both `IngestorPacks.hpp` and `IngestorPacks.cpp` edits are required.** A pack
+registered in the header but missing from the `.cpp` table's `s_packs` vector silently
+vanishes from the unit-test binary (a static-archive linker drops an object nothing
+references) while still working in the plugin `.so` -- no error either way.
+
+## The generate -> validate round trip
+
+`hipdnn_validate_descriptors` only exists in a build configured with
+`-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON` (default **OFF**). If it is not present in your
+build's `bin/` directory, that build was not configured with the flag -- reconfigure
+and rebuild the `hip-kernel-provider`/`tools` targets, or check with whoever owns the
+build.
+
+```bash
+# 1. Generate a bundle.
+.venv/bin/python generate.py --config configs/scale_add.yaml --output-dir /tmp/scale-add
+
+# 2. Validate it structurally, with no GPU and no linked provider.
+<build-dir>/bin/hipdnn_validate_descriptors \
+    /tmp/scale-add/descriptors \
+    --expect-engine hipkernel:ScaleAdd \
+    --json
+
+# 3. (Optional, once you've filled in packs/<Name>Native.cpp) cross-check that the
+#    native file's constexpr symbol constants agree with what the descriptors name.
+<build-dir>/bin/hipdnn_validate_descriptors \
+    /tmp/scale-add/descriptors \
+    --expect-engine hipkernel:ScaleAdd \
+    --native-source /tmp/scale-add/packs/ScaleAddNative.cpp
+```
+
+Exit 0 means: every root loaded with zero ERROR diagnostics, every `--expect-engine`
+name is present, and (if given) every `--native-source` check is clean. **This proves
+parse, cross-reference, symbol resolution, and construction -- nothing about
+`graph_match`/matcher correctness**, which needs a real graph and a real device. See
+`Knowledge/hipdnn/ingestor/06-gotchas.md` ("Enumeration proves much less than it
+looks") for the PR #10839 cautionary tale: an engine enumerated cleanly on gfx90a and
+failed all 27 cases on gfx942 because the packs happened to arch-prune before the
+matcher ever ran on gfx90a.
+
+`tests/test_round_trip.py` checks this in as a permanent (though `-m round_trip`
+opt-in, since it depends on a validator binary this repo does not build by default)
+regression: point `HIPDNN_VALIDATE_DESCRIPTORS` at your build's binary and run
+`.venv/bin/python -m pytest -m round_trip`.
+
+## Configs
+
+`configs/scale_add.yaml` -- a single-pack engine (mirrors the shipped `conv_fwd`
+engine's shape: one pack, one operation, its `graph_match` both admits the node type
+and validates shape).
+
+`configs/binary_ops.yaml` -- a multi-pack engine (mirrors the shipped `pointwise`
+engine's shape: one pack per operation, sharing one KMD/UED/UHD/UDD, each pack naming
+its own operation-scoped UMD via `discriminator`).
+
+## Config surface
+
+```yaml
+engine:
+  name: hipkernel:MyEngine        # required, scoped namespace:local
+  sdk_version: "1.0.0"            # optional, three components, default "1.0.0"
+  behavior_notes: [runtime_compilation]   # optional, closed vocabulary
+  knobs: [block_size]             # optional; must all be int-typed kmd_fields
+  heuristic: native | none        # optional, default "native"; "none" omits the UHD
+
+kmd_fields:                       # the KMD's fields[] -- declared, one per human-
+  - name: block_size              # meaningful axis this engine's kernels vary along
+    type: int                     # bool | int | float | string | int_list
+    default_value: 64             # omit entirely for a MANDATORY field
+  - name: dtype
+    type: string
+
+graph_match:                      # documentation of shape, not consumed by templates
+  shape: shared_shape | disjoint_attributes
+  discriminator: none | field_value | disjoint_topology
+
+kernel_source_kind: embedded_source   # the only implemented kind; anything else is a
+                                        # hard ConfigError naming why
+workspace_policy: none | fixed | derived
+delegates_to_existing_plan: false
+
+packs:
+  - name: add
+    arch: [gfx942]                # optional; empty means arch-independent
+    discriminator: add             # REQUIRED iff this engine has >1 pack; forbidden
+                                    # for a single-pack engine
+    kernels:
+      - name: my_engine.f32_block64
+        kernel_source:
+          kind: embedded_source
+          source_file: MyEngine.cpp
+          entry_point: MyEngine
+        metadata: { block_size: 64, dtype: FLOAT }
+        priority: 0
+        arch: []                   # optional; must be a subset of the pack's arch
+```
+
+## The five pre-mint config-loader checks
+
+Run, in this order, **before any UUID is minted**:
+
+1. `engine.name` matches the scoped `namespace:local` regex.
+2. Every `engine.knobs` entry names a declared **and int-typed** `kmd_fields` entry --
+   a non-int knob is accepted by the real loader and produces no usable knob at all,
+   silently, discovered only at plan-build time against a real device.
+3. Every kernel's `metadata` type-checks against the KMD, with no mandatory field
+   (one with no `default_value`) omitted -- otherwise the real loader drops the whole
+   pack.
+4. Every kernel's `arch` is a subset of its pack's `arch`.
+5. Every `arch` entry is a plausible `gfx`-prefixed base id (lowercase, no feature
+   suffix) -- an error if malformed; a **warning** (not an error) if well-formed but
+   not a recognized target id (e.g. `gfx94` for `gfx942`), since match-time evidence
+   for either case looks identical (an ordinary INFO decline) and this tool does not
+   claim to maintain an exhaustive, always-current arch list.
+
+## Source adapters (`codegen/sources/`)
+
+One protocol (`SourceAdapter.infer(*sources) -> SourceAdapterResult`), two v1
+implementations:
+
+- `InteractiveAdapter` -- no inference; a human or the driving skill fills every field.
+- `HiprtcAdapter` -- scans one or more `.cpp`/`.hip` files for
+  `extern "C" __global__` entry points and candidate KMD fields (externally-supplied
+  `HIP_PLUGIN_*` defines, template parameters).
+
+`rocke` is a later adapter behind the same protocol, added once the packer and kpack
+launcher land -- deliberately absent here, not stubbed.
+
+`hsaco_file` is rejected explicitly (naming `supportsSourceKind()` as the missing
+prerequisite on `IKernelDispatchHandler`), not silently accepted and left to fail later
+with a generic "no implementation yet".
+
+## Tests
+
+```bash
+.venv/bin/python -m pytest
+```
+
+`pyproject.toml` sets `fail_under = 80` for `coverage`. Content/substring assertions on
+rendered output plus CLI subprocess exit-code tests -- not golden-file diffing, per
+`DescriptorGenerator`'s own test shape. Two assertions are load-bearing and
+non-negotiable (`tests/test_generator.py::TestRequiredTrapAssertions`): that the
+emitted `graph_match` stub's doc comment literally contains the whole-catalog
+blast-radius warning, and that the emitted `Test<Name>Matchers.cpp` constructs
+`DeviceProperties` by value.

@@ -1,0 +1,12 @@
+## Splice point 2: .../kernel_ingestor_engine/IngestorKernels.cmake:14
+## Append these kernel source stems (no extension) to the existing
+## HIPDNN_INGESTOR_PACK_KERNELS list. Do not replace the list -- append.
+{% set stems = [] %}
+{% for pack in config.packs %}
+{% for kernel in pack.kernels %}
+{% if kernel.kernel_source.entry_point not in stems %}
+{% set _ = stems.append(kernel.kernel_source.entry_point) %}
+{{ kernel.kernel_source.entry_point }}
+{% endif %}
+{% endfor %}
+{% endfor %}

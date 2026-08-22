@@ -1,0 +1,8 @@
+## Splice point 4a: .../kernel_ingestor_engine/IngestorPacks.hpp
+## Add this declaration beside the other register<Name>Symbols() decls. Both this
+## edit AND the IngestorPacks.cpp table-row edit (ingestor_packs.cpp.txt) are
+## required -- a pack registered here but missing from the table silently vanishes
+## from the unit-test binary (static-archive linker drops an unreferenced object)
+## while surviving in the plugin .so, with no error either way.
+/// @see packs/{{ config.native_class_name }}Native.cpp
+void {{ config.register_symbols_fn }}(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
