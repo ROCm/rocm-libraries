@@ -54,7 +54,7 @@ std::vector<uint8_t> buildSingleTensorGraphBuffer(int64_t uid, int64_t dim)
 }
 } // namespace
 
-TEST(AutotuneCacheKey, EmptyGraphViewReturnsNullopt)
+TEST(TestAutotuneCacheKey, EmptyGraphViewReturnsNullopt)
 {
     const std::array<uint8_t, 4> device{1, 2, 3, 4};
     const hipdnnPluginConstData_t emptyGraph{nullptr, 0};
@@ -62,7 +62,7 @@ TEST(AutotuneCacheKey, EmptyGraphViewReturnsNullopt)
     EXPECT_FALSE(deriveCacheKey(emptyGraph, asConstData(device)).has_value());
 }
 
-TEST(AutotuneCacheKey, EmptyDeviceViewReturnsNullopt)
+TEST(TestAutotuneCacheKey, EmptyDeviceViewReturnsNullopt)
 {
     const std::array<uint8_t, 4> graph{1, 2, 3, 4};
     const hipdnnPluginConstData_t emptyDevice{nullptr, 0};
@@ -70,7 +70,7 @@ TEST(AutotuneCacheKey, EmptyDeviceViewReturnsNullopt)
     EXPECT_FALSE(deriveCacheKey(asConstData(graph), emptyDevice).has_value());
 }
 
-TEST(AutotuneCacheKey, UnverifiableGraphViewReturnsNullopt)
+TEST(TestAutotuneCacheKey, UnverifiableGraphViewReturnsNullopt)
 {
     const std::array<uint8_t, 4> notAGraph{1, 2, 3, 4};
     const std::array<uint8_t, 4> device{5, 6, 7, 8};
@@ -78,7 +78,7 @@ TEST(AutotuneCacheKey, UnverifiableGraphViewReturnsNullopt)
     EXPECT_FALSE(deriveCacheKey(asConstData(notAGraph), asConstData(device)).has_value());
 }
 
-TEST(AutotuneCacheKey, IdenticalBytesHashIdentically)
+TEST(TestAutotuneCacheKey, IdenticalBytesHashIdentically)
 {
     const auto graph = buildSingleTensorGraphBuffer(1, 4);
     const std::array<uint8_t, 4> device{5, 6, 7, 8};
@@ -92,7 +92,7 @@ TEST(AutotuneCacheKey, IdenticalBytesHashIdentically)
     EXPECT_EQ(*first, *second);
 }
 
-TEST(AutotuneCacheKey, DifferingBytesHashDifferently)
+TEST(TestAutotuneCacheKey, DifferingBytesHashDifferently)
 {
     const auto graphA = buildSingleTensorGraphBuffer(1, 4);
     const auto graphB = buildSingleTensorGraphBuffer(1, 8);
@@ -108,7 +108,7 @@ TEST(AutotuneCacheKey, DifferingBytesHashDifferently)
     EXPECT_NE(*keyA, *keyB);
 }
 
-TEST(AutotuneCacheKey, RenumberedGraphHashesIdentically)
+TEST(TestAutotuneCacheKey, RenumberedGraphHashesIdentically)
 {
     // A tensor's ordinal folds into the key, not its uid value, so a renumbered but
     // otherwise identical graph keys the same.
