@@ -68,6 +68,28 @@ struct WinnerKeyHash
     }
 };
 
+/// Do @p left and @p right rank the same candidates in the same order? Compares the
+/// `(kernelId, packId, dispatchId)` sequence positionally and ignores `timeMs`.
+///
+/// This is the write-back supersession test (see `writeBackToShard()`). The two obvious
+/// alternatives are both wrong. Comparing only the kernel-id *set* would treat a genuine
+/// reordering -- a driver or firmware change, a different thermal or clock regime, two
+/// kernels that actually swapped -- as no change and discard it forever, and here the
+/// order IS the payload. Comparing whole records including `timeMs` would never match,
+/// because a measured float essentially never repeats bit-for-bit, so every benchmarking
+/// run of an unchanged catalog would append a line.
+inline bool rankedIdsEqual(const WinnerRecord& left, const WinnerRecord& right)
+{
+    return std::equal(left.begin(),
+                      left.end(),
+                      right.begin(),
+                      right.end(),
+                      [](const RankedEntry& a, const RankedEntry& b) {
+                          return a.kernelId == b.kernelId && a.packId == b.packId
+                                 && a.dispatchId == b.dispatchId;
+                      });
+}
+
 /// Does @p record carry a measurement for every kernel in @p kernels? One-directional:
 /// entries in @p record absent from @p kernels do not fail coverage. Production
 /// decisions go through `orderIfFullyCovered` below, not this directly.
