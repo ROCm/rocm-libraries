@@ -144,7 +144,6 @@ class KernelCodeGenResult(NamedTuple):
     cuoccupancy: int
     pgr: int
     mathclk: int
-    customKernelDef: Optional[dict] = None
 
 class KernelMinResult(NamedTuple):
     err: int
@@ -232,7 +231,6 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
-    customKernelDef = kernel._state.get("CustomKernel", None)
     cuocc = kernel["CUOccupancy"]
     if cuocc <= 0 and getVerbosity() >= 2:
         print2(
@@ -242,8 +240,7 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
         kernel["WavefrontSize"], cuocc, \
-        pgr, kernel["MathClocksUnrolledLoop"], \
-        customKernelDef
+        pgr, kernel["MathClocksUnrolledLoop"]
     )
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
@@ -311,18 +308,6 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
             solution._state["MathClocksUnrolledLoop"] = result.mathclk
-            if result.customKernelDef is not None:
-                solution._state["CustomKernel"] = result.customKernelDef
-
-def _applyCustomKernelDefToSol(sol, result):
-    """Copy codegen-emitted CustomKernel definition from a KernelCodeGenResult to a
-    Contractions.Solution, updating both the originalSolution state and the
-    Contractions-level customKernel attribute."""
-    ckDef = getattr(result, 'customKernelDef', None)
-    if ckDef is not None:
-        sol.originalSolution._state["CustomKernel"] = ckDef
-        from Tensile.Contractions import CustomKernel as CK
-        sol.customKernel = CK.FromOriginalState(ckDef)
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
     resultDict = {}
@@ -348,7 +333,6 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                     sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
                     sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
                     sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
-                    _applyCustomKernelDefToSol(sol, result)
                 except KeyError:
                     print(f"\n{'='*80}")
                     print(f"ERROR: KeyError in masterLibrary.solutions")
@@ -379,7 +363,6 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                         sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
                         sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
                         sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
-                        _applyCustomKernelDefToSol(sol, result)
                     except KeyError:
                         print(f"\n{'='*80}")
                         print(f"ERROR: KeyError in lazyLibrary")
