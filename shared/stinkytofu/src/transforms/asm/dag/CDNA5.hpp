@@ -83,11 +83,13 @@ struct CDNA5Config {
     // explicit non-sentinel user config wins over these.
     int dsReadPerWmma;
     int globalReadPerWmma;
+    int tensorLoadWmmaSpace;
 };
 
 constexpr CDNA5Config kGfx1250Config = {
     /*dsReadPerWmma=*/3,
     /*globalReadPerWmma=*/1,
+    /*tensorLoadWmmaSpace=*/0,
 };
 
 // gfx1250v0: starts from the gfx1250 values. TODO(tuning): fill in gfx1250v0's real
@@ -394,6 +396,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
         return cfg > 0 ? (cfg < INT_MAX ? cfg : config_.dsReadPerWmma) : config_.dsReadPerWmma;
+    }
+    int tensorLoadWmmaSpace() const {
+        const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
+        return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
     }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
@@ -1851,6 +1857,12 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
     if (hasWMMAInRegion_) {
+        // Layer 1/3 (base merge):
+        // Build one threshold map from two independent estimators:
+        //   - afterThresholds : "barrier should be after at least N WMMA"
+        //   - beforeThresholds: "barrier should be before/around WMMA N"
+        // If a barrier appears in both maps, average them to get a single
+        // neutral placement point in barrierWmmaThresholds_.
         auto afterThresholds = computeBarrierAfterThresholds(regionStart, regionEnd);
         for (auto& [barrier, afterOutput] : afterThresholds) {
             barrierWmmaThresholds_[barrier] = afterOutput.afterThreshold;
@@ -1863,13 +1875,16 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             else
                 barrierWmmaThresholds_[barrier] = beforeOutput.beforeThreshold;
         }
-        // Cross-check exclusive barrier pairs:
-        // one barrier appears only in afterThresholds and another appears only in beforeThresholds.
-        // Compare ranges and report overlap.
+        // Layer 2/3 (exclusive overlap reconcile):
+        // Some signal/wait-like pairs are split: one member only lands in the
+        // "after" model while its counterpart only lands in the "before" model.
+        // For those cross-map-only pairs, compare their implied WMMA ranges.
+        // If ranges overlap, force both barriers to the same averaged threshold
+        // so they do not drift to different windows.
         for (const auto& [afterBarrier, afterOutput] : afterThresholds) {
             if (beforeThresholds.find(afterBarrier) != beforeThresholds.end()) continue;
-            const int afterWindow = std::max(0, afterOutput.overlapWmmaWindow);
             const int afterEnd = afterOutput.afterThreshold;
+            const int afterWindow = std::max(0, afterOutput.overlapWmmaWindow);
             const int afterBegin = std::max(0, afterEnd - afterWindow);
             for (const auto& [beforeBarrier, beforeOutput] : beforeThresholds) {
                 if (afterBarrier == beforeBarrier) continue;
@@ -1878,11 +1893,18 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 const int beforeWindow = std::max(0, beforeOutput.wmmaWindowsNeeded);
                 const int beforeEnd = beforeBegin + beforeWindow;
                 const bool overlap = (afterBegin < beforeEnd) && (beforeBegin < afterEnd);
-                if (overlap) {
-                    auto afterIt = barrierWmmaThresholds_.find(afterBarrier);
-                    auto beforeIt = barrierWmmaThresholds_.find(beforeBarrier);
-                    if (afterIt != barrierWmmaThresholds_.end() &&
-                        beforeIt != barrierWmmaThresholds_.end()) {
+                const int totalWmma = std::max(1, wmmaIssueConfig.issuedCount);
+                const int targetTensorLoadWmmaSpace = this->tensorLoadWmmaSpace();
+                auto afterIt = barrierWmmaThresholds_.find(afterBarrier);
+                auto beforeIt = barrierWmmaThresholds_.find(beforeBarrier);
+                if (afterIt != barrierWmmaThresholds_.end() &&
+                    beforeIt != barrierWmmaThresholds_.end()) {
+                    if (targetTensorLoadWmmaSpace > 0) {
+                        const int deltaAfter = targetTensorLoadWmmaSpace / 2;
+                        const int deltaBefore = (targetTensorLoadWmmaSpace + 1) / 2;
+                        afterIt->second = std::clamp(afterIt->second - deltaAfter, 0, totalWmma);
+                        beforeIt->second = std::clamp(beforeIt->second + deltaBefore, 0, totalWmma);
+                    } else if (overlap) {
                         const int mergedThreshold = (afterIt->second + beforeIt->second) / 2;
                         afterIt->second = mergedThreshold;
                         beforeIt->second = mergedThreshold;
@@ -1891,9 +1913,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 PASS_DEBUG(std::cerr
                            << "[CDNA5 onInitRegion after-before exclusive overlap] afterBarrier="
                            << afterBarrier << " beforeBarrier=" << beforeBarrier
-                           << " afterThreshold=" << afterEnd << " afterWmmaWindow=" << afterWindow
-                           << " beforeThreshold=" << beforeBegin << " beforeWmmaWindow="
-                           << beforeWindow << " overlap=" << overlap << "\n");
+                           << " afterThreshold=" << afterEnd << " beforeThreshold=" << beforeBegin
+                           << " targetTensorLoadWmmaSpace=" << targetTensorLoadWmmaSpace << "\n");
             }
         }
 
@@ -1918,11 +1939,16 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     if (it != barrierWmmaThresholds_.end()) it->second = mergedThreshold;
                 }
                 PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion pair normalize] groupSize="
-                                     << group.barriers.size()
-                                     << " mergedThreshold=" << mergedThreshold
-                                     << " useSrcTokens=" << useSrcTokens << "\n");
+                                     << group.barriers.size() << " mergedThreshold="
+                                     << mergedThreshold << " useSrcTokens=" << useSrcTokens
+                                     << " sum=" << sum << " count=" << count << "\n");
             }
         };
+        // Layer 3/3 (final pair normalize):
+        // Run once with source-token grouping and once with destination-token
+        // grouping, because different barrier forms expose their pseudo token on
+        // different operand sides. This final pass guarantees each grouped
+        // barrier_signal/barrier_wait pair shares one threshold.
         normalizeBarrierPairs(/*useSrcTokens=*/true);
         normalizeBarrierPairs(/*useSrcTokens=*/false);
     }
