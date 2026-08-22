@@ -54,6 +54,7 @@ function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     string(REPLACE ";" ";\n" INSERT_KERNELS "${INSERT_KERNELS_LIST}")
     configure_file(kernels/${FILE_NAME}.in ${PROJECT_BINARY_DIR}/${FILE_NAME})
 endfunction()
+
 set( MIOpen_Source
     activ/problem_description.cpp
     activ_api.cpp

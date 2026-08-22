@@ -26,6 +26,7 @@
 
 #include "rocsparse-types.h"
 #include "rocsparse_envariables.hpp"
+#include "rocsparse_getenv.hpp"
 
 namespace rocsparse
 {
@@ -87,29 +88,37 @@ namespace rocsparse
             m_var.set_debug(debug);
 
             const bool debug_arguments
-                = (!getenv(rocsparse::envariables::names[rocsparse::envariables::DEBUG_ARGUMENTS]))
+                = (!rocsparse::get_environment_variable(
+                      rocsparse::envariables::names[rocsparse::envariables::DEBUG_ARGUMENTS])
+                        .has_value())
                       ? debug
                       : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG);
             m_var.set_debug_arguments(debug_arguments);
 
             m_var.set_debug_verbose(
-                (!getenv(rocsparse::envariables::names[rocsparse::envariables::DEBUG_VERBOSE]))
+                (!rocsparse::get_environment_variable(
+                     rocsparse::envariables::names[rocsparse::envariables::DEBUG_VERBOSE])
+                      .has_value())
                     ? debug
                     : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG_VERBOSE));
             m_var.set_debug_arguments_verbose(
-                (!getenv(
-                    rocsparse::envariables::names[rocsparse::envariables::DEBUG_ARGUMENTS_VERBOSE]))
+                (!rocsparse::get_environment_variable(
+                     rocsparse::envariables::names[rocsparse::envariables::DEBUG_ARGUMENTS_VERBOSE])
+                      .has_value())
                     ? debug_arguments
                     : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG_ARGUMENTS_VERBOSE));
 
             m_var.set_debug_force_host_assert(
-                (!getenv(
-                    rocsparse::envariables::names[rocsparse::envariables::DEBUG_FORCE_HOST_ASSERT]))
+                (!rocsparse::get_environment_variable(
+                     rocsparse::envariables::names[rocsparse::envariables::DEBUG_FORCE_HOST_ASSERT])
+                      .has_value())
                     ? debug
                     : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG_FORCE_HOST_ASSERT));
 
             m_var.set_debug_verbose(
-                (!getenv(rocsparse::envariables::names[rocsparse::envariables::DEBUG_WARNINGS]))
+                (!rocsparse::get_environment_variable(
+                     rocsparse::envariables::names[rocsparse::envariables::DEBUG_WARNINGS])
+                      .has_value())
                     ? debug
                     : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG_WARNINGS));
 

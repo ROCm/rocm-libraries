@@ -23,13 +23,14 @@
  * ************************************************************************ */
 
 #include "rocsparse_exporter_matrixmarket.hpp"
+#include "rocsparse_getenv.hpp"
 template <typename X, typename Y>
 rocsparse_status rocsparse_type_conversion(const X& x, Y& y);
 
 rocsparse_exporter_matrixmarket::~rocsparse_exporter_matrixmarket()
 {
-    const char* env = getenv("GTEST_LISTENER");
-    if(!env || strcmp(env, "NO_PASS_LINE_IN_LOG"))
+    auto env = rocsparse_clients::get_environment_variable("GTEST_LISTENER");
+    if(!env || *env != "NO_PASS_LINE_IN_LOG")
     {
         std::cout << "Export done." << std::endl;
     }
@@ -38,8 +39,8 @@ rocsparse_exporter_matrixmarket::~rocsparse_exporter_matrixmarket()
 rocsparse_exporter_matrixmarket::rocsparse_exporter_matrixmarket(const std::string& filename_)
     : m_filename(filename_)
 {
-    const char* env = getenv("GTEST_LISTENER");
-    if(!env || strcmp(env, "NO_PASS_LINE_IN_LOG"))
+    auto env = rocsparse_clients::get_environment_variable("GTEST_LISTENER");
+    if(!env || *env != "NO_PASS_LINE_IN_LOG")
     {
         std::cout << "Opening file '" << this->m_filename << "' ... " << std::endl;
     }

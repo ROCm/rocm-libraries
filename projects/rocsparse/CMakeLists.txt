@@ -100,6 +100,51 @@ if( NOT BUILD_FORTRAN_CLIENTS )
 endif( )
 option(BUILD_DOCS "Build documentation" OFF)
 
+if (WIN32)
+  add_compile_definitions(_CRT_SECURE_NO_DEPRECATE;NOMINMAX;NORIGHT)
+
+  option(USE_BINSKIM_COMPLIANT_COMPILE_FLAGS "Prepare hipBLAS for BinSkim Binary Analyzer" OFF)
+  option(USE_SPECTRE_MITIGATED_LIBRARIES "Use Spectre-mitigated libraries" OFF)
+
+  if (MSVC AND MSVC_VERSION GREATER_EQUAL 1900)
+    if (USE_BINSKIM_COMPLIANT_COMPILE_FLAGS)
+      message(STATUS "Control Flow Guard enabled")
+      add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/guard:cf>)
+      add_link_options(/guard:cf /DYNAMICBASE)
+    endif ()
+    if (USE_SPECTRE_MITIGATED_LIBRARIES)
+      message(STATUS "Using Spectre-mitigated libraries")
+      add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/Qspectre>)
+    endif ()
+  elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if (USE_BINSKIM_COMPLIANT_COMPILE_FLAGS)
+      message(STATUS "Control Flow Guard enabled (Clang)")
+      add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:SHELL:-Xclang -cfguard>")
+      add_link_options(-Wl,-guard:cf)
+    endif ()
+    if (USE_SPECTRE_MITIGATED_LIBRARIES)
+      message(WARNING "Spectre mitigated libraries are not yet available for Clang in this project.")
+    endif ()
+  endif ()
+
+  option(USE_MSVC_STATIC_RUNTIME "Link MSVC runtime library statically" OFF)
+
+  if (NOT USE_MSVC_STATIC_RUNTIME)
+    set(MSVC_RUNTIME_SUFFIX "DLL")
+  endif ()
+  if (NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>${MSVC_RUNTIME_SUFFIX}")
+  endif ()
+
+  # clang's HIP device-side compilation pass doesn't support __declspec(dllexport/dllimport);
+  set(_EXPORT_HEADER_CUSTOM_CONTENT [[
+#if defined(__HIP_DEVICE_COMPILE__)
+#  undef ROCSPARSE_EXPORT
+#  define ROCSPARSE_EXPORT
+#endif
+]])
+endif ()
+
 if(BUILD_WITH_OFFLOAD_COMPRESS)
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag("--offload-compress"
