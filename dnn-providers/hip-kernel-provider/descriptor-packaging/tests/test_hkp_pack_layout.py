@@ -838,3 +838,41 @@ def test_example_tree_native_symbols_are_registered():
         f"example descriptors name unregistered native symbols {sorted(unknown)}; "
         f"registered: {sorted(registered)}"
     )
+
+
+def test_library_resolves_for_a_nested_standalone_ukd(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+):
+    """The standalone-UKD branch of the library rule, which inline coverage misses.
+
+    A standalone UKD ships as its own file, so it anchors on ITS OWN directory --
+    a different code path from an inline UKD, which ships inside its KDP and
+    anchors on the KDP's. Both branches were changed together; only the inline
+    one was covered, so this side was correct by luck rather than by test.
+    """
+    root = tmp_path / "root"
+    _nest(root, "hip/deep", main_fixture)
+
+    run_pipeline(
+        source_root=root,
+        arches=[ARCH],
+        out_root=tmp_path / "out",
+        hipcc=hipcc,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+
+    out = tmp_path / "out" / ARCH
+    checked = 0
+    for ukd_file in out.rglob("*.ukd.json"):
+        doc = _read(ukd_file)
+        ks = doc.get("kernel_source", {})
+        if ks.get("kind") != "kpack":
+            continue
+        resolved = _resolve_library_like_runtime(ukd_file, ks["library"])
+        assert resolved.is_file(), (
+            f"standalone {ukd_file.relative_to(out)} declares "
+            f"library={ks['library']!r} -> {resolved}, which the runtime cannot open"
+        )
+        checked += 1
+    assert checked, "no standalone kpack UKD shipped; the test asserted nothing"
