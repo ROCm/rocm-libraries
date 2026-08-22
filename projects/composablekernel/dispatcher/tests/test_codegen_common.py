@@ -30,6 +30,21 @@ from codegen_common import (  # noqa: E402
     needs_wave_expansion,
     needs_warp_expansion,
     needs_pipeline_expansion,
+    # Block-scale quant kernel-name / epilogue contract (see TestQuant* below).
+    bquant_effective_epilogue,
+    aquant_effective_epilogue,
+    abquant_effective_epilogue,
+    gemm_aquant_effective_epilogue,
+    make_bquant_kernel_name,
+    make_rowcolquant_kernel_name,
+    make_aquant_kernel_name,
+    make_abquant_kernel_name,
+    make_gemm_aquant_kernel_name,
+    make_gemm_abquant_kernel_name,
+)
+from unified_gemm_tensor_quant_codegen import (  # noqa: E402
+    make_tensor_quant_kernel_name,
+    tensor_quant_effective_epilogue,
 )
 
 
@@ -238,6 +253,258 @@ class TestArchAwareExpansion(unittest.TestCase):
 
     def test_needs_pipeline_expansion_explicit(self):
         self.assertFalse(needs_pipeline_expansion({"pipeline": "compv4"}))
+
+
+# =============================================================================
+# Block-scale quant: kernel-name and epilogue-selection contract
+# =============================================================================
+#
+# CHARACTERIZATION TESTS. These pin the CURRENT output of the quant kernel-name
+# builders and epilogue selectors, byte-exact. They exist so the codegen dedup
+# refactor can be proven behaviour-preserving.
+#
+# Why byte-exact matters: the name a generator emits as KERNEL_NAME is the same
+# string the runtime utils rebuild to locate the compiled .so. The two sides
+# share these helpers precisely so they cannot drift -- and the gap these tests
+# fill has already let one real bug through (see the shadowing NOTE at
+# codegen_common.py:662).
+#
+# A failure here is NOT automatically a bug in the test: it means a name or an
+# epilogue choice changed. That is only correct if it was changed deliberately,
+# and it must then be matched on the runtime side in dispatcher/python/*_utils.py.
+
+# One representative tile shared by every name test: N_Repeat = 128/(4*16) = 2,
+# i.e. EVEN, so the permute_n parity condition is satisfiable and the tests can
+# distinguish "cshuffle because parity failed" from "cshuffle unconditionally".
+_TILE = dict(
+    tile_m=128, tile_n=128, tile_k=128,
+    warp_m=1, warp_n=4, warp_k=1,
+    warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+)
+_ARGS = ("fp8", "rcr", "compv3", "cshuffle", "intrawave")
+
+
+class TestQuantEffectiveEpilogue(unittest.TestCase):
+    """The permute_n vs cshuffle selection rule, per operator family."""
+
+    # -- bquant: gated on preshuffle_b AND even N_Repeat AND quant_group_n == 1 --
+
+    def test_bquant_permute_n_when_all_conditions_hold(self):
+        self.assertEqual(bquant_effective_epilogue(128, 4, 16, 1, True), "permute_n")
+
+    def test_bquant_cshuffle_without_preshuffle_b(self):
+        # The preshuffle_b gate is load-bearing: omitting it once made MX kernels
+        # emit a PermuteN epilogue ~16-17% slower than the CShuffle they wanted.
+        self.assertEqual(bquant_effective_epilogue(128, 4, 16, 1, False), "cshuffle")
+
+    def test_bquant_cshuffle_when_quant_group_n_gt_1(self):
+        self.assertEqual(bquant_effective_epilogue(128, 4, 16, 8, True), "cshuffle")
+
+    def test_bquant_cshuffle_when_n_repeat_odd(self):
+        self.assertEqual(bquant_effective_epilogue(64, 4, 16, 1, True), "cshuffle")
+
+    # -- aquant (grouped): same rule but with NO preshuffle_b gate --
+
+    def test_aquant_permute_n_on_even_n_repeat(self):
+        self.assertEqual(aquant_effective_epilogue(128, 4, 16, 1), "permute_n")
+
+    def test_aquant_cshuffle_when_n_repeat_odd(self):
+        self.assertEqual(aquant_effective_epilogue(64, 4, 16, 1), "cshuffle")
+
+    def test_aquant_cshuffle_when_quant_group_n_gt_1(self):
+        self.assertEqual(aquant_effective_epilogue(128, 4, 16, 8), "cshuffle")
+
+    # -- abquant (grouped): as aquant, plus two pipelines forced to cshuffle --
+
+    def test_abquant_permute_n_on_compv3(self):
+        self.assertEqual(abquant_effective_epilogue(128, 4, 16, 1, "compv3"), "permute_n")
+
+    def test_abquant_eightwaves_forces_cshuffle(self):
+        # TransposeC=true is incompatible with PermuteNEpilogue.
+        self.assertEqual(abquant_effective_epilogue(128, 4, 16, 1, "eightwaves"), "cshuffle")
+
+    def test_abquant_preshuffleb_forces_cshuffle(self):
+        self.assertEqual(abquant_effective_epilogue(128, 4, 16, 1, "preshuffleb"), "cshuffle")
+
+    # -- the two unconditional-cshuffle selectors --
+
+    def test_gemm_aquant_epilogue_is_always_cshuffle(self):
+        # Pins current behaviour: this helper ignores all four arguments. Even
+        # with parity satisfied and quant_group_n == 1 it returns cshuffle.
+        self.assertEqual(gemm_aquant_effective_epilogue(128, 4, 16, 1), "cshuffle")
+
+    def test_tensor_quant_epilogue_is_always_cshuffle(self):
+        self.assertEqual(tensor_quant_effective_epilogue(128, 4, 16), "cshuffle")
+
+
+class TestQuantKernelNames(unittest.TestCase):
+    """Byte-exact kernel names. These strings are a cross-layer contract."""
+
+    def test_tensor_quant(self):
+        self.assertEqual(
+            make_tensor_quant_kernel_name(*_ARGS, **_TILE),
+            "gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave"
+            "_128x128x128_1x4x1_16x16x32",
+        )
+
+    def test_rowcolquant(self):
+        # RowColQuant has no quant-group segment: scales are per-row / per-col
+        # vectors, not blocks.
+        self.assertEqual(
+            make_rowcolquant_kernel_name(*_ARGS, **_TILE),
+            "gemm_rowcolquant_fp8_rcr_compv3_cshuffle_intrawave"
+            "_128x128x128_1x4x1_16x16x32",
+        )
+
+    def test_gemm_aquant_with_preshuffle(self):
+        # Note the flag spells "preshufflequant", not "preshuffleaq" as the
+        # grouped variant does.
+        self.assertEqual(
+            make_gemm_aquant_kernel_name(
+                *_ARGS, **_TILE,
+                quant_group_m=1, quant_group_n=1, quant_group_k=128,
+                preshuffle_aquant=True,
+            ),
+            "gemm_aquant_fp8_rcr_compv3_cshuffle_intrawave"
+            "_128x128x128_1x4x1_16x16x32_qg1x1x128_preshufflequant",
+        )
+
+    def test_gemm_abquant_preshuffle_b(self):
+        self.assertEqual(
+            make_gemm_abquant_kernel_name(
+                *_ARGS, **_TILE,
+                aquant_group_k=128, bquant_group_n=1, bquant_group_k=128,
+                preshuffle_b=True, preshuffle_bquant=True, eight_waves=False,
+            ),
+            "gemm_abquant_fp8_rcr_compv3_cshuffle_intrawave"
+            "_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x1x128"
+            "_preshuffleb_preshufflebq",
+        )
+
+    def test_gemm_abquant_never_emits_permute_n(self):
+        # Pins a surprise. make_gemm_abquant_kernel_name has an
+        # `if preshuffle_b and not eight_waves` branch that calls
+        # bquant_effective_epilogue -- but WITHOUT forwarding preshuffle_b, so
+        # that helper sees its default False and returns cshuffle. Both arms of
+        # the branch therefore yield cshuffle and permute_n is unreachable,
+        # even here where parity holds and bquant_group_n == 1.
+        for preshuffle_b, eight_waves in ((True, False), (False, False), (True, True)):
+            name = make_gemm_abquant_kernel_name(
+                *_ARGS, **_TILE,
+                aquant_group_k=128, bquant_group_n=1, bquant_group_k=128,
+                preshuffle_b=preshuffle_b, eight_waves=eight_waves,
+            )
+            self.assertIn("_cshuffle_", name)
+            self.assertNotIn("permute_n", name)
+
+    def test_gemm_abquant_eight_waves(self):
+        self.assertEqual(
+            make_gemm_abquant_kernel_name(
+                "fp8", "rcr", "eightwaves", "cshuffle", "intrawave", **_TILE,
+                aquant_group_k=128, bquant_group_n=1, bquant_group_k=128,
+                preshuffle_b=True, eight_waves=True,
+            ),
+            "gemm_abquant_fp8_rcr_eightwaves_cshuffle_intrawave"
+            "_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x1x128"
+            "_preshuffleb_eightwaves",
+        )
+
+    def test_bquant_plain_prefix_emits_permute_n(self):
+        # name_prefix="gemm_bquant" selects the non-grouped family. preshuffle_b
+        # is forwarded here (unlike gemm_abquant above), so permute_n is live.
+        self.assertEqual(
+            make_bquant_kernel_name(
+                *_ARGS, **_TILE,
+                quant_group_m=1, quant_group_n=1, quant_group_k=128,
+                preshuffle_b=True, preshuffle_bquant=True,
+                name_prefix="gemm_bquant",
+            ),
+            "gemm_bquant_fp8_rcr_compv3_permute_n_intrawave"
+            "_128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb_preshufflebq",
+        )
+
+    def test_bquant_default_prefix_is_grouped(self):
+        # The default name_prefix is the GROUPED family, which is easy to get
+        # wrong: callers that forget it silently emit a grouped name.
+        self.assertEqual(
+            make_bquant_kernel_name(
+                *_ARGS, **_TILE,
+                quant_group_m=1, quant_group_n=1, quant_group_k=128,
+            ),
+            "grouped_gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave"
+            "_128x128x128_1x4x1_16x16x32_qg1x1x128",
+        )
+
+    def test_grouped_aquant(self):
+        self.assertEqual(
+            make_aquant_kernel_name(
+                *_ARGS, **_TILE,
+                quant_group_m=1, quant_group_n=1, quant_group_k=128,
+                preshuffle_aq=True,
+            ),
+            "grouped_gemm_aquant_fp8_rcr_compv3_permute_n_intrawave"
+            "_128x128x128_1x4x1_16x16x32_aqg1x1x128_preshuffleaq",
+        )
+
+    def test_grouped_abquant_all_flags(self):
+        # Flag order is part of the contract: b, aq, bq, transposec.
+        self.assertEqual(
+            make_abquant_kernel_name(
+                *_ARGS, **_TILE,
+                aquant_group_m=1, aquant_group_n=1, aquant_group_k=128,
+                bquant_group_m=1, bquant_group_n=1, bquant_group_k=128,
+                preshuffle_b=True, preshuffle_aq=True, preshuffle_bq=True,
+                transpose_c=True,
+            ),
+            "grouped_gemm_abquant_fp8_rcr_compv3_permute_n_intrawave"
+            "_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x1x128"
+            "_preshuffleb_preshuffleaq_preshufflebq_transposec",
+        )
+
+
+class TestQuantKernelNameInvariants(unittest.TestCase):
+    """Properties that must hold for every quant name builder."""
+
+    def _all_builders(self):
+        return [
+            ("tensor_quant", lambda **t: make_tensor_quant_kernel_name(*_ARGS, **t)),
+            ("rowcolquant", lambda **t: make_rowcolquant_kernel_name(*_ARGS, **t)),
+            ("gemm_aquant", lambda **t: make_gemm_aquant_kernel_name(
+                *_ARGS, **t, quant_group_m=1, quant_group_n=1, quant_group_k=128)),
+            ("gemm_abquant", lambda **t: make_gemm_abquant_kernel_name(
+                *_ARGS, **t, aquant_group_k=128, bquant_group_n=1, bquant_group_k=128)),
+            ("bquant", lambda **t: make_bquant_kernel_name(
+                *_ARGS, **t, quant_group_m=1, quant_group_n=1, quant_group_k=128)),
+            ("grouped_aquant", lambda **t: make_aquant_kernel_name(
+                *_ARGS, **t, quant_group_m=1, quant_group_n=1, quant_group_k=128)),
+            ("grouped_abquant", lambda **t: make_abquant_kernel_name(
+                *_ARGS, **t,
+                aquant_group_m=1, aquant_group_n=1, aquant_group_k=128,
+                bquant_group_m=1, bquant_group_n=1, bquant_group_k=128)),
+        ]
+
+    def test_names_are_filename_safe(self):
+        # Names become .hpp filenames and .so basenames.
+        for label, fn in self._all_builders():
+            name = fn(**_TILE)
+            self.assertRegex(name, r"^[a-z0-9_]+$", f"{label}: {name!r} not filename-safe")
+
+    def test_tile_shape_is_encoded(self):
+        # The tile triple must survive into the name, or two differently-shaped
+        # kernels collide on one filename and one silently overwrites the other.
+        for label, fn in self._all_builders():
+            self.assertIn("128x128x128", fn(**_TILE), label)
+
+    def test_warp_tile_k_distinguishes_names(self):
+        # WarpTileK is the gfx942(32) / gfx950(128) arch trap: the wrong value
+        # silently all-zeros the output, so it MUST be part of the identity.
+        alt = dict(_TILE, warp_tile_k=128)
+        for label, fn in self._all_builders():
+            self.assertNotEqual(fn(**_TILE), fn(**alt), f"{label}: warp_tile_k not in name")
+
+    def test_builders_are_deterministic(self):
+        for label, fn in self._all_builders():
+            self.assertEqual(fn(**_TILE), fn(**_TILE), label)
 
 
 if __name__ == "__main__":
