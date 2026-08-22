@@ -71,7 +71,7 @@ def _parse_args(argv):
         "out-root.",
     )
     p.add_argument(
-        "--rocm-kpack-dir",
+        "--kpack-python-dir",
         default=None,
         help="Path to the rocm-kpack 'python' directory (overrides any "
         "installed rocm_kpack).",
@@ -94,7 +94,7 @@ def main(argv=None):
         arches=arches,
         out_root=Path(args.out_root),
         hipcc=args.hipcc,
-        rocm_kpack_dir=args.rocm_kpack_dir,
+        rocm_kpack_dir=args.kpack_python_dir,
         inter_root=Path(args.inter_root) if args.inter_root else None,
         rocke_wheel_stamp=args.rocke_wheel_stamp,
     )

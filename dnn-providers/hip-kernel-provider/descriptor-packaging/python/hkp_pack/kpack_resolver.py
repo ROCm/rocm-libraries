@@ -30,7 +30,7 @@ def load_kpack(rocm_kpack_dir=None):
         compression = importlib.import_module("rocm_kpack.compression")
     except ImportError as exc:
         raise HkpPackError(
-            "unable to import rocm_kpack; pass --rocm-kpack-dir pointing at "
+            "unable to import rocm_kpack; pass --kpack-python-dir pointing at "
             f"the rocm-kpack 'python' directory (import error: {exc})"
         ) from exc
     return kpack, compression
