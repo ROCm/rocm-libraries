@@ -55,8 +55,21 @@ TEST_P(TestPathSanitizerReservedStems, SanitizesDistinctlyFromTheLiteralStem)
 
     const auto result = sanitizeForPath(stem);
 
-    // A Windows-reserved stem must never survive sanitization unchanged, in any casing.
-    EXPECT_NE(result, stem);
+    // EXPECT_NE(result, stem) alone would hold for every input, reserved or not: the
+    // unconditional hash suffix already guarantees result != stem regardless of
+    // whether the reserved-name guard does anything at all. The guard specifically
+    // must APPEND "_" to a reserved stem (see PathSanitizer.hpp's
+    // `stem.push_back('_')`), so strip the "-<16 hex digits>" suffix (already covered
+    // by ResultAlwaysCarriesTheUnconditionalHashSuffix above) and check the stem
+    // portion gained exactly that suffix over the literal input.
+    const auto dashPos = result.rfind('-');
+    ASSERT_NE(dashPos, std::string::npos);
+    const auto resultStem = result.substr(0, dashPos);
+    EXPECT_EQ(resultStem, stem + "_")
+        << "a reserved stem \"" << stem
+        << "\" must have its stem portion gain a trailing \"_\" from the reserved-name "
+           "guard, not pass through unchanged as \""
+        << resultStem << "\"";
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -93,11 +106,21 @@ TEST_F(TestPathSanitizer, InjectivityAcrossDistinctInputs)
     EXPECT_EQ(results.size(), inputs.size());
 }
 
+/// EXPECT_FALSE(result.empty()) alone is unfalsifiable: the unconditional 16-hex-digit
+/// hash suffix (see ResultAlwaysCarriesTheUnconditionalHashSuffix) already guarantees a
+/// non-empty result no matter what the stem-building logic does, even if it produced no
+/// stem characters at all. The actual claim -- that an empty stem is turned into "_"
+/// rather than left empty -- is only checked by examining the stem portion.
 TEST_F(TestPathSanitizer, EmptyInputProducesNonEmptyResult)
 {
     const auto result = sanitizeForPath("");
 
-    EXPECT_FALSE(result.empty());
+    const auto dashPos = result.rfind('-');
+    ASSERT_NE(dashPos, std::string::npos);
+    const auto stem = result.substr(0, dashPos);
+    EXPECT_EQ(stem, "_") << "an empty input's stem portion must become \"_\", not stay "
+                            "empty (result: \""
+                         << result << "\")";
 }
 
 TEST_F(TestPathSanitizer, LongInputIsCapped)
