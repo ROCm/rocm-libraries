@@ -848,8 +848,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Gemm TensorQuant dispatcher self-test / default-config runner"
     )
-    parser.add_argument("--gfx-arch", default=_DEFAULT_GFX_ARCH,
-                        help="Target GPU arch (default: gfx950)")
+    parser.add_argument("--gfx-arch", default=None,
+                        help="Target GPU arch (default: auto-detect via rocm_agent_enumerator)")
     parser.add_argument("--output-dir", default=None,
                         help="Directory for generated headers + .so files")
     parser.add_argument("--names-only", action="store_true",
@@ -857,6 +857,8 @@ def main() -> int:
     parser.add_argument("--run", action="store_true",
                         help="Execute the built kernels on the GPU (requires a GPU)")
     args = parser.parse_args()
+    if args.gfx_arch is None:
+        args.gfx_arch = _detect_gpu_arch()
     return _self_test(args)
 
 
