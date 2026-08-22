@@ -48,9 +48,13 @@ constexpr std::string_view {{ pack.discriminator.upper() }}_MATCHER_SYMBOL = "{{
 {% endfor %}
 {% endif %}
 
-// KMD fields this engine varies along.
+// KMD fields this engine varies along. `[[maybe_unused]]` because the function bodies
+// below are still `// TODO - FILL THIS OUT` and so reference none of them yet: the
+// provider builds this file under clang-tidy with unused-const-variable as an ERROR, so
+// without the attribute a freshly generated pack fails the build before its author has
+// written a line. Drop the attribute once the bodies read the field.
 {% for f in config.kmd_fields %}
-constexpr std::string_view {{ f.name.upper() }}_FIELD = "{{ f.name }}";
+[[maybe_unused]] constexpr std::string_view {{ f.name.upper() }}_FIELD = "{{ f.name }}";
 {% endfor %}
 
 // ---------------------------------------------------------------------------
@@ -153,10 +157,10 @@ public:
     }
 
     void launch(const Handle& /*handle*/,
-               const PreparedDispatch& /*prepared*/,
-               const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
-               uint32_t /*numDeviceBuffers*/,
-               void* /*workspace*/) const override
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
     {
         // TODO - FILL THIS OUT
     }
