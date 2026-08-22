@@ -37,6 +37,7 @@ from gemm_bquant_utils import (
     BQuantGemmProblem,
     BQuantGpuGemmRunner,
     setup_multiple_bquant_dispatchers,
+    _detect_gpu_arch,
     default_fp8_config,
     default_bf8_config,
     default_fp8i4_config,
@@ -189,6 +190,7 @@ def _max_rel_err(C_gpu: np.ndarray, C_ref: np.ndarray) -> float:
 
 PASS = "PASS"
 FAIL = "FAIL"
+SKIP = "SKIP"
 
 
 def _run_one(label: str, config, M: int, N: int, K: int,
@@ -495,7 +497,11 @@ def _gpu_and_hipcc_available() -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="BQuant GPU correctness tests (C4 + H3)")
-    parser.add_argument("--gfx", default="gfx950", help="GPU arch (default: gfx950)")
+    parser.add_argument(
+        "--gfx",
+        default=None,
+        help="GPU arch (default: auto-detect the running device via rocm_agent_enumerator)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
@@ -509,6 +515,8 @@ def main():
         format="%(levelname)s: %(message)s",
     )
 
+    gfx_arch = args.gfx or _detect_gpu_arch()
+    log.info("Target GPU arch: %s", gfx_arch)
     out_dir = args.output_dir or Path(tempfile.mkdtemp(prefix="bquant_gpu_test_"))
     log.info("Kernel output dir: %s", out_dir)
 
@@ -516,19 +524,27 @@ def main():
     for name, fn in TESTS:
         log.info("--- Running %s ---", name)
         try:
-            status, detail = fn(out_dir, args.gfx)
+            status, detail = fn(out_dir, gfx_arch)
         except Exception as exc:
-            status, detail = FAIL, f"{name}: exception: {exc}"
+            # MX (H3) variants need gfx950 e8m0 microscaling hardware; on any
+            # other arch (e.g. gfx1250/MI400) that is an expected skip, not a
+            # failure -- the fp8/bf8/i4 block-scale paths still run there.
+            if "requires gfx950" in str(exc):
+                status, detail = SKIP, f"{name}: skipped on {gfx_arch} (MX is gfx950-only)"
+            else:
+                status, detail = FAIL, f"{name}: exception: {exc}"
         results.append((name, status, detail))
         log.info("[%s] %s", status, detail)
 
     print("\n=== Summary ===")
     passed = sum(1 for _, s, _ in results if s == PASS)
+    skipped = sum(1 for _, s, _ in results if s == SKIP)
+    failed = sum(1 for _, s, _ in results if s == FAIL)
     for name, status, detail in results:
         print(f"  [{status:4s}] {detail}")
-    print(f"\n{passed}/{len(results)} passed")
+    print(f"\n{passed}/{len(results)} passed, {skipped} skipped, {failed} failed")
 
-    return 0 if passed == len(results) else 1
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":
