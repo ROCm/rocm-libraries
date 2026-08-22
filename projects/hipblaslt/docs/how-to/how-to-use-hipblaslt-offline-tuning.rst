@@ -133,6 +133,17 @@ problems that differ only in one of those omitted fields in the same file.
 ``HIPBLASLT_TUNING_CACHE_PATH`` and ``HIPBLASLT_TUNING_OVERRIDE_FILE`` are mutually exclusive; set
 only one.
 
+Only one process at a time may write a given cache file. Tuning is serialised within a process, but
+nothing coordinates separate processes, so the ranks of a multi-process job such as MPI would each
+benchmark the same shapes and append to the same file unsynchronised. Tune once in a single-rank
+warm-up run, then start the job with ``HIPBLASLT_TUNING_MODE=cache``, which only reads:
+
+.. code-block:: bash
+
+   export HIPBLASLT_TUNING_CACHE_PATH=tuning.txt
+   HIPBLASLT_TUNING_MODE=tune ./your_application          # one rank, once
+   mpirun -n 8 env HIPBLASLT_TUNING_MODE=cache ./your_application
+
 A typical run writes the cache once and reuses it afterwards:
 
 .. code-block:: bash
@@ -265,7 +276,8 @@ Limitations
 * Tuning happens on the C API execution path. Callers of the C++ extension API can replay a cache but do not tune.
 * Grouped GEMM, pointer-array batch, RocRoller and HIP graph capture are excluded from tuning.
 * An uncached in-place problem where ``C`` and ``D`` alias and ``beta`` is nonzero runs with normal selection instead of being tuned. Repeated benchmark launches would otherwise overwrite and reuse C rather than measuring the caller's input.
-* One process should write a given cache file at a time.
+* One process should write a given cache file at a time. Multi-process jobs should tune in a
+  single-rank warm-up and then run in ``cache`` mode; see above.
 * ``alpha``, ``beta`` and whether ``C`` and ``D`` alias are not part of the lookup key, so an entry tuned at one value of ``beta`` can serve a caller using another.
 * Passing ``algo=nullptr`` to ``hipblasLtMatmul`` does not replay cached winners, and such a call is
   left out of the summary rather than counted as a shape the cache served. In ``tune`` mode the shape

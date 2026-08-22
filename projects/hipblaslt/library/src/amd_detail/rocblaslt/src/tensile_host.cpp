@@ -4195,9 +4195,18 @@ namespace
     }
 
     /**
-     * Serialises all tuning. try_lock rather than lock so a second thread
-     * reaching an untuned shape runs normally instead of stalling behind a
-     * benchmark, and so the shared scratch has exactly one writer.
+     * Serialises tuning within this process. try_lock rather than lock so a
+     * second thread reaching an untuned shape runs normally instead of stalling
+     * behind a benchmark, and so the process-owned scratch has exactly one
+     * writer.
+     *
+     * Process-local by construction, and sufficient for what it guards: the
+     * scratch buffer belongs to this process, so a separate process tuning at
+     * the same time cannot corrupt it. What it does not do is coordinate ranks
+     * of a multi-process job. Several ranks in tune mode will each benchmark the
+     * same shapes, duplicating the work, and if they share one cache file they
+     * append to it unsynchronised. Tune once in a single-rank warm-up and run
+     * the job in cache mode, which never writes.
      */
     std::mutex& tuningLock()
     {
@@ -4946,8 +4955,15 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 // default selection unless tuning produces a winner here, so
                 // recording a hit would have the summary claim the cache served
                 // a shape it never touched.
+                //
+                // The lookup runs first either way, so a shape the tuner has
+                // given up on is still counted as the fallback it is. Only then
+                // is the search itself declined, because a budget-truncated or
+                // winnerless search records nothing and repeating it would spend
+                // the same minutes on every matmul of that shape.
                 if(!tuning_cache_has_valid_entry(
-                       handle, key, prob, gemmData, prob.workspaceSize, callerSuppliedAlgo))
+                       handle, key, prob, gemmData, prob.workspaceSize, callerSuppliedAlgo)
+                   && !TensileLite::tuningWasFruitless(key))
                 {
                     // try_lock, not lock: a second thread meeting an untuned
                     // shape runs normally rather than stalling behind a
@@ -5030,6 +5046,15 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                 log_info(__func__, msg.str());
                             }
                         }
+
+                        // A search that reached the measurement loop and still
+                        // has no winner to record is not attempted again in this
+                        // process. Both of these spend the full search before
+                        // discarding it, so retrying on the next matmul would
+                        // stall the caller exactly as long for exactly nothing.
+                        if(result == TensileLite::TuningAttempt::SkippedBudget
+                           || result == TensileLite::TuningAttempt::FallbackNoWinner)
+                            TensileLite::recordFruitlessTuning(key);
 
                         reportAttempt(key, result, elapsedSeconds, tunedIndex, persisted);
                     }

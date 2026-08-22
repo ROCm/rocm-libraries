@@ -1271,6 +1271,27 @@ namespace
         EXPECT_EQ(counters().tuned, 0u) << "the winner was somehow written to " << unwritable;
     }
 
+    // A search the budget cuts short records nothing, so the shape stays
+    // uncached and the next matmul would start the same doomed search again.
+    // Unlatched, that is the whole ceiling spent on every call for the life of
+    // the process rather than once.
+    TEST_F(TuningCache, BudgetExhaustedShapeIsNotRetried)
+    {
+        enterMode("tune", m_path);
+
+        // Small enough that the search is already over budget by the time the
+        // first candidate would be measured, so the test costs one enumeration.
+        setenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "1", 1);
+        hipblaslt_tuning_reset_for_test();
+
+        for(int i = 0; i < 3; i++)
+            ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+        EXPECT_EQ(counters().skipped, 1u)
+            << "the shape re-tuned after its budget ran out, so every call pays the ceiling";
+        EXPECT_EQ(valueRowCount(m_path), 0u) << "a truncated search must not be cached";
+    }
+
     // One stale row is met three times in a tune-mode call: the heuristic
     // lookup, the execution probe, and the recheck under the tuning lock.
     TEST_F(TuningCache, StaleEntryIsCountedAsOneInvalidation)

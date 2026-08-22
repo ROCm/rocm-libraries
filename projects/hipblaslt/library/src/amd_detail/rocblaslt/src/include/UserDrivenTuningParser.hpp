@@ -472,8 +472,11 @@ namespace TensileLite
      *
      * Serialised behind a file-global mutex rather than any per-key guard: two
      * different shapes can finish tuning at the same moment and would otherwise
-     * interleave their rows. Concurrent writers in separate processes are not
-     * supported in this milestone; an unlocked append can still tear.
+     * interleave their rows. That mutex only orders writers inside one process.
+     * Concurrent writers in separate processes, such as the ranks of an MPI job
+     * sharing a cache path, are not supported: the header and row go out as a
+     * single write so a local filesystem will usually append them whole, but
+     * nothing serialises the processes themselves.
      */
     bool appendTunedEntry(const std::string&                 path,
                           const RocblasltContractionProblem& problem,
@@ -550,6 +553,27 @@ namespace TensileLite
      * counted as served. Does nothing in off mode.
      */
     void recordTuningLookup(const ProblemOverride& key, bool matched);
+
+    /**
+     * Note that a full search for this problem ran and produced nothing, and
+     * ask whether one already has.
+     *
+     * A search the budget cuts short is discarded rather than cached, and so is
+     * one where no candidate could be measured. The shape therefore stays
+     * uncached, and without this latch the next matmul starts the same doomed
+     * search again: a 4096-cubed shape under a 30 s ceiling re-ran it on every
+     * call, spending the whole ceiling each time and never recording a row.
+     *
+     * Only the two outcomes that reach the measurement loop are latched. The
+     * early declines cost microseconds, so retrying them is free and lets a
+     * shape recover if the condition was transient.
+     *
+     * Per process, not per file. Raising or clearing
+     * HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE in a later run is what lets the shape
+     * finish, so the latch must not outlive the process that set it.
+     */
+    void recordFruitlessTuning(const ProblemOverride& key);
+    bool tuningWasFruitless(const ProblemOverride& key);
 
     /**
      * Note that this problem was successfully tuned in this process.

@@ -195,6 +195,12 @@ namespace TensileLite
             std::unordered_set<ProblemOverride>       tunedKeys;
             std::unordered_map<ProblemOverride, bool> lookups;
 
+            // Not a diagnostic: shapes whose search already ran and produced
+            // nothing, so the tuner declines to repeat it. Kept here because
+            // this is where the per-key process-lifetime state and its mutex
+            // already live.
+            std::unordered_set<ProblemOverride> fruitlessKeys;
+
             // Solution indexes already counted as rejected, per key. A key can
             // hold several entries and each is its own rejected entry, so the
             // index is part of the identity rather than the key alone.
@@ -365,6 +371,20 @@ namespace TensileLite
             inserted.first->second = true;
     }
 
+    void recordFruitlessTuning(const ProblemOverride& key)
+    {
+        DiagnosticsState&           state = DiagnosticsState::instance();
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.fruitlessKeys.insert(key);
+    }
+
+    bool tuningWasFruitless(const ProblemOverride& key)
+    {
+        DiagnosticsState&           state = DiagnosticsState::instance();
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return state.fruitlessKeys.count(key) != 0;
+    }
+
     void recordTuningWinner(const ProblemOverride& key)
     {
         DiagnosticsState&           state = DiagnosticsState::instance();
@@ -448,6 +468,7 @@ namespace TensileLite
         state.invalidKeys.clear();
         state.tunedKeys.clear();
         state.invalidEntries.clear();
+        state.fruitlessKeys.clear();
         state.lookups.clear();
     }
 
@@ -947,9 +968,6 @@ namespace TensileLite
         if(!out)
             return false;
 
-        if(needHeader)
-            out << kGitVersionHeader << currentBuildStamp() << std::endl;
-
         // Built as one payload and written once, so a row cannot be split by
         // another writer in this process.
         std::ostringstream names;
@@ -1033,7 +1051,23 @@ namespace TensileLite
         column("required_workspace", entry.requiredWorkspaceBytes);
         column("us", entry.winnerTimeUs);
 
-        out << "    " << names.str() << "\n" << values.str() << std::endl;
+        // One write for the header and the row together, rather than a flush
+        // apiece. The process mutex above orders writers inside this process,
+        // but nothing orders a second process appending to the same file, and
+        // there the unit of tearing is the write: a single one that the
+        // filesystem appends atomically cannot be split down the middle by
+        // another rank, whereas two can interleave. This narrows that window on
+        // a local filesystem; it is not a guarantee, least of all on the network
+        // filesystems multi-node jobs use, which is why concurrent writers stay
+        // unsupported.
+        std::ostringstream payload;
+        if(needHeader)
+            payload << kGitVersionHeader << currentBuildStamp() << "\n";
+        payload << "    " << names.str() << "\n" << values.str() << "\n";
+
+        const std::string bytes = payload.str();
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        out.flush();
 
         // Reported rather than swallowed: a full disk or a read-only path
         // otherwise looks like a successful tune whose results silently vanish
