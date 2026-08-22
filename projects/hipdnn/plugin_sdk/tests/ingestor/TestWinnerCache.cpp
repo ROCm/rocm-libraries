@@ -762,7 +762,16 @@ TEST(TestIngestorWinnerCacheStateManager, AVersionMismatchedShardIsDeclinedAndLo
 }
 
 /// One unparseable line costs itself and nothing else -- a shard is not poisoned by a
-/// record a newer build wrote or a partial write left behind.
+/// record a newer build wrote or a partial write left behind. The second good record
+/// lives AFTER the garbage line specifically: an abort-on-first-bad `readAllLines()`
+/// (e.g. `break` instead of `continue`/skip on a decode failure) would still pass the
+/// first assertion below, since that record predates the garbage -- it can only be
+/// caught by a record the reader must continue PAST the bad line to reach.
+///
+/// Falsifying mutation: change `readAllLines()`'s malformed-line handling from "skip
+/// this line, keep scanning" to "stop at the first line `parseLine` rejects" (e.g. add
+/// `break;` where the `if(auto parsed = parseLine(...))` fails). `laterKey`'s record
+/// below is then never decoded.
 TEST(TestIngestorWinnerCacheStateManager, AMalformedLineCostsOnlyItself)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -770,6 +779,10 @@ TEST(TestIngestorWinnerCacheStateManager, AMalformedLineCostsOnlyItself)
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
     const auto properties = suffixedDeviceProperties();
     const auto key = keyFor(graph, properties);
+    // A second, distinct key (same shard: same engine/arch, different device), whose
+    // record is written after the garbage line.
+    const auto laterProperties = suffixedDeviceProperties(400);
+    const auto laterKey = keyFor(graph, laterProperties);
 
     {
         const auto writer = makeNamedStateManager("test:MalformedLine");
@@ -781,13 +794,19 @@ TEST(TestIngestorWinnerCacheStateManager, AMalformedLineCostsOnlyItself)
     {
         std::ofstream out(path, std::ios::app);
         out << "{not valid json at all\n";
+        out << encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)) << "\n";
     }
 
     const auto reader = makeNamedStateManager("test:MalformedLine");
     const auto served = reader->winnerFor(key);
-
     ASSERT_TRUE(served.has_value()) << "the good line before the garbage one must still load";
     EXPECT_EQ(served->front().kernelId, testId(0x31));
+
+    const auto servedAfterGarbage = reader->winnerFor(laterKey);
+    ASSERT_TRUE(servedAfterGarbage.has_value())
+        << "the good line AFTER the garbage one must still load -- an implementation "
+           "that aborts on the first bad line loses it";
+    EXPECT_EQ(servedAfterGarbage->front().kernelId, testId(0x32));
 }
 
 /// A manager built without an engine name has no shard path to compose, so it neither
@@ -808,6 +827,297 @@ TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
     EXPECT_TRUE(std::filesystem::is_empty(cacheDir.path()))
         << "an unnamed engine wrote into the cache directory; every directly-constructed "
            "test manager would then share one shard";
+}
+
+/// B1.1 -- the in-process half of A2's fix: N threads call `recordWinner()` on ONE
+/// manager, half racing a shared key. Counts RAW LINES in the shard file directly,
+/// never through a manager: a manager-mediated count can never see a duplicate append,
+/// because duplicates collapse last-wins when merged into `_winnerCache`, and
+/// `readAllLines()` (used by `winnerFor`) also only ever returns the merged view, not a
+/// per-line tally. Every racing thread on the shared key writes a byte-identical
+/// `(kernelId, packId, dispatchId)` sequence (`timeMs` varies), matching
+/// `rankedIdsEqual()`'s ignore-timeMs comparison -- otherwise `writeBackToShard()` would
+/// legitimately append a superseding line per thread and the expected count would not
+/// be fixed.
+///
+/// Falsifying mutation: delete `_winnerCacheMutex` (or otherwise stop
+/// `writeBackToShard()`'s read-then-append critical section from being serialized
+/// per-shard), leaving only the file-level fcntl lock. POSIX fcntl locks are
+/// (process, inode)-scoped, not per-descriptor or per-thread: with one process-wide
+/// registry entry per shard, every thread of this test shares the SAME native
+/// descriptor, so the OS lock alone cannot serialize them against each other, and the
+/// shared key's raw line count exceeds 1 (observed 2-35+ extra lines in a standalone
+/// repro of the exact critical section). This guards only the mutex half of A2; the
+/// cross-process (file-lock) half, which this in-process test structurally cannot
+/// observe, is covered by B1.2 in TestLineStore.cpp/LineStoreLockHelper.cpp.
+TEST(TestIngestorWinnerCacheStateManager, ConcurrentRecordWinnerOnOneKeyAppendsExactlyOneLine)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("concurrent_record_winner");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto sharedKey = keyFor(graph, properties);
+
+    constexpr int THREADS = 8;
+    constexpr int ITERATIONS_PER_THREAD = 20;
+
+    const auto manager = makeNamedStateManager("test:ConcurrentRecordWinner");
+
+    std::vector<std::thread> threads;
+    threads.reserve(THREADS);
+    for(int t = 0; t < THREADS; ++t)
+    {
+        threads.emplace_back([&manager, &graph, sharedKey, t]() {
+            for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
+            {
+                if(t % 2 == 0)
+                {
+                    // Half the threads race the SAME key with the SAME ranked ids: the
+                    // only sequence rankedIdsEqual() ever treats as unchanged, so every
+                    // write after the first must adopt rather than append.
+                    manager->recordWinner(sharedKey, recordFor(0x71, 1.0 + i));
+                }
+                else
+                {
+                    // The other half touch distinct keys, so a shard-wide lock (rather
+                    // than a per-key one) is exercised without perturbing the shared
+                    // key's expected count.
+                    DeviceProperties distinctProperties = suffixedDeviceProperties();
+                    distinctProperties.multiProcessorCount = 1000 + t;
+                    manager->recordWinner(keyFor(graph, distinctProperties),
+                                          recordFor(static_cast<uint8_t>(0x80 + t), 1.0 + i));
+                }
+            }
+        });
+    }
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    const auto path = winnerCacheShardPath("test:ConcurrentRecordWinner", properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    std::ifstream shardFile(path);
+    ASSERT_TRUE(shardFile.is_open());
+
+    std::vector<std::string> rawLines;
+    for(std::string line; std::getline(shardFile, line);)
+    {
+        rawLines.push_back(line);
+    }
+
+    ASSERT_FALSE(rawLines.empty());
+    // Exactly one version line: a broken lock lets two threads both take the
+    // create-if-absent branch and both write one (LineStore.hpp's openLineStore()).
+    int versionLines = 0;
+    int sharedKeyRecordLines = 0;
+    const std::string sharedKernelIdText = toString(testId(0x71));
+    for(const auto& line : rawLines)
+    {
+        if(line == winnerCacheVersion())
+        {
+            ++versionLines;
+        }
+        else if(line.find(sharedKernelIdText) != std::string::npos)
+        {
+            ++sharedKeyRecordLines;
+        }
+    }
+    EXPECT_EQ(versionLines, 1) << "a broken lock let two threads both stamp the version line";
+    EXPECT_EQ(sharedKeyRecordLines, 1)
+        << "the shared key's ranked ids never changed, so exactly one line for it may "
+           "exist; a broken lock lets racing threads both observe \"absent/unchanged\" "
+           "and both append -- got "
+        << sharedKeyRecordLines << " raw lines:\n"
+        << [&rawLines] {
+               std::string joined;
+               for(const auto& l : rawLines)
+               {
+                   joined += l;
+                   joined += '\n';
+               }
+               return joined;
+           }();
+
+    // A separate CONTENT assertion, not the counter above: a fresh manager reads back
+    // exactly the shared record, proving the merged view is also correct.
+    const auto freshManager = makeNamedStateManager("test:ConcurrentRecordWinner");
+    const auto served = freshManager->winnerFor(sharedKey);
+    ASSERT_TRUE(served.has_value());
+    ASSERT_EQ(served->size(), 1U);
+    EXPECT_EQ(served->front().kernelId, testId(0x71));
+}
+
+/// B1.3 -- refresh semantics for A1: a superseding record widens the shard rather than
+/// replacing the earlier line, and the winning value is the ranking last observed by
+/// disk order.
+///
+/// Falsifying mutation: revert `writeBackToShard()`'s `rankedIdsEqual()` gate to the
+/// pre-A1 "adopt whenever ANY on-disk record for the key exists" behavior (drop the
+/// `&& rankedIdsEqual(*onDiskWinner, record)` check). The genuinely different
+/// 4-kernel write then adopts the stale 3-kernel line instead of appending: the shard
+/// stays at 2 raw lines (version + one record) instead of 3.
+TEST(TestIngestorWinnerCacheStateManager, ASupersedingRecordWidensTheShardAndWins)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("superseding_record");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    const WinnerRecord threeKernelRecord{entryFor(definitionFor(0x81), 1.0),
+                                         entryFor(definitionFor(0x82), 2.0),
+                                         entryFor(definitionFor(0x83), 3.0)};
+    const WinnerRecord fourKernelRecord{entryFor(definitionFor(0x81), 1.1),
+                                        entryFor(definitionFor(0x82), 2.1),
+                                        entryFor(definitionFor(0x83), 3.1),
+                                        entryFor(definitionFor(0x84), 4.1)};
+
+    {
+        const auto writer = makeNamedStateManager("test:SupersedingRecord");
+        writer->recordWinner(key, threeKernelRecord);
+        writer->recordWinner(key, fourKernelRecord);
+    }
+
+    const auto path = winnerCacheShardPath("test:SupersedingRecord", properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    std::ifstream shardFile(path);
+    ASSERT_TRUE(shardFile.is_open());
+    std::vector<std::string> rawLines;
+    for(std::string line; std::getline(shardFile, line);)
+    {
+        rawLines.push_back(line);
+    }
+    // version line + one line per genuinely distinct ranking.
+    ASSERT_EQ(rawLines.size(), 3U) << "the shard must hold BOTH the 3-entry and the "
+                                      "4-entry line, not just the latest";
+
+    const auto reader = makeNamedStateManager("test:SupersedingRecord");
+    const auto served = reader->winnerFor(key);
+    ASSERT_TRUE(served.has_value());
+    EXPECT_EQ(served->size(), 4U) << "winnerFor() must return the 4-entry (last-written) "
+                                     "record, not the earlier 3-entry one";
+}
+
+/// B1.3 -- writing the SAME ranking twice adopts the on-disk copy both times and never
+/// grows the shard.
+///
+/// Falsifying mutation: delete the `rankedIdsEqual()` early-return in
+/// `writeBackToShard()` (always append). The shard then gains a line on the identical
+/// second `recordWinner()` call, and `rawLines.size()` below observes 2 record lines
+/// instead of 1.
+TEST(TestIngestorWinnerCacheStateManager, WritingTheIdenticalRecordTwiceAppendsNoLine)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("identical_record_twice");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    const WinnerRecord record{entryFor(definitionFor(0x91), 1.0),
+                              entryFor(definitionFor(0x92), 2.0)};
+
+    const auto manager = makeNamedStateManager("test:IdenticalRecordTwice");
+    manager->recordWinner(key, record);
+    // Same ranked ids, different timeMs -- rankedIdsEqual() ignores timeMs, so this must
+    // adopt, not append.
+    manager->recordWinner(
+        key, WinnerRecord{entryFor(definitionFor(0x91), 9.0), entryFor(definitionFor(0x92), 9.0)});
+
+    const auto path = winnerCacheShardPath("test:IdenticalRecordTwice", properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    std::ifstream shardFile(path);
+    ASSERT_TRUE(shardFile.is_open());
+    std::vector<std::string> rawLines;
+    for(std::string line; std::getline(shardFile, line);)
+    {
+        rawLines.push_back(line);
+    }
+    ASSERT_EQ(rawLines.size(), 2U) << "version line plus exactly one record line; the "
+                                      "unchanged second write must not append";
+}
+
+/// B1.3 -- on the ADOPT path (on-disk ranking already matches by `rankedIdsEqual()`,
+/// which ignores `timeMs`), the value that reaches `_winnerCache` must be the ON-DISK
+/// record `writeBackToShard()` returned, not the caller's argument re-stored under its
+/// own name. `timeMs` is the only field that can tell them apart here, since
+/// `rankedIdsEqual()` treats them as the same ranking by design.
+///
+/// Falsifying mutation: in `recordWinner()`, change
+/// `_winnerCache[key] = std::move(adopted);` to `_winnerCache[key] = record;` (the
+/// caller's original argument). The disk's original `timeMs` (1.0) would then be
+/// replaced by the second caller's `timeMs` (99.0) even though nothing was appended --
+/// silently reintroducing whatever the second call's measurement was, on a ranking the
+/// shard says is unchanged.
+TEST(TestIngestorWinnerCacheStateManager, TheValueStoredInMemoryAfterAdoptionIsTheOnDiskRecord)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("in_memory_after_adopt");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    {
+        const auto writer = makeNamedStateManager("test:InMemoryAfterAdopt");
+        writer->recordWinner(key, recordFor(0xA1, 1.0)); // disk's timeMs stays 1.0
+    }
+
+    // A second, independent manager: its in-memory cache does not already hold this
+    // key, so the only way `timeMs` reaches it is through writeBackToShard()'s return.
+    // Same ranked ids as the disk line, different timeMs -- rankedIdsEqual() calls this
+    // unchanged, so the disk's original entry (timeMs 1.0) must be what is adopted.
+    const auto second = makeNamedStateManager("test:InMemoryAfterAdopt");
+    second->recordWinner(key, recordFor(0xA1, 99.0));
+
+    const auto inMemory = second->winnerFor(key);
+    ASSERT_TRUE(inMemory.has_value());
+    ASSERT_EQ(inMemory->size(), 1U);
+    EXPECT_EQ(inMemory->front().kernelId, testId(0xA1));
+    EXPECT_DOUBLE_EQ(inMemory->front().timeMs, 1.0)
+        << "_winnerCache must hold the ON-DISK record writeBackToShard() returned on "
+           "adoption, not the caller's own argument re-stored under its own timeMs";
+}
+
+/// B1.3 -- a shard already holding TWO lines for one key: the write-back comparison
+/// must be made against the LAST one. This is what makes last-match scanning
+/// load-bearing; with a first-match scan the comparison would run against the FIRST
+/// (stale) line and this test fails -- see the mutation note on
+/// ASupersedingRecordWidensTheShardAndWins above.
+TEST(TestIngestorWinnerCacheStateManager, TwoLinesOneKeyComparesAgainstTheLastLine)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("two_lines_last_wins");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    const WinnerRecord firstRecord{entryFor(definitionFor(0xB1), 1.0)};
+    const WinnerRecord secondRecord{entryFor(definitionFor(0xB2), 1.0)};
+
+    {
+        const auto writer = makeNamedStateManager("test:TwoLinesLastWins");
+        writer->recordWinner(key, firstRecord); // line 1: 0xB1
+        writer->recordWinner(key, secondRecord); // line 2: 0xB2 (genuinely different)
+    }
+
+    // A third write repeating the LAST line's ranking. A last-match scan adopts (no
+    // append); a first-match scan would compare against 0xB1, see a difference, and
+    // append a third line.
+    {
+        const auto writer = makeNamedStateManager("test:TwoLinesLastWins");
+        writer->recordWinner(key, WinnerRecord{entryFor(definitionFor(0xB2), 9.0)});
+    }
+
+    const auto path = winnerCacheShardPath("test:TwoLinesLastWins", properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    std::ifstream shardFile(path);
+    ASSERT_TRUE(shardFile.is_open());
+    std::vector<std::string> rawLines;
+    for(std::string line; std::getline(shardFile, line);)
+    {
+        rawLines.push_back(line);
+    }
+    ASSERT_EQ(rawLines.size(), 3U) << "version line plus exactly two record lines; a "
+                                      "first-match comparison would wrongly append a third";
 }
 
 /// The pair below is driven by ctest, not gtest: the writer runs in one process, exits,
