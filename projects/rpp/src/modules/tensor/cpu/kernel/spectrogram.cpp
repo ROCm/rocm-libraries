@@ -44,6 +44,7 @@ inline Rpp64s size_out_buf(Rpp64s n) {
 }
 #else
 #include <vector>
+
 #include "rpp_cpu_fft.hpp"
 #endif
 

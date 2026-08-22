@@ -46,7 +46,7 @@ SOFTWARE.
 typedef std::complex<Rpp32f> RppFftComplex;
 
 struct RppCpuFftPlan {
-    Rpp32s n = 0;       // transform size (nfft)
+    Rpp32s n = 0;  // transform size (nfft)
     bool isPow2 = false;
 
     // radix-2 tables for size n (used when isPow2 == true)
@@ -54,7 +54,7 @@ struct RppCpuFftPlan {
     std::vector<RppFftComplex> twiddles;  // twiddles[k] = exp(-2*pi*i*k/n), k in [0, n/2)
 
     // Bluestein tables (used when isPow2 == false)
-    Rpp32s m = 0;                          // convolution length = next power of two >= 2n-1
+    Rpp32s m = 0;  // convolution length = next power of two >= 2n-1
     std::vector<Rpp32u> bitRevM;
     std::vector<RppFftComplex> twiddlesM;  // twiddles[k] = exp(-2*pi*i*k/m), k in [0, m/2)
     std::vector<RppFftComplex> chirp;      // chirp[k] = exp(-pi*i*k^2/n), k in [0, n)
@@ -94,7 +94,8 @@ inline void rpp_fft_build_twiddles(std::vector<RppFftComplex>& tw, Rpp32s len) {
 }
 
 // In-place forward radix-2 DIT FFT (unnormalized), using precomputed bit-reversal and twiddles.
-inline void rpp_fft_radix2_forward(RppFftComplex* data, Rpp32s len, const std::vector<Rpp32u>& bitRev,
+inline void rpp_fft_radix2_forward(RppFftComplex* data, Rpp32s len,
+                                   const std::vector<Rpp32u>& bitRev,
                                    const std::vector<RppFftComplex>& tw) {
     for (Rpp32s i = 0; i < len; i++) {
         Rpp32u j = bitRev[i];
@@ -116,7 +117,8 @@ inline void rpp_fft_radix2_forward(RppFftComplex* data, Rpp32s len, const std::v
 
 // In-place inverse FFT (normalized by 1/len) via the conjugation identity:
 //     ifft(x) = conj(fft(conj(x))) / len
-inline void rpp_fft_radix2_inverse(RppFftComplex* data, Rpp32s len, const std::vector<Rpp32u>& bitRev,
+inline void rpp_fft_radix2_inverse(RppFftComplex* data, Rpp32s len,
+                                   const std::vector<Rpp32u>& bitRev,
                                    const std::vector<RppFftComplex>& tw) {
     for (Rpp32s i = 0; i < len; i++) data[i] = std::conj(data[i]);
     rpp_fft_radix2_forward(data, len, bitRev, tw);
@@ -169,8 +171,7 @@ inline void rpp_cpu_fft_forward_real(const RppCpuFftPlan& plan, const Rpp32f* in
     const Rpp32s numBins = n / 2 + 1;
 
     if (plan.isPow2) {
-        for (Rpp32s i = 0; i < n; i++)
-            scratch[i] = RppFftComplex((i < inLen) ? in[i] : 0.0f, 0.0f);
+        for (Rpp32s i = 0; i < n; i++) scratch[i] = RppFftComplex((i < inLen) ? in[i] : 0.0f, 0.0f);
         rpp_fft_radix2_forward(scratch, n, plan.bitRev, plan.twiddles);
         for (Rpp32s i = 0; i < numBins; i++) out[i] = scratch[i];
         return;
