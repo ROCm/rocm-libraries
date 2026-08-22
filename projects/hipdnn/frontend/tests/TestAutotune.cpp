@@ -461,6 +461,25 @@ TEST(TestAutotune, OracleBestForcesExhaustiveModeRegardlessOfCallerConfig)
     EXPECT_TRUE(err.is_bad());
 }
 
+TEST(TestAutotune, OracleBestForcesBenchmarkUnprimedRegardlessOfCallerConfig)
+{
+    // Mirrors OracleBestForcesExhaustiveModeRegardlessOfCallerConfig: no graph is built, so the
+    // call declines downstream either way. What is pinned is that the entry point overrides the
+    // caller's policy rather than honouring it.
+    //
+    // ABORT_ON_PRIMING_FAILURE is the default, so one broken engine anywhere in the installed
+    // set would abort the whole sweep and persist nothing -- denying a ranking for every graph
+    // on the machine, permanently, since the next run aborts the same way.
+    hipdnn_frontend::graph::Graph g;
+    AutotuneConfig config;
+    config.primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
+
+    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
+    auto err = g.autotuneOracleBest(nullptr, variantPack, nullptr, int64_t{0}, config);
+
+    EXPECT_TRUE(err.is_bad());
+}
+
 TEST(TestAutotune, OracleBestRejectsNegativeWorkspaceSize)
 {
     hipdnn_frontend::graph::Graph g;
