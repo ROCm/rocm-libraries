@@ -552,3 +552,30 @@ budget — better to stop with a measured, shipped +24% than to chase a bounded 
 bounds *recombining what exists*; it says nothing about what a catalog tuned natively for
 60 CUs could achieve, since every kernel here was tuned for navi31's 96. That remains the
 real open question, and it needs a tuning campaign on navi32 hardware — not more porting.
+
+---
+
+## Verification
+
+Every headline figure recomputed from the raw CSV rather than quoted from prose:
+
+| claim | report | recomputed |
+|---|---|---|
+| `gridcat` geomean | 127.21% | **127.21%** |
+| `gridcat` wall-clock | 123.91% | **123.91%** |
+| `pred298` geomean | 115.68% | **115.68%** |
+| `pred73` wall-clock | 93.25% | **93.25%** |
+| A/A geomean | 99.72% | **99.72%** |
+| A/A wall-clock | 100.32% | **100.32%** |
+
+**998 shapes x 5 arms = 4 990 rows exactly**, no duplicates, no missing, zero failures.
+
+**Why the analysis uses 996 shapes, not 998.** Two shapes are degenerate — `M=4,N=1,K=8`
+(32 flops) and `M=1,N=4,K=1` (4 flops). They ran fine (`status=ok`, ~14.7 us on every arm)
+but GFLOPS underflows to `0.00`, so no ratio is definable and the analyzer drops them. All
+five arms land within 0.8 us of each other on both, which is what you would expect from
+measurements dominated entirely by kernel-launch overhead — they carry no information about
+catalog quality either way.
+
+Reproduce: `python3 analyze.py results/P6_main.csv`,
+`python3 arith_intensity.py results/P6_main.csv`.
