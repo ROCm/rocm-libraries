@@ -124,23 +124,12 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_install_base(<out_var>)
-#   The install DESTINATION for a packed arch shard, as one expression.
+#   The install DESTINATION for a packed arch shard.
 #
-#   The SAME subdirectory the provider compiles into HIPDNN_DESCRIPTOR_SUBDIR and that
-#   hkp_wire_demo stages into -- not a second spelling of it. This used to append an extra
-#   "/descriptors" segment, which put every production-packed descriptor into a parallel
-#   tree nothing else names: the runtime resolves its tree as
-#   <plugin engine dir>/${HIPDNN_DESCRIPTOR_SUBDIR}, so an installed rocKE engine shipped
-#   correctly and was then never loaded, with no error to say so. That is precisely the
-#   failure hip-kernel-provider/CMakeLists.txt warns about where it defines the variable
-#   ("a typo in a second copy would yield a provider that finds no descriptors, with no
-#   build error to say so"), so take the value from there rather than restating the path a
-#   third time.
-#
-#   The recursive walk means a deeper tree would still be FOUND -- measured: descriptors
-#   under a `descriptors/` child still load, 2 sets, libraries resolving. The defect is
-#   that it differed from where hkp_wire_demo stages, so the two halves of one tree
-#   disagreed about their own layout. One spelling, from one variable.
+#   Sourced from HIPDNN_DESCRIPTOR_SUBDIR, which is the one spelling of the
+#   arch_content layout: the provider compiles it in, the fixture stages into
+#   it, and this installs into it. A second spelling here would put descriptors
+#   somewhere the runtime does not walk, with no build error to say so.
 # ---------------------------------------------------------------------------
 function(hkp_install_base out_var)
     if(NOT HIPDNN_DESCRIPTOR_SUBDIR)
@@ -161,22 +150,17 @@ endfunction()
 #                    [INTERP_DEP <path>] [WHEEL_STAMP <path>]
 #                    [TOOL_ENV <list>] [COMMENT <string>]
 #                    [STAGE_ROOT <dir> STAGE_TAG <suffix> STAGE_STAMP_VAR <var>])
-#   The compile -> prune -> pack DAG itself, shared by production and the demo
-#   fixture. It exists because those two were near-copies that drifted twice: a
-#   `${kpack_python}` reference to another function's parameter, and then a
-#   non-recursive glob plus a missing interpreter gate on the demo side only.
-#   Both were invisible at configure time. One definition means a future
-#   divergence has to be written deliberately rather than acquired by omission.
+#   The compile -> prune -> pack DAG, shared by production and the demo fixture.
+#   One definition so the two cannot diverge silently: both get the recursive
+#   source glob, the interpreter gate, and (with STAGE_ROOT) build-tree staging.
 #
-#   What is genuinely NOT shared stays with the callers: production installs the
-#   result, the demo fixture stages it into the build tree. Only the DAG that
-#   produces STAMP is here.
+#   Callers keep what genuinely differs: production installs its output, the
+#   fixture does not.
 #
 #   INTERP is gated for rocm_kpack's runtime dependencies before use, so a
-#   missing msgpack/zstandard is a named configure error rather than a failure
-#   part-way through someone's build. WHAT names that interpreter for the
-#   diagnostic ("the base interpreter (...)"), which is a different sentence
-#   from COMMENT's build-progress line.
+#   missing msgpack/zstandard is a configure error rather than a failure
+#   part-way through a build. WHAT names that interpreter in the diagnostic;
+#   COMMENT is the build-progress line.
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_step)
     set(_one STAMP SOURCE_ROOT OUT_ROOT INTER_ROOT HIPCC ROCM_KPACK_DIR INTERP
@@ -184,10 +168,10 @@ function(hkp_wire_pack_step)
     set(_multi ARCHES TOOL_ENV)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "${_multi}")
 
-    # The authored root is a tree, not a flat folder: glob recursively so a
-    # descriptor added in any child folder retriggers the pack step. The packer
-    # walks recursively (load_flat_input uses rglob), so a non-recursive glob
-    # here would silently drop the dependency edge for every nested descriptor.
+    # The authored root is a tree: glob recursively so a descriptor added in any
+    # child folder retriggers the pack step. The packer itself walks recursively
+    # (load_flat_input uses rglob), so a flat glob here would drop the
+    # dependency edge for every nested descriptor.
     file(GLOB_RECURSE _source_inputs CONFIGURE_DEPENDS
          "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp")
 
@@ -239,16 +223,13 @@ function(hkp_wire_pack_step)
         return()
     endif()
 
-    # Copy the packed tree into the build tree so anything running from a build
-    # directory -- ctest, the integration suite -- can load it. Without this the
-    # production path is install-only and has NO runtime coverage at all: the
-    # tree that actually ships is the one nothing ever reads.
+    # Copy the packed tree into the build tree so ctest and the integration
+    # suite can load it; without this the shipping path has no runtime coverage.
     #
-    # The stamp lives INSIDE the staged tree deliberately. The provider wipes
-    # that directory once per configure, which takes the stamp with it and makes
-    # the next build re-copy. A stamp outside would survive the wipe, so the copy
-    # would be skipped against a directory that no longer has the files --
-    # indistinguishable from "packaging never ran".
+    # The stamp lives INSIDE the staged tree: the provider wipes that directory
+    # once per configure, taking the stamp with it so the next build re-copies.
+    # A stamp outside would survive the wipe and skip the copy against a
+    # directory that no longer holds the files.
     set(_stage_stamp "${ARG_STAGE_ROOT}/.hkp-staged${ARG_STAGE_TAG}.stamp")
     add_custom_command(
         OUTPUT "${_stage_stamp}"
@@ -294,8 +275,7 @@ function(hkp_wire_production)
     # A production root is set (the caller only reaches here when it is), so the
     # user asked for packaging and is about to get nothing. Silence here means a
     # fully-configured release build installs an empty descriptor tree and says
-    # so nowhere -- the same silent-empty class as finding 3.9, just reached
-    # through the arch list instead of the descriptor set.
+    # so nowhere.
     if(NOT ARG_ARCHES)
         message(WARNING
             "hkp: a production source root is set but no GPU architectures are "
@@ -336,12 +316,11 @@ function(hkp_wire_production)
     #     no argument. Setting the env var directly makes the pin survive that
     #     indirection changing.
     #   ROCKE_CPP_STRICT=1     -- turns a silent cpp->python degradation into a
-    #     hard BackendError at the point of failure. Verified this does NOT fire
-    #     on an explicit python request (which is what we pin), while it does
-    #     still raise on an actual cpp fallback, so the two compose.
+    #     hard BackendError at the point of failure. It does not fire on an
+    #     explicit python request, so the two pins compose.
     #
-    # ROCKE_CPP_QUIET_FALLBACK is deliberately NOT set: silencing the warning is
-    # the failure mode being fixed.
+    # ROCKE_CPP_QUIET_FALLBACK is deliberately unset: silencing that warning
+    # hides the degradation these pins exist to catch.
     #
     # ROCKE_COMGR_LIB overrides a shadowed System32 amd_comgr on Windows; forward
     # it when set (runtime resolution, no find_library).
@@ -350,16 +329,14 @@ function(hkp_wire_production)
         list(APPEND _tool_env "ROCKE_COMGR_LIB=${ARG_ROCKE_COMGR_LIB}")
     endif()
 
-    # Stage under a `production/` CHILD of the stage root, not the root itself.
-    # Both trees emit `<arch>/kpack/hip_kernel_provider_<arch>.kpack`, so copying
-    # them to one place has the second overwrite the first: descriptors from one
-    # tree then name an archive holding the other's kernels, and it surfaces only
-    # at dispatch as a missing toc_key. Measured on gfx942: demo 3368 B vs
-    # production 6889 B at the identical relative path.
+    # Stage under a `production/` child, not the stage root. Both trees emit
+    # `<arch>/kpack/hip_kernel_provider_<arch>.kpack`, so sharing a root has one
+    # overwrite the other, leaving descriptors that name an archive without
+    # their kernels -- visible only at dispatch as a missing toc_key.
     #
-    # Both stay loadable side by side because the walk is recursive and `library`
-    # resolves relative to each descriptor, so each tree reaches its own archive.
-    # The install tree needs no such split -- the demo fixture is never installed.
+    # Both stay loadable side by side: the walk is recursive and `library`
+    # resolves relative to each descriptor, so each tree reaches its own
+    # archive. The install tree needs no split; the fixture is never installed.
     set(_stage_sub "")
     if(ARG_STAGE_ROOT)
         set(_stage_sub "${ARG_STAGE_ROOT}/production")
@@ -455,10 +432,8 @@ function(hkp_wire_demo source_root arches hipcc kpack_python stage_root)
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-demo-intermediate")
     set(_pack_stamp "${_out_root}.stamp")
 
-    # The fixture is hip-only, so it packs under the base interpreter; the
-    # shared step gates that interpreter for msgpack/zstandard exactly as the
-    # production path does. This used to be an open-coded copy of the pack
-    # command that globbed non-recursively and skipped the gate entirely.
+    # The fixture is hip-only, so it packs under the base interpreter, gated for
+    # msgpack/zstandard by the shared step exactly as the production path is.
     hkp_wire_pack_step(
         STAMP "${_pack_stamp}"
         SOURCE_ROOT "${source_root}"
@@ -490,20 +465,15 @@ endfunction()
 #   the provisioned venv, as the last step of hkp_rocke_wheel_python_interp --
 #   because neither the venv nor the wheels exist until the build runs.
 #
-#   Scope caveat, measured: rocKE treats ROCKE_COMGR_LIB as a *candidate*, not
-#   an assertion (`runtime/comgr.py:66` -- `_candidate_lib_paths` iterates and
-#   the first loadable path wins). A bogus override therefore falls through to
-#   the system comgr and this probe still reports success. That is rocKE's
-#   resolution policy, not something to paper over here, and the probe's actual
-#   question -- "can this machine lower a kernel at all" -- is still answered
-#   correctly. Provenance (Phase 5.1) records the comgr that was really used,
-#   which is the right place to catch a wrong-but-loadable library.
+#   Scope caveat: rocKE treats ROCKE_COMGR_LIB as a candidate, not an assertion
+#   (`runtime/comgr.py` iterates candidates and the first loadable path wins),
+#   so a bogus override falls through to the system comgr and this probe still
+#   reports success. The probe answers "can this machine lower a kernel at all",
+#   which is the common misconfiguration and is knowable at configure time; a
+#   wrong-but-loadable library is caught by the provenance the packer records.
 #
-#   What IS knowable at configure time is whether comgr can be resolved at all,
-#   and that is the common misconfiguration. Probing it here fails fast with a
-#   readable message instead of deep in a build. The probe reads the resolver
-#   from the source tree deliberately: it is asking about the machine's comgr,
-#   not about the wheels.
+#   The probe reads the resolver from the source tree deliberately: it asks
+#   about the machine's comgr, not about the wheels.
 # ---------------------------------------------------------------------------
 function(hkp_probe_comgr_resolvable out_ok out_detail)
     set(_rocke_root "${HKP_PKG_DIR}/../rocke")

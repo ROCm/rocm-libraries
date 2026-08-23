@@ -77,9 +77,9 @@ def comgr_info():
 def wheel_digest(stamp_path):
     """The rocKE wheel content digest the build stamped, or None.
 
-    Read from Phase 2's stamp rather than recomputed: the stamp is what the
-    build actually keyed its staleness decisions on, so recording anything else
-    would let provenance and invalidation disagree.
+    Read from the build's stamp rather than recomputed: the stamp is what the
+    build keyed its staleness decisions on, so recording anything else would let
+    provenance and invalidation disagree.
     """
     if not stamp_path:
         return None

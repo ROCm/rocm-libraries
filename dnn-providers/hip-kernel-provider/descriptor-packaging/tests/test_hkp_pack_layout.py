@@ -843,12 +843,11 @@ def test_example_tree_native_symbols_are_registered():
 def test_library_resolves_for_a_nested_standalone_ukd(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """The standalone-UKD branch of the library rule, which inline coverage misses.
+    """The standalone-UKD branch of the library rule.
 
-    A standalone UKD ships as its own file, so it anchors on ITS OWN directory --
+    A standalone UKD ships as its own file and anchors on its own directory --
     a different code path from an inline UKD, which ships inside its KDP and
-    anchors on the KDP's. Both branches were changed together; only the inline
-    one was covered, so this side was correct by luck rather than by test.
+    anchors on the KDP's.
     """
     root = tmp_path / "root"
     _nest(root, "hip/deep", main_fixture)
@@ -881,22 +880,17 @@ def test_library_resolves_for_a_nested_standalone_ukd(
 def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """A standalone UKD in a DIFFERENT folder from the KDP that references it.
+    """A standalone UKD in a different folder from the KDP that references it.
 
-    Every other fixture co-locates the two, so `sdesc.rel_dir` and `kdp.rel_dir`
-    are equal and the two branches are indistinguishable: swapping one for the
-    other leaves the whole suite green. Nothing forbids splitting them -- a
-    standalone UKD is resolved by global id, not by co-location -- so this moves
-    the .ukd.json somewhere the KDP is not and pins BOTH consequences of the
-    rel_dir it is packed with:
+    Standalone UKDs resolve by global id, not co-location, so the two may live
+    apart. Pins both consequences of the rel_dir the UKD is packed with: the
+    shipped file keeps its authored subpath, and its `library` resolves from
+    that subpath.
 
-      1. the shipped file keeps its own authored subpath, and
-      2. its `library` resolves from that subpath.
-
-    Asserting the path matters as much as the library: rel_dir drives placement
-    and depth together, so anchoring on the KDP moves the file AND recomputes
-    the climb-out to match. The library alone still resolves -- consistently
-    wrong -- and only the path reveals it.
+    The path assertion is the load-bearing one. rel_dir drives placement and
+    depth together, so anchoring on the KDP moves the file and recomputes the
+    climb-out to match -- the library still resolves, consistently wrong, and
+    only the path reveals it.
     """
     root = tmp_path / "root"
     _nest(root, "hip/packs", main_fixture)
@@ -942,10 +936,9 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
 @pytest.mark.parametrize(
     "filename,mutate,expected",
     [
-        # The loader's enums, mirrored by the packer. Each of these packs
-        # cleanly without the packer-side check and is then rejected by
-        # DescriptorLoader.hpp at load -- which drops the matcher, then the pack
-        # that names it, then the engine, at a log level that is off by default.
+        # The loader's enums. Without the packer-side check each of these packs
+        # cleanly and is rejected at load, dropping the matcher, then the pack
+        # naming it, then the engine -- at a log level that is off by default.
         ("pointwise.umd.json", {"scope": "Kernel"}, "invalid scope"),
         ("shared.uhd.json", {"kind": "Native"}, "invalid kind"),
         (
@@ -953,7 +946,7 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
             {"fields": [{"name": "block_size", "type": "integer"}]},
             "invalid type",
         ),
-        # A required key the loader demands and the packer used to pass through.
+        # Required keys the loader demands.
         ("pointwise.udd.json", {"dispatch_symbol": None}, "dispatch_symbol"),
         ("pointwise.umd.json", {"match_symbol": None}, "match_symbol"),
     ],
@@ -963,9 +956,7 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
 ):
     """KMD/UMD/UDD/UHD are checked at pack time, not just by the runtime.
 
-    These four were copied through as raw bytes with only id+version checked, so
-    a bad enum spelling or a missing symbol key shipped and failed at load. A
-    `None` value in `mutate` means "delete this key".
+    A `None` value in `mutate` means "delete this key".
     """
     root = tmp_path / "root"
     _nest(root, "hip", main_fixture)

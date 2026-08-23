@@ -4,10 +4,9 @@ A minimal but **real** authored source root for `hkp_pack`. Both producers are
 exercised end to end: the hip half compiles a `.cpp` with `hipcc`, the rocKE half
 lowers a real rocKE builder through comgr. Placeholder shapes, real code paths.
 
-This tree exists because nothing else drives the production path. Before it, the
-production source-root variables were empty in every preset and CI lane, which
-is how a silent-empty install (review 3.9) and a silent descriptor drop (review
-2.1) both survived unnoticed.
+This tree drives the production packaging path, which the presets and CI lanes
+otherwise leave dormant: without a source root set, the pack step ships nothing
+and says nothing.
 
 ## Layout
 
@@ -33,11 +32,9 @@ arch_content/hip-kernel-provider/gfx942/
 └── rocKE/gfx942_tiled_attention/...
 ```
 
-**`shared.umd.json` appears in both child folders on purpose.** The filename is
-deliberately reused so this tree is a standing regression test for review 2.1: a
-flat, non-path-preserving packer silently drops one of the two. The in-tree
-ingestor descriptor set does the same thing accidentally with
-`kernel_dtype_matches_graph.umd.json`.
+**`shared.umd.json` appears in both child folders on purpose.** Reusing the
+filename keeps this tree a standing check that packing is path-preserving: a
+flat packer silently drops one of the two.
 
 ## Authoring rules worth knowing
 
@@ -85,11 +82,11 @@ per-UKD `kind` dispatch exercised for real. It does **not** prove a rocKE-specif
 runtime dispatch; that needs a native pack nobody has written yet. Writing one is the
 next step toward a true rocKE end-to-end.
 
-The descriptors here are authored against the schema the C++ loader enforces, taken
-from `src/integration_tests/kernel_ingestor_engine/fixtures/packaged/` rather than
-from `descriptor-packaging/tests/fixtures/`. The latter is packer-only test data that
-never passes through `DescriptorLoader.hpp`, and modelling this tree on it once
-produced a tree that packed cleanly and could not be loaded at all.
+The descriptors here are authored against the schema the C++ loader enforces,
+modelled on `src/integration_tests/kernel_ingestor_engine/fixtures/packaged/`.
+Do not model them on `descriptor-packaging/tests/fixtures/`: that is packer-only
+test data which never passes through `DescriptorLoader.hpp`, so a tree copied
+from it can pack cleanly and still fail to load.
 
 gfx942 rather than gfx950 because `hipdnn-linux-superbuild` — the lane that can
 gate this — builds gfx942.

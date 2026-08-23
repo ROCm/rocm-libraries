@@ -200,25 +200,17 @@ def validate_rocke_spec(spec, where):
         raise HkpPackError(f"{where} has invalid spec (not an object)")
 
 
-def _reject_nonbare_arch(archs, where, log=None):
+def _reject_nonbare_arch(archs, where):
     """Reject any arch entry that is not a bare gfx base target id.
 
-    Mirrors the loader's isPlausibleArchBaseId exactly (loader is
-    authoritative): 'gfx' followed by one or more of [a-z0-9_-], nothing else.
-    LLVM generic targets ('gfx9-4-generic') stay legal; a feature suffix
-    ('gfx942:xnack-') does not, because ':' is outside the set.
+    Mirrors the loader's isPlausibleArchBaseId (loader is authoritative): 'gfx'
+    followed by one or more of [a-z0-9_-]. LLVM generic targets
+    ('gfx9-4-generic') are legal; a feature suffix ('gfx942:xnack-') is not,
+    since ':' is outside the set.
 
-    This is fatal rather than advisory. A suffixed arch matches no shard, so the
-    KDP is pruned from every arch and the pack exits 0 having installed nothing
-    -- indistinguishable from a legitimate arch skip. That silent-empty outcome
-    is precisely what hkp_add_packaging treats as FATAL (root set with no
-    producer) and what hkp_wire_production warns about (empty arch list); a
-    typo reaching the same end state deserves the same treatment.
-
-    The previous version warned instead, and bounded the name at 7 chars as a
-    heuristic that would false-warn on a future longer arch. The loader's rule
-    has no length bound, so mirroring it removes both the false positive and
-    the silent failure.
+    Fatal rather than advisory: a suffixed arch matches no shard, so the KDP
+    prunes from every arch and the pack exits 0 having installed nothing --
+    indistinguishable from a legitimate arch skip.
     """
     for arch in archs or []:
         body = arch[3:]
@@ -253,7 +245,7 @@ def _validate_ukd_fields(ukd, where, log=print):
             raise HkpPackError(
                 f"{where} 'arch' must be a list of strings (empty = wildcard)"
             )
-        _reject_nonbare_arch(arch, where, log)
+        _reject_nonbare_arch(arch, where)
     ks = ukd["kernel_source"]
     if not isinstance(ks, dict) or "kind" not in ks:
         raise HkpPackError(f"{where} kernel_source missing 'kind'")
@@ -314,7 +306,7 @@ def _validate_kdp(desc, log=print):
         raise HkpPackError(
             f"{where} 'arch' must be a list of strings (empty = wildcard)"
         )
-    _reject_nonbare_arch(arch, where, log)
+    _reject_nonbare_arch(arch, where)
     kds = doc["kernelDescriptors"]
     if not isinstance(kds, list) or not kds:
         raise HkpPackError(f"{where} 'kernelDescriptors' must be a non-empty list")
@@ -335,8 +327,8 @@ def _validate_ued(desc):
         )
 
 
-# The loader's enum vocabularies, mirrored here so a bad spelling is a pack-time
-# error instead of a runtime file-drop. Loader is authoritative:
+# The loader's enum vocabularies, mirrored so a bad spelling is a pack-time
+# error rather than a runtime file-drop. Loader is authoritative:
 # DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
 # metadataTypeFromString.
 _MATCH_SCOPES = ("graph", "kernel")
@@ -356,11 +348,9 @@ def _require_enum(doc, key, allowed, where):
 def _validate_umd(desc):
     """UMD: scope is a closed enum and match_symbol is required.
 
-    Mirrors parseMatchDescriptor. Without this a mis-cased 'Kernel' packs
-    cleanly and the loader drops the matcher at load -- which cascades, because
-    a KDP naming a matcher no descriptor defines loses its whole pack, and an
-    engine with no loadable pack is dropped entirely. The diagnostic for that
-    arrives at ERROR severity, which the default log level suppresses.
+    Mirrors parseMatchDescriptor. A bad scope drops the matcher at load, which
+    cascades: a KDP naming a matcher no descriptor defines loses its pack, and
+    an engine with no loadable pack is dropped entirely.
     """
     where = f"UMD {desc.path.name}"
     _require(desc.doc, ["name", "scope", "match_symbol"], where)
@@ -384,10 +374,9 @@ def _validate_kmd(desc):
     """KMD: a list of fields, each with a name and a type from the enum.
 
     Mirrors parseMetadataSchema. The default_value/type agreement the loader
-    also checks (coerceToDeclaredType) is deliberately NOT duplicated: it needs
-    the loader's JSON-kind coercion rules to agree exactly, and getting that
-    subtly wrong here would reject descriptors the runtime accepts. The field
-    shape is the part worth catching early.
+    also checks is not duplicated: it would have to match the loader's JSON-kind
+    coercion rules exactly, and a near-miss would reject descriptors the runtime
+    accepts.
     """
     where = f"KMD {desc.path.name}"
     _require(desc.doc, ["name", "fields"], where)
