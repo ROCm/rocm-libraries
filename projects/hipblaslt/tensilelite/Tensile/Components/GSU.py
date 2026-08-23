@@ -986,7 +986,7 @@ class GSUOn(GSU):
                     # It might be possible to fix globalWriteBatch to handle this case but these
                     # are likely to be low-performing so likely not worth optimizing.
                     print("WARNING: half requires at least two elements per batch")
-                    self.overflowedResources = 3
+                    writer.states.overflowedResources = 3
             # elif kernel["ProblemType"]["MacDataTypeA"].is8bitFloat():
             #    if numElementsPerBatch > 1:
             #        numElementsPerBatch = int(numElementsPerBatch/4)*4
@@ -1146,7 +1146,8 @@ class GSUOn(GSU):
                 if writer.states.archCaps["DefaultScopeIsCULocal"] else None
             innerSpinLabel = Label(writer.labels.getNameInc("last_gsu_wg_busy_waiting_inner"), "")
             module.add(innerSpinLabel)
-            if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
+            if writer.states.archCaps["RequiresXCntForVolatileVMEM"] or \
+                    writer.states.archCaps["EnableXnackReplay"]:
                 module.add(SWaitXCnt(xcnt=0, comment="drain in-flight VMEM before flat atomic"))
             module.add(FlatAtomicDecU32(dst=vgpr(dstVgpr), addr=vgpr(addrVgpr, 2), data=vgpr(dataVgpr), \
                                         modifier=atomicFlat, \
@@ -1542,9 +1543,11 @@ class GSUOn(GSU):
             # Save EXEC and set only lane 0 active
             module.add(SMovExec(dst=sgpr(tmpSgpr, numSgpr), src=EXEC(), comment="save EXEC"))
             module.add(SMovExec(dst=EXEC(), src=1, comment="only lane 0 active"))
-            # Arches that mark RequiresXCntForVolatileVMEM (e.g. gfx1250) need
-            # an explicit XNACK-replay drain before a volatile/atomic VMEM op.
-            if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
+            # Arches that mark RequiresXCntForVolatileVMEM or EnableXnackReplay
+            # (e.g. gfx1250) need an explicit XNACK-replay drain before a
+            # volatile/atomic VMEM op.
+            if writer.states.archCaps["RequiresXCntForVolatileVMEM"] or \
+                    writer.states.archCaps["EnableXnackReplay"]:
                 module.add(SWaitXCnt(xcnt=0, comment="drain in-flight VMEM before flat atomic"))
             atomicFlat = FLATModifiers(scope=CacheScope.SCOPE_DEV) \
                 if writer.states.archCaps["DefaultScopeIsCULocal"] else None

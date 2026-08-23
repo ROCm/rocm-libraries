@@ -370,7 +370,8 @@ bool CkImplLibLoader::LoadSymbols()
         {CKSolverType::FusedBiasResAddActiv, "fused_bias_res_add_activ"},
         {CKSolverType::FusedGrpActiv, "fused_grp_activ"},
         {CKSolverType::FusedGrpBiasActiv, "fused_grp_bias_activ"},
-        {CKSolverType::DepthwiseFwd, "depthwise_fwd"}};
+        {CKSolverType::DepthwiseFwd, "depthwise_fwd"},
+        {CKSolverType::DepthwiseBwdData, "depthwise_bwd_data"}};
 
     for(const auto& binding : solver_bindings)
         BindSolverSymbols(binding.solver, binding.prefix, missing);

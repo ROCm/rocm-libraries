@@ -17,8 +17,10 @@
  * lives in bucket 0 and is reached through rocke/lower_llvm_internal.h.
  */
 
+#include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 
+#include <stdio.h>
 #include <string.h>
 
 namespace ckc
@@ -263,12 +265,275 @@ static void _op_tile_ds_swizzle_xor(rocke_lower_t* L, const rocke_op_t* op)
     }
     offset = (xor_mask << 10) | 0x1F;
     data = op->operands[0];
-    rocke_ll_need(L, "ds.swizzle");
+    rocke_ll_need(L, "amdgcn.ds.swizzle");
     rocke_ll_emitf(L,
                    "  %s = call i32 @llvm.amdgcn.ds.swizzle(i32 %s, i32 %lld)",
                    ll_result_name(op),
                    rocke_ll_operand(L, data),
                    (long long)offset);
+}
+
+static void _op_tile_ds_swizzle(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t offset = 0;
+    const rocke_value_t* data;
+    if(!rocke_attr_get_int(&op->attrs, "offset", &offset))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.ds_swizzle: missing 'offset'");
+    }
+    data = op->operands[0];
+    rocke_ll_need(L, "amdgcn.ds.swizzle");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.ds.swizzle(i32 %s, i32 %lld)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, data),
+                   (long long)offset);
+}
+
+static void _op_tile_mov_dpp8(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t sel = 0;
+    const rocke_value_t* data = op->operands[0];
+    const char* llvm_ty;
+    const char* key;
+    if(!rocke_attr_get_int(&op->attrs, "sel", &sel))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.mov_dpp8: missing 'sel'");
+    }
+    if(rocke_i_type_is(data->type, "i32"))
+    {
+        llvm_ty = "i32";
+        key = "mov.dpp8.i32";
+    }
+    else if(rocke_i_type_is(data->type, "f32"))
+    {
+        llvm_ty = "float";
+        key = "mov.dpp8.f32";
+    }
+    else
+    {
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "mov_dpp8: unsupported type %s", data->type->name);
+    }
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.mov.dpp8.%s(%s %s, i32 %lld)",
+                   ll_result_name(op),
+                   llvm_ty,
+                   rocke_i_type_is(data->type, "i32") ? "i32" : "f32",
+                   llvm_ty,
+                   rocke_ll_operand(L, data),
+                   (long long)(sel & 0xFFFFFF));
+}
+
+static void _op_tile_wave_reduce(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const char* reduce_op = rocke_attr_get_str(&op->attrs, "reduce_op");
+    int64_t strategy = 0;
+    const char* llvm_ty;
+    const char* intrin_key;
+    const char* intrin_name;
+    if(!reduce_op)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.wave_reduce: missing 'reduce_op'");
+    }
+    if(!rocke_attr_get_int(&op->attrs, "strategy", &strategy))
+    {
+        strategy = 0;
+    }
+    llvm_ty = rocke_ll_llvm_type(L, v->type);
+    intrin_key = rocke_arena_printf(
+        &L->arena, "wave.reduce.%s.%s", reduce_op, v->type->name ? v->type->name : "");
+    intrin_name = rocke_arena_printf(
+        &L->arena, "llvm.amdgcn.wave.reduce.%s.%s", reduce_op, v->type->name ? v->type->name : "");
+    rocke_ll_need(L, intrin_key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @%s(%s %s, i32 %lld)",
+                   ll_result_name(op),
+                   llvm_ty,
+                   intrin_name,
+                   llvm_ty,
+                   rocke_ll_operand(L, v),
+                   (long long)strategy);
+}
+
+static void _op_tile_readlane(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* lane = op->operands[1];
+    const char* llvm_ty;
+    const char* key;
+    if(rocke_i_type_is(v->type, "i32"))
+    {
+        llvm_ty = "i32";
+        key = "readlane.i32";
+    }
+    else if(rocke_i_type_is(v->type, "f32"))
+    {
+        llvm_ty = "float";
+        key = "readlane.f32";
+    }
+    else
+    {
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "readlane: unsupported type %s", v->type->name);
+    }
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.readlane.%s(%s %s, i32 %s)",
+                   ll_result_name(op),
+                   llvm_ty,
+                   v->type->name,
+                   llvm_ty,
+                   rocke_ll_operand(L, v),
+                   rocke_ll_operand(L, lane));
+}
+
+static void _op_tile_writelane(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* uniform_val = op->operands[0];
+    const rocke_value_t* lane = op->operands[1];
+    const rocke_value_t* passthrough = op->operands[2];
+    const char* llvm_ty;
+    const char* key;
+    if(rocke_i_type_is(uniform_val->type, "i32"))
+    {
+        llvm_ty = "i32";
+        key = "writelane.i32";
+    }
+    else if(rocke_i_type_is(uniform_val->type, "f32"))
+    {
+        llvm_ty = "float";
+        key = "writelane.f32";
+    }
+    else
+    {
+        rocke_ll_fail(
+            L, ROCKE_ERR_NOTIMPL, "writelane: unsupported type %s", uniform_val->type->name);
+    }
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.writelane.%s(%s %s, i32 %s, %s %s)",
+                   ll_result_name(op),
+                   llvm_ty,
+                   uniform_val->type->name,
+                   llvm_ty,
+                   rocke_ll_operand(L, uniform_val),
+                   rocke_ll_operand(L, lane),
+                   llvm_ty,
+                   rocke_ll_operand(L, passthrough));
+}
+
+static void _op_tile_permlane16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    bool fi = rocke_attr_get_bool(&op->attrs, "fi", false);
+    bool bound_ctrl = rocke_attr_get_bool(&op->attrs, "bound_ctrl", false);
+    rocke_ll_need(L, "amdgcn.permlane16");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.permlane16.i32("
+                   "i32 %s, i32 %s, i32 %s, i32 %s, i1 %s, i1 %s)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]),
+                   rocke_ll_operand(L, op->operands[2]),
+                   rocke_ll_operand(L, op->operands[3]),
+                   fi ? "true" : "false",
+                   bound_ctrl ? "true" : "false");
+}
+
+static void _op_tile_permlane64(rocke_lower_t* L, const rocke_op_t* op)
+{
+    rocke_ll_need(L, "amdgcn.permlane64");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.permlane64.i32(i32 %s)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, op->operands[0]));
+}
+
+static void _op_tile_alignbyte(rocke_lower_t* L, const rocke_op_t* op)
+{
+    rocke_ll_need(L, "amdgcn.alignbyte");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.alignbyte(i32 %s, i32 %s, i32 %s)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]),
+                   rocke_ll_operand(L, op->operands[2]));
+}
+
+static void _op_tile_s_wqm(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* mask = op->operands[0];
+    const char* llvm_ty = rocke_ll_llvm_type(L, mask->type);
+    const char* key;
+    if(rocke_i_type_is(mask->type, "i32"))
+        key = "amdgcn.s.wqm.i32";
+    else if(rocke_i_type_is(mask->type, "i64"))
+        key = "amdgcn.s.wqm.i64";
+    else
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "s_wqm: unsupported type %s", mask->type->name);
+    rocke_ll_need(L, key);
+    /* Two suffixes: result and operand are independently overloaded, even
+     * though the ISA only defines the matched-width pair. */
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.s.wqm.%s.%s(%s %s)",
+                   ll_result_name(op),
+                   llvm_ty,
+                   mask->type->name,
+                   mask->type->name,
+                   llvm_ty,
+                   rocke_ll_operand(L, mask));
+}
+
+static void _op_tile_av_load_b128(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* ptr_ty = NULL;
+    int space = rocke_ll_anyptr_space(L,
+                                      "av_load_b128",
+                                      op->operands[0],
+                                      ROCKE_LL_AV_B128_PTR_TYPES,
+                                      ROCKE_LL_AV_B128_PTR_TYPES_COUNT,
+                                      &ptr_ty);
+    rocke_ll_need(L, rocke_arena_printf(&L->arena, "av.load.b128.p%d", space));
+    L->needs_av_scope_md = true;
+    rocke_ll_emitf(L,
+                   "  %s = call <4 x i32> @llvm.amdgcn.av.load.b128.p%d(%s %s, metadata !3)",
+                   ll_result_name(op),
+                   space,
+                   ptr_ty,
+                   rocke_ll_operand(L, op->operands[0]));
+}
+
+static void _op_tile_av_store_b128(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* ptr_ty = NULL;
+    int space = rocke_ll_anyptr_space(L,
+                                      "av_store_b128",
+                                      op->operands[0],
+                                      ROCKE_LL_AV_B128_PTR_TYPES,
+                                      ROCKE_LL_AV_B128_PTR_TYPES_COUNT,
+                                      &ptr_ty);
+    rocke_ll_need(L, rocke_arena_printf(&L->arena, "av.store.b128.p%d", space));
+    L->needs_av_scope_md = true;
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.av.store.b128.p%d(%s %s, <4 x i32> %s, metadata !3)",
+                   space,
+                   ptr_ty,
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]));
+}
+
+static void _op_tile_s_alloc_vgpr(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t count = 0;
+    const char* ok;
+    if(!rocke_attr_get_int(&op->attrs, "count", &count))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.s_alloc_vgpr: missing 'count'");
+    }
+    rocke_ll_need(L, "s.alloc.vgpr");
+    ok = rocke_ll_fresh(L, "alloc_ok");
+    rocke_ll_emitf(L, "  %s = call i1 @llvm.amdgcn.s.alloc.vgpr(i32 %lld)", ok, (long long)count);
+    rocke_ll_emitf(L, "  %s = zext i1 %s to i32", ll_result_name(op), ok);
 }
 
 /* ====================================================================== */
@@ -322,7 +587,7 @@ static void _op_tile_permlane32_swap(rocke_lower_t* L, const rocke_op_t* op)
     const char* tmp;
     const char* lo_s;
     const char* hi_s;
-    rocke_ll_need(L, "permlane32.swap");
+    rocke_ll_need(L, "amdgcn.permlane32.swap");
     tmp = rocke_ll_fresh(L, "psw.tmp");
     lo_s = rocke_ll_operand(L, lo);
     hi_s = rocke_ll_operand(L, hi);
@@ -365,7 +630,7 @@ static void _op_tile_permlanex16(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_need(L, "amdgcn.permlanex16");
     src = rocke_ll_operand(L, v);
     rocke_ll_emitf(L,
-                   "  %s = call i32 @llvm.amdgcn.permlanex16("
+                   "  %s = call i32 @llvm.amdgcn.permlanex16.i32("
                    "i32 %s, i32 %s, i32 1985229328, i32 -19088744, "
                    "i1 false, i1 true)",
                    ll_result_name(op),
@@ -402,45 +667,93 @@ static void _op_tile_byte_perm(rocke_lower_t* L, const rocke_op_t* op)
 /* ds_read_tr16_b64 / ds_read_tr16_b128 / ds_read_tr_b8                   */
 /* ====================================================================== */
 
-/* Shared body for the b16 transpose reads (b64 = <4 x i16>, b128 = <8 x i16>).
- * Mirrors the two near-identical Python handlers. */
-static void ll_ds_read_tr16(rocke_lower_t* L,
-                            const rocke_op_t* op,
-                            const char* base_hint,
-                            const char* raw_hint,
-                            int vec,
-                            const char* intrin_key,
-                            const char* intrin_name)
+/* Python ISABackend.ds_tr16_b128_spec: the gfx950 opcode is type-agnostic --
+ * it returns <8 x i16> whatever the payload is, so the handler reinterprets. */
+bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out)
+{
+    if(strcmp(elem_type, "bf16") != 0 && strcmp(elem_type, "f16") != 0
+       && strcmp(elem_type, "fp16") != 0)
+    {
+        return false;
+    }
+    out->decl_key = "ds.read.tr16.b128";
+    out->intrinsic = "llvm.amdgcn.ds.read.tr16.b128";
+    out->ret_ty = "<8 x i16>";
+    return true;
+}
+
+/* Python Gfx1250Backend.ds_tr16_b128_spec: the gfx1250 wave32 opcode is
+ * overloaded on the result element type. Select the one matching the op so an
+ * f16 read does not reinterpret a bf16 payload (and vice versa). */
+bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t* out)
+{
+    if(strcmp(elem_type, "bf16") == 0)
+    {
+        out->decl_key = "ds.load.tr16.b128.v8bf16";
+        out->intrinsic = "llvm.amdgcn.ds.load.tr16.b128.v8bf16";
+        out->ret_ty = "<8 x bfloat>";
+        return true;
+    }
+    if(strcmp(elem_type, "f16") == 0 || strcmp(elem_type, "fp16") == 0)
+    {
+        out->decl_key = "ds.load.tr16.b128.v8f16";
+        out->intrinsic = "llvm.amdgcn.ds.load.tr16.b128.v8f16";
+        out->ret_ty = "<8 x half>";
+        return true;
+    }
+    return false;
+}
+
+/* Python self._backend.ds_tr16_b128_spec(elem_type), with the type-agnostic
+ * gfx950 opcode as the fallback when no backend is bound. */
+static bool
+    ll_backend_tr16_spec_b128(rocke_lower_t* L, const char* elem_type, rocke_ll_tr16_spec_t* out)
+{
+    if(L && L->backend && L->backend->ds_tr16_b128_spec)
+    {
+        return L->backend->ds_tr16_b128_spec(elem_type, out);
+    }
+    return rocke_ll_tr16_spec_b128_default(elem_type, out);
+}
+
+/* Shared prologue for the b16 transpose reads: emit the getelementptr that
+ * addresses the LDS slot and return its SSA name. The two handlers diverge
+ * after this (b64 always reinterprets a type-agnostic <4 x i16>; b128 asks the
+ * backend which opcode to use and only reinterprets if it has to), so only the
+ * address computation is shared. */
+static const char*
+    ll_ds_read_tr16_base(rocke_lower_t* L, const rocke_op_t* op, const char* base_hint)
 {
     const rocke_value_t* smem = op->operands[0];
     const char* gname;
     const rocke_type_t* stype = NULL;
     const char* agg_ty;
     const char* base;
-    const char* raw;
-    const char* elem_ty;
     rocke_strbuf_t gep;
     int i;
 
     gname = rocke_ll_smem_global_name(L, smem, &stype);
     if(!rocke_ll_live(L))
     {
-        return;
+        return NULL;
     }
     agg_ty = rocke_ll_smem_storage_type(L, stype);
-    base = rocke_ll_fresh(L, base_hint);
-
-    /* getelementptr inbounds <agg>, ptr addrspace(3) <g>, i32 0, i32 <idx>... */
-    if(rocke_strbuf_init(&gep, 64) != 0)
     {
-        rocke_ll_fail(L, ROCKE_ERR_OOM, "ds_read_tr16: strbuf OOM");
+        const char* pool_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
+        base = rocke_ll_fresh(L, base_hint);
+
+        /* getelementptr inbounds <agg>, ptr addrspace(3) <pool>, i32 0, i32 <idx>... */
+        if(rocke_strbuf_init(&gep, 64) != 0)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "ds_read_tr16: strbuf OOM");
+        }
+        rocke_strbuf_appendf(&gep,
+                             "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
+                             "i32 0",
+                             base,
+                             agg_ty,
+                             pool_ptr);
     }
-    rocke_strbuf_appendf(&gep,
-                         "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
-                         "i32 0",
-                         base,
-                         agg_ty,
-                         gname);
     for(i = 1; i < op->num_operands; ++i)
     {
         rocke_strbuf_appendf(&gep, ", i32 %s", rocke_ll_operand(L, op->operands[i]));
@@ -452,29 +765,81 @@ static void ll_ds_read_tr16(rocke_lower_t* L,
     }
     rocke_ll_emit(L, rocke_strbuf_cstr(&gep));
     rocke_strbuf_free(&gep);
-
-    rocke_ll_need(L, intrin_key);
-    raw = rocke_ll_fresh(L, raw_hint);
-    rocke_ll_emitf(L,
-                   "  %s = call <%d x i16> @llvm.amdgcn.%s(ptr addrspace(3) %s)",
-                   raw,
-                   vec,
-                   intrin_name,
-                   base);
-
-    elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
-    rocke_ll_emitf(
-        L, "  %s = bitcast <%d x i16> %s to <%d x %s>", ll_result_name(op), vec, raw, vec, elem_ty);
+    return base;
 }
 
+/* ds_read_b64_tr_b16: the opcode is type-agnostic (<4 x i16>), so the payload
+ * is always reinterpreted as the op's element type. No backend dispatch --
+ * Python has none for the b64 form either. */
 static void _op_tile_ds_read_tr16_b64(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_ds_read_tr16(L, op, "tr.base", "tr.raw", 4, "ds.read.tr16.b64", "ds.read.tr16.b64");
+    const char* base = ll_ds_read_tr16_base(L, op, "tr.base");
+    const char* raw;
+    const char* elem_ty;
+
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    rocke_ll_need(L, "ds.read.tr16.b64");
+    raw = rocke_ll_fresh(L, "tr.raw");
+    rocke_ll_emitf(
+        L, "  %s = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3) %s)", raw, base);
+    elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
+    rocke_ll_emitf(L, "  %s = bitcast <4 x i16> %s to <4 x %s>", ll_result_name(op), raw, elem_ty);
 }
 
+/* ds_read_b128_tr_b16. The backend chooses the opcode: gfx950 has one
+ * type-agnostic <8 x i16> form that the payload is reinterpreted out of, while
+ * gfx1250 has per-element-type forms that land in the right type directly. */
 static void _op_tile_ds_read_tr16_b128(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_ds_read_tr16(L, op, "trw.base", "trw.raw", 8, "ds.read.tr16.b128", "ds.read.tr16.b128");
+    const char* base = ll_ds_read_tr16_base(L, op, "trw.base");
+    const char* elem_name = "f16";
+    rocke_ll_tr16_spec_t spec;
+    const char* elem_ty;
+    char want_ty[32];
+
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    {
+        const char* attr = rocke_attr_get_str(&op->attrs, "elem_type");
+        if(attr)
+        {
+            elem_name = attr;
+        }
+    }
+    if(!ll_backend_tr16_spec_b128(L, elem_name, &spec))
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "ds_load_tr16_b128 on %s supports f16/bf16 only, got elem_type='%s'",
+                      L->backend ? L->backend->gfx : "(unknown)",
+                      elem_name);
+        return;
+    }
+    rocke_ll_need(L, spec.decl_key);
+    elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
+    snprintf(want_ty, sizeof(want_ty), "<8 x %s>", elem_ty);
+    if(strcmp(spec.ret_ty, want_ty) == 0)
+    {
+        rocke_ll_emitf(L,
+                       "  %s = call %s @%s(ptr addrspace(3) %s)",
+                       ll_result_name(op),
+                       spec.ret_ty,
+                       spec.intrinsic,
+                       base);
+        return;
+    }
+    {
+        const char* raw = rocke_ll_fresh(L, "trw.raw");
+        rocke_ll_emitf(
+            L, "  %s = call %s @%s(ptr addrspace(3) %s)", raw, spec.ret_ty, spec.intrinsic, base);
+        rocke_ll_emitf(
+            L, "  %s = bitcast %s %s to %s", ll_result_name(op), spec.ret_ty, raw, want_ty);
+    }
 }
 
 static void _op_tile_ds_read_tr_b8(rocke_lower_t* L, const rocke_op_t* op)
@@ -497,18 +862,21 @@ static void _op_tile_ds_read_tr_b8(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
     agg_ty = rocke_ll_smem_storage_type(L, stype);
-    base = rocke_ll_fresh(L, "tr8.base");
-
-    if(rocke_strbuf_init(&gep, 64) != 0)
     {
-        rocke_ll_fail(L, ROCKE_ERR_OOM, "ds_read_tr_b8: strbuf OOM");
+        const char* pool_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
+        base = rocke_ll_fresh(L, "tr8.base");
+
+        if(rocke_strbuf_init(&gep, 64) != 0)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "ds_read_tr_b8: strbuf OOM");
+        }
+        rocke_strbuf_appendf(&gep,
+                             "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
+                             "i32 0",
+                             base,
+                             agg_ty,
+                             pool_ptr);
     }
-    rocke_strbuf_appendf(&gep,
-                         "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
-                         "i32 0",
-                         base,
-                         agg_ty,
-                         gname);
     for(i = 1; i < op->num_operands; ++i)
     {
         rocke_strbuf_appendf(&gep, ", i32 %s", rocke_ll_operand(L, op->operands[i]));
@@ -661,6 +1029,18 @@ void rocke_ll_register_crosslane(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_DS_BPERMUTE, _op_tile_ds_bpermute);
     rocke_ll_set_handler(ROCKE_OP_TILE_DS_BPERMUTE_B64, _op_tile_ds_bpermute_b64);
     rocke_ll_set_handler(ROCKE_OP_TILE_DS_SWIZZLE_XOR, _op_tile_ds_swizzle_xor);
+    rocke_ll_set_handler(ROCKE_OP_TILE_DS_SWIZZLE, _op_tile_ds_swizzle);
+    rocke_ll_set_handler(ROCKE_OP_TILE_MOV_DPP8, _op_tile_mov_dpp8);
+    rocke_ll_set_handler(ROCKE_OP_TILE_WAVE_REDUCE, _op_tile_wave_reduce);
+    rocke_ll_set_handler(ROCKE_OP_TILE_READLANE, _op_tile_readlane);
+    rocke_ll_set_handler(ROCKE_OP_TILE_WRITELANE, _op_tile_writelane);
+    rocke_ll_set_handler(ROCKE_OP_TILE_PERMLANE16, _op_tile_permlane16);
+    rocke_ll_set_handler(ROCKE_OP_TILE_PERMLANE64, _op_tile_permlane64);
+    rocke_ll_set_handler(ROCKE_OP_TILE_ALIGNBYTE, _op_tile_alignbyte);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WQM, _op_tile_s_wqm);
+    rocke_ll_set_handler(ROCKE_OP_TILE_AV_LOAD_B128, _op_tile_av_load_b128);
+    rocke_ll_set_handler(ROCKE_OP_TILE_AV_STORE_B128, _op_tile_av_store_b128);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_ALLOC_VGPR, _op_tile_s_alloc_vgpr);
     rocke_ll_set_handler(ROCKE_OP_TILE_MOV_DPP, _op_tile_mov_dpp);
     rocke_ll_set_handler(ROCKE_OP_TILE_PERMLANE32_SWAP, _op_tile_permlane32_swap);
     rocke_ll_set_handler(ROCKE_OP_TILE_PERM_B32, _op_tile_perm_b32);

@@ -25,8 +25,11 @@ add_executable(
     flatbuffer_utilities/TestKnobSettingWrapper.cpp
     flatbuffer_utilities/TestSerializedGraphContainer.cpp
     flatbuffer_utilities/TestTensorAttributesWrapper.cpp
+    utilities/TestApplicabilityUtils.cpp
     utilities/TestFlatbufferUtils.cpp
     utilities/TestJson.cpp
+    utilities/TestUuid.cpp
+    utilities/TestMoeGroupedMatmulValidation.cpp
     utilities/TestPointwiseValidation.cpp
 )
 

@@ -115,6 +115,12 @@ typedef struct rocke_gemm_trait_spec
      * atomic-adds each warp's f32 accumulator into it. split_k == 1 (default)
      * keeps the canonical single-K-pass body byte-identical. */
     int split_k; /* default 1 */
+    /* cshuffle epilogue LDS aliasing. False (default): the smem-pool packer
+     * aliases the cshuffle C tile onto the A/B staging bytes (pool = max(ab,c))
+     * with a step-0 reuse barrier. True: C gets its own LDS bytes (pool = ab+c)
+     * and the barrier is elided -> lower small-tile latency, more LDS. Only
+     * affects the cshuffle epilogue; False keeps byte-identical output. */
+    bool cshuffle_no_alias; /* default false */
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

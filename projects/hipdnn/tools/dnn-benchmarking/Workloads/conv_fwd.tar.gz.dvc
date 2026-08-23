@@ -1,5 +1,0 @@
-outs:
-- md5: fd0493b95255235f2634189514153572
-  size: 10873
-  hash: md5
-  path: conv_fwd.tar.gz

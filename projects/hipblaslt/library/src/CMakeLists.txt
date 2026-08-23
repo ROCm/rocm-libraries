@@ -23,6 +23,7 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/handle.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/logging.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/rocblaslt_mat_utils.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/rocblaslt_secure_env.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/status.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/tuple_helper.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/tensile_host.hpp"

@@ -367,8 +367,9 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
 {
     int8_t      dummy;
     const void* dummy_ptr = &dummy;
-    int64_t     m, n, k, lda, ldb, ldc, ldd, lde, batch_stride_a, batch_stride_b, batch_stride_c,
-        batch_stride_d, batch_stride_e;
+    int64_t     m, n, k, lda, ldb, ldc, ldd, lde;
+    int64_t     batch_stride_a, batch_stride_b, batch_stride_c, batch_stride_d, batch_stride_e;
+    int64_t     batch_offset_a, batch_offset_b, batch_offset_c, batch_offset_d;
     int32_t    bias_stride = matmul_descr->bias_stride;
     hipDataType            bias_type;
     hipDataType            aux_type;
@@ -396,15 +397,19 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                                            a_type,
                                                            lda,
                                                            batch_stride_a,
+                                                           batch_offset_a,
                                                            b_type,
                                                            ldb,
                                                            batch_stride_b,
+                                                           batch_offset_b,
                                                            c_type,
                                                            ldc,
                                                            batch_stride_c,
+                                                           batch_offset_c,
                                                            d_type,
                                                            ldd,
                                                            batch_stride_d,
+                                                           batch_offset_d,
                                                            lde,
                                                            batch_stride_e,
                                                            bias,
@@ -460,22 +465,26 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         nullptr,
                                         lda,
                                         batch_stride_a,
+                                        batch_offset_a,
                                         b_type,
                                         nullptr,
                                         nullptr,
                                         ldb,
                                         batch_stride_b,
+                                        batch_offset_b,
                                         beta,
                                         c_type,
                                         nullptr,
                                         nullptr,
                                         ldc,
                                         batch_stride_c,
+                                        batch_offset_c,
                                         d_type,
                                         nullptr,
                                         nullptr,
                                         ldd,
                                         batch_stride_d,
+                                        batch_offset_d,
                                         e,
                                         nullptr,
                                         lde,
@@ -510,7 +519,8 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         batchMode,
                                         bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
+                                        effective_sm_count_target(handle, matmul_descr, nullptr),
+                                        effective_uniform_summation_order(handle, matmul_descr)};
 
     if(scaleAlphaVec)
     {
@@ -630,11 +640,53 @@ rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
 }
 
 /********************************************************************************
+ * \brief Set the handle-level uniform-summation-order request.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_set_uniform_summation_order(rocblaslt_handle handle,
+                                                       int32_t          uniform_summation_order)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(uniform_summation_order < 0 || uniform_summation_order > 1)
+    {
+        log_error(__func__, "invalid uniform_summation_order", uniform_summation_order);
+        return rocblaslt_status_invalid_value;
+    }
+    log_api(__func__, "handle", handle, "uniform_summation_order", uniform_summation_order);
+    handle->uniform_summation_order = uniform_summation_order;
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
+ * \brief Get the handle-level uniform-summation-order request.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_get_uniform_summation_order(rocblaslt_handle handle,
+                                                       int32_t*         uniform_summation_order)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(uniform_summation_order == nullptr)
+    {
+        log_error(__func__, "uniform_summation_order", uniform_summation_order);
+        return rocblaslt_status_invalid_value;
+    }
+    *uniform_summation_order = handle->uniform_summation_order;
+    log_api(__func__, "handle", handle, "uniform_summation_order", *uniform_summation_order);
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
  * \brief rocblaslt_matrix_layout is a structure holding the rocblaslt matrix
  * content. It must be initialized using rocblaslt_matrix_layout_create()
  * and the retured handle must be passed
  * to all subsequent library function calls that involve the matrix.
- * It should be destroyed at the end using rocblaslt_matrix_layout_destory().
+ * It should be destroyed at the end using rocblaslt_matrix_layout_destroy().
  *******************************************************************************/
 rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDescr,
                                                 hipDataType              valueType,
@@ -682,7 +734,7 @@ rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDesc
 /********************************************************************************
  * \brief destroy matrix descriptor
  *******************************************************************************/
-rocblaslt_status rocblaslt_matrix_layout_destory(const rocblaslt_matrix_layout matDescr)
+rocblaslt_status rocblaslt_matrix_layout_destroy(const rocblaslt_matrix_layout matDescr)
 {
     if(matDescr == nullptr)
     {
@@ -804,8 +856,17 @@ rocblaslt_status rocblaslt_matrix_layout_set_attribute(rocblaslt_matrix_layout  
                 {
                     log_error(__func__, "invalid buf size", sizeInBytes);
                     return rocblaslt_status_invalid_value;
-                }                 
-                break;                
+                }
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_OFFSET:
+                if(sizeof(int64_t) <= sizeInBytes)
+                    memcpy(&matLayout->batch_offset, buf, sizeof(int64_t));
+                else
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
             default:
                 log_error(__func__, "invalid attribute", attr);
                 return rocblaslt_status_invalid_value;
@@ -892,6 +953,16 @@ rocblaslt_status rocblaslt_matrix_layout_get_attribute(rocblaslt_matrix_layout  
                 }
                 memcpy(buf, &matLayout->batch_mode, sizeof(int32_t));                         
                 break;                
+            case ROCBLASLT_MATRIX_LAYOUT_OFFSET:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int64_t);
+                if(sizeInBytes < sizeof(int64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->batch_offset, sizeof(int64_t));
+                break;
             default:
                 log_error(__func__, "invalid attribute", attr);
                 return rocblaslt_status_invalid_value;
@@ -1445,6 +1516,26 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT:
+                if(sizeof(int32_t) <= sizeInBytes)
+                {
+                    int32_t requested = 0;
+                    memcpy(&requested, buf, sizeof(int32_t));
+                    if(requested < 0 || requested > 1)
+                    {
+                        log_error(__func__,
+                                  "invalid uniform_summation_order value",
+                                  requested);
+                        return rocblaslt_status_invalid_value;
+                    }
+                    matmulDesc->uniform_summation_order = requested;
+                }
+                else
+                {
+                    log_error(__func__, "invalid uniform_summation_order buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -1781,6 +1872,16 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 memcpy(buf, &matmulDesc->streamk_tile_scheduling_ext, sizeof(int32_t));
+                break;
+            case ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid uniform_summation_order buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->uniform_summation_order, sizeof(int32_t));
                 break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
@@ -2389,6 +2490,7 @@ rocblaslt_status
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
                                      const int32_t          streamKTileSchedulingMode,
+                                     const bool             uniformSummationOrder,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results)
 {
@@ -2410,6 +2512,10 @@ rocblaslt_status
     // tensile_host.cpp (its body needs the TensileDataGemm /
     // TensileDataGroupedGemm types).
     applyStreamKTileSchedulingMode(gemmData, gemmType, streamKTileSchedulingMode);
+    applyUniformSummationOrder(gemmData,
+                               gemmType,
+                               uniformSummationOrder
+                                   || (handle && handle->uniform_summation_order));
     rocblaslt_status status = rocblaslt_status_success;
     try
     {

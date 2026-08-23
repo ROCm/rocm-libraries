@@ -32,7 +32,7 @@ from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import internalParameters
 from Tensile.SolutionStructs import Solution as OriginalSolution
-from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault
+from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from Tensile.Toolchain.Component import Assembler
 from math import ceil
 
@@ -68,7 +68,7 @@ class BoundIndex:
 
 class ProblemType:
     StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputTypeA', 'computeInputTypeB', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
-                 'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
+                 'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useGateResidual', 'gateResidualDataTypeWhiteList', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
@@ -237,6 +237,19 @@ class ProblemType:
         if 'UseE' in d:
             rv.useE = d['UseE']
 
+        rv.useGateResidual = False
+        rv.gateResidualDataTypeWhiteList = []
+        rv.setConstStrideGate = []
+        if 'UseGateResidual' in d:
+            rv.useGateResidual = bool(d['UseGateResidual'])
+            if 'GateResidualDataTypeList' in d:
+                d["GateResidualDataTypeList"].sort()  # Sort to make sure names are unique
+                rv.gateResidualDataTypeWhiteList = d['GateResidualDataTypeList']
+            else:
+                rv.gateResidualDataTypeWhiteList = getGateResidualDataTypeListDefault(d)
+            if 'SetConstStrideGate' in d:
+                rv.setConstStrideGate = d['SetConstStrideGate']
+
         rv.useGradient = False
         if 'Gradient' in d:
             rv.useGradient = d["Gradient"]
@@ -380,6 +393,7 @@ class ProblemType:
             if not self.useBeta:
                 predicates.append(ProblemPredicate("BetaZero"))
             predicates.append(ProblemPredicate("BiasDataTypeWhiteList", value=self.biasDataTypeWhiteList))
+            predicates.append(ProblemPredicate("GateResidualDataTypeWhiteList", value=self.gateResidualDataTypeWhiteList))
             predicates.append(ProblemPredicate("BiasSrcWhiteList", value=self.biasSrcWhiteList))
             predicates.append(ProblemPredicate("AmaxDCheck", value=self.outputAmaxD))
             if self.activationType in ['all', 'hipblaslt_all']:
@@ -399,6 +413,7 @@ class ProblemType:
             predicates.append(ProblemPredicate("UseGradient", value=self.useGradient))
             predicates.append(ProblemPredicate("UseBias", value=self.useBias))
             predicates.append(ProblemPredicate("UseE", value=self.useE))
+            predicates.append(ProblemPredicate("UseGateResidual", value=self.useGateResidual))
             predicates.append(ProblemPredicate("DataTypeE", value=self.eType))
             predicates.append(ProblemPredicate("StridedBatched", value=self.stridedBatched))
             predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
@@ -585,14 +600,6 @@ class ProblemPredicate(Properties.Predicate):
 
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
-
-        valuepredicates = []
-        valuepredicates.append(state["MacroTile0"])
-        valuepredicates.append(state["MacroTile1"])
-        valuepredicates.append(state["GlobalSplitU"])
-        valuepredicates.append(state["ClusterDim"][0])
-        valuepredicates.append(state["ClusterDim"][1])
-        rv += [cls('ClusterDimCheck', value=valuepredicates)]
 
         return rv
 

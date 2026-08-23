@@ -98,3 +98,25 @@ def test_isRhel8_emits_exact_warning_text_on_match(monkeypatch):
     assert calls == [
         ("Rhel8 environments may not support all tools for system queries such as amd-smi.",)
     ]
+
+
+def test_isRhel8_opens_os_release_with_explicit_read_mode(monkeypatch):
+    """The os-release file is opened with the explicit ``"r"`` mode argument."""
+    import builtins
+    from io import StringIO
+
+    calls = []
+
+    def fake_open(file, *args, **kwargs):
+        calls.append((file, args, kwargs))
+        return StringIO(RHEL8_OS_RELEASE)
+
+    monkeypatch.setattr(U, "Path", _FakePath)
+    monkeypatch.setattr(builtins, "open", fake_open)
+    monkeypatch.setattr(U, "printWarning", lambda *a, **k: None)
+
+    assert U.isRhel8() is True
+    assert len(calls) == 1
+    assert isinstance(calls[0][0], _FakePath)
+    assert calls[0][1] == ("r",)
+    assert calls[0][2] == {}

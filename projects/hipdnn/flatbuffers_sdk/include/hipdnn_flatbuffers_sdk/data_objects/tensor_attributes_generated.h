@@ -578,6 +578,8 @@ struct TensorAttributesT : public ::flatbuffers::NativeTable {
   bool virtual_ = false;
   hipdnn_flatbuffers_sdk::data_objects::TensorValueUnion value{};
   bool is_runtime_pass_by_value = false;
+  ::flatbuffers::Optional<int64_t> ragged_offset_tensor_uid = ::flatbuffers::nullopt;
+  int64_t alignment = 16LL;
 };
 
 struct TensorAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -592,7 +594,9 @@ struct TensorAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_VIRTUAL_ = 14,
     VT_VALUE_TYPE = 16,
     VT_VALUE = 18,
-    VT_IS_RUNTIME_PASS_BY_VALUE = 20
+    VT_IS_RUNTIME_PASS_BY_VALUE = 20,
+    VT_RAGGED_OFFSET_TENSOR_UID = 22,
+    VT_ALIGNMENT = 24
   };
   int64_t uid() const {
     return GetField<int64_t>(VT_UID, 0);
@@ -670,6 +674,18 @@ struct TensorAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_is_runtime_pass_by_value(bool _is_runtime_pass_by_value = 0) {
     return SetField<uint8_t>(VT_IS_RUNTIME_PASS_BY_VALUE, static_cast<uint8_t>(_is_runtime_pass_by_value), 0);
   }
+  ::flatbuffers::Optional<int64_t> ragged_offset_tensor_uid() const {
+    return GetOptional<int64_t, int64_t>(VT_RAGGED_OFFSET_TENSOR_UID);
+  }
+  bool mutate_ragged_offset_tensor_uid(int64_t _ragged_offset_tensor_uid) {
+    return SetField<int64_t>(VT_RAGGED_OFFSET_TENSOR_UID, _ragged_offset_tensor_uid);
+  }
+  int64_t alignment() const {
+    return GetField<int64_t>(VT_ALIGNMENT, 16LL);
+  }
+  bool mutate_alignment(int64_t _alignment = 16LL) {
+    return SetField<int64_t>(VT_ALIGNMENT, _alignment, 16LL);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_UID, 8) &&
@@ -685,6 +701,8 @@ struct TensorAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyOffset(verifier, VT_VALUE) &&
            VerifyTensorValue(verifier, value(), value_type()) &&
            VerifyField<uint8_t>(verifier, VT_IS_RUNTIME_PASS_BY_VALUE, 1) &&
+           VerifyField<int64_t>(verifier, VT_RAGGED_OFFSET_TENSOR_UID, 8) &&
+           VerifyField<int64_t>(verifier, VT_ALIGNMENT, 8) &&
            verifier.EndTable();
   }
   TensorAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -755,6 +773,12 @@ struct TensorAttributesBuilder {
   void add_is_runtime_pass_by_value(bool is_runtime_pass_by_value) {
     fbb_.AddElement<uint8_t>(TensorAttributes::VT_IS_RUNTIME_PASS_BY_VALUE, static_cast<uint8_t>(is_runtime_pass_by_value), 0);
   }
+  void add_ragged_offset_tensor_uid(int64_t ragged_offset_tensor_uid) {
+    fbb_.AddElement<int64_t>(TensorAttributes::VT_RAGGED_OFFSET_TENSOR_UID, ragged_offset_tensor_uid);
+  }
+  void add_alignment(int64_t alignment) {
+    fbb_.AddElement<int64_t>(TensorAttributes::VT_ALIGNMENT, alignment, 16LL);
+  }
   explicit TensorAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -776,8 +800,12 @@ inline ::flatbuffers::Offset<TensorAttributes> CreateTensorAttributes(
     bool virtual_ = false,
     hipdnn_flatbuffers_sdk::data_objects::TensorValue value_type = hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE,
     ::flatbuffers::Offset<void> value = 0,
-    bool is_runtime_pass_by_value = false) {
+    bool is_runtime_pass_by_value = false,
+    ::flatbuffers::Optional<int64_t> ragged_offset_tensor_uid = ::flatbuffers::nullopt,
+    int64_t alignment = 16LL) {
   TensorAttributesBuilder builder_(_fbb);
+  builder_.add_alignment(alignment);
+  if(ragged_offset_tensor_uid) { builder_.add_ragged_offset_tensor_uid(*ragged_offset_tensor_uid); }
   builder_.add_uid(uid);
   builder_.add_value(value);
   builder_.add_dims(dims);
@@ -800,7 +828,9 @@ inline ::flatbuffers::Offset<TensorAttributes> CreateTensorAttributesDirect(
     bool virtual_ = false,
     hipdnn_flatbuffers_sdk::data_objects::TensorValue value_type = hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE,
     ::flatbuffers::Offset<void> value = 0,
-    bool is_runtime_pass_by_value = false) {
+    bool is_runtime_pass_by_value = false,
+    ::flatbuffers::Optional<int64_t> ragged_offset_tensor_uid = ::flatbuffers::nullopt,
+    int64_t alignment = 16LL) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto strides__ = strides ? _fbb.CreateVector<int64_t>(*strides) : 0;
   auto dims__ = dims ? _fbb.CreateVector<int64_t>(*dims) : 0;
@@ -814,7 +844,9 @@ inline ::flatbuffers::Offset<TensorAttributes> CreateTensorAttributesDirect(
       virtual_,
       value_type,
       value,
-      is_runtime_pass_by_value);
+      is_runtime_pass_by_value,
+      ragged_offset_tensor_uid,
+      alignment);
 }
 
 ::flatbuffers::Offset<TensorAttributes> CreateTensorAttributes(::flatbuffers::FlatBufferBuilder &_fbb, const TensorAttributesT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -829,7 +861,9 @@ inline bool operator==(const TensorAttributesT &lhs, const TensorAttributesT &rh
       (lhs.dims == rhs.dims) &&
       (lhs.virtual_ == rhs.virtual_) &&
       (lhs.value == rhs.value) &&
-      (lhs.is_runtime_pass_by_value == rhs.is_runtime_pass_by_value);
+      (lhs.is_runtime_pass_by_value == rhs.is_runtime_pass_by_value) &&
+      (lhs.ragged_offset_tensor_uid == rhs.ragged_offset_tensor_uid) &&
+      (lhs.alignment == rhs.alignment);
 }
 
 inline bool operator!=(const TensorAttributesT &lhs, const TensorAttributesT &rhs) {
@@ -855,6 +889,8 @@ inline void TensorAttributes::UnPackTo(TensorAttributesT *_o, const ::flatbuffer
   { auto _e = value_type(); _o->value.type = _e; }
   { auto _e = value(); if (_e) _o->value.value = hipdnn_flatbuffers_sdk::data_objects::TensorValueUnion::UnPack(_e, value_type(), _resolver); }
   { auto _e = is_runtime_pass_by_value(); _o->is_runtime_pass_by_value = _e; }
+  { auto _e = ragged_offset_tensor_uid(); _o->ragged_offset_tensor_uid = _e; }
+  { auto _e = alignment(); _o->alignment = _e; }
 }
 
 inline ::flatbuffers::Offset<TensorAttributes> TensorAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const TensorAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -874,6 +910,8 @@ inline ::flatbuffers::Offset<TensorAttributes> CreateTensorAttributes(::flatbuff
   auto _value_type = _o->value.type;
   auto _value = _o->value.Pack(_fbb);
   auto _is_runtime_pass_by_value = _o->is_runtime_pass_by_value;
+  auto _ragged_offset_tensor_uid = _o->ragged_offset_tensor_uid;
+  auto _alignment = _o->alignment;
   return hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributes(
       _fbb,
       _uid,
@@ -884,7 +922,9 @@ inline ::flatbuffers::Offset<TensorAttributes> CreateTensorAttributes(::flatbuff
       _virtual_,
       _value_type,
       _value,
-      _is_runtime_pass_by_value);
+      _is_runtime_pass_by_value,
+      _ragged_offset_tensor_uid,
+      _alignment);
 }
 
 inline bool VerifyTensorValue(::flatbuffers::Verifier &verifier, const void *obj, TensorValue type) {

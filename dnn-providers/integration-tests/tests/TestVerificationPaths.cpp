@@ -25,7 +25,7 @@ namespace
 
 std::filesystem::path goldenDataRoot()
 {
-    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration_test_bundles";
+    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration-test-bundles";
 }
 
 std::filesystem::path batchNormSmallBundle()

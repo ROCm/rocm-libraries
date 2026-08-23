@@ -82,13 +82,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
     }
 
     // reduce squared entries to find squared norm of x
-    norm2 += shift_left(norm2, 1);
-    norm2 += shift_left(norm2, 2);
-    norm2 += shift_left(norm2, 4);
-    norm2 += shift_left(norm2, 8);
-    norm2 += shift_left(norm2, 16);
-    if(warpSize > 32)
-        norm2 += shift_left(norm2, 32);
+    reduce_wave_sum(norm2);
     if(tid % warpSize == 0)
         sval[tid / warpSize] = norm2;
     __syncthreads();

@@ -49,6 +49,7 @@ set(roclapack_test_source
   lapack/sytrs2_gtest.cpp
   lapack/geblttrf_gtest.cpp
   # orthogonal factorizations
+  lapack/cholqr_gtest.cpp
   lapack/geqr2_geqrf_gtest.cpp
   lapack/gerq2_gerqf_gtest.cpp
   lapack/geql2_geqlf_gtest.cpp
@@ -115,8 +116,11 @@ set(rocauxiliary_test_source
   auxiliary/stebz_gtest.cpp
   auxiliary/stein_gtest.cpp
   auxiliary/latrd_gtest.cpp
+  # hessenberg matrices
+  auxiliary/lahr2_gtest.cpp
   # symmetric matrices
   auxiliary/lasyf_gtest.cpp
+  auxiliary/sy2sb_he2hb_gtest.cpp
   # triangular matrices
   auxiliary/lauum_gtest.cpp
 )
@@ -137,6 +141,11 @@ set(rocrefact_test_source
 set(rocunit_test_source
   # gemm
   unit/gemm_gtest.cpp
+  # generate helpers
+  unit/gerand_gtest.cpp
+  unit/herand_gtest.cpp
+  unit/syrand_gtest.cpp
+  unit/hbrand_gtest.cpp
 )
 
 set(others_test_source
@@ -233,6 +242,20 @@ target_compile_definitions(rocsolver-test PRIVATE
   ROCM_USE_FLOAT16
   ROCSOLVER_CLIENTS_TEST
 )
+
+# Mirror feature flags to test behaviour
+if(ROCSOLVER_ENABLE_CHOLQR)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_CHOLQR)
+endif()
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
+
+# Mirror the library's 2-stage eigensolver feature flag so the tests assert the
+# correct behavior (real run when ON, rocblas_status_not_implemented when OFF).
+if(ROCSOLVER_ENABLE_EIG_2STAGE)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
+endif()
 
 add_test(
   NAME rocsolver-test

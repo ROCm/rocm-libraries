@@ -596,3 +596,135 @@ TEST(DataGeneratorDecoupledScale, BoundedDataWithOnesScale)
             ++meaningful;
     EXPECT_GT(meaningful, 0);
 }
+
+namespace
+{
+    constexpr index_t kMisalignedKRows = 136; // mxBlock=32 -> 4 full + tail of 8
+    constexpr index_t kMisalignedKCols = 128;
+    constexpr index_t kMisalignedKBlock = 32;
+
+    index_t misalignedKLinearIndex(index_t col, index_t k)
+    {
+        return col * kMisalignedKRows + k;
+    }
+
+    template <typename DTYPE>
+    DataGenerator<DTYPE> generateMisalignedK(DataGeneratorOptions opts)
+    {
+        std::vector<index_t> sizes{kMisalignedKRows, kMisalignedKCols};
+        std::vector<index_t> strides{1, kMisalignedKRows};
+        DataGenerator<DTYPE> dgen;
+        dgen.setSeed(42u);
+        dgen.generate(sizes, strides, opts);
+        return dgen;
+    }
+
+    void expectMisalignedKTailScaleGrouping(DataGenerator<ocp_e2m3_mxfp6> const& dgen)
+    {
+        auto const scaleBytes = dgen.getScaleBytes();
+        ASSERT_FALSE(scaleBytes.empty());
+
+        constexpr index_t kFullBlock = 100; // block 3
+        constexpr index_t kTailStart = 128; // block 4 (tail)
+        constexpr index_t kTailEnd   = 135; // block 4 (tail)
+
+        for(index_t col = 0; col < kMisalignedKCols; ++col)
+        {
+            const index_t scaleFullBlock
+                = dgen.scaleIndexForData(misalignedKLinearIndex(col, kFullBlock));
+            const index_t scaleTailStart
+                = dgen.scaleIndexForData(misalignedKLinearIndex(col, kTailStart));
+            const index_t scaleTailEnd
+                = dgen.scaleIndexForData(misalignedKLinearIndex(col, kTailEnd));
+
+            EXPECT_NE(scaleFullBlock, scaleTailEnd);
+            EXPECT_EQ(scaleTailStart, scaleTailEnd);
+            EXPECT_EQ(scaleBytes[scaleTailStart], scaleBytes[scaleTailEnd]);
+        }
+
+        auto const ref = dgen.getReferenceFloat();
+        ASSERT_EQ(ref.size(), static_cast<size_t>(kMisalignedKRows * kMisalignedKCols));
+        const float tailValue = ref[misalignedKLinearIndex(0, kTailEnd)];
+        EXPECT_TRUE(std::isfinite(tailValue)) << "tail element ref = " << tailValue;
+    }
+} // namespace
+
+// When K is not a multiple of mxBlock, the tail elements share one scale value.
+TEST(MxDataGeneratorMisalignedK, BoundedMxfp6PartialTailK136DoesNotThrow)
+{
+    DataGeneratorOptions opts;
+    opts.blockScaling = kMisalignedKBlock;
+    opts.initMode     = Bounded{};
+    opts.min          = -1.0;
+    opts.max          = 1.0;
+
+    DataGenerator<ocp_e2m3_mxfp6> dgen = generateMisalignedK<ocp_e2m3_mxfp6>(opts);
+
+    EXPECT_EQ(dgen.getScaleBytes().size(), static_cast<size_t>(dgen.numScaleBlocks()));
+    expectMisalignedKTailScaleGrouping(dgen);
+}
+
+TEST(MxDataGeneratorMisalignedK, TrigonometricFromFloatMxfp6PartialTailK136DoesNotThrow)
+{
+    DataGeneratorOptions opts;
+    opts.blockScaling = kMisalignedKBlock;
+    opts.initMode     = TrigonometricFromFloat{};
+
+    DataGenerator<ocp_e2m3_mxfp6> dgen = generateMisalignedK<ocp_e2m3_mxfp6>(opts);
+
+    EXPECT_EQ(dgen.getScaleBytes().size(), static_cast<size_t>(dgen.numScaleBlocks()));
+    expectMisalignedKTailScaleGrouping(dgen);
+}
+
+TEST(MxDataGeneratorMisalignedK, NormalFromFloatMxfp6PartialTailK136DoesNotThrow)
+{
+    DataGeneratorOptions opts;
+    opts.blockScaling = kMisalignedKBlock;
+    opts.initMode     = NormalFromFloat{0.0, 1.0};
+
+    DataGenerator<ocp_e2m3_mxfp6> dgen = generateMisalignedK<ocp_e2m3_mxfp6>(opts);
+
+    EXPECT_EQ(dgen.getScaleBytes().size(), static_cast<size_t>(dgen.numScaleBlocks()));
+    expectMisalignedKTailScaleGrouping(dgen);
+}
+
+TEST(MxDataGeneratorMisalignedK, DecoupledScaleInitBoundedWithOnesPartialTailK136DoesNotThrow)
+{
+    DataGeneratorOptions opts;
+    opts.blockScaling  = kMisalignedKBlock;
+    opts.initMode      = Bounded{};
+    opts.scaleInitMode = Ones{};
+    opts.min           = -1.0;
+    opts.max           = 1.0;
+    opts.forceDenorm   = false;
+
+    DataGenerator<ocp_e2m3_mxfp6> dgen = generateMisalignedK<ocp_e2m3_mxfp6>(opts);
+
+    EXPECT_EQ(dgen.getScaleBytes().size(), static_cast<size_t>(dgen.numScaleBlocks()));
+
+    auto const scaleBytes = dgen.getScaleBytes();
+    constexpr uint8_t kUnityScale = 0x7F;
+    for(uint8_t s : scaleBytes)
+        EXPECT_EQ(s, kUnityScale);
+
+    expectMisalignedKTailScaleGrouping(dgen);
+}
+
+TEST(MxDataGeneratorMisalignedK, BoundedMxfp6AlignedK128Unchanged)
+{
+    DataGeneratorOptions opts;
+    opts.blockScaling = 32;
+    opts.initMode     = Bounded{};
+    opts.min          = -1.0;
+    opts.max          = 1.0;
+
+    constexpr index_t kRows = 128;
+    constexpr index_t kCols = 64;
+    std::vector<index_t> sizes{kRows, kCols};
+    std::vector<index_t> strides{1, kRows};
+
+    DataGenerator<ocp_e2m3_mxfp6> dgen;
+    EXPECT_NO_THROW(dgen.generate(sizes, strides, opts));
+    EXPECT_EQ(dgen.getScaleBytes().size(), static_cast<size_t>(kCols * (kRows / opts.blockScaling)));
+    EXPECT_EQ(dgen.getReferenceFloat().size(), static_cast<size_t>(kRows * kCols));
+}

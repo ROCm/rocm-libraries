@@ -609,6 +609,11 @@ static void _op_math_exp2(rocke_lower_t* L, const rocke_op_t* op)
 {
     ll_math_f32_unary(L, op, "exp2", "exp2.f32", "exp2.f32");
 }
+/* Python _op_math_exp2_fast -> llvm.amdgcn.exp2.f32 (native v_exp_f32, no guard). */
+static void _op_math_exp2_fast(rocke_lower_t* L, const rocke_op_t* op)
+{
+    ll_math_f32_unary(L, op, "exp2_fast", "amdgcn.exp2.f32", "amdgcn.exp2.f32");
+}
 /* Python _op_math_log2. */
 static void _op_math_log2(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -738,6 +743,7 @@ void rocke_ll_register_arith(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_UMUL_HI_I32, _op_arith_umul_hi_i32);
 
     rocke_ll_set_handler(ROCKE_OP_MATH_EXP2, _op_math_exp2);
+    rocke_ll_set_handler(ROCKE_OP_MATH_EXP2_FAST, _op_math_exp2_fast);
     rocke_ll_set_handler(ROCKE_OP_MATH_LOG2, _op_math_log2);
     rocke_ll_set_handler(ROCKE_OP_MATH_RCP, _op_math_rcp);
     rocke_ll_set_handler(ROCKE_OP_MATH_RCP_FAST, _op_math_rcp_fast);

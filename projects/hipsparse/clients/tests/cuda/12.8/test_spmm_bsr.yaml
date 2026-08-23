@@ -47,6 +47,7 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   dirA: [HIPSPARSE_DIRECTION_ROW]
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, HIPSPARSE_SPMM_BSR_ALG1]
+  call_preprocess: [true, false]
 
 - name: spmm_bsr
   category: quick
@@ -68,6 +69,7 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   dirA: [HIPSPARSE_DIRECTION_ROW]
   spmm_alg: [HIPSPARSE_SPMM_BSR_ALG1]
+  call_preprocess: [true]
 
 # Pre-checkin
 - name: spmm_bsr_bad_arg
@@ -103,6 +105,7 @@ Tests:
              nos5,
              nos6,
              nos7]
+  call_preprocess: [true]
 
 - name: spmm_bsr
   category: pre_checkin
@@ -126,6 +129,7 @@ Tests:
   spmm_alg: [HIPSPARSE_SPMM_BSR_ALG1]
   filename: [scircuit,
              shipsec1]
+  call_preprocess: [true]
 
 # Nightly
 - name: spmm_bsr
@@ -150,6 +154,7 @@ Tests:
   spmm_alg: [HIPSPARSE_SPMM_BSR_ALG1]
   filename: [scircuit,
              shipsec1]
+  call_preprocess: [true]
 
 - name: spmm_bsr
   category: nightly
@@ -172,3 +177,4 @@ Tests:
   dirA: [HIPSPARSE_DIRECTION_ROW]
   spmm_alg: [HIPSPARSE_SPMM_BSR_ALG1]
   filename: [Chebyshev4]
+  call_preprocess: [true]

@@ -829,6 +829,37 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_half_local_pv = true;
         break;
 
+    /* idx53: production nw=4 softmax<->MFMA interleave config (idx52 +
+       use_softmax_mfma_interleave mode 1 + num_warps=4). Emits one iglp_opt(1)
+       after the iter-start K drain; ported in kv_body_qk_softmax.cpp, so it MUST
+       be C/Python byte-identical. Kept in lockstep with the Python _CONFIGS. */
+    case 53:
+        s->head_size = 128;
+        s->block_size = 64;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 128;
+        s->use_k_single_buffer = true;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_invariant_hoist = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_softmax_mfma_interleave = true;
+        s->softmax_interleave_mode = 1;
+        break;
+
     default:
         return -1;
     }

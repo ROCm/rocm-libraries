@@ -928,6 +928,86 @@ rocsparselt_status
                 assign_data(&_matmulDescr->alpha_vector_scaling);
                 break;
             }
+            case rocsparselt_matmul_gate_residual_mat_pointer:
+            {
+                if((status = validateGetAttributeDataSize<void*>(dataSize))
+                   != rocsparselt_status_success)
+                {
+                    log_error(_handle, __func__, "dataSize is invalid");
+                    return status;
+                }
+                memcpy(&_matmulDescr->gate_residual_mat_pointer, data, dataSize);
+                status = rocsparselt_status_success;
+                break;
+            }
+            case rocsparselt_matmul_gate_residual_desc:
+            {
+                if((status = validateGetAttributeDataSize<_rocsparselt_mat_descr*>(dataSize))
+                   != rocsparselt_status_success)
+                {
+                    log_error(_handle, __func__, "dataSize is invalid");
+                    return status;
+                }
+                auto _gateDesc = reinterpret_cast<const _rocsparselt_mat_descr*>(data);
+                if(!check_is_init_mat_descr(_gateDesc))
+                {
+                    log_error(_handle,
+                              __func__,
+                              "gate_residual_desc did not initialized or already destroyed");
+                    return rocsparselt_status_invalid_handle;
+                }
+                // Validate that gate residual descriptor matches matrix D properties
+                const auto* matD = _matmulDescr->matrix_D;
+                if(_gateDesc->m != matD->m)
+                {
+                    hipsparselt_cerr
+                        << "gate_residual_desc rows (" << _gateDesc->m
+                        << ") must match matrix D rows (" << matD->m << ")" << std::endl;
+                    log_error(_handle,
+                              __func__,
+                              "gate_residual_desc rows must match matrix D rows");
+                    return rocsparselt_status_invalid_value;
+                }
+                if(_gateDesc->n != matD->n)
+                {
+                    hipsparselt_cerr
+                        << "gate_residual_desc cols (" << _gateDesc->n
+                        << ") must match matrix D cols (" << matD->n << ")" << std::endl;
+                    log_error(_handle,
+                              __func__,
+                              "gate_residual_desc cols must match matrix D cols");
+                    return rocsparselt_status_invalid_value;
+                }
+                if(_gateDesc->order != matD->order)
+                {
+                    hipsparselt_cerr << "gate_residual_desc memory order must match matrix D "
+                                        "memory order"
+                                     << std::endl;
+                    log_error(_handle,
+                              __func__,
+                              "gate_residual_desc memory order must match matrix D memory order");
+                    return rocsparselt_status_invalid_value;
+                }
+                const auto* matA = _matmulDescr->matrix_A;
+                hipDataType compute_dt = HIP_R_32F;
+                if(_gateDesc->type != matA->type && _gateDesc->type != matD->type
+                   && _gateDesc->type != compute_dt)
+                {
+                    hipsparselt_cerr << "gate_residual_desc value type must match matrix A, matrix D "
+                                        "or compute value type"
+                                     << std::endl;
+                    log_error(_handle,
+                              __func__,
+                              "gate_residual_desc value type must match matrix A, matrix D or compute "
+                              "value type");
+                    return rocsparselt_status_invalid_value;
+                }
+                if(_matmulDescr->gate_residual_desc != nullptr)
+                    delete _matmulDescr->gate_residual_desc;
+                _matmulDescr->gate_residual_desc = _gateDesc->clone();
+                status                           = rocsparselt_status_success;
+                break;
+            }
             default:
                 log_error(
                     _handle, __func__, "matmulAttribute", matmulAttribute, "is not implemented");
@@ -1074,6 +1154,26 @@ rocsparselt_status
                 retrive_data(_matmulDescr->alpha_vector_scaling);
                 break;
             }
+            case rocsparselt_matmul_gate_residual_mat_pointer:
+                if((status = validateGetAttributeDataSize<void*>(dataSize))
+                   != rocsparselt_status_success)
+                {
+                    log_error(_handle, __func__, "dataSize is invalid");
+                    return status;
+                }
+                memcpy(data, &_matmulDescr->gate_residual_mat_pointer, dataSize);
+                status = rocsparselt_status_success;
+                break;
+            case rocsparselt_matmul_gate_residual_desc:
+                if((status = validateGetAttributeDataSize<_rocsparselt_mat_descr*>(dataSize))
+                   != rocsparselt_status_success)
+                {
+                    log_error(_handle, __func__, "dataSize is invalid");
+                    return status;
+                }
+                memcpy(data, &_matmulDescr->gate_residual_desc, dataSize);
+                status = rocsparselt_status_success;
+                break;
             default:
                 log_error(
                     _handle, __func__, "matmulAttribute", matmulAttribute, "is not implemented");

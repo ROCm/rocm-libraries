@@ -24,7 +24,7 @@ This directory contains the Dockerfile for building the hipDNN development envir
 
 ## 🔨 Building the Docker Image
 
-The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) and **fullbuild** (building from source).
+The Dockerfile supports two build types: **prebuilt** (using current per-family multi-arch tarballs) and **fullbuild** (building from source).
 
 ### Build Arguments
 
@@ -37,7 +37,7 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 #### 📦 Prebuilt-Only Arguments
 
 > [!NOTE]
-> Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds using `install_rocm_from_artifacts.py` (much faster than building from source)
+> Prebuilt mode downloads pre-compiled binaries through TheRock's `install_rocm_from_artifacts.py` from the current nightly or dev multi-arch tarball feed (much faster than building from source).
 
 > [!NOTE]
 > There is currently an issue with using the prebuilt binaries with the gfx90X ASIC family. Refer to this GitHub issue for more details:
@@ -45,42 +45,14 @@ https://github.com/ROCm/TheRock/issues/2179
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `THEROCK_RELEASE` | `latest` | Release version to install. Use `latest` to automatically fetch the newest nightly build, or specify a version like `7.12.0a20260202`. Available versions can be found at [TheRock nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/). |
+| `THEROCK_RELEASE` | `latest` | Release version to install. Use `latest` to automatically fetch the newest nightly build, or specify a nightly version such as `7.12.0a20260202` or a commit-addressed dev version such as `7.15.0.dev0+<sha>`. TheRock selects the appropriate multi-arch feed. |
 | `THEROCK_ASIC` | `gfx94X` | GPU architecture family prefix. Combined with `THEROCK_ASIC_VARIANT` to form the artifact group. |
 | `THEROCK_ASIC_VARIANT` | `dcgpu` | GPU variant suffix (e.g., `dcgpu`, `all`, `dgpu`). Combined with `THEROCK_ASIC` to form the artifact group. |
-| `THEROCK_ARTIFACT_GROUP` | `$THEROCK_ASIC-$THEROCK_ASIC_VARIANT` | Full artifact group override. Available groups: `gfx90X-dcgpu`, `gfx94X-dcgpu`, `gfx950-dcgpu`, `gfx110X-all`, `gfx110X-dgpu`, `gfx120X-all`, etc. See [TheRock releases](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#index-page-listing) for the full list. |
+| `THEROCK_ARTIFACT_GROUP` | `$THEROCK_ASIC-$THEROCK_ASIC_VARIANT` | Full artifact group override. The default `gfx94X-dcgpu` selects the current per-family multi-arch tarball. Use `multiarch` only when all GPU kernel packs are required; it is substantially larger. Choose other per-family group names from the [tarball feed](https://rocm.nightlies.amd.com/tarball-multi-arch/). |
 
 #### Version Logging
 
 The prebuilt stage writes the installed TheRock version to `/opt/rocm/THEROCK_VERSION` inside the image. For pinned releases, this contains the exact version string. For `latest` builds, it captures version information from the install output.
-
-#### ⚠️ Deprecated Prebuilt Arguments
-
-> [!CAUTION]
-> The following build args are **deprecated** and will be removed in a future release. When any of these args are set, the build uses the original wget/tar download method instead of `install_rocm_from_artifacts.py`. A deprecation warning is printed during the build.
-
-| Deprecated Argument | Replacement | Behavior |
-|---------------------|-------------|----------|
-| `THEROCK_TARBALL` | `THEROCK_ARTIFACT_GROUP` + `THEROCK_RELEASE` | Used as-is as the tarball filename for wget download |
-| `THEROCK_PREBUILT_ID` | `THEROCK_ARTIFACT_GROUP` + `THEROCK_RELEASE` | Prefixed with `therock-dist-linux-` and suffixed with `.tar.gz` for wget download |
-| `THEROCK_GIT_TAG` | `THEROCK_RELEASE` | Combined with `THEROCK_ARTIFACT_GROUP` to construct the tarball filename |
-
-Priority when multiple legacy args are set: `THEROCK_TARBALL` > `THEROCK_PREBUILT_ID` > `THEROCK_GIT_TAG`.
-
-**Migration examples:**
-```bash
-# Old: --build-arg THEROCK_GIT_TAG=7.0.0rc20250909
-# New:
---build-arg THEROCK_RELEASE=7.0.0rc20250909
-
-# Old: --build-arg THEROCK_PREBUILT_ID=gfx94X-dcgpu-7.0.0rc20250909
-# New:
---build-arg THEROCK_ARTIFACT_GROUP=gfx94X-dcgpu --build-arg THEROCK_RELEASE=7.0.0rc20250909
-
-# Old: --build-arg THEROCK_TARBALL=therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz
-# New:
---build-arg THEROCK_ARTIFACT_GROUP=gfx94X-dcgpu --build-arg THEROCK_RELEASE=7.0.0rc20250909
-```
 
 #### 🏗️ Fullbuild-Only Arguments
 
@@ -100,12 +72,12 @@ Priority when multiple legacy args are set: `THEROCK_TARBALL` > `THEROCK_PREBUIL
 
 #### 📦 Prebuilt Mode (Recommended)
 
-**Default prebuilt** (latest nightly for gfx94X-dcgpu):
+**Default prebuilt** (latest nightly current per-family multi-arch tarball for gfx94X-dcgpu):
 ```bash
 docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
 ```
 
-This will automatically download and install the latest nightly build for gfx94X-dcgpu.
+This automatically downloads and installs the latest nightly `gfx94X-dcgpu` artifact group. It does not use the heavyweight `multiarch` group, which is only for images that need all GPU kernel packs.
 
 **Specific release version**:
 ```bash
@@ -114,19 +86,26 @@ docker build -f Dockerfile.ubuntu24 \
     -t hipdnn:prebuilt .
 ```
 
-**Different ASIC family** (MI100/MI200 series):
+**Specific dev release**:
 ```bash
 docker build -f Dockerfile.ubuntu24 \
-    --build-arg THEROCK_ASIC=gfx90X \
-    --build-arg THEROCK_ASIC_VARIANT=dcgpu \
-    -t hipdnn:prebuilt_gfx90X .
+    --build-arg THEROCK_RELEASE=7.15.0.dev0+8b3042421581dc0927d7a1278f96f2deeba75286 \
+    --build-arg THEROCK_ARTIFACT_GROUP=gfx90a \
+    -t hipdnn:prebuilt_dev_gfx90a .
 ```
 
-**Full artifact group override** (RDNA3):
+**MI200 (gfx90a)**:
 ```bash
 docker build -f Dockerfile.ubuntu24 \
-    --build-arg THEROCK_ARTIFACT_GROUP=gfx110X-all \
-    -t hipdnn:prebuilt_rdna3 .
+    --build-arg THEROCK_ARTIFACT_GROUP=gfx90a \
+    -t hipdnn:prebuilt_gfx90a .
+```
+
+**Full artifact group override** (all GPU kernel packs):
+```bash
+docker build -f Dockerfile.ubuntu24 \
+    --build-arg THEROCK_ARTIFACT_GROUP=multiarch \
+    -t hipdnn:prebuilt_multiarch .
 ```
 
 #### 🏗️ Fullbuild Mode

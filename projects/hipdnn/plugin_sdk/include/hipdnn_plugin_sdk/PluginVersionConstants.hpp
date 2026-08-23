@@ -25,6 +25,23 @@ inline constexpr std::string_view K_OVERRIDE_EXECUTE_MIN_API_VERSION = "1.1.0";
 // rejects plugins below this when the graph contains any such tensor.
 inline constexpr std::string_view K_PASS_BY_VALUE_MIN_API_VERSION = "1.2.0";
 
+// Minimum engine plugin C ABI version that advertises support for ragged
+// tensors (RFC 0014). Introduced in engine plugin API 1.2.0. The host's
+// applicability filter rejects any plugin reporting an API version strictly
+// less than this when the graph contains ragged tensors.
+inline constexpr std::string_view K_RAGGED_TENSOR_MIN_API_VERSION = "1.3.0";
+
+// Minimum engine plugin API version for tensors carrying a non-default byte
+// alignment. Plugins predating this version are assumed to require the default
+// (16-byte) alignment, so the applicability filter rejects any plugin reporting
+// an API version strictly less than this when the graph sets a custom alignment.
+inline constexpr std::string_view K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION
+    = K_RAGGED_TENSOR_MIN_API_VERSION;
+
+// Deserialize ceiling: a graph whose min_required_engine_api_version exceeds this
+// is rejected. Must equal the highest feature-gated version constant above.
+inline constexpr std::string_view K_MAX_SUPPORTED_API_VERSION = K_RAGGED_TENSOR_MIN_API_VERSION;
+
 /// @brief Computes the minimum engine plugin API version a graph requires,
 /// from the graph-level feature flags gating additive plugin ABI surface.
 ///
@@ -38,7 +55,10 @@ inline constexpr std::string_view K_PASS_BY_VALUE_MIN_API_VERSION = "1.2.0";
 /// Runtime pass-by-value (1.2.0) dominates override-execute (1.1.0) and the
 /// baseline (1.0.0): the highest applicable floor wins.
 inline const hipdnn_data_sdk::utilities::Version&
-    computeMinimumEnginePluginApiVersion(bool isOverrideShapeEnabled, bool isRuntimePassByValue)
+    computeMinimumEnginePluginApiVersion(bool isOverrideShapeEnabled,
+                                         bool isRuntimePassByValue,
+                                         bool isRaggedTensorEnabled,
+                                         bool hasNonDefaultTensorAlignment)
 {
     static const hipdnn_data_sdk::utilities::Version s_baselineVersion{
         K_ENGINE_PLUGIN_API_VERSION_BASELINE};
@@ -46,7 +66,20 @@ inline const hipdnn_data_sdk::utilities::Version&
         K_OVERRIDE_EXECUTE_MIN_API_VERSION};
     static const hipdnn_data_sdk::utilities::Version s_passByValueMinVersion{
         K_PASS_BY_VALUE_MIN_API_VERSION};
+    static const hipdnn_data_sdk::utilities::Version s_raggedTensorMinVersion{
+        K_RAGGED_TENSOR_MIN_API_VERSION};
+    static const hipdnn_data_sdk::utilities::Version s_tensorAlignmentMinVersion{
+        K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION};
 
+    // NOTE: MUST be ordered by highest version to lowest
+    if(isRaggedTensorEnabled)
+    {
+        return s_raggedTensorMinVersion;
+    }
+    if(hasNonDefaultTensorAlignment)
+    {
+        return s_tensorAlignmentMinVersion;
+    }
     if(isRuntimePassByValue)
     {
         return s_passByValueMinVersion;
@@ -55,6 +88,7 @@ inline const hipdnn_data_sdk::utilities::Version&
     {
         return s_overrideExecuteMinVersion;
     }
+
     return s_baselineVersion;
 }
 

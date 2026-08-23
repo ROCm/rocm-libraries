@@ -17,7 +17,11 @@ on:
         type: string
       component:
         type: string
-
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL:
+        required: false
+      HIPDNN_CI_WEBHOOK_URL:
+        required: false
 
 permissions:
   contents: read
@@ -86,9 +90,12 @@ jobs:
         run: git config --global core.longpaths true
 
       - name: Checkout rocm-libraries repository for scripts
+        timeout-minutes: 30
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           path: rocm-libraries
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: true
 
       - name: Run setup test environment workflow
         timeout-minutes: 15
@@ -125,6 +132,13 @@ jobs:
           SHARD_INDEX: ${{ matrix.shard }}
           TOTAL_SHARDS: ${{ fromJSON(inputs.component).total_shards }}
           TEST_TYPE: ${{ fromJSON(inputs.component).test_type }}
+          # MIOpen resolves its packaged system databases against MIOPEN_SYSTEM_DB_PATH, which
+          # CMake only bakes in for BUILD_DEV builds. Windows has no <lib>/share/miopen/db
+          # fallback, so in a BUILD_DEV=Off CI build the path is empty and lookup resolves
+          # relative to the ctest working directory rather than the artifact tree. Point it at
+          # bin/, which is DATABASE_INSTALL_DIR on Windows and where the databases actually land.
+          # Left empty elsewhere; Linux resolves correctly on its own.
+          MIOPEN_SYSTEM_DB_PATH: ${{ runner.os == 'Windows' && format('{0}/build/bin', github.workspace) || '' }}
         run: |
           # Create logs directory
           mkdir -p ./test_logs
@@ -135,15 +149,22 @@ jobs:
 
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MIOPEN_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+          HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+          COMPONENT_NAME: ${{ fromJSON(inputs.component).job_name }}
+          JOB_NAME: "${{ fromJSON(inputs.component).job_name }} (shard ${{ matrix.shard }}/${{ fromJSON(inputs.component).total_shards }})"
         run: |
           python3 rocm-libraries/.github/scripts/notify_teams.py \
             --failure-stage test \
             --log-path ./test_logs/test_output.log \
-            --webhook-urls '{"miopen":"${{ secrets.MIOPEN_CI_WEBHOOK_URL }}","hipdnn":"${{ secrets.HIPDNN_CI_WEBHOOK_URL }}"}' \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --pr-title "${{ github.event.pull_request.title }}" \
-            --component-name "${{ fromJSON(inputs.component).job_name }}" \
-            --job-name "${{ fromJSON(inputs.component).job_name }} (shard ${{ matrix.shard }}/${{ fromJSON(inputs.component).total_shards }})"
+            --webhook-urls "{\"miopen\":\"${MIOPEN_WEBHOOK_URL}\",\"hipdnn\":\"${HIPDNN_WEBHOOK_URL}\"}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --component-name "${COMPONENT_NAME}" \
+            --job-name "${JOB_NAME}"
 
       # GitHub's 'Complete job' step is unaware of launched executables
       # and will fail to clean up orphan processes.

@@ -50,8 +50,13 @@ class Pass;
  *                            @c s_wait_tensorcnt; when false leave tensor
  *                            waits in place so a subsequent insertion pass
  *                            can reuse them.
+ * @param removeXcntWaitCnt   When true also strip @c s_wait_xcnt.
+ *                            TODO: replace this temporary SIA4/SIA0 split once
+ *                            a dedicated hazard pass handles xcnt placement.
+ *                            Until then, non-SIA4 paths preserve hand-authored
+ *                            xcnt drains.
  */
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyRemoveWaitCntPass(
-    bool removeTensorWaitCnt = true);
+    bool removeTensorWaitCnt = true, bool removeXcntWaitCnt = false);
 
 }  // namespace stinkytofu

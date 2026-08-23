@@ -135,6 +135,7 @@ struct Arguments
     int iters;
 
     bool graph_test;
+    bool call_preprocess;
 
     char filename[192]; // nos2.bin, bmwcra_1.bin, etc
     char function[64]; // axpby, spmv_csr, etc
@@ -219,7 +220,8 @@ struct Arguments
         this->timing     = 0;
         this->iters      = 10;
 
-        this->graph_test = false;
+        this->graph_test      = false;
+        this->call_preprocess = true;
 
         this->filename[0] = '\0';
         this->function[0] = '\0';
@@ -353,6 +355,7 @@ struct Arguments
         HIPSPARSE_FORMAT_CHECK(timing);
         HIPSPARSE_FORMAT_CHECK(iters);
         HIPSPARSE_FORMAT_CHECK(graph_test);
+        HIPSPARSE_FORMAT_CHECK(call_preprocess);
         HIPSPARSE_FORMAT_CHECK(filename);
         HIPSPARSE_FORMAT_CHECK(function);
         HIPSPARSE_FORMAT_CHECK(category);
@@ -509,6 +512,7 @@ private:
         print("timing", arg.timing);
         print("iters", arg.iters);
         print("graph_test", arg.graph_test);
+        print("call_preprocess", arg.call_preprocess);
         return str << " }\n";
     }
 };

@@ -720,6 +720,19 @@ namespace
                     to_add.alloc_arg  = arg;
                     to_add.alloc_func = func;
                     to_add.alloc_kind = kind;
+
+                    const double roll = hash_prob(random_seed, to_add.to_string());
+                    // not distinguishing between real/complex for this list generation
+                    if(roll > test_prob)
+                    {
+                        if(verbose > 4)
+                        {
+                            std::cout << "Test skipped: (roll=" << roll << " > " << test_prob
+                                      << ")\n";
+                        }
+                        continue;
+                    }
+
                     insert_into_unique_sorted_params(ret, to_add);
                 }
             }
@@ -1805,6 +1818,8 @@ namespace
     template <fft_precision prec>
     std::vector<hipfftw_input_validation_params<prec>> params_for_testing_input_validation_params()
     {
+        if(test_prob == 0)
+            return {};
         // create a full-scope map containing all the generated test parameters; the map keys
         // capture the hipfftw's function name that the test targets
         // --> ease for guaranteeing coverage even with low test probability in the end
@@ -2712,9 +2727,13 @@ namespace
 
                 verification_data = std::make_unique<reference_fft_data_t>(
                     params.plan_helper.make_params_for_reference_cpu());
-                // generate input data and launch compute
-                verification_data->initialize_input(fft_input_random_generator_host);
-                verification_data->launch_async_compute();
+                // Unnecessary to initialize input data and/or launch async computing
+                // if the reference data is already available (cached from a previous
+                // test)
+                if(verification_data->needs_input_initialization())
+                    verification_data->initialize_input(fft_input_random_generator_host);
+                if(verification_data->needs_computing())
+                    verification_data->launch_async_compute();
             }
             ROCFFT_CATCH_TEST_EXCEPTIONS;
         }
@@ -2834,7 +2853,7 @@ namespace
                     copy_buffers(verification_data->get_buffers<fft_io::fft_io_in>(),
                                  tmp_host_buf_vec,
                                  verification_data->get_params().ilength(),
-                                 verification_data->get_params().nbatch,
+                                 params.get_nbatch(),
                                  verification_data->get_params().precision,
                                  verification_data->get_params().itype,
                                  verification_data->get_params().istride,
@@ -3409,6 +3428,11 @@ namespace
 
 TEST(hipfftw_test, utility_functions)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > test_prob)
+    {
+        GTEST_SKIP();
+    }
     test_existence_of_utility_functions<fft_precision_single>();
     test_existence_of_utility_functions<fft_precision_double>();
 }
@@ -3432,6 +3456,9 @@ INSTANTIATE_TEST_SUITE_P(
     allocation_dp,
     ::testing::ValuesIn(params_for_testing_hipfftw_malloc<fft_precision_double>()),
     allocation_dp::TestName);
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(allocation_sp);
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(allocation_dp);
 
 using argument_validation_sp = hipfftw_argument_validation<fft_precision_single>;
 TEST_P(argument_validation_sp, creation_and_execution)
@@ -3463,6 +3490,9 @@ INSTANTIATE_TEST_SUITE_P(
     argument_validation_dp,
     ::testing::ValuesIn(params_for_testing_input_validation_params<fft_precision_double>()),
     argument_validation_dp::TestName);
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(argument_validation_sp);
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(argument_validation_dp);
 
 using hipfftw_functional_validation_sp = hipfftw_functional_validation<fft_precision_single>;
 TEST_P(hipfftw_functional_validation_sp, accuracy_vs_fftw)

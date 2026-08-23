@@ -58,6 +58,14 @@ set(BUILD_SHARED_LIBS ON)
 
 project(hiptensor)
 
+# Enable the RC language so the Windows version resource (version.rc) is compiled.
+# Visual Studio generators handle .rc natively, but the Ninja/Makefile generators
+# TheRock uses with clang on Windows need RC enabled to configure CMAKE_RC_COMPILER
+# (llvm-rc).
+if(WIN32)
+    enable_language(RC)
+endif()
+
 # Set ROCM_LIBRARIES_ROOT if not already set (for monorepo builds vs standalone)
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
     set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
@@ -261,12 +269,39 @@ endif()
 hiptensor_add_stub_api_coverage_check()
 
 # Versioning via rocm-cmake
-set (VERSION_STRING "2.3.0")
+set (VERSION_STRING "2.4.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Configure a header file to pass the CMake version settings to the source
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h.in"
                "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h")
+
+# Configure Windows version resource file so hiptensor.dll exposes file metadata
+# (File description, version, product name, copyright) in Explorer properties.
+if(WIN32)
+    # Git is optional: a source tarball build (or a machine without Git) must not
+    # fail here. Fall back to "unknown" for the commit id.
+    set(hiptensor_VERSION_COMMIT_ID "unknown")
+
+    find_package(Git QUIET)
+    if(Git_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" log -1 --format=%H .
+            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _hiptensor_commit_id
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _hiptensor_git_result
+            ERROR_QUIET
+        )
+        if(_hiptensor_git_result EQUAL 0 AND _hiptensor_commit_id)
+            set(hiptensor_VERSION_COMMIT_ID "${_hiptensor_commit_id}")
+        endif()
+    endif()
+
+    string(TIMESTAMP HIPTENSOR_COPYRIGHT_YEAR "%Y")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
 
 # Define package dependencies for export
 set(PACKAGE_DEPENDS

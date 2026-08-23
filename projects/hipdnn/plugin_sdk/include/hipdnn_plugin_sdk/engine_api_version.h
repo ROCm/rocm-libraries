@@ -33,7 +33,7 @@
  * Incremented when backward-compatible features are added.
  * Plugins with older minor versions can still be loaded.
  */
-#define HIPDNN_ENGINE_API_VERSION_MINOR 2
+#define HIPDNN_ENGINE_API_VERSION_MINOR 3
 
 /**
  * @brief Patch version of the engine plugin C ABI

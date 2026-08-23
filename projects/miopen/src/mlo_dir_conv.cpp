@@ -60,6 +60,7 @@ static auto GetDirectSolvers()
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw,
                                            miopen::solver::conv::ConvDepthwiseFwd2D,
+                                           miopen::solver::conv::ConvDepthwiseBwdData2D,
                                            miopen::solver::conv::ConvDepthwiseFwd3D>{};
 }
 

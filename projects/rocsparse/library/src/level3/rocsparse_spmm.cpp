@@ -288,6 +288,18 @@ namespace rocsparse
             const int64_t n = mat_C->cols;
             const int64_t k = mat_A->cols;
 
+            // The load-balanced default-algorithm auto-selection lives in the
+            // csrmm layer (csrmm_buffer_size / csrmm_analysis / csrmm): buffer_size
+            // sizes conservatively for the largest auto-selectable kernel, analysis
+            // computes and caches the structural line-nnz profile and resolves the
+            // default from it, and compute re-derives the same choice from the
+            // cached profile without launching a kernel. The selection inputs (the
+            // descriptor-owned profile plus the batch flag) are bundled into one
+            // context so the reduction runs once, on the non-capturing analysis
+            // stage.
+            const rocsparse::spmm_default_alg_info alg_info{
+                &mat_A->line_profile, rocsparse::spmm_is_batched(mat_C->batch_count)};
+
             switch(stage)
             {
             case rocsparse_spmm_stage_buffer_size:
@@ -299,6 +311,7 @@ namespace rocsparse
                                                                        n,
                                                                        k,
                                                                        mat_A->nnz,
+                                                                       mat_C->batch_count,
                                                                        mat_A->descr,
                                                                        alpha_type,
                                                                        mat_A->data_type,
@@ -319,6 +332,8 @@ namespace rocsparse
                                                                     n,
                                                                     k,
                                                                     mat_A->nnz,
+                                                                    mat_A->batch_count,
+                                                                    mat_A->offsets_batch_stride,
                                                                     mat_A->descr,
                                                                     mat_A->data_type,
                                                                     mat_A->const_val_data,
@@ -326,11 +341,44 @@ namespace rocsparse
                                                                     mat_A->const_row_data,
                                                                     mat_A->col_type,
                                                                     mat_A->const_col_data,
+                                                                    &alg_info,
                                                                     temp_buffer));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_compute:
             {
+                // The SpMM preprocess stage is optional in the generic API, and a
+                // reused descriptor may reach compute with a freshly allocated
+                // buffer that was never analyzed. When a profile is already cached
+                // the auto-selected default can resolve to nnz-split, which reads
+                // its row-limit segmentation out of temp_buffer, so ensure that
+                // segmentation exists by (re)running the analysis on the auto path
+                // here. It is cheap (one segmentation kernel) and capture-safe: the
+                // cached profile makes the profiling reduction a no-op, leaving only
+                // a launch. Gate on a known profile so compute never profiles: with
+                // no cached profile the selector keeps the buffer-free row-split.
+                if(csrmm_alg == rocsparse_csrmm_alg_default && mat_A->line_profile.known)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_analysis(handle,
+                                                                        trans_A,
+                                                                        csrmm_alg,
+                                                                        m,
+                                                                        n,
+                                                                        k,
+                                                                        mat_A->nnz,
+                                                                        mat_A->batch_count,
+                                                                        mat_A->offsets_batch_stride,
+                                                                        mat_A->descr,
+                                                                        mat_A->data_type,
+                                                                        mat_A->const_val_data,
+                                                                        mat_A->row_type,
+                                                                        mat_A->const_row_data,
+                                                                        mat_A->col_type,
+                                                                        mat_A->const_col_data,
+                                                                        &alg_info,
+                                                                        temp_buffer));
+                }
+
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm(handle,
                                                            trans_A,
                                                            trans_B,
@@ -365,6 +413,7 @@ namespace rocsparse
                                                            mat_C->batch_count,
                                                            mat_C->batch_stride,
                                                            mat_C->order,
+                                                           &alg_info,
                                                            temp_buffer,
                                                            false));
                 return rocsparse_status_success;
@@ -380,6 +429,15 @@ namespace rocsparse
             const int64_t m = mat_A->rows;
             const int64_t n = mat_C->cols;
             const int64_t k = mat_A->cols;
+
+            // As in the CSR branch, the default-algorithm auto-selection lives in
+            // the cscmm layer (cscmm_buffer_size / cscmm_analysis / cscmm), which
+            // handles the CSC->csrmm operation flip, builds the profile from the
+            // column-pointer array, and gates the upgrade on the effective csrmm
+            // operation. The selection inputs are bundled into one context, as in
+            // the CSR branch.
+            const rocsparse::spmm_default_alg_info alg_info{
+                &mat_A->line_profile, rocsparse::spmm_is_batched(mat_C->batch_count)};
 
             switch(stage)
             {
@@ -412,6 +470,8 @@ namespace rocsparse
                                                                     n,
                                                                     k,
                                                                     mat_A->nnz,
+                                                                    mat_A->batch_count,
+                                                                    mat_A->offsets_batch_stride,
                                                                     mat_A->descr,
                                                                     mat_A->data_type,
                                                                     mat_A->const_val_data,
@@ -419,11 +479,38 @@ namespace rocsparse
                                                                     mat_A->const_col_data,
                                                                     mat_A->row_type,
                                                                     mat_A->const_row_data,
+                                                                    &alg_info,
                                                                     temp_buffer));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_compute:
             {
+                // See the CSR branch: the preprocess stage is optional, so ensure
+                // the nnz-split row-limit segmentation is present in temp_buffer on
+                // the auto path before compute reads it. Gate on a known profile so
+                // compute never profiles. Cheap and capture-safe.
+                if(csrmm_alg == rocsparse_csrmm_alg_default && mat_A->line_profile.known)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_analysis(handle,
+                                                                        trans_A,
+                                                                        csrmm_alg,
+                                                                        m,
+                                                                        n,
+                                                                        k,
+                                                                        mat_A->nnz,
+                                                                        mat_A->batch_count,
+                                                                        mat_A->offsets_batch_stride,
+                                                                        mat_A->descr,
+                                                                        mat_A->data_type,
+                                                                        mat_A->const_val_data,
+                                                                        mat_A->col_type,
+                                                                        mat_A->const_col_data,
+                                                                        mat_A->row_type,
+                                                                        mat_A->const_row_data,
+                                                                        &alg_info,
+                                                                        temp_buffer));
+                }
+
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm(handle,
                                                            trans_A,
                                                            trans_B,
@@ -458,6 +545,7 @@ namespace rocsparse
                                                            mat_C->batch_count,
                                                            mat_C->batch_stride,
                                                            mat_C->order,
+                                                           &alg_info,
                                                            temp_buffer));
                 return rocsparse_status_success;
             }

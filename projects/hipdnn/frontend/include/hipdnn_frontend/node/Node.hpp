@@ -211,20 +211,29 @@ public:
     void gather_hipdnn_tensors(
         std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
     {
+        // Collect a tensor and any auxiliary tensors it references (e.g. its
+        // ragged-offset tensor), so auxiliaries also receive UIDs and take part
+        // in variant-pack validation and lowering.
+        auto insertWithAux = [&](const std::shared_ptr<TensorAttributes>& tensor) {
+            if(!tensor)
+            {
+                return;
+            }
+            allTensors.insert(tensor);
+            if(tensor->has_ragged_offset())
+            {
+                allTensors.insert(tensor->get_ragged_offset());
+            }
+        };
+
         for(auto& [_, tensor] : self().attributes.inputs)
         {
-            if(tensor)
-            {
-                allTensors.insert(tensor);
-            }
+            insertWithAux(tensor);
         }
 
         for(auto& [_, tensor] : self().attributes.outputs)
         {
-            if(tensor)
-            {
-                allTensors.insert(tensor);
-            }
+            insertWithAux(tensor);
         }
     }
 
