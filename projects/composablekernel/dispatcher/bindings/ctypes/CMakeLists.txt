@@ -48,6 +48,80 @@ function(add_ctypes_library TARGET_NAME SOURCE_FILE)
     )
 endfunction()
 
+# Helper function for block-scale quant ctypes targets.
+#
+# Usage:
+#   add_quant_ctypes_target(
+#     TARGET      <cmake-target-name>
+#     SOURCE      <source.cpp>
+#     GLOB        <glob-pattern-for-kernel-headers>
+#     CACHE_VAR   <GFX_ARCH cache variable name>
+#     DEFAULT_ARCH <gfx942|gfx950|FATAL_ERROR>
+#     [MAIN_INCLUDE_ONLY]   # omit dispatcher/include (aquant/abquant collision fix)
+#   )
+#
+# B1: single wrapper replacing five near-identical per-operator stanzas.
+# B2: always list(SORT) the kernel glob, so the first entry is deterministic.
+# D1: each plain target gets its own cache variable (CACHE_VAR), distinct from the
+#     grouped targets that previously shared the same names and silently stomped the
+#     plain targets' NOT DEFINED guard.
+#
+# MAIN_INCLUDE_ONLY: skip ${PROJECT_SOURCE_DIR}/dispatcher/include. That path pulls
+#   in generated_tile_backend.hpp, which instantiates SelectedKernel::run(GemmHostArgs&)
+#   and conflicts with the quant kernel's launch(QuantGemmHostArgs&). Aquant and abquant
+#   set this flag; the plain GEMM and grouped quant targets do not need it.
+#
+# DEFAULT_ARCH: "FATAL_ERROR" makes an unresolved arch a hard configure-time error
+#   (bquant). Otherwise, the value is used as the gfx fallback when neither the cache
+#   variable nor CMAKE_HIP_ARCHITECTURES is set.
+function(add_quant_ctypes_target)
+    cmake_parse_arguments(QUANT "MAIN_INCLUDE_ONLY" "TARGET;SOURCE;GLOB;CACHE_VAR;DEFAULT_ARCH" "" ${ARGN})
+
+    file(GLOB _headers "${QUANT_GLOB}")
+    if(NOT _headers)
+        message(STATUS "No kernel found for ${QUANT_TARGET} - skipping (built at runtime by Python bridge)")
+        return()
+    endif()
+
+    list(SORT _headers)
+    list(GET _headers 0 _kernel_header)
+    message(STATUS "Found kernel for ${QUANT_TARGET}: ${_kernel_header}")
+
+    if(QUANT_MAIN_INCLUDE_ONLY)
+        # Hand-build the target without dispatcher/include to avoid the
+        # SelectedKernel::run(GemmHostArgs&) vs launch(QuantGemmHostArgs&) conflict.
+        add_library(${QUANT_TARGET} SHARED ${QUANT_SOURCE})
+        target_include_directories(${QUANT_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/include)
+        target_link_libraries(${QUANT_TARGET} PRIVATE hip::device)
+        target_compile_options(${QUANT_TARGET} PRIVATE -include ${_kernel_header})
+        set_target_properties(${QUANT_TARGET} PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 17)
+    else()
+        add_ctypes_library(${QUANT_TARGET} ${QUANT_SOURCE} KERNEL_HEADER ${_kernel_header})
+    endif()
+
+    # Resolve GFX arch: cache variable wins, then CMAKE_HIP_ARCHITECTURES, then DEFAULT_ARCH.
+    if(NOT DEFINED ${QUANT_CACHE_VAR} OR "${${QUANT_CACHE_VAR}}" STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _resolved_arch)
+            set(${QUANT_CACHE_VAR} "${_resolved_arch}" CACHE STRING
+                "GFX arch for the CMake-built ${QUANT_TARGET} ctypes .so")
+        elseif("${QUANT_DEFAULT_ARCH}" STREQUAL "FATAL_ERROR")
+            message(FATAL_ERROR
+                "${QUANT_TARGET}: GPU arch is unresolved. Set -D${QUANT_CACHE_VAR}=<gfx###> "
+                "or CMAKE_HIP_ARCHITECTURES.")
+        else()
+            set(${QUANT_CACHE_VAR} "${QUANT_DEFAULT_ARCH}" CACHE STRING
+                "GFX arch for the CMake-built ${QUANT_TARGET} ctypes .so (default: ${QUANT_DEFAULT_ARCH})")
+        endif()
+    endif()
+    message(STATUS "${QUANT_TARGET} GFX_ARCH: ${${QUANT_CACHE_VAR}}")
+
+    target_compile_definitions(${QUANT_TARGET} PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="${${QUANT_CACHE_VAR}}"
+    )
+endfunction()
+
 # =============================================================================
 # GEMM ctypes Library
 # =============================================================================
@@ -243,180 +317,54 @@ endif()
 # GroupedGemm BQuant ctypes Library
 # =============================================================================
 
-file(GLOB BQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_bquant_*.hpp")
-if(BQUANT_GEMM_KERNEL_HEADERS)
-    list(GET BQUANT_GEMM_KERNEL_HEADERS 0 BQUANT_GEMM_KERNEL_HEADER)
-    message(STATUS "Found BQuant GEMM kernel for ctypes lib: ${BQUANT_GEMM_KERNEL_HEADER}")
-
-    add_ctypes_library(dispatcher_grouped_gemm_bquant_lib
-        grouped_gemm_bquant_ctypes_lib.cpp
-        KERNEL_HEADER ${BQUANT_GEMM_KERNEL_HEADER}
-    )
-    # Resolve a single GFX arch string GENERICALLY from CMAKE_HIP_ARCHITECTURES
-    # or the cache variable CK_TILE_BQUANT_GFX_ARCH. Do NOT silently default to
-    # gfx942: an unresolved arch is a hard configure-time error (get_arch+throw),
-    # since a wrong arch mis-targets the kernel. The Python build path always
-    # passes -DGFX_ARCH=... explicitly via hipcc, so this only affects builds
-    # driven through CMake directly.
-    if(NOT DEFINED CK_TILE_BQUANT_GFX_ARCH OR CK_TILE_BQUANT_GFX_ARCH STREQUAL "")
-        if(CMAKE_HIP_ARCHITECTURES)
-            list(GET CMAKE_HIP_ARCHITECTURES 0 _bquant_gfx_arch)
-            set(CK_TILE_BQUANT_GFX_ARCH "${_bquant_gfx_arch}" CACHE STRING
-                "GFX arch for the CMake-built BQuant ctypes .so (from CMAKE_HIP_ARCHITECTURES)")
-        else()
-            message(FATAL_ERROR
-                "dispatcher_grouped_gemm_bquant_lib: GPU arch is unresolved. "
-                "Refusing to silently default to gfx942 (would mis-target "
-                "non-gfx942 hosts). Configure with -DCK_TILE_BQUANT_GFX_ARCH=<gfx###> "
-                "or set CMAKE_HIP_ARCHITECTURES.")
-        endif()
-    endif()
-    message(STATUS "BQuant ctypes lib GFX_ARCH: ${CK_TILE_BQUANT_GFX_ARCH}")
-
-    target_compile_definitions(dispatcher_grouped_gemm_bquant_lib PRIVATE
-        CK_TILE_SINGLE_KERNEL_INCLUDE
-        GFX_ARCH="${CK_TILE_BQUANT_GFX_ARCH}"
-    )
-else()
-    message(STATUS "No BQuant GEMM kernel found for ctypes lib - building without kernel")
-    add_library(dispatcher_grouped_gemm_bquant_lib SHARED grouped_gemm_bquant_ctypes_lib.cpp)
-    target_include_directories(dispatcher_grouped_gemm_bquant_lib PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
-    )
-    target_link_libraries(dispatcher_grouped_gemm_bquant_lib PRIVATE hip::device)
-    set_target_properties(dispatcher_grouped_gemm_bquant_lib PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 17
-    )
-endif()
+add_quant_ctypes_target(
+    TARGET      dispatcher_grouped_gemm_bquant_lib
+    SOURCE      grouped_gemm_bquant_ctypes_lib.cpp
+    GLOB        "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_bquant_*.hpp"
+    CACHE_VAR   CK_TILE_BQUANT_GFX_ARCH
+    DEFAULT_ARCH FATAL_ERROR
+)
 
 # =============================================================================
 # GroupedGemm AQuant ctypes Library
 # =============================================================================
 
-file(GLOB AQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_aquant_*.hpp")
-if(AQUANT_GEMM_KERNEL_HEADERS)
-    list(GET AQUANT_GEMM_KERNEL_HEADERS 0 AQUANT_GEMM_KERNEL_HEADER)
-    message(STATUS "Found AQuant GEMM kernel for ctypes lib: ${AQUANT_GEMM_KERNEL_HEADER}")
-
-    add_ctypes_library(dispatcher_grouped_gemm_aquant_lib
-        grouped_gemm_aquant_ctypes_lib.cpp
-        KERNEL_HEADER ${AQUANT_GEMM_KERNEL_HEADER}
-    )
-    if(NOT DEFINED CK_TILE_AQUANT_GFX_ARCH OR CK_TILE_AQUANT_GFX_ARCH STREQUAL "")
-        if(CMAKE_HIP_ARCHITECTURES)
-            list(GET CMAKE_HIP_ARCHITECTURES 0 _aquant_gfx_arch)
-        else()
-            set(_aquant_gfx_arch "gfx942")
-        endif()
-        set(CK_TILE_AQUANT_GFX_ARCH "${_aquant_gfx_arch}" CACHE STRING
-            "GFX arch for the CMake-built AQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
-    endif()
-    message(STATUS "AQuant ctypes lib GFX_ARCH: ${CK_TILE_AQUANT_GFX_ARCH}")
-    target_compile_definitions(dispatcher_grouped_gemm_aquant_lib PRIVATE
-        CK_TILE_SINGLE_KERNEL_INCLUDE
-        GFX_ARCH="${CK_TILE_AQUANT_GFX_ARCH}"
-    )
-else()
-    message(STATUS "No AQuant GEMM kernel found for ctypes lib - building without kernel")
-    add_library(dispatcher_grouped_gemm_aquant_lib SHARED grouped_gemm_aquant_ctypes_lib.cpp)
-    target_include_directories(dispatcher_grouped_gemm_aquant_lib PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
-    )
-    target_link_libraries(dispatcher_grouped_gemm_aquant_lib PRIVATE hip::device)
-    set_target_properties(dispatcher_grouped_gemm_aquant_lib PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 17
-    )
-endif()
+add_quant_ctypes_target(
+    TARGET      dispatcher_grouped_gemm_aquant_lib
+    SOURCE      grouped_gemm_aquant_ctypes_lib.cpp
+    GLOB        "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_aquant_*.hpp"
+    CACHE_VAR   CK_TILE_AQUANT_GFX_ARCH
+    DEFAULT_ARCH gfx942
+)
 
 # =============================================================================
 # GroupedGemm ABQuant ctypes Library
 # =============================================================================
 
-file(GLOB ABQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_abquant_*.hpp")
-if(ABQUANT_GEMM_KERNEL_HEADERS)
-    list(GET ABQUANT_GEMM_KERNEL_HEADERS 0 ABQUANT_GEMM_KERNEL_HEADER)
-    message(STATUS "Found ABQuant GEMM kernel for ctypes lib: ${ABQUANT_GEMM_KERNEL_HEADER}")
+add_quant_ctypes_target(
+    TARGET      dispatcher_grouped_gemm_abquant_lib
+    SOURCE      grouped_gemm_abquant_ctypes_lib.cpp
+    GLOB        "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_abquant_*.hpp"
+    CACHE_VAR   CK_TILE_ABQUANT_GFX_ARCH
+    DEFAULT_ARCH gfx942
+)
 
-    add_ctypes_library(dispatcher_grouped_gemm_abquant_lib
-        grouped_gemm_abquant_ctypes_lib.cpp
-        KERNEL_HEADER ${ABQUANT_GEMM_KERNEL_HEADER}
-    )
-    if(NOT DEFINED CK_TILE_ABQUANT_GFX_ARCH OR CK_TILE_ABQUANT_GFX_ARCH STREQUAL "")
-        if(CMAKE_HIP_ARCHITECTURES)
-            list(GET CMAKE_HIP_ARCHITECTURES 0 _abquant_gfx_arch)
-        else()
-            set(_abquant_gfx_arch "gfx942")
-        endif()
-        set(CK_TILE_ABQUANT_GFX_ARCH "${_abquant_gfx_arch}" CACHE STRING
-            "GFX arch for the CMake-built ABQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
-    endif()
-    message(STATUS "ABQuant ctypes lib GFX_ARCH: ${CK_TILE_ABQUANT_GFX_ARCH}")
-    target_compile_definitions(dispatcher_grouped_gemm_abquant_lib PRIVATE
-        CK_TILE_SINGLE_KERNEL_INCLUDE
-        GFX_ARCH="${CK_TILE_ABQUANT_GFX_ARCH}"
-    )
-else()
-    message(STATUS "No ABQuant GEMM kernel found for ctypes lib - building without kernel")
-    add_library(dispatcher_grouped_gemm_abquant_lib SHARED grouped_gemm_abquant_ctypes_lib.cpp)
-    target_include_directories(dispatcher_grouped_gemm_abquant_lib PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
-    )
-    target_link_libraries(dispatcher_grouped_gemm_abquant_lib PRIVATE hip::device)
-    set_target_properties(dispatcher_grouped_gemm_abquant_lib PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 17
-    )
-endif()
-
+# =============================================================================
 # Gemm TensorQuant ctypes Library
 # =============================================================================
-#
 # Registry-bypass, single-kernel-per-.so bridge for the TensorQuant GEMM path
 # (one scalar scale for A + one scalar scale for B). fp8/bf8, rcr layout only.
+# CK_TILE_GEMM_TENSOR_QUANT_GFX_ARCH is DISTINCT from the grouped targets'
+# CK_TILE_TENSOR_QUANT_GFX_ARCH to prevent the grouped `set(... CACHE)` call
+# from silently pre-filling this variable before the NOT DEFINED guard below.
 
-file(GLOB TENSOR_QUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_tensor_quant_*.hpp")
-if(TENSOR_QUANT_GEMM_KERNEL_HEADERS)
-    list(GET TENSOR_QUANT_GEMM_KERNEL_HEADERS 0 TENSOR_QUANT_GEMM_KERNEL_HEADER)
-    message(STATUS "Found TensorQuant GEMM kernel for ctypes lib: ${TENSOR_QUANT_GEMM_KERNEL_HEADER}")
-
-    add_ctypes_library(dispatcher_gemm_tensor_quant_lib
-        gemm_tensor_quant_ctypes_lib.cpp
-        KERNEL_HEADER ${TENSOR_QUANT_GEMM_KERNEL_HEADER}
-    )
-    # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
-    # falling back to the cache variable CK_TILE_TENSOR_QUANT_GFX_ARCH (default gfx942).
-    # The Python build path always passes -DGFX_ARCH=... explicitly via hipcc, so
-    # this default only affects builds driven through CMake directly.
-    if(NOT DEFINED CK_TILE_TENSOR_QUANT_GFX_ARCH OR CK_TILE_TENSOR_QUANT_GFX_ARCH STREQUAL "")
-        if(CMAKE_HIP_ARCHITECTURES)
-            list(GET CMAKE_HIP_ARCHITECTURES 0 _tensor_quant_gfx_arch)
-        else()
-            set(_tensor_quant_gfx_arch "gfx942")
-        endif()
-        set(CK_TILE_TENSOR_QUANT_GFX_ARCH "${_tensor_quant_gfx_arch}" CACHE STRING
-            "GFX arch for the CMake-built TensorQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
-    endif()
-    message(STATUS "TensorQuant ctypes lib GFX_ARCH: ${CK_TILE_TENSOR_QUANT_GFX_ARCH}")
-
-    target_compile_definitions(dispatcher_gemm_tensor_quant_lib PRIVATE
-        CK_TILE_SINGLE_KERNEL_INCLUDE
-        GFX_ARCH="${CK_TILE_TENSOR_QUANT_GFX_ARCH}"
-    )
-else()
-    # gemm_tensor_quant_ctypes_lib.cpp requires a force-included generated header
-    # (SelectedKernel/KERNEL_NAME/ADataType/...) under CK_TILE_SINGLE_KERNEL_INCLUDE,
-    # so there is no valid kernel-less build. Skip the target when no header exists
-    # (the Python bridge builds it at runtime once a kernel header is generated),
-    # matching the sibling bridge targets below.
-    message(STATUS
-        "No TensorQuant GEMM kernel found for ctypes lib - skipping dispatcher_gemm_tensor_quant_lib "
-        "(built at runtime by the Python bridge once a kernel header exists)")
-endif()
+add_quant_ctypes_target(
+    TARGET      dispatcher_gemm_tensor_quant_lib
+    SOURCE      gemm_tensor_quant_ctypes_lib.cpp
+    GLOB        "${CMAKE_BINARY_DIR}/generated_kernels/gemm_tensor_quant_*.hpp"
+    CACHE_VAR   CK_TILE_GEMM_TENSOR_QUANT_GFX_ARCH
+    DEFAULT_ARCH gfx942
+)
 
 # =============================================================================
 # Gemm BQuant ctypes Library (non-grouped, block-scale GEMM)
@@ -426,43 +374,30 @@ endif()
 # Doubly guarded (on the generated header glob and on the source file) so the
 # target is skipped cleanly if neither is present.
 
+# =============================================================================
+# Gemm BQuant ctypes Library (non-grouped, block-scale GEMM)
+# =============================================================================
+# Plain (single-problem) B-only quantized block-scale GEMM from
+# 38_block_scale_gemm. Distinct from the grouped_gemm_bquant target above.
+# CK_TILE_GEMM_BQUANT_GFX_ARCH is DISTINCT from the grouped target's
+# CK_TILE_BQUANT_GFX_ARCH: the grouped block runs first and sets that variable
+# via `set(... CACHE)`, which means any `if(NOT DEFINED CK_TILE_BQUANT_GFX_ARCH)`
+# guard below silently never fires -- the grouped stanza's value is silently
+# inherited instead. The distinct name ensures each target is independently
+# configurable.
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/gemm_bquant_ctypes_lib.cpp)
-    file(GLOB PLAIN_BQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_bquant_*.hpp")
-    if(PLAIN_BQUANT_GEMM_KERNEL_HEADERS)
-        list(GET PLAIN_BQUANT_GEMM_KERNEL_HEADERS 0 PLAIN_BQUANT_GEMM_KERNEL_HEADER)
-        message(STATUS "Found gemm_bquant kernel for ctypes lib: ${PLAIN_BQUANT_GEMM_KERNEL_HEADER}")
-
-        add_ctypes_library(dispatcher_gemm_bquant_lib
-            gemm_bquant_ctypes_lib.cpp
-            KERNEL_HEADER ${PLAIN_BQUANT_GEMM_KERNEL_HEADER}
-        )
-        # Resolve the GFX arch GENERICALLY -- do NOT silently default to gfx942.
-        # Non-MX gemm_bquant kernels are not protected by the source-side #error
-        # guard, so an unresolved arch would silently build for gfx942 and
-        # mis-target on other hosts. Per get_arch+throw, an unresolved arch is a
-        # hard configure-time error: pass -DCK_TILE_BQUANT_GFX_ARCH=<gfx###> or set
-        # CMAKE_HIP_ARCHITECTURES. (The Python build path passes -DGFX_ARCH=...
-        # explicitly via hipcc, so this only affects direct CMake-driven builds.)
-        if(NOT DEFINED CK_TILE_BQUANT_GFX_ARCH OR CK_TILE_BQUANT_GFX_ARCH STREQUAL "")
-            if(CMAKE_HIP_ARCHITECTURES)
-                list(GET CMAKE_HIP_ARCHITECTURES 0 _plain_bquant_gfx_arch)
-                set(CK_TILE_BQUANT_GFX_ARCH "${_plain_bquant_gfx_arch}" CACHE STRING
-                    "GFX arch for the CMake-built BQuant ctypes .so (from CMAKE_HIP_ARCHITECTURES)")
-            else()
-                message(FATAL_ERROR
-                    "dispatcher_gemm_bquant_lib: GPU arch is unresolved. Refusing "
-                    "to silently default to gfx942 (would mis-target non-gfx942 "
-                    "hosts). Configure with -DCK_TILE_BQUANT_GFX_ARCH=<gfx###> or "
-                    "set CMAKE_HIP_ARCHITECTURES.")
-            endif()
-        endif()
-        message(STATUS "gemm_bquant ctypes lib GFX_ARCH: ${CK_TILE_BQUANT_GFX_ARCH}")
-
-        target_compile_definitions(dispatcher_gemm_bquant_lib PRIVATE
-            CK_TILE_SINGLE_KERNEL_INCLUDE
-            GFX_ARCH="${CK_TILE_BQUANT_GFX_ARCH}"
-        )
-    else()
+    add_quant_ctypes_target(
+        TARGET      dispatcher_gemm_bquant_lib
+        SOURCE      gemm_bquant_ctypes_lib.cpp
+        GLOB        "${CMAKE_BINARY_DIR}/generated_kernels/gemm_bquant_*.hpp"
+        CACHE_VAR   CK_TILE_GEMM_BQUANT_GFX_ARCH
+        DEFAULT_ARCH FATAL_ERROR
+    )
+    if(NOT TARGET dispatcher_gemm_bquant_lib)
+        # add_quant_ctypes_target returned early (no kernel header). Provide a
+        # kernel-less stub so dependents can link; it won't link fully without
+        # SelectedKernel, but CMake configure/compile succeeds.
         message(STATUS "No gemm_bquant kernel found for ctypes lib - building without kernel")
         add_library(dispatcher_gemm_bquant_lib SHARED gemm_bquant_ctypes_lib.cpp)
         target_include_directories(dispatcher_gemm_bquant_lib PRIVATE
@@ -588,161 +523,53 @@ if(GEMM_KERNEL_HEADERS)
 endif()
 
 
+# =============================================================================
 # Gemm RowColQuant ctypes Library
 # =============================================================================
+# CK_TILE_GEMM_ROWCOLQUANT_GFX_ARCH is a new name with no grouped-target alias,
+# so no cache collision is possible. Included for naming consistency.
 
-file(GLOB ROWCOLQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_rowcolquant_*.hpp")
-if(ROWCOLQUANT_GEMM_KERNEL_HEADERS)
-    list(GET ROWCOLQUANT_GEMM_KERNEL_HEADERS 0 ROWCOLQUANT_GEMM_KERNEL_HEADER)
-    message(STATUS "Found RowColQuant GEMM kernel for ctypes lib: ${ROWCOLQUANT_GEMM_KERNEL_HEADER}")
-
-    add_ctypes_library(dispatcher_gemm_rowcolquant_lib
-        gemm_rowcolquant_ctypes_lib.cpp
-        KERNEL_HEADER ${ROWCOLQUANT_GEMM_KERNEL_HEADER}
-    )
-    # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
-    # falling back to the cache variable CK_TILE_ROWCOLQUANT_GFX_ARCH (default gfx942).
-    # The Python build path always passes -DGFX_ARCH=... explicitly via hipcc, so
-    # this default only affects builds driven through CMake directly.
-    if(NOT DEFINED CK_TILE_ROWCOLQUANT_GFX_ARCH OR CK_TILE_ROWCOLQUANT_GFX_ARCH STREQUAL "")
-        if(CMAKE_HIP_ARCHITECTURES)
-            list(GET CMAKE_HIP_ARCHITECTURES 0 _rowcolquant_gfx_arch)
-        else()
-            set(_rowcolquant_gfx_arch "gfx942")
-        endif()
-        set(CK_TILE_ROWCOLQUANT_GFX_ARCH "${_rowcolquant_gfx_arch}" CACHE STRING
-            "GFX arch for the CMake-built RowColQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
-    endif()
-    message(STATUS "RowColQuant ctypes lib GFX_ARCH: ${CK_TILE_ROWCOLQUANT_GFX_ARCH}")
-
-    target_compile_definitions(dispatcher_gemm_rowcolquant_lib PRIVATE
-        CK_TILE_SINGLE_KERNEL_INCLUDE
-        GFX_ARCH="${CK_TILE_ROWCOLQUANT_GFX_ARCH}"
-    )
-else()
-    # gemm_rowcolquant_ctypes_lib.cpp requires a force-included generated header
-    # (SelectedKernel/KERNEL_NAME/ADataType/...) under CK_TILE_SINGLE_KERNEL_INCLUDE,
-    # so there is no valid kernel-less build. Skip the target when no header exists
-    # (the Python bridge builds it at runtime once a kernel header is generated),
-    # matching the sibling bridge targets below.
-    message(STATUS
-        "No RowColQuant GEMM kernel found for ctypes lib - skipping dispatcher_gemm_rowcolquant_lib "
-        "(built at runtime by the Python bridge once a kernel header exists)")
-endif()
+add_quant_ctypes_target(
+    TARGET      dispatcher_gemm_rowcolquant_lib
+    SOURCE      gemm_rowcolquant_ctypes_lib.cpp
+    GLOB        "${CMAKE_BINARY_DIR}/generated_kernels/gemm_rowcolquant_*.hpp"
+    CACHE_VAR   CK_TILE_GEMM_ROWCOLQUANT_GFX_ARCH
+    DEFAULT_ARCH gfx942
+)
 
 # =============================================================================
-
-
 # AQuant (A-only quantized) GEMM ctypes Library
 # =============================================================================
+# MAIN_INCLUDE_ONLY: omit dispatcher/include to avoid the GemmHostArgs vs
+# QuantGemmHostArgs collision (see add_quant_ctypes_target docs above).
+# CK_TILE_GEMM_AQUANT_GFX_ARCH is distinct from grouped CK_TILE_AQUANT_GFX_ARCH
+# (D1 fix: grouped block runs first and would stomp the NOT DEFINED guard).
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/gemm_aquant_ctypes_lib.cpp)
-    file(GLOB AQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_aquant_*.hpp")
-    if(AQUANT_GEMM_KERNEL_HEADERS)
-        list(SORT AQUANT_GEMM_KERNEL_HEADERS)
-        list(GET AQUANT_GEMM_KERNEL_HEADERS 0 AQUANT_GEMM_KERNEL_HEADER)
-        message(STATUS "Found AQuant GEMM kernel for ctypes lib: ${AQUANT_GEMM_KERNEL_HEADER}")
-
-        # NOTE: unlike the other ctypes targets, this one does NOT use
-        # add_ctypes_library(), because that helper adds ${PROJECT_SOURCE_DIR}/dispatcher/include
-        # to the include path. That directory pulls in generated_tile_backend.hpp, which
-        # instantiates SelectedKernel::run(GemmHostArgs&) and conflicts with the AQuant
-        # kernel's launch(QuantGemmHostArgs&) signature. The Python build path
-        # (gemm_aquant_utils.py:_compile_aquant_kernel) deliberately excludes
-        # dispatcher/include for the same reason. Build the target by hand with a
-        # MAIN-include-only include set so the CMake path matches the Python path.
-        add_library(dispatcher_gemm_aquant_lib SHARED gemm_aquant_ctypes_lib.cpp)
-        target_include_directories(dispatcher_gemm_aquant_lib PRIVATE
-            ${PROJECT_SOURCE_DIR}/include
-        )
-        target_link_libraries(dispatcher_gemm_aquant_lib PRIVATE hip::device)
-        target_compile_options(dispatcher_gemm_aquant_lib PRIVATE
-            -include ${AQUANT_GEMM_KERNEL_HEADER}
-        )
-        set_target_properties(dispatcher_gemm_aquant_lib PROPERTIES
-            POSITION_INDEPENDENT_CODE ON
-            CXX_STANDARD 17
-        )
-        # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
-        # falling back to the cache variable CK_TILE_AQUANT_GFX_ARCH. Never hardcode a
-        # default arch: if none can be resolved, error out (the ctypes source #errors
-        # on an unset GFX_ARCH too). The Python build path always passes -DGFX_ARCH=...
-        # explicitly via hipcc, so this only affects CMake-driven builds.
-        if(NOT DEFINED CK_TILE_AQUANT_GFX_ARCH OR CK_TILE_AQUANT_GFX_ARCH STREQUAL "")
-            if(CMAKE_HIP_ARCHITECTURES)
-                list(GET CMAKE_HIP_ARCHITECTURES 0 _aquant_gfx_arch)
-                set(CK_TILE_AQUANT_GFX_ARCH "${_aquant_gfx_arch}" CACHE STRING
-                    "GFX arch for the CMake-built AQuant ctypes .so (from CMAKE_HIP_ARCHITECTURES)")
-            else()
-                message(FATAL_ERROR
-                    "CK_TILE_AQUANT_GFX_ARCH is unset and CMAKE_HIP_ARCHITECTURES is empty. "
-                    "Set -DCK_TILE_AQUANT_GFX_ARCH=gfx942|gfx950 to build dispatcher_gemm_aquant_lib.")
-            endif()
-        endif()
-        message(STATUS "AQuant ctypes lib GFX_ARCH: ${CK_TILE_AQUANT_GFX_ARCH}")
-
-        target_compile_definitions(dispatcher_gemm_aquant_lib PRIVATE
-            CK_TILE_SINGLE_KERNEL_INCLUDE
-            GFX_ARCH="${CK_TILE_AQUANT_GFX_ARCH}"
-        )
-    else()
-        message(STATUS
-            "No AQuant GEMM kernel found for ctypes lib - skipping dispatcher_gemm_aquant_lib "
-            "(built at runtime by the Python bridge once a kernel header exists)")
-    endif()
+    add_quant_ctypes_target(
+        TARGET      dispatcher_gemm_aquant_lib
+        SOURCE      gemm_aquant_ctypes_lib.cpp
+        GLOB        "${CMAKE_BINARY_DIR}/generated_kernels/gemm_aquant_*.hpp"
+        CACHE_VAR   CK_TILE_GEMM_AQUANT_GFX_ARCH
+        DEFAULT_ARCH FATAL_ERROR
+        MAIN_INCLUDE_ONLY
+    )
 endif()
 
 # =============================================================================
-
-
 # Gemm ABQuant (A+B block-scale) ctypes Library
 # =============================================================================
+# MAIN_INCLUDE_ONLY: same rationale as AQuant above (QuantGemmHostArgs collision).
+# CK_TILE_GEMM_ABQUANT_GFX_ARCH is distinct from grouped CK_TILE_ABQUANT_GFX_ARCH
+# (D1 fix). ABQuant supports gfx942/gfx950; default gfx950 (prefill tile).
 
-file(GLOB ABQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_abquant_*.hpp")
-if(ABQUANT_GEMM_KERNEL_HEADERS)
-    list(GET ABQUANT_GEMM_KERNEL_HEADERS 0 ABQUANT_GEMM_KERNEL_HEADER)
-    message(STATUS "Found ABQuant GEMM kernel for ctypes lib: ${ABQUANT_GEMM_KERNEL_HEADER}")
-
-    add_ctypes_library(dispatcher_gemm_abquant_lib
-        gemm_abquant_ctypes_lib.cpp
-        KERNEL_HEADER ${ABQUANT_GEMM_KERNEL_HEADER}
-    )
-    # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
-    # falling back to the cache variable CK_TILE_ABQUANT_GFX_ARCH. The Python build
-    # path always passes -DGFX_ARCH=... explicitly via hipcc, so this default only
-    # affects builds driven through CMake directly. ABQuant supports gfx942/gfx950.
-    if(NOT DEFINED CK_TILE_ABQUANT_GFX_ARCH OR CK_TILE_ABQUANT_GFX_ARCH STREQUAL "")
-        if(CMAKE_HIP_ARCHITECTURES)
-            list(GET CMAKE_HIP_ARCHITECTURES 0 _abquant_gfx_arch)
-        else()
-            set(_abquant_gfx_arch "gfx950")
-        endif()
-        set(CK_TILE_ABQUANT_GFX_ARCH "${_abquant_gfx_arch}" CACHE STRING
-            "GFX arch for the CMake-built ABQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx950)")
-    endif()
-    message(STATUS "ABQuant ctypes lib GFX_ARCH: ${CK_TILE_ABQUANT_GFX_ARCH}")
-
-    target_compile_definitions(dispatcher_gemm_abquant_lib PRIVATE
-        CK_TILE_SINGLE_KERNEL_INCLUDE
-        GFX_ARCH="${CK_TILE_ABQUANT_GFX_ARCH}"
-    )
-else()
-    message(STATUS "No ABQuant GEMM kernel found for ctypes lib - building without kernel")
-    add_library(dispatcher_gemm_abquant_lib SHARED gemm_abquant_ctypes_lib.cpp)
-    # main include ONLY -- deliberately do NOT add dispatcher/include here. That path
-    # pulls in generated_tile_backend.hpp, whose SelectedKernel::run(GemmHostArgs&)
-    # conflicts with the ABQuant kernel's launch(QuantGemmHostArgs&) (same rationale
-    # as the Python build path, gemm_abquant_utils.py:566-569). This stub branch
-    # won't fully link anyway (SelectedKernel/KERNEL_NAME undefined without the
-    # force-included header) and exists only so CMake configure/compile succeeds.
-    target_include_directories(dispatcher_gemm_abquant_lib PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-    )
-    target_link_libraries(dispatcher_gemm_abquant_lib PRIVATE hip::device)
-    set_target_properties(dispatcher_gemm_abquant_lib PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 17
-    )
-endif()
+add_quant_ctypes_target(
+    TARGET      dispatcher_gemm_abquant_lib
+    SOURCE      gemm_abquant_ctypes_lib.cpp
+    GLOB        "${CMAKE_BINARY_DIR}/generated_kernels/gemm_abquant_*.hpp"
+    CACHE_VAR   CK_TILE_GEMM_ABQUANT_GFX_ARCH
+    DEFAULT_ARCH gfx950
+    MAIN_INCLUDE_ONLY
+)
 
 # =============================================================================
