@@ -273,10 +273,10 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
 
     // KPack must satisfy KPack/KGroup = 16/sizeof(B) so that each thread's NkSwizzle slot
     // matches exactly one 16-byte memory load (= BK1 elements) in the B-preshuffle path.
-    // On gfx1250 the default double-rate instruction (k_per_blk=64) would give KPack=64 and
-    // KGroup=4, changing KPack itself and breaking the B-preshuffle LDS/register layout.
-    // Use the single-rate instruction's k_per_blk only for computing KPack to keep KPack=32
-    // and KGroup=2. KGroup, KLane, and KPerXdlops still derive from the double-rate mfma_selector.
+    // On gfx1250 the default double-rate instruction (k_per_blk=64) gives KPack=64 while
+    // KGroup remains 2, so KPack/KGroup=32 and no longer matches the 16-byte load layout.
+    // Use the single-rate instruction's k_per_blk only for computing KPack to restore
+    // KPack=32 and KPack/KGroup=16. KLane and KPerXdlops still use the double-rate selector.
 #if defined(__gfx125__)
     using preshuffle_mfma_selector =
         MfmaSelector<ComputeTypeA, MPerXdl, NPerXdl, ComputeTypeB, true>;
