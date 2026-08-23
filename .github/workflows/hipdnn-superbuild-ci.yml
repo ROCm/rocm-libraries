@@ -150,13 +150,9 @@ jobs:
           # Confirms the fetch landed on the pinned commit.
           $fetched = (& git -C $kpackSrc rev-parse HEAD).Trim()
           if ($fetched -ne "${{ steps.ci-env.outputs.kpack-ref }}") { throw "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" }
-          # --no-deps with --force-reinstall: the project is version 0.1.0 at
-          # every commit, so a warm cached venv would otherwise keep an older
-          # build; without --no-deps the force also churns msgpack/zstandard.
-          # Dependencies are installed separately so pip resolves them normally.
+          # Installing the directory rebuilds and reinstalls every time, so a
+          # warm venv cannot keep an older build of this same 0.1.0 version.
           & $python -m pip install (Join-Path $kpackSrc "shared\kpack")
-          if ($LASTEXITCODE -ne 0) { throw "Failed to install rocm_kpack dependencies" }
-          & $python -m pip install --force-reinstall --no-deps (Join-Path $kpackSrc "shared\kpack")
           if ($LASTEXITCODE -ne 0) { throw "Failed to install rocm_kpack" }
           # From the installed module, which also proves it imports.
           $sitePackages = (& $python -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
@@ -348,12 +344,9 @@ jobs:
           # Confirms the fetch landed on the pinned commit.
           fetched=$(git -C "$KPACK_SRC" rev-parse HEAD)
           test "$fetched" = "${{ steps.ci-env.outputs.kpack-ref }}" || { echo "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" >&2; exit 1; }
-          # --no-deps with --force-reinstall: the project is version 0.1.0 at
-          # every commit, so a warm cached venv would otherwise keep an older
-          # build; without --no-deps the force also churns msgpack/zstandard.
-          # Dependencies are installed separately so pip resolves them normally.
+          # Installing the directory rebuilds and reinstalls every time, so a
+          # warm venv cannot keep an older build of this same 0.1.0 version.
           "$VENV_PATH/bin/pip" install "$KPACK_SRC/shared/kpack"
-          "$VENV_PATH/bin/pip" install --force-reinstall --no-deps "$KPACK_SRC/shared/kpack"
           # Derived from the installed module, which also proves it imports.
           KPACK_PYTHON_DIR=$("$VENV_PATH/bin/python" -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
           test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
