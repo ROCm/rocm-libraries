@@ -107,17 +107,21 @@ AQUANT_LAYOUT_TO_CK = {
 }
 
 # The 3-char layout tag encodes (A, B, C).  C is always RowMajor for quant kernels
-# (static_assert in gemm_calc_quant).  The AQ layout is derived from the Old-TE
-# run_gemm_example_prec_type dispatch table:
-#   rcr : A=R B=C C=R -> AQ=R BQ=C
-#   rrr : A=R B=R C=R -> AQ=R BQ=C
-#   crr : A=C B=R C=R -> AQ=R BQ=C
-#   ccr : A=C B=C C=R -> AQ=C BQ=C   (non-preshufflequant only)
+# (static_assert in gemm_calc_quant).  The AQ (A-scale) tensor layout is ALWAYS
+# RowMajor: Old-TE's aquant instance builder hardcodes
+#   `using AQLayout = ck_tile::tensor_layout::gemm::RowMajor;`
+# (tile_engine gemm_instance_builder.py populate .. AQLayout) and passes it explicitly
+# to TileGemmQuantTraits for EVERY layout (rcr/rrr/crr/ccr). It does NOT let AQLayout
+# default to ALayout. Emitting ColumnMajor for ccr (A=C B=C) produced a DIFFERENT
+# compiled kernel type than Old-TE -- the strict objdump same-kernel gate flags it as
+# KERNEL_MISMATCH (bridge AQ=ColumnMajor 'SG_' vs Old-TE AQ=RowMajor 'SH_' in the
+# mangled TileGemmQuantTraits args), the ccr mem AQ-layout bug. Mirror Old-TE: AQ is
+# RowMajor for all layouts.
 AQUANT_AQ_LAYOUT = {
     "rcr": "r",
     "rrr": "r",
     "crr": "r",
-    "ccr": "c",
+    "ccr": "r",
 }
 
 # Pipeline map for AQuant kernels.
@@ -240,8 +244,17 @@ class AQuantKernelHeaderGenerator:
         layout_b_ck = AQUANT_LAYOUT_TO_CK[spec.layout[1]]
         layout_c_ck = AQUANT_LAYOUT_TO_CK[spec.layout[2]]
         layout_aq_ck = AQUANT_LAYOUT_TO_CK[AQUANT_AQ_LAYOUT[spec.layout]]
-        # BQ layout is unused for AQuant-only (bq_ptr=nullptr); Old-TE passes ColumnMajor.
-        layout_bq_ck = AQUANT_LAYOUT_TO_CK["c"]
+        # BQ layout is unused for AQuant-only (bq_ptr=nullptr), but it is still a
+        # template parameter of TileGemmQuantTraits and so is part of the compiled
+        # kernel's type. Old-TE's gemm_aquant instance passes ONLY AQLayout to
+        # TileGemmQuantTraits and lets BQLayout take its template default,
+        # `BQLayout_ = BLayout_` (tile_gemm_quant_traits.hpp:44). So Old-TE's BQLayout
+        # is exactly BLayout: ColumnMajor for rcr/ccr (B col-major) but RowMajor for
+        # rrr/crr (B row-major). Hardcoding ColumnMajor here matched Old-TE only for the
+        # col-major-B layouts and emitted a DIFFERENT kernel type for rrr/crr, which the
+        # objdump same-kernel gate flags as KERNEL_MISMATCH (the rrr/crr compv3 residual).
+        # Mirror Old-TE: default BQLayout to BLayout.
+        layout_bq_ck = layout_b_ck
 
         pipeline_key = spec.pipeline_key
         pipeline_ck = AQUANT_PIPELINE_MAP[pipeline_key]
@@ -446,8 +459,9 @@ using SelectedKernel = {struct};
                 f"using ALayout = {ns}::ALayout;\n"
                 f"using BLayout = {ns}::BLayout;\n"
                 f"using CLayout = {ns}::CLayout;\n"
-                "// AQ scale-tensor layout: RowMajor for rcr/rrr/crr, ColumnMajor for ccr.\n"
-                "// The ctypes lib derives stride_AQ from this (RowMajor -> QK_A, ColumnMajor -> M).\n"
+                "// AQ scale-tensor layout: always RowMajor (matches Old-TE, which hardcodes\n"
+                "// AQLayout=RowMajor for every layout). The ctypes lib derives stride_AQ from\n"
+                "// this compile-time type (RowMajor -> QK_A).\n"
                 f"using AQLayout = {ns}::AQLayout;\n"
                 f"constexpr ck_tile::index_t GroupSizeK = {ns}::{struct}::GroupSizeK;"
             ),

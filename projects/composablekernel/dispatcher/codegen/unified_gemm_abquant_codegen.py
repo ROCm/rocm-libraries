@@ -113,7 +113,14 @@ ABQUANT_PIPELINE_MAP = {
 #   PreshuffleB -> BaseWeightPreshufflePipelineAGmemBGmemCRegV2
 #   else ABQuant-> BaseGemmPipelineAgBgCrMem
 ABQUANT_BASE_PIPELINE_MAP = {
-    "compv3":      "ck_tile::BaseGemmPipelineAgBgCrMem",
+    # FIX (parity): compv3 abquant base pipeline must mirror Old-TE's ABQuant
+    # instance builder (base_pipeline_map["compv3"] = BaseGemmPipelineAgBgCrCompV3),
+    # not the generic ...Mem fallthrough. The base pipeline drives
+    # BlockHasHotloop()/GetBlockLoopTailNum(): Mem -> Full/One..Seven, CompV3 ->
+    # Even/Odd. The compute pipeline is scheduled for Even/Odd tails, so a
+    # Mem-derived tail set runs a mismatched schedule -- same device kernel per
+    # objdump but up to +81% slower at small K (1024^3) where the tail dominates.
+    "compv3":      "ck_tile::BaseGemmPipelineAgBgCrCompV3",
     "preshuffleb": "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
     "eightwaves":  "ck_tile::BaseGemmPipelineAgBgCrCompV3",
 }
