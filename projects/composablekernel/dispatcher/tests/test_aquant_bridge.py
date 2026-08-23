@@ -122,23 +122,23 @@ class TestProblem(unittest.TestCase):
 
 
 class TestAQStride(unittest.TestCase):
-    """ccr must carry the column-major AQ stride (M), all others row-major (QK_A)."""
+    """AQ is always RowMajor (matches Old-TE, which hardcodes AQLayout=RowMajor for
+    every layout), so every layout -- including ccr -- uses the row-major stride QK_A."""
 
     M, QK_A = 96, 4
 
-    def test_ccr_is_column_major(self):
-        # ccr: A=C B=C -> AQ column-major, leading dim = M (row count), not QK_A.
-        self.assertIn("ccr", _LAYOUTS_AQ_COLMAJOR)
-        self.assertEqual(_aq_stride("ccr", self.M, self.QK_A), self.M)
-
-    def test_row_major_layouts_use_qk_a(self):
-        for layout in ("rcr", "rrr", "crr"):
+    def test_all_layouts_row_major(self):
+        # Old-TE hardcodes AQLayout=RowMajor for every layout; emitting ColumnMajor for
+        # ccr produced a KERNEL_MISMATCH under the strict objdump same-kernel gate
+        # (the ccr mem AQ-layout bug). ccr must NOT be column-major.
+        self.assertEqual(_LAYOUTS_AQ_COLMAJOR, frozenset())
+        for layout in ("rcr", "rrr", "crr", "ccr"):
             self.assertNotIn(layout, _LAYOUTS_AQ_COLMAJOR)
             self.assertEqual(_aq_stride(layout, self.M, self.QK_A), self.QK_A)
 
-    def test_ccr_stride_differs_from_row_major(self):
-        # Guards against the round-1 bug where stride_AQ was always QK_A.
-        self.assertNotEqual(
+    def test_ccr_stride_matches_row_major(self):
+        # Post AQLayout fix: ccr uses the same row-major stride (QK_A) as rcr.
+        self.assertEqual(
             _aq_stride("ccr", self.M, self.QK_A),
             _aq_stride("rcr", self.M, self.QK_A),
         )

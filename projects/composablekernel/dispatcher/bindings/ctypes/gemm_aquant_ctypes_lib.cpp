@@ -14,8 +14,8 @@
  *
  * The *A* matrix is the quantized operand. AQ has shape [M, QK_A] (QK_A =
  * ceil(K/gK)); aq_ptr is set and bq_ptr is nullptr. Its leading dimension
- * follows AQLayout: row-major uses stride_AQ=QK_A, ccr (column-major) uses
- * stride_AQ=M (run_gemm_quant_example.inc get_default_stride). For pk_int4 A the
+ * follows AQLayout, which is always RowMajor (Old-TE hardcodes AQLayout=RowMajor
+ * for every layout), so stride_AQ=QK_A for all layouts. For pk_int4 A the
  * raw values are permuted (permute_i4_inplace) before the device copy, and
  * APreshuffleQuant kernels shuffle AQ via shuffle_aq (row-major only; ccr is
  * excluded from the preshufflequant path by Old-TE).
@@ -69,8 +69,8 @@ int dispatcher_run_aquant_gemm(const void* A,
         return -1;
 
     // Only packed layouts are supported; expected leading dims depend on the
-    // compile-time A/B/AQ layouts. AQ column-major (ccr) uses stride_AQ=M, matching
-    // Old-TE get_default_stride (the col-major branch returns row count M, not QK_A).
+    // compile-time A/B/AQ layouts. AQLayout is always RowMajor (matches Old-TE), so
+    // aq_row is true and stride_AQ=QK_A for every layout, including ccr.
     constexpr bool a_row  = std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>;
     constexpr bool b_row  = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
     constexpr bool aq_row = std::is_same_v<AQLayout, ck_tile::tensor_layout::gemm::RowMajor>;

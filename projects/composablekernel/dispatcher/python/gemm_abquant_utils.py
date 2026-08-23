@@ -823,18 +823,43 @@ def expand_abquant_sweep(
     k_block_per_cu     = cfg.get("k_block_per_cu", 1)
     double_smem_buffer = cfg.get("double_smem_buffer", False)
     preshuffle_b       = cfg.get("preshuffle_b", False)
-    preshuffle_bquant  = cfg.get("preshuffle_bquant", False)
     eight_waves        = cfg.get("eight_waves", False)
     aquant_group_k     = cfg.get("aquant_group_k", 128)
+
+    # FIX (coverage/parity): BPreshuffleQuant must be a SWEEP dimension, not a
+    # scalar. The Old-TE abquant default_config sweeps
+    # b_preshuffle_quant: {"values": [false, true]}, so it emits BOTH a
+    # BPreshuffleQuant=false and a =true kernel for every tile. The previous
+    # scalar cfg.get("preshuffle_bquant", False) only ever produced the =false
+    # variant, so the whole-config bridge sweep had NO counterpart for the Old-TE
+    # b_preshuffle_quant=true kernels (the `..._True_gsn*` stems). Those kernels
+    # were then (mis)paired with the =false bridge kernel -> a real, different
+    # device kernel (TileGemmQuantTraits 5th bool Lb1 vs Lb0), rocprof-measured up
+    # to +81% slower at 1024^3. Accept the Old-TE key spelling `b_preshuffle_quant`
+    # (nested {"values":[...]}) as well as the flat `preshuffle_bquant` scalar/list.
+    def _as_values(raw, default):
+        if raw is None:
+            return list(default)
+        if isinstance(raw, dict):            # Old-TE {"values": [...]} form
+            return list(raw.get("values", default))
+        if isinstance(raw, (list, tuple)):   # flat list form
+            return list(raw)
+        return [raw]                         # flat scalar form
+
+    preshuffle_bquant_values = _as_values(
+        cfg.get("preshuffle_bquant", cfg.get("b_preshuffle_quant")),
+        default=[False],
+    )
 
     configs: List[ABQuantKernelConfig] = []
     seen: set = set()
 
-    for variant_key, layout, tile_dict, bqg in itertools.product(
+    for variant_key, layout, tile_dict, bqg, preshuffle_bquant in itertools.product(
         cfg.get("variant_keys", ["fp8"]),
         cfg.get("layouts", ["rcr"]),
         cfg.get("tile_configs", []),
         cfg.get("bquant_groups", [{"bquant_group_n": 1, "bquant_group_k": 128}]),
+        preshuffle_bquant_values,
     ):
         c = ABQuantKernelConfig(
             variant_key=variant_key,
@@ -855,7 +880,7 @@ def expand_abquant_sweep(
             bquant_group_n=bqg.get("bquant_group_n", 1),
             bquant_group_k=bqg.get("bquant_group_k", 128),
             preshuffle_b=preshuffle_b,
-            preshuffle_bquant=preshuffle_bquant,
+            preshuffle_bquant=bool(preshuffle_bquant),
             double_smem_buffer=double_smem_buffer,
             eight_waves=eight_waves,
             transpose_c=transpose_c,

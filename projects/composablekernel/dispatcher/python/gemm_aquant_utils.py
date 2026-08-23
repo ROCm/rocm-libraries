@@ -102,20 +102,19 @@ _SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950")
 _LAYOUTS_DECODE = ("rcr", "rrr", "crr", "ccr")
 _LAYOUTS_PRESHUFFLEQUANT = ("rcr", "rrr", "crr")
 
-# AQ (A-scale) tensor layout per 3-char layout tag, mirroring AQUANT_AQ_LAYOUT in
-# unified_gemm_aquant_codegen.py.  The scale tensor is column-major only for ccr
-# (A=C B=C), row-major for rcr/rrr/crr.  A column-major AQ of shape [M, QK_A] has
-# leading dimension M (not QK_A) -- see Old-TE get_default_stride in
-# run_gemm_quant_example.inc (~line 528).
-_LAYOUTS_AQ_COLMAJOR = frozenset({"ccr"})
+# AQ (A-scale) tensor layout, mirroring AQUANT_AQ_LAYOUT in
+# unified_gemm_aquant_codegen.py.  The scale tensor is ALWAYS RowMajor (Old-TE
+# hardcodes AQLayout=RowMajor for every layout, including ccr), so a row-major AQ of
+# shape [M, QK_A] has leading dimension QK_A for all layouts.
+_LAYOUTS_AQ_COLMAJOR = frozenset()
 
 
 def _aq_stride(layout: str, M: int, QK_A: int) -> int:
     """Leading dimension of the AQ scale tensor for a given layout tag.
 
-    Column-major AQ (ccr) -> M; row-major AQ (rcr/rrr/crr) -> QK_A.  Consistent with
-    the ColumnMajor/RowMajor AQLayout the codegen emits and the exp_stride_AQ the
-    ctypes lib validates.
+    Row-major AQ (all layouts) -> QK_A.  Consistent with the RowMajor AQLayout the
+    codegen now emits for every layout and the exp_stride_AQ the ctypes lib validates
+    (aq_row=true -> QK_A).
     """
     return M if layout in _LAYOUTS_AQ_COLMAJOR else QK_A
 
@@ -445,7 +444,7 @@ class AQuantGpuGemmRunner:
         # Packed strides derived from the layout tag.
         a_char, b_char, _c_char = self._layout[0], self._layout[1], self._layout[2]
         stride_A  = K if a_char == "r" else M   # A row-major -> K, col-major -> M
-        # AQ [M, QK_A]: row-major -> QK_A, column-major (ccr) -> M.
+        # AQ [M, QK_A]: always row-major (matches Old-TE) -> QK_A for every layout.
         stride_AQ = _aq_stride(self._layout, M, QK_A)
         stride_B  = N if b_char == "r" else K   # B row-major -> N, col-major -> K
         stride_C  = N                             # C is row-major [M, N]
