@@ -116,6 +116,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
         engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp
+        ingestor/TestPackedDescriptorLoad.cpp
     )
 
     # A real archive to open, so the arch-mismatch and missing-toc_key cases meet the
