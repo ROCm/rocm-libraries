@@ -791,3 +791,28 @@ Shipping five more architectures' catalogs on the strength of one measured archi
 be exactly the over-reach this campaign spent its time avoiding — the same reason the three
 non-HHS navi32 catalogs were measured rather than shipped on analogy. **Recorded as a
 finding, not acted on.**
+
+### Follow-up: navi33 (gfx1102) — it builds, but that is not the question
+
+The wiki flags navi33 as having a **smaller VGPR file: 1024 vs 1536 VGPRs/SIMD**, giving
+`PhysicalMaxVgprCU` 32 768 against gfx1100/1101's 98 304. The gfx1101 gate passed 298/298
+precisely *because* those two parts have identical VGPR budgets, so navi33 looked like the
+case where the port would fail.
+
+Tested it. **It does not fail**: navi31's TN HHS catalog retargeted to gfx1102 builds
+**238/238 kernels, 0 assembler errors, 0 `overflowedResources`**, ELF `Flags: 0x47, gfx1102`.
+
+The reason is that the two limits are different things. **`MaxVgpr` per kernel is 256 on every
+RDNA3 part** — that is the hard compile limit, and navi31's kernels respect it. The smaller
+physical file constrains **occupancy** (how many workgroups fit per exec unit), not
+compilability: at 128 threads, gfx1102's budget is 32 768/128 = 256 VGPRs per thread, so a
+256-VGPR kernel still fits exactly one workgroup and passes the check.
+
+**So the concern is real but inverted from what I first wrote.** The port is *buildable*; what
+is unverified is whether a catalog tuned on a part with 3x the VGPR file picks kernels that
+leave navi33 at occupancy 1. That is a performance question, answerable only by benchmarking —
+not something the build gate can decide.
+
+**This is reasoning, not measurement.** No navi33 hardware was involved and no navi33 emulation
+was attempted (the CU count differs *and* the VGPR file differs, so the emulation used here
+would not be faithful). Recorded so the next person starts from the right question.
