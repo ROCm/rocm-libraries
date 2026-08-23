@@ -876,3 +876,23 @@ def test_library_resolves_for_a_nested_standalone_ukd(
         )
         checked += 1
     assert checked, "no standalone kpack UKD shipped; the test asserted nothing"
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("spelling", ["kpack", "KPACK", "Kpack"])
+def test_reserved_kpack_folder_is_case_insensitive(
+    tmp_path, empty_arch_fixture, spelling
+):
+    """Every spelling is reserved, because Windows cannot tell them apart.
+
+    On Linux `KPACK/` and `kpack/` are distinct directories and coexist without
+    colliding -- verified -- so a case-sensitive check would be correct here.
+    But this tree is authored and consumed on Windows too, where they are the
+    same directory and the collision returns. Rejecting all spellings keeps the
+    rule identical on every platform and costs an author nothing.
+    """
+    root = tmp_path / "root"
+    _nest(root, spelling, empty_arch_fixture)
+
+    with pytest.raises(HkpPackError, match="reserved"):
+        load_flat_input(root)
