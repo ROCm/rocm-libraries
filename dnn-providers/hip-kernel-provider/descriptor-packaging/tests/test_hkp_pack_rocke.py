@@ -589,7 +589,8 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
     (base / "__init__.py").write_text("", encoding="utf-8")
     (base / "sub" / "__init__.py").write_text("", encoding="utf-8")
     (base / "sub" / "mod.py").write_text(
-        textwrap.dedent("""
+        textwrap.dedent(
+            """
             import dataclasses
 
             @dataclasses.dataclass
@@ -598,7 +599,8 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
 
             def build_stub(spec: StubSpec, *, arch="gfx950"):
                 return ("kernel", spec, arch)
-            """),
+            """
+        ),
         encoding="utf-8",
     )
     if str(tmp_path) not in sys.path:
@@ -648,7 +650,7 @@ def test_real_gfx942_attention_dense_is_refused(rocke_importable):
 
 @pytest.mark.quick
 def test_real_gfx942_tiled_2d_is_accepted(rocke_importable):
-    """The builder Phase 6's example tree uses must pass the gate.
+    """The builder the example descriptor tree uses must pass the gate.
 
     Pairs with the refusal above: the gate has to be narrow enough that real
     kernels remain packageable, not just strict.

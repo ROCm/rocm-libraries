@@ -1051,9 +1051,8 @@ def test_empty_pruned_kdp_is_logged(tmp_path, main_fixture, hipcc, rocm_kpack_di
 @pytest.mark.quick
 def test_bare_arch_boundaries():
     # Mirrors the loader's isPlausibleArchBaseId. Bare gfx ids pass; a feature
-    # suffix, an uppercase spelling, or a missing/!alnum body is rejected.
-    # 'gfx9-4-generic' is an LLVM generic target and MUST stay legal -- the old
-    # 7-char heuristic would have false-flagged it.
+    # suffix, an uppercase spelling, or a missing/non-alnum body is rejected.
+    # 'gfx9-4-generic' is an LLVM generic target and must stay legal.
     from hkp_pack.descriptors import _reject_nonbare_arch
 
     for good in ("gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx9-4-generic"):
@@ -1065,8 +1064,7 @@ def test_bare_arch_boundaries():
 
 def test_nonbare_arch_is_rejected(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
     # A feature-suffixed arch matches no shard, so the KDP prunes everywhere and
-    # the pack would otherwise exit 0 having installed nothing -- the same
-    # silent-empty outcome hkp_add_packaging treats as fatal. Reject it instead.
+    # the pack would otherwise exit 0 having installed nothing.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
     doc = _read(p)

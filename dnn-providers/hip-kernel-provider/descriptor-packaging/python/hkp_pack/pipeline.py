@@ -89,18 +89,12 @@ class ArchResult:
 def _sha256(data):
     """Digest of a packed blob, recorded on the shipped UKD.
 
-    PROVENANCE ONLY -- nothing verifies this at load time. The runtime parses
-    `sha256` into KernelSource and never reads it again (Descriptors.hpp: "Carried,
-    not checked -- no digest implementation is linked here"), so a corrupted or
-    substituted archive loads without detection. Confirmed empirically: an
-    all-zero sha256 in a packed descriptor loads clean.
+    Provenance only. The runtime parses `sha256` into KernelSource and never
+    reads it back (Descriptors.hpp: "Carried, not checked"), so it is not an
+    integrity guarantee on the consuming side.
 
-    It is still worth computing. `expected_sha256` cross-checks it at pack time,
-    which catches a packer that changed what it emits, and it names the exact
-    bytes a shipped kernel came from when someone is diagnosing one. Just do not
-    read this field as an integrity guarantee on the consuming side -- closing
-    that loop needs a digest in KpackKernelLoader, which is the runtime's call
-    and not this tool's.
+    Still worth computing: `expected_sha256` cross-checks it at pack time, and
+    it names the exact bytes a shipped kernel came from.
     """
     return hashlib.sha256(data).hexdigest()
 
