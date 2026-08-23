@@ -1,0 +1,88 @@
+diff --git a/shared/origami/src/origami/streamk.cpp b/shared/origami/src/origami/streamk.cpp
+index b9dc49817e8..98599fc17de 100644
+--- a/shared/origami/src/origami/streamk.cpp
++++ b/shared/origami/src/origami/streamk.cpp
+@@ -1,6 +1,7 @@
+ // Copyright Advanced Micro Devices, Inc., or its affiliates.
+ // SPDX-License-Identifier:  MIT
+ 
++#include <cstdlib>
+ #include "origami/streamk.hpp"
+ #include "origami/gemm.hpp"
+ #include "origami/hardware.hpp"
+@@ -338,6 +339,22 @@ size_t grid_k_split_aware(const problem_t& problem,
+   size_t tiles = compute_number_of_output_tiles(
+       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
+ 
++  // EXPERIMENT (2026-08-21): size gate. Offline re-analysis of the 2026-08-19 census
++  // (1495 shapes) found StreamK is a per-shape geomean WIN but a flops-weighted wall-clock
++  // LOSS: mode-4-vs-mode-6 is 96.95% by geomean and 102.17% by total throughput. The cause
++  // is pure weighting -- <0.1ms is 53% of shapes but 3.5% of kernel time (StreamK wins
++  // there), >=1ms is 9.8% of shapes but 77% of time (StreamK loses there). Gating StreamK
++  // off above an M*N threshold projected 101.30% geomean AND 102.08% wall-clock on a
++  // held-out half. M*N rather than M*N*K because the benefit is about tile count, which is
++  // M*N-driven. Returning `tiles` is exactly what grid_data_parallel() returns, so the
++  // launch becomes data-parallel-equivalent. Default 0 = disabled = byte-identical to stock.
++  static const char*  mn_env  = std::getenv("ORIGAMI_MN_GATE");
++  static const double mn_gate = mn_env ? std::atof(mn_env) : 0.0;
++  if (mn_gate > 0.0) {
++    const double mn = static_cast<double>(problem.size.m) * static_cast<double>(problem.size.n);
++    if (mn >= mn_gate) return tiles;
++  }
++
+   size_t sk_grid = tiles;  // Fallback if no good fractional tile is found
+   if (cu_budget > 0) sk_grid = std::min(sk_grid, cu_budget);
+ 
+@@ -370,7 +387,15 @@ size_t grid_k_split_aware(const problem_t& problem,
+   // More tiles than CUs
+   // Distribute tiles evenly across maximum number of CUs
+   // Split remaining tiles as evenly as possible for better caching
+-  if (tiles > cu_count) {
++  // EXPERIMENT (2026-08-19): cu_count is BOTH the branch threshold and the per-branch
++  // grid ceiling. Measurement says only the threshold matters: raising both helped small
++  // shapes, raising the ceiling alone hurt them. This separates the two so the boundary
++  // can move while both ceilings stay put. Default 1 = stock.
++  static const char* th_env = std::getenv("ORIGAMI_THRESHOLD_MULT");
++  static const long  th_mult = th_env ? std::atol(th_env) : 1;
++  const size_t threshold = cu_count * (th_mult > 0 ? static_cast<size_t>(th_mult) : 1);
++
++  if (tiles > threshold) {
+     size_t virt_cu_count = cu_count;
+     if (config.occupancy > 1 && cu_budget == 0) virt_cu_count *= config.occupancy;
+ 
+@@ -401,15 +426,24 @@ size_t grid_k_split_aware(const problem_t& problem,
+   // Split tiles evenly in k-dimension
+   // Attempt to maximize CU utilization, up to a peak number of splits
+   // Max splitting is currently constant, but should be dependant on K dimension
+-  else if (tiles < cu_count) {
++  else if (tiles < threshold) {
+     // For problems with large k and low number of tiles, use parallel reduction
+     // TODO Benchmark to check if limits are correct
+     // constexpr int MinItersForParallel = 64;
+     // constexpr int MaxTilesForParallel = 16;
+     constexpr int MinItersPerCU = 8;
+ 
++    // EXPERIMENT (2026-08-19): cu_count does two jobs -- it is the branch THRESHOLD and
++    // it is the CEILING on this branch's grid. gfx1100 data says the two want different
++    // values: raising the ceiling helps small problems (x3/x4 scored 100.7/100.4 here)
++    // while hurting the tiles>cu_count branch. This lets the ceiling be raised WITHOUT
++    // moving the threshold. Default 1 = stock.
++    static const char* sb_env = std::getenv("ORIGAMI_SMALL_CU_MULT");
++    static const long  sb_mult = sb_env ? std::atol(sb_env) : 1;
++    const size_t small_budget = cu_count * (sb_mult > 0 ? static_cast<size_t>(sb_mult) : 1);
++
+     if (config.reduction_strategy == reduction_t::parallel) {
+-      size_t virt_cu_count = cu_count;
++      size_t virt_cu_count = small_budget;
+       // TODO check if using occupancy info makes workspace too large
+       // if (occupancy > 1)
+       //     virt_cu_count *= occupancy;
+@@ -427,7 +461,7 @@ size_t grid_k_split_aware(const problem_t& problem,
+       for (size_t frac : tile_fractions) {
+         const size_t splitGrid  = tiles * frac;
+         const size_t itersPerCU = iters_per_tile / frac;
+-        if (splitGrid <= cu_count && itersPerCU >= MinItersPerCU) {
++        if (splitGrid <= small_budget && itersPerCU >= MinItersPerCU) {
+           sk_grid = splitGrid;
+           break;
+         }

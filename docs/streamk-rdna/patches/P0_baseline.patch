@@ -1,0 +1,92 @@
+diff --git a/shared/origami/src/origami/hardware.cpp b/shared/origami/src/origami/hardware.cpp
+index 10d7e560ca4..2a142aaf315 100644
+--- a/shared/origami/src/origami/hardware.cpp
++++ b/shared/origami/src/origami/hardware.cpp
+@@ -100,6 +100,13 @@ namespace {
+ // of WGPs (2 CUs each) rather than physical CUs. Origami reasons in physical CUs, so scale
+ // the reported count back up on the RDNA architectures. CDNA archs run in CU mode (factor 1).
+ size_t cus_per_multiProcessorCount(hardware_t::architecture_t arch) {
++  // EXPERIMENT (2026-08-19): make the RDNA scale factor overridable so the "what should
++  // N_CU actually be" question can be swept without a rebuild per value.
++  //   1 = WGPs (48)   2 = physical CUs (96, the shipped default)   4 = SIMD32 lanes (192)
++  // Reads once into a static, like every other tuning knob on this path. Default is 2, so
++  // with the variable unset the behaviour is byte-identical to stock.
++  static const char* mult_env = std::getenv("ORIGAMI_RDNA_CU_MULT");
++  static const long  mult_override = mult_env ? std::atol(mult_env) : 0;
+   switch (arch) {
+     case hardware_t::architecture_t::gfx1100:  // RDNA3
+     case hardware_t::architecture_t::gfx1150:  // RDNA3.5 (Strix)
+@@ -108,7 +115,7 @@ size_t cus_per_multiProcessorCount(hardware_t::architecture_t arch) {
+     case hardware_t::architecture_t::gfx1153:
+     case hardware_t::architecture_t::gfx1200:  // RDNA4
+     case hardware_t::architecture_t::gfx1201:  // RDNA4
+-      return 2;
++      return mult_override > 0 ? static_cast<size_t>(mult_override) : 2;
+     default:
+       return 1;
+   }
+diff --git a/shared/origami/src/origami/streamk.cpp b/shared/origami/src/origami/streamk.cpp
+index b9dc49817e8..e327a25c925 100644
+--- a/shared/origami/src/origami/streamk.cpp
++++ b/shared/origami/src/origami/streamk.cpp
+@@ -1,6 +1,7 @@
+ // Copyright Advanced Micro Devices, Inc., or its affiliates.
+ // SPDX-License-Identifier:  MIT
+ 
++#include <cstdlib>
+ #include "origami/streamk.hpp"
+ #include "origami/gemm.hpp"
+ #include "origami/hardware.hpp"
+@@ -370,7 +371,15 @@ size_t grid_k_split_aware(const problem_t& problem,
+   // More tiles than CUs
+   // Distribute tiles evenly across maximum number of CUs
+   // Split remaining tiles as evenly as possible for better caching
+-  if (tiles > cu_count) {
++  // EXPERIMENT (2026-08-19): cu_count is BOTH the branch threshold and the per-branch
++  // grid ceiling. Measurement says only the threshold matters: raising both helped small
++  // shapes, raising the ceiling alone hurt them. This separates the two so the boundary
++  // can move while both ceilings stay put. Default 1 = stock.
++  static const char* th_env = std::getenv("ORIGAMI_THRESHOLD_MULT");
++  static const long  th_mult = th_env ? std::atol(th_env) : 1;
++  const size_t threshold = cu_count * (th_mult > 0 ? static_cast<size_t>(th_mult) : 1);
++
++  if (tiles > threshold) {
+     size_t virt_cu_count = cu_count;
+     if (config.occupancy > 1 && cu_budget == 0) virt_cu_count *= config.occupancy;
+ 
+@@ -401,15 +410,24 @@ size_t grid_k_split_aware(const problem_t& problem,
+   // Split tiles evenly in k-dimension
+   // Attempt to maximize CU utilization, up to a peak number of splits
+   // Max splitting is currently constant, but should be dependant on K dimension
+-  else if (tiles < cu_count) {
++  else if (tiles < threshold) {
+     // For problems with large k and low number of tiles, use parallel reduction
+     // TODO Benchmark to check if limits are correct
+     // constexpr int MinItersForParallel = 64;
+     // constexpr int MaxTilesForParallel = 16;
+     constexpr int MinItersPerCU = 8;
+ 
++    // EXPERIMENT (2026-08-19): cu_count does two jobs -- it is the branch THRESHOLD and
++    // it is the CEILING on this branch's grid. gfx1100 data says the two want different
++    // values: raising the ceiling helps small problems (x3/x4 scored 100.7/100.4 here)
++    // while hurting the tiles>cu_count branch. This lets the ceiling be raised WITHOUT
++    // moving the threshold. Default 1 = stock.
++    static const char* sb_env = std::getenv("ORIGAMI_SMALL_CU_MULT");
++    static const long  sb_mult = sb_env ? std::atol(sb_env) : 1;
++    const size_t small_budget = cu_count * (sb_mult > 0 ? static_cast<size_t>(sb_mult) : 1);
++
+     if (config.reduction_strategy == reduction_t::parallel) {
+-      size_t virt_cu_count = cu_count;
++      size_t virt_cu_count = small_budget;
+       // TODO check if using occupancy info makes workspace too large
+       // if (occupancy > 1)
+       //     virt_cu_count *= occupancy;
+@@ -427,7 +445,7 @@ size_t grid_k_split_aware(const problem_t& problem,
+       for (size_t frac : tile_fractions) {
+         const size_t splitGrid  = tiles * frac;
+         const size_t itersPerCU = iters_per_tile / frac;
+-        if (splitGrid <= cu_count && itersPerCU >= MinItersPerCU) {
++        if (splitGrid <= small_budget && itersPerCU >= MinItersPerCU) {
+           sk_grid = splitGrid;
+           break;
+         }

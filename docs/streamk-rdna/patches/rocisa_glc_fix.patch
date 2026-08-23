@@ -1,0 +1,51 @@
+diff --git a/projects/hipblaslt/tensilelite/rocisa/rocisa/include/instruction/mem.hpp b/projects/hipblaslt/tensilelite/rocisa/rocisa/include/instruction/mem.hpp
+index 841c7feaf4c..1494dd745fe 100644
+--- a/projects/hipblaslt/tensilelite/rocisa/rocisa/include/instruction/mem.hpp
++++ b/projects/hipblaslt/tensilelite/rocisa/rocisa/include/instruction/mem.hpp
+@@ -2218,7 +2218,18 @@ namespace rocisa
+         std::string toString() const override
+         {
+             std::string kStr = instStr + " " + getArgStr();
+-            kStr += " th:TH_ATOMIC_RETURN";
++            // Returning-atomic modifier, spelled per target -- the same split
++            // GlobalAtomicIncU32Saddr uses:
++            //   gfx12+ (HasTHModifier) -> th:TH_ATOMIC_RETURN
++            //   gfx11 / CDNA           -> glc (or sc0; getGlcBitName() picks per caps)
++            // Emitting th: unconditionally makes this unassemblable on gfx11. GSU reaches
++            // it whenever HasScalarStore is false (GSU.py:1121 takes its else branch), and
++            // gfx1100 rejects s_store_b32 -- so every gfx11 GSU
++            // MultipleBufferSingleKernel kernel failed to build.
++            if(rocIsa::getInstance().getAsmCaps()["HasTHModifier"])
++                kStr += " th:TH_ATOMIC_RETURN";
++            else
++                kStr += " " + getGlcBitName();
+             if(flat)
+                 kStr += flat->toString();
+             kStr = formatWithComment(kStr);
+@@ -2332,12 +2343,23 @@ namespace rocisa
+         std::string toString() const override
+         {
+             // SADDR returning atomic: "global_atomic_inc_u32 vdst, vaddr, vsrc, saddr".
+-            // th:TH_ATOMIC_RETURN is emitted unconditionally; scope: (when the ISA caps
+-            // allow) is rendered first to match StinkyTofu's canonical order.
++            // scope: (when the ISA caps allow) is rendered first to match StinkyTofu's
++            // canonical order.
++            //
++            // The "returning" bit is spelled differently per generation and the wrong
++            // spelling is a hard assembler error, not a warning:
++            //   gfx12+ (HasTHModifier)  -> th:TH_ATOMIC_RETURN
++            //   gfx11 / CDNA            -> glc (or sc0; getGlcBitName() picks per caps)
++            // Emitting th: unconditionally made StreamK 4/5 fail to assemble on gfx1100
++            // with "error: not a valid operand", which is why no RDNA target ever shipped
++            // an SK4/SK5 kernel. gfx1100 supports the operation, just under the old name.
+             std::string kStr = instStr + " " + getArgStr();
+             if(modifier)
+                 kStr += modifier->toString();
+-            kStr += " th:TH_ATOMIC_RETURN";
++            if(rocIsa::getInstance().getAsmCaps()["HasTHModifier"])
++                kStr += " th:TH_ATOMIC_RETURN";
++            else
++                kStr += " " + getGlcBitName();
+             kStr = formatWithComment(kStr);
+             setMsb(kStr, {vaddr, srcData, saddr}, dst);
+             return kStr;

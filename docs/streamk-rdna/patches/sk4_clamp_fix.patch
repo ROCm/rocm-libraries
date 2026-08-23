@@ -1,0 +1,18 @@
+diff --git a/projects/hipblaslt/tensilelite/src/ContractionSolution.cpp b/projects/hipblaslt/tensilelite/src/ContractionSolution.cpp
+index 38f8b1df110..606c27c4142 100644
+--- a/projects/hipblaslt/tensilelite/src/ContractionSolution.cpp
++++ b/projects/hipblaslt/tensilelite/src/ContractionSolution.cpp
+@@ -792,6 +792,13 @@ namespace TensileLite
+                     skTiles = overrideTiles;
+                 if (overrideSplit > -1)
+                     skSplit = overrideSplit;
++                // Cap Stream-K tiles at the total tile count. Without this a
++                // TENSILE_STREAMK_TILES larger than the problem's tile count makes
++                // (tiles - skTiles) wrap around in uint32, so totalItems exceeds the
++                // number of real tiles and work items index tiles that do not exist --
++                // observed as "unspecified launch failure". The StreamK=3 path already
++                // does exactly this (see skTiles = std::min(skTiles, tiles) below).
++                skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
+                 // Calculate number of stream-k iterations per workitem
+                 uint32_t skItersPerWI = CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit);
+                 // Calculate real splitting factor in case iterations don't divide evenly
