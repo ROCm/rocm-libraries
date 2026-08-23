@@ -114,27 +114,54 @@ std::vector<std::filesystem::path> packedArchShards()
 // The packed tree parses at all
 // ---------------------------------------------------------------------------
 
-/// Every descriptor the packer wrote is one the loader accepts.
+/// EVERY descriptor the packer wrote is one the loader accepts -- counted, not sampled.
 ///
-/// The direct guard for the schema defect. `loadDescriptorCatalog` never throws: it logs
-/// and skips a file it cannot parse, so a tree authored to an invented schema loads as an
-/// EMPTY catalog and reports success to a caller that does not look. Counting what came
-/// back is what separates "loaded" from "silently dropped everything" -- the assertion a
-/// green packer suite could not make.
-TEST(TestPackedDescriptorLoad, EveryPackedShardYieldsANonEmptyCatalog)
+/// The direct guard for the schema defect, and the assertion has to be a COUNT rather
+/// than a non-empty check. `loadDescriptorCatalog` never throws: it logs a file it cannot
+/// parse and skips it. So a single unloadable descriptor does not fail anything, it
+/// silently DISAPPEARS -- and every later assertion in this file then iterates whatever
+/// survived and passes.
+///
+/// Mutation-testing this file caught exactly that: three mutations that made a descriptor
+/// unloadable were survived by an earlier `EXPECT_FALSE(empty())` version of this test,
+/// because one engine vanishing still leaves a non-empty catalog. "At least one" is the
+/// wrong floor for a guard whose whole job is to notice a drop.
+///
+/// So: count the `.ued.json` / `.kdp.json` files actually on disk in the shard, and
+/// require the loader to account for every one of them.
+TEST(TestPackedDescriptorLoad, EveryPackedDescriptorInTheShardIsLoaded)
 {
     REQUIRE_PACKED_SHARDS(shards);
 
     for(const auto& shard : shards)
     {
+        size_t engineFiles = 0;
+        size_t packFiles = 0;
+
+        std::error_code ec;
+        for(const auto& entry : std::filesystem::recursive_directory_iterator(shard, ec))
+        {
+            const auto name = entry.path().filename().string();
+            if(name.size() > 9 && name.compare(name.size() - 9, 9, ".ued.json") == 0)
+            {
+                ++engineFiles;
+            }
+            else if(name.size() > 9 && name.compare(name.size() - 9, 9, ".kdp.json") == 0)
+            {
+                ++packFiles;
+            }
+        }
+
         const DescriptorCatalog catalog = loadDescriptorCatalog(shard);
 
-        EXPECT_FALSE(catalog.engines.empty())
-            << shard
-            << " produced no engine descriptors. Either the packer emitted a shape "
-               "the loader rejects (each rejection is logged at ERROR naming the "
-               "file and the reason), or it emitted nothing at all.";
-        EXPECT_FALSE(catalog.packs.empty()) << shard << " produced no kernel descriptor packs.";
+        EXPECT_EQ(catalog.engines.size(), engineFiles)
+            << shard << " holds " << engineFiles << " .ued.json file(s) but the loader "
+            << "accepted " << catalog.engines.size()
+            << ". A descriptor the loader rejects is logged at ERROR and SKIPPED, never "
+               "raised -- so a shortfall here is a descriptor that silently vanished.";
+        EXPECT_EQ(catalog.packs.size(), packFiles)
+            << shard << " holds " << packFiles << " .kdp.json file(s) but the loader accepted "
+            << catalog.packs.size() << ".";
     }
 }
 

@@ -439,9 +439,50 @@ private:
         }
     }
 
+    /// True iff the strides are exactly the packed ROW-MAJOR strides for these dims,
+    /// i.e. walking memory linearly visits the logical elements in index order.
+    ///
+    /// isPacked() is NOT that question, and using it here was a bug. It asks whether
+    /// elementCount == elementSpace, which any PERMUTATION of the strides also
+    /// satisfies -- a [B,H,S,D] tensor declared with BSHD strides spans exactly the
+    /// same memory as one declared BHSD, so isPacked() is true for both while their
+    /// index orders differ. Iterating such a tensor with LinearIndex then visits
+    /// memory in the wrong logical order, silently: a random fill writes values that
+    /// do not correspond to the coordinates a later stride-aware read (getIndexImpl,
+    /// which honours strides) will fetch them by. Reads and writes disagree, and the
+    /// only symptom is wrong numbers far downstream.
+    ///
+    /// RFC 0014 §7.2 records the same conflation from the ragged-tensor side and
+    /// proposes splitting the predicate; this is the iteration half of that split,
+    /// scoped to the one caller whose correctness depends on ORDER rather than extent.
+    static bool visitsInIndexOrder(const ITensor& tensor)
+    {
+        const auto& dims = tensor.dims();
+        const auto& strides = tensor.strides();
+        if(dims.size() != strides.size())
+        {
+            return false;
+        }
+
+        int64_t expected = 1;
+        for(size_t axis = dims.size(); axis-- > 0;)
+        {
+            if(strides[axis] != expected)
+            {
+                return false;
+            }
+            expected *= dims[axis];
+        }
+        return true;
+    }
+
     IndexType makeIndex(TensorType tensor, bool isEnd)
     {
-        if(tensor.get().isPacked())
+        // isPacked() gates the FAST PATH; visitsInIndexOrder gates its CORRECTNESS.
+        // Both are required: a ragged tensor reports isPacked() false despite regular
+        // -looking strides (RFC 0014 §4.5.7), and a stride permutation reports true
+        // while iterating out of index order.
+        if(tensor.get().isPacked() && visitsInIndexOrder(tensor.get()))
         {
             return LinearIndex(tensor, isEnd);
         }
