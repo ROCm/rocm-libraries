@@ -240,6 +240,14 @@ const std::vector<std::unique_ptr<ISolversFinder>>& GetConvSolverFinders()
 /// MIOPEN_NAIVE_DISABLE_IF_ALT (naive_disable, default on) gates the whole policy;
 /// unset it to force Naive to always compete. The AlwaysEnable debug path
 /// (reference/verification) is never skipped so golden references still run.
+/// A solver is Naive iff its id contains "Naive" (ConvDirectNaiveConv{Fwd,Bwd,Wrw}).
+/// Single source of truth for the string test used by both the per-solver skip check
+/// and the FindCore "does any non-Naive solver apply" scan.
+static bool IsNaiveSolverId(const std::string& solver_id)
+{
+    return solver_id.find("Naive") != std::string::npos;
+}
+
 static bool ShouldSkipNaiveBenchmark(bool is_naive,
                                      bool naive_disable,
                                      bool non_naive_exists,
@@ -269,10 +277,6 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     if(!arch.empty())
         return ret;
 
-    const auto is_naive_solver = [](const solver::ConvSolution& s) {
-        return s.solver_id.find("Naive") != std::string::npos;
-    };
-
     bool naive_disable       = env::value(MIOPEN_NAIVE_DISABLE_IF_ALT);
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
     auto selected            = miopen::solver::ConvSolution{miopenStatusUnknownError};
@@ -282,7 +286,7 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
     for(const auto& sol : solutions)
     {
-        const bool is_naive = is_naive_solver(sol);
+        const bool is_naive = IsNaiveSolverId(sol.solver_id);
         if(ShouldSkipNaiveBenchmark(is_naive, naive_disable, non_naive_exists, naive_exceeds_work))
         {
             MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
@@ -290,8 +294,16 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             continue;
         }
         if(naive_disable && is_naive)
-            MIOPEN_LOG_I("Unable to Skip Naive Solver: " << algorithm_name.ToString() << ":"
-                                                         << sol.solver_id);
+        {
+            // Naive is being kept in the benchmark set even though the skip policy is on.
+            // Name the reason so this reads as an expected retention, not an anomaly.
+            const auto* reason = miopen::debug::AlwaysEnableConvDirectNaive ? "reference-forced"
+                                 : !non_naive_exists   ? "sole applicable solver"
+                                 : !naive_exceeds_work ? "below work limit"
+                                                       : "skip criteria not met";
+            MIOPEN_LOG_I("Retaining Naive Solver (" << reason << "): " << algorithm_name.ToString()
+                                                    << ":" << sol.solver_id);
+        }
 
         if(!conv::IsEnoughWorkspace(
                "EvaluateInvokers", solver::Id{sol.solver_id}, sol.workspace_sz, &invoke_ctx))
@@ -506,7 +518,7 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
     const bool non_naive_exists =
         std::any_of(solutions.begin(), solutions.end(), [](const auto& g) {
             return std::any_of(g.second.begin(), g.second.end(), [](const auto& s) {
-                return s.solver_id.find("Naive") == std::string::npos;
+                return !IsNaiveSolverId(s.solver_id);
             });
         });
     const auto* conv_problem = dynamic_cast<const conv::ProblemDescription*>(&problem);
@@ -529,6 +541,36 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
         ret.solutions.insert(ret.solutions.end(),
                              std::make_move_iterator(evaluated.begin()),
                              std::make_move_iterator(evaluated.end()));
+    }
+
+    // Universal-fallback guarantee. The work gate skips *benchmarking* Naive when a
+    // non-Naive solver is applicable, but applicability is not success: every non-Naive
+    // candidate can still be rejected at evaluation (e.g. insufficient workspace). If
+    // that leaves no solution at all, we would otherwise fail the convolution outright
+    // even though the un-tiled Naive kernel could have served it. Re-evaluate with the
+    // skip disabled so Naive remains the true universal fallback. This only triggers in
+    // the rare empty-result case, and the already-rejected non-Naive candidates are
+    // re-rejected cheaply (workspace-filtered before any kernel launch).
+    if(ret.solutions.empty() && non_naive_exists && naive_exceeds_work)
+    {
+        MIOPEN_LOG_I("No solver survived evaluation; re-running with the Naive benchmark "
+                     "re-enabled as a last-resort fallback.");
+        for(const auto& ss : solutions)
+        {
+            auto evaluated = EvaluateInvokers(handle,
+                                              ss.second,
+                                              ss.first,
+                                              network_config,
+                                              invoke_ctx,
+                                              ret,
+                                              force_attach_binary,
+                                              /*non_naive_exists=*/false,
+                                              /*naive_exceeds_work=*/false);
+
+            ret.solutions.insert(ret.solutions.end(),
+                                 std::make_move_iterator(evaluated.begin()),
+                                 std::make_move_iterator(evaluated.end()));
+        }
     }
 
     return ret;

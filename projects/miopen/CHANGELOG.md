@@ -9,6 +9,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Fixed silently incorrect results from the grouped backward-weights CK xdlops solver when a tensor's element extent exceeds INT_MAX but its individual lengths and strides still fit int32; such problems now use a large-tensor (int64) CK instance instead of overflowing int32 indexing.
 * [Conv] Fixed a GPU driver watchdog reset (TDR) that could occur while find benchmarked the un-tiled naive convolution solver on very large problems (e.g. VAE-decode and 3D convolutions). Naive is now skipped during find when a non-naive solver is applicable and the problem's total MAC work exceeds a threshold (~16 GMAC, overridable via `MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK`). Naive still runs when it is the only applicable solver, and small problems where it is fastest continue to compete.
 
+### Removed
+* [Conv] Removed the `MIOPEN_CONV_DIRECT_MAX_SIZE` environment variable (an output-element-count threshold that disabled the entire Direct algorithm). It was a poor proxy for kernel launch cost and is superseded by the naive-conv work gate described above.
+
 ## MIOpen 3.6.0 for ROCm 10.0.0
 ### Added
 * [Conv] Added gfx950 (MI350X/MI355X) 7x7 depthwise forward and backward-data convolution support (fp16/bf16), fixing a slow fallback-to-naive-kernel regression in ConvNeXt-style depthwise convolutions.
