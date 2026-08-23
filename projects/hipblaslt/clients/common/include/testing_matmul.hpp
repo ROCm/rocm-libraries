@@ -1942,7 +1942,56 @@ void testing_matmul_with_bias(const Arguments& arg,
     bool                   HMM                     = arg.HMM;
     hipblaslt_local_handle handle{arg};
     hipStream_t            stream;
-    CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    // HIPBLASLT_BENCH_CU_MASK=<n> restricts this benchmark stream to the first n CUs, so a
+    // larger part can be measured as if it were a smaller one (e.g. 60 CUs = navi32 on a
+    // 96-CU navi31). Unset -> plain hipStreamCreate, byte-identical to stock.
+    //
+    // This is deliberately NOT ROC_GLOBAL_CU_MASK: that env var was measured to be cosmetic
+    // here -- it changes hipGetDeviceProperties().multiProcessorCount (48 -> 30) but neither
+    // restricts execution (4096^3 throughput was 100.4% of unmasked) nor reaches hipBLASLt's
+    // selector (DYNAMIC_GRID=0, whose grid IS computeUnitCount, still read 48). A per-stream
+    // mask is the only mechanism that actually removes CUs from the launch.
+    if(const char* cuEnv = std::getenv("HIPBLASLT_BENCH_CU_MASK"))
+    {
+        const int wantCus = std::atoi(cuEnv);
+        if(wantCus > 0)
+        {
+            hipDeviceProp_t props;
+            CHECK_HIP_ERROR(hipGetDeviceProperties(&props, 0));
+            // MEASURED SEMANTICS: each bit of the HIP CU mask selects a WGP, not a CU. On
+            // RDNA a WGP is two CUs, and multiProcessorCount already reports WGPs. Setting
+            // 60 bits therefore asks for 60 WGPs = 120 CUs, which on a 48-WGP part is no
+            // restriction at all -- that is exactly why a naive 60-bit mask measured 100%
+            // of unmasked throughput. This env var takes CUs (the number a user thinks in,
+            // e.g. 60 for navi32) and converts.
+            //
+            // Verified on a 96-CU gfx1100: 30 WGP -> 55.1 TFLOP/s vs 82.4 at 48 WGP = 66.9%,
+            // against an ideal 30/48 = 62.5%. 16 WGP -> 34.1% and 32 WGP -> 64.4% of the
+            // unmasked figure, i.e. it tracks WGP count as expected.
+            const uint32_t totalWgps = static_cast<uint32_t>(props.multiProcessorCount);
+            uint32_t       wantWgps  = static_cast<uint32_t>((wantCus + 1) / 2);
+            // A mask asking for more WGPs than exist does NOT error -- it HANGS the launch.
+            if(wantWgps > totalWgps)
+            {
+                hipblaslt_cerr << "[bench] CU mask " << wantCus << " CUs needs " << wantWgps
+                               << " WGPs but device has only " << totalWgps
+                               << "; clamping (an over-range mask hangs the GPU)" << std::endl;
+                wantWgps = totalWgps;
+            }
+            const uint32_t        maskWords = (totalWgps + 31u) / 32u;
+            std::vector<uint32_t> cuMask(maskWords, 0u);
+            for(uint32_t i = 0; i < wantWgps; ++i)
+                cuMask[i / 32] |= (1u << (i % 32));
+            CHECK_HIP_ERROR(hipExtStreamCreateWithCUMask(&stream, maskWords, cuMask.data()));
+            hipblaslt_cout << "[bench] CU mask active: " << wantWgps << " of " << totalWgps
+                           << " WGPs = " << wantWgps * 2 << " of " << totalWgps * 2 << " CUs"
+                           << std::endl;
+        }
+        else
+            CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    }
+    else
+        CHECK_HIP_ERROR(hipStreamCreate(&stream));
 
     hipEvent_t event_gpu_time_start, event_gpu_time_end;
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
