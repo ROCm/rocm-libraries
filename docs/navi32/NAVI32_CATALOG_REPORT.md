@@ -524,3 +524,31 @@ on this hardware.**
 Note the count/time inversion: memory-bound shapes are **49% of the shape count but 7.3% of
 kernel time**. Reporting this split by shape count instead would have made the untestable
 region look like half the suite.
+
+---
+
+## P4 — Catalog extension: closed on evidence, not run
+
+The plan's next phase was to extend the catalog beyond navi31's 298 solutions and distil.
+An oracle over what was already built shows the expected value is small:
+
+| selector | wall-clock vs shipped | vs `gridcat` |
+|---|---|---|
+| shipped navi32 (73, GridBased) | 100.00% | 80.70% |
+| **`gridcat` (298, GridBased)** | **123.91%** | 100.00% |
+| ORACLE best-of-4-arms | 127.43% | **+2.84%** |
+| ORACLE best of `gridcat`/`pred298` | 126.90% | +2.41% |
+
+**A perfect per-shape selector over every arm built in this campaign beats `gridcat` by only
+2.8%.** Going 73 -> 298 solutions captured +24%; perfect selection over the resulting pool
+would add 2.8% more. `gridcat` is already the best of the four arms on **542 of 996 shapes
+(54.4%)**.
+
+So the pool is no longer the binding constraint, and neither is selection within it. Spending
+hours adding kernels to a pool whose oracle is nearly exhausted is poor value against a 20 h
+budget — better to stop with a measured, shipped +24% than to chase a bounded 2.8%.
+
+**What this does NOT say.** The oracle spans two pools (73 and 298) under two selectors. It
+bounds *recombining what exists*; it says nothing about what a catalog tuned natively for
+60 CUs could achieve, since every kernel here was tuned for navi31's 96. That remains the
+real open question, and it needs a tuning campaign on navi32 hardware — not more porting.
