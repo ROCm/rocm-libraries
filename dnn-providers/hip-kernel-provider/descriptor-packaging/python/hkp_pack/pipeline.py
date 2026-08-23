@@ -691,7 +691,7 @@ def run_pipeline(
             results[arch] = replace(
                 result,
                 out_dir=out_arch_dir,
-                kpack_path=out_arch_dir / "kpack" / _kpack_filename(arch),
+                kpack_path=out_arch_dir / KPACK_DIR_NAME / _kpack_filename(arch),
             )
         except HkpPackError as exc:
             # One arch failing must not destroy the other arches' work: a
