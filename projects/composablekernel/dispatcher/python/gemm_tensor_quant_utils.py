@@ -410,7 +410,14 @@ class TensorQuantGpuGemmRunner:
 
 
 def _detect_gpu_arch() -> str:
-    """Detect current GPU arch via rocm_agent_enumerator. Falls back to gfx950."""
+    """Detect current GPU arch via rocm_agent_enumerator. Raises if none found.
+
+    The WarpTileK arch rule (128 on gfx950, 32 on gfx942) is a silent wrong-answer
+    trap: the wrong value compiles cleanly and produces all-zero output. Silently
+    defaulting to gfx950 on a gfx942 host would trigger this. Raise instead,
+    matching the behaviour of every sibling utility (aquant, bquant, rowcolquant,
+    abquant).
+    """
     try:
         result = subprocess.run(
             ["rocm_agent_enumerator"],
@@ -419,10 +426,13 @@ def _detect_gpu_arch() -> str:
         for line in result.stdout.splitlines():
             line = line.strip()
             if line.startswith("gfx") and line != "gfx000":
-                return line
-    except Exception:
-        pass
-    return _DEFAULT_GFX_ARCH
+                return _validate_arch(line)
+    except Exception as e:
+        raise RuntimeError(f"Could not detect GPU arch via rocm_agent_enumerator: {e}")
+    raise RuntimeError(
+        "No supported GPU architecture detected; pass gfx_arch explicitly "
+        f"(supported: {', '.join(_SUPPORTED_ARCHS)})"
+    )
 
 
 def _get_ck_include_dir() -> Optional[Path]:
