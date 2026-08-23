@@ -174,6 +174,80 @@ class ResolveRefTest(unittest.TestCase):
         self.assertEqual(result.warnings, [])
 
 
+class BaselineValidationTest(unittest.TestCase):
+    def test_exact_match_is_accepted(self):
+        sha = "a" * 40
+        client = FakeClient(named_commit=Commit(sha=sha, committed_at=dt(1)))
+
+        result = rtr.validate_baseline(
+            client,
+            therock_repo="ROCm/TheRock",
+            current_ref=sha,
+            baseline_ref=sha,
+            baseline_run_id="12345",
+        )
+
+        self.assertTrue(result.compatible)
+        self.assertEqual(result.validated_run_id, "12345")
+        self.assertEqual(client.calls, ["get_commit"])
+
+    def test_different_ref_is_rejected(self):
+        current_sha = "a" * 40
+        baseline_sha = "b" * 40
+        client = FakeClient(named_commit=Commit(sha=baseline_sha, committed_at=dt(1)))
+
+        result = rtr.validate_baseline(
+            client,
+            therock_repo="ROCm/TheRock",
+            current_ref=current_sha,
+            baseline_ref=baseline_sha,
+            baseline_run_id="12345",
+        )
+
+        self.assertFalse(result.compatible)
+        self.assertEqual(result.validated_run_id, "")
+        self.assertIn("does not match", result.reason)
+
+    def test_empty_baseline_pair_is_rejected(self):
+        client = FakeClient()
+
+        result = rtr.validate_baseline(
+            client,
+            therock_repo="ROCm/TheRock",
+            current_ref="a" * 40,
+            baseline_ref="",
+            baseline_run_id="",
+        )
+
+        self.assertFalse(result.compatible)
+        self.assertEqual(result.validated_run_id, "")
+        self.assertIn("No complete baseline", result.reason)
+
+        # Important: should fail before making any GitHub call.
+        self.assertEqual(client.calls, [])
+
+    def test_github_api_failure_is_rejected(self):
+        class FailingClient(FakeClient):
+            def get_commit(self, repo: str, ref: str) -> Commit:
+                self.calls.append("get_commit")
+                raise rtr.requests.RequestException("GitHub API failure")
+
+        client = FailingClient()
+
+        result = rtr.validate_baseline(
+            client,
+            therock_repo="ROCm/TheRock",
+            current_ref="a" * 40,
+            baseline_ref="b" * 40,
+            baseline_run_id="12345",
+        )
+
+        self.assertFalse(result.compatible)
+        self.assertEqual(result.validated_run_id, "")
+        self.assertIn("Could not prove baseline compatibility", result.reason)
+        self.assertEqual(client.calls, ["get_commit"])
+
+
 class BuildSummaryTest(unittest.TestCase):
     def _pr_resolution(self) -> rtr.Resolution:
         merge_base = Commit(sha="a" * 40, committed_at=dt(2))

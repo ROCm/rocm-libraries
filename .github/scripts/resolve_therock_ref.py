@@ -99,6 +99,15 @@ class Resolution:
     staleness_days: int = DEFAULT_STALENESS_DAYS
 
 
+@dataclass
+class BaselineValidation:
+    """Result of validating a baseline against the resolved TheRock ref."""
+
+    compatible: bool
+    validated_run_id: str = ""
+    reason: str = ""
+
+
 class GitHubClient(Protocol):
     """Minimal GitHub read surface the resolver depends on (for testability)."""
 
@@ -237,6 +246,55 @@ def resolve_ref(
     return resolution
 
 
+def validate_baseline(
+    client: GitHubClient,
+    *,
+    therock_repo: str,
+    current_ref: str,
+    baseline_ref: str,
+    baseline_run_id: str,
+) -> BaselineValidation:
+    """Validate that a pinned baseline matches current_ref.
+
+    The ci-env baseline is accepted only when its associated TheRock
+    commit exactly matches the TheRock commit resolved for this run.
+
+    Any failure to prove compatibility fails closed: the baseline is
+    discarded and CI can rebuild instead.
+    """
+    baseline_ref = baseline_ref.strip()
+    baseline_run_id = baseline_run_id.strip()
+
+    if not baseline_ref or not baseline_run_id:
+        return BaselineValidation(
+            compatible=False,
+            reason="No complete baseline ref/run pair was provided.",
+        )
+
+    try:
+        baseline_commit = client.get_commit(therock_repo, baseline_ref)
+    except (requests.RequestException, KeyError, ValueError) as exc:
+        return BaselineValidation(
+            compatible=False,
+            reason=f"Could not prove baseline compatibility: {exc}",
+        )
+
+    if baseline_commit.sha == current_ref:
+        return BaselineValidation(
+            compatible=True,
+            validated_run_id=baseline_run_id,
+            reason="Baseline TheRock commit matches current TheRock commit.",
+        )
+
+    return BaselineValidation(
+        compatible=False,
+        reason=(
+            f"Baseline TheRock commit {baseline_commit.sha[:12]} does not "
+            f"match current TheRock commit {current_ref[:12]}."
+        ),
+    )
+
+
 def _is_merge_base_mode(resolution: Resolution) -> bool:
     """True when the ref was pinned from a PR merge-base (vs. override/live-tip)."""
     return resolution.merge_base is not None
@@ -369,6 +427,11 @@ def main() -> None:
     base_sha = os.environ.get("BASE_SHA", "")
     head_sha = os.environ.get("HEAD_SHA", "")
     override = os.environ.get("THEROCK_REF_OVERRIDE", "").strip()
+
+    # Baseline information passed from ci-env.
+    baseline_therock_ref = os.environ.get("BASELINE_THEROCK_REF", "").strip()
+    baseline_run_id = os.environ.get("BASELINE_RUN_ID", "").strip()
+
     therock_repo = os.environ.get("THEROCK_REPO", DEFAULT_THEROCK_REPO)
     therock_branch = os.environ.get("THEROCK_BRANCH", DEFAULT_THEROCK_BRANCH)
     staleness_days = int(
@@ -388,7 +451,29 @@ def main() -> None:
         staleness_days=staleness_days,
     )
 
-    set_github_output({"therock_ref": resolution.therock_ref})
+    # Validate the ci-env baseline against the resolved TheRock commit.
+    baseline_validation = validate_baseline(
+        client,
+        therock_repo=therock_repo,
+        current_ref=resolution.therock_ref,
+        baseline_ref=baseline_therock_ref,
+        baseline_run_id=baseline_run_id,
+    )
+
+    # Surface why the pinned baseline was rejected.
+    if baseline_run_id and not baseline_validation.compatible:
+        resolution.warnings.append(
+            "Pinned baseline was not used: " + baseline_validation.reason
+        )
+
+    # Output both the resolved ref and validated baseline information.
+    set_github_output(
+        {
+            "therock_ref": resolution.therock_ref,
+            "validated_baseline_run_id": baseline_validation.validated_run_id,
+            "baseline_compatible": str(baseline_validation.compatible).lower(),
+        }
+    )
     append_step_summary(build_summary(resolution))
 
 
