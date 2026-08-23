@@ -147,20 +147,25 @@ repos:
         # both carry a literal copy that this hook holds equal.
         entry: >-
           bash -c '
-          set -euo pipefail;
+          set -uo pipefail;
           src=.github/actions/ci-env/action.yml;
-          pin=$(sed -n "/^  kpack-ref:/,/^  [a-z]/p" "$src"
-          | grep -oE "\"[0-9a-f]{40}\"" | tr -d "\"");
+          read_file() {
+          if [ -f "$1" ]; then cat "$1";
+          else git show "HEAD:$1" 2>/dev/null; fi;
+          };
+          pin=$(read_file "$src"
+          | sed -n "/^  kpack-ref:/,/^  [a-z]/p"
+          | grep -oE "[0-9a-f]{40}" | head -1);
           test -n "$pin" || { echo "kpack pin: no 40-char kpack-ref SHA in $src" >&2; exit 1; };
           check() {
-          got=$(grep -oE "$2[0-9a-f]{40}" "$1" | grep -oE "[0-9a-f]{40}" || true);
+          got=$(read_file "$1" | grep -oE "$2[0-9a-f]{40}" | grep -oE "[0-9a-f]{40}" | head -1);
           test -n "$got" || { echo "kpack pin: no pinned SHA in $1" >&2; exit 1; };
           test "$got" = "$pin" || { echo "kpack pin: $1 has $got, expected $pin from $src" >&2; exit 1; };
           };
           check dnn-providers/hip-kernel-provider/cmake/KpackPython.cmake
           "^set\(HIPKERNELPROVIDER_KPACK_GIT_REF \"";
           check projects/hipdnn/dockerfiles/Dockerfile.ubuntu24
-          "^ARG ROCM_SYSTEMS_KPACK_PINNED_REF=";
+          "^ARG ROCM_SYSTEMS_KPACK_REF=";
           '
         language: system
         # The source of truth, or either copy. The check always inspects the

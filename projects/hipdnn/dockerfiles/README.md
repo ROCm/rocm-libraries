@@ -48,7 +48,7 @@ building against a local rocm-systems checkout. See
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `ROCM_SYSTEMS_KPACK_REF` | value of `ROCM_SYSTEMS_REF`, else a pinned commit | Git ref of [rocm-systems](https://github.com/ROCm/rocm-systems) to take `shared/kpack` from. Only `shared/kpack` is checked out. A branch, a tag, or a **full** commit SHA — the git wire protocol cannot fetch an abbreviated one. |
+| `ROCM_SYSTEMS_KPACK_REF` | a pinned commit | Git ref of [rocm-systems](https://github.com/ROCm/rocm-systems) to take `shared/kpack` from. Only `shared/kpack` is checked out. A branch, a tag, or a **full** commit SHA — the git wire protocol cannot fetch an abbreviated one. Independent of `ROCM_SYSTEMS_REF`, which selects TheRock's rocm-systems submodule. |
 
 > [!NOTE]
 > The default is a pinned commit, not a branch: Docker keys a layer on the command string, so a
