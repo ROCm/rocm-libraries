@@ -375,7 +375,14 @@ def load_flat_input(root, log=print):
         # intermixed with the archive -- today they survive only because the
         # archive happens to be written last. Refuse the name rather than depend
         # on write order.
-        if rel_dir.parts and rel_dir.parts[0] == KPACK_DIR_NAME:
+        # Compared case-insensitively. On Linux `KPACK/` and `kpack/` are
+        # distinct directories and coexist harmlessly (verified), so a
+        # case-sensitive check would be correct here -- but the packed tree also
+        # gets built and consumed on Windows, where they are the SAME directory
+        # and the collision this guard exists to prevent comes back. Rejecting
+        # both spellings costs an author nothing and keeps the rule identical on
+        # every platform.
+        if rel_dir.parts and rel_dir.parts[0].lower() == KPACK_DIR_NAME:
             raise HkpPackError(
                 f"authored folder '{KPACK_DIR_NAME}/' is reserved: it is where "
                 f"the per-arch archive is written, and every packed UKD's "
