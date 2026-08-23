@@ -46,25 +46,37 @@ include_guard(GLOBAL)
 # directories agreeing: PYTHON_DIR names <root>/python while RUNTIME_DIR names
 # <root>, and demanding a particular relationship between them would forbid the
 # legitimate case of a python/ tree relocated beside its source root.
-set(_kpack_py_set FALSE)
-set(_kpack_rt_set FALSE)
-if(DEFINED HIPKERNELPROVIDER_KPACK_PYTHON_DIR AND HIPKERNELPROVIDER_KPACK_PYTHON_DIR)
-    set(_kpack_py_set TRUE)
-endif()
-if(DEFINED HIPKERNELPROVIDER_KPACK_RUNTIME_DIR AND HIPKERNELPROVIDER_KPACK_RUNTIME_DIR)
-    set(_kpack_rt_set TRUE)
-endif()
-if(NOT _kpack_py_set STREQUAL _kpack_rt_set)
-    message(FATAL_ERROR
-        "rocm-kpack: HIPKERNELPROVIDER_KPACK_PYTHON_DIR (packer) and "
-        "HIPKERNELPROVIDER_KPACK_RUNTIME_DIR (reader) must be set together or "
-        "not at all. Setting one leaves the other on the pinned fetch, so the "
-        "packer and the runtime resolve DIFFERENT rocm-kpack trees -- the exact "
-        "format skew the shared pin exists to prevent.\n"
-        "  PYTHON_DIR  = '${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}'\n"
-        "  RUNTIME_DIR = '${HIPKERNELPROVIDER_KPACK_RUNTIME_DIR}'\n"
-        "Set both against one tree: RUNTIME_DIR=<root>, PYTHON_DIR=<root>/python.")
-endif()
+# Wrapped in a function and called from each resolver, not run once at include
+# time. include_guard(GLOBAL) means this module's body executes ONCE: a consumer
+# that includes RocmKpack, then sets one of these, then includes again would
+# skip a top-level check entirely (reproduced). Validating where the variables
+# are actually consumed makes that sequence impossible.
+function(rocm_kpack_assert_overrides_paired)
+    set(_py FALSE)
+    set(_rt FALSE)
+    if(DEFINED HIPKERNELPROVIDER_KPACK_PYTHON_DIR AND HIPKERNELPROVIDER_KPACK_PYTHON_DIR)
+        set(_py TRUE)
+    endif()
+    if(DEFINED HIPKERNELPROVIDER_KPACK_RUNTIME_DIR AND HIPKERNELPROVIDER_KPACK_RUNTIME_DIR)
+        set(_rt TRUE)
+    endif()
+    if(NOT _py STREQUAL _rt)
+        message(FATAL_ERROR
+            "rocm-kpack: HIPKERNELPROVIDER_KPACK_PYTHON_DIR (packer) and "
+            "HIPKERNELPROVIDER_KPACK_RUNTIME_DIR (reader) must be set together or "
+            "not at all. Setting one leaves the other on the pinned fetch, so the "
+            "packer and the runtime resolve DIFFERENT rocm-kpack trees -- the exact "
+            "format skew the shared pin exists to prevent.\n"
+            "  PYTHON_DIR  = '${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}'\n"
+            "  RUNTIME_DIR = '${HIPKERNELPROVIDER_KPACK_RUNTIME_DIR}'\n"
+            "Set both against one tree: RUNTIME_DIR=<root>, PYTHON_DIR=<root>/python.")
+    endif()
+endfunction()
+
+# Belt: catch a half-applied override at include time, which is the common case
+# and gives the earliest diagnostic. Braces: each resolver calls it again, so a
+# variable mutated between two includes cannot slip past the include_guard.
+rocm_kpack_assert_overrides_paired()
 
 # The default ref is pinned to a known-good SHA for reproducible builds. Override
 # the ref to test a newer kpack: set HIPKERNELPROVIDER_KPACK_GIT_REF to any SHA,
@@ -125,6 +137,7 @@ endfunction()
 #   fatal; this function only resolves.
 # ---------------------------------------------------------------------------
 function(rocm_kpack_python_dir out_var)
+    rocm_kpack_assert_overrides_paired()
     rocm_kpack_populate()
     set(${out_var} "${ROCM_KPACK_SOURCE_DIR}/python" PARENT_SCOPE)
 endfunction()
@@ -215,6 +228,7 @@ endfunction()
 #   always populated, for consumers needing an upstream file such as a test asset.
 # ---------------------------------------------------------------------------
 function(rocm_kpack_add_runtime)
+    rocm_kpack_assert_overrides_paired()
     if(TARGET rocm_kpack)
         return()
     endif()
