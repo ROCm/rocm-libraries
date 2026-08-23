@@ -33,11 +33,8 @@ Reference:
         (GemmConfigQuantDecodeInterwave, GemmConfigPreshuffleQuantDecode)
 """
 
-import argparse
-import json
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, List, Optional
 
 from codegen_common import (
@@ -53,7 +50,6 @@ from codegen_common import (
     emit_quant_tile_shape,
     emit_single_kernel_include_footer,
     fp8_warp_tile_k_for_arch,
-    gemm_aquant_effective_epilogue,
     iter_quant_axes,
     make_gemm_aquant_kernel_name,
     run_codegen_cli,
@@ -80,8 +76,6 @@ AQUANT_VARIANTS: Dict[str, Dict[str, str]] = {
         "ck_c": "ck_tile::half_t",
         "ck_q": "float",
         "ck_acc": "float",
-        # PrecType passed to GemmConfig<PrecType> drives K_Tile = 256/sizeof(PrecType).
-        "prec_bytes": 1,
     },
     "bf8": {
         "ck_a": "ck_tile::bf8_t",
@@ -89,7 +83,6 @@ AQUANT_VARIANTS: Dict[str, Dict[str, str]] = {
         "ck_c": "ck_tile::half_t",
         "ck_q": "float",
         "ck_acc": "float",
-        "prec_bytes": 1,
     },
     "fp8i4": {
         "ck_a": "ck_tile::pk_int4_t",
@@ -97,8 +90,6 @@ AQUANT_VARIANTS: Dict[str, Dict[str, str]] = {
         "ck_c": "ck_tile::half_t",
         "ck_q": "ck_tile::fp8_t",
         "ck_acc": "float",
-        # GemmConfig<ck_tile::fp8_t> -> K_Tile = 256/sizeof(fp8_t) = 256.
-        "prec_bytes": 1,
     },
     "bf8i4": {
         "ck_a": "ck_tile::pk_int4_t",
@@ -106,7 +97,6 @@ AQUANT_VARIANTS: Dict[str, Dict[str, str]] = {
         "ck_c": "ck_tile::half_t",
         "ck_q": "ck_tile::bf8_t",
         "ck_acc": "float",
-        "prec_bytes": 1,
     },
 }
 
@@ -234,15 +224,8 @@ class AQuantKernelHeaderGenerator:
         preshuffle_aquant = str(spec.preshuffle_aquant).lower()
         double_smem_buffer = str(spec.double_smem_buffer).lower()
 
-        # AQuant configs never enable TiledMMAPermuteN (see gemm_aquant_effective_epilogue),
-        # so the epilogue is always CShuffle. Kept as a computed value for parity with
-        # the bquant codegen and to fail loudly if the assumption ever changes.
-        use_permute_n_epilogue = (
-            gemm_aquant_effective_epilogue(t.tile_n, t.warp_n, t.warp_tile_n, spec.quant_group_n)
-            == "permute_n"
-        )
-        assert not use_permute_n_epilogue, "AQuant does not support PermuteN epilogue"
-
+        # Always CShuffle: AQuant's configs never enable TiledMMAPermuteN, which
+        # gemm_aquant_effective_epilogue encodes by hardcoding the flag to False.
         epilogue_block = emit_quant_epilogue_block("cshuffle", ns)
         tile_dims = emit_quant_tile_dims(
             t, block_size=spec.block_size, k_block_per_cu=spec.k_block_per_cu
@@ -358,15 +341,6 @@ using SelectedKernel = {struct};
 # =============================================================================
 
 
-def _k_tile_for(variant_key: str) -> int:
-    """K_Tile = 256 / sizeof(PrecType) for the decode config.
-
-    PrecType is the 8-bit float weight type (fp8_t / bf8_t), so sizeof==1 and
-    K_Tile==256 for every supported variant (fp8, bf8, fp8i4, bf8i4).
-    """
-    return 256 // AQUANT_VARIANTS[variant_key]["prec_bytes"]
-
-
 def _default_config(gfx_arch: str = "gfx950") -> dict:
     """Default sweep config matching GemmConfigQuantDecodeInterwave tile defaults.
 
@@ -446,12 +420,6 @@ def _build_specs(config: dict) -> List[AQuantKernelSpec]:
         ))
 
     return specs
-
-
-# =============================================================================
-# Generation entry point
-# =============================================================================
-
 
 # =============================================================================
 # CLI

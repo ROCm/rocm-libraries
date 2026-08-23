@@ -34,12 +34,9 @@ Reference:
     example/ck_tile/38_block_scale_gemm/gemm_utils.hpp              (GemmConfig* structs)
 """
 
-import argparse
-import json
 import logging
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from codegen_common import (
     QUANT_LAYOUT_TO_CK,
@@ -506,12 +503,6 @@ def _build_specs(config: dict) -> List[ABQuantKernelSpec]:
         ))
 
     return specs
-
-
-# =============================================================================
-# Generation entry point
-# =============================================================================
-
 
 # =============================================================================
 # CLI

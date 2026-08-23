@@ -26,13 +26,10 @@ Reference:
     example/ck_tile/38_block_scale_gemm/gemm_utils.hpp  (GemmConfigQuantDecode)
 """
 
-import argparse
 import itertools
-import json
 import logging
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List
 
 from codegen_common import (
     make_bquant_kernel_name,
@@ -566,12 +563,6 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
 
     return specs
 
-
-# =============================================================================
-# Generation entry point
-# =============================================================================
-
-
 # =============================================================================
 # CLI
 # =============================================================================
@@ -580,7 +571,7 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
 def main() -> int:
     return run_codegen_cli(
         description="BQuantGrouped GEMM kernel header generator",
-        op_label="BQuant",
+        op_label="GroupedBQuant",
         make_generator=BQuantKernelHeaderGenerator,
         build_specs=_build_specs,
         default_config=_default_config,

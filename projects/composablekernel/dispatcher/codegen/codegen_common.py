@@ -4,11 +4,20 @@
 # SPDX-License-Identifier: MIT
 
 """
-Shared codegen infrastructure for GEMM, grouped convolution, and FMHA code generators.
+Shared codegen infrastructure for the unified_*_codegen.py kernel-header generators.
 
-Extracted from unified_gemm_codegen.py + arch-aware expansion helpers from conv.
-Both unified_gemm_codegen.py and unified_grouped_conv_codegen.py import from here
-to eliminate duplication.
+Started as the common core of unified_gemm_codegen.py plus the arch-aware expansion
+helpers from unified_grouped_conv_codegen.py. It now also carries the block-scale
+quant layer -- kernel-name and epilogue-selection rules, the emitters for the C++
+blocks every quant header shares, the spec-sweep plumbing, and the run_codegen_cli
+driver -- for the plain and grouped {a,b,ab,tensor,rowcol}quant generators.
+
+Two invariants live here and must not be re-derived anywhere else:
+
+* the KERNEL_NAME format, which is a byte-exact contract between codegen and the
+  Python runtime that dlopen()s the resulting .so, and
+* fp8_warp_tile_k_for_arch(), the arch -> WarpTileK rule, where a wrong value
+  compiles cleanly and then silently produces all-zero output on gfx942.
 """
 
 import argparse
@@ -775,25 +784,6 @@ def quant_decode_default_config(*, warp_tile_k: int, **overrides) -> dict:
 
 
 # ============================================================================
-# BQuant-specific Type Mappings
-# ============================================================================
-
-# CK qualified type names for BQuant dtype fields (A, B, C, Q).
-# Used by unified_bquant_gemm_codegen.py. Kept here so future AQuant/ABQuant
-# codegens can reuse the same map without duplication.
-BQUANT_DTYPE_MAP = {
-    "fp8":     "ck_tile::fp8_t",
-    "bf8":     "ck_tile::bf8_t",
-    "pk_int4": "ck_tile::pk_int4_t",
-    "pk_fp4":  "ck_tile::pk_fp4_t",
-    "half":    "ck_tile::half_t",
-    "bf16":    "ck_tile::bf16_t",
-    "float":   "float",
-    "e8m0":    "ck_tile::e8m0_t",
-}
-
-
-# ============================================================================
 # AQuant kernel name construction
 # ============================================================================
 
@@ -1519,6 +1509,3 @@ def run_codegen_cli(
         parallel=not args.no_parallel,
     )
     return 0 if paths else 1
-
-
-# ============================================================================

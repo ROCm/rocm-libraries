@@ -40,12 +40,9 @@ Reference:
     example/ck_tile/38_block_scale_gemm/gemm_utils.hpp  (GemmConfigQuantDecode etc.)
 """
 
-import argparse
-import json
 import logging
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from codegen_common import (
     QUANT_LAYOUT_TO_CK,
@@ -512,12 +509,6 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
 
     return specs
 
-
-# =============================================================================
-# Generation entry point
-# =============================================================================
-
-
 # =============================================================================
 # CLI
 # =============================================================================
@@ -526,7 +517,7 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
 def main() -> int:
     return run_codegen_cli(
         description="non-grouped gemm_bquant (block-scale) GEMM kernel header generator",
-        op_label="gemm_bquant",
+        op_label="BQuant",
         make_generator=BQuantKernelHeaderGenerator,
         build_specs=_build_specs,
         default_config=_default_config,
