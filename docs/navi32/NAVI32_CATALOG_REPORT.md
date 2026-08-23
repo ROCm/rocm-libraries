@@ -838,3 +838,33 @@ question, not a build-gate one, and the margin is far narrower than a 3x gap wou
 **This is reasoning, not measurement.** No navi33 hardware was involved and no navi33 emulation
 was attempted (the CU count differs *and* the VGPR file differs, so the emulation used here
 would not be faithful). Recorded so the next person starts from the right question.
+
+### navi33 buildability: all four catalogs pass the gfx1102 gate
+
+Extending the single-ProblemType test to all four, navi31's catalogs retargeted to gfx1102:
+
+| | |
+|---|---|
+| logic files | 4 (HHS, HHS+AuxH, BBS, BBS+AuxB) |
+| solutions staged | 1 233 |
+| kernels processed | **987** |
+| assembler errors | **0** |
+| `overflowedResources` (VGPR / occupancy) | **0** |
+| code objects | 4, every one `Flags: 0x47, gfx1102` |
+
+**Buildability is not a blocker for a navi33 port.** What remains unverified is *occupancy*:
+navi33 has 2/3 of navi31's per-CU VGPR file (65 536 vs 98 304), and this hardware cannot
+emulate a different VGPR file — only a different CU count. So the performance question needs
+real navi33 silicon, and this result should not be read as a performance claim.
+
+> **A false failure on the first attempt, worth recording.** The initial run reported
+> "2 assembler errors" and produced no code objects. It was neither: the grep pattern `error`
+> matched the word inside **`ImportError`**, and the actual cause was
+> *"rocisa C++ sources are newer than the built `_rocisa.so`"*. An earlier merge test in a
+> scratch branch had changed `hardware_caps.hpp`'s **mtime** — checking back out restores
+> file *contents* but not *timestamps*, and rocisa's staleness guard keys on mtime.
+> Rebuilding rocisa fixed it.
+>
+> Two habits to keep: **grep for the specific diagnostic, not the substring `error`** (which
+> also matches `ImportError`, `error_code`, `stderr`), and **expect environment residue after
+> a scratch-branch merge test** — the contents revert, the timestamps do not.
