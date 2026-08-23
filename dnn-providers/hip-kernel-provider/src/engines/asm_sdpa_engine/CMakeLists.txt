@@ -104,7 +104,7 @@ include(KpackPython)
 kpack_resolve_python_dir(_KPACK_PYTHON_DIR)
 
 set(ASM_KPACK_ENABLED TRUE)
-if(NOT _KPACK_PYTHON_DIR)
+if("${_KPACK_PYTHON_DIR}" STREQUAL "")
     kpack_unset_reason(_kpack_reason)
     message(STATUS "ASM SDPA: skipping .kpack packing -- ${_kpack_reason}.")
     set(ASM_KPACK_ENABLED FALSE)

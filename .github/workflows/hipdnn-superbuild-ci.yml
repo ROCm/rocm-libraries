@@ -19,12 +19,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Pinned rocm-kpack commit installed into the build venv. Keep in sync with
-  # HIPKERNELPROVIDER_KPACK_GIT_REF in
-  # dnn-providers/hip-kernel-provider/cmake/KpackPython.cmake.
-  KPACK_REF: e3483286e751060b3a70b792792cc122632c66e8
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
@@ -79,6 +73,11 @@ jobs:
             projects/miopen
             test
 
+      # Shared CI constants, kpack-ref among them, defined in one place.
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -131,18 +130,35 @@ jobs:
         shell: pwsh
         run: |
           $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          # --force-reinstall: rocm-kpack is version 0.1.0 at every commit, so
-          # pip would treat the pinned requirement as already satisfied in a
-          # warm venv. Its deps are installed separately because the pinned
-          # commit's pyproject omits msgpack.
-          & $python -m pip install --force-reinstall --no-deps "rocm-kpack @ git+https://github.com/ROCm/rocm-kpack@${{ env.KPACK_REF }}"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to install rocm_kpack" }
-          & $python -m pip install "zstandard>=0.20.0" "msgpack>=1.0.0"
+          # Sparse, blobless, depth-1 checkout of just shared/kpack: the pinned
+          # commit lives in the rocm-systems monorepo, so cloning it whole (or
+          # letting pip do it via a git+ URL) would pull far more than the packer.
+          $kpackSrc = Join-Path $env:RUNNER_TEMP "rocm-systems-kpack"
+          if (Test-Path $kpackSrc) { Remove-Item -Recurse -Force $kpackSrc }
+          New-Item -ItemType Directory -Path $kpackSrc | Out-Null
+          # pwsh does not stop on a native command's exit code, so check the
+          # setup calls as a group before the guarded fetch.
+          git -C $kpackSrc init -q .
+          git -C $kpackSrc remote add origin https://github.com/ROCm/rocm-systems.git
+          git -C $kpackSrc sparse-checkout init --cone
+          git -C $kpackSrc sparse-checkout set shared/kpack
+          if ($LASTEXITCODE -ne 0) { throw "Failed to prepare the rocm-systems sparse checkout" }
+          git -C $kpackSrc fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to fetch rocm-systems ${{ steps.ci-env.outputs.kpack-ref }}" }
+          git -C $kpackSrc checkout -q FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw "Failed to check out ${{ steps.ci-env.outputs.kpack-ref }}" }
+          # Confirms the fetch landed on the pinned commit.
+          $fetched = (& git -C $kpackSrc rev-parse HEAD).Trim()
+          if ($fetched -ne "${{ steps.ci-env.outputs.kpack-ref }}") { throw "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" }
+          # --no-deps with --force-reinstall: the project is version 0.1.0 at
+          # every commit, so a warm cached venv would otherwise keep an older
+          # build; without --no-deps the force also churns msgpack/zstandard.
+          # Dependencies are installed separately so pip resolves them normally.
+          & $python -m pip install (Join-Path $kpackSrc "shared\kpack")
           if ($LASTEXITCODE -ne 0) { throw "Failed to install rocm_kpack dependencies" }
-          $installed = (& $python -c "import importlib.metadata as m, json; print(json.loads(m.distribution('rocm-kpack').read_text('direct_url.json'))['vcs_info']['commit_id'])")
-          if ($installed -ne "${{ env.KPACK_REF }}") { throw "rocm_kpack is $installed, expected ${{ env.KPACK_REF }}" }
-          # From the installed module: site.getsitepackages()[0] is the venv
-          # root on Windows.
+          & $python -m pip install --force-reinstall --no-deps (Join-Path $kpackSrc "shared\kpack")
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install rocm_kpack" }
+          # From the installed module, which also proves it imports.
           $sitePackages = (& $python -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
           if ($LASTEXITCODE -ne 0) { throw "rocm_kpack is not importable after install" }
           if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
@@ -263,6 +279,11 @@ jobs:
             projects/miopen
             test
 
+      # Shared CI constants, kpack-ref among them, defined in one place.
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
       - name: Set environment
         run: |
           echo "VENV_PATH=${{ runner.temp }}/rocm_wheels" >> "$GITHUB_ENV"
@@ -312,15 +333,27 @@ jobs:
       - name: Install rocm_kpack
         run: |
           set -euo pipefail
-          # --force-reinstall: rocm-kpack is version 0.1.0 at every commit, so
-          # pip would treat the pinned requirement as already satisfied in a
-          # warm venv. Its deps are installed separately because the pinned
-          # commit's pyproject omits msgpack.
-          "$VENV_PATH/bin/pip" install --force-reinstall --no-deps \
-            "rocm-kpack @ git+https://github.com/ROCm/rocm-kpack@${{ env.KPACK_REF }}"
-          "$VENV_PATH/bin/pip" install "zstandard>=0.20.0" "msgpack>=1.0.0"
-          installed=$("$VENV_PATH/bin/python" -c "import importlib.metadata as m, json; print(json.loads(m.distribution('rocm-kpack').read_text('direct_url.json'))['vcs_info']['commit_id'])")
-          test "$installed" = "${{ env.KPACK_REF }}" || { echo "rocm_kpack is $installed, expected ${{ env.KPACK_REF }}" >&2; exit 1; }
+          # Sparse, blobless, depth-1 checkout of just shared/kpack: the pinned
+          # commit lives in the rocm-systems monorepo, so cloning it whole (or
+          # letting pip do it via a git+ URL) would pull far more than the packer.
+          KPACK_SRC="${RUNNER_TEMP}/rocm-systems-kpack"
+          rm -rf "$KPACK_SRC"
+          mkdir -p "$KPACK_SRC"
+          git -C "$KPACK_SRC" init -q .
+          git -C "$KPACK_SRC" remote add origin https://github.com/ROCm/rocm-systems.git
+          git -C "$KPACK_SRC" sparse-checkout init --cone
+          git -C "$KPACK_SRC" sparse-checkout set shared/kpack
+          git -C "$KPACK_SRC" fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
+          git -C "$KPACK_SRC" checkout -q FETCH_HEAD
+          # Confirms the fetch landed on the pinned commit.
+          fetched=$(git -C "$KPACK_SRC" rev-parse HEAD)
+          test "$fetched" = "${{ steps.ci-env.outputs.kpack-ref }}" || { echo "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" >&2; exit 1; }
+          # --no-deps with --force-reinstall: the project is version 0.1.0 at
+          # every commit, so a warm cached venv would otherwise keep an older
+          # build; without --no-deps the force also churns msgpack/zstandard.
+          # Dependencies are installed separately so pip resolves them normally.
+          "$VENV_PATH/bin/pip" install "$KPACK_SRC/shared/kpack"
+          "$VENV_PATH/bin/pip" install --force-reinstall --no-deps "$KPACK_SRC/shared/kpack"
           # Derived from the installed module, which also proves it imports.
           KPACK_PYTHON_DIR=$("$VENV_PATH/bin/python" -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
           test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
