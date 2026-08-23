@@ -1049,39 +1049,35 @@ def test_empty_pruned_kdp_is_logged(tmp_path, main_fixture, hipcc, rocm_kpack_di
 
 
 @pytest.mark.quick
-def test_nonbare_arch_warning_boundaries():
-    # Real bare gfx names (6-7 chars, alphanumeric) do NOT warn; feature-suffixed
-    # or over-long/garbage arches DO. Locks the false-positive-free boundary.
-    from hkp_pack.descriptors import _warn_nonbare_arch
+def test_bare_arch_boundaries():
+    # Mirrors the loader's isPlausibleArchBaseId. Bare gfx ids pass; a feature
+    # suffix, an uppercase spelling, or a missing/!alnum body is rejected.
+    # 'gfx9-4-generic' is an LLVM generic target and MUST stay legal -- the old
+    # 7-char heuristic would have false-flagged it.
+    from hkp_pack.descriptors import _reject_nonbare_arch
 
-    for good in ("gfx90a", "gfx942", "gfx1100", "gfx1201"):
-        logs = []
-        _warn_nonbare_arch([good], "where", logs.append)
-        assert logs == [], good
-    for bad in ("gfx942:xnack-", "gfx12345", "gfx942xnack"):
-        logs = []
-        _warn_nonbare_arch([bad], "where", logs.append)
-        assert len(logs) == 1, bad
+    for good in ("gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx9-4-generic"):
+        _reject_nonbare_arch([good], "where")
+    for bad in ("gfx942:xnack-", "GFX942", "gfx", "gfx942 ", "gfx942+"):
+        with pytest.raises(HkpPackError, match="is not usable"):
+            _reject_nonbare_arch([bad], "where")
 
 
-def test_nonbare_arch_warns_but_packs(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
-    # A KDP with a feature-suffixed arch warns and does not match the bare
-    # requested arch, but the pack still proceeds on the other surviving KDPs.
+def test_nonbare_arch_is_rejected(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+    # A feature-suffixed arch matches no shard, so the KDP prunes everywhere and
+    # the pack would otherwise exit 0 having installed nothing -- the same
+    # silent-empty outcome hkp_add_packaging treats as fatal. Reject it instead.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
     doc = _read(p)
     doc["arch"] = ["gfx942:xnack-"]
     p.write_text(json.dumps(doc), encoding="utf-8")
-    logs = []
-    results = run_pipeline(
-        source_root=src,
-        arches=["gfx942"],
-        out_root=tmp_path / "out",
-        hipcc=hipcc,
-        rocm_kpack_dir=rocm_kpack_dir,
-        inter_root=tmp_path / "inter",
-        log=logs.append,
-    )
-    assert any("gfx942:xnack-" in m and "not a bare gfx name" in m for m in logs)
-    assert set(results) == {"gfx942"}
-    assert (tmp_path / "out" / "gfx942").is_dir()
+    with pytest.raises(HkpPackError, match="feature suffix"):
+        run_pipeline(
+            source_root=src,
+            arches=["gfx942"],
+            out_root=tmp_path / "out",
+            hipcc=hipcc,
+            rocm_kpack_dir=rocm_kpack_dir,
+            inter_root=tmp_path / "inter",
+        )

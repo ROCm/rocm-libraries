@@ -878,6 +878,110 @@ def test_library_resolves_for_a_nested_standalone_ukd(
     assert checked, "no standalone kpack UKD shipped; the test asserted nothing"
 
 
+def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+):
+    """A standalone UKD in a DIFFERENT folder from the KDP that references it.
+
+    Every other fixture co-locates the two, so `sdesc.rel_dir` and `kdp.rel_dir`
+    are equal and the two branches are indistinguishable: swapping one for the
+    other leaves the whole suite green. Nothing forbids splitting them -- a
+    standalone UKD is resolved by global id, not by co-location -- so this moves
+    the .ukd.json somewhere the KDP is not and pins BOTH consequences of the
+    rel_dir it is packed with:
+
+      1. the shipped file keeps its own authored subpath, and
+      2. its `library` resolves from that subpath.
+
+    Asserting the path matters as much as the library: rel_dir drives placement
+    and depth together, so anchoring on the KDP moves the file AND recomputes
+    the climb-out to match. The library alone still resolves -- consistently
+    wrong -- and only the path reveals it.
+    """
+    root = tmp_path / "root"
+    _nest(root, "hip/packs", main_fixture)
+
+    # Relocate the standalone UKD (and only it) into a sibling subtree.
+    ukd_src = root / "hip/packs/pointwise_add_b128.ukd.json"
+    assert ukd_src.is_file(), "fixture no longer ships a standalone UKD"
+    ukd_dest = root / "hip/kernels/deep/pointwise_add_b128.ukd.json"
+    ukd_dest.parent.mkdir(parents=True, exist_ok=True)
+    ukd_src.rename(ukd_dest)
+    # Its hip source is resolved relative to the descriptor that names it.
+    shutil.copy2(
+        root / "hip/packs" / _read(ukd_dest)["kernel_source"]["source"],
+        ukd_dest.parent,
+    )
+
+    run_pipeline(
+        source_root=root,
+        arches=[ARCH],
+        out_root=tmp_path / "out",
+        hipcc=hipcc,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+
+    out = tmp_path / "out" / ARCH
+    shipped = out / "hip/kernels/deep/pointwise_add_b128.ukd.json"
+    assert shipped.is_file(), (
+        "the standalone UKD did not keep its authored subpath; shipped tree holds "
+        f"{sorted(p.relative_to(out).as_posix() for p in out.rglob('*.ukd.json'))}"
+    )
+
+    ks = _read(shipped)["kernel_source"]
+    assert ks["kind"] == "kpack"
+    resolved = _resolve_library_like_runtime(shipped, ks["library"])
+    assert resolved.is_file(), (
+        f"standalone UKD declares library={ks['library']!r} -> {resolved}, "
+        "which the runtime cannot open"
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "filename,mutate,expected",
+    [
+        # The loader's enums, mirrored by the packer. Each of these packs
+        # cleanly without the packer-side check and is then rejected by
+        # DescriptorLoader.hpp at load -- which drops the matcher, then the pack
+        # that names it, then the engine, at a log level that is off by default.
+        ("pointwise.umd.json", {"scope": "Kernel"}, "invalid scope"),
+        ("shared.uhd.json", {"kind": "Native"}, "invalid kind"),
+        (
+            "pointwise.kmd.json",
+            {"fields": [{"name": "block_size", "type": "integer"}]},
+            "invalid type",
+        ),
+        # A required key the loader demands and the packer used to pass through.
+        ("pointwise.udd.json", {"dispatch_symbol": None}, "dispatch_symbol"),
+        ("pointwise.umd.json", {"match_symbol": None}, "match_symbol"),
+    ],
+)
+def test_generic_descriptors_are_validated_against_the_loader_schema(
+    tmp_path, main_fixture, filename, mutate, expected
+):
+    """KMD/UMD/UDD/UHD are checked at pack time, not just by the runtime.
+
+    These four were copied through as raw bytes with only id+version checked, so
+    a bad enum spelling or a missing symbol key shipped and failed at load. A
+    `None` value in `mutate` means "delete this key".
+    """
+    root = tmp_path / "root"
+    _nest(root, "hip", main_fixture)
+    target = root / "hip" / filename
+    doc = _read(target)
+    for key, value in mutate.items():
+        if value is None:
+            doc.pop(key, None)
+        else:
+            doc[key] = value
+    target.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    with pytest.raises(HkpPackError, match=expected):
+        load_flat_input(root)
+
+
 @pytest.mark.quick
 @pytest.mark.parametrize("spelling", ["kpack", "KPACK", "Kpack"])
 def test_reserved_kpack_folder_is_case_insensitive(
