@@ -1044,6 +1044,194 @@ using AccDataType = {ck_acc};
     return body
 
 
+# ============================================================================
+# Shared C++ fragments emitted into every quant kernel header
+# ============================================================================
+#
+# The per-op generators build their .hpp body as one big f-string. Large runs of
+# that body are byte-identical between operators -- the epilogue block alone was
+# repeated twelve times. The emitters below own those runs so a fix lands once.
+#
+# Each returns a fragment WITHOUT a trailing newline, indented for substitution
+# on a line of its own (``{block}``), and with literal braces already resolved --
+# do not write ``{{`` here, these produce final text rather than another template.
+#
+# NOT extracted, deliberately: the per-op tile *flags* block (kPad*, Preshuffle*,
+# TransposeC, TiledMMAPermuteN, ...). It looks shared but is not -- the operators
+# disagree on which constants exist, on their values, and even on the `=` column
+# (``kPadM            =`` in rowcolquant/abquant vs ``kPadM           =`` in
+# aquant/bquant). Forcing it through one emitter would take ~10 parameters and
+# enshrine that whitespace drift. Left in the per-op scripts.
+
+
+_QUANT_EPILOGUE_TAIL = {
+    "cshuffle": "",
+    "permute_n": ",\n                    false,\n                    1",
+}
+
+
+def emit_quant_epilogue_block(kind: str, ns: str) -> str:
+    """Emit the ``using GemmEpilogue = ...`` block for a quant kernel body.
+
+    ``kind`` is the *effective* epilogue tag -- ``"cshuffle"`` or ``"permute_n"``,
+    i.e. what quant_effective_epilogue returned, not what the user requested. The
+    two forms differ only in the class name and in PermuteN's two extra trailing
+    template arguments (``false, 1``).
+    """
+    try:
+        tail = _QUANT_EPILOGUE_TAIL[kind]
+    except KeyError:
+        raise ValueError(
+            f"unknown epilogue kind {kind!r}; expected 'cshuffle' or 'permute_n'"
+        ) from None
+    cls = "CShuffle" if kind == "cshuffle" else "PermuteN"
+    return f"""\
+            using GemmEpilogue = ck_tile::{cls}Epilogue<
+                ck_tile::{cls}EpilogueProblem<
+                    typename PipelineProblem::AComputeDataType,
+                    typename PipelineProblem::BComputeDataType,
+                    ck_tile::tuple<>,
+                    AccDataType,
+                    CDataType,
+                    ck_tile::tuple<>,
+                    {ns}::CLayout,
+                    ck_tile::element_wise::PassThrough,
+                    TilePartitioner::MPerBlock,
+                    TilePartitioner::NPerBlock,
+                    WarpM, WarpN,
+                    WarpTileM, WarpTileN, WarpTileK,
+                    TransposeC{tail}>>;"""
+
+
+def emit_quant_tile_dims(tile: Any, *, block_size: int, k_block_per_cu: int) -> str:
+    """Emit the ``TileM``..``kBlockPerCu`` constant block (identical in all ops)."""
+    return f"""\
+    static constexpr ck_tile::index_t TileM      = {tile.tile_m};
+    static constexpr ck_tile::index_t TileN      = {tile.tile_n};
+    static constexpr ck_tile::index_t TileK      = {tile.tile_k};
+    static constexpr ck_tile::index_t WarpM      = {tile.warp_m};
+    static constexpr ck_tile::index_t WarpN      = {tile.warp_n};
+    static constexpr ck_tile::index_t WarpK      = {tile.warp_k};
+    static constexpr ck_tile::index_t WarpTileM  = {tile.warp_tile_m};
+    static constexpr ck_tile::index_t WarpTileN  = {tile.warp_tile_n};
+    static constexpr ck_tile::index_t WarpTileK  = {tile.warp_tile_k};
+    static constexpr ck_tile::index_t BlockSize  = {block_size};
+    static constexpr int               kBlockPerCu = {k_block_per_cu};"""
+
+
+def emit_quant_tile_shape() -> str:
+    """Emit the ``TileShape`` / ``TilePartitioner`` aliases (identical in all ops)."""
+    return """\
+    using TileShape = ck_tile::TileGemmShape<
+        ck_tile::sequence<TileM, TileN, TileK>,
+        ck_tile::sequence<WarpM, WarpN, WarpK>,
+        ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
+
+    using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;"""
+
+
+def emit_quant_gemm_traits(quant_type: str, ns: str) -> str:
+    """Emit ``using GemmTraits = ck_tile::TileGemmQuantTraits<...>``.
+
+    ``quant_type`` is the bare ``ck_tile::QuantType`` enumerator name (e.g.
+    ``"BQuantGrouped"``) -- the only token that differs between operators. The
+    block names the kPad*/Preshuffle*/TransposeC/DoubleSmemBuffer constants the
+    per-op flags block must therefore still define.
+    """
+    return f"""\
+    using GemmTraits = ck_tile::TileGemmQuantTraits<
+        kPadM, kPadN, kPadK,
+        APreshuffleQuant, BPreshuffleQuant, PreshuffleB,
+        {ns}::ALayout, {ns}::BLayout, {ns}::CLayout,
+        ck_tile::QuantType::{quant_type},
+        {ns}::AQLayout, {ns}::BQLayout,
+        TransposeC, DoubleSmemBuffer>;"""
+
+
+_QUANT_LAUNCH_PREAMBLE_DEFAULT = (
+    "        // hot-loop / tail dispatch -- mirrors run_gemm_quant_example.inc\n"
+)
+
+
+def emit_quant_launch_prologue(*, splitk_k: str, preamble: str = "") -> str:
+    """Emit ``launch()`` down to the opening of the ``Run`` lambda.
+
+    ``splitk_k`` is the third argument to ``get_splitk_batch_k_read`` and is a
+    REAL per-op divergence, not incidental: ``WarpTileK`` for aquant / abquant /
+    rowcolquant, ``TileK`` for bquant and the grouped ops, ``K1`` for tensor_quant.
+    Getting it wrong changes split-K addressing, so it is required, not defaulted.
+
+    ``preamble`` replaces the default one-line comment and covers everything
+    between the opening brace and ``const ck_tile::index_t K_split`` -- extra
+    commentary, or tensor_quant's ``constexpr ck_tile::index_t K1`` declaration.
+    It must end with a newline.
+    """
+    head = preamble or _QUANT_LAUNCH_PREAMBLE_DEFAULT
+    return f"""\
+    static float launch(const ck_tile::QuantGemmHostArgs& args,
+                        const ck_tile::stream_config& s)
+    {{
+{head}        const ck_tile::index_t K_split =
+            (args.k_batch == 1)
+                ? ck_tile::integer_least_multiple(args.K, TileK)
+                : ck_tile::get_splitk_batch_k_read(args.K, args.k_batch, {splitk_k});
+
+        const ck_tile::index_t num_loop  = TilePartitioner::GetLoopNum(K_split);
+        const bool has_hot_loop          = BaseGemmPipeline::BlockHasHotloop(num_loop);
+        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
+
+        const auto Run = [&](auto has_hot_loop_, auto tail_number_) {{"""
+
+
+QUANT_LAUNCH_CALL_PLAIN = """\
+            return ck_tile::launch_kernel(
+                s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));"""
+
+
+def emit_quant_kernel_attr_launch(eight_waves_expr: str) -> str:
+    """Emit the ``kernel_attr<...>`` launch used by abquant and tensor_quant.
+
+    This overload is not interchangeable with QUANT_LAUNCH_CALL_PLAIN: it selects
+    a different ``kentry`` specialization and so a different register allocation.
+    Ops that mirror Old-TE's launch must keep using it.
+    """
+    return f"""\
+            using k_attr_t = ck_tile::kernel_attr<{eight_waves_expr}>;
+            return ck_tile::launch_kernel(
+                s,
+                ck_tile::make_kernel<kBlockPerCu, k_attr_t>(
+                    Kernel{{}}, grids, blocks, 0, kargs));"""
+
+
+def emit_quant_launch_tail(
+    *, quant_type: str, launch_call: str = QUANT_LAUNCH_CALL_PLAIN, extra: str = ""
+) -> str:
+    """Emit from ``using Kernel = ...`` to the close of ``launch()``.
+
+    ``quant_type`` is the bare ``ck_tile::QuantType`` enumerator. ``launch_call``
+    is QUANT_LAUNCH_CALL_PLAIN or the result of emit_quant_kernel_attr_launch.
+    ``extra`` is inserted after the grid/block setup and before the launch call
+    (tensor_quant uses it for its ``eight_waves`` ``#ifdef``); it must end with a
+    newline. The caller still emits the struct's own closing ``};``.
+    """
+    return f"""\
+            using Kernel = ck_tile::QuantGemmKernel<
+                TilePartitioner, GemmPipeline, GemmEpilogue,
+                ck_tile::QuantType::{quant_type}>;
+
+            auto kargs = Kernel::MakeKernelArgs(args);
+            if(!Kernel::IsSupportedArgument(kargs))
+                return -1.0f;
+
+            const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
+            const dim3 blocks = Kernel::BlockSize();
+{extra}{launch_call}
+        }};
+
+        return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+    }}"""
+
+
 def generate_kernels_generic(
     *,
     op_label: str,

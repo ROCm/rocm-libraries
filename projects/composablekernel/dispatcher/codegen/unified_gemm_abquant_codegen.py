@@ -49,6 +49,13 @@ from codegen_common import (
     make_gemm_abquant_kernel_name,
     bquant_effective_epilogue,
     emit_generated_header_preamble,
+    emit_quant_epilogue_block,
+    emit_quant_gemm_traits,
+    emit_quant_kernel_attr_launch,
+    emit_quant_launch_prologue,
+    emit_quant_launch_tail,
+    emit_quant_tile_dims,
+    emit_quant_tile_shape,
     emit_single_kernel_include_footer,
     run_codegen_cli,
 )
@@ -264,42 +271,20 @@ class ABQuantKernelHeaderGenerator:
         tiled_mma_permute_n_str = str(tiled_mma_permute_n).lower()
         aq_column_major_str = str(aq_column_major).lower()
 
-        if use_permute_n_epilogue:
-            epilogue_block = f"""\
-            using GemmEpilogue = ck_tile::PermuteNEpilogue<
-                ck_tile::PermuteNEpilogueProblem<
-                    typename PipelineProblem::AComputeDataType,
-                    typename PipelineProblem::BComputeDataType,
-                    ck_tile::tuple<>,
-                    AccDataType,
-                    CDataType,
-                    ck_tile::tuple<>,
-                    {ns}::CLayout,
-                    ck_tile::element_wise::PassThrough,
-                    TilePartitioner::MPerBlock,
-                    TilePartitioner::NPerBlock,
-                    WarpM, WarpN,
-                    WarpTileM, WarpTileN, WarpTileK,
-                    TransposeC,
-                    false,
-                    1>>;"""
-        else:
-            epilogue_block = f"""\
-            using GemmEpilogue = ck_tile::CShuffleEpilogue<
-                ck_tile::CShuffleEpilogueProblem<
-                    typename PipelineProblem::AComputeDataType,
-                    typename PipelineProblem::BComputeDataType,
-                    ck_tile::tuple<>,
-                    AccDataType,
-                    CDataType,
-                    ck_tile::tuple<>,
-                    {ns}::CLayout,
-                    ck_tile::element_wise::PassThrough,
-                    TilePartitioner::MPerBlock,
-                    TilePartitioner::NPerBlock,
-                    WarpM, WarpN,
-                    WarpTileM, WarpTileN, WarpTileK,
-                    TransposeC>>;"""
+        epilogue_block = emit_quant_epilogue_block(
+            "permute_n" if use_permute_n_epilogue else "cshuffle", ns
+        )
+
+        tile_dims = emit_quant_tile_dims(
+            t, block_size=spec.block_size, k_block_per_cu=spec.k_block_per_cu
+        )
+        tile_shape = emit_quant_tile_shape()
+        gemm_traits = emit_quant_gemm_traits("ABQuantGrouped", ns)
+        launch_prologue = emit_quant_launch_prologue(splitk_k="WarpTileK")
+        launch_tail = emit_quant_launch_tail(
+            quant_type="ABQuantGrouped",
+            launch_call=emit_quant_kernel_attr_launch(str(spec.eight_waves).lower()),
+        )
 
         return emit_generated_header_preamble(
             "ABQuant (A+B block-scale) GEMM", "unified_gemm_abquant_codegen.py"
@@ -339,17 +324,7 @@ struct {struct} {{
     using AComputeDataType = {ns}::AComputeDataType;
     using BComputeDataType = {ns}::BComputeDataType;
 
-    static constexpr ck_tile::index_t TileM      = {t.tile_m};
-    static constexpr ck_tile::index_t TileN      = {t.tile_n};
-    static constexpr ck_tile::index_t TileK      = {t.tile_k};
-    static constexpr ck_tile::index_t WarpM      = {t.warp_m};
-    static constexpr ck_tile::index_t WarpN      = {t.warp_n};
-    static constexpr ck_tile::index_t WarpK      = {t.warp_k};
-    static constexpr ck_tile::index_t WarpTileM  = {t.warp_tile_m};
-    static constexpr ck_tile::index_t WarpTileN  = {t.warp_tile_n};
-    static constexpr ck_tile::index_t WarpTileK  = {t.warp_tile_k};
-    static constexpr ck_tile::index_t BlockSize  = {spec.block_size};
-    static constexpr int               kBlockPerCu = {spec.k_block_per_cu};
+{tile_dims}
     static constexpr ck_tile::index_t AGroupSizeK = {spec.aquant_group_k};
     static constexpr ck_tile::index_t BGroupSizeK = {spec.bquant_group_k};
     static constexpr ck_tile::index_t BGroupSizeN = {spec.bquant_group_n};
@@ -371,12 +346,7 @@ struct {struct} {{
     // AQIsColumnMajor: true only for the n=128 EightWaves fast path (StrideAQ=M).
     static constexpr bool AQIsColumnMajor  = {aq_column_major_str};
 
-    using TileShape = ck_tile::TileGemmShape<
-        ck_tile::sequence<TileM, TileN, TileK>,
-        ck_tile::sequence<WarpM, WarpN, WarpK>,
-        ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
-
-    using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
+{tile_shape}
 
     // Config exposing the member names ck_tile::shuffle_b / shuffle_b_permuteN
     // expect (N_Warp, N_Warp_Tile, K_Warp_Tile, N_Tile). Used by the ctypes lib
@@ -389,13 +359,7 @@ struct {struct} {{
         static constexpr ck_tile::index_t K_Warp_Tile = WarpTileK;
     }};
 
-    using GemmTraits = ck_tile::TileGemmQuantTraits<
-        kPadM, kPadN, kPadK,
-        APreshuffleQuant, BPreshuffleQuant, PreshuffleB,
-        {ns}::ALayout, {ns}::BLayout, {ns}::CLayout,
-        ck_tile::QuantType::ABQuantGrouped,
-        {ns}::AQLayout, {ns}::BQLayout,
-        TransposeC, DoubleSmemBuffer>;
+{gemm_traits}
 
     using GemmPipelineProblemBase = ck_tile::GemmPipelineProblemBase<
         ADataType, BDataType, AccDataType, TileShape, GemmTraits,
@@ -403,20 +367,7 @@ struct {struct} {{
 
     using BaseGemmPipeline = {base_pipeline_ck}<GemmPipelineProblemBase>;
 
-    static float launch(const ck_tile::QuantGemmHostArgs& args,
-                        const ck_tile::stream_config& s)
-    {{
-        // hot-loop / tail dispatch -- mirrors run_gemm_quant_example.inc
-        const ck_tile::index_t K_split =
-            (args.k_batch == 1)
-                ? ck_tile::integer_least_multiple(args.K, TileK)
-                : ck_tile::get_splitk_batch_k_read(args.K, args.k_batch, WarpTileK);
-
-        const ck_tile::index_t num_loop  = TilePartitioner::GetLoopNum(K_split);
-        const bool has_hot_loop          = BaseGemmPipeline::BlockHasHotloop(num_loop);
-        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
-
-        const auto Run = [&](auto has_hot_loop_, auto tail_number_) {{
+{launch_prologue}
             using PipelineProblem = ck_tile::GemmABQuantPipelineProblem<
                 ADataType,
                 QDataType,       // AQ dtype
@@ -437,25 +388,7 @@ struct {struct} {{
 
 {epilogue_block}
 
-            using Kernel = ck_tile::QuantGemmKernel<
-                TilePartitioner, GemmPipeline, GemmEpilogue,
-                ck_tile::QuantType::ABQuantGrouped>;
-
-            auto kargs = Kernel::MakeKernelArgs(args);
-            if(!Kernel::IsSupportedArgument(kargs))
-                return -1.0f;
-
-            const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
-            const dim3 blocks = Kernel::BlockSize();
-            using k_attr_t = ck_tile::kernel_attr<{str(spec.eight_waves).lower()}>;
-            return ck_tile::launch_kernel(
-                s,
-                ck_tile::make_kernel<kBlockPerCu, k_attr_t>(
-                    Kernel{{}}, grids, blocks, 0, kargs));
-        }};
-
-        return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
-    }}
+{launch_tail}
 }};
 
 using SelectedKernel = {struct};

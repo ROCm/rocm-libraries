@@ -53,6 +53,13 @@ from codegen_common import (
     QUANT_SCHEDULER_TO_CK,
     TileConfig,
     emit_generated_header_preamble,
+    emit_quant_epilogue_block,
+    emit_quant_gemm_traits,
+    emit_quant_kernel_attr_launch,
+    emit_quant_launch_prologue,
+    emit_quant_launch_tail,
+    emit_quant_tile_dims,
+    emit_quant_tile_shape,
     emit_single_kernel_include_footer,
     make_tensor_quant_kernel_name,
     run_codegen_cli,
@@ -210,22 +217,45 @@ class TensorQuantKernelHeaderGenerator:
         # TensorQuant (GemmConfigQuantDecode) always uses the CShuffle epilogue
         # (TiledMMAPermuteN=false). The CShuffleEpilogue is invoked with the two
         # scalar scales (aq_scale, bq_scale) inside the kernel for TensorQuant.
-        epilogue_block = f"""\
-            using GemmEpilogue = ck_tile::CShuffleEpilogue<
-                ck_tile::CShuffleEpilogueProblem<
-                    typename PipelineProblem::AComputeDataType,
-                    typename PipelineProblem::BComputeDataType,
-                    ck_tile::tuple<>,
-                    AccDataType,
-                    CDataType,
-                    ck_tile::tuple<>,
-                    {ns}::CLayout,
-                    ck_tile::element_wise::PassThrough,
-                    TilePartitioner::MPerBlock,
-                    TilePartitioner::NPerBlock,
-                    WarpM, WarpN,
-                    WarpTileM, WarpTileN, WarpTileK,
-                    TransposeC>>;"""
+        epilogue_block = emit_quant_epilogue_block("cshuffle", ns)
+
+        tile_dims = emit_quant_tile_dims(
+            t, block_size=spec.block_size, k_block_per_cu=spec.k_block_per_cu
+        )
+        tile_shape = emit_quant_tile_shape()
+        gemm_traits = emit_quant_gemm_traits("TensorQuant", ns)
+        launch_prologue = emit_quant_launch_prologue(
+            splitk_k="K1",
+            preamble=(
+                "        // hot-loop / tail dispatch -- mirrors run_gemm_quant_example.inc.\n"
+                "        // K1 = WarpTileK; K_split uses K_Tile for k_batch==1.\n"
+                "        constexpr ck_tile::index_t K1 = WarpTileK;\n"
+            ),
+        )
+        launch_tail = emit_quant_launch_tail(
+            quant_type="TensorQuant",
+            launch_call=emit_quant_kernel_attr_launch("eight_waves"),
+            extra="""
+            // Launch through the SAME kernel_attr<...> / kentry overload Old-TE
+            // uses (run_gemm_quant_example.inc), NOT the plain make_kernel path.
+            // Old-TE computes:
+            //   eight_waves = IS_FP8BLOCKSCALE && (M_Warp*N_Warp*K_Warp == 8) &&
+            //                 K_Warp_Tile == 128;   // under CK_GFX950_SUPPORT
+            // For TensorQuant IS_FP8BLOCKSCALE is false, so eight_waves is always
+            // false here -- but we mirror the full expression so the emitted
+            // kentry<Attr, MinBlockPerCu, ...> specialization is byte-for-byte the
+            // same instantiation Old-TE compiles (this is what makes the resulting
+            // kernel identical: VGPR 132 to match Old-TE, vs 136 for the plain
+            // make_kernel<kBlockPerCu> / kentry<MinBlockPerCu, ...> overload).
+            constexpr bool eight_waves =
+#ifdef CK_GFX950_SUPPORT
+                false /* IS_FP8BLOCKSCALE=false for TensorQuant */ &&
+                (WarpM * WarpN * WarpK == 8) && (WarpTileK == 128);
+#else
+                false;
+#endif
+""",
+        )
 
         return emit_generated_header_preamble(
             "Gemm TensorQuant", "unified_gemm_tensor_quant_codegen.py"
@@ -258,17 +288,7 @@ struct {struct} {{
     using QDataType   = {ns}::QDataType;
     using AccDataType = {ns}::AccDataType;
 
-    static constexpr ck_tile::index_t TileM      = {t.tile_m};
-    static constexpr ck_tile::index_t TileN      = {t.tile_n};
-    static constexpr ck_tile::index_t TileK      = {t.tile_k};
-    static constexpr ck_tile::index_t WarpM      = {t.warp_m};
-    static constexpr ck_tile::index_t WarpN      = {t.warp_n};
-    static constexpr ck_tile::index_t WarpK      = {t.warp_k};
-    static constexpr ck_tile::index_t WarpTileM  = {t.warp_tile_m};
-    static constexpr ck_tile::index_t WarpTileN  = {t.warp_tile_n};
-    static constexpr ck_tile::index_t WarpTileK  = {t.warp_tile_k};
-    static constexpr ck_tile::index_t BlockSize  = {spec.block_size};
-    static constexpr int               kBlockPerCu = {spec.k_block_per_cu};
+{tile_dims}
 
     static constexpr bool kPadM            = {pad_m};
     static constexpr bool kPadN            = {pad_n};
@@ -279,20 +299,9 @@ struct {struct} {{
     static constexpr bool TransposeC       = false;
     static constexpr bool DoubleSmemBuffer = {double_smem_buffer};
 
-    using TileShape = ck_tile::TileGemmShape<
-        ck_tile::sequence<TileM, TileN, TileK>,
-        ck_tile::sequence<WarpM, WarpN, WarpK>,
-        ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
+{tile_shape}
 
-    using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
-
-    using GemmTraits = ck_tile::TileGemmQuantTraits<
-        kPadM, kPadN, kPadK,
-        APreshuffleQuant, BPreshuffleQuant, PreshuffleB,
-        {ns}::ALayout, {ns}::BLayout, {ns}::CLayout,
-        ck_tile::QuantType::TensorQuant,
-        {ns}::AQLayout, {ns}::BQLayout,
-        TransposeC, DoubleSmemBuffer>;
+{gemm_traits}
 
     // ComputeDataType for the base pipeline problem: the example uses
     // AComputeDataType=void for the non-fp8-blockscale TensorQuant path.
@@ -301,22 +310,7 @@ struct {struct} {{
 
     using BaseGemmPipeline = {base_pipeline_ck}<GemmPipelineProblemBase>;
 
-    static float launch(const ck_tile::QuantGemmHostArgs& args,
-                        const ck_tile::stream_config& s)
-    {{
-        // hot-loop / tail dispatch -- mirrors run_gemm_quant_example.inc.
-        // K1 = WarpTileK; K_split uses K_Tile for k_batch==1.
-        constexpr ck_tile::index_t K1 = WarpTileK;
-        const ck_tile::index_t K_split =
-            (args.k_batch == 1)
-                ? ck_tile::integer_least_multiple(args.K, TileK)
-                : ck_tile::get_splitk_batch_k_read(args.K, args.k_batch, K1);
-
-        const ck_tile::index_t num_loop  = TilePartitioner::GetLoopNum(K_split);
-        const bool has_hot_loop          = BaseGemmPipeline::BlockHasHotloop(num_loop);
-        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
-
-        const auto Run = [&](auto has_hot_loop_, auto tail_number_) {{
+{launch_prologue}
             // TensorQuant reuses the regular GEMM compute pipeline via
             // GemmRowColTensorQuantPipelineProblem; the scalar scales are applied
             // in the epilogue (see gemm_quant_kernel.hpp TensorQuant branch).
@@ -341,44 +335,7 @@ struct {struct} {{
 
 {epilogue_block}
 
-            using Kernel = ck_tile::QuantGemmKernel<
-                TilePartitioner, GemmPipeline, GemmEpilogue,
-                ck_tile::QuantType::TensorQuant>;
-
-            auto kargs = Kernel::MakeKernelArgs(args);
-            if(!Kernel::IsSupportedArgument(kargs))
-                return -1.0f;
-
-            const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
-            const dim3 blocks = Kernel::BlockSize();
-
-            // Launch through the SAME kernel_attr<...> / kentry overload Old-TE
-            // uses (run_gemm_quant_example.inc), NOT the plain make_kernel path.
-            // Old-TE computes:
-            //   eight_waves = IS_FP8BLOCKSCALE && (M_Warp*N_Warp*K_Warp == 8) &&
-            //                 K_Warp_Tile == 128;   // under CK_GFX950_SUPPORT
-            // For TensorQuant IS_FP8BLOCKSCALE is false, so eight_waves is always
-            // false here -- but we mirror the full expression so the emitted
-            // kentry<Attr, MinBlockPerCu, ...> specialization is byte-for-byte the
-            // same instantiation Old-TE compiles (this is what makes the resulting
-            // kernel identical: VGPR 132 to match Old-TE, vs 136 for the plain
-            // make_kernel<kBlockPerCu> / kentry<MinBlockPerCu, ...> overload).
-            constexpr bool eight_waves =
-#ifdef CK_GFX950_SUPPORT
-                false /* IS_FP8BLOCKSCALE=false for TensorQuant */ &&
-                (WarpM * WarpN * WarpK == 8) && (WarpTileK == 128);
-#else
-                false;
-#endif
-            using k_attr_t = ck_tile::kernel_attr<eight_waves>;
-            return ck_tile::launch_kernel(
-                s,
-                ck_tile::make_kernel<kBlockPerCu, k_attr_t>(
-                    Kernel{{}}, grids, blocks, 0, kargs));
-        }};
-
-        return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
-    }}
+{launch_tail}
 }};
 
 using SelectedKernel = {struct};
