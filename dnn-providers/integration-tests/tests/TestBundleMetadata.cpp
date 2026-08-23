@@ -3,10 +3,14 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdlib>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
+#include <unistd.h>
 
 #include "harness/BundleMetadata.hpp"
 
@@ -24,14 +28,54 @@ using hipdnn_test_sdk::utilities::isMetaJsonFile;
 namespace
 {
 
+/// Claims a uniquely-named temp directory. Seeded from the clock, the pid and a
+/// per-call counter, so neither a sibling process nor a second TempBundle in this one
+/// draws the same name.
+///
+/// ScopedDirectory itself creates the directory and throws when the name is already
+/// taken, which is the behaviour that makes this safe: a lost race is retried rather
+/// than adopted, and the returned object still owns exactly what it created.
+hipdnn_test_sdk::utilities::ScopedDirectory makeUniqueBundleDir()
+{
+    static std::atomic<uint64_t> counter{0};
+    const auto base = std::filesystem::temp_directory_path();
+    const auto seed
+        = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())
+          ^ (static_cast<uint64_t>(::getpid()) << 32U);
+
+    for(int attempt = 0; attempt < 64; ++attempt)
+    {
+        const auto candidate
+            = base / ("test_bundle_" + std::to_string(seed + counter.fetch_add(1)));
+        try
+        {
+            return hipdnn_test_sdk::utilities::ScopedDirectory(candidate);
+        }
+        catch(const std::runtime_error&)
+        {
+            // Name taken by a concurrent binary; draw another.
+        }
+    }
+    throw std::runtime_error("makeUniqueBundleDir: could not claim a temp directory");
+}
+
 /// Helper: create a temporary directory with a fake bundle JSON and optional
 /// .meta.json companion. Auto-cleans on destruction via ScopedDirectory.
+///
+/// The directory name must be unique per process AND per construction. `std::rand()`
+/// without a seed yields the same sequence in every process, so two test binaries
+/// running concurrently -- ctest -j N, or an install-tree and build-tree run at once --
+/// both draw 1804289383 first and the second one dies with "ScopedDirectory: Directory
+/// already exists" before reaching an assertion. That is why only the FIRST TempBundle
+/// user in this file was observed failing while its siblings passed.
+///
+/// create_directory() reporting whether it did the creating is what makes this safe:
+/// a name already taken is retried rather than adopted.
 class TempBundle
 {
 public:
     explicit TempBundle(const std::string& metaJsonContent = "")
-        : _dir(std::filesystem::temp_directory_path()
-               / ("test_bundle_" + std::to_string(std::rand())))
+        : _dir(makeUniqueBundleDir())
     {
         // Create a minimal bundle JSON (enough for path derivation)
         std::ofstream bundleFile(_dir.path() / "Bundle.json");

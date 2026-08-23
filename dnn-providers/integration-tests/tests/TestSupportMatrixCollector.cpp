@@ -3,9 +3,12 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
+#include <unistd.h>
 
 #include "harness/SupportMatrixCollector.hpp"
 
@@ -109,14 +112,25 @@ TEST_F(TestSupportMatrixCollector, WriteMarkdownProducesFile)
     auto& collector = SupportMatrixCollector::get();
     collector.setEnabled(true);
 
-    const std::string tmpPath = "test_support_matrix_output.md";
+    // A unique path, not a bare name in the shared CWD. ctest invokes this binary from
+    // several tiered suites (see _add_test_target_internal in dnn-providers/cmake/
+    // Tests.cmake -- the category suites all run the same executable), so under -j N two
+    // copies share a working directory. A fixed name means one copy can truncate or
+    // rewrite the file between this test's writeMarkdown() and its read, which surfaces
+    // as a file that opens fine but holds the wrong contents.
+    const auto tmpPath
+        = (std::filesystem::temp_directory_path()
+           / ("test_support_matrix_" + std::to_string(::getpid()) + "_"
+              + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())
+              + ".md"))
+              .string();
     collector.setOutputPath(tmpPath);
     collector.recordGraphSupport("Conv", "ConvFprop fp32", "Test1", {}, "", "NHWC");
 
     collector.writeMarkdown({"TestEngine"});
 
     std::ifstream inFile(tmpPath);
-    ASSERT_TRUE(inFile.is_open());
+    ASSERT_TRUE(inFile.is_open()) << "collector wrote nothing to " << tmpPath;
 
     const std::string content((std::istreambuf_iterator<char>(inFile)),
                               std::istreambuf_iterator<char>());
