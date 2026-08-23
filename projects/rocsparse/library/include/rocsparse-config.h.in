@@ -36,6 +36,8 @@
 
 /* Build-time feature flags baked in at compile time. */
 
+#cmakedefine ROCSPARSE_WITH_TRSM_REFACTORING
+
 /* rocSPARSE 5.1 */
 #cmakedefine ROCSPARSE_WITH_SPMAT_SCALE
 #cmakedefine ROCSPARSE_WITH_SDDMM_BATCHED

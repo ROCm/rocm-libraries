@@ -97,6 +97,7 @@ option(BUILD_WITH_CSC_TRSV "Enable CSC format support in rocsparse_spsv and rocs
 option(BUILD_WITH_CSC_TRSM "Enable CSC format support in rocsparse_spsm and rocsparse_sptrsm" ON)
 option(BUILD_WITH_ELL_TRSV "Enable ELL format support in rocsparse_spsv and rocsparse_sptrsv" ON)
 option(BUILD_WITH_DIAGONAL_SOLVE "Enable the diagonal solve in rocsparse_sptrsv and rocsparse_sptrsm" ON)
+option(BUILD_WITH_TRSM_REFACTORING "Build rocSPARSE with the refactored triangular solve (SpTRSM/SpSM) implementation" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )
