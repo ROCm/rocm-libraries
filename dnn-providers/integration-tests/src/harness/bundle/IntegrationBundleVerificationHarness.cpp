@@ -220,8 +220,9 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
     if(status.is_bad()
        || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
     {
-        throw EngineNotApplicableError("Engine " + std::string(TestConfig::get().getEngineName())
-                                       + " does not support this graph");
+        skipUnverifiable("Engine " + std::string(TestConfig::get().getEngineName())
+                         + " does not support this graph (enforcement_level=" + rung + ")");
+        return;
     }
 
     if(level == EnforcementLevel::APPLICABILITY)

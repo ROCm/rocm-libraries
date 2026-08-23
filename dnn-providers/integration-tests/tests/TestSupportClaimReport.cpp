@@ -82,6 +82,13 @@ TEST_F(TestSupportClaimReport, RecordsQueryErrored)
     EXPECT_TRUE(SupportClaimReport::get().hasFailures());
 }
 
+TEST_F(TestSupportClaimReport, RecordsEngineNotLoaded)
+{
+    SupportClaimReport::get().record(makeResult(SupportVerdict::ENGINE_NOT_LOADED));
+    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::ENGINE_NOT_LOADED), 1u);
+    EXPECT_TRUE(SupportClaimReport::get().hasFailures());
+}
+
 TEST_F(TestSupportClaimReport, RecordsUnclaimedSupport)
 {
     SupportClaimReport::get().record(makeResult(SupportVerdict::UNCLAIMED_SUPPORT));
@@ -214,6 +221,19 @@ TEST_F(TestSupportClaimReport, PrintLevel3ListsUnclaimedBundles)
     EXPECT_NE(output.find("UNCLAIMED SUPPORT"), std::string::npos);
     // A bare count is not actionable — the bundle has to be named.
     EXPECT_NE(output.find("test/bundle"), std::string::npos);
+    EXPECT_NE(output.find("ENGINE_A"), std::string::npos);
+}
+
+TEST_F(TestSupportClaimReport, PrintShowsFailureSectionForEngineNotLoaded)
+{
+    SupportClaimReport::get().record(makeResult(SupportVerdict::ENGINE_NOT_LOADED));
+
+    std::ostringstream oss;
+    SupportClaimReport::get().print(oss);
+    const auto output = oss.str();
+
+    EXPECT_NE(output.find("CLAIM FAILURES (1)"), std::string::npos);
+    EXPECT_NE(output.find("ENGINE_NOT_LOADED"), std::string::npos);
     EXPECT_NE(output.find("ENGINE_A"), std::string::npos);
 }
 

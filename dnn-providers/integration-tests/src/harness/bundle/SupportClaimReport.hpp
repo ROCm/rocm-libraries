@@ -131,7 +131,10 @@ public:
            << "  not-loaded: " << notLoaded << "  unclaimed: " << unc
            << "  not-enforced: " << notEnf << "\n";
 
-        const size_t totalFailures = broke + err + notLoaded;
+        const auto totalFailures = static_cast<size_t>(
+            std::count_if(records.begin(), records.end(), [](const SupportResult& r) {
+                return isFailure(r.verdict);
+            }));
         if(totalFailures > 0)
         {
             os << "\n---- CLAIM FAILURES (" << totalFailures << ") ----\n";
