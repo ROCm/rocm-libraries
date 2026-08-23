@@ -48,6 +48,7 @@ target_sources(stinkytofu_objs PRIVATE
     RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
     InsertCoexecHazardPass.cpp
+    EpilogueStoreSinkPass.cpp
     StinkyWmmaVgprReorderPass.cpp
     FlattenCalleesPass.cpp
 )

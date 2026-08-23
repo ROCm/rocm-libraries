@@ -1333,6 +1333,21 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         (scopeStartIdx != -1 && scopeEndIdx != -1 && scopeStartIdx <= scopeEndIdx);
     static const std::string kScope = "expertScheduleMode2";
 
+    // Tag every top-level item whose subtree holds Module("GlobalWriteElements"),
+    // from the first such item through the last. Covers both the main store
+    // epilogue and the separate GSU-split OptNLL store.
+    int epilogueStartIdx = -1;
+    int epilogueEndIdx = -1;
+    for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
+        if (containsModule(module.itemList[i].get(), "GlobalWriteElements")) {
+            if (epilogueStartIdx == -1) epilogueStartIdx = i;
+            epilogueEndIdx = i;
+        }
+    }
+    const bool hasEpilogue =
+        (epilogueStartIdx != -1 && epilogueEndIdx != -1 && epilogueStartIdx <= epilogueEndIdx);
+    static const std::string kEpilogue = "globalWriteEpilogue";
+
     // Traverse top-level items, injecting the loopWithPrefetch group name
     // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx]
     // (spans all main-loop bodies when present).
@@ -1340,9 +1355,11 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         const auto& item = module.itemList[i];
         const bool inPGR = hasPGR && (i >= pgrStartIdx && i <= loopBodyIdx);
         const bool inScope = hasScope && (i >= scopeStartIdx && i <= scopeEndIdx);
+        const bool inEpilogue = hasEpilogue && (i >= epilogueStartIdx && i <= epilogueEndIdx);
 
         std::vector<const std::string*> base;
         if (inScope) base.push_back(&kScope);
+        if (inEpilogue) base.push_back(&kEpilogue);
         if (inPGR) base.push_back(&kPGR);
         base.push_back(&module.name);
 

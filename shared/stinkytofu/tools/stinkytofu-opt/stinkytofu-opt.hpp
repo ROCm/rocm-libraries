@@ -38,6 +38,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
@@ -161,6 +162,15 @@ const std::vector<PassInfo> availablePasses = {
     {"DumpMemTokenIRStructurePass",
      [](const auto&) {
          return createDumpMemTokenIRStructurePass({.path = "dump_memtoken_ir_structure.txt"});
+     }},
+    // EpilogueStoreSinkPass accepts: noCluster (clusterSize=0),
+    // noGuard (avoidMsbXcntDrain=false)
+    {"EpilogueStoreSinkPass",
+     [](const std::vector<std::string>& args) {
+         EpilogueStoreSinkOptions options;
+         if (hasPassArg(args, "noCluster")) options.clusterSize = 0;
+         if (hasPassArg(args, "noGuard")) options.avoidMsbXcntDrain = false;
+         return createEpilogueStoreSinkPass(options);
      }},
     {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},
     {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},

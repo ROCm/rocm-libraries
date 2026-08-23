@@ -39,6 +39,7 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
@@ -203,6 +204,16 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));
         }
 
+        if (moduleOptions.EnableESM2) {
+            PassManager epiloguePM;
+            registerAllAnalyses(epiloguePM.getAnalysisManager());
+            configureStandardInstrumentations(epiloguePM, moduleOptions, "globalWriteEpilogue",
+                                              debugStreams);
+            epiloguePM.addPass(createEpilogueStoreSinkPass());
+            pm.addPass(createKernelToRegionPassAdaptor(module, "globalWriteEpilogue",
+                                                       std::move(epiloguePM)));
+        }
+
         PB.applyExtensionPoint(PipelineExtensionPoint::AfterRegionPasses, pm, module);
 
         // Cluster-barrier insertion (kernel scope) — runs at every OptLevel when
@@ -338,7 +349,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 struct Gfx1250Registrar {
     Gfx1250Registrar() {
         BackendRegistry::setArchPipeline(
-            GFX1250_ARCH, {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody"}});
+            GFX1250_ARCH,
+            {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody", "globalWriteEpilogue"}});
     }
 };
 static Gfx1250Registrar s_gfx1250Registrar;
