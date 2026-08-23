@@ -640,3 +640,39 @@ bandwidth advantage and transfers to navi32 with a smaller caveat than the fp16 
 | rejected | WGM re-fork, Origami-Prediction, catalog extension — each with evidence |
 | bounded | 73% of kernel time is compute-bound, so results transfer despite bandwidth |
 | verified | every headline figure recomputed from raw CSV; all match |
+
+---
+
+## P10 — AuxH validation: three of four shipped catalogs now measured
+
+| catalog | geomean | wall-clock | A/A |
+|---|---|---|---|
+| HHS-TN (fp16) | 127.21% | **123.91%** | 100.32% |
+| BBS-TN (bf16) | 119.89% | **122.17%** | 100.60% |
+| **AuxH-TN (fp16 + aux epilogue)** | 117.34% | **120.45%** | 100.39% |
+
+All three land in a **+20 to +24% wall-clock band**, with the same shape signature:
+
+| AuxH by | large | medium | small | tiny | | gemv | rect | skinny | square |
+|---|---|---|---|---|---|---|---|---|---|
+| wall-clock | 119.5% | 119.2% | 137.1% | 146.0% | | **237.3%** | 119.0% | 122.7% | 120.2% |
+
+GEMV at 237% is the largest of the three (HHS 223%, BBS 178%). The bias-aux epilogue does not
+change the picture — as expected, since the epilogue is not what a sparse shape table gets
+wrong.
+
+**Only `AuxB` (bf16 + aux) remains unmeasured**, and it is now bracketed on both axes: the
+same dtype as a measured case (BBS) and the same epilogue as a measured case (AuxH).
+
+### A silent failure worth recording
+
+The first AuxH attempt ran to completion at the expected rate and produced **231 rows that
+were all `status=error`**, `gflops=0.00`, empty kernel name. The Aux ProblemTypes carry an
+auxiliary output and need `--use_e --aux_type f16_r --activation_type gelu`; without them the
+library reports `NO solution found`. (`--use_e` alone fails with *"activation type 1 does not
+support '--use_e'"*.)
+
+That is the third instance today of **a check returning the reassuring signal without doing
+the work** — alongside the `--logic-filter` glob that built zero kernels while exiting 0, and
+`ROC_GLOBAL_CU_MASK` reporting 30 CUs while restricting nothing. The rule now in the runbook:
+**check status counts, not row counts.**

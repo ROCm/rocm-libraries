@@ -53,17 +53,18 @@ def parse(out):
     return g, us, kern
 
 
-def run_one(lib, env_extra, shape, cus, iters, timeout, no_mask=False):
+def run_one(lib, env_extra, shape, cus, iters, timeout, no_mask=False, dtype="f16_r",
+            extra=()):
     m, n, k = shape["M"], shape["N"], shape["K"]
     cmd = [BENCH, "--api_method", "c", "-m", str(m), "-n", str(n), "-k", str(k),
            "--transA", "T", "--transB", "N", "--lda", str(k), "--ldb", str(k),
            "--ldc", str(m), "--ldd", str(m),
-           "--a_type", "f16_r", "--b_type", "f16_r", "--c_type", "f16_r",
-           "--d_type", "f16_r", "--compute_type", "f32_r",
+           "--a_type", dtype, "--b_type", dtype, "--c_type", dtype,
+           "--d_type", dtype, "--compute_type", "f32_r",
            "--algo_method", "heuristic", "--requested_solution", "1",
            "--initialization", "trig_float", "--print_kernel_info",
            "--cold_iters", str(max(1, iters // 3)), "--iters", str(iters),
-           "--sm_count_target", str(cus)]
+           "--sm_count_target", str(cus)] + list(extra)
     env = dict(os.environ, HIPBLASLT_TENSILE_LIBPATH=lib, **env_extra)
     if not no_mask:
         env["HIPBLASLT_BENCH_CU_MASK"] = str(cus)
@@ -91,6 +92,14 @@ def main():
     ap.add_argument("--cus", type=int, default=60)
     ap.add_argument("--fixed-iters", type=int, default=20)
     ap.add_argument("--timeout", type=int, default=35)
+    ap.add_argument("--extra-args", default="",
+                    help="extra bench flags for every arm, space separated. The Aux "
+                         "ProblemTypes need '--use_e --aux_type f16_r --activation_type gelu': "
+                         "without them the library reports NO solution found, and "
+                         "--use_e alone fails with 'activation type 1 does not support --use_e'.")
+    ap.add_argument("--dtype", default="f16_r",
+                    help="a/b/c/d type; compute stays f32_r (the S in HHS/BBS). "
+                         "Use bf16_r for the BBS ProblemTypes.")
     ap.add_argument("--no-cu-mask", action="store_true",
                     help="skip HIPBLASLT_BENCH_CU_MASK. The masked stream hangs ~37%% of "
                          "runs (measured: 0/8 timeouts unmasked vs 3/8 masked), which is "
@@ -145,7 +154,8 @@ def main():
                 if key in done:
                     continue
                 g, us, kern, st = run_one(lib, env, sh, a.cus, a.fixed_iters, a.timeout,
-                                          a.no_cu_mask)
+                                          a.no_cu_mask, a.dtype,
+                                          a.extra_args.split())
                 w.writerow([sh["shape_id"], sh["M"], sh["N"], sh["K"],
                             sh.get("stratum", ""), name, rep,
                             f"{g:.2f}", f"{us:.3f}", kern, st, f"{time.time():.0f}"])

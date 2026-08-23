@@ -152,6 +152,21 @@ A clean exit code proved nothing here. **Verify a build by its artifacts** — k
 `.co`. The vacuous build left a 356 KB directory containing only extop/transform helpers and
 no GEMM libraries at all; the real one is 9.8 MB with 39 code objects.
 
+## 7c. The Aux ProblemTypes need extra bench flags, and fail silently without them
+
+`*_Bias_AuxH_*` / `*_Bias_AuxB_*` carry an auxiliary output. Benchmarked with the same flags
+as their non-Aux siblings, the library reports **`NO solution found`** and every row lands as
+`status=error` with `gflops=0.00` and an empty kernel name — 231 rows of it before I looked
+at the status column rather than the row count.
+
+Required: `--use_e --aux_type f16_r --activation_type gelu`.
+
+`--use_e` alone is not enough; it fails with *"The activation type 1 does not support
+'--use_e'"*. Any of `gelu`/`relu` satisfies it.
+
+**Check `status` counts, not row counts.** A sweep producing rows at the expected rate can be
+producing nothing but errors, and the harness will happily run to completion.
+
 ## 8. Operational
 
 - `flock` every GPU action. A hung child holds it — kill by PID, and remember
