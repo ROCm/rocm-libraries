@@ -13,7 +13,9 @@
 #include <miopen/mlo_internal.hpp>
 #include <miopen/perf_field.hpp>
 #include <miopen/conv/problem_description.hpp>
+#include <miopen/conv/solvers.hpp>
 #include <miopen/solution.hpp>
+#include <miopen/solver/conv_direct_naive_conv.hpp>
 #include <miopen/utility/modified_z.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_GEMM)
@@ -29,7 +31,6 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_NAIVE_DISABLE_IF_ALT, true)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CONV_DIRECT_MAX_SIZE, 0)
 
 namespace miopen {
 
@@ -202,6 +203,55 @@ const std::vector<std::unique_ptr<ISolversFinder>>& GetConvSolverFinders()
 
 } // namespace conv
 
+/// Decide whether the Naive convolution solver should be *skipped* -- i.e. not
+/// executed in Find's mini-benchmark -- for the current solution.
+///
+/// Why this exists: Naive is MIOpen's universal fallback and stays *applicable* at
+/// any problem size, but its kernel is un-tiled, so on a large problem a single
+/// launch runs for multiple seconds. Find times every applicable solver by actually
+/// *executing* it, so merely benchmarking Naive on such a shape trips the OS GPU
+/// watchdog (a TDR / driver reset) even when a fast solver (CK/GEMM) also applies
+/// and would ultimately win. Naive does not have to be *selected* to cause the
+/// hang -- being *benchmarked* is enough. We therefore skip *running* Naive during
+/// the benchmark exactly when BOTH of these hold:
+///
+///   * non_naive_exists   -- some non-Naive solver was found applicable for this
+///                           problem. The caller computes this from the full
+///                           solution list *before* workspace filtering, so a fast
+///                           solver that is later workspace-filtered still counts;
+///                           that is what closes the TDR leak where the alternative
+///                           never gets to time itself. AND
+///   * naive_exceeds_work -- the problem's total MAC work is over the Naive work
+///                           limit (~16 GMAC, see ConvDirectNaiveConvExceedsWorkLimit),
+///                           i.e. large enough that a single launch could TDR.
+///
+/// Consequences of this exact condition (the whole selection policy in one place):
+///   * Naive is the *sole* applicable solver -> not skipped -> it runs, preserving
+///     the universal-fallback guarantee. A huge sole-Naive shape may then still TDR
+///     -- an honest "extend coverage here" signal we deliberately do not mask.
+///   * Any shape under the work limit -> not skipped -> Naive competes and wins on
+///     merit wherever it is fastest. This notably covers *all* real depthwise convs
+///     (group == C == K => C_per_group == 1 => ~C x less work), which never approach
+///     the limit and for which Naive is often the fastest option (e.g. NCHW): they
+///     keep competing with no special case.
+///   * Only large-and-avoidable shapes (over the limit with an alternative present)
+///     are skipped -- the actual TDR case.
+///
+/// MIOPEN_NAIVE_DISABLE_IF_ALT (naive_disable, default on) gates the whole policy;
+/// unset it to force Naive to always compete. The AlwaysEnable debug path
+/// (reference/verification) is never skipped so golden references still run.
+static bool ShouldSkipNaiveBenchmark(bool is_naive,
+                                     bool naive_disable,
+                                     bool non_naive_exists,
+                                     bool naive_exceeds_work)
+{
+    if(!is_naive || !naive_disable)
+        return false;
+    if(miopen::debug::AlwaysEnableConvDirectNaive)
+        return false;
+    return non_naive_exists && naive_exceeds_work;
+}
+
 /// Register invoker only for the best solution within algorithm.
 std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        const std::vector<solver::ConvSolution>& solutions,
@@ -210,7 +260,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        const AnyInvokeParams& invoke_ctx,
                                        FindCoreResult& core_result,
                                        bool force_attach_binary,
-                                       bool& non_naive_succeeded)
+                                       bool non_naive_exists,
+                                       bool naive_exceeds_work)
 {
     std::vector<Solution> ret;
 
@@ -224,43 +275,23 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
     bool naive_disable       = env::value(MIOPEN_NAIVE_DISABLE_IF_ALT);
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
-    // Defer Naive only when a non-Naive alternative exists across all algorithms or this one.
-    const bool defer_naive =
-        naive_disable &&
-        (non_naive_succeeded || std::any_of(solutions.begin(), solutions.end(), [&](const auto& s) {
-             return !is_naive_solver(s);
-         }));
-    auto selected     = miopen::solver::ConvSolution{miopenStatusUnknownError};
-    auto best         = std::numeric_limits<float>::max();
-    auto best_invoker = Invoker{};
+    auto selected            = miopen::solver::ConvSolution{miopenStatusUnknownError};
+    auto best                = std::numeric_limits<float>::max();
+    auto best_invoker        = Invoker{};
     std::vector<float> samples;
 
-    // Iterate non-Naive solutions first, Naive last
-    std::vector<std::size_t> order(solutions.size());
-    std::iota(order.begin(), order.end(), 0);
-    if(defer_naive)
+    for(const auto& sol : solutions)
     {
-        std::stable_partition(order.begin(), order.end(), [&](std::size_t i) {
-            return !is_naive_solver(solutions[i]);
-        });
-    }
-
-    for(std::size_t idx : order)
-    {
-        const auto& sol = solutions[idx];
-
         const bool is_naive = is_naive_solver(sol);
-        if(naive_disable && is_naive)
+        if(ShouldSkipNaiveBenchmark(is_naive, naive_disable, non_naive_exists, naive_exceeds_work))
         {
-            if(defer_naive && non_naive_succeeded)
-            {
-                MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
-                                                       << sol.solver_id);
-                continue;
-            }
+            MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
+                                                   << sol.solver_id);
+            continue;
+        }
+        if(naive_disable && is_naive)
             MIOPEN_LOG_I("Unable to Skip Naive Solver: " << algorithm_name.ToString() << ":"
                                                          << sol.solver_id);
-        }
 
         if(!conv::IsEnoughWorkspace(
                "EvaluateInvokers", solver::Id{sol.solver_id}, sol.workspace_sz, &invoke_ctx))
@@ -389,8 +420,6 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             else
                 solution.SetInvoker(invoker, {}, {});
             ret.emplace_back(std::move(solution));
-            if(!is_naive)
-                non_naive_succeeded = true;
         }
         catch(const miopen::Exception& ex)
         {
@@ -468,7 +497,23 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
     ret.solutions.reserve(total);
 
-    bool non_naive_succeeded = false;
+    // Does any non-Naive solver apply, across all algorithms? Computed from the full solution
+    // list *before* per-solver workspace filtering, so a fast-but-workspace-limited alternative
+    // still counts and Naive is deferred rather than benchmarked (the TDR-leak fix). Also decide
+    // once whether this conv's total MAC work is large enough that the un-tiled Naive kernel would
+    // trip the OS GPU watchdog if benchmarked. Non-conv (fusion) problems yield nullptr and are
+    // inert here.
+    const bool non_naive_exists =
+        std::any_of(solutions.begin(), solutions.end(), [](const auto& g) {
+            return std::any_of(g.second.begin(), g.second.end(), [](const auto& s) {
+                return s.solver_id.find("Naive") == std::string::npos;
+            });
+        });
+    const auto* conv_problem = dynamic_cast<const conv::ProblemDescription*>(&problem);
+    const bool naive_exceeds_work =
+        (conv_problem != nullptr) &&
+        solver::conv::ConvDirectNaiveConvExceedsWorkLimit(*conv_problem);
+
     for(const auto& ss : solutions)
     {
         auto evaluated = EvaluateInvokers(handle,
@@ -478,7 +523,8 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
                                           invoke_ctx,
                                           ret,
                                           force_attach_binary,
-                                          non_naive_succeeded);
+                                          non_naive_exists,
+                                          naive_exceeds_work);
 
         ret.solutions.insert(ret.solutions.end(),
                              std::make_move_iterator(evaluated.begin()),
@@ -490,37 +536,7 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
 namespace conv {
 
-namespace detail {
-/// Determine if problem size exceeds threshold for Direct solver.
-///
-/// The result tensor is used to estimate problem size.
-/// The maximum size is determined by MIOPEN_CONV_DIRECT_MAX_SIZE environment variable.
-///
-/// @param problem The convolution problem description.
-bool IsDirectProblemTooLarge(const ProblemDescription& problem)
-{
-    const unsigned long long max_size = env::value(MIOPEN_CONV_DIRECT_MAX_SIZE);
-    // 0 means no limit
-    if(max_size == 0)
-        return false;
-
-    // For FWD/BWD: 'out' is the result (swapped in BWD)
-    // For WRW: 'weights' is the result (out is dy, not dw)
-    const size_t problem_size = problem.IsDirectionBackwardWrW()
-                                    ? problem.GetWeights().GetElementSize()
-                                    : problem.GetOut().GetElementSize();
-
-    // Problem size is within limit
-    if(problem_size <= max_size)
-        return false;
-
-    MIOPEN_LOG_I2("DirectSolverFinder disabled for problem size "
-                  << problem_size << " > " << max_size << " (MIOPEN_CONV_DIRECT_MAX_SIZE)");
-    return true;
-}
-} // namespace detail
-
-bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& problem)
+bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& /*problem*/)
 {
     switch(algo)
     { // clang-format off
@@ -531,7 +547,7 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& p
         return true;
 #endif
     case miopenConvolutionAlgoDirect:
-        return env::disabled(MIOPEN_DEBUG_CONV_DIRECT) || detail::IsDirectProblemTooLarge(problem);
+        return env::disabled(MIOPEN_DEBUG_CONV_DIRECT);
     case miopenConvolutionAlgoFFT:
         return env::disabled(MIOPEN_DEBUG_CONV_FFT);
     case miopenConvolutionAlgoWinograd:

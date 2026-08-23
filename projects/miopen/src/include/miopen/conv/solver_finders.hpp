@@ -171,7 +171,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        const AnyInvokeParams& invoke_ctx,
                                        FindCoreResult& core_result,
                                        bool force_attach_binary,
-                                       bool& non_naive_succeeded);
+                                       bool non_naive_exists   = false,
+                                       bool naive_exceeds_work = false);
 
 FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
                         const ExecutionContext& ctx,
