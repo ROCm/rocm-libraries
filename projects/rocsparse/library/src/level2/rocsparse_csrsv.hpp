@@ -84,6 +84,19 @@ namespace rocsparse
                                  rocsparse_csrsv_info        csrsv_info,
                                  void*                       temp_buffer);
 
+  rocsparse_status csrsv_solve(rocsparse_handle            handle,
+			       rocsparse_operation         trans,
+			       rocsparse_datatype          alpha_datatype,
+			       const void*                 alpha,
+			       int64_t                     alpha_stride,
+			       rocsparse_const_spmat_descr A,
+			       rocsparse_const_dnvec_descr x,
+			       rocsparse_dnvec_descr       y,
+			       rocsparse_solve_policy      policy,
+			       rocsparse_csrsv_info        csrsv_info,
+			       size_t                      buffer_size_in_bytes,
+			       void*                       buffer);
+
     rocsparse_status launch_csrsv_analysis_kernel(rocsparse_handle    handle,
                                                   rocsparse_operation trans,
                                                   int64_t             m,
