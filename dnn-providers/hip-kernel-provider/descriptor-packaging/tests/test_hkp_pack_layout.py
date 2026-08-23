@@ -896,3 +896,112 @@ def test_reserved_kpack_folder_is_case_insensitive(
 
     with pytest.raises(HkpPackError, match="reserved"):
         load_flat_input(root)
+
+
+@pytest.mark.quick
+def test_example_tree_cross_references_resolve_to_the_right_types():
+    """Every id reference must exist AND name the correct descriptor kind.
+
+    A dangling or mistyped reference is worse than a parse error: the tree loads
+    and then fails to match, with a diagnostic that points at the runtime rather
+    than at the descriptor that lied. Field-shape parity does not catch it.
+    """
+    by_id = {}
+    for path in _descriptor_files(EXAMPLE_ROOT):
+        doc = _read(path)
+        by_id[doc["id"]] = (path.name.split(".")[-2], path.name)
+
+    def expect(ref, kind, where):
+        assert ref in by_id, f"{where}: reference {ref} resolves to nothing"
+        actual = by_id[ref][0]
+        assert (
+            actual == kind
+        ), f"{where}: reference {ref} is a .{actual}, expected a .{kind}"
+
+    kdps = 0
+    for path in EXAMPLE_ROOT.rglob("*.kdp.json"):
+        doc = _read(path)
+        for matcher in doc.get("matchers", []):
+            expect(matcher, "umd", f"{path.name} matchers")
+        expect(doc["engine"], "ued", f"{path.name} engine")
+        expect(doc["dispatch"], "udd", f"{path.name} dispatch")
+        kdps += 1
+
+    ueds = 0
+    for path in EXAMPLE_ROOT.rglob("*.ued.json"):
+        doc = _read(path)
+        expect(doc["heuristic"], "uhd", f"{path.name} heuristic")
+        expect(doc["metadata"], "kmd", f"{path.name} metadata")
+        ueds += 1
+
+    assert kdps and ueds, "no references were checked; the walk is broken"
+
+
+@pytest.mark.quick
+def test_example_tree_metadata_matches_its_kmd_schema():
+    """A UKD's metadata keys and types must match what its KMD declares.
+
+    Another failure that loads cleanly and breaks at match time: the loader does
+    not reconcile the two, so an undeclared key or a wrong type is silent until
+    something tries to select on it.
+    """
+    schemas = {
+        _read(p)["id"]: {f["name"]: f["type"] for f in _read(p).get("fields", [])}
+        for p in EXAMPLE_ROOT.rglob("*.kmd.json")
+    }
+    engines = {
+        _read(p)["id"]: _read(p)["metadata"] for p in EXAMPLE_ROOT.rglob("*.ued.json")
+    }
+    py_type = {"int": int, "string": str, "bool": bool, "float": float}
+
+    checked = 0
+    for path in EXAMPLE_ROOT.rglob("*.kdp.json"):
+        doc = _read(path)
+        schema = schemas[engines[doc["engine"]]]
+        for ukd in doc["kernelDescriptors"]:
+            if isinstance(ukd, str):
+                continue
+            for key, value in ukd.get("metadata", {}).items():
+                assert (
+                    key in schema
+                ), f"{path.name}: metadata '{key}' is not declared by its KMD"
+                expected = py_type.get(schema[key])
+                assert expected is None or isinstance(
+                    value, expected
+                ), f"{path.name}: metadata '{key}'={value!r} is not {schema[key]}"
+                checked += 1
+    assert checked, "no metadata was checked; the walk is broken"
+
+
+@pytest.mark.quick
+def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
+    """Ids must be unique against every tree that could share a catalog.
+
+    The example, the runtime fixture, and the in-tree ingestor set can all be
+    loaded into one process. A duplicate id across them is a load-time rejection
+    that would look like a bug in whichever tree loaded second.
+    """
+
+    def ids(root):
+        root = Path(root)
+        if not root.is_dir():
+            return set()
+        out = set()
+        for path in root.rglob("*.json"):
+            try:
+                out.add(_read(path)["id"])
+            except (KeyError, json.JSONDecodeError):
+                continue
+        return out
+
+    provider = EXAMPLE_ROOT.parent.parent.parent
+    example = ids(EXAMPLE_ROOT)
+    assert len(example) == len(
+        list(_descriptor_files(EXAMPLE_ROOT))
+    ), "the example tree has duplicate ids within itself"
+    for other in (
+        provider / "src/integration_tests/kernel_ingestor_engine/fixtures/packaged",
+        provider / "src/engines/kernel_ingestor_engine/descriptors",
+    ):
+        clash = example & ids(other)
+        assert not clash, f"example ids collide with {other.name}: {sorted(clash)}"
