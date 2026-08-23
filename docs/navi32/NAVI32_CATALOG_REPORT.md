@@ -7,32 +7,41 @@ Written incrementally, one section per phase, so a crash preserves findings.
 
 ## Summary
 
-**Shipped: navi32's TN HHS catalog widened from 73 to 298 solutions — +40% geomean,
-+24% wall-clock**, on branch `vmijovic/navi32` (2 commits, pushed).
+**Shipped: all four of navi32's thin TN catalogs widened, +18.8% to +23.9% wall-clock**, on
+branch `vmijovic/navi32` (18 commits, pushed). All four measured, not inferred.
+
+| catalog | solutions | wall-clock | geomean | A/A |
+|---|---|---|---|---|
+| HHS-TN (fp16) | 73 -> 298 | **+23.9%** | +27.2% | 100.32% |
+| BBS-TN (bf16) | 64 -> 306 | **+22.2%** | +19.9% | 100.60% |
+| AuxH-TN (fp16+aux) | 73 -> 313 | **+20.4%** | +17.3% | 100.42% |
+| AuxB-TN (bf16+aux) | 64 -> 316 | **+18.8%** | +18.3% | 100.19% |
+
+**15 122 measurements across five sweeps, zero failures.** Quote the wall-clock figure: as the
+sample grew from n=219 to n=996 the geomean moved **13 points** while wall-clock moved 0.7.
 
 | what was tried | result |
 |---|---|
-| **Port navi31's catalog to navi32** | **+40% geomean / +24% wall-clock — SHIPPED** |
+| **Widen the TN catalogs from navi31's** | **SHIPPED — +18.8 to +23.9% wall-clock, all four measured** |
 | Add gfx1101 to Origami (9 sites) | done; navi32 was previously unrecognised entirely |
 | Re-fork `WorkGroupMapping` for 60 CUs | **null** — 6/8/10 within 0.33 pt of each other |
 | Switch to an Origami Prediction library | **rejected** — 13 pt worse than GridBased |
+| Extend the catalog past ~300 solutions | **rejected** — oracle over all arms is only +2.8% |
 | `ROC_GLOBAL_CU_MASK` to emulate 60 CUs | **cosmetic** — replaced with a per-stream mask |
 
-The gain is concentrated where a sparse lookup table hurts most: **2.3–2.7x on tiny and GEMV
-shapes**, ~1.2x on large square ones. All 298 solutions were gated through a real gfx1101
-build (0 assembler errors, 0 VGPR overflows, ELF `Flags: 0x46, gfx1101`).
+The gain concentrates where a sparse lookup table hurts most: **GEMV 1.7-2.6x**, tiny/small
+~1.4x, large/square ~1.2x. Every shipped solution was gated through a real gfx1101 build
+(0 assembler errors, 0 VGPR overflows, ELF `Flags: 0x46, gfx1101`), and the branch is verified
+to merge, build and still function against current develop.
 
-**Two well-motivated hypotheses were rejected by measurement**, and both are recorded so they
-are not retried: WGM re-forking (mechanically real — 8 is ragged on 30 WGPs — but
-unmeasurable), and Origami-Prediction selection (level with GridBased on large shapes,
-collapsing on small ones). The `pred73` control isolates why: Origami over navi32's *own* 73
-solutions gains nothing, so **the win is the catalog, not the selector**.
+**The control that makes the diagnosis stick**: Origami over navi32's *own* 73 solutions gains
+nothing (98.3% geomean), so **the win is the catalog, not the selector**.
 
-**Fidelity caveat that applies to every number here.** Selection is navi32-correct
-(`--sm_count_target 60`), but execution is on all 96 CUs because the real CU mask hangs ~37%
-of runs. Arm *ratios* are sound — the execution error is common-mode — but absolute
-throughput is optimistic for navi32, and the memory system (960 GB/s / 96 MB vs navi32's
-624 / 64) is not emulated at all.
+**Fidelity.** Selection is navi32-correct (`--sm_count_target 60`); execution ran on all 96 CUs
+because a real CU mask hangs ~37% of runs. Arm *ratios* are sound (common-mode error) but
+absolute throughput is optimistic. ~73% of kernel time is compute-bound, so the result
+transfers despite the bandwidth difference; only ~7% of kernel time is in the memory-bound
+band this card cannot speak for.
 
 ---
 
