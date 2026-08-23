@@ -145,9 +145,10 @@
 #endif
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 
+#include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
+
 #include <hipdnn_frontend/autotune/AutotuneBenchmark.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
-#include <hipdnn_frontend/autotune/BenchmarkStatistics.hpp>
 #include <hipdnn_frontend/autotune/CartesianProduct.hpp>
 #include <hipdnn_frontend/autotune/EngineSweepValidation.hpp>
 #include <hipdnn_frontend/autotune/KnobConstants.hpp>
@@ -1897,25 +1898,28 @@ private:
             result.succeeded = true;
             result.compiledPlanIndex = static_cast<int>(info.planIndex);
             result.minTimeMs = *std::min_element(timings.begin(), timings.end());
-            result.avgTimeMs = autotune::detail::computeMean(timings);
+            result.avgTimeMs = hipdnn_data_sdk::utilities::detail::mean(timings);
+            result.robustTimeMs = hipdnn_data_sdk::utilities::detail::robustMean(timings);
             if(timings.size() > 1)
             {
-                result.stddevMs = autotune::detail::computeStddev(timings);
+                result.stddevMs = hipdnn_data_sdk::utilities::detail::stddev(timings);
             }
 
             // --- Log per-engine result ---
             if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
             {
                 HIPDNN_FE_LOG_INFO("autotune: engine "
-                                   << result.engineName << ": min=" << result.minTimeMs << "ms avg="
-                                   << result.avgTimeMs << "ms stddev=" << result.stddevMs
+                                   << result.engineName << ": robust=" << result.robustTimeMs
+                                   << "ms min=" << result.minTimeMs << "ms avg=" << result.avgTimeMs
+                                   << "ms stddev=" << result.stddevMs
                                    << "ms iters=" << result.iterationsRun);
             }
             else // RUN_UNTIL_STABLE
             {
                 HIPDNN_FE_LOG_INFO("autotune: engine "
-                                   << result.engineName << ": min=" << result.minTimeMs << "ms avg="
-                                   << result.avgTimeMs << "ms iters=" << result.iterationsRun
+                                   << result.engineName << ": robust=" << result.robustTimeMs
+                                   << "ms min=" << result.minTimeMs << "ms avg=" << result.avgTimeMs
+                                   << "ms iters=" << result.iterationsRun
                                    << " converged=" << (result.converged ? "true" : "false"));
             }
 
@@ -3845,64 +3849,92 @@ public:
             handle, variantPack, workspace, workspaceSize, config, storageConfig, results);
     }
 
-    // --- Autotune: restricted "oracle best" entry point ---
+    // --- Autotune: exhaustive-sweep entry point ---
 
     /**
-     * @brief Restricted "oracle best" autotune: measures and caches the true best engine
-     *        order for this exact graph.
+     * @brief Benchmarks every candidate engine for this graph and caches the measured
+     *        ranking.
      *
-     * @c config.mode and @c config.primingFailurePolicy are both forced -- to
-     * TuneMode::EXHAUSTIVE and PrimingFailurePolicy::BENCHMARK_UNPRIMED -- and are not
-     * caller-overridable. This overload accepts no sweep/variant parameter; populate
-     * candidates via add_engine_configs()/add_all_engines()/add_engine() before calling.
+     * Compiles and times every plan spec added via add_engine_configs(),
+     * add_all_engines(), or add_engine(), ranks the engines by measured speed, and writes
+     * that order to the exact-match autotune cache. Takes no sweep/variant argument:
+     * populate candidates before calling.
      *
-     * Because priming failures do not abort the sweep, a persisted ranking may contain
-     * engines that were measured without priming and are therefore ranked conservatively:
-     * a slow-but-primed engine can outrank a fast-but-unprimed one. Every engine in the
-     * record was really measured, so this is a wrong-order risk, not a wrong-answer one,
-     * and per-result @c ranExhaustive says which engines were primed.
+     * By default engines are ranked on @c AutotuneResult::robustTimeMs -- the mean of a
+     * candidate's iterations after discarding its slow tail -- so the order reflects what
+     * each engine usually costs. A candidate that is normally slower but occasionally lucky
+     * does not outrank a consistently faster one on the strength of a single good
+     * iteration. Set @c config.rankingFn to rank on any other criterion; the sweep persists
+     * whatever order it produces. Every field of @c AutotuneResult is available to it,
+     * including @c minTimeMs, @c avgTimeMs, and @c stddevMs.
      *
-     * On success the ranked order is written to the exact-match autotune cache, keyed on
-     * this graph's serialized content and the handle's device: succeeded engines fastest
-     * first, followed by any engine that was measured and failed, so that a permanently
-     * failing engine cannot wedge the cache. A cache-write failure is logged but does not
-     * fail this call.
+     * Three @c config fields are set by this call and ignored on input: @c mode
+     * (TuneMode::EXHAUSTIVE), @c primingFailurePolicy
+     * (PrimingFailurePolicy::BENCHMARK_UNPRIMED), and @c strategy
+     * (AutotuneStrategy::FIXED_AVERAGE). Fixing the strategy makes
+     * @c config.timedIterations the count every candidate runs, so the timings a ranking
+     * function compares are drawn from equally sized sample sets.
+     *
+     * Raising @c config.timedIterations improves the odds that the genuinely fastest engine
+     * ranks first, at a proportional cost in sweep time. Engines whose true times differ by
+     * a wide margin separate reliably at any value; engines within a few percent of each
+     * other need substantially more iterations to order correctly, because each measurement
+     * carries run-to-run jitter of a similar size. Raise it when the ranking must resolve
+     * close candidates or will be reused by many later runs.
+     *
+     * Priming failures do not abort the sweep. An engine that failed to prime is still
+     * benchmarked, but without its internal caches warmed, so it can rank below a slower
+     * engine that primed successfully. Per-result @c ranExhaustive reports which engines
+     * were primed.
+     *
+     * The cached order is keyed on this graph's serialized content and the handle's
+     * device. Engines that were measured and failed are appended after the successful
+     * ones, so a permanently failing engine cannot wedge the cache. A cache-write failure
+     * is logged and does not fail this call.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
      * @param workspace Pointer to workspace memory
      * @param workspaceSize Maximum allowed workspace size in bytes
-     * @param config Autotuning configuration; @c mode and @c primingFailurePolicy are overridden
+     * @param config Autotuning configuration; see above for the fields this call sets, for
+     *        @c timedIterations, and for @c rankingFn, which it defaults but does not
+     *        override
      * @param storageConfig File output parameters (empty filePath = no file output)
      * @param[out] results Per-engine benchmarking results (optional)
      * @param[out] cacheWriteOutcome This run's exact-match cache write outcome (optional)
      * @return ErrorCode::OK on success
      */
-    Error autotuneOracleBest(hipdnnHandle_t handle,
-                             const std::unordered_map<int64_t, void*>& variantPack,
-                             void* workspace,
-                             int64_t workspaceSize,
-                             AutotuneConfig config = {},
-                             const AutotuneStorageConfig& storageConfig = {},
-                             std::vector<AutotuneResult>* results = nullptr,
-                             AutotuneCacheWriteOutcome* cacheWriteOutcome = nullptr)
+    Error autotuneExhaustiveSweep(hipdnnHandle_t handle,
+                                  const std::unordered_map<int64_t, void*>& variantPack,
+                                  void* workspace,
+                                  int64_t workspaceSize,
+                                  AutotuneConfig config = {},
+                                  const AutotuneStorageConfig& storageConfig = {},
+                                  std::vector<AutotuneResult>* results = nullptr,
+                                  AutotuneCacheWriteOutcome* cacheWriteOutcome = nullptr)
     {
         if(workspaceSize < 0)
         {
             return {ErrorCode::INVALID_VALUE,
-                    "workspaceSize must be >= 0 for autotuneOracleBest()."};
+                    "workspaceSize must be >= 0 for autotuneExhaustiveSweep()."};
         }
-
         config.mode = TuneMode::EXHAUSTIVE;
-        // Overridden for the same reason as the mode: one engine failing to prime must not deny
-        // a ranking for every graph on the machine. Aborting yields no record at all, so the
-        // next run re-tunes from scratch and, with the broken engine still installed, aborts
-        // again -- the cost compounds. An engine measured without priming is ranked
-        // conservatively, which is a wrong-order risk rather than a wrong-answer one, and a
-        // later sweep that primes successfully supersedes it. Note the codebase already mixes
-        // primed and unprimed measurements: an engine that does not expose the benchmarking knob
-        // is skipped with no policy consultation at all.
+        // Aborting on a priming failure yields no record at all, so the next run re-tunes from
+        // scratch and, with the broken engine still installed, aborts again -- one engine denies
+        // a ranking to every graph on the machine, permanently. Benchmarking it unprimed risks
+        // only a wrong order, which a later successful sweep supersedes.
         config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
+        // Ranking compares candidates on how many samples they were given as much as on speed
+        // unless every candidate runs the same number of iterations, because the statistics are
+        // drawn from that sample set. FIXED_AVERAGE is what holds the count equal; the count
+        // itself is config.timedIterations, which autotuneImpl() validates as >= 1.
+        config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+
+        // Rank on the representative time rather than the fastest sample; see
+        // rankByRobustTime(). This is a default, not an override: a caller that supplied its
+        // own rankingFn ranks by that instead, and the sweep persists whatever order it
+        // produces.
+        config.rankingFn = autotune::detail::sweepRankingOr(config.rankingFn);
 
         std::vector<AutotuneResult> localResults;
         std::vector<AutotuneResult>& resultsOut = results != nullptr ? *results : localResults;
@@ -3957,8 +3989,8 @@ public:
                 if(status != HIPDNN_STATUS_SUCCESS)
                 {
                     HIPDNN_FE_LOG_WARN(
-                        "autotuneOracleBest: failed to write engine ranking to the exact-match "
-                        "cache (backend status "
+                        "autotuneExhaustiveSweep: failed to write engine ranking to the "
+                        "exact-match cache (backend status "
                         << static_cast<int>(status) << ")");
                     outcome = AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE;
                 }
