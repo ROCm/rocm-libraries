@@ -219,7 +219,12 @@ struct KernelSource
     /// only field that separates two kernels sharing a tocKey.
     std::string symbol;
     /// KPACK: digest of the raw decompressed code object, as the packager recorded it.
-    /// Carried, not checked -- no digest implementation is linked here.
+    ///
+    /// Identification only. Nothing verifies it, on this path or any other, and it is
+    /// not a security control: a descriptor and the archive it names travel together, so
+    /// whoever can rewrite one can rewrite the other. Treat a match as evidence the two
+    /// came from the same pack run, nothing more. The loader's defence against a wrong
+    /// or corrupt payload is KpackArchive's container check, not this field.
     std::string sha256;
 };
 
