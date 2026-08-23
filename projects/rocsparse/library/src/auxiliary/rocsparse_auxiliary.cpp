@@ -2000,7 +2000,8 @@ _rocsparse_dnvec_descr::_rocsparse_dnvec_descr(int64_t            batch_count_,
                                                const void*        const_values_,
                                                void*              values_,
                                                int64_t            inc_,
-                                               int64_t            batch_stride_)
+                                               int64_t            batch_stride_,
+					       rocsparse_pointer_mode pointer_mode_)
     : init(true)
     , size(nitems_)
     , values(values_)
@@ -2009,8 +2010,12 @@ _rocsparse_dnvec_descr::_rocsparse_dnvec_descr(int64_t            batch_count_,
     , batch_stride(batch_stride_)
     , batch_count(batch_count_)
     , inc(inc_)
+    , pointer_mode(pointer_mode_)
 {
 }
+
+
+
 
 /********************************************************************************
  * \brief rocsparse_create_coo_descr creates a descriptor holding the COO matrix
@@ -5002,7 +5007,6 @@ try
         break;
     }
     }
-
     ROCSPARSE_CHECKARG_ARRAY(4, int64_t(rows) * cols, values);
 
     *descr = new _rocsparse_dnmat_descr;
@@ -5319,22 +5323,10 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
-    ROCSPARSE_CHECKARG(2, batch_stride, (batch_stride < 0), rocsparse_status_invalid_value);
 
-    if(descr->order == rocsparse_order_column)
-    {
-        ROCSPARSE_CHECKARG(2,
-                           batch_stride,
-                           (batch_count > 1 && batch_stride < descr->ld * descr->cols),
-                           rocsparse_status_invalid_value);
-    }
-    else if(descr->order == rocsparse_order_row)
-    {
-        ROCSPARSE_CHECKARG(2,
-                           batch_stride,
-                           (batch_count > 1 && batch_stride < descr->ld * descr->rows),
-                           rocsparse_status_invalid_value);
-    }
+    //
+    // No constraint on the batch_stride value.
+    //
 
     descr->batch_count  = batch_count;
     descr->batch_stride = batch_stride;

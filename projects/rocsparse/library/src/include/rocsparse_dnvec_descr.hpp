@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,20 +28,33 @@
 
 struct _rocsparse_dnvec_descr
 {
-    bool               init{};
-    int64_t            size{};
-    void*              values{};
-    const void*        const_values{};
-    rocsparse_datatype data_type{};
-    int64_t            batch_stride{};
-    int64_t            batch_count{1};
-    int64_t            inc{1};
+    bool                   init{};
+    int64_t                size{};
+    void*                  values{};
+    const void*            const_values{};
+    rocsparse_datatype     data_type{};
+    int64_t                batch_stride{};
+    int64_t                batch_count{1};
+    int64_t                inc{1};
+    rocsparse_pointer_mode pointer_mode{rocsparse_pointer_mode_device};
     _rocsparse_dnvec_descr() = default;
-    _rocsparse_dnvec_descr(int64_t            batch_count_,
-                           int64_t            nitems_,
-                           rocsparse_datatype data_type_,
-                           const void*        const_values_,
-                           void*              values_,
-                           int64_t            inc_,
-                           int64_t            batch_stride_);
+    _rocsparse_dnvec_descr(int64_t                batch_count_,
+                           int64_t                nitems_,
+                           rocsparse_datatype     data_type_,
+                           const void*            const_values_,
+                           void*                  values_,
+                           int64_t                inc_,
+                           int64_t                batch_stride_,
+                           rocsparse_pointer_mode pointer_mode_ = rocsparse_pointer_mode_device);
 };
+
+namespace rocsparse
+{
+
+    rocsparse_status dnvec_copy_data(rocsparse_handle            handle,
+                                     rocsparse_const_dnvec_descr alpha,
+                                     rocsparse_const_dnvec_descr source,
+                                     rocsparse_dnvec_descr       target,
+                                     rocsparse_error*            p_error);
+
+}
