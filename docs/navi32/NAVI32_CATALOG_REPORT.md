@@ -685,10 +685,10 @@ the work** — alongside the `--logic-filter` glob that built zero kernels while
 | | |
 |---|---|
 | branch | `vmijovic/navi32`, 10 commits, pushed |
-| measurements | **12 128** across 4 completed sweeps, **zero failures in any** |
+| measurements | **15 100+** across 5 completed sweeps, **zero failures in any** |
 | shipped | 4 TN catalogs widened; Origami gains gfx1101; bench gains a CU mask |
-| measured | HHS **+23.9%**, BBS **+22.2%**, AuxH **+20.4%** wall-clock |
-| unmeasured | AuxB only — bracketed by BBS (same dtype) and AuxH (same epilogue) |
+| measured | **all four**: HHS +23.9%, BBS +22.2%, AuxH +20.4%, AuxB +18.8% wall-clock |
+| unmeasured | **none** — nothing on the branch rests on analogy |
 | gated | every shipped solution builds for gfx1101, `Flags: 0x46` |
 | rejected | WGM re-fork, Origami-Prediction, catalog extension — each with evidence |
 | bounded | ~73% of kernel time is compute-bound, so results transfer despite bandwidth |
@@ -708,3 +708,30 @@ confident wrong claim:
 The common rule, now in the runbook: **verify the artifact, not the exit status** — kernel
 counts, ELF flags, throughput slopes, status counts. And where a knob appears inert, sweep it
 before concluding: an inert knob and a mis-scaled one are indistinguishable at one point.
+
+---
+
+## P11 — AuxB measured: all four shipped catalogs now validated
+
+| catalog | solutions | geomean | wall-clock | A/A |
+|---|---|---|---|---|
+| HHS-TN (fp16) | 73 -> 298 | 127.21% | **123.91%** | 100.32% |
+| BBS-TN (bf16) | 64 -> 306 | 119.89% | **122.17%** | 100.60% |
+| AuxH-TN (fp16 + aux) | 73 -> 313 | 117.28% | **120.42%** | 100.42% |
+| **AuxB-TN (bf16 + aux)** | 64 -> 316 | 118.38% | **118.82%** | 100.18% |
+
+**Nothing on the branch now rests on analogy.** All four land in a **+18.8% to +23.9%
+wall-clock band**, every A/A control within 0.6 pt of 100%, and every one shows the same
+signature — modest gains on large/square, large gains on small/tiny/GEMV:
+
+| AuxB by | large | medium | small | tiny | | gemv | rect | skinny | square |
+|---|---|---|---|---|---|---|---|---|---|
+| wall-clock | 117.5% | 117.1% | 141.7% | 143.2% | | **174.6%** | 118.0% | 124.4% | 118.1% |
+
+The ordering across all four is stable: **fp16 > bf16, non-aux > aux**, spanning 5 pt in
+total. Neither dtype nor epilogue changes the mechanism — a 471-row nearest-neighbour table
+mis-serves small and skinny shapes regardless of what is computed in them.
+
+That the four agree this closely is the strongest evidence that the diagnosis is right. Had
+the win come from something incidental to one ProblemType, four independent 1 000-shape
+sweeps across two dtypes and two epilogues would not land within 5 pt of each other.
