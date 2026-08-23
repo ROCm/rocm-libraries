@@ -53,6 +53,46 @@ from codegen_common import make_gemm_aquant_kernel_name  # noqa: E402
 
 # NEVER default to gfx942 -- arch must be detected or explicitly supplied.
 _DEFAULT_HIPCC = "hipcc"
+
+# --- Tile-Engine perf flags (parity fix): authoritative develop TE flag set ---
+import os as _os_teflags
+import subprocess as _sp_teflags
+
+
+def _coerce_flag_ok(hipcc):
+    """True iff local clang accepts -mllvm -amdgpu-coerce-illegal-types=1.
+    ROCm7.2 clang>=22 removed it and aborts the compile, so gate on it."""
+    try:
+        r = _sp_teflags.run(
+            [hipcc, "-x", "hip", "-c", "-mllvm",
+             "-amdgpu-coerce-illegal-types=1", "-", "-o", "/dev/null"],
+            input="int main(){return 0;}", text=True,
+            capture_output=True, timeout=60)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _te_perf_flags(hipcc):
+    """Authoritative develop Tile-Engine -mllvm perf flag set (5 flags).
+    Source: composablekernel/CMakeLists.txt L521/L528/L535/L546/L547.
+    Without these, hipcc -O3 register allocation on the block-scale hot loops
+    spills to scratch and collapses occupancy -> bridge slower than the
+    byte-identical Old-TE kernel. Off only if CK_BRIDGE_NO_TE_FLAGS=1."""
+    if _os_teflags.environ.get("CK_BRIDGE_NO_TE_FLAGS") == "1":
+        return []
+    flags = [
+        "-fno-offload-uniform-block",
+        "-mllvm", "--lsr-drop-solution=1",
+        "-mllvm", "-enable-post-misched=0",
+        "-mllvm", "-amdgpu-early-inline-all=true",
+        "-mllvm", "-amdgpu-function-calls=false",
+    ]
+    if _coerce_flag_ok(hipcc):
+        flags += ["-mllvm", "-amdgpu-coerce-illegal-types=1"]
+    return flags
+# --- end Tile-Engine perf flags ---
+
 _SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950")
 
 # Layout tags AQuant supports, and whether preshufflequant is allowed for each.
@@ -134,6 +174,10 @@ class AQuantKernelConfig:
     double_smem_buffer: bool = False
     k_block_per_cu: int      = 1
 
+    # Epilogue variant: "cshuffle" or "default". Must match the codegen spec so the
+    # ctypes .so name lines up with the generated header (and the matched Old-TE stem).
+    epilogue: str = "cshuffle"
+
     # No default arch: caller must pass a valid one (or use _detect_gpu_arch()).
     gfx_arch: str = "gfx950"
 
@@ -149,7 +193,7 @@ class AQuantKernelConfig:
             variant_key=self.variant_key,
             layout=self.layout,
             pipeline=self.pipeline_key,
-            epilogue="cshuffle",
+            epilogue=self.epilogue,
             scheduler=self.scheduler,
             tile_m=self.tile_m, tile_n=self.tile_n, tile_k=self.tile_k,
             warp_m=self.warp_m, warp_n=self.warp_n, warp_k=self.warp_k,
@@ -185,6 +229,7 @@ class AQuantKernelConfig:
             "preshuffle_aquant": self.preshuffle_aquant,
             "double_smem_buffer": self.double_smem_buffer,
             "k_block_per_cu": self.k_block_per_cu,
+            "epilogues": [self.epilogue],
         }
 
 
@@ -534,6 +579,7 @@ def _compile_aquant_kernel(
                    f"--offload-arch={gfx_arch}",
                    f"-DGFX_ARCH=\"{gfx_arch}\"",
                    *arch_defines,
+                   *_te_perf_flags(hipcc),
                    "-include", str(hpp_path),
                    str(_CTYPES_LIB_SRC),
                    "-o", str(obj_path)]

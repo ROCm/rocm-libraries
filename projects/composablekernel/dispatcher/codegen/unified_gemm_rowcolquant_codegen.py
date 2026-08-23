@@ -125,7 +125,7 @@ class RowColQuantKernelSpec:
     tile: RowColQuantTileConfig
     pad_m: bool = False
     pad_n: bool = False
-    pad_k: bool = True
+    pad_k: bool = False
     block_size: int = 256
     k_block_per_cu: int = 1
     double_smem_buffer: bool = False
@@ -300,9 +300,14 @@ def _default_config() -> dict:
     outputs all-zeros on gfx942). The Python driver
     (gemm_rowcolquant_utils.default_*_config -> _warp_tile_k_for) sets this
     per-arch; this standalone fallback uses the gfx950 value.
+
+    pad_k=False overrides the shared decode default (True): RowColQuant runs
+    the unpadded-K pipeline for Old-TE perf parity, unlike tensor_quant and
+    bquant which keep the padded default.
     """
     return quant_decode_default_config(
         warp_tile_k=fp8_warp_tile_k_for_arch("gfx950"),
+        pad_k=False,
     )
 
 
@@ -313,7 +318,7 @@ def _build_specs(config: dict) -> List[RowColQuantKernelSpec]:
     scheduler = config.get("scheduler", "intrawave")
     pad_m     = config.get("pad_m", False)
     pad_n     = config.get("pad_n", False)
-    pad_k     = config.get("pad_k", True)
+    pad_k     = config.get("pad_k", False)
     block_size         = config.get("block_size", 256)
     k_block_per_cu     = config.get("k_block_per_cu", 1)
     double_smem_buffer = config.get("double_smem_buffer", False)

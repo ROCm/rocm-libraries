@@ -934,30 +934,30 @@ def gemm_aquant_effective_epilogue(
     warp_n: int,
     warp_tile_n: int,
     quant_group_n: int,
+    requested_epilogue: str = "cshuffle",
 ) -> str:
     """Return the epilogue tag the aquant codegen will actually emit.
 
-    Mirrors the TiledPermuteN logic in run_gemm_quant_example.inc for AQuant:
-      TiledPermuteN = (BQuantGroupSize::kN > 1) ? false : GemmConfig::TiledMMAPermuteN
-    For the AQuant decode configs (GemmConfigQuantDecodeInterwave /
-    GemmConfigPreshuffleQuantDecode) TiledMMAPermuteN is false (it is only set on
-    the PreshuffleB configs, which AQuant does not use — PreshuffleB is rejected
-    for AQuant in run_gemm_example_prec_type). So AQuant always uses the CShuffle
-    epilogue. The parameters are accepted for signature symmetry with the bquant
-    helper and to keep the door open for future permute-N aquant configs.
+    Two orthogonal decisions:
+      1. PermuteN vs non-PermuteN (TiledMMAPermuteN in run_gemm_quant_example.inc).
+         AQuant decode/preshufflequant configs never enable TiledMMAPermuteN
+         (PreshuffleB is rejected for AQuant), so PermuteN is never selected.
+      2. CShuffle vs Default epilogue -- the sweep's ``epilogue`` trait, which
+         Old-TE's gemm_instance_builder honors via populate_{cshuffle,default}_gemm_aquant.
+    Since PermuteN is never used, the effective tag is just the requested trait
+    ("cshuffle" or "default"), which keeps the bridge kernel name byte-exact with
+    the matched Old-TE stem (..._mem_default_... vs ..._mem_cshuffle_...).
     """
-    # AQuant configs never enable TiledMMAPermuteN, so the epilogue is always
-    # cshuffle -- tiled_mma_permute_n=False short-circuits the parity check.
-    return quant_effective_epilogue(
-        tile_n, warp_n, warp_tile_n, quant_group_n, tiled_mma_permute_n=False,
-    )
+    _ = (tile_n, warp_n, warp_tile_n, quant_group_n)
+    # AQuant never enables TiledMMAPermuteN; the epilogue is whatever was requested.
+    return requested_epilogue
 
 
 def make_gemm_aquant_kernel_name(
     variant_key: str,
     layout: str,
     pipeline: str,
-    epilogue: str,  # ignored — actual epilogue computed via gemm_aquant_effective_epilogue
+    epilogue: str,  # "cshuffle" or "default" -- sweep epilogue trait, mirrors Old-TE
     scheduler: str,
     tile_m: int, tile_n: int, tile_k: int,
     warp_m: int, warp_n: int, warp_k: int,
@@ -977,7 +977,9 @@ def make_gemm_aquant_kernel_name(
         {TileM}x{TileN}x{TileK}_{WarpM}x{WarpN}x{WarpK}_{WtM}x{WtN}x{WtK}_
         qg{gM}x{gN}x{gK}[_preshufflequant]
 
-    The ``epilogue`` parameter is accepted for call-site compatibility but not used.
+    The ``epilogue`` slot in the name is the *effective* epilogue -- see
+    gemm_aquant_effective_epilogue (AQuant never uses PermuteN, so it is exactly
+    the requested "cshuffle"/"default" trait).
     """
     return make_quant_kernel_name(
         prefix="gemm_aquant",
@@ -985,7 +987,7 @@ def make_gemm_aquant_kernel_name(
         layout=layout,
         pipeline=pipeline,
         epilogue=gemm_aquant_effective_epilogue(
-            tile_n, warp_n, warp_tile_n, quant_group_n
+            tile_n, warp_n, warp_tile_n, quant_group_n, requested_epilogue=epilogue
         ),
         scheduler=scheduler,
         tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
@@ -1278,15 +1280,20 @@ def emit_quant_tile_dims(tile: Any, *, block_size: int, k_block_per_cu: int) -> 
     static constexpr int               kBlockPerCu = {k_block_per_cu};"""
 
 
-def emit_quant_tile_shape() -> str:
-    """Emit the ``TileShape`` / ``TilePartitioner`` aliases (identical in all ops)."""
-    return """\
+def emit_quant_tile_shape(partitioner: str = "ck_tile::GemmTile1DPartitioner<TileShape>") -> str:
+    """Emit the ``TileShape`` / ``TilePartitioner`` aliases.
+
+    ``TileShape`` is identical in every operator. ``partitioner`` is the only
+    divergence: ABQuant uses ``GemmSpatiallyLocalTilePartitioner<TileShape,8,4>``
+    for prefill-tile L2 locality; everyone else uses the 1D partitioner.
+    """
+    return f"""\
     using TileShape = ck_tile::TileGemmShape<
         ck_tile::sequence<TileM, TileN, TileK>,
         ck_tile::sequence<WarpM, WarpN, WarpK>,
         ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
 
-    using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;"""
+    using TilePartitioner = {partitioner};"""
 
 
 def emit_quant_gemm_traits(quant_type: str, ns: str) -> str:

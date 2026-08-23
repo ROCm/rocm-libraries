@@ -276,7 +276,11 @@ class ABQuantKernelHeaderGenerator:
         tile_dims = emit_quant_tile_dims(
             t, block_size=spec.block_size, k_block_per_cu=spec.k_block_per_cu
         )
-        tile_shape = emit_quant_tile_shape()
+        # ABQuant is the only operator using the spatially-local partitioner
+        # (prefill 128x128x128 tile -- L2 locality); the rest use 1D.
+        tile_shape = emit_quant_tile_shape(
+            "ck_tile::GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>"
+        )
         gemm_traits = emit_quant_gemm_traits("ABQuantGrouped", ns)
         launch_prologue = emit_quant_launch_prologue(splitk_k="WarpTileK")
         launch_tail = emit_quant_launch_tail(

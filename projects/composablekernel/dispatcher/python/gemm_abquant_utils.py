@@ -1277,19 +1277,20 @@ def main() -> int:
     import argparse
     parser = argparse.ArgumentParser(
         description="ABQuant dispatcher self-test / default-config runner")
-    parser.add_argument("--gfx", default="gfx950", help="Target GFX arch (gfx942|gfx950)")
+    parser.add_argument("--gfx", default=None, help="Target GFX arch (default: auto-detect via rocm_agent_enumerator)")
     parser.add_argument("--build", action="store_true",
                         help="Also compile each config with hipcc (needs a build env)")
     parser.add_argument("--list", action="store_true",
                         help="Only list the default-config kernel names and exit")
     args = parser.parse_args()
+    gfx_arch = args.gfx or _detect_gpu_arch()
 
     if args.list:
-        for c in all_default_configs(gfx_arch=args.gfx):
+        for c in all_default_configs(gfx_arch=gfx_arch):
             print(c.name)
         return 0
 
-    return _self_test(args.gfx, do_build=args.build)
+    return _self_test(gfx_arch, do_build=args.build)
 
 
 if __name__ == "__main__":
