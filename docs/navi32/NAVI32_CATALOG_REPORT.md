@@ -794,10 +794,9 @@ finding, not acted on.**
 
 ### Follow-up: navi33 (gfx1102) — it builds, but that is not the question
 
-The wiki flags navi33 as having a **smaller VGPR file: 1024 vs 1536 VGPRs/SIMD**, giving
-`PhysicalMaxVgprCU` 32 768 against gfx1100/1101's 98 304. The gfx1101 gate passed 298/298
-precisely *because* those two parts have identical VGPR budgets, so navi33 looked like the
-case where the port would fail.
+The wiki flags navi33 as having a **smaller VGPR file: 1024 vs 1536 VGPRs/SIMD**. The
+gfx1101 gate passed 298/298 precisely *because* gfx1100/1101 have identical VGPR budgets, so
+navi33 looked like the case where the port would fail.
 
 Tested it. **It does not fail**: navi31's TN HHS catalog retargeted to gfx1102 builds
 **238/238 kernels, 0 assembler errors, 0 `overflowedResources`**, ELF `Flags: 0x47, gfx1102`.
@@ -805,13 +804,25 @@ Tested it. **It does not fail**: navi31's TN HHS catalog retargeted to gfx1102 b
 The reason is that the two limits are different things. **`MaxVgpr` per kernel is 256 on every
 RDNA3 part** — that is the hard compile limit, and navi31's kernels respect it. The smaller
 physical file constrains **occupancy** (how many workgroups fit per exec unit), not
-compilability: at 128 threads, gfx1102's budget is 32 768/128 = 256 VGPRs per thread, so a
-256-VGPR kernel still fits exactly one workgroup and passes the check.
+compilability. Read from the source rather than the wiki
+(`hardware_caps.hpp:645-655`), gfx11 computes `2 SIMDs x vgprPerSimd x 32`:
 
-**So the concern is real but inverted from what I first wrote.** The port is *buildable*; what
-is unverified is whether a catalog tuned on a part with 3x the VGPR file picks kernels that
-leave navi33 at occupancy 1. That is a performance question, answerable only by benchmarking —
-not something the build gate can decide.
+| arch | `PhysicalMaxVgprCU` (source) | the wiki says |
+|---|---|---|
+| gfx1100 / gfx1101 | 2x1536x32 = **98 304** | 49 152 |
+| gfx1102 (navi33) | 2x1024x32 = **65 536** | 32 768 |
+
+**The wiki reports half the source value throughout** — it quotes the *per-SIMD* figure under
+the source's *per-CU* variable name. So navi33 has **2/3** of navi31's per-CU VGPR file, not
+1/3. At 128 threads gfx1102 allows 65 536/128 = 512 VGPRs per thread, so a 256-VGPR kernel
+fits two workgroups per exec unit, not one.
+
+**So the concern is real but much smaller than I first wrote, and I got the ratio wrong.** I
+compared the wiki's navi33 number (32 768, per-SIMD) against the source's navi31 number
+(98 304, per-CU) — per-SIMD against per-CU — and reported a 3x gap. The true per-CU ratio is
+**1.5x**. The port is buildable, and the open question is only whether a catalog tuned with
+50% more VGPR headroom picks kernels that cost navi33 some occupancy. That is a benchmark
+question, not a build-gate one, and the margin is far narrower than a 3x gap would imply.
 
 **This is reasoning, not measurement.** No navi33 hardware was involved and no navi33 emulation
 was attempted (the CU count differs *and* the VGPR file differs, so the emulation used here
