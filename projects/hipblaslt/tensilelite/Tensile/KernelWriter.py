@@ -6982,6 +6982,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # colliding stepping is targeted) tells StinkyTofu which cost table to use.
                                "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
                                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
+                               "TensorLoadWmmaSpace": int(globalParameters.get("StinkyTofuTensorLoadWmmaSpace") or 0),
                                "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
                                "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
                                "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),

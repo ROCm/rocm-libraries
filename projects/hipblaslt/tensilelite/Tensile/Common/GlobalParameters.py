@@ -395,6 +395,10 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+# Reserve WMMA issue space around tensor loads in StinkyTofu scheduling (0 = disabled).
+# See ROCm/rocm-libraries#10652 and AIHPBLAS-4159.
+globalParameters["StinkyTofuTensorLoadWmmaSpace"] = 0
+
 # Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
 # When set, each kernel's StinkyTofu module writes its cost file here via
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
