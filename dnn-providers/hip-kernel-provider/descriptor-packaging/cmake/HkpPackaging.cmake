@@ -226,6 +226,23 @@ function(hkp_wire_pack_step)
     # Copy the packed tree into the build tree so ctest and the integration
     # suite can load it; without this the shipping path has no runtime coverage.
     #
+    # Clear this caller's own arch directories first. copy_directory overwrites
+    # same-named files but does NOT remove destination files the source no
+    # longer has, so an archive or descriptor from an earlier configure outlives
+    # the copy while the files around it update -- leaving descriptors that name
+    # a toc_key the surviving archive does not contain, which fails at dispatch
+    # with KPACK_ERROR_KERNEL_NOT_FOUND rather than at build time. The pack step
+    # already clears its own out-root for the same reason.
+    #
+    # Per arch rather than rm -rf on STAGE_ROOT: production stages into a child
+    # of the root the fixture stages into, so clearing the whole root would have
+    # whichever copy runs second delete the other's tree.
+    set(_clear_cmds "")
+    foreach(_arch IN LISTS ARG_ARCHES)
+        list(APPEND _clear_cmds
+             COMMAND "${CMAKE_COMMAND}" -E rm -rf "${ARG_STAGE_ROOT}/${_arch}")
+    endforeach()
+
     # The stamp lives INSIDE the staged tree: the provider wipes that directory
     # once per configure, taking the stamp with it so the next build re-copies.
     # A stamp outside would survive the wipe and skip the copy against a
@@ -233,6 +250,7 @@ function(hkp_wire_pack_step)
     set(_stage_stamp "${ARG_STAGE_ROOT}/.hkp-staged${ARG_STAGE_TAG}.stamp")
     add_custom_command(
         OUTPUT "${_stage_stamp}"
+        ${_clear_cmds}
         COMMAND "${CMAKE_COMMAND}" -E copy_directory
                 "${ARG_OUT_ROOT}" "${ARG_STAGE_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stage_stamp}"
@@ -376,9 +394,8 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_wire_demo(<source_root> <arches> <hipcc> <kpack_python> <stage_root>)
-#   Wire the shared compile -> prune -> pack DAG (hkp_wire_pack_step), then a
-#   second, cheap step that copies the packed tree into the build tree's staged
-#   descriptor directory. Two differences, both deliberate:
+#   Wires the shared pack step (hkp_wire_pack_step) for the integration
+#   fixture. Two differences from production, both deliberate:
 #
 #   * No install() of any kind. The artifact exists so an integration ctest has a
 #     real .kpack to load; it is not shipped surface.
@@ -386,14 +403,6 @@ endfunction()
 #     ships nothing is worse than a failed build, which is why production is
 #     fatal -- but a test fixture must never break a developer's build. The test
 #     GTEST_SKIP()s when the artifact is absent.
-#
-#   The two steps are separate custom commands on purpose. The pack step is
-#   expensive and keyed on the authored sources; the copy step is keyed on a
-#   stamp placed INSIDE stage_root, which hip-kernel-provider/CMakeLists.txt
-#   wipes with file(REMOVE_RECURSE) once per configure. The wipe therefore takes
-#   the stamp with it and the next build re-copies -- a stamp outside stage_root
-#   would leave the tree wiped and the copy skipped, which looks exactly like
-#   "packaging did not run".
 #
 #   The packer's <arch>/ + kpack/ layout is copied through verbatim: `library` on
 #   a packed UKD is relative to the directory of the descriptor that declared it,
@@ -780,10 +789,6 @@ assertion: an unloadable path silently falls through to the next candidate.")
         hkp_rocke_wheel_stamp(_rocke_wheel_stamp)
         hkp_rocke_wheel_python_interp(_rocke_interp "${_rocke_wheel_stamp}")
     endif()
-
-    # The interpreter gate now lives in hkp_wire_pack_step, which every pack
-    # path routes through, so it covers the demo fixture too rather than only
-    # this one. Checking again here would just duplicate it.
 
     if(_source_root)
         hkp_wire_production(
