@@ -145,9 +145,10 @@
 #endif
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 
+#include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
+
 #include <hipdnn_frontend/autotune/AutotuneBenchmark.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
-#include <hipdnn_frontend/autotune/BenchmarkStatistics.hpp>
 #include <hipdnn_frontend/autotune/CartesianProduct.hpp>
 #include <hipdnn_frontend/autotune/EngineSweepValidation.hpp>
 #include <hipdnn_frontend/autotune/KnobConstants.hpp>
@@ -1897,25 +1898,28 @@ private:
             result.succeeded = true;
             result.compiledPlanIndex = static_cast<int>(info.planIndex);
             result.minTimeMs = *std::min_element(timings.begin(), timings.end());
-            result.avgTimeMs = autotune::detail::computeMean(timings);
+            result.avgTimeMs = hipdnn_data_sdk::utilities::detail::mean(timings);
+            result.robustTimeMs = hipdnn_data_sdk::utilities::detail::robustMean(timings);
             if(timings.size() > 1)
             {
-                result.stddevMs = autotune::detail::computeStddev(timings);
+                result.stddevMs = hipdnn_data_sdk::utilities::detail::stddev(timings);
             }
 
             // --- Log per-engine result ---
             if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
             {
                 HIPDNN_FE_LOG_INFO("autotune: engine "
-                                   << result.engineName << ": min=" << result.minTimeMs << "ms avg="
-                                   << result.avgTimeMs << "ms stddev=" << result.stddevMs
+                                   << result.engineName << ": robust=" << result.robustTimeMs
+                                   << "ms min=" << result.minTimeMs << "ms avg=" << result.avgTimeMs
+                                   << "ms stddev=" << result.stddevMs
                                    << "ms iters=" << result.iterationsRun);
             }
             else // RUN_UNTIL_STABLE
             {
                 HIPDNN_FE_LOG_INFO("autotune: engine "
-                                   << result.engineName << ": min=" << result.minTimeMs << "ms avg="
-                                   << result.avgTimeMs << "ms iters=" << result.iterationsRun
+                                   << result.engineName << ": robust=" << result.robustTimeMs
+                                   << "ms min=" << result.minTimeMs << "ms avg=" << result.avgTimeMs
+                                   << "ms iters=" << result.iterationsRun
                                    << " converged=" << (result.converged ? "true" : "false"));
             }
 
@@ -3843,6 +3847,175 @@ public:
         HIPDNN_CHECK_ERROR(detail::tensorLookupToVariantPack(tensorLookup, variantPack));
         return autotune(
             handle, variantPack, workspace, workspaceSize, config, storageConfig, results);
+    }
+
+    // --- Autotune: exhaustive-sweep entry point ---
+
+    /**
+     * @brief Benchmarks every candidate engine for this graph and caches the measured
+     *        ranking.
+     *
+     * Compiles and times every plan spec added via add_engine_configs(),
+     * add_all_engines(), or add_engine(), ranks the engines by measured speed, and writes
+     * that order to the exact-match autotune cache. Takes no sweep/variant argument:
+     * populate candidates before calling.
+     *
+     * By default engines are ranked on @c AutotuneResult::robustTimeMs -- the mean of a
+     * candidate's iterations after discarding its slow tail -- so the order reflects what
+     * each engine usually costs. A candidate that is normally slower but occasionally lucky
+     * does not outrank a consistently faster one on the strength of a single good
+     * iteration. Set @c config.rankingFn to rank on any other criterion; the sweep persists
+     * whatever order it produces. Every field of @c AutotuneResult is available to it,
+     * including @c minTimeMs, @c avgTimeMs, and @c stddevMs.
+     *
+     * Two @c config fields are locked, because they are what makes this call an exhaustive
+     * sweep that populates the cache rather than an ordinary tune: @c mode
+     * (TuneMode::EXHAUSTIVE) and @c primingFailurePolicy
+     * (PrimingFailurePolicy::BENCHMARK_UNPRIMED). Without the latter, one engine failing to
+     * prime would abandon the sweep and persist nothing, so a single broken plugin would
+     * deny a ranking for every graph on the machine. Both are set on input and any
+     * caller-supplied value is ignored.
+     *
+     * Every other @c config field is honoured, including @c strategy, @c timedIterations,
+     * @c warmupIterations, @c engineIdFilter, and @c rankingFn. Calling with a
+     * default-constructed @c config performs a complete sweep.
+     *
+     * An engine that failed to prime is still benchmarked, but without its internal caches
+     * warmed, so it can rank below a slower engine that primed successfully. Per-result
+     * @c ranExhaustive reports which engines were primed.
+     *
+     * Giving candidates more iterations improves the odds that the genuinely fastest engine
+     * ranks first. Engines whose true times differ by a wide margin separate reliably at any
+     * count; engines within a few percent of each other need substantially more iterations
+     * to order correctly, because each measurement carries run-to-run jitter of a similar
+     * size. Raise @c config.timedIterations, or select AutotuneStrategy::FIXED_AVERAGE for a
+     * fixed count per candidate, when the ranking must resolve close candidates or will be
+     * reused by many later runs.
+     *
+     * The cached order is keyed on this graph's serialized content and the handle's
+     * device. Engines that were measured and failed are appended after the successful
+     * ones, so a permanently failing engine cannot wedge the cache. A cache-write failure
+     * is logged and does not fail this call.
+     *
+     * @param handle The hipDNN handle
+     * @param variantPack Map from tensor UID to device memory pointers
+     * @param workspace Pointer to workspace memory
+     * @param workspaceSize Maximum allowed workspace size in bytes
+     * @param config Autotuning configuration; see above for the fields this call sets, for
+     *        @c timedIterations, and for @c rankingFn, which it defaults but does not
+     *        override
+     * @param storageConfig File output parameters (empty filePath = no file output)
+     * @param[out] results Per-engine benchmarking results (optional)
+     * @param[out] cacheWriteOutcome This run's exact-match cache write outcome (optional)
+     * @return ErrorCode::OK on success
+     */
+    Error autotuneExhaustiveSweep(hipdnnHandle_t handle,
+                                  const std::unordered_map<int64_t, void*>& variantPack,
+                                  void* workspace,
+                                  int64_t workspaceSize,
+                                  AutotuneConfig config = {},
+                                  const AutotuneStorageConfig& storageConfig = {},
+                                  std::vector<AutotuneResult>* results = nullptr,
+                                  AutotuneCacheWriteOutcome* cacheWriteOutcome = nullptr)
+    {
+        if(workspaceSize < 0)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "workspaceSize must be >= 0 for autotuneExhaustiveSweep()."};
+        }
+        // mode and primingFailurePolicy are locked, rankingFn is defaulted, and every other
+        // field is left as the caller set it. See sweepConfigFrom().
+        config = autotune::detail::sweepConfigFrom(std::move(config));
+
+        std::vector<AutotuneResult> localResults;
+        std::vector<AutotuneResult>& resultsOut = results != nullptr ? *results : localResults;
+
+        HIPDNN_CHECK_ERROR(autotuneImpl(
+            handle, variantPack, workspace, workspaceSize, config, storageConfig, &resultsOut));
+
+        // Ranked survivors first, then engines that were measured and failed.
+        //
+        // The failures have to be in this list, not just conceptually "sampled". The read path
+        // checks every live candidate against the record's sampled set and rejects the entry
+        // outright if one is missing, so an engine that is installed and always fails would
+        // wedge the cache permanently. It then applies a second gate requiring the stored order
+        // to be the same size as the live candidate set, which is why marking them sampled
+        // without also ranking them merely trades one rejection for another.
+        //
+        // Ranking them last is also the honest answer: they were measured, and they lost. The
+        // read path only reaches them if every better engine also fails to build, which is
+        // exactly where the ordinary fallback would have put them.
+        std::vector<int64_t> order;
+        order.reserve(resultsOut.size());
+        for(const auto& result : resultsOut)
+        {
+            if(result.succeeded)
+            {
+                order.push_back(result.engineId);
+            }
+        }
+        const size_t succeededCount = order.size();
+        for(const auto& result : resultsOut)
+        {
+            if(!result.succeeded && result.benchmarked)
+            {
+                order.push_back(result.engineId);
+            }
+        }
+
+        AutotuneCacheWriteOutcome outcome
+            = AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE;
+
+        // Gated on a real winner, not on `order` being non-empty: a sweep in which every engine
+        // was measured and failed produces a non-empty order of nothing but failures, and
+        // caching that would serve a ranking with no usable entry in it.
+        if(succeededCount > 0)
+        {
+            if(hasValidGraphDesc())
+            {
+                hipdnnAutotuneCacheWriteOutcome_ext_t backendOutcome
+                    = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
+                const auto status = detail::hipdnnBackend()->writeEngineRankingResultsExt(
+                    handle, _graphDesc->get(), order.data(), order.size(), &backendOutcome);
+                if(status != HIPDNN_STATUS_SUCCESS)
+                {
+                    HIPDNN_FE_LOG_WARN(
+                        "autotuneExhaustiveSweep: failed to write engine ranking to the "
+                        "exact-match cache (backend status "
+                        << static_cast<int>(status) << ")");
+                    outcome = AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE;
+                }
+                else if(backendOutcome == HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN)
+                {
+                    outcome = AutotuneCacheWriteOutcome::WRITTEN;
+                }
+                else if(backendOutcome == HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_DISABLED)
+                {
+                    outcome = AutotuneCacheWriteOutcome::DECLINED_DISABLED;
+                }
+                else if(backendOutcome == HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED)
+                {
+                    outcome = AutotuneCacheWriteOutcome::UNCHANGED;
+                }
+                else
+                {
+                    // Covers the UNKEYABLE_OR_UNFINALIZED and NO_ENGINES backend values,
+                    // plus any future value this frontend predates.
+                    outcome = AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE;
+                }
+            }
+            else
+            {
+                outcome = AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE;
+            }
+        }
+
+        if(cacheWriteOutcome != nullptr)
+        {
+            *cacheWriteOutcome = outcome;
+        }
+
+        return {ErrorCode::OK, ""};
     }
 
     // --- Autotune: cuDNN-compatibility overloads ---

@@ -50,4 +50,16 @@ inline bool archMatches(std::string_view deviceArch, std::string_view candidate,
            && (deviceArch.size() == candidate.size() || deviceArch[candidate.size()] == ':');
 }
 
+/// Strip an arch string down to its base target id by truncating at the first
+/// ':'. "gfx942:sramecc+:xnack-" -> "gfx942". An input with no ':' (e.g. the
+/// LLVM generic target "gfx9-4-generic") is returned unchanged; an empty
+/// input returns empty.
+///
+/// The result never contains ':' -- callers use it as a cache-directory path
+/// component, and ':' is illegal in Windows filenames.
+inline std::string_view stripArchFeatures(std::string_view gcnArchName)
+{
+    return gcnArchName.substr(0, gcnArchName.find(':'));
+}
+
 } // namespace hipdnn_plugin_sdk

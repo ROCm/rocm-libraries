@@ -90,6 +90,51 @@ def test_autotune_enums():
     assert hipdnn.PrimingFailurePolicy.BENCHMARK_UNPRIMED.name == "BENCHMARK_UNPRIMED"
 
 
+def test_autotune_cache_write_outcome_enum():
+    """AutotuneCacheWriteOutcome exposes every C++ enumerator."""
+    names = {
+        hipdnn.AutotuneCacheWriteOutcome.WRITTEN.name,
+        hipdnn.AutotuneCacheWriteOutcome.DECLINED_DISABLED.name,
+        hipdnn.AutotuneCacheWriteOutcome.DECLINED_UNKEYABLE.name,
+        hipdnn.AutotuneCacheWriteOutcome.NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE.name,
+        hipdnn.AutotuneCacheWriteOutcome.UNCHANGED.name,
+    }
+    assert names == {
+        "WRITTEN",
+        "DECLINED_DISABLED",
+        "DECLINED_UNKEYABLE",
+        "NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE",
+        "UNCHANGED",
+    }
+    assert (
+        hipdnn.AutotuneCacheWriteOutcome.WRITTEN
+        != hipdnn.AutotuneCacheWriteOutcome.DECLINED_DISABLED
+    )
+
+
+def test_autotune_exhaustive_sweep_is_bound():
+    """Graph exposes autotune_exhaustive_sweep, returning results and a write outcome."""
+    assert hasattr(hipdnn.Graph, "autotune_exhaustive_sweep")
+    doc = hipdnn.Graph.autotune_exhaustive_sweep.__doc__
+    assert "tuple[list[" in doc
+    assert "AutotuneCacheWriteOutcome" in doc
+
+
+def test_autotune_exhaustive_sweep_documents_iteration_dial():
+    """The accuracy/cost dial lives on AutotuneConfig, not on the sweep's own signature."""
+    doc = hipdnn.Graph.autotune_exhaustive_sweep.__doc__
+    assert "config.timed_iterations" in doc
+    assert hipdnn.AutotuneConfig().timed_iterations == 10
+
+
+def test_autotune_result_exposes_robust_time():
+    """The statistic the exhaustive sweep ranks on is readable from a result."""
+    result = hipdnn.AutotuneResult()
+    assert hasattr(result, "robust_time_ms")
+    assert hasattr(result, "min_time_ms")
+    assert result.robust_time_ms == 0.0
+
+
 def test_engine_config_info_defaults_and_assignment():
     """EngineConfigInfo mirrors the C++ defaults and its fields are writable."""
     cfg = hipdnn.EngineConfigInfo()

@@ -111,6 +111,10 @@ inline AutotuneResult makeBenchmarkResult(int64_t engineId,
     result.estimatedWorkspaceSize = estimatedWorkspaceSize;
     result.workspaceSize = compiledWorkspaceSize;
     result.engineName = ::hipdnn_frontend::detail::resolveEngineName(engineId);
+    // This candidate is entering the timing loop, so it counts as measured whatever the
+    // outcome. makeNonBenchmarkedResult() leaves the flag false for everything that never
+    // gets that far.
+    result.benchmarked = true;
     result.modeUsed = config.mode;
     result.strategyUsed = config.strategy;
 
@@ -281,6 +285,55 @@ inline std::vector<KnobSetting> stripBenchmarkingKnob(const std::vector<KnobSett
         stripped.push_back(setting);
     }
     return stripped;
+}
+
+// Order succeeded results for an exhaustive sweep: ascending robustTimeMs, fastest first.
+//
+// Uses the representative time rather than the fastest single iteration. A candidate that
+// is usually slower but occasionally lucky has the better best-case, and ranking on that
+// would pick it, then serve its typical -- slower -- time on every later execution.
+//
+// stable_sort so that candidates with identical times keep their benchmarked order, which
+// makes the resulting ranking reproducible for a given sweep order.
+inline void rankByRobustTime(std::vector<AutotuneResult>& succeeded)
+{
+    std::stable_sort(
+        succeeded.begin(), succeeded.end(), [](const AutotuneResult& a, const AutotuneResult& b) {
+            return a.robustTimeMs < b.robustTimeMs;
+        });
+}
+
+// The ranking an exhaustive sweep should use: the caller's own if it supplied one,
+// otherwise rankByRobustTime.
+//
+// Split out from the sweep so the choice is testable without running a benchmark.
+inline AutotuneRankingFn sweepRankingOr(const AutotuneRankingFn& callerSupplied)
+{
+    if(callerSupplied)
+    {
+        return callerSupplied;
+    }
+    return &rankByRobustTime;
+}
+
+// Apply the settings that define an exhaustive sweep, leaving every other field of @p config
+// as the caller set it.
+//
+// Two fields are locked rather than defaulted, because they are what makes the call an
+// exhaustive sweep that populates the cache. EXHAUSTIVE is the sweep itself.
+// BENCHMARK_UNPRIMED keeps a record reachable: under ABORT_ON_PRIMING_FAILURE one engine
+// failing to prime abandons the sweep and persists nothing, so a single broken plugin denies
+// a ranking for every graph on the machine, and the next run aborts identically.
+//
+// rankingFn is defaulted, not locked: a caller that supplied one decides the persisted order.
+//
+// Split out from the sweep so the settings are testable without running a benchmark.
+inline AutotuneConfig sweepConfigFrom(AutotuneConfig config)
+{
+    config.mode = TuneMode::EXHAUSTIVE;
+    config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
+    config.rankingFn = sweepRankingOr(config.rankingFn);
+    return config;
 }
 
 // Rank benchmark results and select the winning plan.

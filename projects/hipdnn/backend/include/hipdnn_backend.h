@@ -861,6 +861,52 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHand
                                                                       char* apiVersion,
                                                                       size_t* apiVersionLen);
 
+/*!
+ * @brief Outcome of a hipdnnBackendWriteEngineRankingResults_ext() call.
+ *
+ * Reported through that call's optional @c outcome out-parameter, and meaningful only
+ * when the call returns HIPDNN_STATUS_SUCCESS. A decline is not an error.
+ */
+typedef enum
+{
+    HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN = 0, ///< The ranking was written to the cache.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_DISABLED
+    = 1, ///< The exact-match cache is disabled via HIPDNN_DISABLE_EXACT_ENGINE_CACHE.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED
+    = 2, ///< graphDescriptor is unfinalized, or the graph/device could not be keyed.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES
+    = 3, ///< engineIdsInRankOrder was null or engineIdCount was 0.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED
+    = 4 ///< The cache already held this exact ranking, so nothing was written.
+} hipdnnAutotuneCacheWriteOutcome_ext_t;
+
+/*!
+ * @brief Writes an exhaustive-tuning engine ranking to the exact-match autotune cache.
+ *
+ * Keys on @p graphDescriptor's serialized buffer and the handle's current device.
+ * @p engineIdsInRankOrder is stored verbatim as both the sampled-engine set and the
+ * winning order. Fail-soft: never fails the caller's tuning run over a cache problem;
+ * an unfinalized descriptor, an empty ranking, an unkeyable graph, or a disabled cache
+ * (`HIPDNN_DISABLE_EXACT_ENGINE_CACHE`) is treated as success-with-no-write.
+ *
+ * @param [in]  handle                Supplies the device identity the ranking is scoped to.
+ * @param [in]  graphDescriptor       Backend graph descriptor; its buffer derives the cache key.
+ * @param [in]  engineIdsInRankOrder  Engine ids in winning rank order (fastest first).
+ * @param [in]  engineIdCount         Number of entries in @p engineIdsInRankOrder.
+ * @param [out] outcome               Optional; fail-soft outcome, valid on
+ *                                    HIPDNN_STATUS_SUCCESS. See
+ *                                    @ref hipdnnAutotuneCacheWriteOutcome_ext_t.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                 Written, or fail-soft declined (see above).
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  handle is null.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendWriteEngineRankingResults_ext(hipdnnHandle_t handle,
+                                               hipdnnBackendDescriptor_t graphDescriptor,
+                                               const int64_t* engineIdsInRankOrder,
+                                               size_t engineIdCount,
+                                               hipdnnAutotuneCacheWriteOutcome_ext_t* outcome);
+
 /**
  * @brief Returns hipdnn backend version string. Returns an error if nullptr is passed
  *

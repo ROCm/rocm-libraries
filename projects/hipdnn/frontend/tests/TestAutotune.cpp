@@ -3,10 +3,10 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/autotune/AutotuneBenchmark.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
-#include <hipdnn_frontend/autotune/BenchmarkStatistics.hpp>
 #include <hipdnn_frontend/autotune/KnobConstants.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 #include <hipdnn_frontend/autotune/TimedRunLoop.hpp>
@@ -440,4 +440,239 @@ TEST(TestAutotune, RankAndSelectWinnerSortsSucceededAndSelectsFastest)
     EXPECT_EQ(results[3].rank, -1);
 
     EXPECT_EQ(activePlanIndex, 1u);
+}
+
+// ============================================================================
+// autotuneExhaustiveSweep
+// ============================================================================
+
+// mode and primingFailurePolicy are locked because they are what makes the call an
+// exhaustive sweep that populates the cache. STANDARD would not prime any engine, and
+// ABORT_ON_PRIMING_FAILURE would let one broken engine abandon the sweep and persist
+// nothing -- denying a ranking for every graph on the machine, permanently, since the next
+// run aborts the same way.
+TEST(TestAutotune, SweepConfigLocksModeAndPrimingPolicy)
+{
+    AutotuneConfig requested;
+    requested.mode = TuneMode::STANDARD;
+    requested.primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
+
+    const auto applied = autotune::detail::sweepConfigFrom(requested);
+
+    EXPECT_EQ(applied.mode, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(applied.primingFailurePolicy, PrimingFailurePolicy::BENCHMARK_UNPRIMED);
+}
+
+// Everything the two locked fields do not decide stays the caller's.
+TEST(TestAutotune, SweepConfigPreservesEveryOtherField)
+{
+    AutotuneConfig requested;
+    requested.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    requested.timedIterations = 37;
+    requested.warmupIterations = 4;
+    requested.maxIterations = 55;
+    requested.windowSize = 6;
+    requested.stabilityThreshold = 0.02f;
+    requested.engineIdFilter = {11, 22};
+
+    const auto applied = autotune::detail::sweepConfigFrom(requested);
+
+    EXPECT_EQ(applied.strategy, AutotuneStrategy::FIXED_AVERAGE);
+    EXPECT_EQ(applied.timedIterations, 37);
+    EXPECT_EQ(applied.warmupIterations, 4);
+    EXPECT_EQ(applied.maxIterations, 55);
+    EXPECT_EQ(applied.windowSize, 6);
+    EXPECT_FLOAT_EQ(applied.stabilityThreshold, 0.02f);
+    EXPECT_EQ(applied.engineIdFilter, (std::vector<int64_t>{11, 22}));
+}
+
+// A default-constructed config must come back ready to sweep, so the common call is
+// autotuneExhaustiveSweep(handle, variantPack, workspace, size) with nothing else supplied.
+TEST(TestAutotune, SweepConfigFromDefaultsIsReadyToSweep)
+{
+    const auto applied = autotune::detail::sweepConfigFrom(AutotuneConfig{});
+
+    EXPECT_EQ(applied.mode, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(applied.primingFailurePolicy, PrimingFailurePolicy::BENCHMARK_UNPRIMED);
+    EXPECT_TRUE(static_cast<bool>(applied.rankingFn));
+}
+
+TEST(TestAutotune, ExhaustiveSweepRejectsNegativeWorkspaceSize)
+{
+    hipdnn_frontend::graph::Graph g;
+    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
+
+    auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{-1});
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_NE(err.get_message().find("workspaceSize"), std::string::npos);
+}
+
+// autotuneExhaustiveSweep takes no sweep/variant parameter, so add_engine_sweep()/
+// add_engine_variants() are structurally unreachable from it, checked at compile time.
+TEST(TestAutotune, ExhaustiveSweepHasNoSweepOrVariantOverload)
+{
+    using Graph = hipdnn_frontend::graph::Graph;
+    using VariantPack = std::unordered_map<int64_t, void*>;
+
+    static_assert(!std::is_invocable_v<decltype(&Graph::autotuneExhaustiveSweep),
+                                       Graph*,
+                                       hipdnnHandle_t,
+                                       const VariantPack&,
+                                       void*,
+                                       int64_t,
+                                       AutotuneConfig,
+                                       AutotuneStorageConfig,
+                                       std::vector<AutotuneResult>*,
+                                       int>,
+                  "autotuneExhaustiveSweep must not accept extra sweep/variant-shaped arguments");
+    SUCCEED();
+}
+
+TEST(TestAutotune, ExhaustiveSweepExhaustiveIsTheOnlyModeItProduces)
+{
+    EXPECT_EQ(tuneModeToString(TuneMode::EXHAUSTIVE), std::string("EXHAUSTIVE"));
+}
+
+// timedIterations is the caller's accuracy/cost dial, validated by autotuneImpl for the
+// strategy that reads it. A count of zero would otherwise leave an empty sample set.
+TEST(TestAutotune, ExhaustiveSweepRejectsNonPositiveTimedIterations)
+{
+    hipdnn_frontend::graph::Graph g;
+    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
+
+    for(const int bad : {0, -1})
+    {
+        AutotuneConfig config;
+        config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+        config.timedIterations = bad;
+
+        auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{0}, config);
+        EXPECT_TRUE(err.is_bad());
+        EXPECT_NE(err.get_message().find("timedIterations"), std::string::npos);
+    }
+}
+
+// ============================================================================
+// autotuneExhaustiveSweep ranking
+// ============================================================================
+
+namespace
+{
+AutotuneResult makeRankable(const char* name, float robustMs, float minMs)
+{
+    AutotuneResult result;
+    result.engineName = name;
+    result.robustTimeMs = robustMs;
+    result.minTimeMs = minMs;
+    result.succeeded = true;
+    return result;
+}
+
+std::vector<std::string> rankedNames(const std::vector<AutotuneResult>& results)
+{
+    std::vector<std::string> names;
+    names.reserve(results.size());
+    for(const auto& result : results)
+    {
+        names.push_back(result.engineName);
+    }
+    return names;
+}
+} // namespace
+
+TEST(TestAutotune, RankByRobustTimeOrdersFastestFirst)
+{
+    std::vector<AutotuneResult> results{makeRankable("slow", 30.0f, 30.0f),
+                                        makeRankable("fast", 10.0f, 10.0f),
+                                        makeRankable("medium", 20.0f, 20.0f)};
+
+    autotune::detail::rankByRobustTime(results);
+
+    EXPECT_EQ(rankedNames(results), (std::vector<std::string>{"fast", "medium", "slow"}));
+}
+
+// The reason the sweep ranks on robustTimeMs at all. The volatile candidate has the better
+// fastest iteration but is usually slower, so ranking must not put it first.
+TEST(TestAutotune, RankByRobustTimePrefersConsistentEngineOverLuckyOne)
+{
+    std::vector<AutotuneResult> results{
+        makeRankable("volatile", /*robustMs=*/25.0f, /*minMs=*/5.0f),
+        makeRankable("consistent", /*robustMs=*/10.0f, /*minMs=*/9.5f)};
+
+    autotune::detail::rankByRobustTime(results);
+
+    EXPECT_EQ(results.front().engineName, "consistent");
+    // Guard against a silent regression to min-based ranking, which would invert this.
+    EXPECT_LT(results.back().minTimeMs, results.front().minTimeMs);
+}
+
+TEST(TestAutotune, RankByRobustTimeKeepsBenchmarkedOrderOnTies)
+{
+    std::vector<AutotuneResult> results{makeRankable("first", 10.0f, 10.0f),
+                                        makeRankable("second", 10.0f, 9.0f),
+                                        makeRankable("third", 10.0f, 8.0f)};
+
+    autotune::detail::rankByRobustTime(results);
+
+    // Equal robust times must not be reordered by any other field, or the persisted
+    // ranking would vary run to run for candidates that measured the same.
+    EXPECT_EQ(rankedNames(results), (std::vector<std::string>{"first", "second", "third"}));
+}
+
+TEST(TestAutotune, RankByRobustTimeHandlesEmptyAndSingleResult)
+{
+    std::vector<AutotuneResult> empty;
+    autotune::detail::rankByRobustTime(empty);
+    EXPECT_TRUE(empty.empty());
+
+    std::vector<AutotuneResult> single{makeRankable("only", 10.0f, 10.0f)};
+    autotune::detail::rankByRobustTime(single);
+    EXPECT_EQ(single.front().engineName, "only");
+}
+
+// The sweep defaults rankingFn rather than overriding it, so a caller can rank on any
+// criterion its own results expose -- ranking by stddev to prefer the steadiest engine, for
+// instance, which no built-in ordering provides.
+TEST(TestAutotune, SweepRankingHonoursCallerSuppliedFunction)
+{
+    bool called = false;
+    AutotuneRankingFn callerSupplied = [&called](std::vector<AutotuneResult>& succeeded) {
+        called = true;
+        std::stable_sort(succeeded.begin(),
+                         succeeded.end(),
+                         [](const AutotuneResult& a, const AutotuneResult& b) {
+                             return a.stddevMs < b.stddevMs;
+                         });
+    };
+
+    auto chosen = autotune::detail::sweepRankingOr(callerSupplied);
+    ASSERT_TRUE(static_cast<bool>(chosen));
+
+    // "steady" has the worse robust time but the lower stddev, so the caller's ordering and
+    // the default disagree: only the caller's puts it first.
+    std::vector<AutotuneResult> results{makeRankable("steady", 20.0f, 19.0f),
+                                        makeRankable("quick", 10.0f, 1.0f)};
+    results[0].stddevMs = 0.1f;
+    results[1].stddevMs = 9.0f;
+
+    chosen(results);
+
+    EXPECT_TRUE(called);
+    EXPECT_EQ(results.front().engineName, "steady");
+}
+
+TEST(TestAutotune, SweepRankingFallsBackToRobustTimeWhenCallerSuppliesNone)
+{
+    auto chosen = autotune::detail::sweepRankingOr(nullptr);
+    ASSERT_TRUE(static_cast<bool>(chosen));
+
+    std::vector<AutotuneResult> results{makeRankable("steady", 20.0f, 19.0f),
+                                        makeRankable("quick", 10.0f, 1.0f)};
+    results[0].stddevMs = 0.1f;
+    results[1].stddevMs = 9.0f;
+
+    chosen(results);
+
+    // Same inputs as above, but with no caller function the robust ordering wins.
+    EXPECT_EQ(results.front().engineName, "quick");
 }
