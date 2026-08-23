@@ -12,6 +12,7 @@ to eliminate duplication.
 """
 
 import argparse
+import itertools
 import json
 import logging
 import concurrent.futures
@@ -23,6 +24,7 @@ from typing import (
     ClassVar,
     Dict,
     FrozenSet,
+    Iterator,
     List,
     Mapping,
     Optional,
@@ -603,6 +605,173 @@ def make_rowcolquant_kernel_name(
         warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
         warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
     )
+
+
+# ============================================================================
+# Arch-derived warp tile K
+# ============================================================================
+
+
+def fp8_warp_tile_k_for_arch(gfx_arch: str, *, preshuffle_quant: bool = False) -> int:
+    """Arch-derived WarpTileK for an 8-bit float operand with M_Warp_Tile=16.
+
+    Mirrors ``ck_tile::get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16, IsFlatMM>()``
+    (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp)::
+
+        gfx950                        -> 128  (both plain and preshufflequant)
+        gfx942/other, plain           ->  32
+        gfx942/other, preshufflequant ->  64
+
+    This rule must exist exactly once. Using 128 on gfx942 compiles cleanly and
+    then produces **all-zeros output** -- there is no valid 16x16x128 fp8/bf8
+    warp-gemm on gfx942 -- so a second, drifting copy is a silent-wrong-answer
+    bug rather than a build failure.
+
+    ``preshuffle_quant`` applies to AQuant's preshufflequant configs; every
+    other quant operator passes the default.
+    """
+    if "gfx950" in gfx_arch:
+        return 128
+    return 64 if preshuffle_quant else 32
+
+
+# ============================================================================
+# Quant spec-sweep helpers
+# ============================================================================
+#
+# The five ``_build_specs()`` functions share their whole middle: the same
+# ``itertools.product`` over (variant x layout x tile x optional group), the
+# same unknown-variant / unsupported-pipeline warn-and-skip, the same
+# ``TileConfig(**tile_dict)`` construction and ``is_valid()`` guard.
+#
+# NOT extracted, deliberately: the ``config.get()`` pull-outs and the
+# ``specs.append(<Op>KernelSpec(...))`` call. Those are where the operators
+# genuinely differ -- different dataclasses, different field sets, different
+# defaults for the same key (``pad_k`` is True everywhere but ABQuant, and
+# AQuant's default scheduler is computed from ``preshuffle_aquant``). Routing
+# them through one helper would mean a kwargs blob that no longer type-checks
+# against the target dataclass. Left in the per-op scripts.
+
+
+def tile_config_from_dict(tile_dict: Mapping[str, int]) -> TileConfig:
+    """Build a :class:`TileConfig` from a sweep-config tile dict.
+
+    All nine keys are required; a missing one is a malformed config and should
+    raise rather than silently default.
+    """
+    return TileConfig(
+        tile_m=tile_dict["tile_m"],
+        tile_n=tile_dict["tile_n"],
+        tile_k=tile_dict["tile_k"],
+        warp_m=tile_dict["warp_m"],
+        warp_n=tile_dict["warp_n"],
+        warp_k=tile_dict["warp_k"],
+        warp_tile_m=tile_dict["warp_tile_m"],
+        warp_tile_n=tile_dict["warp_tile_n"],
+        warp_tile_k=tile_dict["warp_tile_k"],
+    )
+
+
+def rcr_only_layout_guard(layout: str) -> Optional[str]:
+    """Layout guard for operators that only support ``rcr``.
+
+    Downstream codegen indexes ``layout[0/1/2]`` and looks each char up in the
+    op's LAYOUT_TO_CK map, so anything outside the supported scope would raise
+    IndexError/KeyError. Skip cleanly with a warning instead.
+    """
+    if layout != "rcr":
+        return f"Unsupported layout {layout} (only rcr) -- skipping"
+    return None
+
+
+def iter_quant_axes(
+    config: dict,
+    *,
+    variants: Mapping[str, Any],
+    logger: logging.Logger,
+    pipeline: Optional[str] = None,
+    pipeline_map: Optional[Mapping[str, Any]] = None,
+    extra_axis: Optional[Tuple[str, List[dict]]] = None,
+    layout_guard: Optional[Callable[[str], Optional[str]]] = None,
+) -> Iterator[Tuple[str, str, TileConfig, dict]]:
+    """Yield ``(variant_key, layout, tile, extra)`` for every valid sweep point.
+
+    Guards run in the order variant -> pipeline -> layout -> tile validity, and
+    each one warns (or, for tile validity, debug-logs) and skips exactly as the
+    hand-rolled loops did. ``logger`` is the *caller's* logger so the module
+    name in the log record still identifies the operator.
+
+    ``pipeline_map`` is optional -- AQuant has no pipeline axis. ``extra_axis``
+    is ``(config_key, default)`` for the fourth product axis (``quant_groups``
+    for AQuant/BQuant, ``bquant_groups`` for ABQuant); operators without one
+    receive ``{}`` as ``extra``.
+    """
+    extra_key, extra_default = extra_axis if extra_axis else (None, None)
+    extra_values: List[dict] = (
+        config.get(extra_key, extra_default) if extra_key else [{}]
+    )
+
+    for variant_key, layout, tile_dict, extra in itertools.product(
+        config.get("variant_keys", ["fp8"]),
+        config.get("layouts", ["rcr"]),
+        config.get("tile_configs", []),
+        extra_values,
+    ):
+        if variant_key not in variants:
+            logger.warning("Unknown variant_key %s -- skipping", variant_key)
+            continue
+        if pipeline_map is not None and pipeline not in pipeline_map:
+            logger.warning("Unsupported pipeline %s -- skipping", pipeline)
+            continue
+        if layout_guard is not None:
+            reason = layout_guard(layout)
+            if reason is not None:
+                logger.warning("%s", reason)
+                continue
+
+        tile = tile_config_from_dict(tile_dict)
+        if not tile.is_valid():
+            logger.debug("Invalid tile config %s -- skipping", tile)
+            continue
+
+        yield variant_key, layout, tile, extra
+
+
+def quant_decode_default_config(*, warp_tile_k: int, **overrides) -> dict:
+    """The GemmConfigQuantDecode sweep shared by tensor_quant/rowcolquant/bquant.
+
+    fp8+bf8, rcr only, compv3 + cshuffle + intrawave, tile 16x64x256 with warp
+    1x4x1 and warp_tile 16x16x``warp_tile_k``. ``overrides`` is merged last, so
+    an operator can add its own keys (BQuant's ``quant_groups`` /
+    ``preshuffle_*``) or restate an existing one.
+
+    AQuant and ABQuant deliberately do not use this: AQuant has no pipeline or
+    epilogue axis and sweeps four layouts, and ABQuant is a 128x128x128 prefill
+    tile with ``pad_k=False``. Expressing either as overrides of this base would
+    mean *removing* keys, which is less readable than their own literal.
+    """
+    config = {
+        "variant_keys": ["fp8", "bf8"],
+        "layouts": ["rcr"],
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "scheduler": "intrawave",
+        "tile_configs": [
+            # GemmConfigQuantDecode<fp8_t>: M=16, N=64, K=256/sizeof(8bit)=256
+            {"tile_m": 16, "tile_n": 64, "tile_k": 256,
+             "warp_m": 1, "warp_n": 4, "warp_k": 1,
+             "warp_tile_m": 16, "warp_tile_n": 16,
+             "warp_tile_k": warp_tile_k},
+        ],
+        "pad_m": False,
+        "pad_n": False,
+        "pad_k": True,
+        "block_size": 256,
+        "k_block_per_cu": 1,
+        "double_smem_buffer": False,
+    }
+    config.update(overrides)
+    return config
 
 
 # ============================================================================

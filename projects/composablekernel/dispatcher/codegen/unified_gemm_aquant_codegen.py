@@ -34,7 +34,6 @@ Reference:
 """
 
 import argparse
-import itertools
 import json
 import logging
 from dataclasses import dataclass
@@ -45,8 +44,6 @@ from codegen_common import (
     QUANT_LAYOUT_TO_CK,
     QUANT_SCHEDULER_TO_CK,
     TileConfig,
-    make_gemm_aquant_kernel_name,
-    gemm_aquant_effective_epilogue,
     emit_generated_header_preamble,
     emit_quant_epilogue_block,
     emit_quant_gemm_traits,
@@ -55,6 +52,10 @@ from codegen_common import (
     emit_quant_tile_dims,
     emit_quant_tile_shape,
     emit_single_kernel_include_footer,
+    fp8_warp_tile_k_for_arch,
+    gemm_aquant_effective_epilogue,
+    iter_quant_axes,
+    make_gemm_aquant_kernel_name,
     run_codegen_cli,
 )
 
@@ -366,25 +367,6 @@ def _k_tile_for(variant_key: str) -> int:
     return 256 // AQUANT_VARIANTS[variant_key]["prec_bytes"]
 
 
-def _warp_tile_k_for_arch(gfx_arch: str, preshuffle_aquant: bool = False) -> int:
-    """Arch-derived WarpTileK for AQuant with M_Warp_Tile=16.
-
-    Every AQuant variant (fp8, bf8, fp8i4, bf8i4) instantiates the GEMM config with
-    an 8-bit float PrecType (fp8_t/bf8_t; the pk_int4 A operand does not drive the K
-    warp tile -- see gemm_aquant_quantgrouped{,_preshufflequant}.cpp GemmConfig<fp8/bf8_t>).
-    Mirrors ck_tile::get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16, IsFlatMM>()
-    (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp):
-      gfx950                         -> 128 (decode and preshufflequant)
-      gfx942/other, decode           ->  32
-      gfx942/other, preshufflequant  ->  64
-    Using 128 on gfx942 compiles but produces all-zeros output (no valid 16x16x128
-    fp8/bf8 warp-gemm on gfx942).
-    """
-    if "gfx950" in gfx_arch:
-        return 128
-    return 64 if preshuffle_aquant else 32
-
-
 def _default_config(gfx_arch: str = "gfx950") -> dict:
     """Default sweep config matching GemmConfigQuantDecodeInterwave tile defaults.
 
@@ -401,7 +383,7 @@ def _default_config(gfx_arch: str = "gfx950") -> dict:
             {"tile_m": 16, "tile_n": 64, "tile_k": 256,
              "warp_m": 1, "warp_n": 4, "warp_k": 1,
              "warp_tile_m": 16, "warp_tile_n": 16,
-             "warp_tile_k": _warp_tile_k_for_arch(gfx_arch, preshuffle_aquant=False)},
+             "warp_tile_k": fp8_warp_tile_k_for_arch(gfx_arch, preshuffle_quant=False)},
         ],
         "quant_groups": [
             {"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128},
@@ -429,38 +411,23 @@ def _build_specs(config: dict) -> List[AQuantKernelSpec]:
     k_block_per_cu     = config.get("k_block_per_cu", 1)
     double_smem_buffer = config.get("double_smem_buffer", False)
 
-    for variant_key, layout, tile_dict, qg in itertools.product(
-        config.get("variant_keys", ["fp8"]),
-        config.get("layouts", ["rcr"]),
-        config.get("tile_configs", []),
-        config.get("quant_groups", [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}]),
-    ):
-        if variant_key not in AQUANT_VARIANTS:
-            log.warning("Unknown variant_key %s -- skipping", variant_key)
-            continue
+    def _layout_guard(layout: str) -> Optional[str]:
         if layout not in AQUANT_AQ_LAYOUT:
-            log.warning("Unsupported layout %s -- skipping", layout)
-            continue
+            return f"Unsupported layout {layout} -- skipping"
         # Old-TE rejects the ccr layout for the preshufflequant path.
         if preshuffle_aquant and layout == "ccr":
-            log.warning("ccr layout is unsupported for preshufflequant -- skipping")
-            continue
+            return "ccr layout is unsupported for preshufflequant -- skipping"
+        return None
 
-        tile = AQuantTileConfig(
-            tile_m=tile_dict["tile_m"],
-            tile_n=tile_dict["tile_n"],
-            tile_k=tile_dict["tile_k"],
-            warp_m=tile_dict["warp_m"],
-            warp_n=tile_dict["warp_n"],
-            warp_k=tile_dict["warp_k"],
-            warp_tile_m=tile_dict["warp_tile_m"],
-            warp_tile_n=tile_dict["warp_tile_n"],
-            warp_tile_k=tile_dict["warp_tile_k"],
-        )
-        if not tile.is_valid():
-            log.debug("Invalid tile config %s -- skipping", tile)
-            continue
-
+    # AQuant has no pipeline axis, so no pipeline_map is passed.
+    for variant_key, layout, tile, qg in iter_quant_axes(
+        config,
+        variants=AQUANT_VARIANTS,
+        logger=log,
+        extra_axis=("quant_groups",
+                    [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}]),
+        layout_guard=_layout_guard,
+    ):
         specs.append(AQuantKernelSpec(
             variant_key=variant_key,
             layout=layout,

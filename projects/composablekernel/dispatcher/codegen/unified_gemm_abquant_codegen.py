@@ -35,7 +35,6 @@ Reference:
 """
 
 import argparse
-import itertools
 import json
 import logging
 from dataclasses import dataclass
@@ -46,7 +45,6 @@ from codegen_common import (
     QUANT_LAYOUT_TO_CK,
     QUANT_SCHEDULER_TO_CK,
     TileConfig,
-    make_gemm_abquant_kernel_name,
     bquant_effective_epilogue,
     emit_generated_header_preamble,
     emit_quant_epilogue_block,
@@ -57,6 +55,9 @@ from codegen_common import (
     emit_quant_tile_dims,
     emit_quant_tile_shape,
     emit_single_kernel_include_footer,
+    fp8_warp_tile_k_for_arch,
+    iter_quant_axes,
+    make_gemm_abquant_kernel_name,
     run_codegen_cli,
 )
 
@@ -422,7 +423,11 @@ def _default_config() -> dict:
     """Default sweep config matching GemmConfigABQuantPrefill tile defaults.
 
     fp8/bf8 non-preshuffle, 1x1x128 A-quant / 1x1x128 B-quant, prefill tile
-    128x128x128 (GemmConfigQuantPrefill), warp 1x4x1, warp_tile 16x16x32.
+    128x128x128 (GemmConfigQuantPrefill), warp 1x4x1, warp_tile 16x16x<K>.
+
+    WarpTileK is arch-derived (see ``fp8_warp_tile_k_for_arch``); this entry
+    point takes no ``gfx_arch``, so it pins the gfx942 value it has always
+    used rather than guessing.
     """
     return {
         "variant_keys": ["fp8", "bf8"],
@@ -433,7 +438,8 @@ def _default_config() -> dict:
         "tile_configs": [
             {"tile_m": 128, "tile_n": 128, "tile_k": 128,
              "warp_m": 1, "warp_n": 4, "warp_k": 1,
-             "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 32},
+             "warp_tile_m": 16, "warp_tile_n": 16,
+             "warp_tile_k": fp8_warp_tile_k_for_arch("gfx942")},
         ],
         "aquant_group_k": 128,
         "bquant_groups": [
@@ -469,34 +475,14 @@ def _build_specs(config: dict) -> List[ABQuantKernelSpec]:
     eight_waves        = config.get("eight_waves", False)
     aquant_group_k     = config.get("aquant_group_k", 128)
 
-    for variant_key, layout, tile_dict, bqg in itertools.product(
-        config.get("variant_keys", ["fp8"]),
-        config.get("layouts", ["rcr"]),
-        config.get("tile_configs", []),
-        config.get("bquant_groups", [{"bquant_group_n": 1, "bquant_group_k": 128}]),
+    for variant_key, layout, tile, bqg in iter_quant_axes(
+        config,
+        variants=ABQUANT_VARIANTS,
+        logger=log,
+        pipeline=pipeline,
+        pipeline_map=ABQUANT_PIPELINE_MAP,
+        extra_axis=("bquant_groups", [{"bquant_group_n": 1, "bquant_group_k": 128}]),
     ):
-        if variant_key not in ABQUANT_VARIANTS:
-            log.warning("Unknown variant_key %s -- skipping", variant_key)
-            continue
-        if pipeline not in ABQUANT_PIPELINE_MAP:
-            log.warning("Unsupported pipeline %s -- skipping", pipeline)
-            continue
-
-        tile = ABQuantTileConfig(
-            tile_m=tile_dict["tile_m"],
-            tile_n=tile_dict["tile_n"],
-            tile_k=tile_dict["tile_k"],
-            warp_m=tile_dict["warp_m"],
-            warp_n=tile_dict["warp_n"],
-            warp_k=tile_dict["warp_k"],
-            warp_tile_m=tile_dict["warp_tile_m"],
-            warp_tile_n=tile_dict["warp_tile_n"],
-            warp_tile_k=tile_dict["warp_tile_k"],
-        )
-        if not tile.is_valid():
-            log.debug("Invalid tile config %s -- skipping", tile)
-            continue
-
         specs.append(ABQuantKernelSpec(
             variant_key=variant_key,
             layout=layout,

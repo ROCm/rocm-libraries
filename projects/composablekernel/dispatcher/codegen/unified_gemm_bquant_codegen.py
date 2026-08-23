@@ -41,7 +41,6 @@ Reference:
 """
 
 import argparse
-import itertools
 import json
 import logging
 from dataclasses import dataclass
@@ -52,7 +51,6 @@ from codegen_common import (
     QUANT_LAYOUT_TO_CK,
     QUANT_SCHEDULER_TO_CK,
     TileConfig,
-    make_bquant_kernel_name,
     bquant_effective_epilogue,
     emit_generated_header_preamble,
     emit_quant_epilogue_block,
@@ -62,6 +60,10 @@ from codegen_common import (
     emit_quant_tile_dims,
     emit_quant_tile_shape,
     emit_single_kernel_include_footer,
+    fp8_warp_tile_k_for_arch,
+    iter_quant_axes,
+    make_bquant_kernel_name,
+    quant_decode_default_config,
     run_codegen_cli,
 )
 
@@ -447,36 +449,22 @@ using SelectedKernel = {struct};
 
 
 def _default_config() -> dict:
-    """Default sweep config matching GemmConfigQuantDecode tile defaults."""
-    return {
-        "variant_keys": ["fp8", "bf8"],
-        "layouts": ["rcr"],
-        "pipeline": "compv3",
-        "epilogue": "cshuffle",
-        "scheduler": "intrawave",
-        "tile_configs": [
-            # GemmConfigQuantDecode<fp8_t>: M=16, N=64, K=256
-            # WarpTileK=128: get_k_warp_tile<fp8_t, M_Warp_Tile=16>() on gfx950 = 128.
-            # NOTE: this built-in header-enumeration sweep is gfx950-only. Arch-correct
-            # warp_tile_k (gfx942 fp8/bf8 -> 32) is produced by the bridge via
-            # gemm_bquant_utils._warp_tile_k_for(); a gfx942 sweep must pass a config
-            # with warp_tile_k=32 (128 silently outputs all-zeros on gfx942).
-            {"tile_m": 16, "tile_n": 64, "tile_k": 256,
-             "warp_m": 1, "warp_n": 4, "warp_k": 1,
-             "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128},
-        ],
-        "quant_groups": [
+    """Default sweep config matching GemmConfigQuantDecode tile defaults.
+
+    NOTE: this built-in header-enumeration sweep is gfx950-only, hence the
+    literal arch below. Arch-correct warp_tile_k (gfx942 fp8/bf8 -> 32) is
+    produced by the bridge via gemm_bquant_utils._warp_tile_k_for(); a gfx942
+    sweep must pass a config with warp_tile_k=32 (128 silently outputs
+    all-zeros on gfx942).
+    """
+    return quant_decode_default_config(
+        warp_tile_k=fp8_warp_tile_k_for_arch("gfx950"),
+        quant_groups=[
             {"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128},
         ],
-        "pad_m": False,
-        "pad_n": False,
-        "pad_k": True,
-        "block_size": 256,
-        "k_block_per_cu": 1,
-        "double_smem_buffer": False,
-        "preshuffle_b": False,
-        "preshuffle_bquant": False,
-    }
+        preshuffle_b=False,
+        preshuffle_bquant=False,
+    )
 
 
 def _build_specs(config: dict) -> List[BQuantKernelSpec]:
@@ -493,34 +481,15 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
     preshuffle_b       = config.get("preshuffle_b", False)
     preshuffle_bquant  = config.get("preshuffle_bquant", False)
 
-    for variant_key, layout, tile_dict, qg in itertools.product(
-        config.get("variant_keys", ["fp8"]),
-        config.get("layouts", ["rcr"]),
-        config.get("tile_configs", []),
-        config.get("quant_groups", [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}]),
+    for variant_key, layout, tile, qg in iter_quant_axes(
+        config,
+        variants=BQUANT_VARIANTS,
+        logger=log,
+        pipeline=pipeline,
+        pipeline_map=BQUANT_PIPELINE_MAP,
+        extra_axis=("quant_groups",
+                    [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}]),
     ):
-        if variant_key not in BQUANT_VARIANTS:
-            log.warning("Unknown variant_key %s -- skipping", variant_key)
-            continue
-        if pipeline not in BQUANT_PIPELINE_MAP:
-            log.warning("Unsupported pipeline %s -- skipping", pipeline)
-            continue
-
-        tile = BQuantTileConfig(
-            tile_m=tile_dict["tile_m"],
-            tile_n=tile_dict["tile_n"],
-            tile_k=tile_dict["tile_k"],
-            warp_m=tile_dict["warp_m"],
-            warp_n=tile_dict["warp_n"],
-            warp_k=tile_dict["warp_k"],
-            warp_tile_m=tile_dict["warp_tile_m"],
-            warp_tile_n=tile_dict["warp_tile_n"],
-            warp_tile_k=tile_dict["warp_tile_k"],
-        )
-        if not tile.is_valid():
-            log.debug("Invalid tile config %s -- skipping", tile)
-            continue
-
         specs.append(BQuantKernelSpec(
             variant_key=variant_key,
             layout=layout,

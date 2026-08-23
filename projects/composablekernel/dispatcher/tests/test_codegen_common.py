@@ -10,6 +10,7 @@ Phase 1a TDD: these tests are written BEFORE the implementation exists.
 Run: python3 -m pytest tests/test_codegen_common.py -v
 """
 
+import logging
 import sys
 import unittest
 from pathlib import Path
@@ -38,6 +39,12 @@ from codegen_common import (  # noqa: E402
     make_bquant_kernel_name,
     make_rowcolquant_kernel_name,
     make_aquant_kernel_name,
+    # Shared quant spec-sweep plumbing (see TestQuantSpecSweepHelpers).
+    fp8_warp_tile_k_for_arch,
+    iter_quant_axes,
+    quant_decode_default_config,
+    rcr_only_layout_guard,
+    tile_config_from_dict,
     make_abquant_kernel_name,
     make_gemm_aquant_kernel_name,
     make_gemm_abquant_kernel_name,
@@ -505,6 +512,125 @@ class TestQuantKernelNameInvariants(unittest.TestCase):
     def test_builders_are_deterministic(self):
         for label, fn in self._all_builders():
             self.assertEqual(fn(**_TILE), fn(**_TILE), label)
+
+
+class TestQuantSpecSweepHelpers(unittest.TestCase):
+    """Contracts for the shared _build_specs()/_default_config() plumbing.
+
+    The generated-header A/B gate catches a sweep point that starts or stops
+    being emitted, but it cannot see *why* one was skipped. These pin the guard
+    order and the skip diagnostics, which are the operator's only signal that a
+    config axis was silently dropped.
+    """
+
+    VARIANTS = {"fp8": {}, "bf8": {}}
+    PIPELINES = {"compv3": "X"}
+
+    def _cfg(self, **over):
+        cfg = {
+            "variant_keys": ["fp8"],
+            "layouts": ["rcr"],
+            "tile_configs": [dict(_TILE)],
+        }
+        cfg.update(over)
+        return cfg
+
+    def _axes(self, cfg, **kw):
+        kw.setdefault("variants", self.VARIANTS)
+        kw.setdefault("logger", logging.getLogger("test_quant_axes"))
+        return list(iter_quant_axes(cfg, **kw))
+
+    def test_yields_tile_config_and_empty_extra_without_extra_axis(self):
+        (variant, layout, tile, extra), = self._axes(self._cfg())
+        self.assertEqual((variant, layout, extra), ("fp8", "rcr", {}))
+        self.assertIsInstance(tile, TileConfig)
+        self.assertEqual(tile.warp_tile_k, _TILE["warp_tile_k"])
+
+    def test_extra_axis_default_is_used_when_key_absent(self):
+        default = [{"quant_group_k": 128}]
+        (_, _, _, extra), = self._axes(
+            self._cfg(), extra_axis=("quant_groups", default)
+        )
+        self.assertEqual(extra, default[0])
+
+    def test_unknown_variant_is_skipped_with_a_warning(self):
+        with self.assertLogs("test_quant_axes", level="WARNING") as cm:
+            self.assertEqual(self._axes(self._cfg(variant_keys=["int4"])), [])
+        self.assertIn("Unknown variant_key int4", "\n".join(cm.output))
+
+    def test_unsupported_pipeline_is_skipped_only_when_a_map_is_given(self):
+        cfg = self._cfg()
+        # No pipeline_map (AQuant) -> the pipeline axis is not policed at all.
+        self.assertEqual(len(self._axes(cfg, pipeline="nonsense")), 1)
+        with self.assertLogs("test_quant_axes", level="WARNING"):
+            self.assertEqual(
+                self._axes(cfg, pipeline="nonsense", pipeline_map=self.PIPELINES), []
+            )
+
+    def test_rcr_only_layout_guard(self):
+        self.assertIsNone(rcr_only_layout_guard("rcr"))
+        self.assertIn("only rcr", rcr_only_layout_guard("ccr"))
+        with self.assertLogs("test_quant_axes", level="WARNING"):
+            self.assertEqual(
+                self._axes(self._cfg(layouts=["ccr"]), layout_guard=rcr_only_layout_guard),
+                [],
+            )
+
+    def test_invalid_tile_is_dropped_without_a_warning(self):
+        # tile_n=64 is not divisible by warp_n*warp_tile_n=4*32.
+        bad = dict(_TILE, tile_n=64, warp_n=4, warp_tile_n=32)
+        self.assertEqual(self._axes(self._cfg(tile_configs=[bad])), [])
+
+    def test_guard_order_is_variant_then_pipeline_then_layout(self):
+        # A config that trips all three must report the *first* failure, so the
+        # operator fixes the outermost problem rather than chasing a symptom.
+        cfg = self._cfg(variant_keys=["int4"], layouts=["ccr"])
+        with self.assertLogs("test_quant_axes", level="WARNING") as cm:
+            self._axes(cfg, pipeline="nonsense", pipeline_map=self.PIPELINES,
+                       layout_guard=rcr_only_layout_guard)
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("Unknown variant_key", cm.output[0])
+
+    def test_tile_config_from_dict_requires_every_key(self):
+        with self.assertRaises(KeyError):
+            tile_config_from_dict({k: v for k, v in _TILE.items()
+                                   if k != "warp_tile_k"})
+
+    def test_decode_default_config_shape(self):
+        cfg = quant_decode_default_config(warp_tile_k=128)
+        self.assertEqual(cfg["variant_keys"], ["fp8", "bf8"])
+        self.assertEqual(cfg["layouts"], ["rcr"])
+        self.assertEqual(cfg["pad_k"], True)
+        tile, = cfg["tile_configs"]
+        self.assertEqual((tile["tile_m"], tile["tile_n"], tile["tile_k"]), (16, 64, 256))
+        self.assertEqual(tile["warp_tile_k"], 128)
+
+    def test_decode_default_config_overrides_and_isolation(self):
+        cfg = quant_decode_default_config(warp_tile_k=32, preshuffle_b=True, pad_k=False)
+        self.assertTrue(cfg["preshuffle_b"])
+        self.assertFalse(cfg["pad_k"])
+        # Each call must own its nested containers, or one operator's sweep
+        # mutates another's defaults.
+        other = quant_decode_default_config(warp_tile_k=32)
+        cfg["tile_configs"][0]["tile_m"] = 999
+        self.assertEqual(other["tile_configs"][0]["tile_m"], 16)
+
+
+class TestArchWarpTileK(unittest.TestCase):
+    """The gfx942/gfx950 WarpTileK rule -- a silent-wrong-answer trap."""
+
+    def test_gfx950_is_128_regardless_of_preshuffle(self):
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx950"), 128)
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx950", preshuffle_quant=True), 128)
+
+    def test_gfx942_is_32_plain_and_64_preshuffle(self):
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx942"), 32)
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx942", preshuffle_quant=True), 64)
+
+    def test_unknown_arch_takes_the_safe_non_gfx950_branch(self):
+        # 128 on a non-gfx950 target compiles and then emits all zeros, so an
+        # unrecognised arch must never fall through to it.
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx90a"), 32)
 
 
 if __name__ == "__main__":

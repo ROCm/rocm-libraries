@@ -41,7 +41,6 @@ Reference:
 """
 
 import argparse
-import itertools
 import json
 import logging
 from dataclasses import dataclass
@@ -52,6 +51,8 @@ from codegen_common import (
     QUANT_LAYOUT_TO_CK,
     QUANT_SCHEDULER_TO_CK,
     TileConfig,
+    # Re-exported for gemm_tensor_quant_utils.py / tests, which import it from
+    # this module; not called here.
     emit_generated_header_preamble,
     emit_quant_epilogue_block,
     emit_quant_gemm_traits,
@@ -61,10 +62,12 @@ from codegen_common import (
     emit_quant_tile_dims,
     emit_quant_tile_shape,
     emit_single_kernel_include_footer,
+    fp8_warp_tile_k_for_arch,
+    iter_quant_axes,
     make_tensor_quant_kernel_name,
+    quant_decode_default_config,
+    rcr_only_layout_guard,
     run_codegen_cli,
-    # Re-exported for gemm_tensor_quant_utils.py / tests, which import it from
-    # this module; not called here.
     tensor_quant_effective_epilogue,  # noqa: F401
 )
 
@@ -362,17 +365,6 @@ using SelectedKernel = {struct};
 _DEFAULT_GFX_ARCH = "gfx950"
 
 
-def _fp8_warp_tile_k_for_arch(gfx_arch: str) -> int:
-    """Arch-derived WarpTileK for fp8/bf8 with M_Warp_Tile=16.
-
-    Mirrors ck_tile::get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16>()
-    (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp): 128 on gfx950,
-    32 on gfx942. Using 128 on gfx942 compiles but produces all-zeros output
-    (no valid 16x16x128 fp8/bf8 warp-gemm on gfx942).
-    """
-    return 128 if "gfx950" in gfx_arch else 32
-
-
 def _default_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> dict:
     """Default sweep config matching GemmConfigQuantDecode tile defaults.
 
@@ -380,25 +372,9 @@ def _default_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> dict:
     warp 1x4x1, warp_tile 16x16x K_warp. WarpTileK is arch-derived
     (get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16>() = 128 on gfx950, 32 on gfx942).
     """
-    return {
-        "variant_keys": ["fp8", "bf8"],
-        "layouts": ["rcr"],
-        "pipeline": "compv3",
-        "epilogue": "cshuffle",
-        "scheduler": "intrawave",
-        "tile_configs": [
-            {"tile_m": 16, "tile_n": 64, "tile_k": 256,
-             "warp_m": 1, "warp_n": 4, "warp_k": 1,
-             "warp_tile_m": 16, "warp_tile_n": 16,
-             "warp_tile_k": _fp8_warp_tile_k_for_arch(gfx_arch)},
-        ],
-        "pad_m": False,
-        "pad_n": False,
-        "pad_k": True,
-        "block_size": 256,
-        "k_block_per_cu": 1,
-        "double_smem_buffer": False,
-    }
+    return quant_decode_default_config(
+        warp_tile_k=fp8_warp_tile_k_for_arch(gfx_arch),
+    )
 
 
 def _build_specs(config: dict) -> List[TensorQuantKernelSpec]:
@@ -422,36 +398,14 @@ def _build_specs(config: dict) -> List[TensorQuantKernelSpec]:
     k_block_per_cu     = config.get("k_block_per_cu", 1)
     double_smem_buffer = config.get("double_smem_buffer", False)
 
-    for variant_key, layout, tile_dict in itertools.product(
-        config.get("variant_keys", ["fp8"]),
-        config.get("layouts", ["rcr"]),
-        config.get("tile_configs", []),
+    for variant_key, layout, tile, _ in iter_quant_axes(
+        config,
+        variants=TENSOR_QUANT_VARIANTS,
+        logger=log,
+        pipeline=pipeline,
+        pipeline_map=TENSOR_QUANT_PIPELINE_MAP,
+        layout_guard=rcr_only_layout_guard,
     ):
-        if variant_key not in TENSOR_QUANT_VARIANTS:
-            log.warning("Unknown variant_key %s -- skipping", variant_key)
-            continue
-        if pipeline not in TENSOR_QUANT_PIPELINE_MAP:
-            log.warning("Unsupported pipeline %s -- skipping", pipeline)
-            continue
-        if layout != "rcr":
-            log.warning("Unsupported layout %s (only rcr) -- skipping", layout)
-            continue
-
-        tile = TensorQuantTileConfig(
-            tile_m=tile_dict["tile_m"],
-            tile_n=tile_dict["tile_n"],
-            tile_k=tile_dict["tile_k"],
-            warp_m=tile_dict["warp_m"],
-            warp_n=tile_dict["warp_n"],
-            warp_k=tile_dict["warp_k"],
-            warp_tile_m=tile_dict["warp_tile_m"],
-            warp_tile_n=tile_dict["warp_tile_n"],
-            warp_tile_k=tile_dict["warp_tile_k"],
-        )
-        if not tile.is_valid():
-            log.debug("Invalid tile config %s -- skipping", tile)
-            continue
-
         specs.append(TensorQuantKernelSpec(
             variant_key=variant_key,
             layout=layout,

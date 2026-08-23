@@ -34,7 +34,6 @@ Reference:
 """
 
 import argparse
-import itertools
 import json
 import logging
 from dataclasses import dataclass
@@ -45,7 +44,6 @@ from codegen_common import (
     QUANT_LAYOUT_TO_CK,
     QUANT_SCHEDULER_TO_CK,
     TileConfig,
-    make_rowcolquant_kernel_name,
     emit_generated_header_preamble,
     emit_quant_epilogue_block,
     emit_quant_gemm_traits,
@@ -54,6 +52,11 @@ from codegen_common import (
     emit_quant_tile_dims,
     emit_quant_tile_shape,
     emit_single_kernel_include_footer,
+    fp8_warp_tile_k_for_arch,
+    iter_quant_axes,
+    make_rowcolquant_kernel_name,
+    quant_decode_default_config,
+    rcr_only_layout_guard,
     run_codegen_cli,
 )
 
@@ -293,31 +296,17 @@ using SelectedKernel = {struct};
 
 
 def _default_config() -> dict:
-    """Default sweep config matching GemmConfigRowColQuant tile defaults."""
-    return {
-        "variant_keys": ["fp8", "bf8"],
-        "layouts": ["rcr"],
-        "pipeline": "compv3",
-        "epilogue": "cshuffle",
-        "scheduler": "intrawave",
-        "tile_configs": [
-            # GemmConfigRowColQuant<fp8_t>: M=16, N=64, K=256/sizeof(fp8_t)=256
-            # WarpTileK is arch-derived: get_k_warp_tile<fp8_t, M_Warp_Tile=16>()
-            # returns 128 on gfx950 but 32 on gfx942 (128 silently outputs
-            # all-zeros on gfx942). The Python driver
-            # (gemm_rowcolquant_utils.default_*_config -> _warp_tile_k_for) sets
-            # this per-arch; this standalone fallback uses the gfx950 value.
-            {"tile_m": 16, "tile_n": 64, "tile_k": 256,
-             "warp_m": 1, "warp_n": 4, "warp_k": 1,
-             "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128},
-        ],
-        "pad_m": False,
-        "pad_n": False,
-        "pad_k": True,
-        "block_size": 256,
-        "k_block_per_cu": 1,
-        "double_smem_buffer": False,
-    }
+    """Default sweep config matching GemmConfigRowColQuant tile defaults.
+
+    GemmConfigRowColQuant<fp8_t> is the shared decode tile (16x64x256).
+    WarpTileK is arch-derived (128 on gfx950, 32 on gfx942; 128 silently
+    outputs all-zeros on gfx942). The Python driver
+    (gemm_rowcolquant_utils.default_*_config -> _warp_tile_k_for) sets this
+    per-arch; this standalone fallback uses the gfx950 value.
+    """
+    return quant_decode_default_config(
+        warp_tile_k=fp8_warp_tile_k_for_arch("gfx950"),
+    )
 
 
 def _build_specs(config: dict) -> List[RowColQuantKernelSpec]:
@@ -332,39 +321,14 @@ def _build_specs(config: dict) -> List[RowColQuantKernelSpec]:
     k_block_per_cu     = config.get("k_block_per_cu", 1)
     double_smem_buffer = config.get("double_smem_buffer", False)
 
-    for variant_key, layout, tile_dict in itertools.product(
-        config.get("variant_keys", ["fp8"]),
-        config.get("layouts", ["rcr"]),
-        config.get("tile_configs", []),
+    for variant_key, layout, tile, _ in iter_quant_axes(
+        config,
+        variants=ROWCOLQUANT_VARIANTS,
+        logger=log,
+        pipeline=pipeline,
+        pipeline_map=ROWCOLQUANT_PIPELINE_MAP,
+        layout_guard=rcr_only_layout_guard,
     ):
-        if variant_key not in ROWCOLQUANT_VARIANTS:
-            log.warning("Unknown variant_key %s -- skipping", variant_key)
-            continue
-        if pipeline not in ROWCOLQUANT_PIPELINE_MAP:
-            log.warning("Unsupported pipeline %s -- skipping", pipeline)
-            continue
-        # Downstream codegen indexes layout[0/1/2] and looks each char up in
-        # ROWCOLQUANT_LAYOUT_TO_CK, so anything but the supported rcr scope would
-        # raise IndexError/KeyError. Skip cleanly with a warning instead.
-        if layout != "rcr":
-            log.warning("Unsupported layout %s (only rcr) -- skipping", layout)
-            continue
-
-        tile = RowColQuantTileConfig(
-            tile_m=tile_dict["tile_m"],
-            tile_n=tile_dict["tile_n"],
-            tile_k=tile_dict["tile_k"],
-            warp_m=tile_dict["warp_m"],
-            warp_n=tile_dict["warp_n"],
-            warp_k=tile_dict["warp_k"],
-            warp_tile_m=tile_dict["warp_tile_m"],
-            warp_tile_n=tile_dict["warp_tile_n"],
-            warp_tile_k=tile_dict["warp_tile_k"],
-        )
-        if not tile.is_valid():
-            log.debug("Invalid tile config %s -- skipping", tile)
-            continue
-
         specs.append(RowColQuantKernelSpec(
             variant_key=variant_key,
             layout=layout,
