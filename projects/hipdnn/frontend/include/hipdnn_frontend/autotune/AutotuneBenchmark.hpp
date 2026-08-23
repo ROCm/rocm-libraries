@@ -316,6 +316,26 @@ inline AutotuneRankingFn sweepRankingOr(const AutotuneRankingFn& callerSupplied)
     return &rankByRobustTime;
 }
 
+// Apply the settings that define an exhaustive sweep, leaving every other field of @p config
+// as the caller set it.
+//
+// Two fields are locked rather than defaulted, because they are what makes the call an
+// exhaustive sweep that populates the cache. EXHAUSTIVE is the sweep itself.
+// BENCHMARK_UNPRIMED keeps a record reachable: under ABORT_ON_PRIMING_FAILURE one engine
+// failing to prime abandons the sweep and persists nothing, so a single broken plugin denies
+// a ranking for every graph on the machine, and the next run aborts identically.
+//
+// rankingFn is defaulted, not locked: a caller that supplied one decides the persisted order.
+//
+// Split out from the sweep so the settings are testable without running a benchmark.
+inline AutotuneConfig sweepConfigFrom(AutotuneConfig config)
+{
+    config.mode = TuneMode::EXHAUSTIVE;
+    config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
+    config.rankingFn = sweepRankingOr(config.rankingFn);
+    return config;
+}
+
 // Rank benchmark results and select the winning plan.
 //
 // Sorts succeeded results (custom config.rankingFn if provided, otherwise by
