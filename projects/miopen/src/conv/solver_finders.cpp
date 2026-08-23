@@ -759,6 +759,37 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
                              std::make_move_iterator(evaluated.end()));
     }
 
+    // Universal-fallback guarantee. The work gate skips *benchmarking* Naive when a
+    // non-Naive solver is applicable, but applicability is not success: every non-Naive
+    // candidate can still be rejected at evaluation (e.g. insufficient workspace). If
+    // that leaves no solution at all, we would otherwise fail the convolution outright
+    // even though the un-tiled Naive kernel could have served it. Re-evaluate with the
+    // skip disabled so Naive remains the true universal fallback. This only triggers in
+    // the rare empty-result case, and the already-rejected non-Naive candidates are
+    // re-rejected cheaply (workspace-filtered before any kernel launch).
+    if(ret.solutions.empty() && non_naive_exists && naive_exceeds_work)
+    {
+        MIOPEN_LOG_I("No solver survived evaluation; re-running with the Naive benchmark "
+                     "re-enabled as a last-resort fallback.");
+        for(const auto& ss : solutions)
+        {
+            auto evaluated = EvaluateInvokers(handle,
+                                              ss.second,
+                                              ss.first,
+                                              network_config,
+                                              invoke_ctx,
+                                              ret,
+                                              force_attach_binary,
+                                              non_naive_succeeded,
+                                              /*non_naive_exists=*/false,
+                                              /*naive_exceeds_work=*/false);
+
+            ret.solutions.insert(ret.solutions.end(),
+                                 std::make_move_iterator(evaluated.begin()),
+                                 std::make_move_iterator(evaluated.end()));
+        }
+    }
+
     return ret;
 }
 
