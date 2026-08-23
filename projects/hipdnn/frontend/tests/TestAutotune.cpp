@@ -862,7 +862,7 @@ TEST(TestAutotune, RankByRobustTimeHandlesEmptyAndSingleResult)
 TEST(TestAutotune, SweepRankingHonoursCallerSuppliedFunction)
 {
     bool called = false;
-    AutotuneRankingFn callerSupplied = [&called](std::vector<AutotuneResult>& succeeded) {
+    const AutotuneRankingFn callerSupplied = [&called](std::vector<AutotuneResult>& succeeded) {
         called = true;
         std::stable_sort(succeeded.begin(),
                          succeeded.end(),
