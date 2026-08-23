@@ -1,0 +1,56 @@
+# navi32 (gfx1101) catalog campaign
+
+Supporting material for the navi32 changes on this branch. **This is campaign tooling and a
+measurement record, not product documentation** — nothing here is wired into the Sphinx docs
+under `projects/hipblaslt/docs/`.
+
+## What changed, and why
+
+navi32's TN GEMM catalogs were far thinner than navi31's on the same ProblemTypes — around
+70 solutions against ~300, with **471-row** shape tables against **~9 700**. GridBased
+selection is nearest-neighbour matching, so on a 471-row table most real shapes resolve to a
+distant neighbour and run a badly-sized tile.
+
+Widening all four affected TN ProblemTypes measured, on 996–997 stratified shapes each:
+
+| ProblemType | solutions | wall-clock | A/A control |
+|---|---|---|---|
+| `Cijk_Alik_Bljk_HHS_BH_Bias_HAS_SAV` | 73 → 298 | **+23.9%** | 100.32% |
+| `Cijk_Alik_Bljk_BBS_BH_Bias_HAS_SAV` | 64 → 306 | **+22.2%** | 100.60% |
+| `Cijk_Alik_Bljk_HHS_BH_Bias_AuxH_HAS_SAV` | 73 → 313 | **+20.4%** | 100.42% |
+| `Cijk_Alik_Bljk_BBS_BH_Bias_AuxB_HAS_SAV` | 64 → 316 | **+18.8%** | 100.19% |
+
+15 122 measurements, zero failures. Origami also gained gfx1101 support — it did not
+recognise the architecture at all before (`arch_name_to_enum("gfx1101")` returned `Count`).
+
+## Files
+
+| file | what it is |
+|---|---|
+| `NAVI32_CATALOG_REPORT.md` | the measurement record: results, rejected hypotheses, caveats, audit |
+| `NAVI32_RUNBOOK.md` | **read this before repeating any of it** — method and every trap hit |
+| `bench_arms.py` | interleaved multi-arm benchmark; an arm is a (library, env) pair |
+| `analyze.py` | geomean + flops-weighted wall-clock, jackknife, per-stratum breakdown |
+| `arith_intensity.py` | splits results by flop/byte to bound the memory-bandwidth gap |
+| `retarget_logic.py` | retarget a logic file between gfx1100 and gfx1101 (**two ISA sites**) |
+| `to_prediction.py` | GridBased → Prediction (Origami-selected) conversion |
+| `wgm_variant.py` | rewrite `WorkGroupMapping` across a whole logic file |
+
+## Three things worth knowing before extending this
+
+**It was developed on a gfx1100 part emulating navi32.** Selection is navi32-correct via
+`--sm_count_target 60`; execution ran on all 96 CUs because a real per-stream CU mask hangs
+~37% of runs. Arm *ratios* are sound (common-mode error) but absolute throughput is
+optimistic. ~73% of kernel time is compute-bound, so the result transfers despite the
+bandwidth difference — see the report's arithmetic-intensity section.
+
+**Three hypotheses were tested and rejected.** Do not retry them without new evidence:
+re-forking `WorkGroupMapping` for 60 CUs (null: 6/8/10 within 0.33 pt), switching to an
+Origami `Prediction` library (13 pt worse than GridBased over an identical solution pool),
+and extending the catalog past ~300 solutions (an oracle over every arm built is only +2.8%
+above what shipped).
+
+**The runbook exists because three separate checks returned a reassuring signal while doing
+nothing** — a CU mask that reported 30 CUs but restricted nothing, a `--logic-filter` build
+that exited 0 having compiled zero kernels, and a sweep that produced rows at the normal rate
+which were all errors. Verify the artifact, not the exit status.
