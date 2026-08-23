@@ -1786,8 +1786,15 @@ static rocke_kernel_def_t*
                 break;
             }
         int chosen = 1;
-        rocke_coalesced_tile_loader_choose_vec_axis(
+        rocke_status_t st = rocke_coalesced_tile_loader_choose_vec_axis(
             block_n, block_k, threads, max_from_C, true, &chosen);
+        if(st != ROCKE_OK)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "dgrad tilde: no usable free-axis load_vec for B tile geometry");
+            return NULL;
+        }
         if(spec->has_vector_size_b)
         {
             load_vec_b = spec->vector_size_b;
