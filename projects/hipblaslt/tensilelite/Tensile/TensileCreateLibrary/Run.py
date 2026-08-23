@@ -24,6 +24,7 @@
 
 import rocisa
 
+import concurrent.futures
 import copy
 import functools
 import glob
@@ -665,19 +666,6 @@ def writeSolutionsAndKernelsTCL(
         compress,
     )
 
-    writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    srcKernelFile = Path(outputPath) / "Kernels.cpp"
-
-    buildSourceCodeObjectFiles(
-        srcToolchain.compiler,
-        srcToolchain.bundler,
-        destRoot,
-        objectTmpPath,
-        outputPath,
-        srcKernelFile,
-        cmdlineArchs,
-    )
-
     return len(uniqueAsmKernels), uniqueAsmKernels, results
 
 
@@ -1097,6 +1085,8 @@ def run():
 
     copyStaticFiles(outputPath)
 
+    writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
+
     start_wsk = timer()
     numKernels, uniqueKernels, kernelInfo = writeSolutionsAndKernelsTCL(
         outputPath,
@@ -1116,6 +1106,24 @@ def run():
     )
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
+
+    # The helper-kernel compile is a memory-heavy amdclang subprocess. Launch it
+    # only after the assembly kernels are generated and built (the other
+    # memory-heavy phase), so it overlaps the library-writing tail below
+    # (passPostKernelInfoToLibrary / writeMsl) rather than the assembly build.
+    helperDestRoot = ensurePath(libraryRoot(outputPath))
+    helperObjTmp = ensurePath(Path(outputPath) / "build_tmp" / Path(outputPath).stem.upper() / "code_object_tmp")
+    helperExecutor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    helperFuture = helperExecutor.submit(
+        buildSourceCodeObjectFiles,
+        srcToolchain.compiler,
+        srcToolchain.bundler,
+        helperDestRoot,
+        helperObjTmp,
+        outputPath,
+        Path(outputPath) / "Kernels.cpp",
+        archs,
+    )
 
     archs = [ # is this really different than the other archs above?
         isaToGfx(arch)
@@ -1183,6 +1191,11 @@ def run():
                          return_as="list")
     stop_msl = timer()
     print(f"Time to write master solution libraries (s): {(stop_msl-start_msl):3.2f}")
+
+    start_helper = timer()
+    helperFuture.result()
+    helperExecutor.shutdown(wait=True)
+    print(f"Time waiting on helper compile (s): {(timer()-start_helper):3.2f}")
 
     if not arguments["KeepBuildTmp"]:
         buildTmp = Path(arguments["OutputPath"]).parent / "library" / "build_tmp"
