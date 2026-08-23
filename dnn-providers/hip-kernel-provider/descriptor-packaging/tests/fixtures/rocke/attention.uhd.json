@@ -2,6 +2,6 @@
   "version": "0.1",
   "id": "uhd-attention",
   "name": "Attention static-order heuristic",
-  "adapter": "static_order",
-  "order": ["priority", "id"]
+  "kind": "native",
+  "payload": "hipkernel.attention.score"
 }

@@ -200,19 +200,39 @@ def validate_rocke_spec(spec, where):
         raise HkpPackError(f"{where} has invalid spec (not an object)")
 
 
-def _warn_nonbare_arch(archs, where, log):
-    """Warn (non-fatal) on any arch entry that is not a plausible bare gfx name.
+def _reject_nonbare_arch(archs, where, log=None):
+    """Reject any arch entry that is not a bare gfx base target id.
 
-    Every real gfx name is 6-7 chars and fully alphanumeric (gfx90a, gfx942,
-    gfx1100, gfx1201). A feature-suffixed arch (gfx942:xnack-) or alphanumeric
-    garbage (gfx12345) trips this and is warned, not rejected: the loader matches
-    on the bare name, so a suffixed arch simply won't match a requested arch. The
-    7-char bound is a heuristic, not a hard fact -- a hypothetical future >7-char
-    arch would false-warn, which is harmless since the warning is advisory.
+    Mirrors the loader's isPlausibleArchBaseId exactly (loader is
+    authoritative): 'gfx' followed by one or more of [a-z0-9_-], nothing else.
+    LLVM generic targets ('gfx9-4-generic') stay legal; a feature suffix
+    ('gfx942:xnack-') does not, because ':' is outside the set.
+
+    This is fatal rather than advisory. A suffixed arch matches no shard, so the
+    KDP is pruned from every arch and the pack exits 0 having installed nothing
+    -- indistinguishable from a legitimate arch skip. That silent-empty outcome
+    is precisely what hkp_add_packaging treats as FATAL (root set with no
+    producer) and what hkp_wire_production warns about (empty arch list); a
+    typo reaching the same end state deserves the same treatment.
+
+    The previous version warned instead, and bounded the name at 7 chars as a
+    heuristic that would false-warn on a future longer arch. The loader's rule
+    has no length bound, so mirroring it removes both the false positive and
+    the silent failure.
     """
     for arch in archs or []:
-        if not arch.isalnum() or len(arch) > 7:
-            log(f"{where}: arch '{arch}' is not a bare gfx name")
+        body = arch[3:]
+        if (
+            not arch.startswith("gfx")
+            or not body
+            or not all(c.islower() or c.isdigit() or c in "-_" for c in body)
+        ):
+            hint = (
+                "it carries a feature suffix; name the base target (e.g. 'gfx942')"
+                if ":" in arch
+                else "expected a bare gfx target id (e.g. 'gfx942')"
+            )
+            raise HkpPackError(f"{where}: arch '{arch}' is not usable -- {hint}")
 
 
 def _validate_ukd_fields(ukd, where, log=print):
@@ -233,7 +253,7 @@ def _validate_ukd_fields(ukd, where, log=print):
             raise HkpPackError(
                 f"{where} 'arch' must be a list of strings (empty = wildcard)"
             )
-        _warn_nonbare_arch(arch, where, log)
+        _reject_nonbare_arch(arch, where, log)
     ks = ukd["kernel_source"]
     if not isinstance(ks, dict) or "kind" not in ks:
         raise HkpPackError(f"{where} kernel_source missing 'kind'")
@@ -294,7 +314,7 @@ def _validate_kdp(desc, log=print):
         raise HkpPackError(
             f"{where} 'arch' must be a list of strings (empty = wildcard)"
         )
-    _warn_nonbare_arch(arch, where, log)
+    _reject_nonbare_arch(arch, where, log)
     kds = doc["kernelDescriptors"]
     if not isinstance(kds, list) or not kds:
         raise HkpPackError(f"{where} 'kernelDescriptors' must be a non-empty list")
@@ -313,6 +333,73 @@ def _validate_ued(desc):
             f"UED {desc.path.name} name '{name}' must be scoped 'namespace:local' "
             "matching ^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$"
         )
+
+
+# The loader's enum vocabularies, mirrored here so a bad spelling is a pack-time
+# error instead of a runtime file-drop. Loader is authoritative:
+# DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
+# metadataTypeFromString.
+_MATCH_SCOPES = ("graph", "kernel")
+_HEURISTIC_KINDS = ("native", "model")
+_METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
+
+
+def _require_enum(doc, key, allowed, where):
+    value = doc.get(key)
+    if value not in allowed:
+        raise HkpPackError(
+            f"{where} has invalid {key} '{value}' "
+            f"(expected one of {', '.join(allowed)})"
+        )
+
+
+def _validate_umd(desc):
+    """UMD: scope is a closed enum and match_symbol is required.
+
+    Mirrors parseMatchDescriptor. Without this a mis-cased 'Kernel' packs
+    cleanly and the loader drops the matcher at load -- which cascades, because
+    a KDP naming a matcher no descriptor defines loses its whole pack, and an
+    engine with no loadable pack is dropped entirely. The diagnostic for that
+    arrives at ERROR severity, which the default log level suppresses.
+    """
+    where = f"UMD {desc.path.name}"
+    _require(desc.doc, ["name", "scope", "match_symbol"], where)
+    _require_enum(desc.doc, "scope", _MATCH_SCOPES, where)
+
+
+def _validate_udd(desc):
+    """UDD: dispatch_symbol is required. Mirrors parseDispatchDescriptor."""
+    _require(desc.doc, ["name", "dispatch_symbol"], f"UDD {desc.path.name}")
+
+
+def _validate_uhd(desc):
+    """UHD: kind is a closed enum, payload required. Mirrors
+    parseHeuristicDescriptor."""
+    where = f"UHD {desc.path.name}"
+    _require(desc.doc, ["name", "kind", "payload"], where)
+    _require_enum(desc.doc, "kind", _HEURISTIC_KINDS, where)
+
+
+def _validate_kmd(desc):
+    """KMD: a list of fields, each with a name and a type from the enum.
+
+    Mirrors parseMetadataSchema. The default_value/type agreement the loader
+    also checks (coerceToDeclaredType) is deliberately NOT duplicated: it needs
+    the loader's JSON-kind coercion rules to agree exactly, and getting that
+    subtly wrong here would reject descriptors the runtime accepts. The field
+    shape is the part worth catching early.
+    """
+    where = f"KMD {desc.path.name}"
+    _require(desc.doc, ["name", "fields"], where)
+    fields = desc.doc["fields"]
+    if not isinstance(fields, list):
+        raise HkpPackError(f"{where} 'fields' must be a list")
+    for entry in fields:
+        if not isinstance(entry, dict):
+            raise HkpPackError(f"{where} has a 'fields' entry that is not an object")
+        entry_where = f"{where} field '{entry.get('name')}'"
+        _require(entry, ["name", "type"], entry_where)
+        _require_enum(entry, "type", _METADATA_TYPES, entry_where)
 
 
 def _validate_shape(desc, log=print):
@@ -337,6 +424,14 @@ def _validate_shape(desc, log=print):
         _validate_kdp(desc, log)
     if dtype == UED_TYPE:
         _validate_ued(desc)
+    if dtype == "umd":
+        _validate_umd(desc)
+    if dtype == "udd":
+        _validate_udd(desc)
+    if dtype == "uhd":
+        _validate_uhd(desc)
+    if dtype == "kmd":
+        _validate_kmd(desc)
 
 
 def load_flat_input(root, log=print):
