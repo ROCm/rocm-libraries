@@ -33,3 +33,29 @@ gives 96.95% by per-shape geomean and **102.17% by wall-clock**.
 
 `PLAN.md` was reconstructed from a session transcript after the original was overwritten —
 plan-mode scratch files are reused per session. That is precisely why this directory exists.
+
+## `streamk-reviewer-claims/` — StreamK review material, gfx1100
+
+Four documents produced while answering reviewer questions about StreamK on RDNA3.
+`REVIEWER_CLAIMS.md` is the deliverable; `STREAMK_GRID_FINDINGS.md` carries the grid census
+that reads `skGrid`/`skTiles` directly out of kernel arguments via `TENSILE_DB=0x40` —
+measured rather than modelled, which is why those numbers have no statistical uncertainty.
+
+`STREAMK_RUNBOOK.md` and `STREAMK_NEW_SKU_PROMPT.md` are the portable parts: how to repeat
+the comparison on a different SKU.
+
+## `vopd-fp32/` — FP32 VOPD dual-issue and non-MI tuning, gfx1100/gfx1151
+
+22 documents from the FP32 campaigns. `fp32_tuning/research_diary.md` and the per-campaign
+`iteration_log.md` files are the running records; `VOPD_CAMPAIGN_PLAYBOOK.md` and
+`GFX1151_TUNING_HANDOFF.md` are the portable method.
+
+Headline from persistent notes: VOPD dual-issue works in hipBLASLt on branch
+`vmijovic/add_vopd` (+27% geomean, +47% peak, zero regressions under a clean A/B), and the
+gfx1100 FP32 non-MI campaign produced production logic covering 1 030 shapes at 24.1 TFLOPS
+peak.
+
+**A measurement caveat recorded there and worth repeating**: earlier "+1294%" and "GEMV -44%"
+figures from that work were **measurement artefacts**. The corrected protocol requires NT
+orientation, one benchmark process at a time, and max-of-N for GEMV. Do not quote the
+pre-correction numbers.
