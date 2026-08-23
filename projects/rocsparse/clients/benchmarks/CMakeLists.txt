@@ -77,6 +77,7 @@ set(ROCSPARSE_CLIENTS_COMMON
   ../common/rocsparse_clients_matrices_dir.cpp
   ../common/rocsparse_clients_spmat_descr.cpp
   ../common/rocsparse_clients_dnvec_descr.cpp
+  ../common/rocsparse_clients_dnmat_descr.cpp
   ../common/rocsparseio.cpp
 )
 
@@ -186,6 +187,9 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_sptrsv.cpp
 ../testings/testing_spsm_csr.cpp
 ../testings/testing_spsm_coo.cpp
+../testings/testing_dnmat_copy_data.cpp
+../testings/testing_dnmat_transpose.cpp
+../testings/testing_sptrsm.cpp
 ../testings/testing_sptrsm_csr.cpp
 ../testings/testing_sptrsm_coo.cpp
 ../testings/testing_sparse_to_dense_coo.cpp

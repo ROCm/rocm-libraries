@@ -130,6 +130,9 @@ include: test_spsv_coo.yaml
 include: test_sptrsv_coo.yaml
 include: test_spsm_csr.yaml
 include: test_spsm_coo.yaml
+include: test_sptrsm.yaml
+include: test_dnmat_copy_data.yaml
+include: test_dnmat_transpose.yaml
 include: test_sptrsm_csr.yaml
 include: test_sptrsm_coo.yaml
 include: test_spmm_bsr.yaml
