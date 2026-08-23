@@ -58,14 +58,15 @@ using CachedKpackModule = std::shared_ptr<const KpackModule>;
 /// KpackKernelLoader::load() receives one; it takes that parameter purely so its error
 /// messages can name it.
 ///
-/// Why not rocm-kpack's own cache: kpack_cache_* at the pinned SHA caches the
-/// decompressed code-object *blob*, not the loaded hipModule_t, so it would still leave
-/// a hipModuleLoadData on every dispatch. Building on compilation::ModuleCache also
-/// matches SdpaModuleCache.
+/// Why not rocm-kpack's own cache: kpack_cache_* caches the decompressed code-object
+/// *blob*, not the loaded hipModule_t, so it would still leave a hipModuleLoadData on
+/// every dispatch. Building on compilation::ModuleCache also matches SdpaModuleCache.
 ///
-/// Not keyed by device ordinal: a multi-GPU process holding two devices of the *same*
-/// arch shares one hipModule_t across both. SdpaModuleCache has the identical property.
-/// Arch is in the key, so the different-arch case is correct.
+/// Not keyed by device ordinal, which is safe only because every device in a process
+/// that shares an arch also shares this provider's single HIP context. A hipModule_t
+/// belongs to the device current when it was loaded, so keying by arch alone would be
+/// wrong under a per-device context; arch is in the key, so the different-arch case is
+/// correct either way. SdpaModuleCache has the identical property.
 class KpackModuleCache : public ModuleCache<KpackModuleCache,
                                             CachedKpackModule,
                                             const std::string& /*archivePath*/,

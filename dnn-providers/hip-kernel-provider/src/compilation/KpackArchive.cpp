@@ -5,6 +5,8 @@
 
 #include "KpackArchive.hpp"
 
+#include <algorithm>
+#include <string_view>
 #include <utility>
 
 #include <rocm_kpack/kpack.h>
@@ -73,6 +75,30 @@ KpackError makeError(KpackLoadStage stage, kpack_error_t code)
     error.archiveAbsent
         = code == KPACK_ERROR_FILE_NOT_FOUND || code == KPACK_ERROR_ARCHIVE_NOT_FOUND;
     return error;
+}
+
+/// Does `data` begin with a container hipModuleLoadData can be expected to accept?
+///
+/// The reader reports success on a TOC entry whose `offset`/`size`/`ordinal` keys are
+/// absent, having read those fields uninitialized, so a well-formed request can come
+/// back holding an unrelated entry's bytes. Nothing in the reported status distinguishes
+/// that from a correct hit. Checking the magic turns the common case of it -- bytes that
+/// are not a code object at all -- into a named DECOMPRESS failure here, rather than an
+/// opaque rejection inside HIP or, worse, a successful load of the wrong kernel.
+///
+/// Two containers are legitimate: a bare ELF, and a clang offload bundle, which is what
+/// hipcc emits and what the packer stores.
+bool hasCodeObjectMagic(const void* data, size_t size)
+{
+    static constexpr std::string_view ELF_MAGIC{"\177ELF", 4};
+    static constexpr std::string_view BUNDLE_MAGIC{"__CLANG_OFFLOAD_BUNDLE__"};
+
+    const std::string_view bytes(static_cast<const char*>(data),
+                                 std::min(size, BUNDLE_MAGIC.size()));
+    const auto hasPrefix = [bytes](std::string_view prefix) {
+        return bytes.size() >= prefix.size() && bytes.compare(0, prefix.size(), prefix) == 0;
+    };
+    return hasPrefix(ELF_MAGIC) || hasPrefix(BUNDLE_MAGIC);
 }
 
 } // namespace
@@ -147,7 +173,23 @@ bool KpackArchive::open(const std::filesystem::path& path, KpackError& error)
     kpack_archive_t archive = nullptr;
     // string() rather than the native wide form: the reader's C interface takes char*,
     // and the descriptor paths this sees are ASCII by construction.
-    const kpack_error_t status = kpack_open(path.string().c_str(), &archive);
+    //
+    // The reader parses the TOC behind this call and casts msgpack values without
+    // checking their type first, which throws msgpack::type_error on a wrong-typed
+    // field. That derives from std::bad_cast, not std::runtime_error, so no catch
+    // upstream intercepts it, and it would otherwise unwind out of a function declared
+    // to report failure by returning false.
+    kpack_error_t status = KPACK_ERROR_INVALID_FORMAT;
+    try
+    {
+        status = kpack_open(path.string().c_str(), &archive);
+    }
+    catch(...)
+    {
+        error = makeError(KpackLoadStage::OPEN_ARCHIVE, KPACK_ERROR_MSGPACK_PARSE_FAILED);
+        return false;
+    }
+
     if(status != KPACK_SUCCESS)
     {
         error = makeError(KpackLoadStage::OPEN_ARCHIVE, status);
@@ -194,8 +236,20 @@ bool KpackArchive::codeObject(const std::string& tocKey,
 {
     void* data = nullptr;
     size_t size = 0;
-    const kpack_error_t status
-        = kpack_get_kernel(asArchive(_archive), tocKey.c_str(), arch.c_str(), &data, &size);
+    // Guarded for the same reason as kpack_open: decompression reads TOC-derived sizes
+    // and can allocate against them, so a malformed archive reaches here as an
+    // exception rather than a status.
+    kpack_error_t status = KPACK_ERROR_DECOMPRESSION_FAILED;
+    try
+    {
+        status = kpack_get_kernel(asArchive(_archive), tocKey.c_str(), arch.c_str(), &data, &size);
+    }
+    catch(...)
+    {
+        error = makeError(KpackLoadStage::DECOMPRESS, KPACK_ERROR_DECOMPRESSION_FAILED);
+        return false;
+    }
+
     if(status != KPACK_SUCCESS)
     {
         // KERNEL_NOT_FOUND / ARCH_NOT_FOUND mean the entry is absent; everything else
@@ -213,6 +267,12 @@ bool KpackArchive::codeObject(const std::string& tocKey,
         // A success return with nothing in it would otherwise reach hipModuleLoadData
         // as a null pointer and fail there, one stage too late to name.
         error = makeError(KpackLoadStage::DECOMPRESS, KPACK_ERROR_DECOMPRESSION_FAILED);
+        return false;
+    }
+
+    if(!hasCodeObjectMagic(codeObject.data(), codeObject.size()))
+    {
+        error = makeError(KpackLoadStage::DECOMPRESS, KPACK_ERROR_INVALID_METADATA);
         return false;
     }
 
