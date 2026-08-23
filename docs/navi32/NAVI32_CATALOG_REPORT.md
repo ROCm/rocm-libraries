@@ -748,3 +748,46 @@ sweeps across two dtypes and two epilogues would not land within 5 pt of each ot
 
 **15 122 measurements, zero failures anywhere.** Every published number recomputed from the
 CSVs rather than quoted from prose, and all match.
+
+---
+
+## P12 — The gap is systemic across RDNA3, not navi32-specific
+
+Auditing every architecture's GridBased catalogs against navi31's on shared ProblemTypes:
+
+| arch | shared PTs | thin (<50% of navi31) | worst ratio |
+|---|---|---|---|
+| **navi33** (gfx1102) | 38 | **4** | 20% |
+| **gfx1103** | 38 | **4** | 20% |
+| **gfx1150** | 38 | **4** | 20% |
+| **gfx1152** | 38 | **4** | 20% |
+| **gfx1153** | 38 | **4** | 20% |
+| gfx1151 | 38 | 0 | — (fully populated) |
+| navi32 | 38 | **0** | — *(fixed by this branch)* |
+| gfx1200 | 6 | 2 | 47% |
+| arcturus | 3 | 3 | 1% |
+
+**Five more architectures carry the identical defect** — the same four `Alik_Bljk` (TN)
+ProblemTypes, the same 64/73-against-~300 solution counts, the same 471-row shape tables.
+It is not a navi32 oversight; it is how the TN catalogs were populated across the family.
+gfx1151 is the exception, and it is the one architecture the tuning wiki records as having
+had a real tuning campaign.
+
+### Why this branch does NOT fix them
+
+The mechanism (a sparse nearest-neighbour table mis-serving small and skinny shapes) is
+architecture-independent, but **the remedy is not**. This campaign's fix ports navi31's
+catalog, and that is only defensible where the target is close to navi31:
+
+* **navi33 / gfx1103** — same RDNA3 discrete/mobile uarch, same WMMA V1, same VGPR file.
+  The port is plausible and the gfx1101 build gate would likely pass. Worth doing, and
+  measurable the same way (emulate the CU count, run the same 1 000-shape sweep).
+* **gfx1150 / 1152 / 1153** — Strix-family iGPUs with **very different CU counts and memory
+  systems** (gfx1153 is 0.240 mem1_perf_ratio against navi31's 7.12 in Origami's own
+  constants). A catalog tuned for a 96-CU discrete part with 960 GB/s is not obviously right
+  for a 4-CU iGPU on system memory. Porting there needs its own evidence.
+
+Shipping five more architectures' catalogs on the strength of one measured architecture would
+be exactly the over-reach this campaign spent its time avoiding — the same reason the three
+non-HHS navi32 catalogs were measured rather than shipped on analogy. **Recorded as a
+finding, not acted on.**
