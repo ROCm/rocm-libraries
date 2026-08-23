@@ -9,7 +9,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
   kernels to the `ConvHipConv` solver (hipconv v0.3.1).
 
+### Resolved Issues
+* [Conv] Fixed a GPU driver watchdog reset (TDR) that could occur while find benchmarked the un-tiled naive convolution solver on very large problems (e.g. VAE-decode and 3D convolutions). Naive is now skipped during find when a non-naive solver is applicable and the problem's total MAC work exceeds a threshold (~16 GMAC, overridable via `MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK`). This complements the existing `MIOPEN_NAIVE_TIMEOUT` deferral, which bounds how long find waits on the naive warmup but cannot prevent the launch itself. Naive still runs when it is the only applicable solver, and small problems where it is fastest continue to compete.
+
 ### Removed
+* [Conv] Removed the `MIOPEN_CONV_DIRECT_MAX_SIZE` environment variable (an output-element-count threshold that disabled the entire Direct algorithm). It was a poor proxy for kernel launch cost and is superseded by the naive-conv work gate described above.
 * [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
 * [Conv] Removed the gfx803 code paths and kernel sources from `ConvBinWinograd3x3U` and `ConvBinWinogradRxS`.
 * [Conv] Removed the gfx803 find-database files.
