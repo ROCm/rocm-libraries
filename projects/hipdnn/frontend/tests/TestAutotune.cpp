@@ -672,38 +672,55 @@ TEST(TestAutotune, NonBenchmarkedFactoriesResolveAnOmittedEngineName)
 // autotuneExhaustiveSweep
 // ============================================================================
 
-TEST(TestAutotune, ExhaustiveSweepForcesExhaustiveModeRegardlessOfCallerConfig)
+// mode and primingFailurePolicy are locked because they are what makes the call an
+// exhaustive sweep that populates the cache. STANDARD would not prime any engine, and
+// ABORT_ON_PRIMING_FAILURE would let one broken engine abandon the sweep and persist
+// nothing -- denying a ranking for every graph on the machine, permanently, since the next
+// run aborts the same way.
+TEST(TestAutotune, SweepConfigLocksModeAndPrimingPolicy)
 {
-    // No graph is built, so autotuneImpl declines before reaching the mode-forcing
-    // assignment's downstream effects either way; this test asserts the config object
-    // passed downstream, not the return status.
-    hipdnn_frontend::graph::Graph g;
-    AutotuneConfig config;
-    config.mode = TuneMode::STANDARD;
+    AutotuneConfig requested;
+    requested.mode = TuneMode::STANDARD;
+    requested.primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
 
-    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
-    auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{0}, config);
+    const auto applied = autotune::detail::sweepConfigFrom(requested);
 
-    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(applied.mode, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(applied.primingFailurePolicy, PrimingFailurePolicy::BENCHMARK_UNPRIMED);
 }
 
-TEST(TestAutotune, ExhaustiveSweepForcesBenchmarkUnprimedRegardlessOfCallerConfig)
+// Everything the two locked fields do not decide stays the caller's.
+TEST(TestAutotune, SweepConfigPreservesEveryOtherField)
 {
-    // Mirrors ExhaustiveSweepForcesExhaustiveModeRegardlessOfCallerConfig: no graph is built, so
-    // the call declines downstream either way. What is pinned is that the entry point overrides
-    // the caller's policy rather than honouring it.
-    //
-    // ABORT_ON_PRIMING_FAILURE is the default, so one broken engine anywhere in the installed
-    // set would abort the whole sweep and persist nothing -- denying a ranking for every graph
-    // on the machine, permanently, since the next run aborts the same way.
-    hipdnn_frontend::graph::Graph g;
-    AutotuneConfig config;
-    config.primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
+    AutotuneConfig requested;
+    requested.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    requested.timedIterations = 37;
+    requested.warmupIterations = 4;
+    requested.maxIterations = 55;
+    requested.windowSize = 6;
+    requested.stabilityThreshold = 0.02f;
+    requested.engineIdFilter = {11, 22};
 
-    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
-    auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{0}, config);
+    const auto applied = autotune::detail::sweepConfigFrom(requested);
 
-    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(applied.strategy, AutotuneStrategy::FIXED_AVERAGE);
+    EXPECT_EQ(applied.timedIterations, 37);
+    EXPECT_EQ(applied.warmupIterations, 4);
+    EXPECT_EQ(applied.maxIterations, 55);
+    EXPECT_EQ(applied.windowSize, 6);
+    EXPECT_FLOAT_EQ(applied.stabilityThreshold, 0.02f);
+    EXPECT_EQ(applied.engineIdFilter, (std::vector<int64_t>{11, 22}));
+}
+
+// A default-constructed config must come back ready to sweep, so the common call is
+// autotuneExhaustiveSweep(handle, variantPack, workspace, size) with nothing else supplied.
+TEST(TestAutotune, SweepConfigFromDefaultsIsReadyToSweep)
+{
+    const auto applied = autotune::detail::sweepConfigFrom(AutotuneConfig{});
+
+    EXPECT_EQ(applied.mode, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(applied.primingFailurePolicy, PrimingFailurePolicy::BENCHMARK_UNPRIMED);
+    EXPECT_TRUE(static_cast<bool>(applied.rankingFn));
 }
 
 TEST(TestAutotune, ExhaustiveSweepRejectsNegativeWorkspaceSize)
@@ -742,26 +759,8 @@ TEST(TestAutotune, ExhaustiveSweepExhaustiveIsTheOnlyModeItProduces)
     EXPECT_EQ(tuneModeToString(TuneMode::EXHAUSTIVE), std::string("EXHAUSTIVE"));
 }
 
-// An engine's timing statistics are drawn from its own sample set, so candidates measured
-// a different number of times are not directly comparable. A convergence-based strategy
-// stops each candidate independently and produces exactly that asymmetry, so the sweep
-// pins FIXED_AVERAGE regardless of what the caller asked for.
-TEST(TestAutotune, ExhaustiveSweepOverridesCallerStrategy)
-{
-    AutotuneConfig config;
-    config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
-
-    hipdnn_frontend::graph::Graph g;
-    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
-    // Declines downstream (no graph built); what is pinned is that the caller's strategy
-    // does not survive into the sweep.
-    auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{0}, config);
-    EXPECT_TRUE(err.is_bad());
-}
-
-// timedIterations is the caller's accuracy/cost dial. The sweep pins FIXED_AVERAGE, so
-// autotuneImpl's strategy-scoped validation rejects a nonsensical count rather than letting
-// it through to produce a single-sample ranking.
+// timedIterations is the caller's accuracy/cost dial, validated by autotuneImpl for the
+// strategy that reads it. A count of zero would otherwise leave an empty sample set.
 TEST(TestAutotune, ExhaustiveSweepRejectsNonPositiveTimedIterations)
 {
     hipdnn_frontend::graph::Graph g;
@@ -770,9 +769,7 @@ TEST(TestAutotune, ExhaustiveSweepRejectsNonPositiveTimedIterations)
     for(const int bad : {0, -1})
     {
         AutotuneConfig config;
-        // Deliberately left at RUN_UNTIL_STABLE, which does not validate timedIterations:
-        // the rejection must come from the sweep forcing FIXED_AVERAGE, not from the caller
-        // having selected that strategy themselves.
+        config.strategy = AutotuneStrategy::FIXED_AVERAGE;
         config.timedIterations = bad;
 
         auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{0}, config);

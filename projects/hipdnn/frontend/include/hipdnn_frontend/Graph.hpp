@@ -3938,24 +3938,29 @@ public:
      * whatever order it produces. Every field of @c AutotuneResult is available to it,
      * including @c minTimeMs, @c avgTimeMs, and @c stddevMs.
      *
-     * Three @c config fields are set by this call and ignored on input: @c mode
-     * (TuneMode::EXHAUSTIVE), @c primingFailurePolicy
-     * (PrimingFailurePolicy::BENCHMARK_UNPRIMED), and @c strategy
-     * (AutotuneStrategy::FIXED_AVERAGE). Fixing the strategy makes
-     * @c config.timedIterations the count every candidate runs, so the timings a ranking
-     * function compares are drawn from equally sized sample sets.
+     * Two @c config fields are locked, because they are what makes this call an exhaustive
+     * sweep that populates the cache rather than an ordinary tune: @c mode
+     * (TuneMode::EXHAUSTIVE) and @c primingFailurePolicy
+     * (PrimingFailurePolicy::BENCHMARK_UNPRIMED). Without the latter, one engine failing to
+     * prime would abandon the sweep and persist nothing, so a single broken plugin would
+     * deny a ranking for every graph on the machine. Both are set on input and any
+     * caller-supplied value is ignored.
      *
-     * Raising @c config.timedIterations improves the odds that the genuinely fastest engine
-     * ranks first, at a proportional cost in sweep time. Engines whose true times differ by
-     * a wide margin separate reliably at any value; engines within a few percent of each
-     * other need substantially more iterations to order correctly, because each measurement
-     * carries run-to-run jitter of a similar size. Raise it when the ranking must resolve
-     * close candidates or will be reused by many later runs.
+     * Every other @c config field is honoured, including @c strategy, @c timedIterations,
+     * @c warmupIterations, @c engineIdFilter, and @c rankingFn. Calling with a
+     * default-constructed @c config performs a complete sweep.
      *
-     * Priming failures do not abort the sweep. An engine that failed to prime is still
-     * benchmarked, but without its internal caches warmed, so it can rank below a slower
-     * engine that primed successfully. Per-result @c ranExhaustive reports which engines
-     * were primed.
+     * An engine that failed to prime is still benchmarked, but without its internal caches
+     * warmed, so it can rank below a slower engine that primed successfully. Per-result
+     * @c ranExhaustive reports which engines were primed.
+     *
+     * Giving candidates more iterations improves the odds that the genuinely fastest engine
+     * ranks first. Engines whose true times differ by a wide margin separate reliably at any
+     * count; engines within a few percent of each other need substantially more iterations
+     * to order correctly, because each measurement carries run-to-run jitter of a similar
+     * size. Raise @c config.timedIterations, or select AutotuneStrategy::FIXED_AVERAGE for a
+     * fixed count per candidate, when the ranking must resolve close candidates or will be
+     * reused by many later runs.
      *
      * The cached order is keyed on this graph's serialized content and the handle's
      * device. Engines that were measured and failed are appended after the successful
@@ -3988,23 +3993,9 @@ public:
             return {ErrorCode::INVALID_VALUE,
                     "workspaceSize must be >= 0 for autotuneExhaustiveSweep()."};
         }
-        config.mode = TuneMode::EXHAUSTIVE;
-        // Aborting on a priming failure yields no record at all, so the next run re-tunes from
-        // scratch and, with the broken engine still installed, aborts again -- one engine denies
-        // a ranking to every graph on the machine, permanently. Benchmarking it unprimed risks
-        // only a wrong order, which a later successful sweep supersedes.
-        config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
-        // Ranking compares candidates on how many samples they were given as much as on speed
-        // unless every candidate runs the same number of iterations, because the statistics are
-        // drawn from that sample set. FIXED_AVERAGE is what holds the count equal; the count
-        // itself is config.timedIterations, which autotuneImpl() validates as >= 1.
-        config.strategy = AutotuneStrategy::FIXED_AVERAGE;
-
-        // Rank on the representative time rather than the fastest sample; see
-        // rankByRobustTime(). This is a default, not an override: a caller that supplied its
-        // own rankingFn ranks by that instead, and the sweep persists whatever order it
-        // produces.
-        config.rankingFn = autotune::detail::sweepRankingOr(config.rankingFn);
+        // mode and primingFailurePolicy are locked, rankingFn is defaulted, and every other
+        // field is left as the caller set it. See sweepConfigFrom().
+        config = autotune::detail::sweepConfigFrom(std::move(config));
 
         std::vector<AutotuneResult> localResults;
         std::vector<AutotuneResult>& resultsOut = results != nullptr ? *results : localResults;
