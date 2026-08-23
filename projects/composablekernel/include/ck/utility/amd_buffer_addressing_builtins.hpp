@@ -510,6 +510,16 @@ __device__ void amd_buffer_atomic_add_impl(const typename vector_type<T, N>::typ
                       (is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4 || N == 8)),
                   "wrong! not implemented");
 
+    // GFX12 encodes the memory scope in bits [4:3] of the CPol (aux) operand. Leaving it 0
+    // selects SCOPE_CU, so the atomic is resolved in the CU-local cache and updates from other
+    // workgroups are lost. Device scope is the minimum that is correct there. Pre-GFX12 targets
+    // keep the previous value of 0.
+#if defined(__gfx12__)
+    constexpr index_t cpol = static_cast<index_t>(AmdBufferCoherenceEnum::DEVICE);
+#else
+    constexpr index_t cpol = 0;
+#endif
+
     if constexpr(is_same<T, float>::value)
     {
         if constexpr(N == 1)
@@ -518,7 +528,7 @@ __device__ void amd_buffer_atomic_add_impl(const typename vector_type<T, N>::typ
                                                    dst_wave_buffer_resource,
                                                    dst_thread_addr_offset,
                                                    dst_wave_addr_offset,
-                                                   0);
+                                                   cpol);
         }
         else
         {
@@ -528,7 +538,7 @@ __device__ void amd_buffer_atomic_add_impl(const typename vector_type<T, N>::typ
                                                        dst_wave_buffer_resource,
                                                        dst_thread_addr_offset,
                                                        dst_wave_addr_offset + i * sizeof(float),
-                                                       0);
+                                                       cpol);
             });
         }
     }
@@ -540,7 +550,7 @@ __device__ void amd_buffer_atomic_add_impl(const typename vector_type<T, N>::typ
                                                      dst_wave_buffer_resource,
                                                      dst_thread_addr_offset,
                                                      dst_wave_addr_offset,
-                                                     0);
+                                                     cpol);
         }
         else if constexpr(N == 4)
         {
@@ -551,7 +561,7 @@ __device__ void amd_buffer_atomic_add_impl(const typename vector_type<T, N>::typ
                                                          dst_wave_buffer_resource,
                                                          dst_thread_addr_offset,
                                                          dst_wave_addr_offset + i * sizeof(half2_t),
-                                                         0);
+                                                         cpol);
             });
         }
         else if constexpr(N == 8)
@@ -563,7 +573,7 @@ __device__ void amd_buffer_atomic_add_impl(const typename vector_type<T, N>::typ
                                                          dst_wave_buffer_resource,
                                                          dst_thread_addr_offset,
                                                          dst_wave_addr_offset + i * sizeof(half2_t),
-                                                         0);
+                                                         cpol);
             });
         }
     }
@@ -575,7 +585,7 @@ __device__ void amd_buffer_atomic_add_impl(const typename vector_type<T, N>::typ
                                                   dst_wave_buffer_resource,
                                                   dst_thread_addr_offset,
                                                   dst_wave_addr_offset,
-                                                  0);
+                                                  cpol);
         }
         else
         {
@@ -585,7 +595,7 @@ __device__ void amd_buffer_atomic_add_impl(const typename vector_type<T, N>::typ
                                                       dst_wave_buffer_resource,
                                                       dst_thread_addr_offset,
                                                       dst_wave_addr_offset + i * sizeof(int32_t),
-                                                      0);
+                                                      cpol);
             });
         }
     }
@@ -599,6 +609,16 @@ __device__ void amd_buffer_atomic_max_impl(const typename vector_type<T, N>::typ
 {
     static_assert((is_same<T, double>::value && (N == 1 || N == 2 || N == 4)),
                   "wrong! not implemented");
+
+    // GFX12 encodes the memory scope in bits [4:3] of the CPol (aux) operand. Leaving it 0
+    // selects SCOPE_CU, so the atomic is resolved in the CU-local cache and updates from other
+    // workgroups are lost. Device scope is the minimum that is correct there. Pre-GFX12 targets
+    // keep the previous value of 0.
+#if defined(__gfx12__)
+    constexpr index_t cpol = static_cast<index_t>(AmdBufferCoherenceEnum::DEVICE);
+#else
+    constexpr index_t cpol = 0;
+#endif
     if constexpr(is_same<T, double>::value)
     {
         if constexpr(N == 1)
@@ -607,7 +627,7 @@ __device__ void amd_buffer_atomic_max_impl(const typename vector_type<T, N>::typ
                                                    dst_wave_buffer_resource,
                                                    dst_thread_addr_offset,
                                                    dst_wave_addr_offset,
-                                                   0);
+                                                   cpol);
         }
         else if constexpr(N == 2)
         {
@@ -617,13 +637,13 @@ __device__ void amd_buffer_atomic_max_impl(const typename vector_type<T, N>::typ
                                                    dst_wave_buffer_resource,
                                                    dst_thread_addr_offset,
                                                    dst_wave_addr_offset,
-                                                   0);
+                                                   cpol);
 
             llvm_amdgcn_raw_buffer_atomic_max_fp64(tmp.AsType<double>()[Number<1>{}],
                                                    dst_wave_buffer_resource,
                                                    dst_thread_addr_offset,
                                                    dst_wave_addr_offset + sizeof(double),
-                                                   0);
+                                                   cpol);
         }
         else if constexpr(N == 4)
         {
@@ -633,25 +653,25 @@ __device__ void amd_buffer_atomic_max_impl(const typename vector_type<T, N>::typ
                                                    dst_wave_buffer_resource,
                                                    dst_thread_addr_offset,
                                                    dst_wave_addr_offset,
-                                                   0);
+                                                   cpol);
 
             llvm_amdgcn_raw_buffer_atomic_max_fp64(tmp.AsType<double>()[Number<1>{}],
                                                    dst_wave_buffer_resource,
                                                    dst_thread_addr_offset,
                                                    dst_wave_addr_offset + sizeof(double),
-                                                   0);
+                                                   cpol);
 
             llvm_amdgcn_raw_buffer_atomic_max_fp64(tmp.AsType<double>()[Number<2>{}],
                                                    dst_wave_buffer_resource,
                                                    dst_thread_addr_offset,
                                                    dst_wave_addr_offset + 2 * sizeof(double),
-                                                   0);
+                                                   cpol);
 
             llvm_amdgcn_raw_buffer_atomic_max_fp64(tmp.AsType<double>()[Number<3>{}],
                                                    dst_wave_buffer_resource,
                                                    dst_thread_addr_offset,
                                                    dst_wave_addr_offset + 3 * sizeof(double),
-                                                   0);
+                                                   cpol);
         }
     }
 }
