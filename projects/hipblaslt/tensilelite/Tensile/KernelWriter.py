@@ -28,7 +28,7 @@ from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
-from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
+from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
   BufferLoadD16B16, BufferLoadD16U8, DSLoad2B32, DSLoad2B64, DSLoadB128, \
   DSLoadB32, DSLoadB64, DSLoadB192, DSStoreB192, DSLoadB64TrB16, DSLoadB128TrB16, \
   DSLoadB64TrB8, DSLoadB64TrB4, DSLoadB96TrB6, DSLoadInstruction, DSLoadU16, \
@@ -51,6 +51,8 @@ from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
+from .Common.DecouplePgr import decouplePgrBlocks, decoupledSingleBuffered, decoupledOneBlockBoth, \
+                                tdmDealiasAB
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -69,6 +71,7 @@ import math
 import abc
 import sys
 import os
+import re
 import time
 import collections
 from copy import deepcopy
@@ -723,6 +726,167 @@ class KernelWriter(metaclass=abc.ABCMeta):
         localWriteEndIter, firstIter, lastLoop, lastLc, globalReadIncACode, \
         globalReadIncBCode, isNGLL)
 
+    self._dcpScheduleSingleBufferedFillLate(kernel)
+
+  ##############################################################################
+  # Decouple PGR: re-slot a single-buffered tensor's fill inside the loop body.
+  #
+  # The body's fill sits at the top of the iteration and targets the tile the
+  # *next* iteration consumes, which is legal only because that tile lands in
+  # the other LDS block. A one-block tensor has no other block, so its fill
+  # would land on the bytes this iteration is still reading. Its one legal
+  # window is between the iteration's last local read of the block and the
+  # prefetched read that opens the next one, i.e. sub-iteration
+  # LoopIters - numItersPLR.
+  #
+  # Both slots emit the same module under complementary wave-parity guards, so
+  # every wave still issues exactly one fill and one advance per iteration and
+  # round counts, the post-loop pointer, the NoLoadLoop and the tail are all
+  # unchanged -- the last body iteration's late fill already delivers the tile
+  # the NoLoadLoop reads.
+  #
+  # This reaches divergent pairs only. The window exists because the other
+  # tensor is double-buffered and keeps the pipeline fed across the move, so it
+  # cannot be extended to a pair where both tensors are one-block -- see the
+  # (1,1) TODO in Solution.assignDerivedParameters.
+  ##############################################################################
+  def _dcpScheduleSingleBufferedFillLate(self, kernel):
+    if not self._dcpDivergent(kernel):
+      return
+    # noSchedGlobalRead parks the whole fill group in the unrolled loop header,
+    # so that is the group to duplicate. A body copy carrying no fill
+    # (NoLoadLoop, NGLL) has nothing to move.
+    src = self.codes.unrollLoopHeader
+    if src is None or not src.itemsSize():
+      return
+    if self.codes.globalReadA is None or not self.codes.globalReadA.middle.itemsSize():
+      return
+    # itemsSize() counts sub-modules, not instructions, so a group of empty ones
+    # -- what ScheduleIterAlg=3 leaves here -- reaches this point. Re-slotting it
+    # guards nothing and leaves the single-buffered fill at the top of the loop,
+    # wrong from K = 2*DepthU.
+    assert any(isinstance(item, TensorLoadToLds) for item in src.flatitems()), \
+      "decoupled PGR: the fill group to re-slot carries no tensor_load_to_lds"
+
+    assert self.isTdmWaveSeparated(kernel), \
+      "decoupled PGR with divergent block counts needs the wave-separated TDM descriptor"
+    lateIter = kernel["LoopIters"] - self.states.numItersPLR
+    assert 0 < lateIter < kernel["LoopIters"], \
+      "decoupled PGR: no sub-iteration between the last local read and the pre-read sync"
+
+    _, numLdsBlkA, numLdsBlkB = decouplePgrBlocks(kernel)
+    singleIsA = numLdsBlkA < numLdsBlkB
+    singleTc  = "A" if singleIsA else "B"
+    doubleTc  = "B" if singleIsA else "A"
+    # The parity check leaves SCC set on odd waves, and odd waves carry B.
+    skipEarly = SCBranchSCC0 if singleIsA else SCBranchSCC1
+    skipLate  = SCBranchSCC1 if singleIsA else SCBranchSCC0
+
+    def parityCheck(mod):
+      if self.isTdmWaveIdxLive(kernel):
+        self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity")
+      else:
+        with self.allocTmpSgpr(1, tag="dcpLateFill_waveIdx") as tmp:
+          self._emitTdmWaveParitySCC(mod, kernel, tmp.idx, "check wave parity")
+
+    late = Module("TDM decoupled late fill %s" % singleTc)
+    # Every wave reads the single-buffered block this iteration, so the refill is
+    # a write-after-read against the whole workgroup, not just this wave. The
+    # read-after-write against the next iteration's prefetched read is already
+    # closed by the sync at the head of this sub-iteration.
+    late.add(SWaitCnt(dscnt=0, comment="TDM decoupled: all ds_reads done before %s refill" % singleTc))
+    late.add(SBarrier(comment="TDM decoupled: signal+wait done reading %s block" % singleTc))
+
+    if self.tdmFusePaired(kernel):
+      # Here a cadence belongs to a descriptor SET, not to a wave parity: each
+      # set holds one data tensor and the other tensor's scales, so both
+      # parities carry one single-buffered tensor and one double-buffered one
+      # and the parity split below would leave a single-buffered scale fill at
+      # the top. The single-buffered set's fill is one instruction every wave
+      # issues, so it moves whole and unguarded, and the advance that follows it
+      # moves with it -- a wave fills from the pointer it holds and then
+      # advances it. Solution rejects HalfPLR here, whose increment mask would
+      # ride along inside the module that moves.
+      singleFill = self.codes.globalReadA if singleIsA else self.codes.globalReadB
+      singleIncName = "globalReadIncrement%s" % ("A" if singleIsA else "B")
+      kept = []
+      for item in src.items():
+        if item is singleFill or getattr(item, "name", None) == singleIncName:
+          late.add(item)
+        else:
+          kept.append(item)
+      src.setItems(kept)
+      self.codes.perIterGlobalRead[lateIter].add(late)
+      return
+
+    if self.tdmDealiasAB(kernel):
+      # A and B hold their own descriptors, so each fill is one instruction
+      # already guarded to the waves that carry that tensor and the re-slot is a
+      # move rather than a duplication. Everything else in the group still has to
+      # appear at both slots under complementary guards:
+      #
+      #   - the MX scale pair is still parity-aliased, so its fill is one
+      #     instruction serving both scales. MXSA follows A's block count and
+      #     MXSB follows B's, so the copy that runs late is the one on the
+      #     single-buffered parity.
+      #   - a descriptor advance must stay with the fill it follows. A wave fills
+      #     from the pointer it holds and then advances it, so leaving the advance
+      #     at the top while the fill moves late has the late fill read from an
+      #     address already moved. That fails FFM validation for every
+      #     K > DepthU, first at 512x512x1x544.
+      singleFill = self.codes.globalReadA if singleIsA else self.codes.globalReadB
+      doubleFill = self.codes.globalReadB if singleIsA else self.codes.globalReadA
+      rest = Module("TDM decoupled per-parity fill group")
+      kept = []
+      for item in src.items():
+        if item is doubleFill:
+          kept.append(item)
+        elif item is singleFill:
+          continue
+        else:
+          rest.add(item)
+      hasRest = rest.itemsSize() > 0
+
+      if hasRest:
+        lblEarly = Label(self.labels.getNameInc("DcpEarlyFill%sEnd" % doubleTc), "")
+        early = Module("TDM decoupled early fill group %s" % doubleTc)
+        parityCheck(early)
+        early.add(skipEarly(labelName=lblEarly.getLabelName(),
+                            comment="this wave carries %s, whose group moves late" % singleTc))
+        early.add(rest)
+        early.add(lblEarly)
+        kept.append(early)
+      src.setItems(kept)
+
+      late.add(singleFill)
+      if hasRest:
+        lblLate = Label(self.labels.getNameInc("DcpLateFill%sEnd" % singleTc), "")
+        parityCheck(late)
+        late.add(skipLate(labelName=lblLate.getLabelName(),
+                          comment="this wave carries %s, whose group stays at the top" % doubleTc))
+        late.add(deepcopy(rest))
+        late.add(lblLate)
+      self.codes.perIterGlobalRead[lateIter].add(late)
+      return
+
+    lblLate = Label(self.labels.getNameInc("DcpLateFill%sEnd" % singleTc), "")
+    parityCheck(late)
+    late.add(skipLate(labelName=lblLate.getLabelName(),
+                      comment="%s is double-buffered, its fill stays at the top" % doubleTc))
+    late.add(deepcopy(src))
+    late.add(lblLate)
+
+    early = Module("TDM decoupled early fill %s" % doubleTc)
+    lblEarly = Label(self.labels.getNameInc("DcpEarlyFill%sEnd" % doubleTc), "")
+    parityCheck(early)
+    early.add(skipEarly(labelName=lblEarly.getLabelName(),
+                        comment="%s is single-buffered, its fill moves late" % singleTc))
+    early.add(src)
+    early.add(lblEarly)
+    self.codes.unrollLoopHeader = early
+
+    self.codes.perIterGlobalRead[lateIter].add(late)
+
   ##############################################################################
   # packItemsConditional: pack src items into dst items until numPack or searchString is found
   # returns number of items packed
@@ -1045,7 +1209,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       for item in readItems:
         iterCode.add(item)
 
-      if kernel["1LDSBuffer"]:
+      if kernel["1LDSBuffer"] or decoupledOneBlockBoth(kernel):
         if localWriteCode.itemsSize() > 0:
           barrier = Module()
           barrier.addComment0("1 LDS buffer: read-sync-write")
@@ -1182,7 +1346,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         iterCode.add(macIterItems.pop(0))
 
       iterCode.add(SSetPrior(prior=1, comment="Raise priority while processing macs"))
-      if kernel["1LDSBuffer"]:
+      if kernel["1LDSBuffer"] or decoupledOneBlockBoth(kernel):
         barrier = Module()
         barrier.addComment0("1 LDS buffer: read-sync-write")
         barrier.add(SWaitCnt(dscnt=0, comment=""))
@@ -1837,7 +2001,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         ####
         # scheduled local write
         ####
-        if kernel["1LDSBuffer"] and mfmaIndex == self.states.sync1LdsMfmaIndex:
+        if (kernel["1LDSBuffer"] or decoupledOneBlockBoth(kernel)) and mfmaIndex == self.states.sync1LdsMfmaIndex:
           barrier = Module()
           barrier.addComment0("1 LDS buffer: read-sync-write")
           barrier.add(SWaitCnt(dscnt=0, comment=""))
@@ -3036,9 +3200,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # WaveIdx already freed for subtile (before graWorkGroup above)
       # TDM StaggerU reads wave parity from WaveIdx through calculateStagger below,
       # so its release is deferred to releaseWaveIdxAfterStagger.
+      # TDM StaggerU also reads wave parity from WaveIdx, and so does a
+      # de-aliased A/B pair, whose two fills are each parity-guarded.
       if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"] \
           and not kernel.get("UseSubtileImpl") \
-          and not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
+          and not self.isTdmWaveIdxLive(kernel):
         module.add(self.undefineSgpr("WaveIdx"))
 
       ###########################################################################
@@ -3197,6 +3363,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
             tPA = None
           if kernel["DirectToVgprB"]:
             tPB = None
+        # Decoupled PGR advances both tensors here, like legacy: a
+        # single-buffered tensor is made legal by where its fill sits in the loop
+        # body (_dcpScheduleSingleBufferedFillLate), and holding one side's
+        # increment back here would instead put that tensor a tile behind from the
+        # second unrolled iteration onwards.
         module.add(self.globalReadIncrementAB(kernel, tPA, tPB, self.states.unrollIdx, pfi))
         # swap Tensor memToken
         self.states.ldsTensorTokenIdx = \
@@ -3946,7 +4117,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
             if kernel["enableTDMB"]:
               #TODO: TDM refactor
-              if kernel["NumWaves"] == 1:
+              if kernel["NumWaves"] == 1 or self.tdmSeparateABDescriptors(kernel):
                 pointerLWCode.addComment1("tdm swap offsets b")
                 pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB))
             elif not kernel["NoLdsWriteCode"]:
@@ -4836,7 +5007,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
           if kernel["enableTDMB"]:
             #TODO: TDM refactor
-            if kernel["NumWaves"] == 1:
+            if kernel["NumWaves"] == 1 or self.tdmSeparateABDescriptors(kernel):
               pointerLWCode.addComment1("tdm swap offsets b")
               pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB))
           else:
@@ -5578,7 +5749,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       if kernel["enableTDMB"]:
         #TODO: TDM refactor
-        if kernel["NumWaves"] == 1:
+        if kernel["NumWaves"] == 1 or self.tdmSeparateABDescriptors(kernel):
           module.addComment1("TDM swap lds b")
           module.add(self.tdmSwapLdsOffset(kernel, tensorParametersB))
       else:
@@ -5869,8 +6040,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     def _kernelBody(pack, packPre, nta, ntb):
       # open unrolled summation loop
       module.addComment2("Unrolled Loop(s) - Begin")
-      if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
-        module.add(SBarrier(comment="TDM PGR=0: prime barrier before loop"))
+      if kernel["enableTDMA"] and kernel["enableTDMB"] and \
+         (not kernel["PrefetchGlobalRead"] or decoupledSingleBuffered(kernel)):
+        primeWhy = "PGR=0" if not kernel["PrefetchGlobalRead"] else "single LDS blk"
+        module.add(SBarrier(comment=f"TDM {primeWhy}: prime barrier before loop"))
       if _needsPreLoopLocalReadDrain(kernel, self.states.numItersPLR,
                                      preLoopLocalReadDrainEmitted):
         module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
@@ -6277,7 +6450,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif tc2 == 'B':
           globalReadMode2nd = 2
 
-      if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["1LDSBuffer"]:
+      if (kernel["enableTDMA"] or kernel["enableTDMB"]) and \
+         not (kernel["1LDSBuffer"] or decoupledOneBlockBoth(kernel)):
         module.add(self._syncThreads(kernel, "Barrier before tail TDM loads (WAR hazard with NLL LDS reads)"))
 
       if kernel["enableTDMA"] and kernel["enableTDMB"]:
@@ -6433,7 +6607,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                            self.states.numReadsIterCoalescedB > 1)
       # TDM tail may keep using whichever LDS buffer the swap parity left it in
       # (no forced buffer 0), unless wider local read needs the offset recomputed.
-      needResetLROffsets = not kernel["1LDSBuffer"] and (not tdm or tdmTailWasWiderLR)
+      needResetLROffsets = not (kernel["1LDSBuffer"] or decoupledOneBlockBoth(kernel)) \
+                           and (not tdm or tdmTailWasWiderLR)
       # change local read policy from wider local read to one unit of K at a time
       # DirectToVgpr case, use original wider local read instead of recalculating local read address
       if not (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]):
@@ -7154,6 +7329,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
        kernel["UseSubtileImpl"] or \
        clusterEnabled(kernel["ClusterDim"]):
       self.states.staggerUCode = False
+    # StaggerU=0 must not keep the wrap machinery alive on the strength of the
+    # runtime SupportCustomStaggerU flag. StreamK is exempt: dropping the wrap
+    # code switches its GlobalReadIncs to the const form, and the shorter sgpr
+    # layout that follows leaves SKMappingTemp no aligned gap to check out.
+    if kernel["StaggerU"] == 0 and not kernel["StreamK"]:
+      self.states.staggerUCode = False
     
     self.states.tailloopInNllmaxUnit = 1
     if self.states.tailloopInNll:
@@ -7439,6 +7620,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.IncLdsBufSwitch = kernel["NumLdsBlk"] >= 3
     # oneBufferScheduling
     self.states.oneBufferScheduling = (kernel["1LDSBuffer"]) or \
+                                      decoupledOneBlockBoth(kernel) or \
                                       ((kernel["DirectToLdsA"] or kernel["DirectToLdsB"]) and \
                                        self.states.numLDSBlk == kernel["PrefetchGlobalRead"])
     # common sgprSwap
@@ -7452,7 +7634,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.useCommonSgprSwap = True
     # set memory token by LDS buffer setting
     self.states.memTokenLdsBufferMeta = 4
-    if kernel["1LDSBuffer"]:
+    # A single-buffered tensor reads and refills the same bytes, so the two buffer
+    # tokens have to collapse to one or the dependency tracker sees the refill land
+    # on a buffer nothing read and postMainLoopBarrierCheckAndReset emits no
+    # barrier for a real write-after-read. Only one tensor may be single-buffered,
+    # but the wave-separated tensor_load_to_lds is shared, so the one token has to
+    # cover both. Collapsing can only add barriers, never remove a required one.
+    if kernel["1LDSBuffer"] or decoupledSingleBuffered(kernel) or decoupledOneBlockBoth(kernel):
       self.states.memTokenLdsBuffer0 = 0
       self.states.memTokenLdsBuffer1 = 0
       self.states.memTokenLdsSplit = [[1, 2], [1, 2]]
@@ -11138,52 +11326,188 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # unroll loop we model the back-edge for.
       return isinstance(labelName, str) and "LoopBegin" in labelName and "TailLoopBegin" not in labelName
 
+    def _isLabelDef(leaf):
+      # A label definition answers getLabelName; a branch carries labelName.
+      return hasattr(leaf, "getLabelName") and not isinstance(leaf, Instruction)
+
+    # The whole tree flattened to its leaves in program order, each paired with
+    # the module that owns it and its index there.
+    #
+    # Insertion used to recurse module by module, which put a barrier in the
+    # module owning the conflicting access and so could not see a branch opened
+    # outside it. _dcpScheduleSingleBufferedFillLate emits the wave-parity
+    # s_cbranch beside the fill group rather than inside it, so the barrier for
+    # that group's tensor_load_to_lds landed after the branch and only the waves
+    # falling through ever reached it. One flattening keeps such a branch in
+    # scope for the whole walk, and (owner, index) is what still lets an
+    # insertion be written back into the right place in the tree.
+    flatLeaves = []
+    seenModules = set()
+
+    def _flattenLeaves(mod: Module):
+      if id(mod) in seenModules:
+        print2("[postMainLoopBarrierCheckAndReset] WARNING: module '%s' is reached twice, so an "
+               "insertion index in it names two places" % mod.name)
+      seenModules.add(id(mod))
+      for pos, item in enumerate(mod.items()):
+        if isinstance(item, Module):
+          _flattenLeaves(item)
+        else:
+          flatLeaves.append((item, mod, pos))
+
+    _flattenLeaves(rootModule)
+
+    labelDefIndex = {}
+    for idx, (leaf, _leafMod, _leafPos) in enumerate(flatLeaves):
+      if _isLabelDef(leaf):
+        labelDefIndex.setdefault(leaf.getLabelName(), idx)
+
+    # beginLabelName -> (beginIdx, backBranchIdx) using the widest back-edge span.
+    loopSpanByLabel = {}
+    for idx, (leaf, _leafMod, _leafPos) in enumerate(flatLeaves):
+      target = getattr(leaf, "labelName", None)
+      if target is None or not _isUnrollLoopBeginLabel(target):
+        continue
+      beginIdx = labelDefIndex.get(target, None)
+      if beginIdx is None or beginIdx >= idx:
+        continue  # forward branch, not a back-edge
+      prev = loopSpanByLabel.get(target)
+      if prev is None or idx > prev[1]:
+        loopSpanByLabel[target] = (beginIdx, idx)
+
+    # Every point a barrier must not be moved across, because crossing one
+    # changes how many times it executes.
+    loopBoundaryIndices = sorted(
+      {beginIdx for beginIdx, _branchIdx in loopSpanByLabel.values()} |
+      {branchIdx for _beginIdx, branchIdx in loopSpanByLabel.values()})
+
+    # Only WAVE-DIVERGENT conditional branches are tracked, not every conditional
+    # one. A trip-count or K-remainder branch is taken by the whole workgroup, so
+    # a barrier inside it is already correct - and the unroll loop is itself
+    # skipped by such a branch, so treating that as a guard would lift a barrier
+    # clean out of the loop.
+    #
+    # Everything that dispatches TDM work by wave leaves its answer in SCC:
+    # s_bitcmp1_b32 on bit 0 of the wave index for a parity split, s_cmp_eq_u32
+    # for a named wave, either reading sgpr("WaveIdx") directly or an sgpr filled
+    # by a v_readfirstlane_b32 of vgprSerial where that is no longer live. SCC is
+    # therefore followed as the register it is, from the write to the branch that
+    # reads it, with no distance limit. Adjacency would be enough for the tree as
+    # the writer builds it, but it is not a property this pass should depend on.
+    #
+    # The categories come from the instruction class name so that str() is only
+    # rendered for the comparisons, and the SCC-writing families are listed
+    # because a stale predicate is the failure that matters: it would report a
+    # guard that is not one.
+    sccCompareClassPrefixes = ("SBitcmp", "SCmp")
+    sccClobberClassPrefixes = (
+      "SAdd", "SSub", "SAnd", "SOr", "SXor", "SNand", "SNor", "SXnor", "SAndn2",
+      "SOrn2", "SNot", "SLShift", "SAShift", "SBfe", "SAbs", "SBcnt", "SFf",
+      "SFlbit", "SQuadmask", "SWqm", "SBitset", "SPack", "SMin", "SMax",
+      "SBitreplicate",
+    )
+
+    # The unconditional branches are listed rather than the conditional ones so
+    # that an unfamiliar branch class is treated as conditional, which costs a
+    # needless hoist, instead of ignored, which is this pass's defect. By name
+    # because only some of them are classes: rocisa exposes the long branches as
+    # factory functions that build a Module, so isinstance cannot name them.
+    unconditionalBranchClassNames = (
+      "SBranch", "SLongBranch", "SLongBranchPositive", "SLongBranchNegative",
+    )
+
+    def _isConditionalBranch(leaf):
+      return isinstance(leaf, BranchInstruction) and \
+             type(leaf).__name__ not in unconditionalBranchClassNames
+
+    def _writtenSgprNumbers(leaf):
+      # rocisa gives every instruction at most one destination, so a single dst
+      # is the whole write set, and it is None on the compares that only write
+      # SCC. A numbered container carries its index and its width; a named one
+      # carries neither, and is matched by symbol instead.
+      dst = getattr(leaf, "dst", None)
+      if not isinstance(dst, RegisterContainer) or dst.regType != "s" or \
+         dst.regName is not None or dst.regIdx < 0:
+        return ()
+      return range(dst.regIdx, dst.regIdx + max(dst.regNum, 1))
+
+    def _readsAnySgprNumber(leaf, numbers):
+      for src in (getattr(leaf, "srcs", None) or []):
+        if isinstance(src, RegisterContainer) and src.regType == "s" and \
+           src.regName is None and src.regIdx >= 0 and \
+           any(n in numbers
+               for n in range(src.regIdx, src.regIdx + max(src.regNum, 1))):
+          return True
+      return False
+
+    sgprNumberPattern = re.compile(r"\bs\[?(\d+)")
+    waveIdSgprs = set()
+    guardEndByIndex = {}
+    sccIsWaveDivergent = False
+    for idx, (leaf, _leafMod, _leafPos) in enumerate(flatLeaves):
+      if not isinstance(leaf, Instruction):
+        continue
+      if _isConditionalBranch(leaf):
+        endIdx = labelDefIndex.get(getattr(leaf, "labelName", None))
+        # A backward branch is a loop back-edge, and a target this tree does not
+        # define is not a region that closes at a known point either.
+        if sccIsWaveDivergent and endIdx is not None and endIdx > idx:
+          guardEndByIndex[idx] = endIdx
+        continue
+      className = type(leaf).__name__
+      if className.startswith(sccCompareClassPrefixes):
+        text = str(leaf)
+        sccIsWaveDivergent = "WaveIdx" in text or \
+            any(int(n) in waveIdSgprs for n in sgprNumberPattern.findall(text))
+      elif className.startswith(sccClobberClassPrefixes):
+        sccIsWaveDivergent = False
+
+      # Where sgpr("WaveIdx") is no longer live the wave index is recomputed into
+      # a temporary, and the comparison then names that number rather than the
+      # symbol. Nothing else in a TDM kernel reads vgprSerial into an sgpr, so
+      # that read is what identifies the temporary.
+      #
+      # A number in waveIdSgprs names a register that holds a wave index now, not
+      # one that ever did. The allocator hands the same number out again once the
+      # temporary is released, so a set that only ever grew would read whatever
+      # replaced it as a wave index and report a guard that is not one. Every
+      # write therefore ends a number's tenure and only that read begins one.
+      #
+      # The read lands the thread id, not the wave id, so the tenure has to
+      # survive the s_lshr_b32 that divides it by the wave length in place. A
+      # write that reads the register it writes is refining the wave index it
+      # already holds; a write sourced from elsewhere is replacing it. Only the
+      # latter ends the tenure. Refinement never extends it to a register that
+      # was not already holding a wave index, so this cannot report a new guard,
+      # only keep reporting one that is still there.
+      #
+      # A write through a symbol cannot end the tenure of the number it occupies,
+      # because a named sgpr carries no index at this stage; the symbolic wave
+      # index is matched by name above, so only recomputed temporaries depend on
+      # this, and those are numbered where they are written and read.
+      written = _writtenSgprNumbers(leaf)
+      if written:
+        if isinstance(leaf, VReadfirstlaneB32) and "vgprSerial" in str(leaf):
+          waveIdSgprs.update(written)
+        elif not _readsAnySgprNumber(leaf, waveIdSgprs):
+          waveIdSgprs.difference_update(written)
+
     def _detectLoopHeadInfo():
-      # Detect the real loop span(s) from the back-edge, not from module names.
-      # A module named "loopBody" also contains the odd/even-iter exit code and
-      # the loop-end label that execute AFTER the back-branch, so its last token
-      # access is not the loop tail. Instead, flatten leaves in program order,
-      # find each backward branch to a "LoopBegin" label, and treat
-      # [begin .. back-branch] as the loop body.
+      # Read the loop span(s) off the back-edge, not off module names. A module
+      # named "loopBody" also contains the odd/even-iter exit code and the
+      # loop-end label that execute AFTER the back-branch, so its last token
+      # access is not the loop tail.
       #
       # Returns beginLabelName -> {token: [firstAccess, tailState]} where:
       #   firstAccess: access ("read"/"write") of the token's FIRST occurrence in
       #                the body (what the back-edge feeds into).
       #   tailState:   phase ("reading"/"writing") of the token's LAST occurrence
       #                in the body (the phase the back-edge carries out).
-      flatLeaves = []
-      def _flattenLeaves(mod: Module):
-        for item in mod.items():
-          if isinstance(item, Module):
-            _flattenLeaves(item)
-          else:
-            flatLeaves.append(item)
-      _flattenLeaves(rootModule)
-
-      labelDefIndex = {}
-      for idx, leaf in enumerate(flatLeaves):
-        if hasattr(leaf, "getLabelName") and not isinstance(leaf, Instruction):
-          name = leaf.getLabelName()
-          labelDefIndex.setdefault(name, idx)
-
-      # beginLabelName -> (beginIdx, backBranchIdx) using the widest back-edge span.
-      loopSpanByLabel = {}
-      for idx, leaf in enumerate(flatLeaves):
-        target = getattr(leaf, "labelName", None)
-        if target is None or not _isUnrollLoopBeginLabel(target):
-          continue
-        beginIdx = labelDefIndex.get(target, None)
-        if beginIdx is None or beginIdx >= idx:
-          continue  # forward branch, not a back-edge
-        prev = loopSpanByLabel.get(target)
-        if prev is None or idx > prev[1]:
-          loopSpanByLabel[target] = (beginIdx, idx)
-
       headInfo = {}
       for beginName, (beginIdx, branchIdx) in loopSpanByLabel.items():
         info = {}
         for k in range(beginIdx, branchIdx + 1):
-          leaf = flatLeaves[k]
+          leaf = flatLeaves[k][0]
           if not isinstance(leaf, Instruction):
             continue
           access = _classifyTokenAccess(leaf)
@@ -11203,101 +11527,157 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # PrefetchGlobalRead >= 2 the pipelined prologue pre-stages the next
     # iteration's LDS data, so the steady-state phase is already established and
     # a plain single linear pass is correct - leaving loopHeadInfo empty makes
-    # _rewriteModuleInOrder degrade to exactly that linear pass.
+    # the walk below degrade to exactly that linear pass.
     loopEntryOverride = {}
     loopPendingTokens = set()
     loopHeadInfo = _detectLoopHeadInfo() if kernel["PrefetchGlobalRead"] < 2 else {}
 
-    def _rewriteModuleInOrder(mod: Module):
-      nonlocal insertedCount
-      rewrittenItems = []
-      for item in mod.items():
-        if hasattr(item, "getLabelName") and not isinstance(item, Instruction):
-          labelName = item.getLabelName()
-          if _isOptNllEndLabelName(labelName) and labelName in branchTokenStateSnapshot:
-            # recover token state from the snapshot
-            tokenState.clear()
-            tokenState.update(deepcopy(branchTokenStateSnapshot[labelName]))
-          if labelName in loopHeadInfo:
-            # Entering the unroll loop. The loop-head barrier is driven purely by
-            # the back-edge (loop-tail) state, so a steady-state iteration only
-            # gets a barrier when the carried phase truly conflicts with the
-            # first access. The first iteration's pre-loop conflict, if any and
-            # not already covered by a back-edge barrier, is satisfied ONCE by a
-            # barrier hoisted into the prologue (emitted right before the loop
-            # label) instead of one that re-fires every iteration.
-            prologueBarrierTokens = []
-            for token, (firstAccess, tailState) in loopHeadInfo[labelName].items():
-              preState = tokenState.get(token, "standby")
-              loopEntryOverride[token] = tailState
-              loopPendingTokens.add(token)
-              if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, tailState):
-                prologueBarrierTokens.append(token)
-            if prologueBarrierTokens:
-              uniqueTokens = sorted(set(prologueBarrierTokens))
-              syncComments = ", ".join([f"sync LDS{token}" for token in uniqueTokens])
-              barrier = SBarrier(comment=f"auto token transition barrier (loop prologue), {syncComments}")
-              barrier.setMemToken(MemTokenData(uniqueTokens))
-              rewrittenItems.append(barrier)
-              insertedCount += 1
-          rewrittenItems.append(item)
-          continue
+    # (ownerModule, indexInOwner, tokens, commentPrefix), in program order.
+    plannedBarriers = []
+    # One entry per wave-divergent region still open, outermost first:
+    # [endIdx, branchIdx, ownerModule, indexInOwner, tokensTouchedSinceItOpened].
+    openGuards = []
+    divergentBarriers = 0
 
-        if isinstance(item, Module):
-          _rewriteModuleInOrder(item)
-          rewrittenItems.append(item)
-          continue
-        if not isinstance(item, Instruction):
-          rewrittenItems.append(item)
-          continue
+    def _crossesLoopBoundary(fromIdx, toIdx):
+      return any(fromIdx < b <= toIdx for b in loopBoundaryIndices)
 
-        branchLabelName = getattr(item, "labelName", None)
-        if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
-          # Save token state at the first branch to OptNLL_End.
-          branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
-        if branchLabelName in loopHeadInfo:
-          # Reached the loop back-branch: drop any stale loop-entry overrides.
-          loopEntryOverride.clear()
-          loopPendingTokens.clear()
+    for idx, (item, owner, pos) in enumerate(flatLeaves):
+      if openGuards:
+        openGuards = [guard for guard in openGuards if guard[0] > idx]
 
-        access = _classifyTokenAccess(item)
-        tokens = _getTokenList(item)
-        if access is None and tokens:
-          print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(item).__name__} has tokens {tokens} but no classified access — barrier may be missing")
-        if access is None or not tokens:
-          rewrittenItems.append(item)
-          continue
+      if _isLabelDef(item):
+        labelName = item.getLabelName()
+        if _isOptNllEndLabelName(labelName) and labelName in branchTokenStateSnapshot:
+          # recover token state from the snapshot
+          tokenState.clear()
+          tokenState.update(deepcopy(branchTokenStateSnapshot[labelName]))
+        if labelName in loopHeadInfo:
+          # Entering the unroll loop. The loop-head barrier is driven purely by
+          # the back-edge (loop-tail) state, so a steady-state iteration only
+          # gets a barrier when the carried phase truly conflicts with the
+          # first access. The first iteration's pre-loop conflict, if any and
+          # not already covered by a back-edge barrier, is satisfied ONCE by a
+          # barrier hoisted into the prologue (emitted right before the loop
+          # label) instead of one that re-fires every iteration.
+          prologueBarrierTokens = []
+          for token, (firstAccess, tailState) in loopHeadInfo[labelName].items():
+            preState = tokenState.get(token, "standby")
+            loopEntryOverride[token] = tailState
+            loopPendingTokens.add(token)
+            if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, tailState):
+              prologueBarrierTokens.append(token)
+          if prologueBarrierTokens:
+            # Never relocated: this one has to fire exactly once on the way in,
+            # and the label it precedes is a branch target, so moving it ahead
+            # of an enclosing branch would change which paths reach it. A loop
+            # head is not inside a wave-divergent region; say so if that ever
+            # stops holding rather than emitting it quietly.
+            if openGuards:
+              divergentBarriers += 1
+              print2("[postMainLoopBarrierCheckAndReset] WARNING: the loop prologue barrier for "
+                     "%s is inside a wave-divergent region, so only some waves reach it"
+                     % labelName)
+            plannedBarriers.append((owner, pos, sorted(set(prologueBarrierTokens)),
+                                    "auto token transition barrier (loop prologue)"))
+        continue
 
-        barrierTokens = []
-        for token in tokens:
-          if token in loopPendingTokens:
-            # First access of this token inside the loop body: evaluate it
-            # against the back-edge (loop-tail) state.
-            state = loopEntryOverride.get(token, tokenState.get(token, "standby"))
-            loopPendingTokens.discard(token)
+      if not isinstance(item, Instruction):
+        continue
+
+      branchLabelName = getattr(item, "labelName", None)
+      if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
+        # Save token state at the first branch to OptNLL_End.
+        branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
+      if branchLabelName in loopHeadInfo:
+        # Reached the loop back-branch: drop any stale loop-entry overrides.
+        loopEntryOverride.clear()
+        loopPendingTokens.clear()
+      if idx in guardEndByIndex:
+        openGuards.append([guardEndByIndex[idx], idx, owner, pos, set()])
+
+      access = _classifyTokenAccess(item)
+      tokens = _getTokenList(item)
+      if access is None and tokens:
+        print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(item).__name__} has tokens {tokens} but no classified access - barrier may be missing")
+      if access is None or not tokens:
+        continue
+
+      barrierTokens = []
+      for token in tokens:
+        if token in loopPendingTokens:
+          # First access of this token inside the loop body: evaluate it
+          # against the back-edge (loop-tail) state.
+          state = loopEntryOverride.get(token, tokenState.get(token, "standby"))
+          loopPendingTokens.discard(token)
+        else:
+          state = tokenState.get(token, "standby")
+        if _conflicts(access, state):
+          barrierTokens.append(token)
+
+      if barrierTokens:
+        uniqueTokens = sorted(set(barrierTokens))
+        if not openGuards:
+          plannedBarriers.append((owner, pos, uniqueTokens, "auto token transition barrier"))
+        else:
+          outer = openGuards[0]
+          blockers = sorted(outer[4].intersection(uniqueTokens))
+          if blockers:
+            # Moving it ahead of the branch would move it ahead of an access it
+            # has to separate, so there is no correct placement. Leave it on the
+            # transition and say so rather than emit one that only looks right.
+            reason = ("%s is also accessed inside that region" % blockers)
+          elif _crossesLoopBoundary(outer[1], idx):
+            # The region begins outside the loop this access is in, so the
+            # barrier would go from once per iteration to once per kernel.
+            reason = "the region begins outside this access's loop"
           else:
-            state = tokenState.get(token, "standby")
-          if _conflicts(access, state):
-            barrierTokens.append(token)
+            reason = None
+          if reason is None:
+            plannedBarriers.append((outer[2], outer[3], uniqueTokens,
+                                    "auto token transition barrier (ahead of a wave-divergent branch)"))
+          else:
+            divergentBarriers += 1
+            print2("[postMainLoopBarrierCheckAndReset] WARNING: the barrier for tokens %s cannot "
+                   "leave the wave-divergent region it falls in, because %s; only some waves will "
+                   "reach it" % (uniqueTokens, reason))
+            plannedBarriers.append((owner, pos, uniqueTokens, "auto token transition barrier"))
 
-        if barrierTokens:
-          uniqueTokens = sorted(set(barrierTokens))
-          syncComments = ", ".join([f"sync LDS{token}" for token in uniqueTokens])
-          barrier = SBarrier(comment=f"auto token transition barrier, {syncComments}")
-          barrier.setMemToken(MemTokenData(uniqueTokens))
-          rewrittenItems.append(barrier)
-          insertedCount += 1
+      nextState = _accessPhase(access)
+      for token in tokens:
+        tokenState[token] = nextState
+      for guard in openGuards:
+        guard[4].update(tokens)
 
-        nextState = _accessPhase(access)
-        for token in tokens:
-          tokenState[token] = nextState
+    # Two transitions relocated to the same point want one barrier, not two
+    # adjacent ones. plannedBarriers is in program order, so they are adjacent.
+    mergedBarriers = []
+    for owner, pos, tokens, prefix in plannedBarriers:
+      if mergedBarriers and mergedBarriers[-1][0] is owner and mergedBarriers[-1][1] == pos:
+        mergedBarriers[-1][2] = sorted(set(mergedBarriers[-1][2]) | set(tokens))
+        continue
+      mergedBarriers.append([owner, pos, tokens, prefix])
 
-        rewrittenItems.append(item)
+    # Applied per owning module, descending by index, so every index still names
+    # the item it was recorded against. Two at one index are applied in reverse
+    # order so that they end up in program order.
+    barriersByOwner = {}
+    for order, (owner, pos, tokens, prefix) in enumerate(mergedBarriers):
+      barriersByOwner.setdefault(id(owner), (owner, []))[1].append((pos, order, tokens, prefix))
+    for owner, entries in barriersByOwner.values():
+      items = list(owner.items())
+      for pos, _order, tokens, prefix in sorted(entries, key=lambda e: (e[0], e[1]), reverse=True):
+        syncComments = ", ".join([f"sync LDS{token}" for token in tokens])
+        barrier = SBarrier(comment=f"{prefix}, {syncComments}")
+        barrier.setMemToken(MemTokenData(tokens))
+        items.insert(pos, barrier)
+        insertedCount += 1
+      owner.setItems(items)
 
-      mod.setItems(rewrittenItems)
-
-    _rewriteModuleInOrder(rootModule)
     print2(f"[postMainLoopBarrierCheckAndReset] removed {removedCount} barriers, inserted {insertedCount} barriers")
+    if divergentBarriers:
+      print2(f"[postMainLoopBarrierCheckAndReset] WARNING: {divergentBarriers} inserted barrier(s) "
+             "are reachable only under a wave-divergent branch")
     return
 
   ##############################################################################
@@ -11478,7 +11858,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                          comment="mask ArgType domain (bit 8 = TDM wave-parity)"))
       module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=value, comment=comment))
 
-  def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
+  def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB, zeroTc=None) -> Module:
     assert False, "Should be overrided"
   
   @abc.abstractmethod

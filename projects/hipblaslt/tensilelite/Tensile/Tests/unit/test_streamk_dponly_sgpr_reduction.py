@@ -138,6 +138,27 @@ class _SKWriter:
     def s_mul_u64_u32(self, *args, **kwargs):
         return Module("s_mul_u64_u32 stub")
 
+    # The TDM StreamK-offset helpers ask the writer whether {A,MXSA,MXSB} share a
+    # descriptor set. Mirror KernelWriterAssembly.isTdmWaveSeparated rather than
+    # returning a constant, so the answer still follows the kernel; .get is the
+    # only departure, because the kernels these tests build carry StreamK keys
+    # only and an absent TDM key means the feature is off.
+    def isTdmWaveSeparated(self, kernel):
+        return bool(
+            kernel.get("enableTDMA")
+            and kernel.get("enableTDMB")
+            and kernel.get("NumWaves", 1) > 1
+        )
+
+    def tdmFuseAMx(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFuseAMx(self, kernel)
+
+    def tdmFusePaired(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFusePaired(self, kernel)
+
+    def _tdmPairedParityOrder(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
+
 
 def _sk_common_kernel(dp_only):
     return {

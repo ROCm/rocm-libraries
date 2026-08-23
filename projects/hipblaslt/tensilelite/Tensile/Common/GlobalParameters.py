@@ -485,6 +485,11 @@ defaultBenchmarkCommonParameters = [
     {"WaveSeparateGlobalReadMetadata": [0]},
     {"UnrollLoopSwapGlobalReadOrder": [0]},
     {"PrefetchGlobalRead": [1]},
+    # PrefetchGlobalReadA/B have no entry here on purpose: an absent key is the
+    # "not specified" sentinel, which leaves 0 free to be a real block count.
+    # A default of 0 makes every solution decoupled and the scalar-consistency
+    # guard then rejects all of them; a -1 sentinel puts both keys on every
+    # serialized solution.
     {"PrefetchLocalRead": [1]},
     {"PrefetchGL2": [0]},
     {"ClusterLocalRead": [1]},
@@ -616,6 +621,11 @@ defaultBenchmarkCommonParameters = [
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
     {"TDMLoadWaveSync": [False]},
+    # TDMFuse has no entry here on purpose. An absent key is "off", and a key the
+    # solution does not carry is skipped by _getName, so the full solution name
+    # and the kernel dedup key stay what they were before the parameter existed.
+    # A default of 0 would put TDMF0 on both, on every kernel, for a parameter
+    # that is switched off.
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
     # SwInstructionPrefetch — StinkyTofu software instruction-prefetch mode (single integer):
