@@ -181,13 +181,13 @@ T robustMean(const std::vector<T>& values,
 
     // 0.6745 is the 0.75 quantile of the standard normal. It scales the MAD so the score is
     // on the same footing as a standard deviation for normally distributed samples.
-    constexpr T scale = static_cast<T>(0.6745);
+    constexpr T SCALE = static_cast<T>(0.6745);
 
     std::vector<T> kept;
     kept.reserve(sorted.size());
     for(const auto& v : sorted)
     {
-        if(scale * (v - median) / mad <= zThreshold)
+        if(SCALE * (v - median) / mad <= zThreshold)
         {
             kept.push_back(v);
         }
