@@ -486,3 +486,41 @@ That divergence is the useful part: **the equally-weighted metric moved 13 point
 sample broadened while the time-weighted one moved 0.7.** Early shapes over-represented the
 tiny/GEMV strata where the thin catalog collapses; geomean gave those shapes the same weight
 as a 5 ms GEMM, wall-clock did not. Quote the wall-clock figure.
+
+---
+
+## P7 — Bounding the memory-bandwidth gap (the downclock probe was impossible)
+
+The plan called for downclocking memory toward navi32's ~624 GB/s to bound how much this
+960 GB/s card overstates memory-bound shapes. **That probe cannot be run here**: the system
+has no clock control — `rocm-smi --showmclkrange` returns `get_od_volt, Not supported`,
+`rocm-smi -s` reports every clock domain as "exists but EMPTY! Likely driver error", and
+`pp_dpm_mclk` is absent from sysfs.
+
+**Substitute that bounds the same gap.** Split the result by arithmetic intensity,
+`AI = 2MNK / (2(MK + KN + 2MN))` flop/byte. High-AI shapes are compute-bound and insensitive
+to bandwidth, so their measured ratio transfers to navi32 directly; low-AI shapes are where
+the overstatement lives. The roofline crossover is ~125 flop/byte on this card and ~118 on
+navi32, so the bands mean the same thing on both.
+
+| band | n | % of kernel time | `gridcat` | A/A |
+|---|---|---|---|---|
+| memory-bound `AI<32` | 487 | **7.3%** | 142.89% | 101.67% |
+| mixed `32–128` | 197 | 6.3% | 138.05% | 101.42% |
+| compute-bound `128–512` | 195 | 13.6% | 124.12% | 99.34% |
+| **deep compute `AI>=512`** | 117 | **72.8%** | **121.18%** | 100.28% |
+
+**The caveat is much weaker than assumed. 73% of kernel time is deep-compute, and the win
+there is 121% — essentially the headline figure.** The bands this card cannot speak for
+(AI<32) are only 7.3% of kernel time, and they show the *largest* win (142.9%), so the
+bandwidth difference is not propping up the result; if anything a more bandwidth-starved
+navi32 would benefit more from a catalog that picks better tiles.
+
+So the honest statement changes from "absolute throughput is optimistic, treat all numbers as
+an upper bound" to: **the +24% wall-clock result is carried by compute-bound shapes and
+transfers to navi32; only the 7.3% of time spent in memory-bound shapes remains unverifiable
+on this hardware.**
+
+Note the count/time inversion: memory-bound shapes are **49% of the shape count but 7.3% of
+kernel time**. Reporting this split by shape count instead would have made the untestable
+region look like half the suite.
