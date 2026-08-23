@@ -64,6 +64,7 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 **Options:**
 - `--arch <arch>`: Target GPU architecture (default: gfx1250). Supported: `gfx1250`
 - `--remarks`: Enable optimization remarks on stderr (e.g. loop region diagnostics)
+- `--time-passes`: Report per-pass wall time on stderr (self / total / runs, slowest first)
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information
 
