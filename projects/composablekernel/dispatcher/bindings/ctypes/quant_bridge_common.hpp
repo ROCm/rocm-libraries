@@ -12,10 +12,18 @@
  * header-only: the templates / inline helpers below each get their own copy per
  * .so, so there is no shared library and no ODR concern. It centralizes the
  * infrastructure that used to be copy-pasted into all five sources -- device
- * memory management, GPU-arch validation, kernel-launch timing, init/cleanup,
- * and the exported C boilerplate -- so a fix to any of those happens exactly
- * once. Op-specific argument construction and shuffle behavior stay in the
- * per-op files.
+ * memory management, GPU-arch validation, the entry guard chain, quant-group
+ * validation, kernel-launch timing, init/cleanup, and the exported C
+ * boilerplate -- so a fix to any of those happens exactly once.
+ *
+ * run_scalar_quant_gemm() goes one step further and holds the *entire* run()
+ * body for the two bridges (tensor_quant, rowcolquant) that neither reshuffle
+ * their operands nor carry a quant group size; those two sources are reduced to
+ * an entry point plus their scale extents.
+ *
+ * The three bridges that do reshuffle (aquant, abquant, bquant) keep their own
+ * argument construction here, and their host-side reshuffle steps live in
+ * quant_bridge_shuffle.hpp.
  *
  * The generated kernel header (force-included before this one) must already
  * provide ck_tile (numeric_traits, stream_config, QuantGemmHostArgs, index_t)
@@ -31,6 +39,36 @@
 #include <initializer_list>
 #include <iostream>
 #include <string>
+
+// On a HIP error, print the failing op name + file/line and return -1. RAII
+// DeviceBuffers free themselves on the return, so no cleanup call is needed.
+// Defined before the namespace because the helpers below use it too.
+#define BRIDGE_HIP_CHECK(fn, call)                                                                \
+    do                                                                                            \
+    {                                                                                             \
+        hipError_t _err = (call);                                                                 \
+        if(_err != hipSuccess)                                                                    \
+        {                                                                                         \
+            std::cerr << (fn) << ": HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ \
+                      << ":" << __LINE__ << "\n";                                                 \
+            return -1;                                                                            \
+        }                                                                                         \
+    } while(0)
+
+// Emit the C API boilerplate shared by every bridge. Invoke once at the top of
+// each op's `extern "C"` block (it declares the file-local g_initialized flag
+// that the op's run() guard checks). KERNEL_NAME is force-included.
+#define QUANT_BRIDGE_C_API()                                         \
+    static bool g_initialized = false;                               \
+    int dispatcher_initialize()                                      \
+    {                                                                \
+        g_initialized = true;                                        \
+        return 0;                                                    \
+    }                                                                \
+    const char* dispatcher_get_kernel_name() { return KERNEL_NAME; } \
+    int dispatcher_init() { return dispatcher_initialize(); }        \
+    int dispatcher_get_kernel_count() { return 1; }                  \
+    void dispatcher_cleanup() { g_initialized = false; }
 
 namespace quant_bridge {
 
@@ -156,6 +194,45 @@ inline bool check_positive_dims(const char* fn, std::initializer_list<int64_t> d
     return true;
 }
 
+// The entry guard every bridge opens with, in the order they all used: init flag,
+// null pointers, positive dimensions, then GPU arch. Returns false once anything
+// fails (each helper has already printed its own diagnostic) so the caller can
+// `return -1`.
+//
+// check_arch exists for abquant, which must run its compile-time fp4-preshuffle
+// reject (return -3) between the argument checks and the arch check; it passes
+// false here and calls validate_supported_arch() itself afterwards.
+inline bool check_entry_args(const char* fn,
+                             bool initialized,
+                             std::initializer_list<const void*> ptrs,
+                             std::initializer_list<int64_t> dims,
+                             bool allow_gfx90a = false,
+                             bool check_arch   = true)
+{
+    return check_initialized(fn, initialized) && check_non_null(fn, ptrs) &&
+           check_positive_dims(fn, dims) &&
+           (!check_arch || validate_supported_arch(fn, allow_gfx90a));
+}
+
+// Verify one caller-supplied scale count against the quant group size baked into
+// this .so: `count` must equal ceil(dim / group). A mismatch means the host built
+// its scale tensor for a different group size than the compiled kernel reads, so
+// the kernel would index past the end of it.
+inline bool check_quant_group_count(const char* fn,
+                                    const char* count_name,
+                                    int64_t count,
+                                    const char* dim_name,
+                                    int64_t dim,
+                                    int64_t group)
+{
+    const int64_t expected = (dim + group - 1) / group;
+    if(count == expected)
+        return true;
+    std::cerr << fn << ": " << count_name << " mismatch. Got " << count << ", expected " << expected
+              << " for " << dim_name << "=" << dim << " with quant group size " << group << "\n";
+    return false;
+}
+
 // The identical tail every bridge's run() ended with: direct-launch the
 // force-included kernel (return -2 if it rejects the args), copy C back to the
 // host, publish the optional timing, return 0. C_dev is any type convertible to
@@ -189,35 +266,93 @@ inline int launch_and_copyback(const char* fn,
     return 0;
 }
 
+// The complete run() body shared by the tensor_quant and rowcolquant bridges.
+// Neither reshuffles anything and neither has a quant group size, so both reduce
+// to: guard, require packed strides, copy five buffers up, launch, copy C back.
+// They differ only in how many scale elements each side carries -- tensor_quant
+// passes one scalar per tensor (aq_elems = bq_elems = 1), rowcolquant one per A
+// row / B column (M and N) -- which is why those are runtime arguments rather
+// than another pair of template parameters.
+//
+// QK_A/QK_B and stride_AQ/stride_BQ are hardcoded to 1 for both: neither kernel
+// has quant groups, and both index their scales by position rather than by a
+// scale stride (mirrors the TensorQuant / RowColQuant branches of
+// run_gemm_quant_example.inc).
+template <typename KernelT, typename AT, typename BT, typename CT, typename QT>
+inline int run_scalar_quant_gemm(const char* fn,
+                                 bool initialized,
+                                 const void* A,
+                                 const void* B,
+                                 const void* AQ,
+                                 const void* BQ,
+                                 void* C,
+                                 int64_t M,
+                                 int64_t N,
+                                 int64_t K,
+                                 int64_t stride_A,
+                                 int64_t stride_B,
+                                 int64_t stride_C,
+                                 std::size_t aq_elems,
+                                 std::size_t bq_elems,
+                                 int k_batch,
+                                 float* time_ms)
+{
+    if(!check_entry_args(fn, initialized, {A, B, AQ, BQ, C}, {M, N, K}))
+        return -1;
+
+    // Only packed (contiguous) layouts are supported: A is [M,K] row-major, B is
+    // [K,N] column-major (leading dim K), C is [M,N] row-major.
+    if(stride_A != K || stride_B != K || stride_C != N)
+    {
+        std::cerr << fn << ": non-packed strides are not supported. Expected stride_A=" << K
+                  << " stride_B=" << K << " stride_C=" << N << ", got stride_A=" << stride_A
+                  << " stride_B=" << stride_B << " stride_C=" << stride_C << "\n";
+        return -1;
+    }
+
+    DeviceBuffer<AT> A_dev;
+    DeviceBuffer<BT> B_dev;
+    DeviceBuffer<QT> AQ_dev;
+    DeviceBuffer<QT> BQ_dev;
+    DeviceBuffer<CT> C_dev;
+    BRIDGE_HIP_CHECK(fn, A_dev.allocate(elements_to_bytes<AT>(M * K)));
+    BRIDGE_HIP_CHECK(fn, B_dev.allocate(elements_to_bytes<BT>(K * N)));
+    BRIDGE_HIP_CHECK(fn, AQ_dev.allocate(elements_to_bytes<QT>(aq_elems)));
+    BRIDGE_HIP_CHECK(fn, BQ_dev.allocate(elements_to_bytes<QT>(bq_elems)));
+    BRIDGE_HIP_CHECK(fn, C_dev.allocate(elements_to_bytes<CT>(M * N)));
+
+    BRIDGE_HIP_CHECK(fn,
+                     hipMemcpy(A_dev, A, elements_to_bytes<AT>(M * K), hipMemcpyHostToDevice));
+    BRIDGE_HIP_CHECK(fn,
+                     hipMemcpy(B_dev, B, elements_to_bytes<BT>(K * N), hipMemcpyHostToDevice));
+    BRIDGE_HIP_CHECK(
+        fn, hipMemcpy(AQ_dev, AQ, elements_to_bytes<QT>(aq_elems), hipMemcpyHostToDevice));
+    BRIDGE_HIP_CHECK(
+        fn, hipMemcpy(BQ_dev, BQ, elements_to_bytes<QT>(bq_elems), hipMemcpyHostToDevice));
+    BRIDGE_HIP_CHECK(fn, hipMemset(C_dev, 0, elements_to_bytes<CT>(M * N)));
+
+    ck_tile::QuantGemmHostArgs args;
+    args.a_ptr     = A_dev;
+    args.b_ptr     = B_dev;
+    args.aq_ptr    = AQ_dev;
+    args.bq_ptr    = BQ_dev;
+    args.c_ptr     = C_dev;
+    args.k_batch   = k_batch;
+    args.M         = static_cast<ck_tile::index_t>(M);
+    args.N         = static_cast<ck_tile::index_t>(N);
+    args.K         = static_cast<ck_tile::index_t>(K);
+    args.QK_A      = 1;
+    args.QK_B      = 1;
+    args.stride_A  = static_cast<ck_tile::index_t>(stride_A);
+    args.stride_B  = static_cast<ck_tile::index_t>(stride_B);
+    args.stride_C  = static_cast<ck_tile::index_t>(stride_C);
+    args.stride_AQ = 1;
+    args.stride_BQ = 1;
+
+    return launch_and_copyback<KernelT, CT>(
+        fn, args, C, C_dev, static_cast<std::size_t>(M) * N, time_ms);
+}
+
 } // namespace quant_bridge
-
-// On a HIP error, print the failing op name + file/line and return -1. RAII
-// DeviceBuffers free themselves on the return, so no cleanup call is needed.
-#define BRIDGE_HIP_CHECK(fn, call)                                                                \
-    do                                                                                            \
-    {                                                                                             \
-        hipError_t _err = (call);                                                                 \
-        if(_err != hipSuccess)                                                                    \
-        {                                                                                         \
-            std::cerr << (fn) << ": HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ \
-                      << ":" << __LINE__ << "\n";                                                 \
-            return -1;                                                                            \
-        }                                                                                         \
-    } while(0)
-
-// Emit the C API boilerplate shared by every bridge. Invoke once at the top of
-// each op's `extern "C"` block (it declares the file-local g_initialized flag
-// that the op's run() guard checks). KERNEL_NAME is force-included.
-#define QUANT_BRIDGE_C_API()                                         \
-    static bool g_initialized = false;                               \
-    int dispatcher_initialize()                                      \
-    {                                                                \
-        g_initialized = true;                                        \
-        return 0;                                                    \
-    }                                                                \
-    const char* dispatcher_get_kernel_name() { return KERNEL_NAME; } \
-    int dispatcher_init() { return dispatcher_initialize(); }        \
-    int dispatcher_get_kernel_count() { return 1; }                  \
-    void dispatcher_cleanup() { g_initialized = false; }
 
 #endif // CK_TILE_DISPATCHER_QUANT_BRIDGE_COMMON_HPP

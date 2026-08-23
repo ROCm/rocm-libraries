@@ -281,8 +281,14 @@ class TestPreshuffleBMatrixShuffle(unittest.TestCase):
         # permute_n variant is selected exactly when TiledMMAPermuteN && kN==1.
         self.assertIn("SelectedKernel::TiledMMAPermuteN", _CTYPES_SRC)
         self.assertIn("QuantGroupSize::kN == 1", _CTYPES_SRC)
-        # The BQ scales must also be bq_permuteN'd for the permuteN case.
-        self.assertIn("bq_permuteN<typename SelectedKernel::BShuffleConfig>", _CTYPES_SRC)
+        # The BQ scales must also be bq_permuteN'd for the permuteN case. BQ prep
+        # is shared with the abquant bridge, so that call lives in the header;
+        # the .cpp binds GroupN to QuantGroupSize::kN at the call site.
+        self.assertIn("bq_permuteN<typename KernelT::BShuffleConfig>", _SHUFFLE_SRC)
+        self.assertIn(
+            "prepare_bq_device<SelectedKernel, QuantGroupSize::kK, QuantGroupSize::kN>",
+            _CTYPES_SRC,
+        )
 
     def test_preshuffleb_headers_expose_bshuffle_config(self):
         preshuffleb_ctors = [

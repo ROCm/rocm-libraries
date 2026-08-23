@@ -36,6 +36,9 @@ from codegen_common import make_gemm_abquant_kernel_name  # noqa: E402
 
 # The ctypes lib source (checked for the B-matrix shuffle step, no GPU needed).
 _CTYPES_SRC = (_DISP / "bindings" / "ctypes" / "gemm_abquant_ctypes_lib.cpp").read_text()
+# The AQ/BQ scale-tensor prep steps live in the header shared with the bquant and
+# aquant bridges, so assertions about them grep there rather than in the .cpp.
+_SHUFFLE_SRC = (_DISP / "bindings" / "ctypes" / "quant_bridge_shuffle.hpp").read_text()
 
 _ALL = [
     default_fp8_config,
@@ -256,23 +259,26 @@ class TestBqPermuteNForPermuteNKernels(unittest.TestCase):
 
     def test_ctypes_lib_applies_bq_permuteN(self):
         # bq_permuteN must be invoked on the BQ scale tensor, using the same
-        # BShuffleConfig that shuffle_b_permuteN uses.
-        self.assertIn(
-            "bq_permuteN<typename SelectedKernel::BShuffleConfig>", _CTYPES_SRC
-        )
+        # BShuffleConfig that shuffle_b_permuteN uses. BQ prep is shared with the
+        # bquant bridge, so the call lives in quant_bridge_shuffle.hpp.
+        self.assertIn("bq_permuteN<typename KernelT::BShuffleConfig>", _SHUFFLE_SRC)
+        self.assertIn("prepare_bq_device<SelectedKernel,", _CTYPES_SRC)
 
     def test_bq_permute_n_gated_on_permute_n_predicate(self):
         # The BQ permute must be gated by exactly PreshuffleB && TiledMMAPermuteN
         # && BGroupSizeN==1 (the permute_n kernel), matching the B-matrix path.
-        self.assertIn("SelectedKernel::PreshuffleB && SelectedKernel::TiledMMAPermuteN",
-                      _CTYPES_SRC)
-        self.assertIn("bq_use_permute_n", _CTYPES_SRC)
+        # The first two conjuncts are the shared helper's gate; the third arrives
+        # as its GroupN template argument, which abquant binds to BGroupSizeN.
+        self.assertIn("KernelT::PreshuffleB && KernelT::TiledMMAPermuteN", _SHUFFLE_SRC)
+        self.assertIn("(GroupN == 1)", _SHUFFLE_SRC)
+        self.assertIn("use_permute_n", _SHUFFLE_SRC)
+        self.assertIn("BQuantGroupSize::kK, BGroupSizeN", _CTYPES_SRC)
 
     def test_bq_permute_n_then_shuffle_bq_when_preshufflequant(self):
         # For permute_n + BPreshuffleQuant kernels, bq_permuteN is applied FIRST,
         # then shuffle_bq -- exactly Old-TE inc:805-810. Both calls must appear.
-        self.assertIn("bq_permuteN", _CTYPES_SRC)
-        self.assertIn("shuffle_bq", _CTYPES_SRC)
+        self.assertIn("bq_permuteN", _SHUFFLE_SRC)
+        self.assertIn("shuffle_bq", _SHUFFLE_SRC)
 
     def test_preshuffleb_config_is_cshuffle_not_permute_n(self):
         # PreshuffleB (and EightWaves) use TransposeC=true, which is incompatible

@@ -60,22 +60,13 @@ int dispatcher_run_aquant_gemm(const void* A,
     using namespace quant_bridge;
     const char* kFn = "dispatcher_run_aquant_gemm";
 
-    if(!check_initialized(kFn, g_initialized) || !check_non_null(kFn, {A, AQ, B, C}) ||
-       !check_positive_dims(kFn, {M, N, K, QK_A}) ||
-       !validate_supported_arch(kFn, /*allow_gfx90a=*/true))
+    if(!check_entry_args(kFn, g_initialized, {A, AQ, B, C}, {M, N, K, QK_A},
+                         /*allow_gfx90a=*/true))
         return -1;
 
     // Validate QK_A against the compile-time quant group size baked into this .so.
-    {
-        const int64_t expected_QK_A =
-            (K + static_cast<int64_t>(QuantGroupSize::kK) - 1) / QuantGroupSize::kK;
-        if(QK_A != expected_QK_A)
-        {
-            std::cerr << kFn << ": QK_A mismatch. Got " << QK_A << ", expected " << expected_QK_A
-                      << " for K=" << K << " with QuantGroupSize kK=" << QuantGroupSize::kK << "\n";
-            return -1;
-        }
-    }
+    if(!check_quant_group_count(kFn, "QK_A", QK_A, "K", K, QuantGroupSize::kK))
+        return -1;
 
     // Only packed layouts are supported; expected leading dims depend on the
     // compile-time A/B/AQ layouts. AQ column-major (ccr) uses stride_AQ=M, matching
@@ -130,33 +121,17 @@ int dispatcher_run_aquant_gemm(const void* A,
             kFn, hipMemcpy(A_dev, A, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
     }
 
-    // Apply AQ preshuffle when required (run_gemm_quant_example.inc:746-751).
-    // APreshuffleQuant reorders AQ (shuffle_aq) into the interleaved layout the
-    // kernel expects. shuffle_aq assumes a row-major AQ descriptor, which holds
-    // because Old-TE rejects the ccr layout for the preshufflequant path.
-    if constexpr(SelectedKernel::APreshuffleQuant)
-    {
-        static_assert(!SelectedKernel::APreshuffleQuant ||
-                          std::is_same_v<AQLayout, ck_tile::tensor_layout::gemm::RowMajor>,
-                      "APreshuffleQuant requires a row-major AQ layout (ccr is excluded "
-                      "from the preshufflequant path); shuffle_aq below assumes row-major");
-        const int block_aq_k =
-            static_cast<int>(SelectedKernel::TileK) / static_cast<int>(QuantGroupSize::kK);
-        auto aq_h = load_host_tensor<true>(
-            AQ_host, static_cast<int>(M), static_cast<int>(QK_A), static_cast<int>(QK_A));
-        auto aq_shuffled = ck_tile::shuffle_aq(&aq_h, block_aq_k);
-        BRIDGE_HIP_CHECK(kFn,
-                         hipMemcpy(AQ_dev,
-                                   aq_shuffled.data(),
-                                   elements_to_bytes<QDataType>(M * QK_A),
-                                   hipMemcpyHostToDevice));
-    }
-    else
-    {
-        BRIDGE_HIP_CHECK(
-            kFn,
-            hipMemcpy(AQ_dev, AQ, elements_to_bytes<QDataType>(M * QK_A), hipMemcpyHostToDevice));
-    }
+    // Apply AQ preshuffle when required; shared with abquant, see
+    // prepare_aq_device() (run_gemm_quant_example.inc:746-751). The assert is
+    // AQuant-specific: shuffle_aq assumes a row-major AQ descriptor, which holds
+    // here because Old-TE rejects the ccr layout for the preshufflequant path.
+    // (abquant's AQ *can* be column-major, but never with APreshuffleQuant on.)
+    static_assert(!SelectedKernel::APreshuffleQuant ||
+                      std::is_same_v<AQLayout, ck_tile::tensor_layout::gemm::RowMajor>,
+                  "APreshuffleQuant requires a row-major AQ layout (ccr is excluded "
+                  "from the preshufflequant path); shuffle_aq assumes row-major");
+    BRIDGE_HIP_CHECK(
+        kFn, (prepare_aq_device<SelectedKernel, QuantGroupSize::kK>(AQ_host, AQ_dev, M, QK_A)));
     BRIDGE_HIP_CHECK(
         kFn, hipMemcpy(B_dev, B, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
     BRIDGE_HIP_CHECK(kFn, hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));

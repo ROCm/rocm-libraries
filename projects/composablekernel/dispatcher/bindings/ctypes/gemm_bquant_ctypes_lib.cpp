@@ -55,27 +55,14 @@ int dispatcher_run_bquant_gemm(const void* A,
     using namespace quant_bridge;
     const char* kFn = "dispatcher_run_bquant_gemm";
 
-    if(!check_initialized(kFn, g_initialized) || !check_non_null(kFn, {A, B, BQ, C}) ||
-       !check_positive_dims(kFn, {M, N, K, QK_B, QN_B}) ||
-       !validate_supported_arch(kFn, /*allow_gfx90a=*/true))
+    if(!check_entry_args(kFn, g_initialized, {A, B, BQ, C}, {M, N, K, QK_B, QN_B},
+                         /*allow_gfx90a=*/true))
         return -1;
 
     // Validate QK_B/QN_B against the compile-time quant group sizes baked into this .so.
-    {
-        const int64_t expected_QK_B =
-            (K + static_cast<int64_t>(QuantGroupSize::kK) - 1) / QuantGroupSize::kK;
-        const int64_t expected_QN_B =
-            (N + static_cast<int64_t>(QuantGroupSize::kN) - 1) / QuantGroupSize::kN;
-        if(QK_B != expected_QK_B || QN_B != expected_QN_B)
-        {
-            std::cerr << kFn << ": QK_B/QN_B mismatch. Got (" << QK_B << ", " << QN_B
-                      << "), expected (" << expected_QK_B << ", " << expected_QN_B
-                      << ") for K=" << K << " N=" << N
-                      << " with QuantGroupSize kK=" << QuantGroupSize::kK
-                      << " kN=" << QuantGroupSize::kN << "\n";
-            return -1;
-        }
-    }
+    if(!check_quant_group_count(kFn, "QK_B", QK_B, "K", K, QuantGroupSize::kK) ||
+       !check_quant_group_count(kFn, "QN_B", QN_B, "N", N, QuantGroupSize::kN))
+        return -1;
 
     // Only packed layouts are supported. BQ is ColumnMajor [QK_B, QN_B] (leading
     // dim QK_B), matching Old-TE's rcr path and the WPQuantB pipeline.
@@ -148,53 +135,11 @@ int dispatcher_run_bquant_gemm(const void* A,
             kFn, hipMemcpy(B_dev, B, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
     }
 
-    // Host-side BQ prep (run_gemm_quant_example.inc:794-825). Three cases:
-    //   (a) PreshuffleB && TiledMMAPermuteN && kN==1: bq_permuteN first, then
-    //       shuffle_bq if BPreshuffleQuant (else use the permuted BQ).
-    //   (b) BPreshuffleQuant (no permuteN): shuffle_bq only.
-    //   (c) neither: plain copy of raw BQ straight to device (no host tensor).
-    // BQ is ColumnMajor [QK_B, QN_B] (leading dim QK_B).
-    {
-        constexpr bool use_permute_n = SelectedKernel::PreshuffleB &&
-                                       SelectedKernel::TiledMMAPermuteN &&
-                                       (QuantGroupSize::kN == 1);
-        const std::size_t bq_bytes = elements_to_bytes<QDataType>(QK_B * QN_B);
-        if constexpr(use_permute_n || SelectedKernel::BPreshuffleQuant)
-        {
-            const int block_bq_k =
-                static_cast<int>(SelectedKernel::TileK) / static_cast<int>(QuantGroupSize::kK);
-            auto bq_h = load_host_tensor<false>(
-                BQ_host, static_cast<int>(QK_B), static_cast<int>(QN_B), static_cast<int>(QK_B));
-            if constexpr(use_permute_n)
-            {
-                auto bq_permuted = ck_tile::bq_permuteN<typename SelectedKernel::BShuffleConfig>(
-                    bq_h, static_cast<ck_tile::index_t>(QuantGroupSize::kN));
-                if constexpr(SelectedKernel::BPreshuffleQuant)
-                {
-                    auto bq_shuffled = ck_tile::shuffle_bq(&bq_permuted, block_bq_k);
-                    BRIDGE_HIP_CHECK(
-                        kFn,
-                        hipMemcpy(BQ_dev, bq_shuffled.data(), bq_bytes, hipMemcpyHostToDevice));
-                }
-                else
-                {
-                    BRIDGE_HIP_CHECK(
-                        kFn,
-                        hipMemcpy(BQ_dev, bq_permuted.data(), bq_bytes, hipMemcpyHostToDevice));
-                }
-            }
-            else // BPreshuffleQuant only
-            {
-                auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
-                BRIDGE_HIP_CHECK(
-                    kFn, hipMemcpy(BQ_dev, bq_shuffled.data(), bq_bytes, hipMemcpyHostToDevice));
-            }
-        }
-        else
-        {
-            BRIDGE_HIP_CHECK(kFn, hipMemcpy(BQ_dev, BQ, bq_bytes, hipMemcpyHostToDevice));
-        }
-    }
+    // Host-side BQ prep (bq_permuteN / shuffle_bq / plain copy); shared verbatim
+    // with abquant, see prepare_bq_device().
+    BRIDGE_HIP_CHECK(kFn,
+                     (prepare_bq_device<SelectedKernel, QuantGroupSize::kK, QuantGroupSize::kN>(
+                         BQ_host, BQ_dev, QK_B, QN_B)));
     BRIDGE_HIP_CHECK(kFn, hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
     // BQuant-only: aq_ptr = nullptr, QK_A = 0, stride_AQ = 0.
