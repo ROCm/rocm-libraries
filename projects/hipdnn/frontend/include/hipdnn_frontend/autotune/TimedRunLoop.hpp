@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-#include "hipdnn_frontend/autotune/BenchmarkStatistics.hpp"
+#include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
 
 namespace hipdnn_frontend::autotune
 {
@@ -87,7 +87,7 @@ TimedRunOutcome runUntilStable(int maxIterations,
         {
             const std::vector<float> window(outcome.timings.end() - windowSize,
                                             outcome.timings.end());
-            cov = computeCoefficientOfVariation(window);
+            cov = ::hipdnn_data_sdk::utilities::detail::coefficientOfVariation(window);
             covValid = true;
             if(cov < stabilityThreshold)
             {

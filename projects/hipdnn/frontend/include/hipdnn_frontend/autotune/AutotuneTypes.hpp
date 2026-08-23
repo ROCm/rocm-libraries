@@ -42,15 +42,19 @@ enum class TuneMode
 
 /**
  * @enum AutotuneStrategy
- * @brief Benchmarking iteration strategy for timed runs
+ * @brief Controls how many timed iterations each engine runs
  *
- * Controls how many timed iterations are executed per engine and how
- * timing stability is assessed.
+ * Selects when the timed loop stops, and so how many samples each engine's timing
+ * statistics are drawn from. It does not select which statistic ranks the engines.
  */
 enum class AutotuneStrategy
 {
-    FIXED_AVERAGE, ///< Average of N runs
-    RUN_UNTIL_STABLE ///< Run until timing variance stabilizes, up to a cap (default)
+    /// Run exactly timedIterations iterations.
+    FIXED_AVERAGE,
+
+    /// Run until the trailing-window variation falls below stabilityThreshold, or
+    /// maxIterations is reached (default).
+    RUN_UNTIL_STABLE
 };
 
 /**
@@ -71,9 +75,9 @@ enum class PrimingFailurePolicy
 
 /**
  * @enum AutotuneCacheWriteOutcome
- * @brief Write-provenance of autotuneOracleBest()'s exact-match cache write-back
+ * @brief Write-provenance of autotuneExhaustiveSweep()'s exact-match cache write-back
  *
- * Reports whether a given autotuneOracleBest() call's measured ranking reached the
+ * Reports whether a given autotuneExhaustiveSweep() call's measured ranking reached the
  * exact-match autotune cache, and if not, the specific reason.
  */
 enum class AutotuneCacheWriteOutcome
@@ -200,16 +204,24 @@ struct AutotuneResult
     std::vector<KnobSetting> knobSettings;
 
     // --- Timing ---
-    float minTimeMs = 0.0f; ///< Minimum time across iterations (used for default ranking)
-    float avgTimeMs = 0.0f; ///< Average time across iterations
+    float minTimeMs = 0.0f; ///< Fastest single iteration (used for default ranking)
+    float avgTimeMs = 0.0f; ///< Mean across all iterations
     float stddevMs = 0.0f; ///< Standard deviation of timing measurements
+
+    /// Mean of this engine's iterations after discarding the slow tail: what the engine
+    /// usually costs, rather than the best it ever managed. Always populated, but only
+    /// autotuneExhaustiveSweep() ranks on it; autotune() ranks on @c minTimeMs. Compare
+    /// @c stddevMs to see how much an engine's timings actually varied.
+    float robustTimeMs = 0.0f;
+
     int iterationsRun = 0; ///< Actual number of timed iterations executed
 
-    /// true for FIXED_AVERAGE when all iterations completed successfully.
-    /// false on benchmark failure (any strategy) or for RUN_UNTIL_STABLE
-    /// when maxIterations was reached without convergence. Only meaningful
-    /// for RUN_UNTIL_STABLE; for FIXED_AVERAGE, the value is true on success,
-    /// false on failure.
+    /// For RUN_UNTIL_STABLE, true when the trailing-window variation fell below
+    /// stabilityThreshold before maxIterations was reached. For FIXED_AVERAGE, true when
+    /// every iteration completed. False on benchmark failure under either strategy.
+    ///
+    /// Note this does not affect ranking: a candidate that never converged is ranked on
+    /// its measured timings like any other.
     bool converged = false;
 
     // --- Status ---
@@ -227,7 +239,7 @@ struct AutotuneResult
     /// measured the re-admitted engine.
     bool benchmarked = false;
 
-    std::string errorMessage; ///< Empty if no error; describes bemchmarking failure otherwise
+    std::string errorMessage; ///< Empty if no error; describes the benchmarking failure otherwise
 
     int64_t workspaceSize = 0; ///< Workspace bytes used by this engine
     int64_t estimatedWorkspaceSize = 0; ///< Pre-compile workspace estimate from engine config
@@ -272,7 +284,7 @@ using AutotuneRankingFn = std::function<void(std::vector<AutotuneResult>&)>;
  * @code{.cpp}
  * AutotuneConfig config;
  * config.mode = TuneMode::EXHAUSTIVE;
- * config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
+ * config.strategy = AutotuneStrategy::FIXED_AVERAGE;
  * config.timedIterations = 20;
  * graph.autotune(handle, variantPack, workspace, config);
  * @endcode
@@ -280,11 +292,10 @@ using AutotuneRankingFn = std::function<void(std::vector<AutotuneResult>&)>;
 struct AutotuneConfig
 {
     TuneMode mode = TuneMode::STANDARD; ///< Tuning mode (STANDARD or EXHAUSTIVE)
-    AutotuneStrategy strategy
-        = AutotuneStrategy::RUN_UNTIL_STABLE; ///< Benchmarking iteration strategy (cuDNN parity)
+    AutotuneStrategy strategy = AutotuneStrategy::RUN_UNTIL_STABLE; ///< When the timed loop stops
 
-    int warmupIterations = 1; ///< Number of warmup iterations before timed runs (cuDNN parity)
-    int timedIterations = 10; ///< Number of timed iterations for FIXED_AVERAGE
+    int warmupIterations = 1; ///< Untimed iterations run before timing starts
+    int timedIterations = 10; ///< Timed iterations per engine; FIXED_AVERAGE only
 
     /// Maximum iterations for RUN_UNTIL_STABLE (must be >= windowSize)
     int maxIterations = 100;

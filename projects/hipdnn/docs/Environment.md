@@ -289,8 +289,8 @@ different commit therefore reads and writes a different subdirectory: a field-de
 never be misread by a newer build, but a developer who rebuilds every few minutes will rarely see
 a hit at all, since every rebuild starts that commit's subtree empty.
 
-**A re-tune now refreshes the record instead of being ignored.** Writing a ranking identical to
-what a shard already holds for that key is a no-op. Writing a ranking that measured the same
+**A re-tune refreshes the record.** Writing a ranking identical to what a shard already holds
+for that key is a no-op. Writing a ranking that measured the same
 engines in a different order appends a new line -- lookups resolve multiple lines for one key
 last-line-wins, so the newest measurement is what a later process sees. The one write that is
 *not* accepted as a refresh: one whose sampled-engine set is a strict subset of what the shard

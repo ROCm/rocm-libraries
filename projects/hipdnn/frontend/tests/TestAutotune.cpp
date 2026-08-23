@@ -4,10 +4,10 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/autotune/AutotuneBenchmark.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
-#include <hipdnn_frontend/autotune/BenchmarkStatistics.hpp>
 #include <hipdnn_frontend/autotune/KnobConstants.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 #include <hipdnn_frontend/autotune/TimedRunLoop.hpp>
@@ -669,10 +669,10 @@ TEST(TestAutotune, NonBenchmarkedFactoriesResolveAnOmittedEngineName)
 }
 
 // ============================================================================
-// autotuneOracleBest
+// autotuneExhaustiveSweep
 // ============================================================================
 
-TEST(TestAutotune, OracleBestForcesExhaustiveModeRegardlessOfCallerConfig)
+TEST(TestAutotune, ExhaustiveSweepForcesExhaustiveModeRegardlessOfCallerConfig)
 {
     // No graph is built, so autotuneImpl declines before reaching the mode-forcing
     // assignment's downstream effects either way; this test asserts the config object
@@ -682,16 +682,16 @@ TEST(TestAutotune, OracleBestForcesExhaustiveModeRegardlessOfCallerConfig)
     config.mode = TuneMode::STANDARD;
 
     const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
-    auto err = g.autotuneOracleBest(nullptr, variantPack, nullptr, int64_t{0}, config);
+    auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{0}, config);
 
     EXPECT_TRUE(err.is_bad());
 }
 
-TEST(TestAutotune, OracleBestForcesBenchmarkUnprimedRegardlessOfCallerConfig)
+TEST(TestAutotune, ExhaustiveSweepForcesBenchmarkUnprimedRegardlessOfCallerConfig)
 {
-    // Mirrors OracleBestForcesExhaustiveModeRegardlessOfCallerConfig: no graph is built, so the
-    // call declines downstream either way. What is pinned is that the entry point overrides the
-    // caller's policy rather than honouring it.
+    // Mirrors ExhaustiveSweepForcesExhaustiveModeRegardlessOfCallerConfig: no graph is built, so
+    // the call declines downstream either way. What is pinned is that the entry point overrides
+    // the caller's policy rather than honouring it.
     //
     // ABORT_ON_PRIMING_FAILURE is the default, so one broken engine anywhere in the installed
     // set would abort the whole sweep and persist nothing -- denying a ranking for every graph
@@ -701,29 +701,29 @@ TEST(TestAutotune, OracleBestForcesBenchmarkUnprimedRegardlessOfCallerConfig)
     config.primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
 
     const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
-    auto err = g.autotuneOracleBest(nullptr, variantPack, nullptr, int64_t{0}, config);
+    auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{0}, config);
 
     EXPECT_TRUE(err.is_bad());
 }
 
-TEST(TestAutotune, OracleBestRejectsNegativeWorkspaceSize)
+TEST(TestAutotune, ExhaustiveSweepRejectsNegativeWorkspaceSize)
 {
     hipdnn_frontend::graph::Graph g;
     const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
 
-    auto err = g.autotuneOracleBest(nullptr, variantPack, nullptr, int64_t{-1});
+    auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{-1});
     EXPECT_TRUE(err.is_bad());
     EXPECT_NE(err.get_message().find("workspaceSize"), std::string::npos);
 }
 
-// autotuneOracleBest takes no sweep/variant parameter, so add_engine_sweep()/
+// autotuneExhaustiveSweep takes no sweep/variant parameter, so add_engine_sweep()/
 // add_engine_variants() are structurally unreachable from it, checked at compile time.
-TEST(TestAutotune, OracleBestHasNoSweepOrVariantOverload)
+TEST(TestAutotune, ExhaustiveSweepHasNoSweepOrVariantOverload)
 {
     using Graph = hipdnn_frontend::graph::Graph;
     using VariantPack = std::unordered_map<int64_t, void*>;
 
-    static_assert(!std::is_invocable_v<decltype(&Graph::autotuneOracleBest),
+    static_assert(!std::is_invocable_v<decltype(&Graph::autotuneExhaustiveSweep),
                                        Graph*,
                                        hipdnnHandle_t,
                                        const VariantPack&,
@@ -733,11 +733,175 @@ TEST(TestAutotune, OracleBestHasNoSweepOrVariantOverload)
                                        AutotuneStorageConfig,
                                        std::vector<AutotuneResult>*,
                                        int>,
-                  "autotuneOracleBest must not accept extra sweep/variant-shaped arguments");
+                  "autotuneExhaustiveSweep must not accept extra sweep/variant-shaped arguments");
     SUCCEED();
 }
 
-TEST(TestAutotune, OracleBestExhaustiveIsTheOnlyModeItProduces)
+TEST(TestAutotune, ExhaustiveSweepExhaustiveIsTheOnlyModeItProduces)
 {
     EXPECT_EQ(tuneModeToString(TuneMode::EXHAUSTIVE), std::string("EXHAUSTIVE"));
+}
+
+// An engine's timing statistics are drawn from its own sample set, so candidates measured
+// a different number of times are not directly comparable. A convergence-based strategy
+// stops each candidate independently and produces exactly that asymmetry, so the sweep
+// pins FIXED_AVERAGE regardless of what the caller asked for.
+TEST(TestAutotune, ExhaustiveSweepOverridesCallerStrategy)
+{
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
+
+    hipdnn_frontend::graph::Graph g;
+    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
+    // Declines downstream (no graph built); what is pinned is that the caller's strategy
+    // does not survive into the sweep.
+    auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{0}, config);
+    EXPECT_TRUE(err.is_bad());
+}
+
+// timedIterations is the caller's accuracy/cost dial. The sweep pins FIXED_AVERAGE, so
+// autotuneImpl's strategy-scoped validation rejects a nonsensical count rather than letting
+// it through to produce a single-sample ranking.
+TEST(TestAutotune, ExhaustiveSweepRejectsNonPositiveTimedIterations)
+{
+    hipdnn_frontend::graph::Graph g;
+    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
+
+    for(const int bad : {0, -1})
+    {
+        AutotuneConfig config;
+        // Deliberately left at RUN_UNTIL_STABLE, which does not validate timedIterations:
+        // the rejection must come from the sweep forcing FIXED_AVERAGE, not from the caller
+        // having selected that strategy themselves.
+        config.timedIterations = bad;
+
+        auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{0}, config);
+        EXPECT_TRUE(err.is_bad());
+        EXPECT_NE(err.get_message().find("timedIterations"), std::string::npos);
+    }
+}
+
+// ============================================================================
+// autotuneExhaustiveSweep ranking
+// ============================================================================
+
+namespace
+{
+AutotuneResult makeRankable(const char* name, float robustMs, float minMs)
+{
+    AutotuneResult result;
+    result.engineName = name;
+    result.robustTimeMs = robustMs;
+    result.minTimeMs = minMs;
+    result.succeeded = true;
+    return result;
+}
+
+std::vector<std::string> rankedNames(const std::vector<AutotuneResult>& results)
+{
+    std::vector<std::string> names;
+    names.reserve(results.size());
+    for(const auto& result : results)
+    {
+        names.push_back(result.engineName);
+    }
+    return names;
+}
+} // namespace
+
+TEST(TestAutotune, RankByRobustTimeOrdersFastestFirst)
+{
+    std::vector<AutotuneResult> results{makeRankable("slow", 30.0f, 30.0f),
+                                        makeRankable("fast", 10.0f, 10.0f),
+                                        makeRankable("medium", 20.0f, 20.0f)};
+
+    autotune::detail::rankByRobustTime(results);
+
+    EXPECT_EQ(rankedNames(results), (std::vector<std::string>{"fast", "medium", "slow"}));
+}
+
+// The reason the sweep ranks on robustTimeMs at all. The volatile candidate has the better
+// fastest iteration but is usually slower, so ranking must not put it first.
+TEST(TestAutotune, RankByRobustTimePrefersConsistentEngineOverLuckyOne)
+{
+    std::vector<AutotuneResult> results{
+        makeRankable("volatile", /*robustMs=*/25.0f, /*minMs=*/5.0f),
+        makeRankable("consistent", /*robustMs=*/10.0f, /*minMs=*/9.5f)};
+
+    autotune::detail::rankByRobustTime(results);
+
+    EXPECT_EQ(results.front().engineName, "consistent");
+    // Guard against a silent regression to min-based ranking, which would invert this.
+    EXPECT_LT(results.back().minTimeMs, results.front().minTimeMs);
+}
+
+TEST(TestAutotune, RankByRobustTimeKeepsBenchmarkedOrderOnTies)
+{
+    std::vector<AutotuneResult> results{makeRankable("first", 10.0f, 10.0f),
+                                        makeRankable("second", 10.0f, 9.0f),
+                                        makeRankable("third", 10.0f, 8.0f)};
+
+    autotune::detail::rankByRobustTime(results);
+
+    // Equal robust times must not be reordered by any other field, or the persisted
+    // ranking would vary run to run for candidates that measured the same.
+    EXPECT_EQ(rankedNames(results), (std::vector<std::string>{"first", "second", "third"}));
+}
+
+TEST(TestAutotune, RankByRobustTimeHandlesEmptyAndSingleResult)
+{
+    std::vector<AutotuneResult> empty;
+    autotune::detail::rankByRobustTime(empty);
+    EXPECT_TRUE(empty.empty());
+
+    std::vector<AutotuneResult> single{makeRankable("only", 10.0f, 10.0f)};
+    autotune::detail::rankByRobustTime(single);
+    EXPECT_EQ(single.front().engineName, "only");
+}
+
+// The sweep defaults rankingFn rather than overriding it, so a caller can rank on any
+// criterion its own results expose -- ranking by stddev to prefer the steadiest engine, for
+// instance, which no built-in ordering provides.
+TEST(TestAutotune, SweepRankingHonoursCallerSuppliedFunction)
+{
+    bool called = false;
+    AutotuneRankingFn callerSupplied = [&called](std::vector<AutotuneResult>& succeeded) {
+        called = true;
+        std::stable_sort(succeeded.begin(),
+                         succeeded.end(),
+                         [](const AutotuneResult& a, const AutotuneResult& b) {
+                             return a.stddevMs < b.stddevMs;
+                         });
+    };
+
+    auto chosen = autotune::detail::sweepRankingOr(callerSupplied);
+    ASSERT_TRUE(static_cast<bool>(chosen));
+
+    // "steady" has the worse robust time but the lower stddev, so the caller's ordering and
+    // the default disagree: only the caller's puts it first.
+    std::vector<AutotuneResult> results{makeRankable("steady", 20.0f, 19.0f),
+                                        makeRankable("quick", 10.0f, 1.0f)};
+    results[0].stddevMs = 0.1f;
+    results[1].stddevMs = 9.0f;
+
+    chosen(results);
+
+    EXPECT_TRUE(called);
+    EXPECT_EQ(results.front().engineName, "steady");
+}
+
+TEST(TestAutotune, SweepRankingFallsBackToRobustTimeWhenCallerSuppliesNone)
+{
+    auto chosen = autotune::detail::sweepRankingOr(nullptr);
+    ASSERT_TRUE(static_cast<bool>(chosen));
+
+    std::vector<AutotuneResult> results{makeRankable("steady", 20.0f, 19.0f),
+                                        makeRankable("quick", 10.0f, 1.0f)};
+    results[0].stddevMs = 0.1f;
+    results[1].stddevMs = 9.0f;
+
+    chosen(results);
+
+    // Same inputs as above, but with no caller function the robust ordering wins.
+    EXPECT_EQ(results.front().engineName, "quick");
 }

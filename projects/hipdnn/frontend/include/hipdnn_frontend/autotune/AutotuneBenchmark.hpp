@@ -305,6 +305,35 @@ inline std::vector<KnobSetting> stripBenchmarkingKnob(const std::vector<KnobSett
     return stripped;
 }
 
+// Order succeeded results for an exhaustive sweep: ascending robustTimeMs, fastest first.
+//
+// Uses the representative time rather than the fastest single iteration. A candidate that
+// is usually slower but occasionally lucky has the better best-case, and ranking on that
+// would pick it, then serve its typical -- slower -- time on every later execution.
+//
+// stable_sort so that candidates with identical times keep their benchmarked order, which
+// makes the resulting ranking reproducible for a given sweep order.
+inline void rankByRobustTime(std::vector<AutotuneResult>& succeeded)
+{
+    std::stable_sort(
+        succeeded.begin(), succeeded.end(), [](const AutotuneResult& a, const AutotuneResult& b) {
+            return a.robustTimeMs < b.robustTimeMs;
+        });
+}
+
+// The ranking an exhaustive sweep should use: the caller's own if it supplied one,
+// otherwise rankByRobustTime.
+//
+// Split out from the sweep so the choice is testable without running a benchmark.
+inline AutotuneRankingFn sweepRankingOr(const AutotuneRankingFn& callerSupplied)
+{
+    if(callerSupplied)
+    {
+        return callerSupplied;
+    }
+    return &rankByRobustTime;
+}
+
 // Rank benchmark results and select the winning plan.
 //
 // Sorts succeeded results (custom config.rankingFn if provided, otherwise by
