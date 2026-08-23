@@ -857,6 +857,17 @@ navi33 has 2/3 of navi31's per-CU VGPR file (65 536 vs 98 304), and this hardwar
 emulate a different VGPR file — only a different CU count. So the performance question needs
 real navi33 silicon, and this result should not be read as a performance claim.
 
+> **Since narrowed — and the implication above is wrong.** The occupancy *exposure* is
+> computable without navi33 hardware, from the VGPR counts in the built code objects. Doing
+> so ([`NAVI33_OCCUPANCY.md`](NAVI33_OCCUPANCY.md)) shows **100% of measured kernel time**
+> sits in solutions that drop waves/SIMD on navi33, dominated by **256 VGPR: 6 -> 4 waves**.
+> But the control settles the interpretation: **navi32's own shipped catalog is 100%
+> exposed, and the port is 98.3%** — the cut is a property of these TN tile shapes on RDNA3,
+> **not something porting introduces**, and navi33 already pays it today. So the open
+> question is not whether the port is valid but whether schedule parameters tuned at 6
+> waves/SIMD still hold at 4. That still needs silicon; it is a narrower question than this
+> paragraph implies.
+
 > **A false failure on the first attempt, worth recording.** The initial run reported
 > "2 assembler errors" and produced no code objects. It was neither: the grep pattern `error`
 > matched the word inside **`ImportError`**, and the actual cause was
