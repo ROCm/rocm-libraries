@@ -167,6 +167,22 @@ Required: `--use_e --aux_type f16_r --activation_type gelu`.
 **Check `status` counts, not row counts.** A sweep producing rows at the expected rate can be
 producing nothing but errors, and the harness will happily run to completion.
 
+## 7d. Two ways a build failure lies about itself
+
+**`grep -i error` matches `ImportError`, `error_code` and `stderr`.** A gfx1102 gate run was
+reported here as "2 assembler errors, 0 code objects" on the strength of that grep. There
+were no assembler errors: the log said
+*"rocisa C++ sources are newer than the built `_rocisa.so` — bindings are stale."* Trusting
+the grep would have produced a confident, entirely wrong conclusion about a different
+architecture. **Grep the specific diagnostic** — `not a valid operand`,
+`overflowedResources`, `Total kernels processed` — never the substring `error`.
+
+**A scratch-branch merge test leaves environment residue.** Checking out back to the original
+branch restores file *contents* but not *timestamps*, and rocisa's staleness guard keys on
+mtime. So a merge test two hours earlier can break an unrelated build later. Symptom is the
+ImportError above; fix is `invoke rocisa`, or rebuild `_rocisa` in the build tree. Verify with
+`python3 -c "import rocisa"` before blaming the thing you are actually testing.
+
 ## 8. Operational
 
 - `flock` every GPU action. A hung child holds it — kill by PID, and remember
