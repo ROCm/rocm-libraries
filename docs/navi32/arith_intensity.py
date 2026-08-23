@@ -28,7 +28,7 @@ import statistics
 import sys
 
 CSV = sys.argv[1] if len(sys.argv) > 1 else "/home/vmijovic/navi32/results/P6_main.csv"
-BASE = "navi32ship"
+BASE = sys.argv[2] if len(sys.argv) > 2 else "navi32ship"
 BANDS = [("memory-bound  AI<32", 0, 32), ("mixed  32-128", 32, 128),
          ("compute-bound 128-512", 128, 512), ("deep compute  AI>=512", 512, 1e9)]
 

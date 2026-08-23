@@ -591,9 +591,9 @@ A/A control), bf16 in/out with fp32 compute.
 
 | | fp16 HHS (measured earlier) | **bf16 BBS** |
 |---|---|---|
-| wall-clock | 123.91% | **122.31%** |
-| geomean | 127.21% | 120.03% |
-| A/A control | 100.32% | **100.63%** |
+| wall-clock | 123.91% | **122.17%** |
+| geomean | 127.21% | 119.89% |
+| A/A control | 100.32% | **100.60%** |
 
 And the same shape-dependent signature:
 
@@ -602,7 +602,8 @@ And the same shape-dependent signature:
 | bf16 `bbs_wide` | 120.4% | 122.2% | 142.6% | 143.1% | | **178.1%** | 120.6% | 127.2% | 122.2% |
 | fp16 `gridcat` | 122.7% | 122.7% | 140.2% | 141.7% | | 222.9% | 123.3% | 124.4% | 123.5% |
 
-**+22% wall-clock on bf16 against +24% on fp16**, with the same ordering across every size and
+**+22% wall-clock on bf16 against +24% on fp16** (final n=996, 2 994 measurements,
+zero failures), with the same ordering across every size and
 geometry band. The mechanism is the catalog, not the dtype, exactly as the "same mechanism
 applies" argument in the commit claimed — and now that claim rests on measurement across two
 dtypes rather than on one measurement plus an analogy.
@@ -610,3 +611,32 @@ dtypes rather than on one measurement plus an analogy.
 Two of the four shipped catalogs are now directly measured (HHS-TN and BBS-TN). The remaining
 two are the `AuxH`/`AuxB` variants of those same two ProblemTypes — the closest possible
 neighbours, differing only in the bias-aux epilogue.
+
+### bf16 arithmetic-intensity bands — transfers at least as well as fp16
+
+| band | n | % of kernel time | `bbs_wide` |
+|---|---|---|---|
+| memory-bound `AI<32` | 487 | 7.0% | 110.94% |
+| mixed `32–128` | 197 | 6.0% | 114.15% |
+| compute-bound `128–512` | 195 | 14.4% | 124.76% |
+| **deep compute `AI>=512`** | 117 | **72.6%** | **123.60%** |
+
+Same structure as fp16 — 72.6% of kernel time is deep-compute, winning 123.6%, essentially
+the headline. Notably the bf16 win is **more** concentrated in the compute-bound bands
+(110.9% in the memory-bound band vs fp16's 142.9%), so it depends even less on this card's
+bandwidth advantage and transfers to navi32 with a smaller caveat than the fp16 result.
+
+---
+
+## Final state
+
+| | |
+|---|---|
+| branch | `vmijovic/navi32`, 8 commits, pushed |
+| measurements | **~9 100** across 3 sweeps, **zero failures** |
+| shipped | 4 TN catalogs widened; Origami gains gfx1101; bench gains a CU mask |
+| measured | HHS-TN **+24%**, BBS-TN **+22%** wall-clock |
+| gated | all 935+298 solutions build for gfx1101 (`Flags: 0x46`) |
+| rejected | WGM re-fork, Origami-Prediction, catalog extension — each with evidence |
+| bounded | 73% of kernel time is compute-bound, so results transfer despite bandwidth |
+| verified | every headline figure recomputed from raw CSV; all match |
