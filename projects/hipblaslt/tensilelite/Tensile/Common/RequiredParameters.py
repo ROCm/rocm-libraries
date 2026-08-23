@@ -108,6 +108,8 @@ def getRequiredParametersMin() -> set:
         'OptNoLoadLoop',
         'PrefetchAcrossPersistent',
         'PrefetchGlobalRead',
+        'PrefetchGlobalReadA',
+        'PrefetchGlobalReadB',
         'PrefetchLocalRead',
         'PrefetchGL2',
         'PreloadKernArgs',

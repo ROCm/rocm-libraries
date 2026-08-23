@@ -1461,6 +1461,8 @@
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
     'PrefetchGlobalRead',
+    'PrefetchGlobalReadA',
+    'PrefetchGlobalReadB',
     'PrefetchLocalRead',
     'PreloadKernArgs',
     'SFCWGM',
@@ -1487,11 +1489,13 @@
     'SuppressNoLoadLoop',
     'SwInstructionPrefetch',
     'SwapGlobalReadOrder',
+    'TDMFuse',
     'TDMInst',
     'TDMIterateMode',
     'TDMLoadWaveSync',
     'TDMPlusLdsBuf',
     'TDMSplit',
+    'TDMWaveSpread',
     'TailloopInNll',
     'TemporalHint',
     'TemporalHintA',
@@ -2428,6 +2432,24 @@
       'len': 17,
       'type': 'list',
     }),
+    'PrefetchGlobalReadA': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 17,
+      'type': 'list',
+    }),
+    'PrefetchGlobalReadB': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 17,
+      'type': 'list',
+    }),
     'PrefetchLocalRead': dict({
       'head': list([
         0,
@@ -2641,6 +2663,15 @@
       'len': 2,
       'type': 'list',
     }),
+    'TDMFuse': dict({
+      'head': list([
+        0,
+        2,
+        4,
+      ]),
+      'len': 5,
+      'type': 'list',
+    }),
     'TDMInst': dict({
       'head': list([
         0,
@@ -2680,6 +2711,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'TDMWaveSpread': dict({
+      'head': list([
+        0,
+        1,
       ]),
       'len': 2,
       'type': 'list',
