@@ -188,14 +188,16 @@ def test_unresolvable_hint_is_a_readable_error(tmp_path):
     """
     ns = {}
     exec(
-        textwrap.dedent("""
+        textwrap.dedent(
+            """
             from __future__ import annotations
             import dataclasses
 
             @dataclasses.dataclass
             class Broken:
                 field: DoesNotExist
-            """),
+            """
+        ),
         ns,
     )
 
