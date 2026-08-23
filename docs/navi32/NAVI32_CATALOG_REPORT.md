@@ -779,9 +779,11 @@ The mechanism (a sparse nearest-neighbour table mis-serving small and skinny sha
 architecture-independent, but **the remedy is not**. This campaign's fix ports navi31's
 catalog, and that is only defensible where the target is close to navi31:
 
-* **navi33 / gfx1103** — same RDNA3 discrete/mobile uarch, same WMMA V1, same VGPR file.
-  The port is plausible and the gfx1101 build gate would likely pass. Worth doing, and
-  measurable the same way (emulate the CU count, run the same 1 000-shape sweep).
+* **navi33 / gfx1103** — same RDNA3 discrete/mobile uarch and same WMMA V1, but a **smaller
+  VGPR file** (1024 vs 1536 per SIMD; 65 536 vs 98 304 per CU). The port is plausible and the
+  build gate **does** pass — 238/238 for gfx1102, tested below — but the emulation used in
+  this campaign would not be faithful, because the VGPR file differs as well as the CU count
+  and only the latter can be emulated here. See the follow-up section.
 * **gfx1150 / 1152 / 1153** — Strix-family iGPUs with **very different CU counts and memory
   systems** (gfx1153 is 0.240 mem1_perf_ratio against navi31's 7.12 in Origami's own
   constants). A catalog tuned for a 96-CU discrete part with 960 GB/s is not obviously right
