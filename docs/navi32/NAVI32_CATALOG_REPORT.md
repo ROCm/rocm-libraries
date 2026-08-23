@@ -579,3 +579,34 @@ catalog quality either way.
 
 Reproduce: `python3 analyze.py results/P6_main.csv`,
 `python3 arith_intensity.py results/P6_main.csv`.
+
+---
+
+## P9 — bf16 (BBS) validation: the analogy holds across a dtype boundary
+
+Three of the four catalogs shipped on analogy rather than measurement. The weakest link was
+the **bf16 (BBS)** pair, because it crosses a dtype boundary from the measured fp16 case.
+Measured it: 904 shapes, 3 arms (shipped 64-solution BBS, widened 306-solution BBS, and an
+A/A control), bf16 in/out with fp32 compute.
+
+| | fp16 HHS (measured earlier) | **bf16 BBS** |
+|---|---|---|
+| wall-clock | 123.91% | **122.31%** |
+| geomean | 127.21% | 120.03% |
+| A/A control | 100.32% | **100.63%** |
+
+And the same shape-dependent signature:
+
+| | large | medium | small | tiny | | gemv | rect | skinny | square |
+|---|---|---|---|---|---|---|---|---|---|
+| bf16 `bbs_wide` | 120.4% | 122.2% | 142.6% | 143.1% | | **178.1%** | 120.6% | 127.2% | 122.2% |
+| fp16 `gridcat` | 122.7% | 122.7% | 140.2% | 141.7% | | 222.9% | 123.3% | 124.4% | 123.5% |
+
+**+22% wall-clock on bf16 against +24% on fp16**, with the same ordering across every size and
+geometry band. The mechanism is the catalog, not the dtype, exactly as the "same mechanism
+applies" argument in the commit claimed — and now that claim rests on measurement across two
+dtypes rather than on one measurement plus an analogy.
+
+Two of the four shipped catalogs are now directly measured (HHS-TN and BBS-TN). The remaining
+two are the `AuxH`/`AuxB` variants of those same two ProblemTypes — the closest possible
+neighbours, differing only in the bias-aux epilogue.
