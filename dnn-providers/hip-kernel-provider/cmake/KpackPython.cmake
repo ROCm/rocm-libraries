@@ -43,9 +43,8 @@ option(HIPKERNELPROVIDER_KPACK_ALLOW_FETCH
     "Fetch rocm_kpack when no local source is configured." OFF)
 
 # The dev container stages rocm_kpack plus msgpack/zstandard in the first entry,
-# so a container build needs no flags. Outside /opt/rocm, which is a run-time
-# mount point in that image. Absent or malformed entries are skipped, not fatal:
-# they describe the environment rather than an explicit request.
+# so a container build needs no flags. Absent or malformed entries are skipped,
+# not fatal: they describe the environment rather than an explicit request.
 set(HIPKERNELPROVIDER_KPACK_DEFAULT_DIRS "/opt/rocm-kpack/python" CACHE STRING
     "Directories searched for rocm_kpack when no path is configured.")
 
@@ -78,19 +77,27 @@ endfunction()
 
 # _kpack_fetch(<out_dir>)
 #   Sparse, blobless, depth-1 checkout of the pinned commit's kpack directory.
-#   The pin lives in a monorepo: a full clone costs ~1.6 GB and half a minute to
-#   obtain a directory of Python files, and FetchContent cannot avoid it here
-#   because its GIT_SHALLOW emits `clone --depth 1` with no ref, which cannot
-#   reach a commit SHA. This is the same recipe the dev container and the
+#   The pin lives in a monorepo, where a full clone costs ~1.6 GB to obtain a
+#   directory of Python files. This is the same recipe the dev container and the
 #   superbuild CI jobs use.
 #
-#   Re-entrant: an existing checkout of the pin is reused, so a warm configure
-#   touches no network.
+#   Re-entrant: a checkout already at the pinned commit is reused, so a warm
+#   configure touches no network. Reuse is gated on the checked-out commit
+#   rather than on the package being present, so a bumped pin refetches and a
+#   checkout interrupted partway through is not mistaken for a complete one.
 function(_kpack_fetch out_dir)
     set(_src "${CMAKE_BINARY_DIR}/_kpack-fetch")
     set(_result "${_src}/${HIPKERNELPROVIDER_KPACK_GIT_SUBDIR}")
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+        WORKING_DIRECTORY "${_src}"
+        RESULT_VARIABLE _rev_rc
+        OUTPUT_VARIABLE _head
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
     _kpack_is_python_dir("${_result}" _have)
-    if(_have)
+    if(_have AND _rev_rc EQUAL 0 AND
+       "${_head}" STREQUAL "${HIPKERNELPROVIDER_KPACK_GIT_REF}")
         set(${out_dir} "${_result}" PARENT_SCOPE)
         return()
     endif()
@@ -100,8 +107,13 @@ function(_kpack_fetch out_dir)
     file(REMOVE_RECURSE "${_src}")
     file(MAKE_DIRECTORY "${_src}")
     # The cone holds the project directory, one level above the python/ dir the
-    # caller receives, so pyproject.toml comes along with the package.
+    # caller receives, so pyproject.toml comes along with the package. A
+    # single-component subdir has no parent; cone on it directly, since an empty
+    # cone checks out nothing and would fail as if the pin were wrong.
     get_filename_component(_cone "${HIPKERNELPROVIDER_KPACK_GIT_SUBDIR}" DIRECTORY)
+    if("${_cone}" STREQUAL "")
+        set(_cone "${HIPKERNELPROVIDER_KPACK_GIT_SUBDIR}")
+    endif()
     foreach(_step
             "init;-q;."
             "remote;add;origin;${HIPKERNELPROVIDER_KPACK_GIT_REPO}"
@@ -181,10 +193,7 @@ endfunction()
 # kpack_unset_reason(<out_var>)
 #   The remediation message callers print when resolution returns empty.
 function(kpack_unset_reason out_var)
-    # The searched-defaults clause is dropped when the list is empty, and its
-    # ;-separated entries are re-joined with commas: raw ; would be
-    # indistinguishable from the sentence's own punctuation. This is the only
-    # remediation text on both failure paths, so it has to read cleanly.
+    # Re-joined with commas; a raw ; would read as sentence punctuation.
     string(REPLACE ";" ", " _dirs_csv "${HIPKERNELPROVIDER_KPACK_DEFAULT_DIRS}")
     set(_searched "")
     if(NOT "${_dirs_csv}" STREQUAL "")

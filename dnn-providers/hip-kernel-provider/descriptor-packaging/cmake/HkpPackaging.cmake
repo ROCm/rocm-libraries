@@ -182,8 +182,9 @@ endfunction()
 #   Register the pytest suite as two build-tree ctest entries running disjoint
 #   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
 #   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
-#   whose cascade runs each test once per tier with no overlap. Without pytest on
-#   PATH the entries register DISABLED so they list as skipped, not absent.
+#   whose cascade runs each test once per tier with no overlap. When
+#   Python3_EXECUTABLE cannot import pytest the entries register DISABLED so
+#   they list as skipped, not absent.
 # ---------------------------------------------------------------------------
 function(hkp_register_tests kpack_python hipcc)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)

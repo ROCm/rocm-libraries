@@ -75,24 +75,20 @@ FROM base AS install_kpack
 # cannot read it. The kpack-pin-sync pre-commit hook holds them equal.
 #
 # Pinned, not a branch: Docker keys a RUN on the command string, so a warm
-# builder cache would serve stale tooling indefinitely. ROCM_SYSTEMS_REF
-# overrides it; ROCM_SYSTEMS_KPACK_REF=develop tracks the branch.
-ARG ROCM_SYSTEMS_KPACK_PINNED_REF=a022846cf553c2b135410a5168f97705f1b9c6ac
-ARG ROCM_SYSTEMS_REF=default
-ARG ROCM_SYSTEMS_KPACK_REF=$ROCM_SYSTEMS_REF
+# builder cache would serve stale tooling indefinitely. Set
+# ROCM_SYSTEMS_KPACK_REF to override; =develop tracks the branch. It is
+# deliberately independent of ROCM_SYSTEMS_REF, which selects TheRock's
+# rocm-systems submodule and need not carry a working shared/kpack.
+ARG ROCM_SYSTEMS_KPACK_REF=a022846cf553c2b135410a5168f97705f1b9c6ac
 
 # init + fetch rather than `clone --branch`, which accepts only a branch or tag
 # while these refs are usually commit SHAs. The git wire protocol cannot fetch
 # an abbreviated SHA; pass a full one.
 RUN kpack_ref="$ROCM_SYSTEMS_KPACK_REF" && \
-    if [ "$kpack_ref" = "default" ] || [ -z "$kpack_ref" ]; then \
-        kpack_ref="$ROCM_SYSTEMS_KPACK_PINNED_REF"; \
-    fi && \
     echo "Staging rocm_kpack from rocm-systems ref: $kpack_ref" && \
     mkdir -p /tmp/rocm-systems && cd /tmp/rocm-systems && \
     git init -q . && \
     git remote add origin https://github.com/ROCm/rocm-systems.git && \
-    git config core.sparseCheckout true && \
     git sparse-checkout init --cone && \
     git sparse-checkout set shared/kpack && \
     git fetch --depth 1 --filter=blob:none origin "$kpack_ref" && \
@@ -102,17 +98,14 @@ RUN kpack_ref="$ROCM_SYSTEMS_KPACK_REF" && \
         exit 1; \
     fi
 
-# --target, not a venv: the result is a flat directory that is itself the
-# parent of rocm_kpack/, which is what HIPKERNELPROVIDER_KPACK_PYTHON_DIR
-# expects, and dependencies land beside the package so one PYTHONPATH entry
-# satisfies the import -- including from a venv built without
-# --system-site-packages. A venv here would instead pin one interpreter.
+# --target yields a flat directory that is itself the parent of rocm_kpack/,
+# which is what HIPKERNELPROVIDER_KPACK_PYTHON_DIR expects, with the
+# dependencies beside the package so one PYTHONPATH entry satisfies the import.
+# Installing the checkout takes msgpack and zstandard from kpack's own
+# pyproject.toml.
 #
-# Installing the checkout itself takes msgpack and zstandard from kpack's own
-# pyproject.toml, so this image is not a second opinion on their versions.
-#
-# zstandard ships two ~12 MB backends and CPython loads only backend_c; _cffi is
-# PyPy-only, and removing it nearly halves the layer.
+# zstandard ships two ~12 MB backends and CPython loads only backend_c;
+# removing the PyPy-only _cffi nearly halves the layer.
 RUN python3 -m pip install --no-cache-dir --no-compile \
         --target /opt/rocm-kpack/python \
         /tmp/rocm-systems/shared/kpack && \

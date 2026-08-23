@@ -313,10 +313,9 @@ Python tooling. Resolution never reaches the network unless you opt in with
 `HIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON`; otherwise the build uses an existing copy or skips packing.
 
 > [!NOTE]
-> kpack is a **superbuild** concern. The standalone `projects/hipdnn` build does not include
-> `dnn-providers`, so none of the flags below apply to it — passing them there does nothing but
-> earn an "unused variable" warning. Use a preset that builds the provider, such as
-> `hip-kernel-provider`, `hipdnn-providers-all`, or `hipdnn-dev-all`, from the repository root.
+> kpack is a **superbuild** concern; these flags apply only to builds that include
+> `dnn-providers`. Use a preset that builds the provider, such as `hip-kernel-provider`,
+> `hipdnn-providers-all`, or `hipdnn-dev-all`, from the repository root.
 
 **In the hipDNN dev container this is already handled** — the `devshell` and `hipdnn` images ship
 `rocm_kpack` and its `msgpack`/`zstandard` dependencies at `/opt/rocm-kpack/python`, which the build
@@ -328,13 +327,11 @@ Resolution order:
 |--------|-------|
 | `-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR=<dir>` | Highest precedence. Fatal if the path has no `rocm_kpack/`. |
 | `-DROCKE_KPACK_PYTHON_DIR=<dir>` | **Deprecated** alias for the above; seeds it and warns. Kept until TheRock migrates; do not use in new builds. |
-| `-DHIPKERNELPROVIDER_KPACK_DEFAULT_DIRS` | Defaults to `/opt/rocm-kpack/python`, what the container ships. Skipped silently when absent. |
+| `-DHIPKERNELPROVIDER_KPACK_DEFAULT_DIRS=<dir>[;<dir>...]` | Defaults to `/opt/rocm-kpack/python`, what the container ships. Skipped silently when absent. |
 | `-DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON` | Off by default. Checks out `shared/kpack` from the pinned `rocm-systems` commit — the only path that reaches the network. |
 
-`<dir>` is whichever directory *contains* `rocm_kpack/`: `<rocm-systems>/shared/kpack/python`, or a
-virtual environment's `site-packages`. Installing the kpack project with `pip` ships only the
-top-level `rocm_kpack` package; the `elf`, `coff`, and `tools` subpackages exist only in a source
-checkout, and no hipDNN build needs them.
+`<dir>` is whichever directory *contains* `rocm_kpack/`: a rocm-systems checkout's
+`shared/kpack/python`, or a virtual environment's `site-packages`.
 
 If nothing resolves, the ASM SDPA engine logs `skipping .kpack packing` and the build proceeds;
 the runtime loads loose `.co` files, so this is not fatal. Descriptor packaging
@@ -353,26 +350,25 @@ environment's `site-packages`:
 python3 -m venv .venv && source .venv/bin/activate
 
 # From a rocm-systems checkout (the source of truth for kpack):
-pip install <rocm-systems>/shared/kpack
+pip install /path/to/rocm-systems/shared/kpack
 
 cmake --preset hip-kernel-provider \
     -DPython3_EXECUTABLE="$(which python)" \
     -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
 ```
 
-Alternatively, point `-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR` straight at
-`<rocm-systems>/shared/kpack/python` and install `msgpack` and `zstandard` for the interpreter
-CMake uses.
+Alternatively, point `-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR` straight at a rocm-systems checkout's
+`shared/kpack/python` and install `msgpack` and `zstandard` for the interpreter CMake uses.
 
 Configure prints `kpack: using rocm_kpack from <dir>` on success. Two failures read differently:
 
 - **`no rocm_kpack source found`** — nothing resolved. Pass
   `-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR`, or set `-DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON` to
   fetch the pinned commit.
-- **`cannot import rocm_kpack.compression`** — a path resolved, but `Python3_EXECUTABLE` cannot
-  import it; typically a tree staged for a different Python, or one whose `msgpack`/`zstandard`
-  are missing. Install the dependencies for this interpreter, or point `-DPython3_EXECUTABLE` at
-  the one they were built for.
+- **`cannot import`** — a path resolved, but `Python3_EXECUTABLE` cannot import it; typically a
+  tree staged for a different Python, or one whose `msgpack`/`zstandard` are missing. Install the
+  dependencies for this interpreter, or point `-DPython3_EXECUTABLE` at the one they were built
+  for.
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
