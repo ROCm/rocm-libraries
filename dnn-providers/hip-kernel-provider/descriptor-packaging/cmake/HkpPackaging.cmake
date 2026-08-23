@@ -107,6 +107,145 @@ function(hkp_selected_arches out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_install_base(<out_var>)
+#   The install DESTINATION for a packed arch shard, as one expression.
+#
+#   The SAME subdirectory the provider compiles into HIPDNN_DESCRIPTOR_SUBDIR and that
+#   hkp_wire_demo stages into -- not a second spelling of it. This used to append an extra
+#   "/descriptors" segment, which put every production-packed descriptor into a parallel
+#   tree nothing else names: the runtime resolves its tree as
+#   <plugin engine dir>/${HIPDNN_DESCRIPTOR_SUBDIR}, so an installed rocKE engine shipped
+#   correctly and was then never loaded, with no error to say so. That is precisely the
+#   failure hip-kernel-provider/CMakeLists.txt warns about where it defines the variable
+#   ("a typo in a second copy would yield a provider that finds no descriptors, with no
+#   build error to say so"), so take the value from there rather than restating the path a
+#   third time.
+#
+#   The recursive walk means a deeper tree would still be FOUND -- measured: descriptors
+#   under a `descriptors/` child still load, 2 sets, libraries resolving. The defect is
+#   that it differed from where hkp_wire_demo stages, so the two halves of one tree
+#   disagreed about their own layout. One spelling, from one variable.
+# ---------------------------------------------------------------------------
+function(hkp_install_base out_var)
+    if(NOT HIPDNN_DESCRIPTOR_SUBDIR)
+        message(FATAL_ERROR
+            "hkp: HIPDNN_DESCRIPTOR_SUBDIR is unset, so there is no canonical descriptor "
+            "subdirectory to install into. It is defined under HIPDNN_ENABLE_KERNEL_INGESTOR "
+            "in hip-kernel-provider/CMakeLists.txt, which must be processed first.")
+    endif()
+    set(${out_var}
+        "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
+        PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_wire_pack_step(STAMP <file> SOURCE_ROOT <dir> OUT_ROOT <dir>
+#                    INTER_ROOT <dir> ARCHES <list> HIPCC <path>
+#                    ROCM_KPACK_DIR <dir> INTERP <path> WHAT <string>
+#                    [INTERP_DEP <path>] [WHEEL_STAMP <path>]
+#                    [TOOL_ENV <list>] [COMMENT <string>]
+#                    [STAGE_ROOT <dir> STAGE_TAG <suffix> STAGE_STAMP_VAR <var>])
+#   The compile -> prune -> pack DAG itself, shared by production and the demo
+#   fixture. It exists because those two were near-copies that drifted twice: a
+#   `${kpack_python}` reference to another function's parameter, and then a
+#   non-recursive glob plus a missing interpreter gate on the demo side only.
+#   Both were invisible at configure time. One definition means a future
+#   divergence has to be written deliberately rather than acquired by omission.
+#
+#   What is genuinely NOT shared stays with the callers: production installs the
+#   result, the demo fixture stages it into the build tree. Only the DAG that
+#   produces STAMP is here.
+#
+#   INTERP is gated for rocm_kpack's runtime dependencies before use, so a
+#   missing msgpack/zstandard is a named configure error rather than a failure
+#   part-way through someone's build. WHAT names that interpreter for the
+#   diagnostic ("the base interpreter (...)"), which is a different sentence
+#   from COMMENT's build-progress line.
+# ---------------------------------------------------------------------------
+function(hkp_wire_pack_step)
+    set(_one STAMP SOURCE_ROOT OUT_ROOT INTER_ROOT HIPCC ROCM_KPACK_DIR INTERP
+        WHAT INTERP_DEP WHEEL_STAMP COMMENT STAGE_ROOT STAGE_TAG STAGE_STAMP_VAR)
+    set(_multi ARCHES TOOL_ENV)
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "${_multi}")
+
+    # The authored root is a tree, not a flat folder: glob recursively so a
+    # descriptor added in any child folder retriggers the pack step. The packer
+    # walks recursively (load_flat_input uses rglob), so a non-recursive glob
+    # here would silently drop the dependency edge for every nested descriptor.
+    file(GLOB_RECURSE _source_inputs CONFIGURE_DEPENDS
+         "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp")
+
+    # Editing the tool's own sources must retrigger the pack step, else the
+    # artifacts go stale against the current pipeline code. The fetched
+    # rocm_kpack package counts: kpack_resolver.py imports it and it decides the
+    # archive format. FetchContent's source dir is name-derived, so moving
+    # HIPKERNELPROVIDER_KPACK_GIT_REF does not move this stamp -- without these
+    # inputs a `cmake --fresh` onto a new ref rebuilds the reader while the pack
+    # stamp survives, leaving an archive written by the old packer and read by
+    # the new one. That is the skew the single pin in RocmKpack.cmake prevents.
+    file(GLOB _tool_sources CONFIGURE_DEPENDS
+         "${HKP_PYTHON_ROOT}/hkp_pack/*.py"
+         "${ARG_ROCM_KPACK_DIR}/rocm_kpack/*.py")
+
+    # Whatever interpreter the caller picked has to be able to import what the
+    # packer imports. Checked here, once, for both callers: the base interpreter
+    # is provisioned by nothing, and the rocKE venv is cheap to re-affirm.
+    hkp_require_kpack_runtime("${ARG_INTERP}" "${ARG_WHAT}")
+
+    string(REPLACE ";" "," _arch_csv "${ARG_ARCHES}")
+
+    set(_wheel_stamp_arg "")
+    if(ARG_WHEEL_STAMP)
+        set(_wheel_stamp_arg --rocke-wheel-stamp "${ARG_WHEEL_STAMP}")
+    endif()
+
+    set(_tool_cmd "${CMAKE_COMMAND}" -E env ${ARG_TOOL_ENV} "${ARG_INTERP}"
+        "${HKP_TOOL}")
+
+    add_custom_command(
+        OUTPUT "${ARG_STAMP}"
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${ARG_OUT_ROOT}"
+        COMMAND ${_tool_cmd}
+                --source-root "${ARG_SOURCE_ROOT}"
+                --out-root "${ARG_OUT_ROOT}"
+                --arches "${_arch_csv}"
+                --hipcc "${ARG_HIPCC}"
+                --inter-root "${ARG_INTER_ROOT}"
+                --kpack-python-dir "${ARG_ROCM_KPACK_DIR}"
+                ${_wheel_stamp_arg}
+        COMMAND "${CMAKE_COMMAND}" -E touch "${ARG_STAMP}"
+        DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
+                ${ARG_INTERP_DEP} ${ARG_WHEEL_STAMP}
+        COMMENT "${ARG_COMMENT}"
+        VERBATIM)
+
+    if(NOT ARG_STAGE_ROOT)
+        return()
+    endif()
+
+    # Copy the packed tree into the build tree so anything running from a build
+    # directory -- ctest, the integration suite -- can load it. Without this the
+    # production path is install-only and has NO runtime coverage at all: the
+    # tree that actually ships is the one nothing ever reads.
+    #
+    # The stamp lives INSIDE the staged tree deliberately. The provider wipes
+    # that directory once per configure, which takes the stamp with it and makes
+    # the next build re-copy. A stamp outside would survive the wipe, so the copy
+    # would be skipped against a directory that no longer has the files --
+    # indistinguishable from "packaging never ran".
+    set(_stage_stamp "${ARG_STAGE_ROOT}/.hkp-staged${ARG_STAGE_TAG}.stamp")
+    add_custom_command(
+        OUTPUT "${_stage_stamp}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${ARG_OUT_ROOT}" "${ARG_STAGE_ROOT}"
+        COMMAND "${CMAKE_COMMAND}" -E touch "${_stage_stamp}"
+        DEPENDS "${ARG_STAMP}"
+        COMMENT "hkp: staging into ${ARG_STAGE_ROOT}"
+        VERBATIM)
+    set(${ARG_STAGE_STAMP_VAR} "${_stage_stamp}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_wire_production(SOURCE_ROOT <dir> ENABLE_ROCKE <bool> ARCHES <list>
 #                     HIPCC <path> ROCM_KPACK_DIR <dir> INSTALL_BASE <dir>
 #                     ROCKE_INTERP <path> ROCKE_COMGR_LIB <path>
@@ -133,7 +272,7 @@ endfunction()
 # ---------------------------------------------------------------------------
 function(hkp_wire_production)
     set(_one SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR INSTALL_BASE
-        ROCKE_INTERP ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP)
+        STAGE_ROOT ROCKE_INTERP ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
     # A production root is set (the caller only reaches here when it is), so the
@@ -152,40 +291,23 @@ function(hkp_wire_production)
 
     set(_out_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-descriptors")
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-intermediate")
-    string(REPLACE ";" "," _arch_csv "${ARG_ARCHES}")
     set(_stamp "${_out_root}.stamp")
-
-    # The authored root is a tree, not a flat folder: glob recursively so a
-    # descriptor added in any child folder retriggers the pack step.
-    file(GLOB_RECURSE _source_inputs CONFIGURE_DEPENDS
-         "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp")
-
-    # Editing the tool's own sources must retrigger the pack step, else the
-    # install artifacts go stale against the current pipeline code. The fetched
-    # rocm_kpack package counts: kpack_resolver.py imports it and it decides the
-    # archive format. FetchContent's source dir is name-derived, so moving
-    # HIPKERNELPROVIDER_KPACK_GIT_REF does not move this stamp -- without these
-    # inputs a `cmake --fresh` onto a new ref rebuilds the reader while the pack
-    # stamp survives, leaving an archive written by the old packer and read by the
-    # new one. That is the skew the single pin in RocmKpack.cmake exists to prevent.
-    # NOTE `ARG_ROCM_KPACK_DIR`, not `kpack_python`: that name is a positional
-    # parameter of hkp_wire_demo, not of this function. CMake resolves an
-    # unset variable to the empty string, so the glob silently matched nothing
-    # and this DEPENDS edge did not exist -- exactly the staleness the comment
-    # above claims it prevents.
-    file(GLOB _tool_sources CONFIGURE_DEPENDS
-         "${HKP_PYTHON_ROOT}/hkp_pack/*.py"
-         "${ARG_ROCM_KPACK_DIR}/rocm_kpack/*.py")
 
     # The rocKE producer needs the wheel-provisioned interpreter so its UKDs
     # import; a hip-only pack runs under the base interpreter (hip compiles shell
     # out to hipcc and are interpreter-agnostic).
     set(_interp "${Python3_EXECUTABLE}")
+    set(_interp_what "base interpreter (hip-only production packaging)")
     set(_interp_dep "")
     set(_wheel_dep "")
     if(ARG_ENABLE_ROCKE)
         set(_interp "${ARG_ROCKE_INTERP}")
+        set(_interp_what "rocKE wheel interpreter (production packaging)")
         set(_interp_dep "${ARG_ROCKE_INTERP}")
+        # Record the wheel digest in each rocKE UKD's provenance, so a shipped
+        # kernel names the wheel that produced it, and depend on it so editing a
+        # kernel restages. Only meaningful when the rocKE producer is on; the hip
+        # half has no wheel.
         set(_wheel_dep "${ARG_ROCKE_WHEEL_STAMP}")
     endif()
 
@@ -211,35 +333,42 @@ function(hkp_wire_production)
     if(ARG_ROCKE_COMGR_LIB)
         list(APPEND _tool_env "ROCKE_COMGR_LIB=${ARG_ROCKE_COMGR_LIB}")
     endif()
-    set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env}
-        "${_interp}" "${HKP_TOOL}")
 
-    # Record the wheel digest in each rocKE UKD's provenance, so a shipped
-    # kernel names the wheel that produced it. Only meaningful when the rocKE
-    # producer is on; the hip half has no wheel.
-    set(_wheel_stamp_arg "")
-    if(ARG_ENABLE_ROCKE AND ARG_ROCKE_WHEEL_STAMP)
-        set(_wheel_stamp_arg --rocke-wheel-stamp "${ARG_ROCKE_WHEEL_STAMP}")
+    # Stage under a `production/` CHILD of the stage root, not the root itself.
+    # Both trees emit `<arch>/kpack/hip_kernel_provider_<arch>.kpack`, so copying
+    # them to one place has the second overwrite the first: descriptors from one
+    # tree then name an archive holding the other's kernels, and it surfaces only
+    # at dispatch as a missing toc_key. Measured on gfx942: demo 3368 B vs
+    # production 6889 B at the identical relative path.
+    #
+    # Both stay loadable side by side because the walk is recursive and `library`
+    # resolves relative to each descriptor, so each tree reaches its own archive.
+    # The install tree needs no such split -- the demo fixture is never installed.
+    set(_stage_sub "")
+    if(ARG_STAGE_ROOT)
+        set(_stage_sub "${ARG_STAGE_ROOT}/production")
     endif()
 
-    add_custom_command(
-        OUTPUT "${_stamp}"
-        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_out_root}"
-        COMMAND ${_tool_cmd}
-                --source-root "${ARG_SOURCE_ROOT}"
-                --out-root "${_out_root}"
-                --arches "${_arch_csv}"
-                --hipcc "${ARG_HIPCC}"
-                --inter-root "${_inter_root}"
-                --kpack-python-dir "${ARG_ROCM_KPACK_DIR}"
-                ${_wheel_stamp_arg}
-        COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
-        DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources} ${_interp_dep}
-                ${_wheel_dep}
-        COMMENT "hkp: compiling + pruning + packing descriptors for ${ARG_ARCHES}"
-        VERBATIM)
+    hkp_wire_pack_step(
+        STAMP "${_stamp}"
+        SOURCE_ROOT "${ARG_SOURCE_ROOT}"
+        OUT_ROOT "${_out_root}"
+        INTER_ROOT "${_inter_root}"
+        ARCHES ${ARG_ARCHES}
+        HIPCC "${ARG_HIPCC}"
+        ROCM_KPACK_DIR "${ARG_ROCM_KPACK_DIR}"
+        INTERP "${_interp}"
+        WHAT "the ${_interp_what}"
+        INTERP_DEP "${_interp_dep}"
+        WHEEL_STAMP "${_wheel_dep}"
+        TOOL_ENV ${_tool_env}
+        STAGE_ROOT "${_stage_sub}"
+        STAGE_TAG "-production"
+        STAGE_STAMP_VAR _stage_stamp
+        COMMENT "hkp: compiling + pruning + packing descriptors for ${ARG_ARCHES}")
 
-    add_custom_target(hkp_descriptor_packaging ALL DEPENDS "${_stamp}"
+    add_custom_target(hkp_descriptor_packaging ALL
+                      DEPENDS "${_stamp}" ${_stage_stamp}
                       COMMENT "hkp: descriptor packaging")
 
     # The tool writes only the shippable tree (kpack-form descriptor JSON + the
@@ -254,7 +383,7 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_wire_demo(<source_root> <arches> <hipcc> <kpack_python> <stage_root>)
-#   Wire the same compile -> prune -> pack DAG as hkp_wire_production, then a
+#   Wire the shared compile -> prune -> pack DAG (hkp_wire_pack_step), then a
 #   second, cheap step that copies the packed tree into the build tree's staged
 #   descriptor directory. Two differences, both deliberate:
 #
@@ -308,37 +437,26 @@ function(hkp_wire_demo source_root arches hipcc kpack_python stage_root)
 
     set(_out_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-demo-descriptors")
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-demo-intermediate")
-    string(REPLACE ";" "," _arch_csv "${arches}")
     set(_pack_stamp "${_out_root}.stamp")
-    file(GLOB _source_inputs CONFIGURE_DEPENDS
-         "${source_root}/*.json" "${source_root}/*.cpp")
-    # Both halves of the packer, for the reason spelled out in hkp_wire_production.
-    file(GLOB _tool_sources CONFIGURE_DEPENDS
-         "${HKP_PYTHON_ROOT}/hkp_pack/*.py" "${kpack_python}/rocm_kpack/*.py")
 
-    add_custom_command(
-        OUTPUT "${_pack_stamp}"
-        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_out_root}"
-        COMMAND "${Python3_EXECUTABLE}" "${HKP_TOOL}"
-                --source-root "${source_root}"
-                --out-root "${_out_root}"
-                --arches "${_arch_csv}"
-                --hipcc "${hipcc}"
-                --inter-root "${_inter_root}"
-                --kpack-python-dir "${kpack_python}"
-        COMMAND "${CMAKE_COMMAND}" -E touch "${_pack_stamp}"
-        DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
-        COMMENT "hkp: packing the integration fixture for ${arches}"
-        VERBATIM)
-
-    set(_stage_stamp "${stage_root}/.hkp-demo-staged.stamp")
-    add_custom_command(
-        OUTPUT "${_stage_stamp}"
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${_out_root}" "${stage_root}"
-        COMMAND "${CMAKE_COMMAND}" -E touch "${_stage_stamp}"
-        DEPENDS "${_pack_stamp}"
-        COMMENT "hkp: staging the packaged integration fixture into ${stage_root}"
-        VERBATIM)
+    # The fixture is hip-only, so it packs under the base interpreter; the
+    # shared step gates that interpreter for msgpack/zstandard exactly as the
+    # production path does. This used to be an open-coded copy of the pack
+    # command that globbed non-recursively and skipped the gate entirely.
+    hkp_wire_pack_step(
+        STAMP "${_pack_stamp}"
+        SOURCE_ROOT "${source_root}"
+        OUT_ROOT "${_out_root}"
+        INTER_ROOT "${_inter_root}"
+        ARCHES ${arches}
+        HIPCC "${hipcc}"
+        ROCM_KPACK_DIR "${kpack_python}"
+        INTERP "${Python3_EXECUTABLE}"
+        WHAT "the base interpreter (packaged integration fixture)"
+        STAGE_ROOT "${stage_root}"
+        STAGE_TAG "-demo"
+        STAGE_STAMP_VAR _stage_stamp
+        COMMENT "hkp: packing the integration fixture for ${arches}")
 
     add_custom_target(hkp_demo_packaging ALL DEPENDS "${_stage_stamp}"
                       COMMENT "hkp: packaged integration fixture")
@@ -587,8 +705,7 @@ function(hkp_add_packaging)
     # a last-resort fallback.
     find_program(HKP_HIPCC NAMES hipcc hipcc.bat hipcc.bin.exe)
 
-    set(_install_base
-        "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/arch_content/hip-kernel-provider/descriptors")
+    hkp_install_base(_install_base)
 
     set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT "" CACHE PATH
         "The authored source root the production pack step compiles from. \
@@ -678,14 +795,9 @@ assertion: an unloadable path silently falls through to the next candidate.")
         hkp_rocke_wheel_python_interp(_rocke_interp "${_rocke_wheel_stamp}")
     endif()
 
-    # A hip-only pack runs the tool under the BASE interpreter, which nothing
-    # provisions -- so it needs rocm_kpack's dependencies itself. The rocKE path
-    # gets them installed into its venv, and that venv is probed at build time
-    # as part of provisioning, so only this case needs checking here.
-    if(_source_root AND NOT _enable_rocke)
-        hkp_require_kpack_runtime("${Python3_EXECUTABLE}"
-            "the base interpreter (hip-only production packaging)")
-    endif()
+    # The interpreter gate now lives in hkp_wire_pack_step, which every pack
+    # path routes through, so it covers the demo fixture too rather than only
+    # this one. Checking again here would just duplicate it.
 
     if(_source_root)
         hkp_wire_production(
@@ -695,6 +807,7 @@ assertion: an unloadable path silently falls through to the next candidate.")
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             INSTALL_BASE "${_install_base}"
+            STAGE_ROOT "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
             ROCKE_INTERP "${_rocke_interp}"
             ROCKE_COMGR_LIB "${_rocke_comgr_lib}"
             ROCKE_WHEEL_STAMP "${_rocke_wheel_stamp}")
