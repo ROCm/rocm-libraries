@@ -685,9 +685,9 @@ the work** — alongside the `--logic-filter` glob that built zero kernels while
 | | |
 |---|---|
 | branch | `vmijovic/navi32`, 10 commits, pushed |
-| measurements | **15 100+** across 5 completed sweeps, **zero failures in any** |
+| measurements | **15 122** across 5 completed sweeps, **zero failures in any** |
 | shipped | 4 TN catalogs widened; Origami gains gfx1101; bench gains a CU mask |
-| measured | **all four**: HHS +23.9%, BBS +22.2%, AuxH +20.4%, AuxB +18.8% wall-clock |
+| measured | **all four**: HHS +23.9%, BBS +22.2%, AuxH +20.4%, AuxB +18.8% wall-clock (996/996/997/997 shapes) |
 | unmeasured | **none** — nothing on the branch rests on analogy |
 | gated | every shipped solution builds for gfx1101, `Flags: 0x46` |
 | rejected | WGM re-fork, Origami-Prediction, catalog extension — each with evidence |
@@ -718,7 +718,7 @@ before concluding: an inert knob and a mis-scaled one are indistinguishable at o
 | HHS-TN (fp16) | 73 -> 298 | 127.21% | **123.91%** | 100.32% |
 | BBS-TN (bf16) | 64 -> 306 | 119.89% | **122.17%** | 100.60% |
 | AuxH-TN (fp16 + aux) | 73 -> 313 | 117.28% | **120.42%** | 100.42% |
-| **AuxB-TN (bf16 + aux)** | 64 -> 316 | 118.38% | **118.82%** | 100.18% |
+| **AuxB-TN (bf16 + aux)** | 64 -> 316 | 118.32% | **118.77%** | 100.19% |
 
 **Nothing on the branch now rests on analogy.** All four land in a **+18.8% to +23.9%
 wall-clock band**, every A/A control within 0.6 pt of 100%, and every one shows the same
@@ -735,3 +735,16 @@ mis-serves small and skinny shapes regardless of what is computed in them.
 That the four agree this closely is the strongest evidence that the diagnosis is right. Had
 the win come from something incidental to one ProblemType, four independent 1 000-shape
 sweeps across two dtypes and two epilogues would not land within 5 pt of each other.
+
+### Final audit — every figure recomputed from raw CSVs
+
+| catalog | shapes | rows | geomean | wall-clock | A/A wall-clock | failures |
+|---|---|---|---|---|---|---|
+| HHS-TN (fp16) | 996 | 4 990 | 127.21% | **123.91%** | 100.32% | **0** |
+| BBS-TN (bf16) | 996 | 2 994 | 119.89% | **122.17%** | 100.60% | **0** |
+| AuxH-TN (fp16+aux) | 997 | 2 994 | 117.28% | **120.42%** | 100.42% | **0** |
+| AuxB-TN (bf16+aux) | 997 | 2 994 | 118.32% | **118.77%** | 100.19% | **0** |
+| WGM sweep (P3) | 230 | 1 150 | — | — | 99.72% | **0** |
+
+**15 122 measurements, zero failures anywhere.** Every published number recomputed from the
+CSVs rather than quoted from prose, and all match.
