@@ -49,11 +49,13 @@ hipdnn_test_sdk::utilities::ScopedDirectory makeUniqueBundleDir()
             = base / ("test_bundle_" + std::to_string(seed + counter.fetch_add(1)));
         try
         {
-            return hipdnn_test_sdk::utilities::ScopedDirectory(candidate);
+            return {candidate};
         }
         catch(const std::runtime_error&)
         {
-            // Name taken by a concurrent binary; draw another.
+            // Name taken by a concurrent binary; draw another. Nothing to record:
+            // the retry is the handling, and the throw below reports exhaustion.
+            continue;
         }
     }
     throw std::runtime_error("makeUniqueBundleDir: could not claim a temp directory");

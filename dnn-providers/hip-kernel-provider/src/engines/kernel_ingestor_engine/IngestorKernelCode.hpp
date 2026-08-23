@@ -76,11 +76,29 @@ inline IngestorKernelCode
         // weakly_canonical because the target need not exist -- when it does not, the
         // archive-open failure below is the diagnostic, not a filesystem exception.
         std::error_code ignored;
-        const std::filesystem::path resolved = std::filesystem::weakly_canonical(
-            kernel.originDirectory / kernel.source.library, ignored);
+        const std::filesystem::path origin
+            = std::filesystem::weakly_canonical(kernel.originDirectory, ignored);
+        const std::filesystem::path resolved
+            = std::filesystem::weakly_canonical(origin / kernel.source.library, ignored);
 
         const std::string label = hipdnn_plugin_sdk::ingestor::describeDescriptor(
             "kernel", kernel.name, kernel.kernelId);
+
+        // A descriptor names an archive shipped beside it, never one elsewhere on the
+        // filesystem. weakly_canonical normalises `..` and absolute paths rather than
+        // rejecting them, so without this a descriptor could name any readable file and
+        // have it loaded as executable code. Compare canonical forms: the lexical check
+        // alone would miss a symlink out of the tree.
+        const std::string relative = resolved.lexically_relative(origin).generic_string();
+        if(resolved != origin && (relative.empty() || relative.rfind("..", 0) == 0))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "kpack kernel source for " + label + ": library '" + kernel.source.library
+                    + "' resolves to '" + resolved.string()
+                    + "', which is outside the descriptor's own directory '" + origin.string()
+                    + "'");
+        }
 
         auto program = kpackLoader.load(resolved,
                                         kernel.source.tocKey,

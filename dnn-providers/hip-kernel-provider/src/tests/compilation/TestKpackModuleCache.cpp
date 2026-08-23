@@ -17,9 +17,9 @@ namespace hip_kernel_provider::compilation
 namespace
 {
 
-/// rocm-kpack's own test archive, path supplied by CMake from ROCM_KPACK_SOURCE_DIR. Its
-/// entries are placeholder payloads rather than HSA code objects, so an entry that comes
-/// out of it intact is exactly what HIP declines to load.
+/// rocm-kpack's own test archive, vendored beside this test. Its entries are placeholder
+/// payloads rather than HSA code objects, which is what makes it useful here: it is a
+/// real container, so the reader parses it, but nothing in it can load.
 constexpr const char* REAL_ARCHIVE = HIPDNN_TEST_KPACK_ARCHIVE;
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
@@ -52,31 +52,30 @@ TEST(TestKpackModuleCacheKey, KeyDistinguishesTocKeyAndArch)
     // names, and closing it would change the format the case above pins.
 }
 
-/// The last of the staged failures, and the only one past the reader: the blob is found,
-/// decompressed and handed to HIP intact, and HIP rejects it. Asserted on stage() rather
-/// than on message text, because the stage is what tells a caller the archive was fine and
-/// the code object was not.
-TEST(TestKpackModuleCacheLoad, ReportsAnUnloadableCodeObject)
+/// A blob that is found and decompressed but is not a code object at all.
+///
+/// The reader reports success on a TOC entry whose ordinal/size keys are missing, having
+/// read them uninitialized, so a well-formed request can return an unrelated entry's
+/// bytes. KpackArchive checks the container magic to catch that before HIP sees it, which
+/// is why this stops at DECOMPRESS rather than reaching MODULE_LOAD: the payloads in this
+/// asset are ASCII stand-ins, not ELF.
+TEST(TestKpackModuleCacheLoad, RejectsAPayloadThatIsNotACodeObject)
 {
-    // hipModuleLoadData needs a device to reject a code object *as* a code object. Without
-    // one it still fails, but for want of a context, which is a different claim.
-    SKIP_IF_NO_DEVICES();
-
     ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
         << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
 
     try
     {
         KpackModuleCache::load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, ARCHIVE_ARCH);
-        FAIL() << "expected HIP to reject a payload that is not a code object";
+        FAIL() << "expected a payload without code-object magic to be rejected";
     }
     catch(const KpackModuleLoadFailure& failure)
     {
-        EXPECT_EQ(failure.stage(), KpackLoadStage::MODULE_LOAD)
-            << "a code object that survived extraction must not be reported as a reader "
-               "failure: "
+        EXPECT_EQ(failure.stage(), KpackLoadStage::DECOMPRESS)
+            << "a payload that is not a code object must be named before HIP sees it: "
             << failure.what();
-        EXPECT_NE(std::string(failure.what()).find("hipModuleLoadData rejected"), std::string::npos)
+        EXPECT_NE(std::string(failure.what()).find("KPACK_ERROR_INVALID_METADATA"),
+                  std::string::npos)
             << failure.what();
     }
 
@@ -84,6 +83,34 @@ TEST(TestKpackModuleCacheLoad, ReportsAnUnloadableCodeObject)
     // HipErrorHandler listener fails this test for it.
     static_cast<void>(hipGetLastError());
     static_cast<void>(hipExtGetLastError());
+}
+
+/// The archive holds no binary for the running device.
+///
+/// Raised by KpackModuleCache::load's own pre-check rather than by the reader, which
+/// cannot tell "wrong GPU" from "wrong toc_key" -- both are KERNEL_NOT_FOUND. The message
+/// must name the arches the archive does carry, since that is what tells an author
+/// whether the packer or the descriptor is wrong.
+TEST(TestKpackModuleCacheLoad, ReportsAnArchTheArchiveDoesNotHold)
+{
+    ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
+        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+
+    try
+    {
+        KpackModuleCache::load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, "gfx90a");
+        FAIL() << "expected an arch the archive does not hold to be rejected";
+    }
+    catch(const KpackModuleLoadFailure& failure)
+    {
+        EXPECT_EQ(failure.stage(), KpackLoadStage::ARCH_LOOKUP) << failure.what();
+
+        const std::string message = failure.what();
+        EXPECT_NE(message.find("gfx90a"), std::string::npos)
+            << "the message must name the arch that was asked for: " << message;
+        EXPECT_NE(message.find(ARCHIVE_ARCH), std::string::npos)
+            << "the message must name the arches the archive provides: " << message;
+    }
 }
 
 } // namespace

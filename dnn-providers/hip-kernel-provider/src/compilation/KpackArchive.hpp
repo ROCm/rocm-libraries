@@ -29,8 +29,7 @@ enum class KpackLoadStage
 };
 
 /// A staged reader failure: the step that failed plus the raw kpack_error_t value and
-/// its spelling. Mirrors the struct in ALMIOPEN-2420's KpackModuleLoader so the two
-/// readers stay easy to reconcile.
+/// its spelling.
 struct KpackError
 {
     KpackLoadStage stage = KpackLoadStage::OPEN_ARCHIVE;

@@ -241,23 +241,19 @@ else()
     message(STATUS "rocKE features disabled")
 endif()
 
-# Both halves of kpack support ride the ingestor gate and nothing else. The
-# packer that writes archives and the runtime that reads them are one dependency
-# at one commit, so there is no state in which only one of them is wanted; a
-# separate switch could only ever advertise an ingestor that cannot dispatch.
+# Both halves of kpack support ride the ingestor gate and nothing else.
 #
-# The order of the two calls below is load-bearing, and reversing it fails
-# silently rather than loudly. rocm_kpack_add_runtime() is the only function that
-# honours HIPKERNELPROVIDER_KPACK_RUNTIME_DIR, and it publishes the tree it chose
-# as ROCM_KPACK_SOURCE_DIR. The packaging module's resolver only reads that cache
-# entry, via rocm_kpack_populate(), which fetches the pinned tree when nothing has
-# set it yet. So calling the runtime first makes the packer inherit whichever tree
-# the reader is built from; calling it second lets the packer fetch the pinned
-# commit and the reader then override to a different one, leaving a build whose
-# packer and reader disagree and whose configure output looks correct.
+# The reader is the rocm_kpack shared library ROCm ships, resolved the way this repo's
+# other providers resolve their externals: miopen-provider finds MIOpen, hipblaslt-provider
+# finds the SDKs. The guard lets a superbuild that already defines the target -- one
+# building rocm-kpack as a sibling component -- win over an installed copy.
+#
+# descriptor-packaging resolves the packer separately, from the rocm_kpack Python
+# package. Both halves come from the platform, so nothing here pins a ref.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    include(RocmKpack)
-    rocm_kpack_add_runtime()
+    if(NOT TARGET rocm::rocm_kpack)
+        find_package(rocm-kpack CONFIG REQUIRED)
+    endif()
     add_subdirectory(descriptor-packaging)
 endif()
 

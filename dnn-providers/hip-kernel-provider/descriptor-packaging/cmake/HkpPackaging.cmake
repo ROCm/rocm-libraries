@@ -23,51 +23,47 @@ set(HKP_FIXTURES "${HKP_PKG_DIR}/tests/fixtures")
 set(HKP_DEMO_SOURCE_ROOT
     "${HKP_PKG_DIR}/../src/integration_tests/kernel_ingestor_engine/fixtures/packaged")
 
-# The rocm-kpack repo/ref pin and the fetch itself live in RocmKpack.cmake, which
-# is shared with the runtime half of this provider. The packer written by this
-# module and the reader linked into the provider must come from one commit, so
-# there is exactly one place that names it.
-include(RocmKpack)
-
 # ---------------------------------------------------------------------------
 # hkp_resolve_kpack(<out_var>)
-#   2-tier resolution of the rocm-kpack 'python' directory, matching the tiers
-#   rocm_kpack_add_runtime() uses for the reader:
+#   2-tier resolution of the rocm-kpack 'python' directory:
 #   (1) -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR override,
-#   (2) the shared pinned rocm-kpack tree. Sets <out_var> to the resolved python
-#   dir. rocm_kpack is load-bearing (the tool cannot pack without it), so an
-#   unresolvable dependency is a hard error.
+#   (2) a rocm_kpack importable by the build's Python. Sets <out_var> to the
+#   resolved python dir. rocm_kpack is load-bearing (the tool cannot pack without
+#   it), so an unresolvable dependency is a hard error.
 #
-#   This resolves the PACKER only. HIPKERNELPROVIDER_KPACK_PYTHON_DIR predates the
-#   runtime half of kpack support and now names one side of a pair: the reader is
-#   resolved separately, by rocm_kpack_add_runtime(), from
-#   HIPKERNELPROVIDER_KPACK_RUNTIME_DIR. Overriding one and not the other resolves
-#   the two halves from different trees.
+#   This resolves the PACKER only. The reader is the platform's rocm_kpack shared
+#   library, resolved by find_package(rocm-kpack) in the provider's CMakeLists;
+#   the two halves are versioned by the platform rather than pinned together here.
 # ---------------------------------------------------------------------------
 function(hkp_resolve_kpack out_var)
     if(DEFINED HIPKERNELPROVIDER_KPACK_PYTHON_DIR AND EXISTS "${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}")
         set(${out_var} "${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}" PARENT_SCOPE)
         message(STATUS "hkp: using the rocm_kpack packer from \
 HIPKERNELPROVIDER_KPACK_PYTHON_DIR=${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}; the reader is \
-resolved separately, from HIPKERNELPROVIDER_KPACK_RUNTIME_DIR")
+the platform's rocm_kpack shared library")
         return()
     endif()
 
-    # Tier 2: the shared tree at HIPKERNELPROVIDER_KPACK_GIT_REPO/REF, fetched
-    # once per build and reused by the runtime half. Only python/ is consumed here.
-    rocm_kpack_python_dir(_kpack_python)
-    if(EXISTS "${_kpack_python}/rocm_kpack/kpack.py")
+    # Tier 2: a rocm_kpack importable by the build's Python. The reader is the
+    # platform's shared library, so an installed rocm_kpack package is its counterpart;
+    # there is no source tree to borrow a python/ directory from.
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c
+                "import os, rocm_kpack; print(os.path.dirname(os.path.dirname(rocm_kpack.__file__)))"
+        OUTPUT_VARIABLE _kpack_python
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _kpack_probe
+        ERROR_QUIET)
+    if(_kpack_probe EQUAL 0 AND EXISTS "${_kpack_python}/rocm_kpack/kpack.py")
         set(${out_var} "${_kpack_python}" PARENT_SCOPE)
         message(STATUS "hkp: using rocm_kpack from ${_kpack_python}")
         return()
     endif()
 
     message(FATAL_ERROR
-        "hkp: rocm_kpack could not be resolved. Override the PACKER's copy with "
-        "-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR=<a rocm-kpack python/ dir>, or "
-        "ensure the pinned commit is fetchable. Note the reader is resolved "
-        "separately via HIPKERNELPROVIDER_KPACK_RUNTIME_DIR -- overriding only "
-        "one half points the packer and the runtime at different trees. "
+        "hkp: rocm_kpack could not be resolved (override with "
+        "HIPKERNELPROVIDER_KPACK_PYTHON_DIR, or install the rocm_kpack Python "
+        "package into ${Python3_EXECUTABLE}). "
         "rocm_kpack is required to pack; there is no skip path.")
 endfunction()
 
@@ -176,13 +172,9 @@ function(hkp_wire_pack_step)
          "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp")
 
     # Editing the tool's own sources must retrigger the pack step, else the
-    # artifacts go stale against the current pipeline code. The fetched
-    # rocm_kpack package counts: kpack_resolver.py imports it and it decides the
-    # archive format. FetchContent's source dir is name-derived, so moving
-    # HIPKERNELPROVIDER_KPACK_GIT_REF does not move this stamp -- without these
-    # inputs a `cmake --fresh` onto a new ref rebuilds the reader while the pack
-    # stamp survives, leaving an archive written by the old packer and read by
-    # the new one. That is the skew the single pin in RocmKpack.cmake prevents.
+    # artifacts go stale against the current pipeline code. The resolved
+    # rocm_kpack package counts too: kpack_resolver.py imports it and it decides
+    # the archive format, so a packer change there must invalidate the stamp.
     file(GLOB _tool_sources CONFIGURE_DEPENDS
          "${HKP_PYTHON_ROOT}/hkp_pack/*.py"
          "${ARG_ROCM_KPACK_DIR}/rocm_kpack/*.py")
@@ -639,9 +631,9 @@ function(hkp_rocke_wheel_python_interp out_interp wheel_stamp)
     set(_library_wheel
         "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
 
-    # rocm_kpack's runtime dependencies. It is reached by putting a FetchContent
-    # SOURCE TREE on sys.path, never by pip-installing it, so nothing ever
-    # resolves the `msgpack>=1.0.0` / `zstandard>=0.20.0` it declares in its own
+    # rocm_kpack's runtime dependencies. The packer reaches rocm_kpack by path on
+    # sys.path rather than by pip-installing it, so nothing resolves the
+    # `msgpack>=1.0.0` / `zstandard>=0.20.0` it declares in its own
     # pyproject.toml -- and `import rocm_kpack.kpack` fails without them. The
     # previous venv used --system-site-packages and inherited whatever the host
     # happened to have; making the venv hermetic removed that accident, so the
