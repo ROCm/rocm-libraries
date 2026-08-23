@@ -649,9 +649,10 @@ bandwidth advantage and transfers to navi32 with a smaller caveat than the fp16 
 |---|---|---|---|
 | HHS-TN (fp16) | 127.21% | **123.91%** | 100.32% |
 | BBS-TN (bf16) | 119.89% | **122.17%** | 100.60% |
-| **AuxH-TN (fp16 + aux epilogue)** | 117.34% | **120.45%** | 100.39% |
+| **AuxH-TN (fp16 + aux epilogue)** | 117.28% | **120.42%** | 100.42% |
 
-All three land in a **+20 to +24% wall-clock band**, with the same shape signature:
+All three complete: 996/996/997 shapes, zero failures. All land in a
+**+20 to +24% wall-clock band**, with the same shape signature:
 
 | AuxH by | large | medium | small | tiny | | gemv | rect | skinny | square |
 |---|---|---|---|---|---|---|---|---|---|
@@ -676,3 +677,34 @@ That is the third instance today of **a check returning the reassuring signal wi
 the work** — alongside the `--logic-filter` glob that built zero kernels while exiting 0, and
 `ROC_GLOBAL_CU_MASK` reporting 30 CUs while restricting nothing. The rule now in the runbook:
 **check status counts, not row counts.**
+
+---
+
+## Campaign totals
+
+| | |
+|---|---|
+| branch | `vmijovic/navi32`, 10 commits, pushed |
+| measurements | **12 128** across 4 completed sweeps, **zero failures in any** |
+| shipped | 4 TN catalogs widened; Origami gains gfx1101; bench gains a CU mask |
+| measured | HHS **+23.9%**, BBS **+22.2%**, AuxH **+20.4%** wall-clock |
+| unmeasured | AuxB only — bracketed by BBS (same dtype) and AuxH (same epilogue) |
+| gated | every shipped solution builds for gfx1101, `Flags: 0x46` |
+| rejected | WGM re-fork, Origami-Prediction, catalog extension — each with evidence |
+| bounded | ~73% of kernel time is compute-bound, so results transfer despite bandwidth |
+| wiki | gfx1101 page moved from "tentative, no data" to measured |
+
+### The three silent failures
+
+Each returned the reassuring signal without doing the work, and each would have produced a
+confident wrong claim:
+
+| what looked fine | what was actually happening |
+|---|---|
+| `ROC_GLOBAL_CU_MASK` reported 30 CUs | restricted nothing; each mask bit is a WGP, not a CU |
+| `invoke build --logic-filter 'navi32/*'` exited 0 | compiled **zero** kernels; the glob does not recurse |
+| AuxH sweep produced rows at the normal rate | all 231 were `status=error`, `gflops=0.00` |
+
+The common rule, now in the runbook: **verify the artifact, not the exit status** — kernel
+counts, ELF flags, throughput slopes, status counts. And where a knob appears inert, sweep it
+before concluding: an inert knob and a mis-scaled one are indistinguishable at one point.
