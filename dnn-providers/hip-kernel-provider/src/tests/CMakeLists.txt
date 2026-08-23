@@ -119,18 +119,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
 
     # A real archive to open, so the arch-mismatch and missing-toc_key cases meet the
-    # actual reader rather than a hand-forged header. rocm-kpack's own test asset is
-    # used because it is the archive the pinned reader is tested against; taken from
-    # ROCM_KPACK_SOURCE_DIR, which rocm_kpack_populate() publishes as an INTERNAL cache
-    # entry, rather than hardcoded, so a change to the fetch layout cannot silently
-    # leave this naming nothing.
-    if(NOT ROCM_KPACK_SOURCE_DIR)
-        message(FATAL_ERROR
-            "ROCM_KPACK_SOURCE_DIR is unset, but the ingestor is ON. "
-            "rocm_kpack_add_runtime() should have populated it before src/ was added.")
-    endif()
+    # actual reader rather than a hand-forged header. Vendored from rocm-kpack's own
+    # test assets: the reader is now the platform's shared library, so there is no
+    # fetched source tree to take it from, and a 518-byte container is cheaper to carry
+    # than a build-time dependency on one.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        HIPDNN_TEST_KPACK_ARCHIVE="${ROCM_KPACK_SOURCE_DIR}/runtime/tests/test_assets/test_zstd.kpack")
+        HIPDNN_TEST_KPACK_ARCHIVE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack")
 
     # The device cases above read the per-arch archive hkp_wire_demo() stages under
     # HIPDNN_TEST_DESCRIPTOR_DIR, and that target is reachable only through ALL.

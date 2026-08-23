@@ -22,40 +22,38 @@ set(HKP_FIXTURES "${HKP_PKG_DIR}/tests/fixtures")
 set(HKP_DEMO_SOURCE_ROOT
     "${HKP_PKG_DIR}/../src/integration_tests/kernel_ingestor_engine/fixtures/packaged")
 
-# The rocm-kpack repo/ref pin and the fetch itself live in RocmKpack.cmake, which
-# is shared with the runtime half of this provider. The packer written by this
-# module and the reader linked into the provider must come from one commit, so
-# there is exactly one place that names it.
-include(RocmKpack)
-
 # ---------------------------------------------------------------------------
 # hkp_resolve_kpack(<out_var>)
-#   2-tier resolution of the rocm-kpack 'python' directory, matching the tiers
-#   rocm_kpack_add_runtime() uses for the reader:
+#   2-tier resolution of the rocm-kpack 'python' directory:
 #   (1) -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR override,
-#   (2) the shared pinned rocm-kpack tree. Sets <out_var> to the resolved python
-#   dir. rocm_kpack is load-bearing (the tool cannot pack without it), so an
-#   unresolvable dependency is a hard error.
+#   (2) a rocm_kpack importable by the build's Python. Sets <out_var> to the
+#   resolved python dir. rocm_kpack is load-bearing (the tool cannot pack without
+#   it), so an unresolvable dependency is a hard error.
 #
-#   This resolves the PACKER only. HIPKERNELPROVIDER_KPACK_PYTHON_DIR predates the
-#   runtime half of kpack support and now names one side of a pair: the reader is
-#   resolved separately, by rocm_kpack_add_runtime(), from
-#   HIPKERNELPROVIDER_KPACK_RUNTIME_DIR. Overriding one and not the other resolves
-#   the two halves from different trees.
+#   This resolves the PACKER only. The reader is the platform's rocm_kpack shared
+#   library, resolved by find_package(rocm-kpack) in the provider's CMakeLists;
+#   the two halves are versioned by the platform rather than pinned together here.
 # ---------------------------------------------------------------------------
 function(hkp_resolve_kpack out_var)
     if(DEFINED HIPKERNELPROVIDER_KPACK_PYTHON_DIR AND EXISTS "${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}")
         set(${out_var} "${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}" PARENT_SCOPE)
         message(STATUS "hkp: using the rocm_kpack packer from \
 HIPKERNELPROVIDER_KPACK_PYTHON_DIR=${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}; the reader is \
-resolved separately, from HIPKERNELPROVIDER_KPACK_RUNTIME_DIR")
+the platform's rocm_kpack shared library")
         return()
     endif()
 
-    # Tier 2: the shared tree at HIPKERNELPROVIDER_KPACK_GIT_REPO/REF, fetched
-    # once per build and reused by the runtime half. Only python/ is consumed here.
-    rocm_kpack_python_dir(_kpack_python)
-    if(EXISTS "${_kpack_python}/rocm_kpack/kpack.py")
+    # Tier 2: a rocm_kpack importable by the build's Python. The reader is the
+    # platform's shared library, so an installed rocm_kpack package is its counterpart;
+    # there is no source tree to borrow a python/ directory from.
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c
+                "import os, rocm_kpack; print(os.path.dirname(os.path.dirname(rocm_kpack.__file__)))"
+        OUTPUT_VARIABLE _kpack_python
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _kpack_probe
+        ERROR_QUIET)
+    if(_kpack_probe EQUAL 0 AND EXISTS "${_kpack_python}/rocm_kpack/kpack.py")
         set(${out_var} "${_kpack_python}" PARENT_SCOPE)
         message(STATUS "hkp: using rocm_kpack from ${_kpack_python}")
         return()
@@ -63,7 +61,8 @@ resolved separately, from HIPKERNELPROVIDER_KPACK_RUNTIME_DIR")
 
     message(FATAL_ERROR
         "hkp: rocm_kpack could not be resolved (override with "
-        "HIPKERNELPROVIDER_KPACK_PYTHON_DIR or ensure the pinned commit is fetchable). "
+        "HIPKERNELPROVIDER_KPACK_PYTHON_DIR, or install the rocm_kpack Python "
+        "package into ${Python3_EXECUTABLE}). "
         "rocm_kpack is required to pack; there is no skip path.")
 endfunction()
 

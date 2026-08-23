@@ -90,13 +90,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         compilation/KpackProgram.cpp
     )
 
-    # rocm_kpack is plain and unnamespaced -- rocm::rocm_kpack does not exist. It is
-    # static, and linking it inherits ROCM_KPACK_STATIC PUBLIC, so nothing here defines
-    # it. The object library gets it for its include directories; the two targets that
-    # actually link have to name it themselves, because they consume the objects via
-    # $<TARGET_OBJECTS:...>, which carries no link interface.
-    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm_kpack)
-    target_link_libraries(hip_kernel_provider_private PUBLIC rocm_kpack)
+    # The object library gets rocm::rocm_kpack for its include directories; the two
+    # targets that actually link have to name it themselves, because they consume the
+    # objects via $<TARGET_OBJECTS:...>, which carries no link interface.
+    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
+    target_link_libraries(hip_kernel_provider_private PUBLIC rocm::rocm_kpack)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
@@ -106,7 +104,7 @@ target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuf
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # See the note above hip_kernel_provider_impl: $<TARGET_OBJECTS:...> carries no link
     # interface, so the plugin has to name the kpack reader itself.
-    target_link_libraries(hip_kernel_provider PRIVATE rocm_kpack)
+    target_link_libraries(hip_kernel_provider PRIVATE rocm::rocm_kpack)
 endif()
 
 if(NOT WIN32)
