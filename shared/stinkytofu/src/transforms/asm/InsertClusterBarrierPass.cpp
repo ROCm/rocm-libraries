@@ -57,11 +57,6 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 /// Set to 0 to co-locate the signal with the wait.
 constexpr int kRule3SignalLeadCycles = 500;
 
-/// Minimum Part-A cycles (wait→loop head) before the opening segment may wrap to the latch
-/// for the remaining lead. Avoids hoisting when the head climb is too short to justify a
-/// loop-carried signal.
-constexpr int kMinHeadAccumForLoopWrap = kRule3SignalLeadCycles / 4;
-
 /// Ceiling on how far ahead of its wait the signal may end up after climbing out of a live
 /// SCC range. The climb has to clear the whole range, so its cost is the length of that
 /// range, not a constant; past this ceiling it buys correctness at more overlap than it is
@@ -565,13 +560,6 @@ struct Rule3SignalAnchor {
     IRBase* preClampOutOfSegmentAnchor = nullptr;
 };
 
-/// True when \p segBegin is the opening segment of \p loopHead.
-bool isFirstLoopSegment(BasicBlock::iterator segBegin, StinkyInstruction* loopHead) {
-    if (loopHead == nullptr) return false;
-    auto headIt = BasicBlock::iterator(loopHead);
-    return segBegin == headIt || segBegin == std::next(headIt);
-}
-
 /// Walk backward from the wait for cycle lead. \p maxHops 0 = in-segment only
 /// (kRule3CrossLoop false); 1 = one segment hop allowed (kRule3CrossLoop true).
 /// Whether \p anchor came to rest in the wait's own segment after all.
@@ -646,16 +634,14 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return segmentEndAfter(BasicBlock::iterator(anchorInst), parent->end());
     };
 
-    // findSccDeadPointBelow stops before \p limit, so when the wait itself is the first
-    // dead spot the walk returns null even though co-locating with the wait is valid.
-    // UNREACHABLE only when SCC is still live in front of the wait.
+    // Nothing below the range to correct to. Giving up the lead and co-locating with the
+    // wait is still an answer -- that spot is where the handshake goes anyway -- so the
+    // search only runs out of answers once SCC holds something live there too.
     auto resolveSccDeadBelow = [&](StinkyInstruction* from, const IRBase* limit) -> IRBase* {
         StinkyInstruction* below = findSccDeadPointBelow(from, limit);
         if (below != nullptr) return static_cast<IRBase*>(below);
-        if (limit == static_cast<const IRBase*>(referenceAnchor) &&
-            !isSccLiveBefore(referenceAnchor))
-            return defaultAnchor;
-        STINKY_UNREACHABLE("Rule 3 signal anchor: SCC live from scan start to wait");
+        if (!isSccLiveBefore(referenceAnchor)) return defaultAnchor;
+        STINKY_UNREACHABLE("Rule 3 signal anchor: SCC live at the wait");
     };
 
     // A climb that ends up further than maxLeadCycles from the wait has cleared a range too
@@ -717,66 +703,17 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return report(clearSccNote(resolveSccDeadBelow(leadPoint, referenceAnchor)));
     };
 
-    // kRule3CrossLoop true only: wait→head; part B latch→anchor for the remainder.
-    auto scanTailForRemainder = [&](StinkyInstruction* latch, int64_t headAccum,
-                                    int64_t remainder) -> Rule3SignalAnchor {
-        crossedLoopHead = true;
-        hops = 1;
-
-        int64_t tailAccum = 0;
-        auto latchCycleIt = cycleMap.find(latch);
-        int64_t tailPrevCycle = (latchCycleIt != cycleMap.end())
-                                    ? static_cast<int64_t>(latchCycleIt->second)
-                                    : prevCycle;
-        bool tailSccLive = readsScc(*latch) || (sccLive && !writesScc(*latch));
-        bool tailTargetMet = false;
-        StinkyInstruction* tailLeadPoint = nullptr;
-
-        auto tailIt = BasicBlock::iterator(latch);
-        while (tailIt != bbBegin) {
-            --tailIt;
-            auto* tailInst = dyn_cast<StinkyInstruction>(tailIt.getNodePtr());
-            if (tailInst == nullptr) continue;
-
-            tailSccLive = readsScc(*tailInst) || (tailSccLive && !writesScc(*tailInst));
-
-            if (isClusterBarrierWait(*tailInst)) {
-                return report(
-                    clearSccNote(anchorAfterWorkgroupBarrierFollowing(tailInst, defaultAnchor)));
-            }
-            if (isSegmentBoundary(*tailInst)) {
-                if (isCall(*tailInst) || isUnconditionalBranch(*tailInst)) {
-                    return report(clearSccNote(defaultAnchor));
-                }
-                if (loopHead != nullptr && tailInst == loopHead) {
-                    return report(clearSccNote(loopHead));
-                }
-                continue;
-            }
-            if (isWorkgroupBarrierSignal(*tailInst) && priorWaitAnchors.count(tailInst) != 0) {
-                return report(
-                    clearSccNote(anchorAfterWorkgroupBarrierPair(tailInst, defaultAnchor)));
-            }
-            if (isWorkgroupBarrierSignal(*tailInst) || isWorkgroupBarrierWait(*tailInst)) continue;
-
-            auto tailCycleIt = cycleMap.find(tailInst);
-            if (tailCycleIt != cycleMap.end()) {
-                const int64_t cyc = static_cast<int64_t>(tailCycleIt->second);
-                if (cyc <= tailPrevCycle) tailAccum += tailPrevCycle - cyc;
-                tailPrevCycle = cyc;
-                if (tailAccum >= remainder) {
-                    if (!tailTargetMet) tailLeadPoint = tailInst;
-                    tailTargetMet = true;
-                }
-            }
-            leadPoint = tailLeadPoint;
-            if (tailTargetMet && !tailSccLive) {
-                return report(clearSccNote(settle(tailInst, headAccum + tailAccum)));
-            }
+    // The spot a boundary-forced anchor takes is the first instruction below that boundary,
+    // i.e. the start of the segment the climb is standing in. Whether that spot is legal is
+    // a question about the code below it, not about the boundary just stepped over: a
+    // conditional exit reads SCC by construction, so the carried flag is set at every one of
+    // them and would send every settled climb back down for nothing.
+    auto curSegBeginSccLive = [&]() -> bool {
+        for (auto probe = curSegBegin; probe != parent->end(); ++probe) {
+            auto* probeInst = dyn_cast<StinkyInstruction>(probe.getNodePtr());
+            if (probeInst != nullptr) return isSccLiveBefore(probeInst);
         }
-        leadPoint = tailLeadPoint;
-        IRBase* fallback = (loopHead != nullptr) ? static_cast<IRBase*>(loopHead) : defaultAnchor;
-        return report(clearSccNote(settle(fallback, headAccum + tailAccum)));
+        return false;
     };
 
     auto it = BasicBlock::iterator(referenceAnchor);
@@ -795,26 +732,19 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
             return report(clearSccNote(anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor)));
         }
         if (isSegmentBoundary(*inst)) {
-            if (loopHead != nullptr && inst == loopHead) {
-                if (targetMet && !sccLive) {
-                    if (inst != defaultAnchor && !inWaitSegment(inst) && hops <= 0)
-                        preClampOutOfSegmentAnchor = inst;
-                    return report(clearSccNote(settle(inst, accum)));
-                }
-                // kRule3CrossLoop true only: latch wrap when head climb falls short.
-                if (accum >= kMinHeadAccumForLoopWrap && accum < leadCycles && maxHops > 0 &&
-                    hops == 0 && isFirstLoopSegment(segBegin, loopHead)) {
-                    StinkyInstruction* latch = findLatchBranchFor(inst);
-                    if (latch == nullptr) return report(clearSccNote(curSegBegin.getNodePtr()));
-                    return scanTailForRemainder(latch, accum, leadCycles - accum);
-                }
-                if (targetMet && sccLive) return downwardFromLeadMet();
-            }
-            // Stops at segment boundary once maxHops is exhausted (0 when kRule3CrossLoop false).
-            if (hops >= maxHops || isCall(*inst) || isUnconditionalBranch(*inst)) {
-                if (targetMet && sccLive) return downwardFromLeadMet();
+            // A climb holding its lead comes to rest below the boundary rather than spending
+            // a hop on more of it: at the segment start, or -- when a live range covers that
+            // spot -- back down from the lead point. The loop head is such a stop even with
+            // hops to spare, since the only way past it is the latch.
+            const bool atLoopHead = (loopHead != nullptr && inst == loopHead);
+            // Stops at a segment boundary once maxHops is exhausted (0 when
+            // kRule3CrossLoop false); a call or an unconditional branch is never crossed.
+            const bool mustStop = hops >= maxHops || isCall(*inst) || isUnconditionalBranch(*inst);
+            if (targetMet && (atLoopHead || mustStop)) {
+                if (curSegBeginSccLive()) return downwardFromLeadMet();
                 return report(clearSccNote(curSegBegin.getNodePtr()));
             }
+            if (mustStop) return report(clearSccNote(curSegBegin.getNodePtr()));
             if (isLabel(*inst)) {
                 // Leaving a loop head textually would land in the preheader, which runs
                 // once; follow the latch so the signal lands on the path that repeats.
