@@ -264,10 +264,18 @@ function(hkp_stage_all)
         list(APPEND _cmds
              COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_stage_root}/${_arch}")
     endforeach()
+    # A root legitimately produces no output: the packer writes no arch folder when
+    # nothing in that root targets the arch being built, so a tree whose descriptors all
+    # name gfx942 leaves an empty out-root on a gfx90a build. `copy_directory` on a
+    # missing source is a hard error, so guard each copy at BUILD time -- the directory's
+    # existence is not knowable at configure time, since the pack step that creates it
+    # runs later in the same build.
     foreach(_out_root IN LISTS _out_roots)
         list(APPEND _cmds
-             COMMAND "${CMAKE_COMMAND}" -E copy_directory
-                     "${_out_root}" "${_stage_root}")
+             COMMAND "${CMAKE_COMMAND}"
+                     "-DHKP_FROM=${_out_root}"
+                     "-DHKP_TO=${_stage_root}"
+                     -P "${HKP_CMAKE_DIR}/HkpStageIfPresent.cmake")
     endforeach()
 
     # The stamp lives INSIDE the staged tree: the provider wipes that directory
