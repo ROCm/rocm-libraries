@@ -503,9 +503,9 @@ struct GridwiseGemmMX_xdl_cshuffle_v3_bpreshuffle
     __host__ __device__ static auto MakeBGridDescriptor_BK0_N_BK1(
         index_t K, index_t KPad, index_t N, index_t NPad, index_t StrideB, index_t BK0)
     {
-        // For mixed packed types (e.g. A=fp8, B=fp4), B's physical K differs from A's.
-        // Apply conversion when B is more densely packed than A (e.g. A=fp8 packed_size=1, B=fp4x2
-        // packed_size=2),
+        // When B packs more elements per storage unit than A (BPackedSize > APackedSize),
+        // B's physical K extent is K * APackedSize / BPackedSize.
+        // e.g. A=fp8 (packed_size=1), B=fp4x2 (packed_size=2): BK = K/2.
         const index_t BK = [&] {
             if constexpr(BPackedSize > APackedSize)
             {
