@@ -949,6 +949,9 @@ TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
     const std::vector<int64_t> dims{2, 3, 4};
     const std::vector<int64_t> strides{12, 1, 3};
 
+    // Written through begin(), which is non-const: the writes go via the returned
+    // pointer rather than the object, so this cannot be declared const.
+    // NOLINTNEXTLINE(misc-const-correctness)
     hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
 
     // The premise: this is exactly the case the old predicate could not distinguish.
@@ -996,6 +999,9 @@ TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
     const std::vector<int64_t> dims{2, 3, 4};
     const std::vector<int64_t> strides{12, 4, 1};
 
+    // Written through begin(), which is non-const: the writes go via the returned
+    // pointer rather than the object, so this cannot be declared const.
+    // NOLINTNEXTLINE(misc-const-correctness)
     hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
     EXPECT_TRUE(tensor.isPacked());
 
