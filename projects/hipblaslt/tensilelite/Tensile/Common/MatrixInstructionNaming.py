@@ -154,24 +154,6 @@ def matrixInstructionTypes(
     return miInInstType, miOutInstType, negFlag
 
 
-def pinnedIsa(kernelInfo):
-    """The ISA *kernelInfo* has pinned, or None when the thread never pinned one.
-
-    The two backends spell "no kernel" differently. The stinkytofu adaptor uses
-    ``isa=None``; rocisa's ``KernelInfo`` is a C++ aggregate that the per-thread
-    map value-initialises on lookup, so an unpinned thread reads back ``(0, 0, 0)``.
-    Neither is an ISA anyone is running, and putting ``(0, 0, 0)`` back would leave
-    the thread pinned to one whose capability map is empty -- ``getAsmCaps`` indexes
-    ``m_isainfo`` with ``operator[]`` -- so everything the thread generated
-    afterwards would silently read capability defaults instead of the target's.
-    """
-    isa = getattr(kernelInfo, "isa", None)
-    if isa is None:
-        return None
-    isa = tuple(isa)
-    return isa if any(isa) else None
-
-
 def backendCapsLoaded(isa) -> bool:
     """Whether the backend can name instructions for *isa* accurately.
 
@@ -200,12 +182,16 @@ def _pinnedKernelIsa(isa, wavefrontSize: int):
     """Pin the thread's kernel ISA, then put back everything setKernel disturbs.
 
     rocisa's setKernel does not only switch ISA: it also clears the thread's VGPR
-    index map and MSB (rocisa base.hpp). Saving and restoring those keeps this a
-    query rather than a mutation of whatever the thread was in the middle of.
+    index map and MSB (rocisa base.hpp). Saving and restoring those -- and the prior
+    kernel ISA itself, even an unpinned one -- keeps this a query rather than a
+    mutation of whatever the thread was in the middle of. Leaving the thread pinned
+    to *isa* (the old behavior, for a thread that had never called setKernel) is not
+    a safe default: the next code on this thread that generates instructions
+    without pinning its own ISA -- another worker task, a test -- would silently
+    read *isa*'s capabilities instead of its own.
     """
     ti = rocIsa.getInstance()
     prevKernel = ti.getKernel()
-    prevIsa = pinnedIsa(prevKernel)
     prevVgprIdx = ti.getVgprIdx()
     prevVgprMsb = ti.getVgprMsb()
 
@@ -213,8 +199,16 @@ def _pinnedKernelIsa(isa, wavefrontSize: int):
     try:
         yield
     finally:
-        if prevIsa is not None:
-            ti.setKernel(prevIsa, prevKernel.wavefrontSize)
+        if getattr(prevKernel, "isa", None) is None:
+            # The stinkytofu adaptor's spelling of "never pinned". Its setKernel
+            # cannot express None (it normalizes to a concrete ISA key), so put
+            # the raw KernelInfo back directly instead.
+            ti.setKernelInfo(prevKernel)
+        else:
+            # rocisa's "never pinned" reads back as a value-initialised (0, 0, 0);
+            # restoring it is safe -- it is exactly what a thread that had never
+            # called setKernel already reads.
+            ti.setKernel(tuple(prevKernel.isa), prevKernel.wavefrontSize)
         for name, idx in prevVgprIdx.items():
             ti.setVgprIdx(name, idx)
         ti.setVgprMsb(prevVgprMsb)

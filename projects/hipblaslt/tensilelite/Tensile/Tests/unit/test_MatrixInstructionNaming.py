@@ -15,7 +15,6 @@ from Tensile.Common.DataType import DataType
 from Tensile.Common.MatrixInstructionNaming import (
     backendCapsLoaded,
     matrixInstructionMnemonic,
-    pinnedIsa,
 )
 from Tensile.SolutionStructs.Validators.MatrixInstruction import (
     unsupportedMatrixInstructionMnemonic,
@@ -50,6 +49,30 @@ def capsLoaded():
         pytest.skip(f"cannot load gfx1250 capabilities: {e}")
     if not backendCapsLoaded(GFX1250):
         pytest.skip("gfx1250 capabilities unavailable")
+
+
+@pytest.fixture(autouse=True)
+def _isolatedKernelState():
+    """Undo any pinned-kernel/VGPR state a test leaves on the rocIsa singleton.
+
+    pytest-xdist reuses worker processes across test files, so anything a test
+    here pins on rocisa's process-wide singleton and does not clean up leaks
+    into whichever unrelated test runs next in the same worker -- e.g. a macro
+    test that never calls setKernel and expects capability defaults would
+    silently observe gfx1250's real asm bugs instead.
+    """
+    ti = rocisa.rocIsa.getInstance()
+    prevKernel = ti.getKernel()
+    prevVgprIdx = ti.getVgprIdx()
+    prevVgprMsb = ti.getVgprMsb()
+    yield
+    if getattr(prevKernel, "isa", None) is None:
+        ti.setKernelInfo(prevKernel)
+    else:
+        ti.setKernel(tuple(prevKernel.isa), prevKernel.wavefrontSize)
+    for name, idx in prevVgprIdx.items():
+        ti.setVgprIdx(name, idx)
+    ti.setVgprMsb(prevVgprMsb)
 
 
 def mnemonic(mi4, dtype, **kwargs):
@@ -212,6 +235,22 @@ def test_reads_raw_enum_int_problem_types():
     assert unsupported(solution, [16, 16, 32, 1]) is None
 
 
+def test_leaves_thread_capabilities_alone():
+    """The query must not leak GFX1250's capabilities into this thread afterward.
+
+    Regression for the actual failure: a thread that queries a mnemonic and
+    then goes on to build instructions without pinning its own ISA (as a
+    macro-expansion test does) must keep reading whatever capabilities it had
+    before the query, not silently pick up GFX1250's.
+    """
+    ti = rocisa.rocIsa.getInstance()
+    before = dict(ti.getAsmBugs())
+
+    mnemonic([16, 16, 32, 1], "bfloat16")
+
+    assert dict(ti.getAsmBugs()) == before
+
+
 def test_leaves_thread_vgpr_state_alone():
     # setKernel clears the thread's VGPR index map, so the query has to put it back.
     ti = rocisa.rocIsa.getInstance()
@@ -224,30 +263,14 @@ def test_leaves_thread_vgpr_state_alone():
     assert ti.getVgprMsb() == 1
 
 
-@pytest.mark.parametrize(
-    "isa,expected",
-    [
-        (None, None),  # how the stinkytofu adaptor spells "never pinned"
-        ((0, 0, 0), None),  # how rocisa spells it: a value-initialised KernelInfo
-        (GFX1250, GFX1250),
-    ],
-)
-def test_pinned_isa_reads_an_unpinned_thread_as_none(isa, expected):
-    class KernelInfo:
-        pass
-
-    info = KernelInfo()
-    info.isa = isa
-    assert pinnedIsa(info) == expected
-
-
 @pytest.mark.parametrize("unpinned", [None, (0, 0, 0)])
-def test_restores_nothing_when_no_kernel_was_pinned(monkeypatch, unpinned):
-    """Neither spelling of "no kernel" may be handed back to setKernel.
+def test_restores_the_kernel_after_the_query(monkeypatch, unpinned):
+    """Both spellings of "no kernel" must be put back after the query.
 
-    The adaptor's None cannot be expressed at all, and rocisa's (0, 0, 0) would pin
-    the thread to an ISA with an empty capability map, so every kernel the thread
-    generated afterwards would read capability defaults instead of its target's.
+    Leaving the thread pinned to GFX1250 -- the old behavior for a thread that
+    had never called setKernel -- meant the next code on this thread that reads
+    capabilities without pinning its own ISA would silently see GFX1250's,
+    rather than the defaults (or a loud error) it started with.
     """
     import Tensile.Common.MatrixInstructionNaming as naming
 
@@ -260,6 +283,7 @@ def test_restores_nothing_when_no_kernel_was_pinned(monkeypatch, unpinned):
     class FakeTi:
         def __init__(self):
             self.setKernelCalls = []
+            self.setKernelInfoCalls = []
 
         def getKernel(self):
             return UnpinnedKernelInfo()
@@ -274,6 +298,9 @@ def test_restores_nothing_when_no_kernel_was_pinned(monkeypatch, unpinned):
             self.setKernelCalls.append((isa, wavefrontSize))
             real.setKernel(isa, wavefrontSize)
 
+        def setKernelInfo(self, info):
+            self.setKernelInfoCalls.append(info)
+
         def setVgprIdx(self, name, idx):
             real.setVgprIdx(name, idx)
 
@@ -284,7 +311,15 @@ def test_restores_nothing_when_no_kernel_was_pinned(monkeypatch, unpinned):
     monkeypatch.setattr(naming.rocIsa, "getInstance", staticmethod(lambda: fake))
 
     assert mnemonic([16, 16, 32, 1], "bfloat16") == "v_wmma_f32_16x16x32_bf16"
-    assert fake.setKernelCalls == [(GFX1250, 32)]  # pinned once, no restore attempted
+    assert fake.setKernelCalls[0] == (GFX1250, 32)  # pinned once
+    if unpinned is None:
+        # setKernel cannot express None; the raw KernelInfo goes back instead.
+        assert len(fake.setKernelInfoCalls) == 1
+        assert fake.setKernelInfoCalls[0].isa is None
+    else:
+        # (0, 0, 0) is a concrete tuple, so a second, restoring setKernel call
+        # puts it back directly.
+        assert fake.setKernelCalls == [(GFX1250, 32), ((0, 0, 0), 0)]
 
 
 def test_declines_when_the_backend_has_no_capabilities_for_the_isa(monkeypatch):
