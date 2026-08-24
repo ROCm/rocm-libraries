@@ -35,8 +35,6 @@
 #include <fstream>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
-#include <mutex>
-#include <unordered_map>
 #include <vector>
 
 struct _rocblaslt_attribute
@@ -130,55 +128,94 @@ struct _rocblaslt_handle
     std::atomic<bool>     check_numerics_short_circuit{false};
 
     // Stream-K and MBSK kernels treat the synchronizer buffer as inter-workgroup
-    // flags that they set, spin on, and reset themselves, so the buffer may only
-    // be touched by one kernel at a time. GEMMs issued on different streams run
-    // concurrently and would clear each other's flags, leaving a workgroup
-    // spinning forever. Grouped GEMM already separates its flags per problem
-    // index; give each stream its own buffer for the same reason.
-    static constexpr size_t c_syncSlotElements  = 409600;
-    static constexpr size_t c_syncGroupedSlots  = 16;
-    static constexpr size_t c_syncTotalElements = c_syncGroupedSlots * c_syncSlotElements;
-    // Bounds the extra device memory this can hold (each buffer is 1.6 MB).
-    static constexpr size_t c_syncMaxStreamBuffers = 64;
+    // flags that they set, spin on, and reset themselves, so a flag region may
+    // only be touched by one kernel at a time. Two GEMMs running concurrently on
+    // different streams would otherwise clear a flag the other was still
+    // spinning on, leaving that workgroup spinning forever with no error
+    // reported. Offsetting by problem index alone, as grouped GEMM did, makes a
+    // single grouped call internally safe but still shares that region with
+    // every other stream, so the region has to be picked per stream *and* per
+    // problem index.
+    //
+    // Stream-K indexes its flags by workgroup id (StreamK.py emits "flag offset
+    // based on CTA index"), so one slot holds one int per Stream-K workgroup.
+    // skGrid does not approach this on any current part -- gfx950 has 256 CUs
+    // and picks 224 -- and MBSK usage is held under the same bound by
+    // SynchronizerSizeCheck, so nothing can run past the end of its own slot.
+    static constexpr size_t c_syncSlotElements = 2048;
+    static constexpr size_t c_syncSlotBytes    = c_syncSlotElements * sizeof(int);
+    // Problem slots inside one stream's block. Grouped GEMM indexes into these;
+    // SynchronizerSizeCheck rejects solutions for a group wider than this.
+    static constexpr size_t c_syncSlotsPerStream = 16;
+    // Distinct streams one handle can serve. A block is claimed on a stream's
+    // first matmul and held until the handle is destroyed, so this bounds
+    // distinct streams per handle rather than concurrent ones. PyTorch draws
+    // streams from a fixed pool that tops out at 32 distinct hipStream_t however
+    // many it is asked for, and a 32-way fan-out needs 33 (the streams plus the
+    // default one it forks from); 64 is that working set doubled.
+    static constexpr size_t c_syncStreamSlots = 64;
+    // Allocated once at handle creation: allocating device memory mid-run would
+    // break hipGraph capture, and a fixed layout keeps the lookup lock-free.
+    // The whole table is 8 MiB.
+    static constexpr size_t c_syncTotalElements
+        = c_syncStreamSlots * c_syncSlotsPerStream * c_syncSlotElements;
 
-    void* synchronizerForStream(hipStream_t stream)
+    // Hands back the flag region reserved for (`stream`, `problemIndex`) in
+    // `out`. Blocks are claimed lock-free; the scan is over at most
+    // c_syncStreamSlots entries and hits on the first comparison once a stream
+    // owns its block.
+    //
+    // Returns rocblaslt_status_internal_error once every block is taken, or for
+    // a problem index past the block. Handing back a shared region instead would
+    // silently reintroduce the cross-stream deadlock this separation exists to
+    // prevent, and the caller would report success while a workgroup spins
+    // forever.
+    rocblaslt_status synchronizerForStream(hipStream_t stream, size_t problemIndex, void** out)
     {
+        *out = nullptr;
         if(Synchronizer == nullptr)
-            return nullptr;
+            return rocblaslt_status_success;
 
-        std::lock_guard<std::mutex> guard(m_syncLock);
-        auto                        it = m_syncOfStream.find(stream);
-        if(it != m_syncOfStream.end())
-            return it->second;
+        if(problemIndex >= c_syncSlotsPerStream)
+            return rocblaslt_status_internal_error;
 
-        if(m_syncOfStream.size() >= c_syncMaxStreamBuffers)
-            return Synchronizer;
-
-        constexpr size_t bytes = c_syncSlotElements * sizeof(int);
-        void*            buf   = nullptr;
-        if(hipMalloc(&buf, bytes) != hipSuccess || hipMemset(buf, 0, bytes) != hipSuccess)
+        // hipStreamPerThread is a sentinel that resolves to a different stream
+        // for every host thread, so every thread would present the same key and
+        // share one block. Key those by thread instead. The legacy null stream
+        // needs no such treatment: it really is one stream shared by all threads.
+        const void* key = static_cast<const void*>(stream);
+        if(stream == hipStreamPerThread)
         {
-            // Out of memory: fall back to the shared buffer. Results stay
-            // correct; only the cross-stream hazard comes back.
-            if(buf != nullptr)
-                static_cast<void>(hipFree(buf));
-            return Synchronizer;
+            static thread_local char perThreadKey;
+            key = &perThreadKey;
         }
 
-        m_syncOfStream.emplace(stream, buf);
-        return buf;
+        for(size_t i = 0; i < c_syncStreamSlots; ++i)
+        {
+            const void* owner = m_syncSlotOwner[i].load(std::memory_order_acquire);
+            if(owner == nullptr)
+            {
+                const void* expected = nullptr;
+                // Whoever wins the exchange owns the block; the loser reads back
+                // the winner's key and falls through to the comparison below.
+                owner = m_syncSlotOwner[i].compare_exchange_strong(
+                            expected, key, std::memory_order_acq_rel, std::memory_order_acquire)
+                            ? key
+                            : expected;
+            }
+            if(owner == key)
+            {
+                *out = static_cast<char*>(Synchronizer)
+                       + (i * c_syncSlotsPerStream + problemIndex) * c_syncSlotBytes;
+                return rocblaslt_status_success;
+            }
+        }
+
+        return rocblaslt_status_internal_error;
     }
 
-    void releaseStreamSynchronizers()
-    {
-        std::lock_guard<std::mutex> guard(m_syncLock);
-        for(auto& entry : m_syncOfStream)
-            static_cast<void>(hipFree(entry.second));
-        m_syncOfStream.clear();
-    }
-
-    std::mutex                             m_syncLock;
-    std::unordered_map<hipStream_t, void*> m_syncOfStream;
+    // Value-initialised so every block starts unowned.
+    std::atomic<const void*> m_syncSlotOwner[c_syncStreamSlots] = {};
 };
 
 /********************************************************************************

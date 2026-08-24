@@ -229,8 +229,6 @@ _rocblaslt_handle::_rocblaslt_handle()
 
 _rocblaslt_handle::~_rocblaslt_handle()
 {
-    releaseStreamSynchronizers();
-
     if(!check_numerics_flag)
         return;
 

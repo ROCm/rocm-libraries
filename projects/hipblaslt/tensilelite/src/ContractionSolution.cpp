@@ -1553,17 +1553,17 @@ namespace TensileLite
             gsuVal = std::min(gsuVal, static_cast<uint32_t>(std::ceil(static_cast<float>(K) / MT2)));
 
         // SynchronizerSizeCheck
+        //
+        // A caller owns exactly one synchronizer slot, picked per stream and per
+        // problem index (_rocblaslt_handle::synchronizerForStream). Bounding
+        // usage by the slot size is what makes a solution unable to run past the
+        // end of its own region.
         if(gsuVal > 1 && sizeMapping.globalAccumulation == 3) // MBSK
         {
             uint32_t synchronizerUsage
                 = sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B;
 
-            if (problem.groupedGemm() && (problem.groupedGemmCount() > 1))
-            {
-                gsuVal = synchronizerUsage > (409600 * 16 / problem.groupedGemmCount()) ? 1 : gsuVal;
-            }
-            else
-                gsuVal = synchronizerUsage > (409600 * 16) ? 1 : gsuVal;
+            gsuVal = synchronizerUsage > SynchronizerSlotElements ? 1 : gsuVal;
         }
 
         // Avoid selecting a gsu value that would make launch grid over the limit
