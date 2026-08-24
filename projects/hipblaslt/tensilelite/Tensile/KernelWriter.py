@@ -81,8 +81,8 @@ import itertools
 from pprint import pprint
 
 
-def _needsPreLoopLocalReadDrain(kernel, preLoopLocalReadDrainEmitted):
-  return bool(kernel["UseCustomMainLoopSchedule"] and kernel["ForceUnrollSubIter"]
+def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitted):
+  return bool(numItersPLR and kernel["UseCustomMainLoopSchedule"] and kernel["ForceUnrollSubIter"]
               and not preLoopLocalReadDrainEmitted)
 
 
@@ -5870,7 +5870,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment2("Unrolled Loop(s) - Begin")
       if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
         module.add(SBarrier(comment="TDM PGR=0: prime barrier before loop"))
-      if _needsPreLoopLocalReadDrain(kernel, preLoopLocalReadDrainEmitted):
+      if _needsPreLoopLocalReadDrain(kernel, self.states.numItersPLR,
+                                     preLoopLocalReadDrainEmitted):
         module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
                             comment="complete one-time pre-loop local reads"))
       module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False, nta=nta, ntb=ntb))
