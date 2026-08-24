@@ -22,11 +22,15 @@ import sys
 import torch
 
 from rocke.helpers import compile_kernel
+from rocke.instances.gfx942.gdn_state_scan import (
+    GdnStateScanSpec,
+    build_gdn_state_scan,
+    gdn_state_scan_grid,
+    gdn_state_scan_signature,
+)
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-from .builder import build_k5
 from .reference import ref_chunk_gated_delta_rule_fwd_h
-from .spec import GdnStateScanSpec
 
 ATOL = RTOL = 5e-2
 
@@ -35,33 +39,6 @@ ATOL = RTOL = 5e-2
 GATE_TOTAL = 2.5
 
 LOG2E = 1.4426950408889634
-
-
-def _sig(spec):
-    """Kernel signature for `spec` — varlen adds cu_seqlens/chunk_offsets/T_flat,
-    and the SSM-state dtype tracks STATE_DTYPE_BF16."""
-    st = "bf16" if spec.STATE_DTYPE_BF16 else "f32"
-    out = "bf16" if spec.OUTPUT_DTYPE_BF16 else "f32"
-    sig = [
-        {"name": "Kt", "type": "ptr<bf16,global>"},
-        {"name": "Wt", "type": "ptr<bf16,global>"},
-        {"name": "Ut", "type": "ptr<bf16,global>"},
-        {"name": "Gate", "type": "ptr<f32,global>"},
-        {"name": "H0", "type": f"ptr<{st},global>"},
-        {"name": "Vnew", "type": f"ptr<{out},global>"},
-        {"name": "Hout", "type": f"ptr<{out},global>"},
-        {"name": "Ht", "type": f"ptr<{st},global>"},
-        {"name": "T_val", "type": "i32"},
-        {"name": "NT_val", "type": "i32"},
-        {"name": "N_val", "type": "i32"},
-    ]
-    if spec.IS_VARLEN:
-        sig += [
-            {"name": "cu_seqlens", "type": "ptr<i32,global>"},
-            {"name": "chunk_offsets", "type": "ptr<i32,global>"},
-            {"name": "T_flat", "type": "i32"},
-        ]
-    return sig
 
 
 #: (label, seqlens, H, BV, NR, gate, extra-spec-kwargs). ``seqlens`` is the list
@@ -153,7 +130,7 @@ def build_case(label, seqlens, H, BV, NR, gate="gk", extra=None, *,
         BUFFER_DESC=buffer_desc, XCD_REMAP=xcd_remap,
         **layout)
 
-    kern = build_k5(spec)
+    kern = build_gdn_state_scan(spec)
     art = compile_kernel(kern, isa=f"amdgcn-amd-amdhsa--{arch}")
     dev = "cuda"
 
@@ -236,8 +213,10 @@ def build_case(label, seqlens, H, BV, NR, gate="gk", extra=None, *,
         vals["chunk_offsets"] = co
         vals["T_flat"] = T_flat
 
-    ln = KernelLauncher(hsaco=art.hsaco, kernel_name=kern.name, signature=_sig(spec))
-    cfg = LaunchConfig(grid=spec.grid(N * H), block=(spec.block_threads, 1, 1),
+    ln = KernelLauncher(hsaco=art.hsaco, kernel_name=kern.name,
+                        signature=gdn_state_scan_signature(spec))
+    cfg = LaunchConfig(grid=gdn_state_scan_grid(spec, N * H),
+                       block=(spec.block_threads, 1, 1),
                        stream=int(torch.cuda.current_stream().cuda_stream),
                        fence=fence)
     dims = dict(N=N, T_flat=T_flat, NT_list=NT_list, NT_total=NT_total,

@@ -1,19 +1,30 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Builders for the gated-delta-rule state-scan study.
+"""gfx942 gated-delta-rule / KDA chunked state scan (the "K5" stage).
 
-Phase 2 (this file, so far) is the **GEMM1 probe**: deliberately the least
-optimized possible form of
+The compute, for one chunk of ``BT`` tokens, with state ``h`` of shape
+``[V, K]``::
 
-    v_new[BT, BV] = u[BT, BV] - w[BT, K] @ h[BV, K]^T
+    h_snapshot = h                                  # drained for the K6 stage
+    v_new      = u - w @ h^T                        # GEMM1
+    v_new     *= decay                              # scalar-gate path only
+    h          = Diag(gate) @ h + k^T @ v_new       # GEMM2
 
-with padded (unswizzled) LDS and a single chunk, so that the *only* thing under
-test is the MFMA operand mapping. That mapping is the study's highest risk: a
-transposed operand load is a legal set of addresses and yields silently wrong
-numbers rather than an error.
+**Why this is an arch-specific instance rather than a shared one.** ``k`` feeds
+GEMM2 as an A-operand contracted along ``K``, which wants a ``[K, BT]`` fragment
+read. CDNA4 gets that from a transposing LDS read (``ds_read_*_tr_*``); gfx942
+has no such instruction, so this kernel transposes on the *store* side instead,
+staging ``k`` into LDS as ``[K, BT]`` one row at a time
+(:func:`_stage_k_transposed`). That staging, and the K-row prefetch schedule
+built around it, is the part that genuinely differs on gfx942.
 
-The three mappings, for a 16x16xK atom on wave64 (verified empirically against
-a torch matmul before being used here):
+``MFMA_K`` is derived from the arch catalog, not hardcoded. On CDNA3 the widest
+16x16 bf16 atom is K=16; on CDNA4 it is K=32. Every K-loop bound keys off
+:attr:`GdnStateScanSpec.mfma_k`, so retargeting changes one lookup instead of a
+dozen literals.
+
+**The MFMA operand mapping**, for a 16x16xK atom on wave64 (verified empirically
+against a torch matmul before being used here):
 
 ===========  ===============================================================
 A operand    lane holds ``A[m = lane % 16, k = (lane // 16) * 4 + e]``
@@ -21,9 +32,11 @@ B operand    lane holds ``B[k = (lane // 16) * 4 + e, n = lane % 16]``
 C / D        lane holds ``D[m = (lane // 16) * 4 + e, n = lane % 16]``
 ===========  ===============================================================
 
-Here ``B`` is ``h^T``, i.e. ``B[k, v] == h[v, k]``, so the B-operand read is a
-run along K at fixed ``v`` — contiguous in the K-major LDS layout, same shape of
-access as the A-operand read.
+In GEMM1 ``B`` is ``h^T``, i.e. ``B[k, v] == h[v, k]``, so the B-operand read is
+a run along K at fixed ``v`` — contiguous in the K-major LDS layout, the same
+shape of access as the A-operand read. This mapping is the highest-risk part of
+the kernel: a transposed operand load is a legal set of addresses and yields
+silently wrong numbers rather than an error.
 
 **The C-operand trap.** ``u`` is GEMM1's C operand, so it must be gathered in
 the C-fragment layout: four *consecutive* BT rows at a fixed V column, which is
@@ -35,19 +48,23 @@ transpose. That is why ``u`` is read with scalar loads keyed off
 
 from __future__ import annotations
 
-from rocke.core.ir import (BF16, F32, I16, I32, IRBuilder, PtrType,
-                           VectorType)
-from rocke.helpers.atoms import mfma_atom
+from dataclasses import dataclass, fields as dataclass_fields
+from typing import ClassVar, List, Optional, Tuple
 
-from .spec import GdnStateScanSpec
+from ...core.arch.target import ArchTarget
+from ...core.ir import (BF16, F32, I16, I32, IRBuilder, KernelDef, PtrType,
+                        VectorType)
+from ...helpers.atoms import mfma_atom
+from ...helpers.spec import SignatureBuilder
 
 #: log2(e) — the kernel works in the log2 domain so the gate can use the raw
 #: ``v_exp_f32`` (``exp2``) rather than a range-reduced ``exp``.
 LOG2E = 1.4426950408889634
 
-#: LDS row padding, in bf16 elements. Phase 2 uses padding rather than an XOR
-#: swizzle: padding is the always-correct answer and keeps the operand mapping
-#: the only variable under test. Swizzle is a later, numerics-neutral step.
+#: LDS row padding, in bf16 elements, for the unswizzled fallback layout.
+#: Padding is the always-correct answer; the XOR swizzle
+#: (:attr:`GdnStateScanSpec.LDS_SWIZZLE`) is the numerics-neutral optimization
+#: on top of it.
 LDS_PAD = 8
 
 #: Global->LDS staging vector width, in bf16 elements (8 * 2 B = 128 bit).
@@ -55,6 +72,434 @@ STAGE_VEC = 8
 
 #: XCD count on this part; drives the P7 chiplet remap.
 NXCD = 8
+
+
+#: bf16 atoms we are willing to use, widest-K first. The 16x16 shape is what
+#: the state-scan tiling assumes (a 32x32 atom would change N_REPEAT and the
+#: whole wave decomposition), so only the K dimension varies by arch.
+_BF16_ATOM_PREFERENCE = (
+    "mfma_f32_16x16x32_bf16",   # CDNA4
+    "mfma_f32_16x16x16_bf16",   # CDNA3
+)
+
+
+def pick_bf16_atom(arch: str) -> Tuple[str, int]:
+    """Return ``(op_id, mfma_k)`` — the widest legal 16x16 bf16 atom on *arch*."""
+    target = ArchTarget.from_gfx(arch)
+    catalog = target.mma
+    ops = catalog.ops if hasattr(catalog, "ops") else catalog
+    available = {o.op_id for o in ops}
+    for op_id in _BF16_ATOM_PREFERENCE:
+        if op_id in available:
+            return op_id, int(op_id.rsplit("x", 1)[-1].split("_")[0])
+    raise ValueError(
+        f"no 16x16 bf16 MFMA atom on {arch}; available: {sorted(available)}"
+    )
+
+
+@dataclass(frozen=True)
+class GdnStateScanSpec:
+    """Compile-time configuration for one build of the state-scan kernel.
+
+    Every downstream quantity is a derived property rather than a stored field,
+    and :meth:`__post_init__` rejects the illegal combinations — so an unusable
+    configuration is impossible to construct rather than merely discouraged.
+    Use :func:`is_valid_spec` for a non-throwing probe.
+    """
+
+    # -- problem shape --
+    K: int = 128
+    V: int = 128
+    H: int = 12                  # value heads on this device (post-TP)
+    Hg: int = 12                 # key heads on this device (post-TP); GQA = H // Hg
+    BT: int = 64                 # chunk size; fixed by the upstream stages
+    BV: int = 32                 # V-slice per CTA
+
+    # -- gate selection: exactly one --
+    USE_G: bool = True           # scalar gate
+    USE_GK: bool = False         # per-channel gate
+
+    # -- feature knobs, all default-off-or-benign --
+    USE_INITIAL_STATE: bool = True
+    STORE_FINAL_STATE: bool = True
+    SAVE_NEW_VALUE: bool = True
+    STORE_H: bool = True
+    IS_VARLEN: bool = True
+    WU_CONTIGUOUS: bool = True
+    STATE_DTYPE_BF16: bool = False
+    OUTPUT_DTYPE_BF16: bool = False
+    G_IS_LOG2_SCALED: bool = False
+
+    # -- wave widening --
+    NR_SPLIT: int = 1
+
+    #: Group-major + XOR swizzle for every LDS buffer, matching the FlyDSL
+    #: parent. A logical ``[R, C]`` tile is stored as ``[R][C/4][4]`` and the
+    #: 4-element group index is XORed by ``(row ^ (row >> 3)) & (ng - 1)``.
+    #:
+    #: When off, the buffers are row-major with :data:`LDS_PAD` trailing
+    #: elements instead — always correct, but it costs LDS *and* leaves bank
+    #: conflicts on the fragment reads. Padding does not fit the fused
+    #: configuration, so this is a fit requirement there, not just a tuning
+    #: knob. Default-on because the parent does it and the comparison is
+    #: supposed to isolate the DSL, not the algorithm.
+    LDS_SWIZZLE: bool = True
+
+    #: Loop-carried prefetch: issue chunk i+1's ``w`` / ``u`` / gate reads at
+    #: the end of chunk i and carry the raw values across the loop back edge.
+    #: The FlyDSL parent does this, so matching it matters for a like-for-like
+    #: comparison.
+    #:
+    #: **Default-off pending root cause.** With prefetch on *and* the LDS
+    #: swizzle on, ``BV=64, NR_SPLIT=2, USE_GK`` produces wrong results —
+    #: deterministically, and only when both ``u`` and the gate are prefetched.
+    #: Reordering the carry list makes all 14 verify configs pass, but the
+    #: reason the original order fails is not understood, so the flag stays off
+    #: rather than shipping a fix nobody can explain. See PERF_PLAN.md P5.
+    PREFETCH: bool = False
+
+    #: Carry-order switch for the prefetch phis, kept only to reproduce the
+    #: backend miscompile (see repro_phi_order.py / PERF_PLAN.md §P5). True (the
+    #: default and committed layout) puts the ``<4 x float>`` gate phis before
+    #: the ``bfloat`` u phis, which the backend compiles correctly. False
+    #: reproduces the miscompiled scalar-first order. No effect unless PREFETCH.
+    PREFETCH_VEC_FIRST: bool = True
+
+    #: Issue the next chunk's ``w`` loads before the pre-GEMM2 barrier. ATT
+    #: shows the default post-barrier issue still waiting on ``w`` at the next
+    #: iteration's LDS store. This adds barrier overlap without keeping W live
+    #: across GEMM1, while U and gate remain at the lower-pressure late point.
+    PREFETCH_W_EARLY: bool = False
+
+    #: Load the current chunk's four K rows before the first barrier, then
+    #: gather and transpose-store them before GEMM2.
+    PREFETCH_K_EARLY: bool = False
+
+    #: Spread the four K-row loads across the first four GEMM1 MFMA steps.
+    #: This is the lower-vmcnt-pressure schedule for wider blocks.
+    PREFETCH_K_INTERLEAVE: bool = False
+
+    #: Route global **loads** through bounds-checked buffer descriptors
+    #: (``buffer_rsrc`` + ``buffer_load_*``) instead of raw pointers, letting
+    #: hardware return 0 out of range so the explicit row clamps can go. The
+    #: FlyDSL parent does this via ``make_buffer_tensor(max_size=False)``.
+    #:
+    #: **Default-off: implemented but NOT yet verified on hardware.**
+    BUFFER_DESC: bool = False
+
+    #: Chiplet (XCD) remap of the flat block id, so a head's whole run of
+    #: ``GRID_V`` V-tiles lands on one XCD and shares its L2 copy of the
+    #: V-independent ``w`` / ``k`` / gate slices. Ported from the parent,
+    #: including its tail guard. ``NXCD = 8`` on this part.
+    #:
+    #: **Default-off: implemented but NOT yet verified on hardware.**
+    XCD_REMAP: bool = False
+
+    #: Force VGPR-form MFMA by pinning ``amdgpu-agpr-alloc`` to 0.
+    #:
+    #: The state accumulators are read and written by VALU every chunk (the
+    #: gate multiply), so leaving them in AGPRs makes the backend insert
+    #: ``accvgpr_read`` / ``accvgpr_write`` copies around every gate. Pinning
+    #: AGPR allocation to zero removes those copies outright and *lowers* the
+    #: register count. Default-off to match rocKE's default codegen; see
+    #: PERF_PLAN.md item P0.
+    MFMA_VGPR_FORM: bool = False
+
+    # -- fused K6 stage (out of scope for the first study milestone) --
+    COMPUTE_OUTPUT: bool = False
+    SCALE: Optional[float] = None
+
+    arch: str = "gfx942"
+    name: str = "rocke_gdn_state_scan"
+
+    # ---------------------------------------------------------------- checks
+    def __post_init__(self) -> None:
+        if self.USE_G == self.USE_GK:
+            raise ValueError("exactly one of USE_G / USE_GK must be set")
+        if self.K % 64 != 0 or self.K > 256:
+            raise ValueError(f"K must be a multiple of 64 and <= 256 (got {self.K})")
+        if self.K & (self.K - 1):
+            raise ValueError(f"K must be a power of two (got {self.K}); "
+                             "the k store-transpose staging depends on it")
+        if self.BV % 16 != 0:
+            raise ValueError(f"BV must be a multiple of 16 (got {self.BV})")
+        if self.BT % 4 or self.K % 4:
+            raise ValueError("BT and K must both be multiples of 4")
+        if self.H % self.Hg:
+            raise ValueError(f"H={self.H} must be divisible by Hg={self.Hg} (GQA)")
+        if (self.SCALE is not None) != self.COMPUTE_OUTPUT:
+            raise ValueError("SCALE is required iff COMPUTE_OUTPUT")
+        if self.PREFETCH_K_EARLY and self.PREFETCH_K_INTERLEAVE:
+            raise ValueError("choose one K prefetch schedule")
+        # group-XOR is a bank bijection only with >= 16 groups per row
+        if self.K // 4 < 16 or self.BT // 4 < 16:
+            raise ValueError("group-XOR swizzle needs >= 16 groups per row "
+                             f"(K/4={self.K // 4}, BT/4={self.BT // 4})")
+
+        if self.n_repeat % self.NR_SPLIT:
+            legal = [s for s in (1, 2, 4, 8) if self.n_repeat % s == 0]
+            raise ValueError(
+                f"NR_SPLIT={self.NR_SPLIT} must divide N_REPEAT={self.n_repeat} "
+                f"(=BV/16); BV={self.BV} supports {legal}"
+            )
+        if self.COMPUTE_OUTPUT and (self.BT // self.mfma_k) % self.NR_SPLIT:
+            raise ValueError(
+                f"NR_SPLIT={self.NR_SPLIT} must divide BT_STEPS="
+                f"{self.BT // self.mfma_k} to split the attention matrix "
+                "across the V-split waves"
+            )
+
+        target = ArchTarget.from_gfx(self.arch)
+        if self.block_threads > target.max_threads_per_block:
+            raise ValueError(
+                f"BLOCK_THREADS={self.block_threads} exceeds the {self.arch} "
+                f"limit ({target.max_threads_per_block}); reduce NR_SPLIT"
+            )
+        if not target.fits_lds(self.lds_total_bytes):
+            raise ValueError(
+                f"LDS {self.lds_total_bytes / 1024:.1f} KiB exceeds the "
+                f"{self.arch} budget; reduce BV"
+            )
+        if self.STORE_H:
+            if self.lds_h_ng % 2:
+                raise ValueError(
+                    f"h drain pairs k-groups; K/4={self.lds_h_ng} must be even")
+            pairs = self.BV * (self.lds_h_ng // 2)
+            if pairs % self.block_threads:
+                raise ValueError(
+                    f"h snapshot drain ({pairs} pairs) must tile "
+                    f"BLOCK_THREADS={self.block_threads}")
+
+    # ------------------------------------------------------------- derived
+    @property
+    def mfma_op_id(self) -> str:
+        return pick_bf16_atom(self.arch)[0]
+
+    @property
+    def mfma_k(self) -> int:
+        """Contraction depth of the chosen atom. **16 on CDNA3, 32 on CDNA4.**"""
+        return pick_bf16_atom(self.arch)[1]
+
+    @property
+    def gqa_ratio(self) -> int:
+        return self.H // self.Hg
+
+    @property
+    def num_k_blocks(self) -> int:
+        return self.K // 64
+
+    @property
+    def n_repeat(self) -> int:
+        return self.BV // 16
+
+    @property
+    def m_waves(self) -> int:
+        return self.BT // 16
+
+    @property
+    def n_repeat_local(self) -> int:
+        return self.n_repeat // self.NR_SPLIT
+
+    @property
+    def num_warps(self) -> int:
+        return self.m_waves * self.NR_SPLIT
+
+    @property
+    def block_threads(self) -> int:
+        return self.num_warps * ArchTarget.from_gfx(self.arch).wave_size
+
+    @property
+    def bt_steps(self) -> int:
+        return self.BT // self.mfma_k
+
+    @property
+    def bt_steps_local(self) -> int:
+        return self.bt_steps // self.NR_SPLIT
+
+    @property
+    def k_steps_per_block(self) -> int:
+        return 64 // self.mfma_k
+
+    @property
+    def grid_v(self) -> int:
+        return (self.V + self.BV - 1) // self.BV
+
+    @property
+    def kt_transposed(self) -> bool:
+        """``k`` staged as ``[K, BT]``. True for K5-only; the fused build wants
+        ``[BT, K]`` so the heavier reader (the attention GEMM) gets the
+        contiguous access and the state GEMM takes the strided one."""
+        return not self.COMPUTE_OUTPUT
+
+    # -- LDS, in elements (bf16) --
+    #: Trailing pad per row when the XOR swizzle is off. Swizzle needs none.
+    LDS_PAD: ClassVar[int] = 8
+
+    @property
+    def _pad(self) -> int:
+        return 0 if self.LDS_SWIZZLE else self.LDS_PAD
+
+    @property
+    def lds_w_elems(self) -> int:
+        return self.BT * (self.K + self._pad)
+
+    @property
+    def lds_kt_elems(self) -> int:
+        return self.K * (self.BT + self._pad)
+
+    @property
+    def lds_vnt_elems(self) -> int:
+        return self.BV * (self.BT + self._pad)
+
+    @property
+    def lds_h_elems(self) -> int:
+        return self.BV * (self.K + self._pad)
+
+    @property
+    def lds_a_elems(self) -> int:
+        return self.BT * self.BT if self.COMPUTE_OUTPUT else 0
+
+    @property
+    def lds_h_ng(self) -> int:
+        return self.K // 4
+
+    @property
+    def lds_total_bytes(self) -> int:
+        elems = (self.lds_w_elems + self.lds_kt_elems + self.lds_vnt_elems
+                 + self.lds_h_elems + self.lds_a_elems)
+        return elems * 2
+
+    @property
+    def alias_a_onto_h(self) -> bool:
+        """Reuse the ``h`` buffer for the attention matrix. Only engaged when
+        the five buffers would otherwise overflow — at K=128/BV=64 they come to
+        exactly the CDNA3 budget, so this is inactive there and the path exists
+        for configurations that do overflow."""
+        budget = 65536
+        return (self.COMPUTE_OUTPUT
+                and self.lds_total_bytes > budget
+                and self.lds_a_elems <= self.lds_h_elems)
+
+    #: Manifest dtype of the initial / final SSM state buffers (``H0`` / ``Ht``).
+    @property
+    def state_dtype(self) -> str:
+        return "bf16" if self.STATE_DTYPE_BF16 else "f32"
+
+    #: Manifest dtype of the materialized per-chunk outputs (``Vnew`` / ``Hout``).
+    @property
+    def output_dtype(self) -> str:
+        return "bf16" if self.OUTPUT_DTYPE_BF16 else "f32"
+
+    def kernel_name(self) -> str:
+        gate = "gk" if self.USE_GK else "g"
+        suffix = "_o" if self.COMPUTE_OUTPUT else ""
+        return (f"{self.name}{suffix}_{gate}_K{self.K}_V{self.V}"
+                f"_bt{self.BT}_bv{self.BV}_w{self.num_warps}")
+
+    def grid(self, n_seq_heads: int) -> Tuple[int, int, int]:
+        """``(V-tiles, sequence*head, 1)``."""
+        return (self.grid_v, n_seq_heads, 1)
+
+    def describe(self) -> str:
+        return (
+            f"{self.kernel_name()}\n"
+            f"  arch={self.arch} atom={self.mfma_op_id} mfma_k={self.mfma_k}\n"
+            f"  waves={self.num_warps} threads={self.block_threads} "
+            f"m_waves={self.m_waves} nr_split={self.NR_SPLIT} "
+            f"n_repeat={self.n_repeat}/{self.n_repeat_local}\n"
+            f"  k_blocks={self.num_k_blocks} bt_steps={self.bt_steps} "
+            f"k_steps_per_block={self.k_steps_per_block} "
+            f"kt_transposed={self.kt_transposed}\n"
+            f"  lds={self.lds_total_bytes / 1024:.1f} KiB "
+            f"(w={self.lds_w_elems * 2 // 1024} kt={self.lds_kt_elems * 2 // 1024} "
+            f"vnt={self.lds_vnt_elems * 2 // 1024} h={self.lds_h_elems * 2 // 1024} "
+            f"A={self.lds_a_elems * 2 // 1024} KiB) alias_A={self.alias_a_onto_h}\n"
+            f"  grid_v={self.grid_v}"
+        )
+
+
+def is_valid_config(**fields) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for a candidate set of :class:`GdnStateScanSpec`
+    fields, without requiring that they be constructible.
+
+    :meth:`GdnStateScanSpec.__post_init__` rejects illegal combinations in the
+    constructor, which is what makes a spec instance trustworthy but also means
+    a sweep cannot build one in order to test it. This is the probe for that
+    case: pass the candidate fields, get a reason instead of an exception. An
+    unknown field name comes back as a reason too, so a stale sweep table
+    reports itself rather than crashing the driver.
+    """
+    try:
+        spec = GdnStateScanSpec(**fields)
+        # Not covered by __post_init__: it only reaches spec.mfma_k when
+        # COMPUTE_OUTPUT is set, so an arch without a 16x16 bf16 atom would
+        # otherwise surface at the first mfma_k use inside the builder.
+        pick_bf16_atom(spec.arch)
+    except (ValueError, KeyError, TypeError) as e:
+        return False, str(e).strip("'\"")
+    return True, "ok"
+
+
+def is_valid_spec(
+    spec: GdnStateScanSpec, arch: Optional[str] = None
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for *spec*, optionally retargeted to *arch*.
+
+    The non-throwing validity probe every instance module exposes, for
+    dispatcher-style enumeration where an unsupported configuration is a skip
+    rather than an error. Retargeting is the case that can actually fail for an
+    already-constructed spec: the LDS budget, the thread cap, and the MFMA atom
+    all come from the arch, so a spec that fits gfx942 need not fit elsewhere.
+    """
+    # dataclass_fields(), not __dataclass_fields__: the latter also reports the
+    # LDS_PAD ClassVar, which is not a constructor argument.
+    cfg = {f.name: getattr(spec, f.name) for f in dataclass_fields(spec) if f.init}
+    if arch is not None:
+        cfg["arch"] = arch
+    return is_valid_config(**cfg)
+
+
+def gdn_state_scan_signature(spec: GdnStateScanSpec) -> List[dict]:
+    """The kernel's ABI, as the manifest-style list
+    :class:`rocke.runtime.launcher.KernelLauncher` binds against.
+
+    This is the interface contract for :func:`build_gdn_state_scan`: same names,
+    same order, same dtypes as the ``b.param`` sequence the builder emits, which
+    that builder asserts before returning. Two spec flags move the pointer
+    dtypes — ``STATE_DTYPE_BF16`` for the SSM state carried across chunks
+    (``H0`` / ``Ht``) and ``OUTPUT_DTYPE_BF16`` for the materialized per-chunk
+    outputs (``Vnew`` / ``Hout``) — and ``IS_VARLEN`` appends the packed-sequence
+    descriptors.
+    """
+    st, out = spec.state_dtype, spec.output_dtype
+    sig = (
+        SignatureBuilder()
+        .ptr("Kt", "bf16")
+        .ptr("Wt", "bf16")
+        .ptr("Ut", "bf16")
+        .ptr("Gate", "f32")
+        .ptr("H0", st)
+        .ptr("Vnew", out)
+        .ptr("Hout", out)
+        .ptr("Ht", st)
+        .scalar("T_val", "i32")
+        .scalar("NT_val", "i32")
+        .scalar("N_val", "i32")
+    )
+    if spec.IS_VARLEN:
+        sig = (
+            sig.ptr("cu_seqlens", "i32")
+            .ptr("chunk_offsets", "i32")
+            .scalar("T_flat", "i32")
+        )
+    return sig.build()
+
+
+def gdn_state_scan_grid(
+    spec: GdnStateScanSpec, n_seq_heads: int
+) -> Tuple[int, int, int]:
+    """``(ceil(V / BV), N * H, 1)``. ``n_seq_heads`` is ``N * H``."""
+    return spec.grid(n_seq_heads)
 
 
 
@@ -332,93 +777,8 @@ def _drain_h(b, *, sH, dst, spec, tid, nthreads, chunk, i_h, v_base, ng=None):
             b.global_store_vN(dst, b.add(base, b.const_i32(g * 4)), quad, 4)
 
 
-def build_gemm1_probe(spec: GdnStateScanSpec) -> "object":
-    """Build the Phase-2 GEMM1 probe kernel.
-
-    Signature (all row-major, one chunk, one head)::
-
-        W    bf16 [BT, K]
-        Hst  bf16 [V,  K]     the state, in VK order
-        U    bf16 [BT, V]
-        OUT  f32  [BT, V]     v_new = u - w @ h^T
-
-    Grid is ``(ceil(V / BV), 1, 1)``: each CTA owns a ``BV``-wide V stripe.
-    """
-    if spec.mfma_k * spec.k_steps_per_block != 64:
-        raise ValueError("probe assumes k_steps_per_block covers a 64-wide K block")
-
-    atom = mfma_atom("bf16", 16, 16, spec.mfma_k)
-    BT, K, BV, V = spec.BT, spec.K, spec.BV, spec.V
-    nthreads = spec.block_threads
-    lds_cols = K + LDS_PAD
-
-    b = IRBuilder(spec.kernel_name() + "_gemm1probe")
-    b.kernel.attrs["max_workgroup_size"] = nthreads
-
-    W = b.param("W", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
-    Hst = b.param("Hst", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
-    U = b.param("U", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
-    OUT = b.param("OUT", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
-
-    sW = b.smem_alloc(BF16, [BT, lds_cols], name_hint="sW")
-    sH = b.smem_alloc(BF16, [BV, lds_cols], name_hint="sH")
-
-    tid = b.thread_id_x()
-    i_v = b.block_id_x()
-    v_base = b.mul(i_v, b.const_i32(BV))
-
-    # ---- global -> LDS -------------------------------------------------
-    _stage_tile(b, src_ptr=W, smem=sW, rows=BT, cols=K, row_stride_src=K,
-                src_row_base=None, block_threads=nthreads, tid=tid, pad=LDS_PAD)
-    _stage_tile(b, src_ptr=Hst, smem=sH, rows=BV, cols=K, row_stride_src=K,
-                src_row_base=v_base, block_threads=nthreads, tid=tid, pad=LDS_PAD)
-    b.sync()
-
-    # ---- wave / lane decomposition -------------------------------------
-    c16 = b.const_i32(16)
-    c4 = b.const_i32(4)
-    wid = b.div(tid, b.const_i32(64))
-    lane = b.mod(tid, b.const_i32(64))
-    wid_m = b.mod(wid, b.const_i32(spec.m_waves))
-    wid_n = b.div(wid, b.const_i32(spec.m_waves))
-    lane_n = b.mod(lane, c16)
-    lmb = b.div(lane, c16)
-
-    bt_row = b.add(b.mul(wid_m, c16), lane_n)       # A-operand row (m)
-    k_lane = b.mul(lmb, c4)                          # this lane's K offset in a step
-
-    cV = b.const_i32(V)
-
-    for nr in range(spec.n_repeat_local):
-        # this wave's global V tile index
-        nr_g = b.add(b.mul(wid_n, b.const_i32(spec.n_repeat_local)), b.const_i32(nr))
-        v_tile = b.mul(nr_g, c16)
-        v_row = b.add(v_tile, lane_n)                # B-operand row: h[v, k]
-
-        acc = atom.zero_acc(b)
-        for kb in range(spec.num_k_blocks):
-            for ks in range(spec.k_steps_per_block):
-                k0 = b.add(b.const_i32(kb * 64 + ks * spec.mfma_k), k_lane)
-                af = b.smem_load_vN(sW, bt_row, k0, dtype=BF16, n=atom.a_per_lane)
-                bf = b.smem_load_vN(sH, v_row, k0, dtype=BF16, n=atom.b_per_lane)
-                acc = atom.emit(b, af, bf, acc)
-
-        # ---- C fragment: v_new = u - acc --------------------------------
-        # rows/cols come FROM the atom, not asserted alongside it.
-        for e in range(atom.c_per_lane):
-            r_in, c_in = atom.lane_to_output(b, lane, e)
-            row = b.add(b.mul(wid_m, c16), r_in)          # BT row
-            col = b.add(v_base, b.add(v_tile, c_in))      # global V column
-            off = b.add(b.mul(row, cV), col)
-            u_f32 = b.cast_to_f32(b.global_load_bf16(U, off))
-            b.global_store(OUT, off, b.fsub(u_f32, b.vec_extract(acc, e)), align=4)
-
-    b.ret()
-    return b.kernel
-
-
 # ---------------------------------------------------------------------------
-# Phase 3 + 4 — the full K5 chunk recurrence
+# The full K5 chunk recurrence
 # ---------------------------------------------------------------------------
 #
 # Operand assignments, derived from the atom contract at the top of this file:
@@ -469,13 +829,12 @@ def _pack_f32x4(b, vals):
     return v
 
 
-def build_k5(spec: GdnStateScanSpec):
+def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
     """Full K5 chunk recurrence: snapshot, GEMM1, gate, GEMM2.
 
-    Milestone restrictions (each asserted, each a later phase):
-      * ``USE_GK`` only — per-channel gate, no v_new gating
-      * non-varlen: one sequence per ``i_n``, ``T`` a runtime scalar
-      * f32 SSM state
+    The emitted kernel binds against :func:`gdn_state_scan_signature` and
+    launches on :func:`gdn_state_scan_grid`. Call :func:`is_valid_spec` first if
+    *spec* comes from a sweep; an unsupported configuration raises here.
 
     Layouts (row-major, token-major)::
 
@@ -1000,4 +1359,16 @@ def build_k5(spec: GdnStateScanSpec):
                 else:
                     b.global_store_vN(Ht, state_off(kb, nr, i_n), acc, 4)
     b.ret()
+
+    # The kernelspec is the published interface; this is what keeps it honest.
+    # Every arg the launcher binds is named and ordered here, so a param added
+    # to the builder without a matching signature entry fails at build time
+    # rather than as a misaligned kernarg buffer at launch.
+    declared = [p.name for p in b.kernel.params]
+    expected = [a["name"] for a in gdn_state_scan_signature(spec)]
+    if declared != expected:
+        raise AssertionError(
+            f"kernel params {declared} do not match "
+            f"gdn_state_scan_signature {expected}"
+        )
     return b.kernel
