@@ -155,7 +155,7 @@ try
 
     info->load_cb_data_jit.resize(count);
     std::copy(cb_data, cb_data + count, info->load_cb_data_jit.begin());
-    info->load_cb_data = info->load_cb_data_jit.data();
+    info->load_cb_data = count ? info->load_cb_data_jit.data() : nullptr;
     return rocfft_status_success;
 }
 catch(...)
@@ -201,7 +201,7 @@ try
 
     info->store_cb_data_jit.resize(count);
     std::copy(cb_data, cb_data + count, info->store_cb_data_jit.begin());
-    info->store_cb_data = info->store_cb_data_jit.data();
+    info->store_cb_data = count ? info->store_cb_data_jit.data() : nullptr;
     return rocfft_status_success;
 }
 catch(...)
