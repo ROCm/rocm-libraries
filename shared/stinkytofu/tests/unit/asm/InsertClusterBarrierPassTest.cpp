@@ -37,7 +37,9 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPassTestSupport.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -551,6 +553,20 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
             ++idx;
         }
         return static_cast<size_t>(-1);
+    }
+
+    BasicBlock::iterator segBeginAfter(StinkyInstruction* boundary) const {
+        return std::next(BasicBlock::iterator(boundary));
+    }
+
+    bool anchorInWaitSegment(const IRBase* anchor, BasicBlock::iterator segBegin,
+                             const StinkyInstruction* trigger) const {
+        if (anchor == trigger) return true;
+        for (auto it = segBegin;
+             it != BasicBlock::iterator(const_cast<StinkyInstruction*>(trigger)); ++it) {
+            if (it.getNodePtr() == anchor) return true;
+        }
+        return false;
     }
 
     static bool isWorkgroupBarrierSignalInst(const StinkyInstruction& inst) {
@@ -1759,6 +1775,79 @@ IF_RULE3_CROSS_LOOP(TEST_F(InsertClusterBarrierPassTest,
 
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
 })
+
+// kRule3CrossLoop off: the cycle-lead climb meets its target while sccLive is held open by
+// a reader below the trigger, crosses the loop head via line 745 (accum >= leadCycles) with
+// hops still 0, then settles in the preheader once sccLive clears on the run-up's SCC def.
+// Without the report() clamp the signal lands before the loop head (runs once) while the
+// wait runs every iteration.
+TEST_F(InsertClusterBarrierPassTest,
+       CrossLoopOffDoesNotPlaceRule3SignalInPreheaderWhenLeadMetAtLoopHead) {
+    if (cluster_barrier::kRule3CrossLoop) GTEST_SKIP() << "requires kRule3CrossLoop == false";
+
+    appendGsu1Preheader();
+    // Once the climb steps over this def the backward sccLive carry drops, which is what lets
+    // line 788 fire in the preheader instead of only inside the body.
+    StinkyInstruction* preheaderSccDef = createSSubWritingSgprAndScc(/*sgpr=*/90);
+    openLoop();
+    // Long enough to meet the 500-cycle lead at the loop head, but not so long that settle()
+    // pulls the nomination below kRule3SignalMaxLeadCycles before we reach the preheader.
+    for (int i = 0; i < 70; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    // Plant the trigger mid-loop so the backward climb reaches the loop head before it hits
+    // the latch branches that closeLoop() adds below the tail handshake.
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    // Holds sccLive open during the body climb; must sit below the trigger under test.
+    createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    for (int i = 0; i < 50; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+    closeLoop();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    const BasicBlock::iterator segBegin = segBeginAfter(loopHead);
+    const auto found = cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+        trigger, segBegin, trigger, cycleMap, /*leadCycles=*/500, /*maxLeadCycles=*/900,
+        /*priorWaitAnchors=*/{}, /*maxHops=*/0, loopHead);
+    ASSERT_NE(cycleMap.find(trigger), cycleMap.end())
+        << "trigger must be present in the estimated cycle map:" << blockListing(*bb);
+    ASSERT_NE(found.preClampOutOfSegmentAnchor, nullptr)
+        << "cycle-lead IR must nominate an out-of-segment anchor at hops==0:" << blockListing(*bb);
+    const auto* preClampInst = dyn_cast<StinkyInstruction>(found.preClampOutOfSegmentAnchor);
+    ASSERT_NE(preClampInst, nullptr);
+    EXPECT_EQ(preClampInst, preheaderSccDef)
+        << "hops==0 nomination should be the run-up SCC def below the loop head:"
+        << blockListing(*bb);
+    EXPECT_TRUE(anchorInWaitSegment(found.anchor, segBegin, trigger))
+        << "report() must clamp hops==0 out-of-segment nominations back into the segment:"
+        << blockListing(*bb);
+    EXPECT_EQ(found.anchor, static_cast<IRBase*>(trigger))
+        << "with no hop budget the clamp falls back to the trigger:" << blockListing(*bb);
+
+    runPass();
+
+    const size_t headIdx = indexOf(loopHead);
+    const size_t triggerIdx = indexOf(trigger);
+    ASSERT_NE(headIdx, static_cast<size_t>(-1));
+    ASSERT_NE(triggerIdx, static_cast<size_t>(-1));
+
+    StinkyInstruction* rule3Cmp = findClusterWaveCmpAfter(headIdx);
+    ASSERT_NE(rule3Cmp, nullptr) << "Rule 3 handshake missing:" << blockListing(*bb);
+
+    EXPECT_GT(indexOf(rule3Cmp), headIdx)
+        << "Rule 3 signal must not anchor at or above the loop head (preheader):"
+        << blockListing(*bb);
+    EXPECT_LE(indexOf(rule3Cmp), triggerIdx)
+        << "with no hop budget the signal stays in its segment near the trigger:"
+        << blockListing(*bb);
+    EXPECT_EQ(inFlightAt(headIdx), 0)
+        << "no preheader compensation when kRule3CrossLoop is off:" << blockListing(*bb);
+
+    expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
+}
 
 // With kRule3CrossLoop false, segments too short to hold the lead stay inside their segment.
 TEST_F(InsertClusterBarrierPassTest, CrossLoopOffKeepsSignalsInsideTheirSegments) {

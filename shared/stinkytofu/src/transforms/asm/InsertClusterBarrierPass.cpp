@@ -35,6 +35,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPassTestSupport.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -559,6 +560,8 @@ struct Rule3SignalAnchor {
     /// True when one of those edges was the back edge. The signal then feeds the *next*
     /// trip's wait, which leaves the first trip with nobody to feed it.
     bool crossedLoopHead = false;
+    /// Filled only for unit-test entry: out-of-segment nomination at hops==0 before clamping.
+    IRBase* preClampOutOfSegmentAnchor = nullptr;
 };
 
 /// True when \p segBegin is the opening segment of \p loopHead.
@@ -570,6 +573,35 @@ bool isFirstLoopSegment(BasicBlock::iterator segBegin, StinkyInstruction* loopHe
 
 /// Walk backward from the wait for cycle lead. \p maxHops 0 = in-segment only
 /// (kRule3CrossLoop false); 1 = one segment hop allowed (kRule3CrossLoop true).
+/// Whether \p anchor came to rest in the wait's own segment after all.
+bool rule3AnchorInWaitSegment(IRBase* anchor, IRBase* defaultAnchor, BasicBlock::iterator segBegin,
+                              StinkyInstruction* referenceAnchor) {
+    if (anchor == defaultAnchor) return true;
+    for (auto it = segBegin; it != BasicBlock::iterator(referenceAnchor); ++it) {
+        if (it.getNodePtr() == anchor) return true;
+    }
+    return false;
+}
+
+Rule3SignalAnchor rule3ReportAnchor(IRBase* anchor, IRBase* defaultAnchor, int hops,
+                                    bool crossedLoopHead, IRBase* preClampOutOfSegmentAnchor,
+                                    BasicBlock::iterator segBegin,
+                                    StinkyInstruction* referenceAnchor,
+                                    IRBase* clampedDefaultAnchor) {
+    Rule3SignalAnchor result;
+    if (anchor == defaultAnchor) {
+        result = {defaultAnchor, 0, false};
+    } else if (rule3AnchorInWaitSegment(anchor, defaultAnchor, segBegin, referenceAnchor)) {
+        result = {anchor, 0, false};
+    } else if (hops <= 0) {
+        result = {clampedDefaultAnchor, 0, false};
+    } else {
+        result = {anchor, hops, crossedLoopHead};
+    }
+    result.preClampOutOfSegmentAnchor = preClampOutOfSegmentAnchor;
+    return result;
+}
+
 Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
@@ -602,6 +634,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     bool sccLive = isSccLiveBefore(referenceAnchor);
     bool targetMet = false;
     StinkyInstruction* leadPoint = nullptr;
+    IRBase* preClampOutOfSegmentAnchor = nullptr;
 
     // SCC queries about the anchor scan forward towards the wait, so the wait bounds them --
     // an anchor may not be corrected past the very spot it is leading. Only the back edge
@@ -645,14 +678,25 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return false;
     };
 
+    auto clearSccNote = [&](IRBase* anchor) -> IRBase* {
+        if (anchor != defaultAnchor && !inWaitSegment(anchor) && hops <= 0)
+            preClampOutOfSegmentAnchor = anchor;
+        return clearScc(anchor);
+    };
+
     // The hop count is what buys the loop its compensation, so it has to describe the anchor
     // that comes back rather than the climb that looked for it. A scan that climbed over an
     // edge and then dropped back below it crossed nothing in the end and must not be billed
     // for it -- neither when it gave up at the caller's default, which is the wait's own
     // spot, nor when it settled anywhere else the wait can reach without a branch.
+    //
     auto report = [&](IRBase* anchor) -> Rule3SignalAnchor {
-        if (anchor == defaultAnchor || inWaitSegment(anchor)) return {anchor, 0, false};
-        return {anchor, hops, crossedLoopHead};
+        IRBase* clamped = (hops <= 0 && !rule3AnchorInWaitSegment(anchor, defaultAnchor, segBegin,
+                                                                  referenceAnchor))
+                              ? clearSccNote(defaultAnchor)
+                              : anchor;
+        return rule3ReportAnchor(anchor, defaultAnchor, hops, crossedLoopHead,
+                                 preClampOutOfSegmentAnchor, segBegin, referenceAnchor, clamped);
     };
 
     // kRule3CrossLoop true only: wait→head; part B latch→anchor for the remainder.
@@ -680,19 +724,20 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
 
             if (isClusterBarrierWait(*tailInst)) {
                 return report(
-                    clearScc(anchorAfterWorkgroupBarrierFollowing(tailInst, defaultAnchor)));
+                    clearSccNote(anchorAfterWorkgroupBarrierFollowing(tailInst, defaultAnchor)));
             }
             if (isSegmentBoundary(*tailInst)) {
                 if (isCall(*tailInst) || isUnconditionalBranch(*tailInst)) {
-                    return report(clearScc(defaultAnchor));
+                    return report(clearSccNote(defaultAnchor));
                 }
                 if (loopHead != nullptr && tailInst == loopHead) {
-                    return report(clearScc(loopHead));
+                    return report(clearSccNote(loopHead));
                 }
                 continue;
             }
             if (isWorkgroupBarrierSignal(*tailInst) && priorWaitAnchors.count(tailInst) != 0) {
-                return report(clearScc(anchorAfterWorkgroupBarrierPair(tailInst, defaultAnchor)));
+                return report(
+                    clearSccNote(anchorAfterWorkgroupBarrierPair(tailInst, defaultAnchor)));
             }
             if (isWorkgroupBarrierSignal(*tailInst) || isWorkgroupBarrierWait(*tailInst)) continue;
 
@@ -708,12 +753,12 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
             }
             leadPoint = tailLeadPoint;
             if (tailTargetMet && !tailSccLive) {
-                return report(clearScc(settle(tailInst, headAccum + tailAccum)));
+                return report(clearSccNote(settle(tailInst, headAccum + tailAccum)));
             }
         }
         leadPoint = tailLeadPoint;
         IRBase* fallback = (loopHead != nullptr) ? static_cast<IRBase*>(loopHead) : defaultAnchor;
-        return report(clearScc(settle(fallback, headAccum + tailAccum)));
+        return report(clearSccNote(settle(fallback, headAccum + tailAccum)));
     };
 
     auto it = BasicBlock::iterator(referenceAnchor);
@@ -729,29 +774,33 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         sccLive = readsScc(*inst) || (sccLive && !writesScc(*inst));
 
         if (isClusterBarrierWait(*inst)) {
-            return report(clearScc(anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor)));
+            return report(clearSccNote(anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor)));
         }
         if (isSegmentBoundary(*inst)) {
             if (loopHead != nullptr && inst == loopHead) {
-                if (targetMet && !sccLive) return report(clearScc(settle(inst, accum)));
+                if (targetMet && !sccLive) {
+                    if (inst != defaultAnchor && !inWaitSegment(inst) && hops <= 0)
+                        preClampOutOfSegmentAnchor = inst;
+                    return report(clearSccNote(settle(inst, accum)));
+                }
                 // kRule3CrossLoop true only: latch wrap when head climb falls short.
                 if (accum >= kMinHeadAccumForLoopWrap && accum < leadCycles && maxHops > 0 &&
                     hops == 0 && isFirstLoopSegment(segBegin, loopHead)) {
                     StinkyInstruction* latch = findLatchBranchFor(inst);
-                    if (latch == nullptr) return report(clearScc(curSegBegin.getNodePtr()));
+                    if (latch == nullptr) return report(clearSccNote(curSegBegin.getNodePtr()));
                     return scanTailForRemainder(latch, accum, leadCycles - accum);
                 }
                 if (accum >= leadCycles) continue;
             }
             // Stops at segment boundary once maxHops is exhausted (0 when kRule3CrossLoop false).
             if (hops >= maxHops || isCall(*inst) || isUnconditionalBranch(*inst)) {
-                return report(clearScc(curSegBegin.getNodePtr()));
+                return report(clearSccNote(curSegBegin.getNodePtr()));
             }
             if (isLabel(*inst)) {
                 // Leaving a loop head textually would land in the preheader, which runs
                 // once; follow the latch so the signal lands on the path that repeats.
                 StinkyInstruction* latch = findLatchBranchFor(inst);
-                if (latch == nullptr) return report(clearScc(curSegBegin.getNodePtr()));
+                if (latch == nullptr) return report(clearSccNote(curSegBegin.getNodePtr()));
                 it = BasicBlock::iterator(latch);
                 // The latch is landed on rather than stepped over, so its own read of the
                 // loop condition has to be folded in by hand.
@@ -766,7 +815,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
             continue;
         }
         if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0) {
-            return report(clearScc(anchorAfterWorkgroupBarrierPair(inst, defaultAnchor)));
+            return report(clearSccNote(anchorAfterWorkgroupBarrierPair(inst, defaultAnchor)));
         }
 
         if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
@@ -784,10 +833,14 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         // clearScc has the last word even here. `sccLive` is carried along the one path the
         // climb took, while clearScc reads the range off the code below the anchor, so it
         // also covers a reader the climb never walked past.
-        if (targetMet && !sccLive) return report(clearScc(settle(inst, accum)));
+        if (targetMet && !sccLive) {
+            if (inst != defaultAnchor && !inWaitSegment(inst) && hops <= 0)
+                preClampOutOfSegmentAnchor = inst;
+            return report(clearSccNote(settle(inst, accum)));
+        }
     }
     // Running out of block can leave the anchor inside a range that starts above it.
-    return report(clearScc(settle(curSegBegin.getNodePtr(), accum)));
+    return report(clearSccNote(settle(curSegBegin.getNodePtr(), accum)));
 }
 
 StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
@@ -1375,5 +1428,22 @@ char InsertClusterBarrierPassImpl::ID = 0;
 std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue) {
     return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue);
 }
+
+namespace cluster_barrier {
+namespace test {
+
+Rule3SignalAnchorResult findRule3SignalAnchorByCycleLeadForUnitTest(
+    StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
+    const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
+    int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors, int maxHops,
+    StinkyInstruction* loopHead) {
+    const Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
+        referenceAnchor, segBegin, defaultAnchor, cycleMap, leadCycles, maxLeadCycles,
+        priorWaitAnchors, maxHops, loopHead);
+    return {found.anchor, found.hops, found.crossedLoopHead, found.preClampOutOfSegmentAnchor};
+}
+
+}  // namespace test
+}  // namespace cluster_barrier
 
 }  // namespace stinkytofu
