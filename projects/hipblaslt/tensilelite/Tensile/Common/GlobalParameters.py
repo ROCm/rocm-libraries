@@ -400,7 +400,7 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
 globalParameters["StinkyTofuCostOutputDir"] = ""
 
-globalParameters["DisableSTWaitCnt"] = False
+globalParameters["DisableSTWaitCnt"] = True
 
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
 # When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
@@ -605,10 +605,12 @@ defaultBenchmarkCommonParameters = [
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
+    {"TDMPlusLdsBuf": [0]},
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
+    {"TDMLoadWaveSync": [False]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
     # SwInstructionPrefetch — StinkyTofu software instruction-prefetch mode (single integer):

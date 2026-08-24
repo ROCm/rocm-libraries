@@ -32,6 +32,7 @@ from rocisa.code import Label, Module
 from rocisa.container import sgpr, vgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
+    SAndB32,
     SBranch,
     SCmpEQU32,
     SCmpEQU64,
@@ -127,6 +128,9 @@ class _SKWriter:
 
     def isStreamKConstantsToVgprEnabled(self, kernel, name=None):
         return False
+
+    def cmpNamedArgTypeEq(self, module, value, comment=""):
+        kw_module.KernelWriter.cmpNamedArgTypeEq(self, module, value, comment)
 
     def strideRef(self, tc, idx):
         return 1
@@ -229,7 +233,7 @@ def _strided_or_general_items(dp_only):
         "StreamKForceDPOnly": 1 if dp_only else 0,
         "ProblemType": {"SupportUserArgs": True},
     }
-    module = _sk().stridedBatchOrGeneralBatch(strided, general, kernel)
+    module = _sk().stridedBatchOrGeneralBatch(_SKWriter(), strided, general, kernel)
     return _module_items(module), general.getLabelName()
 
 
@@ -240,12 +244,14 @@ def test_general_batched_flag_check_folded_under_dp_only():
     # DP-only: no AddressFlags compare, and an unconditional branch to general.
     assert not _instruction_indices(dp_items, SCmpEQU64, src_contains="AddressFlags")
     assert any(isinstance(i, SBranch) and general_name in str(i) for i in dp_items)
-    # The ArgType==3 dispatch compare is retained in both variants.
-    assert _instruction_indices(dp_items, SCmpEQU32, src_contains="ArgType")
+    # Named ArgType==3 is masked (bit 8 = TDM wave-parity) then compared.
+    assert _instruction_indices(dp_items, SAndB32, src_contains="ArgType")
+    assert _instruction_indices(dp_items, SCmpEQU32)
 
     # non-DP-only: the AddressFlags synchronizer compare is present.
     assert _instruction_indices(nodp_items, SCmpEQU64, src_contains="AddressFlags")
-    assert _instruction_indices(nodp_items, SCmpEQU32, src_contains="ArgType")
+    assert _instruction_indices(nodp_items, SAndB32, src_contains="ArgType")
+    assert _instruction_indices(nodp_items, SCmpEQU32)
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@
 using hipdnn_integration_tests::BundleMetadata;
 using hipdnn_integration_tests::checkArchCompatibility;
 using hipdnn_integration_tests::checkVramRequirement;
+using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::loadBundleMetadata;
 using hipdnn_integration_tests::metaJsonPath;
 using hipdnn_test_sdk::utilities::isMetaJsonFile;
@@ -507,6 +508,56 @@ TEST(TestLoadBundleMetadata, ReturnsNulloptOnJsonArray)
 TEST(TestLoadBundleMetadata, RejectsFormatVersionZero)
 {
     const TempBundle bundle(R"({"format_version": 0})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    EXPECT_FALSE(meta.has_value());
+}
+
+// ---------------------------------------------------------------------------
+// loadBundleMetadata — enforcement_level
+// ---------------------------------------------------------------------------
+
+TEST(TestLoadBundleMetadata, EnforcementLevelDefaultsToFullWhenAbsent)
+{
+    const TempBundle bundle(R"({"format_version": 1})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::FULL);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelParsesApplicability)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "applicability"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::APPLICABILITY);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelParsesBuildable)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "buildable"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::BUILDABLE);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelParsesFull)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "full"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::FULL);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelInvalidTokenRejectsMetadata)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "buildible"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    EXPECT_FALSE(meta.has_value());
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelNonStringRejectsMetadata)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": 1})");
     auto meta = loadBundleMetadata(bundle.bundleJsonPath());
     EXPECT_FALSE(meta.has_value());
 }

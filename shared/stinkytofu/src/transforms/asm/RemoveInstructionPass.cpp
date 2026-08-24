@@ -84,7 +84,9 @@ size_t removeInstructionsInBlock(BasicBlock& bb,
     size_t removed = 0;
     for (auto it = bb.begin(); it != bb.end();) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst && targetOpcodes.count(inst->getUnifiedOpcode()) != 0) {
+        // Never erase branches/calls: this pass reports preserveCFGAnalyses().
+        if (inst && targetOpcodes.count(inst->getUnifiedOpcode()) != 0 && !isBranch(*inst) &&
+            !isCall(*inst)) {
             it = bb.eraseIR(it);
             ++removed;
         } else {
