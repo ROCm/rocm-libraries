@@ -294,6 +294,7 @@ set(rocsolver_auxiliary_source
   # triangular matrices
   auxiliary/rocauxiliary_lauum.cpp
   # band matrices
+  auxiliary/rocauxiliary_sb2st_hb2st.cpp
   auxiliary/rocauxiliary_sy2sb_he2hb.cpp
 )
 
