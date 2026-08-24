@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -107,6 +108,17 @@ inline std::unique_ptr<StinkyOpOperand> makeSSAImmOperand(LegacyImmPayload paylo
 struct STINKYTOFU_EXPORT AttachedSSA {
     std::vector<StinkySSAValue*> results;
     std::vector<std::unique_ptr<StinkyOpOperand>> operands;
+
+    // Copies must be deleted, not just unused: dllexport defines every declared,
+    // non-deleted special member, and copying a unique_ptr is ill-formed.
+    AttachedSSA() = default;
+    AttachedSSA(AttachedSSA&&) = default;
+    AttachedSSA& operator=(AttachedSSA&&) = default;
+    AttachedSSA(const AttachedSSA&) = delete;
+    AttachedSSA& operator=(const AttachedSSA&) = delete;
 };
+
+static_assert(!std::is_copy_constructible_v<AttachedSSA>,
+              "AttachedSSA owns unique_ptrs; dllexport would force an ill-formed copy");
 
 }  // namespace stinkytofu

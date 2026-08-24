@@ -28,6 +28,7 @@
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
@@ -70,8 +71,14 @@ AttachedSSAVerificationResult verifyAttachedSSA(const Function& function) {
     auto error = [&](std::string message) { result.errors.push_back(std::move(message)); };
 
     std::unordered_set<const StinkyOpOperand*> observedUses;
+    // Insertion-ordered mirror of observedUses so diagnostics do not depend on
+    // the hash order of pointer keys.
+    std::vector<const StinkyOpOperand*> orderedUses;
+    auto observeUse = [&](const StinkyOpOperand* use) {
+        if (observedUses.insert(use).second) orderedUses.push_back(use);
+    };
 
-    const std::string funcName = function.getName();
+    const std::string& funcName = function.getName();
     unsigned instIndex = 0;
     for (const BasicBlock& block : function) {
         for (size_t argIndex = 0; argIndex < block.ssaArguments().size(); ++argIndex) {
@@ -114,7 +121,7 @@ AttachedSSAVerificationResult verifyAttachedSSA(const Function& function) {
                           std::to_string(argIndex) + " incoming" + std::to_string(inc) +
                           ": value operand is null");
                 }
-                observedUses.insert(incoming.use.get());
+                observeUse(incoming.use.get());
             }
         }
 
@@ -156,7 +163,7 @@ AttachedSSAVerificationResult verifyAttachedSSA(const Function& function) {
                     error("@" + funcName + " #" + std::to_string(thisInst) + " operand" +
                           std::to_string(i) + ": value operand is null");
                 }
-                observedUses.insert(operand);
+                observeUse(operand);
             }
         }
     }
@@ -185,7 +192,7 @@ AttachedSSAVerificationResult verifyAttachedSSA(const Function& function) {
         }
     }
 
-    for (const StinkyOpOperand* use : observedUses) {
+    for (const StinkyOpOperand* use : orderedUses) {
         if (use->kind() != StinkyOpOperand::Kind::Value) continue;
         StinkySSAValue* value = use->value();
         if (value == nullptr) continue;

@@ -73,7 +73,7 @@ class LiftAsmRegistersToSSAPassImpl : public Pass {
         Expected<LiftAttachedSSAResult> lifted =
             liftAsmRegistersToAttachedSSA(func, dominance, options_);
         if (lifted.hasError()) {
-            const std::string reason = lifted.getError();
+            const std::string& reason = lifted.getError();
             PASS_DEBUG(std::cerr << "LiftAsmRegistersToSSA: " << reason << "\n");
             missed(passCtx, reason);
             return preserveCFGAnalyses();
