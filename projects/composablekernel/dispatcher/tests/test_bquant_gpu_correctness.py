@@ -4,16 +4,16 @@
 # SPDX-License-Identifier: MIT
 
 """
-GPU correctness tests for BQuant GEMM dispatcher — C4 and H3 coverage.
+GPU correctness tests for BQuant GEMM dispatcher -- C4 and H3 coverage.
 
 Requires a gfx950 GPU (MI350X / MI355X) and hipcc in PATH.
 
 Tests:
-  C4 — fp8, bf8: GPU output is non-zero and within 5% max-relative-error
+  C4 -- fp8, bf8: GPU output is non-zero and within 5% max-relative-error
        vs. a fp32 CPU reference.
-  H3 — mx_bf16bf16, mx_bf16bf8, mx_bf16fp4: same non-zero / rel-error checks,
+  H3 -- mx_bf16bf16, mx_bf16bf8, mx_bf16fp4: same non-zero / rel-error checks,
        plus verify QuantType::BQuantGrouped + e8m0 pipeline compiles and runs.
-  M2 — timing: time_ms is non-zero when timing is requested.
+  M2 -- timing: time_ms is non-zero when timing is requested.
 
 Run:
   python3 test_bquant_gpu_correctness.py
@@ -30,7 +30,22 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # for conftest helpers
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+
+# Canonical numeric codecs (single copies shared with the sibling quant GPU
+# tests): e8m0, OCP-fp4 LUT/unpack, bf16<->f32, and the global-max-floored
+# max-rel-error helper all live in conftest.py.
+from conftest import (
+    uses_ocp_fp8 as _uses_ocp_fp8,
+    ml_fp8_dtype as _ml_fp8_dtype,
+    encode_e8m0 as _encode_e8m0,
+    decode_e8m0 as _decode_e8m0,
+    decode_fp4 as _decode_fp4,
+    bf16_raw_to_f32 as _bf16_raw_to_f32,
+    max_rel_err as _conftest_max_rel_err,
+    FP4_E2M1_LUT as _FP4_E2M1_LUT,
+)
 
 # Non-grouped gemm_bquant bridge (38_block_scale_gemm), the subject of PR #9982.
 from gemm_bquant_utils import (
@@ -49,33 +64,19 @@ from gemm_bquant_utils import (
 
 log = logging.getLogger(__name__)
 
-TOLERANCE = 0.05  # 5% max relative error — fp8/bf8 precision floor
+TOLERANCE = 0.05  # 5% max relative error -- fp8/bf8 precision floor
 
 
 # ---------------------------------------------------------------------------
-# Dtype helpers
+# Dtype helpers.  _uses_ocp_fp8 / _ml_fp8_dtype and the e8m0 / fp4 / bf16
+# codecs come from conftest.py (single canonical copies).  The fp8/bf8
+# encode/decode wrappers below keep this test's ml_dtypes-missing fallback and
+# its direct (no float32-cast) ml_dtypes path, so the standalone script still
+# runs on a box without ml_dtypes.
 # ---------------------------------------------------------------------------
-
-def _uses_ocp_fp8(gfx_arch: str) -> bool:
-    """True when ck_tile::fp8_t is OCP (not FNUZ) for ``gfx_arch``.
-
-    Mirrors the C++ arch defines in gemm_bquant_utils._compile_bquant_kernel:
-    gfx950 / gfx12* build with -DCK_TILE_USE_OCP_FP8 (OCP e4m3/e5m2), everything
-    else (gfx942 / gfx90a) uses FNUZ e4m3fnuz / e5m2fnuz.  Hardcoding OCP made
-    gfx942 read NaN / mismatched fp8 values.
-    """
-    return ("gfx950" in gfx_arch) or ("gfx12" in gfx_arch)
-
-
-def _ml_fp8_dtype(dtype: str, gfx_arch: str):
-    import ml_dtypes
-    if _uses_ocp_fp8(gfx_arch):
-        return ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
-    return ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else ml_dtypes.float8_e5m2fnuz
-
 
 def _encode_fp8(arr: np.ndarray, dtype: str, gfx_arch: str = "gfx950") -> np.ndarray:
-    """Encode float32 → fp8 bytes (uint8 view), ARCH-AWARE (FNUZ on gfx942)."""
+    """Encode float32 -> fp8 bytes (uint8 view), ARCH-AWARE (FNUZ on gfx942)."""
     try:
         ml_t = _ml_fp8_dtype(dtype, gfx_arch)
         return arr.astype(ml_t).view(np.uint8)
@@ -98,62 +99,6 @@ def _decode_bf8(arr: np.ndarray, gfx_arch: str = "gfx950") -> np.ndarray:
     return _decode_fp8(arr, "bf8", gfx_arch)
 
 
-def _encode_e8m0(arr: np.ndarray) -> np.ndarray:
-    """Encode float32 scale values → e8m0 uint8 (MX block scale format).
-
-    e8m0 stores a power-of-two exponent: byte b represents 2^(b - 127).
-    Scales must be positive; zero maps to 0 (subnormal/zero in e8m0).
-    """
-    arr = np.asarray(arr, dtype=np.float32)
-    # Clamp to representable range: 2^-127 … 2^127
-    arr = np.clip(arr, 0.0, np.float32(2.0 ** 127))
-    nonzero = arr > 0.0
-    out = np.zeros(arr.shape, dtype=np.uint8)
-    # biased exponent = floor(log2(s)) + 127, clamped to [0, 254]
-    exp = np.floor(np.log2(arr[nonzero])).astype(np.int32) + 127
-    out[nonzero] = np.clip(exp, 0, 254).astype(np.uint8)
-    return out
-
-
-def _decode_e8m0(arr: np.ndarray) -> np.ndarray:
-    """Decode e8m0 uint8 → float32 scale values (2^(b - 127))."""
-    arr = np.asarray(arr, dtype=np.uint8)
-    return np.exp2(arr.astype(np.float32) - 127.0)
-
-
-# OCP FP4 E2M1 lookup table (from pk_fp4.hpp e2m1_to_fp32_table).
-# Index i (0-15) gives the float32 value for the 4-bit code i.
-_FP4_E2M1_LUT: np.ndarray = np.array([
-    0.0,  0.5,  1.0,  1.5,  2.0,  3.0,  4.0,  6.0,
-   -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
-], dtype=np.float32)
-
-
-def _decode_fp4(packed: np.ndarray, K: int, N: int) -> np.ndarray:
-    """Unpack K*N OCP FP4 E2M1 values from K*N/2 packed bytes.
-
-    pk_fp4_t packing (from pk_fp4.hpp _pack/_unpack):
-      byte = (element1 << 4) | (element0 & 0xF)
-    Low nibble = element at flat index 2i; high nibble = element at flat index 2i+1.
-    The flat layout is row-major [K, N], so each byte contains two consecutive N-elements.
-    """
-    flat = packed.flatten()
-    lo = (flat & 0x0F).astype(np.uint8)
-    hi = ((flat >> 4) & 0x0F).astype(np.uint8)
-    out = np.empty(K * N, dtype=np.float32)
-    out[0::2] = _FP4_E2M1_LUT[lo]
-    out[1::2] = _FP4_E2M1_LUT[hi]
-    return out.reshape(K, N)
-
-
-def _bf16_raw_to_f32(arr: np.ndarray) -> np.ndarray:
-    """Reinterpret a uint16 array of bf16 bit patterns as float32."""
-    u16 = arr.flatten().astype(np.uint16)
-    words = np.zeros(len(u16) * 2, dtype=np.uint16)
-    words[1::2] = u16  # bf16 occupies upper 2 bytes of float32 (little-endian)
-    return words.view(np.float32).reshape(arr.shape)
-
-
 # ---------------------------------------------------------------------------
 # CPU reference
 # ---------------------------------------------------------------------------
@@ -173,15 +118,11 @@ def _reference_gemm(A_f32: np.ndarray, B_f32: np.ndarray,
 
 
 def _max_rel_err(C_gpu: np.ndarray, C_ref: np.ndarray) -> float:
-    C_gpu_f = C_gpu.astype(np.float32)
-    C_ref_f = C_ref.astype(np.float32)
-    num = np.abs(C_gpu_f - C_ref_f)
-    # Use 1% of the global max magnitude as the denominator floor to avoid
-    # inflating the relative error when individual elements are near zero
-    # (a common occurrence with random inputs that partially cancel in GEMM).
-    ref_max = float(np.abs(C_ref_f).max())
-    den = np.abs(C_ref_f) + max(ref_max * 1e-2, 1e-6)
-    return float(np.max(num / den))
+    # Canonical helper in conftest.py: max|gpu-ref| / (|ref| + max(1%*max|ref|,
+    # 1e-6)).  The 1%-of-global-max floor avoids inflating the relative error
+    # when individual elements are near zero (random GEMM inputs that partially
+    # cancel).
+    return _conftest_max_rel_err(C_gpu, C_ref, floor_frac=1e-2)
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +226,7 @@ def _make_fp8_inputs(M, N, K, gK, gN, dtype="fp8", seed=42, gfx_arch="gfx950"):
 
 
 def _to_bf16_raw(x: np.ndarray) -> np.ndarray:
-    """Encode float32 array → uint16 array of bfloat16 bit patterns."""
+    """Encode float32 array -> uint16 array of bfloat16 bit patterns."""
     packed = np.frombuffer(x.astype(np.float32).tobytes(), dtype=np.uint16)
     # Little-endian: bf16 occupies the upper 2 bytes of each float32,
     # which are at odd indices (1, 3, 5, ...) in the uint16 view.
@@ -386,7 +327,7 @@ def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
 
 
 def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
-    # pk_fp4: 2 fp4 values per byte → B buffer is K*N/2 bytes.
+    # pk_fp4: 2 fp4 values per byte -> B buffer is K*N/2 bytes.
     # K=256 = 2*TileK(128): MicroscaleCompV3 needs num_loop>=2 to avoid OOB second prefetch.
     M, K, gK, gN = 128, 256, 32, 1
     cfg = default_mx_bf16fp4_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
@@ -480,19 +421,12 @@ def _gpu_and_hipcc_available() -> bool:
     """True only if both hipcc and a ROCm GPU are present.
 
     Lets the standalone test SKIP cleanly (exit 0) on CPU-only CI runners
-    instead of failing when the kernel build/run cannot proceed.
+    instead of failing when the kernel build/run cannot proceed.  Delegates to
+    the canonical probe shared with the sibling quant GPU tests.
     """
-    import shutil
-    import subprocess as _sp
-    if shutil.which("hipcc") is None:
-        return False
-    try:
-        out = _sp.run(
-            ["rocminfo"], capture_output=True, text=True, timeout=30
-        ).stdout
-    except Exception:
-        return False
-    return "gfx" in out
+    from conftest import gpu_available
+
+    return gpu_available()
 
 
 def main():

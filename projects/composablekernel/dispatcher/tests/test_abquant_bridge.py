@@ -32,7 +32,6 @@ from gemm_abquant_utils import (  # noqa: E402
     default_fp8_preshuffleb_preshufflequant_config,
     _generate_abquant_kernel,
 )
-from codegen_common import make_gemm_abquant_kernel_name  # noqa: E402
 
 # The ctypes lib source (checked for the B-matrix shuffle step, no GPU needed).
 _CTYPES_SRC = (_DISP / "bindings" / "ctypes" / "gemm_abquant_ctypes_lib.cpp").read_text()
@@ -51,44 +50,12 @@ _ALL = [
     default_fp8_preshuffleb_preshufflequant_config,
 ]
 
-
-class TestConfigName(unittest.TestCase):
-    def test_name_prefix_and_layout(self):
-        for ctor in _ALL:
-            cfg = ctor()
-            self.assertTrue(cfg.name.startswith(f"gemm_abquant_{cfg.variant_key}"), cfg.name)
-            self.assertIn("rcr", cfg.name)
-
-    def test_name_encodes_tiles(self):
-        cfg = default_fp8_config()
-        self.assertIn(f"{cfg.tile_m}x{cfg.tile_n}x{cfg.tile_k}", cfg.name)
-        self.assertIn(f"{cfg.warp_tile_m}x{cfg.warp_tile_n}x{cfg.warp_tile_k}", cfg.name)
-
-
-class TestNameContract(unittest.TestCase):
-    def _assert_contract(self, cfg):
-        expected = make_gemm_abquant_kernel_name(
-            variant_key=cfg.variant_key,
-            layout=cfg.layout,
-            pipeline=cfg.pipeline,
-            epilogue=cfg.epilogue,
-            scheduler=cfg.scheduler,
-            tile_m=cfg.tile_m, tile_n=cfg.tile_n, tile_k=cfg.tile_k,
-            warp_m=cfg.warp_m, warp_n=cfg.warp_n, warp_k=cfg.warp_k,
-            warp_tile_m=cfg.warp_tile_m, warp_tile_n=cfg.warp_tile_n,
-            warp_tile_k=cfg.warp_tile_k,
-            aquant_group_k=cfg.aquant_group_k,
-            bquant_group_n=cfg.bquant_group_n,
-            bquant_group_k=cfg.bquant_group_k,
-            preshuffle_b=cfg.preshuffle_b,
-            preshuffle_bquant=cfg.preshuffle_bquant,
-            eight_waves=cfg.eight_waves,
-        )
-        self.assertEqual(cfg.name, expected)
-
-    def test_all_contracts(self):
-        for ctor in _ALL:
-            self._assert_contract(ctor())
+# The config-name prefix (gemm_abquant_<variant> + rcr) / tiles-in-name contract
+# and the byte-exact codegen<->utils kernel-name contract for all _ALL ctors are
+# exercised by the shared parametrized tests in test_quant_bridge_shared.py
+# (driven by _quant_bridge_descriptors.py). The abquant-specific scope, warp_tile_k,
+# EightWaves, preshuffle-B, AQ-layout and permute-N regression tests below stay
+# explicit and per-op.
 
 
 class TestScope(unittest.TestCase):
@@ -399,17 +366,6 @@ class TestEightWavesColumnMajorAQ(unittest.TestCase):
     def test_ctypes_lib_derives_column_major_aq_stride(self):
         # The ctypes stride check must use M for ColumnMajor AQ, QK_A otherwise.
         self.assertIn("SelectedKernel::AQIsColumnMajor ? M : QK_A", _CTYPES_SRC)
-
-
-class TestCodegenProjection(unittest.TestCase):
-    def test_to_codegen_config_roundtrip(self):
-        cfg = default_fp8_config()
-        d = cfg.to_codegen_config()
-        self.assertEqual(d["variant_keys"], [cfg.variant_key])
-        self.assertEqual(d["layouts"], [cfg.layout])
-        self.assertEqual(d["aquant_group_k"], cfg.aquant_group_k)
-        self.assertEqual(d["bquant_groups"][0]["bquant_group_n"], cfg.bquant_group_n)
-        self.assertEqual(d["preshuffle_b"], cfg.preshuffle_b)
 
 
 if __name__ == "__main__":

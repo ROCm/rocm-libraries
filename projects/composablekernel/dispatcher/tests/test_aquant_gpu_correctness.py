@@ -37,8 +37,6 @@ Run:
 """
 
 import math
-import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -47,6 +45,16 @@ import numpy as np
 import pytest
 
 _HERE = Path(__file__).resolve()
+sys.path.insert(0, str(_HERE.parent))  # for conftest helpers under standalone run
+
+# Shared GPU probes, arch-aware fp8/bf8 codecs and build->run->verify harness.
+from conftest import (  # noqa: E402
+    encode_fp8 as _encode_arch,
+    qdq_fp8 as _qdq_arch,
+    gpu_available as _have_gpu,
+    ml_dtypes_available as _have_ml_dtypes,
+    run_and_verify,
+)
 
 
 def _find_python_dir() -> Path:
@@ -73,52 +81,15 @@ from gemm_aquant_utils import (  # noqa: E402
 )
 
 
-# =============================================================================
-# arch-aware fp8/bf8 codecs (OCP on gfx950/gfx12, FNUZ on gfx942)
-# =============================================================================
-
-
-def _uses_ocp(arch: str) -> bool:
-    return ("gfx950" in arch) or ("gfx12" in arch)
-
-
-def _ml_type(dtype: str, arch: str):
-    import ml_dtypes
-    if _uses_ocp(arch):
-        return ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
-    return ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else ml_dtypes.float8_e5m2fnuz
-
-
+# Thin local aliases so the case body reads the same as before (the codecs are
+# the single canonical copies from conftest.py).
 def _encode(arr, dtype: str, arch: str) -> np.ndarray:
-    t = _ml_type(dtype, arch)
-    return np.ascontiguousarray(arr.astype(np.float32).astype(t)).view(np.uint8)
+    return _encode_arch(arr, dtype, arch)
 
 
 def _qdq(arr, dtype: str, arch: str) -> np.ndarray:
     """Round through fp8/bf8 and back to fp32 (reference-side counterpart)."""
-    t = _ml_type(dtype, arch)
-    return arr.astype(np.float32).astype(t).astype(np.float32)
-
-
-def _have_ml_dtypes() -> bool:
-    try:
-        import ml_dtypes  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
-def _have_gpu() -> bool:
-    # Require BOTH a ROCm GPU (rocminfo) and hipcc: this test builds a kernel .so
-    # at runtime via hipcc, so on GPU-but-no-hipcc nodes it must skip cleanly
-    # rather than run and then fail at build time.
-    if shutil.which("hipcc") is None:
-        return False
-    try:
-        out = subprocess.run(["rocminfo"], capture_output=True, text=True, timeout=30)
-        return "gfx" in out.stdout
-    except Exception:
-        return False
+    return _qdq_arch(arr, dtype, arch)
 
 
 # =============================================================================
@@ -153,12 +124,6 @@ def _run_case(dtype: str, M: int, N: int, K: int, gK: int, out_dir: Path):
         f"warp_tile_k arch trap: got {config.warp_tile_k}, expected {expected_wtk} for {arch}"
     )
 
-    so_paths = setup_multiple_aquant_dispatchers(
-        configs=[config], output_dir=out_dir, gfx_arch=arch
-    )
-    assert so_paths and so_paths[0] is not None, "aquant kernel build failed"
-    so_path = so_paths[0]
-
     rng = np.random.default_rng(1234)
     QK_A = math.ceil(K / gK)
     A_f = rng.uniform(-1.0, 1.0, (M, K)).astype(np.float32)
@@ -171,18 +136,26 @@ def _run_case(dtype: str, M: int, N: int, K: int, gK: int, out_dir: Path):
     B_dec = _qdq(B_f, dtype, arch)
 
     problem = AQuantGemmProblem(M=M, N=N, K=K, quant_group_k=gK)
-    runner = AQuantGpuGemmRunner(so_path, layout="rcr")
-    result = runner.run(A=A_raw, AQ=AQ_f, B=B_raw, problem=problem)
 
-    C_gpu = np.asarray(result.C, dtype=np.float32)
-    assert np.max(np.abs(C_gpu)) > 1e-3, "GPU output all-zeros (warp_tile_k arch trap?)"
+    def _build():
+        so_paths = setup_multiple_aquant_dispatchers(
+            configs=[config], output_dir=out_dir, gfx_arch=arch
+        )
+        return so_paths[0] if so_paths else None
 
-    C_ref = reference_aquant_gemm(A_dec, B_dec, AQ_f, problem)
-    max_rel = float(np.max(np.abs(C_gpu - C_ref)) / (np.max(np.abs(C_ref)) + 1e-6))
+    def _run(so_path):
+        runner = AQuantGpuGemmRunner(so_path, layout="rcr")
+        result = runner.run(A=A_raw, AQ=AQ_f, B=B_raw, problem=problem)
+        return result.C, result.time_ms
 
-    tol = 0.05  # fp8/bf8 block-scale ~1e-2 .. 5e-2
-    assert max_rel <= tol, f"max_rel={max_rel:.4f} > tol={tol} ({dtype} {M}x{N}x{K} gK={gK})"
-    return max_rel, result.time_ms
+    res = run_and_verify(
+        build_so=_build,
+        run_kernel=_run,
+        reference=lambda: reference_aquant_gemm(A_dec, B_dec, AQ_f, problem),
+        tol=0.05,  # fp8/bf8 block-scale ~1e-2 .. 5e-2
+        label=f"aquant {dtype} {M}x{N}x{K} gK={gK}",
+    )
+    return res.max_rel, res.time_ms
 
 
 _SKIP_NO_GPU = pytest.mark.skipif(not _have_gpu(), reason="no ROCm GPU detected")

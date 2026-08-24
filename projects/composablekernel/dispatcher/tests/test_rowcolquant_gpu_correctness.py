@@ -29,8 +29,6 @@ Run:
     python3 test_rowcolquant_gpu_correctness.py          # standalone
 """
 
-import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -39,6 +37,15 @@ import numpy as np
 import pytest
 
 _HERE = Path(__file__).resolve()
+sys.path.insert(0, str(_HERE.parent))  # for conftest helpers under standalone run
+
+# Shared GPU build->run->verify harness. rowcolquant's fp8/bf8 codecs live in its
+# own utils (encode_fp8_bytes / quantize_dequantize_fp8, used below), so only the
+# GPU/ml_dtypes probes and the harness are pulled from conftest here.
+from conftest import (  # noqa: E402
+    gpu_available as _have_gpu,
+    run_and_verify,
+)
 
 
 def _find_python_dir() -> Path:
@@ -67,20 +74,8 @@ from gemm_rowcolquant_utils import (  # noqa: E402
 
 
 def _have_ml_dtypes() -> bool:
+    # rowcolquant's fp8 encoders come from ml_dtypes via its own utils.
     return u.fp8_encoding_available()
-
-
-def _have_gpu() -> bool:
-    # Require BOTH a ROCm GPU (rocminfo) and hipcc: this test builds a kernel .so
-    # at runtime via hipcc, so on GPU-but-no-hipcc nodes it must skip cleanly
-    # rather than run and then fail at build time.
-    if shutil.which("hipcc") is None:
-        return False
-    try:
-        out = subprocess.run(["rocminfo"], capture_output=True, text=True, timeout=30)
-        return "gfx" in out.stdout
-    except Exception:
-        return False
 
 
 # =============================================================================
@@ -110,12 +105,6 @@ def _run_case(dtype: str, M: int, N: int, K: int, out_dir: Path):
         f"warp_tile_k arch trap: got {config.warp_tile_k}, expected {expected_wtk} for {arch}"
     )
 
-    so_paths = setup_multiple_rowcolquant_dispatchers(
-        configs=[config], output_dir=out_dir, gfx_arch=arch
-    )
-    assert so_paths and so_paths[0] is not None, "rowcolquant kernel build failed"
-    so_path = so_paths[0]
-
     rng = np.random.default_rng(1234)
     A_f = rng.uniform(-2.0, 2.0, (M, K)).astype(np.float32)
     B_f = rng.uniform(-2.0, 2.0, (K, N)).astype(np.float32)
@@ -129,18 +118,26 @@ def _run_case(dtype: str, M: int, N: int, K: int, out_dir: Path):
     B_dec = u.quantize_dequantize_fp8(B_f, dtype, arch)
 
     problem = RowColQuantGemmProblem(M=M, N=N, K=K)
-    runner = RowColQuantGpuGemmRunner(so_path)
-    result = runner.run(A_raw, B_raw, AQ, BQ, problem)
 
-    C_gpu = np.asarray(result.C, dtype=np.float32)
-    assert np.max(np.abs(C_gpu)) > 1e-3, "GPU output all-zeros (warp_tile_k arch trap?)"
+    def _build():
+        so_paths = setup_multiple_rowcolquant_dispatchers(
+            configs=[config], output_dir=out_dir, gfx_arch=arch
+        )
+        return so_paths[0] if so_paths else None
 
-    C_ref = reference_rowcolquant_gemm(A_dec, B_dec, AQ, BQ)
-    max_rel = float(np.max(np.abs(C_gpu - C_ref)) / (np.max(np.abs(C_ref)) + 1e-6))
+    def _run(so_path):
+        runner = RowColQuantGpuGemmRunner(so_path)
+        result = runner.run(A_raw, B_raw, AQ, BQ, problem)
+        return result.C, result.time_ms
 
-    tol = 0.05  # fp8/bf8 block-scale ~1e-2 .. 5e-2
-    assert max_rel <= tol, f"max_rel={max_rel:.4f} > tol={tol} ({dtype} {M}x{N}x{K})"
-    return max_rel, result.time_ms
+    res = run_and_verify(
+        build_so=_build,
+        run_kernel=_run,
+        reference=lambda: reference_rowcolquant_gemm(A_dec, B_dec, AQ, BQ),
+        tol=0.05,  # fp8/bf8 block-scale ~1e-2 .. 5e-2
+        label=f"rowcolquant {dtype} {M}x{N}x{K}",
+    )
+    return res.max_rel, res.time_ms
 
 
 _SKIP_NO_GPU = pytest.mark.skipif(not _have_gpu(), reason="no ROCm GPU detected")

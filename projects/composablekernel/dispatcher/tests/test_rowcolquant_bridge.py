@@ -5,10 +5,15 @@
 
 """CPU-only unit tests for the rowcolquant GEMM TileEngine -> Dispatcher bridge.
 
-Locks the config name format, the byte-exact codegen<->utils kernel-name contract,
-the codegen-JSON projection, and the fp8/bf8 x rcr scope (the exact dtype/layout set
-that Old-TE gemm_quant_rowcol.cpp registers: per-row scale on A, per-col scale on B).
-No GPU, no hipcc, no Old-TE builder import required.
+Locks the fp8/bf8 x rcr scope (per-row scale on A, per-col scale on B; the exact
+dtype/layout set Old-TE gemm_quant_rowcol.cpp registers), the arch-derived
+warp_tile_k trap, the arch-threaded self-test, and the arch-aware fp8 encoding
+flavour.  No GPU, no hipcc, no Old-TE builder import required.
+
+The config-name prefix / tiles-in-name contract, the byte-exact codegen<->utils
+kernel-name contract, and the codegen-JSON projection roundtrip are exercised for
+every quant bridge (including this one) by the shared parametrized tests in
+test_quant_bridge_shared.py, driven by _quant_bridge_descriptors.py.
 """
 
 import sys
@@ -30,54 +35,6 @@ from gemm_rowcolquant_utils import (  # noqa: E402
     _ml_fp8_dtype,
     _uses_ocp_fp8,
 )
-from codegen_common import make_rowcolquant_kernel_name  # noqa: E402
-
-
-class TestConfigName(unittest.TestCase):
-    def test_fp8_name_prefix(self):
-        self.assertTrue(default_fp8_config().name.startswith("gemm_rowcolquant_fp8_rcr_"),
-                        default_fp8_config().name)
-
-    def test_bf8_name_prefix(self):
-        self.assertTrue(default_bf8_config().name.startswith("gemm_rowcolquant_bf8_rcr_"),
-                        default_bf8_config().name)
-
-    def test_name_encodes_tiles(self):
-        cfg = default_fp8_config()
-        self.assertIn(f"{cfg.tile_m}x{cfg.tile_n}x{cfg.tile_k}", cfg.name)
-        self.assertIn(f"{cfg.warp_tile_m}x{cfg.warp_tile_n}x{cfg.warp_tile_k}", cfg.name)
-
-
-class TestNameContract(unittest.TestCase):
-    def _assert_contract(self, cfg):
-        expected = make_rowcolquant_kernel_name(
-            variant_key=cfg.variant_key,
-            layout=cfg.layout,
-            pipeline=cfg.pipeline,
-            epilogue=cfg.epilogue,
-            scheduler=cfg.scheduler,
-            tile_m=cfg.tile_m, tile_n=cfg.tile_n, tile_k=cfg.tile_k,
-            warp_m=cfg.warp_m, warp_n=cfg.warp_n, warp_k=cfg.warp_k,
-            warp_tile_m=cfg.warp_tile_m, warp_tile_n=cfg.warp_tile_n,
-            warp_tile_k=cfg.warp_tile_k,
-        )
-        self.assertEqual(cfg.name, expected)
-
-    def test_fp8_contract(self):
-        self._assert_contract(default_fp8_config())
-
-    def test_bf8_contract(self):
-        self._assert_contract(default_bf8_config())
-
-
-class TestCodegenProjection(unittest.TestCase):
-    def test_to_codegen_config_roundtrip(self):
-        cfg = default_fp8_config()
-        d = cfg.to_codegen_config()
-        self.assertEqual(d["variant_keys"], [cfg.variant_key])
-        self.assertEqual(d["layouts"], [cfg.layout])
-        self.assertEqual(d["tile_configs"][0]["tile_m"], cfg.tile_m)
-        self.assertEqual(d["tile_configs"][0]["warp_tile_k"], cfg.warp_tile_k)
 
 
 class TestScope(unittest.TestCase):

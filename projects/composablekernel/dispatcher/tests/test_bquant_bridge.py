@@ -43,7 +43,6 @@ from gemm_bquant_utils import (  # noqa: E402
     default_mx_bf16fp4_config,
     setup_multiple_bquant_dispatchers,
 )
-from codegen_common import make_bquant_kernel_name  # noqa: E402
 
 # The ctypes lib source (checked for the B-matrix shuffle / pk_int4 permute steps,
 # no GPU needed).
@@ -85,41 +84,19 @@ _ALL = _BASE + [
 
 
 class TestPrefix(unittest.TestCase):
-    def test_name_prefix_is_gemm_bquant(self):
+    # The gemm_bquant_<variant> prefix loop and the byte-exact codegen<->utils
+    # kernel-name contract for every _ALL ctor are exercised by the shared
+    # parametrized tests in test_quant_bridge_shared.py (driven by
+    # _quant_bridge_descriptors.py, which uses NAME_PREFIX in the name builder).
+    # The NAME_PREFIX-constant value and the distinct "not grouped_" namespace
+    # guard stay here.
+    def test_name_prefix_constant(self):
         self.assertEqual(NAME_PREFIX, "gemm_bquant")
-        for ctor in _ALL:
-            self.assertTrue(ctor().name.startswith("gemm_bquant_"), ctor().name)
 
     def test_not_grouped_prefix(self):
         # Must NOT collide with the grouped_gemm_bquant bridge namespace.
         for ctor in _ALL:
             self.assertFalse(ctor().name.startswith("grouped_"), ctor().name)
-
-
-class TestNameContract(unittest.TestCase):
-    def _assert_contract(self, cfg):
-        expected = make_bquant_kernel_name(
-            variant_key=cfg.variant_key,
-            layout=cfg.layout,
-            pipeline=cfg.pipeline,
-            epilogue=cfg.epilogue,
-            scheduler=cfg.scheduler,
-            tile_m=cfg.tile_m, tile_n=cfg.tile_n, tile_k=cfg.tile_k,
-            warp_m=cfg.warp_m, warp_n=cfg.warp_n, warp_k=cfg.warp_k,
-            warp_tile_m=cfg.warp_tile_m, warp_tile_n=cfg.warp_tile_n,
-            warp_tile_k=cfg.warp_tile_k,
-            quant_group_m=cfg.quant_group_m,
-            quant_group_n=cfg.quant_group_n,
-            quant_group_k=cfg.quant_group_k,
-            preshuffle_b=cfg.preshuffle_b,
-            preshuffle_bquant=cfg.preshuffle_bquant,
-            name_prefix=NAME_PREFIX,
-        )
-        self.assertEqual(cfg.name, expected)
-
-    def test_all_contracts(self):
-        for ctor in _ALL:
-            self._assert_contract(ctor())
 
 
 class TestScope(unittest.TestCase):
@@ -141,16 +118,6 @@ class TestScope(unittest.TestCase):
         self.assertTrue(default_fp8_preshufflequant_config().preshuffle_bquant)
         pq = default_fp8_preshuffleb_bquant_config()
         self.assertTrue(pq.preshuffle_b and pq.preshuffle_bquant)
-
-
-class TestCodegenProjection(unittest.TestCase):
-    def test_to_codegen_config_roundtrip(self):
-        cfg = default_fp8_config()
-        d = cfg.to_codegen_config()
-        self.assertEqual(d["variant_keys"], [cfg.variant_key])
-        self.assertEqual(d["layouts"], [cfg.layout])
-        self.assertEqual(d["quant_groups"][0]["quant_group_k"], cfg.quant_group_k)
-        self.assertEqual(d["preshuffle_b"], cfg.preshuffle_b)
 
 
 class TestProblem(unittest.TestCase):
