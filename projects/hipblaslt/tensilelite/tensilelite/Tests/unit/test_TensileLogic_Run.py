@@ -96,6 +96,7 @@ class TestSetup:
                 assert "logic2.yaml" in yaml_names
 
     def test_setup_forwards_explicit_argv(self):
+        """Ensure `_setup` parses caller-supplied argv instead of global `sys.argv`."""
         with patch('tensilelite.tensilelite_logic.run.validateToolchain', return_value='/usr/bin/g++'), \
              patch('tensilelite.tensilelite_logic.run.makeIsaInfoMap', return_value={}), \
              patch('tensilelite.tensilelite_logic.run.assignGlobalParameters'), \
