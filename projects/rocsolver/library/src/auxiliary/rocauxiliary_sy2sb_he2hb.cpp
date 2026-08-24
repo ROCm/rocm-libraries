@@ -46,7 +46,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 //              2*kd - 1 sub-diagonals. On output, the main diagonal and kd
 //              sub-diagonals are set; other entries are destroyed.
 //  ldab        Leading dimension of Aband. ldab >= 3*kd - 1.
-//  tau         Householder tau values.
+//  tau         Householder tau values, length n - kd.
 //
 template <typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
