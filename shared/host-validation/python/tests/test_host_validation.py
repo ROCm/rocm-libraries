@@ -1281,9 +1281,7 @@ class TensorAndGemmTests(unittest.TestCase):
                 self.assertFalse(rejected.passed)
 
     def test_default_float32_policy_rejects_opposite_signs_near_zero(self):
-        observed = hv.from_numpy(
-            np.asarray([-0.0001, -0.0002], dtype=np.float32)
-        )
+        observed = hv.from_numpy(np.asarray([-0.0001, -0.0002], dtype=np.float32))
         expected = hv.from_numpy(np.asarray([0.0001, 0.0002], dtype=np.float32))
         options = hv.default_comparison_options(hv.ScalarType.Float32)
         options.compute_frobenius = False
