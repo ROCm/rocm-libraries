@@ -19,6 +19,8 @@ _SPEC = importlib.util.spec_from_file_location("subtile_plsin", PLSIN_PATH)
 _PLSIN = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_PLSIN)
 computeSubtilePlsin = _PLSIN.computeSubtilePlsin
+plsinLargeTile = _PLSIN.plsinLargeTile
+PLSIN_WEAVE_LOOKAHEAD = _PLSIN.PLSIN_WEAVE_LOOKAHEAD
 
 
 class _DType:
@@ -153,3 +155,55 @@ def test_plsin_register_budget_boundaries(mi_wave_tile, expected):
     kernel = _eligible_kernel()
     kernel["MIWaveTile"] = deepcopy(mi_wave_tile)
     assert computeSubtilePlsin(kernel) is expected
+
+
+# ── plsinLargeTile: coord-weave gate, independent of PLSIN eligibility ──
+
+
+@pytest.mark.parametrize(
+    "mt0, mt1, expected",
+    [
+        (256, 256, False),
+        (128, 256, False),
+        (256, 512, True),
+        (512, 256, True),
+        (512, 512, True),
+    ],
+)
+def test_plsin_large_tile_boundary(mt0, mt1, expected):
+    kernel = _eligible_kernel()
+    kernel["MacroTile0"] = mt0
+    kernel["MacroTile1"] = mt1
+    assert plsinLargeTile(kernel) is expected
+
+
+def test_plsin_large_tile_does_not_gate_eligibility():
+    # A MacroTile > 256 is a coord-WEAVE decision only; it must not by itself
+    # disable PLSIN when the register/spill/profit budgets still pass.
+    kernel = _eligible_kernel()
+    kernel["MacroTile0"] = 512
+    kernel["MacroTile1"] = 512
+    assert plsinLargeTile(kernel) is True
+    assert computeSubtilePlsin(kernel) is True
+
+
+# ── PLSIN_WEAVE_LOOKAHEAD: shared profitability threshold ──
+
+
+def test_weave_lookahead_is_shared_positive_constant():
+    # The scheduler weave (LogicalScheduler) and the eligibility gate must read the
+    # SAME lookahead. Lock its value here so a change in one place without the other
+    # is caught (the two are documented to move together in Plsin.py).
+    assert PLSIN_WEAVE_LOOKAHEAD == 2
+    assert PLSIN_WEAVE_LOOKAHEAD > 0
+
+
+def test_eligible_tile_has_more_store_pairs_than_lookahead():
+    # Gate/weave consistency: any tile the gate accepts must leave at least one
+    # store-pair in the loop to hide the woven pairs under, i.e.
+    # numStorePairs (= MIWT0*MIWT1//2) > PLSIN_WEAVE_LOOKAHEAD.
+    kernel = _eligible_kernel()
+    miwt = kernel["MIWaveTile"]
+    assert computeSubtilePlsin(kernel) is True
+    numStorePairs = miwt[0] * miwt[1] // 2
+    assert numStorePairs > PLSIN_WEAVE_LOOKAHEAD

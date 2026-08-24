@@ -75,9 +75,11 @@ def _plsinStoreGate(name: str, default: bool = False) -> bool:
 
 # --- AITER-style PLSIN1 BF16 store optimizations (see plsin1_direct_store plan) ---
 # Component B: hoist the redundant per-store `v_add addrDVgpr + lane_group*8` so the
-#   lane-adjusted dwordx4 base is computed once per (addr,N-group) and reused via the
-#   MUBUF immediate offsets 0/64/128/192.  Pure reorder of address arithmetic; the
-#   store data path is unchanged.
+#   lane-adjusted dwordx4 base (vgprAddrScratch) is computed once per (addrDVgpr,
+#   N-group) and reused by every paired store in that group. The per-pair M
+#   displacement is carried by each store's MUBUF offset12=globalOffset (and/or an
+#   updated addrDVgpr), not by an soffset immediate. Pure reorder of address
+#   arithmetic; the store data path is unchanged.
 PLSIN_STORE_HOIST_ADDR = _plsinStoreGate("PLSIN_STORE_HOIST_ADDR", default=True)
 
 
@@ -167,8 +169,8 @@ class GlobalWriteBatchWriter:
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
     # Component B (PLSIN_STORE_HOIST_ADDR): the lane-adjusted dwordx4 base
     # (addrDVgpr + lane_group*8) is identical for every paired store that shares
-    # the same addrDVgpr and N-group (the M-subtile stride is carried by the MUBUF
-    # immediate offset 0/64/128/192, not by addrDVgpr).  Track the (addrDVgpr
+    # the same addrDVgpr and N-group (the per-pair M displacement is carried by each
+    # store's MUBUF offset12=globalOffset, not by addrDVgpr).  Track the (addrDVgpr
     # index, blockIdxN) that vgprAddrScratch currently holds so Phase1 recomputes
     # it only when that key changes.  -1 = invalid / not yet computed.
     self._subtileHoistedAddrDVgpr = -1
@@ -1708,8 +1710,10 @@ class GlobalWriteBatchWriter:
       module.add(SMovB32(dst=sgpr(stmp+1), src="0xffff0000"))
       module.add(VCndMaskB32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=vgpr(vPermAddr), src2=sgpr(stmp,2), comment="restore original lane_id for selected lanes"))
       module.add(VLShiftLeftB32(dst=vgpr(vPermAddr), shiftHex=2, src=vgpr(vTmp), comment="partner_lane * 4 = ds_permute byte addr"))
-      # Pre-compute lane_group*8 once; reused as the row-byte address correction in every
-      # paired dwordx4 store (addrDVgpr encodes lane_group*8 but we need lane_group*16).
+      # Pre-compute lane_group*8 once; reused as the row-byte address correction added
+      # into vgprAddrScratch in every paired dwordx4 store. addrDVgpr holds the M offset
+      # in bpeCexternal units; Phase1 scales it to the dest bpe and adds this
+      # vgprLaneGroupDelta (lane_group*8 bytes) -- there is no separate lane_group*16 term.
       vLGDelta = self.cvtVgprStruct.vgprLaneGroupDelta
       module.addComment1("16bit dwordx4: pre-compute lane_group*8 row-byte correction")
       module.add(VAndB32(dst=vgpr(vLGDelta), src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"),
@@ -3013,8 +3017,8 @@ class GlobalWriteBatchWriter:
     #      at tile boundaries without adding latency to the critical path.
     # Component B (PLSIN_STORE_HOIST_ADDR): vAddrScratch = (scaled addrDVgpr) +
     # lane_group*8 is identical for every paired store that shares this addrDVgpr and
-    # N-group -- the per-M-subtile-pair stride is carried by the MUBUF immediate offset
-    # (0/64/128/192) in Phase2, not by addrDVgpr.  So compute it once and reuse.
+    # N-group -- the per-pair M displacement is carried by each Phase2 store's MUBUF
+    # offset12=globalOffset, not by addrDVgpr.  So compute it once and reuse.
     #
     # Safe ONLY in the full-tile fused store (_fusedFullTileNoGuards): there every
     # paired store in the N-group is emitted straight-line and unconditionally

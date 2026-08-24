@@ -648,13 +648,24 @@ class KernelWriterAssembly(KernelWriter):
 
   def defineSgpr(self, name, numSgprs, align=1):
     if numSgprs == 0: return Module()
-    # Temporarily mark parked (freeSgprVarPool) vars in-use so this checkout does
-    # not grab their registers, then restore them afterwards. A parked var may
-    # already be borrowed as a main-loop temp (its registers currently checked
-    # out) -- e.g. StreamK parks SrdWS specifically for reuse during the main
-    # loop. In that case its registers are not Available, this checkout cannot
-    # grab them anyway, and setSgprToInUseState would raise; skip such vars and
-    # only restore the ones we actually flipped back to in-use here.
+    if not getattr(self.states, "postLoopStoreInNll", False):
+      # Baseline (non-PLSIN) path: identical to develop. Mark every parked
+      # (freeSgprVarPool) var in-use so this checkout skips their registers,
+      # then restore them. Any RuntimeError here is a genuine pool bug and must
+      # surface, so keep the strict allocator behavior for all non-PLSIN kernels.
+      for s in self.states.freeSgprVarPool:
+        self.setSgprToInUseState(s)
+      ret = RegSet("s", "sgpr"+name, self.defineSgprIdx(name, numSgprs, align))
+      for s in self.states.freeSgprVarPool:
+        self.setSgprToFreeState(s)
+      return ret
+    # PLSIN path only: a parked var may already be borrowed as a main-loop temp
+    # (its registers currently checked out) -- e.g. StreamK parks SrdWS
+    # specifically for reuse during the main loop, and buildSubtileFusedStore
+    # defines guard SGPRs while that borrow is live. In that case its registers
+    # are not Available, this checkout cannot grab them anyway, and
+    # setSgprToInUseState would raise; skip such vars and only restore the ones
+    # we actually flipped back to in-use here.
     protected = []
     for s in self.states.freeSgprVarPool:
       try:
@@ -671,8 +682,7 @@ class KernelWriterAssembly(KernelWriter):
         #     out at all.
         # In both cases the checkout below cannot grab those registers anyway, so
         # the var is simply skipped. Any OTHER RuntimeError is a genuine SGPR-pool
-        # bug and must NOT be masked -- this runs for every kernel/arch, so a
-        # blanket `except: pass` would hide real pool corruption codebase-wide.
+        # bug and must NOT be masked.
         msg = str(e)
         if "is not in Available state" not in msg and "never checked out" not in msg:
           raise
@@ -14402,18 +14412,22 @@ class KernelWriterAssembly(KernelWriter):
     return module, definedNames
 
   def buildSubtileFusedStore(self, kernel, tPA, tPB):
-    """Emit the beta0/NonEdge D store INSIDE the FUSED NLL.
+    """Emit the beta0/full-tile D store INSIDE the FUSED NLL.
 
     Mirrors the restricted OptNLL store (see the NLL prefetch path ~L9860):
     globalWriteElements is called with noGSUBranch=True, applyAlpha=True,
-    betas=[False], edge=False so ONLY the beta0/NonEdge paired dwordx4 stores are
-    emitted — no C load (SrdC), no beta/edge/StreamK/GSU/activation branches. The
-    applyAlpha multiply carries the effective alpha (with scaleA*scaleB folded in for
-    scalar UseScaleAB); the fold + StreamK Alpha save/restore happen inside
-    globalWriteElements so the later PLAIN post-loop store is unaffected. That
-    is exactly the store the front guard already guarantees at runtime
-    (PostLoopHasTail==0 && beta==0 && NonEdge), so SrdC is never referenced (only
-    SrdD is hoisted) and no undefined-symbol / SGPR-overflow problem arises.
+    betas=[False], edge=False so ONLY the beta0/full-tile paired dwordx4 stores are
+    emitted — no C load (SrdC), no beta/edge/StreamK/GSU/activation branches.
+    Alpha is NOT part of the fused-store predicate: applyAlpha=True runs the normal
+    scalar-alpha multiply for every alpha value. For the eligible scalar-UseScaleAB
+    case globalWriteElements temporarily folds scalar scaleA*scaleB into Alpha (with
+    a StreamK Alpha save/restore so the later PLAIN post-loop store is unaffected);
+    vector UseScaleAB and the remaining epilogue scales still run in the normal
+    epilogue. In weave mode alpha is applied per element after each accvgpr read.
+    The runtime PostLoopFusedStore predicate (folding no-tail, beta==0, full
+    MacroTile in M and N, and StreamK full-tile ownership) already guarantees this
+    exact store, so SrdC is never referenced (only SrdD is hoisted) and no
+    undefined-symbol / SGPR-overflow problem arises.
 
     endSummation has NOT run at the NLL emit point, so this re-establishes the
     store prerequisites it normally provides — serializedStore, codes.accVgprRead
@@ -14777,14 +14791,15 @@ class KernelWriterAssembly(KernelWriter):
     savedWeave = self.states.subtileFusedWeave
     self.states.subtileFusedWeave = True
     # (subtileFusedFullTileStore was set above, before the guard-SGPR decision.)
-    # applyAlpha: normally True -- apply the effective alpha (= user Alpha, with
-    # scaleA*scaleB folded in for scalar UseScaleAB) to the accumulators before the
-    # paired D store. globalWriteElements does the scalar-ScaleAB->Alpha fold internally
-    # and, for StreamK, saves/restores the original Alpha around this call, so the later
-    # PLAIN post-loop store re-folds from the correct original Alpha (no double scaling).
-    # Arbitrary-alpha fused path: retain the normal per-element alpha multiply.
-    # beta==0 and full-tile are still guaranteed by the front guard, so no C-read or
-    # edge path is added.
+    # applyAlpha=True: apply the normal scalar-alpha multiply to the accumulators
+    # before the paired D store, for EVERY alpha value (alpha is not a fused-store
+    # guard). For the eligible scalar-UseScaleAB case globalWriteElements folds
+    # scalar scaleA*scaleB into Alpha internally and, for StreamK, saves/restores the
+    # original Alpha around this call so the later PLAIN post-loop store re-folds
+    # from the correct original Alpha (no double scaling). Vector UseScaleAB and the
+    # other epilogue scales still run in the normal epilogue; in weave mode alpha is
+    # applied per element after each read. beta==0 and full-tile are still guaranteed
+    # by the front guard, so no C-read or edge path is added.
     storeModule, _ = self.globalWriteElements(
       kernel, tPA, tPB,
       [fullVws[0]], [fullVws_1[0]], [elements[0]], [elements_1[0]],
@@ -16004,8 +16019,10 @@ class KernelWriterAssembly(KernelWriter):
     Alpha and scalar-scale pointers are intentionally not guard terms: the fused store
     keeps applyAlpha=True and performs the normal epilogue multiply. Any failing
     structural sub-guard forces flag=0 => PLAIN NLL. The flag is only defined/computed
-    for fp32-compute PLSIN kernels (_plsinFusedFlagEligible); non-fp32 PLSIN keeps the
-    inline emitFusedStoreGuard chain.
+    when _plsinFusedFlagEligible (PLSIN + fp32 compute); otherwise this returns an empty
+    module. Since computeSubtilePlsin already requires fp32 compute, every PLSIN kernel
+    takes this hoisted path -- the inline emitFusedStoreGuard chain is the non-PLSIN /
+    fallback form, not an alternate PLSIN mode.
 
     IMPLEMENTATION: every sub-guard except the full-tile pair is an exact-zero or
     bitwise-equality test, so they are OR-reduced into a single 'bad' accumulator and

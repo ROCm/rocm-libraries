@@ -394,10 +394,11 @@ class InstructionEmitter:
                 module.add(cmpCls(
                     src0=sgpr("LoopCounterL"), src1=sgpr(litSgpr),
                     comment=f"LoopCounter {source.compare} {source.value}?"))
-        # PostLoopStoreInNll bias/SAV bloats the NLL bodies so this preloop skip
-        # (e.g. SkipToNLL, which jumps across the whole preloop+mainloop+NGLL) can
-        # exceed the +-simm16 short-branch range. Emit a 32-bit long branch in that
-        # mode; every other kernel keeps the original short branch (byte-identical).
+        # PostLoopStoreInNll adds the fused-store + epilogue footprint to the kernel,
+        # growing the total distance this preloop skip spans (e.g. SkipToNLL jumps
+        # across the whole preloop+mainloop+NGLL) past the +-simm16 short-branch range.
+        # Emit a 32-bit long branch in that mode; every other kernel keeps the original
+        # short branch (byte-identical).
         if getattr(self.writer.states, "postLoopStoreInNll", False):
             module.add(self.writer.longBranchScc1(
                 skipLabel, posNeg=1,

@@ -3560,8 +3560,9 @@ class LogicalScheduler:
         MFMA window), while non-owner WGs keep the lean plainNGLL.
 
         The arm is chosen by the SAME loop-invariant guard as the fused NLL store
-        (emitFusedStoreGuard: no-tail && beta==0 && full-tile owner), so NGLL and NLL
-        can never disagree about which WG is the fused owner.
+        (the hoisted PostLoopFusedStore flag / emitFusedStoreGuard: no-tail && beta==0
+        && full MacroTile in M and N && StreamK full-tile owner), so NGLL and NLL can
+        never disagree about which WG is the fused owner.
 
         Gating:
           * non-PLSIN kernels (postLoopStoreInNll False) -> return the stock single
@@ -3599,14 +3600,17 @@ class LogicalScheduler:
         # checks them in exactly once, completing the checkout(NGLL)/checkin(store)
         # pairing (each NGLL_Cui/NLL_Cui pair is emitted contiguously, so the pool
         # watermark only grows by the 4 coord VGPRs held across the NLL body, never
-        # accumulates across copies). Restricted to tiles <= 256x256: larger tiles
-        # already peak at the arch-VGPR occupancy budget in the loop and cannot afford
-        # the extra live coord registers.
+        # accumulates across copies). Coord WEAVING (not PLSIN eligibility) is
+        # restricted to MacroTile <= 256x256: larger tiles already peak at the
+        # arch-VGPR occupancy budget in the loop and cannot afford the extra live
+        # coord registers.
         largeTile = plsinLargeTile(kernel)
         ngllInit = self._emitLoop(writer, kernel, f"{label}_INIT", initEmitted)
-        # Coord-hoist weaving is ON for eligible (<=256x256) PLSIN tiles (spill tiles
-        # are already excluded upstream, so largeTile never trips for an eligible
-        # kernel -- kept as a defensive guard).
+        # Coord-hoist weaving runs only when the MacroTile is <= 256x256
+        # (plsinLargeTile is False). computeSubtilePlsin does NOT cap eligibility at
+        # 256x256, so largeTile CAN be True for an eligible kernel; in that case the
+        # INIT arm is emitted without coord weaving and VGPR lending handles the store
+        # register pressure.
         if not largeTile:
             from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
             # Generate the coord instructions (also checks out the persistent coord
@@ -3957,9 +3961,10 @@ class LogicalScheduler:
 
     def _emitFusedFrontGuard(self, writer, kernel, label, plainLabel):
         """Loop-invariant front guard for PostLoopStoreInNll: fall through to the
-        FUSED NLL only when the NLL is terminal (no tail loop), beta==0, and the
-        tile is subtile-aligned (NonEdge); otherwise branch to `plainLabel` (the
-        PLAIN NLL).
+        FUSED NLL only when the NLL is terminal (no tail loop), beta==0, this WG
+        covers a complete MacroTile in both M and N (requireFullTile, NOT merely
+        NonEdge), and this WG is the StreamK full-tile owner; otherwise branch to
+        `plainLabel` (the PLAIN NLL).
 
         - PostLoopHasTail (SizesSum % DepthU, computed before the main loop) is 0 iff
           the NLL is the terminal K-step (no flat tail loop follows).
@@ -4002,10 +4007,11 @@ class LogicalScheduler:
                                         SCBranchSCC1, SBranch, SLongBranchPositive)
         from rocisa.container import sgpr
 
-        # PostLoopStoreInNll bias/SAV bloats the FUSED NLL bodies so the exit-loop
-        # branches that jump across them (to SkipToEnd / ExitC{ui}) overflow the
-        # +-simm16 short-branch range. Emit those as 32-bit long branches, gated so
-        # every other kernel keeps the original short branches (byte-identical).
+        # PostLoopStoreInNll adds the fused-store + epilogue footprint (bias/SAV etc.)
+        # to the kernel, growing the total span the exit-loop branches jump across (to
+        # SkipToEnd / ExitC{ui}) past the +-simm16 short-branch range. Emit those as
+        # 32-bit long branches, gated so every other kernel keeps the original short
+        # branches (byte-identical).
         plsin = getattr(writer.states, "postLoopStoreInNll", False)
 
         assert self._emitter is not None, \
@@ -4160,10 +4166,12 @@ class LogicalScheduler:
                                          source=None))
             self._foldInjectedIntoPreloop = True
 
-            # Pre-loop scheduling (Change B): computePostLoopFusedStore may have split the
-            # scale-pointer load off from the guard body (isScalarScale + hoist enabled).
-            # Splice it BEFORE the first global_read so its s_waitcnt kmcnt(0) (still in the
-            # guard fold above) is covered by the entire prefetch buffer_load window.
+            # Pre-loop scheduling: the arbitrary-alpha fused path no longer defers
+            # scale-pointer loads, so computePostLoopFusedStore always leaves
+            # _plsinDeferredScalePtrLoads == None and this splice is inert. The guarded
+            # block is kept so re-enabling scale-pointer hoisting only needs the stash to
+            # be repopulated (it would splice the load BEFORE the first global_read so its
+            # s_waitcnt kmcnt(0) is covered by the whole prefetch buffer_load window).
             scalePtrLoad = getattr(writer, "_plsinDeferredScalePtrLoads", None)
             if scalePtrLoad is not None:
                 gr_idx = next((i for i, em in enumerate(em_list)
@@ -4186,8 +4194,9 @@ class LogicalScheduler:
             assert init_idx is not None, "preloop must contain the canonical initC op"
             next_id = max(em.moduleId for em in em_list) + 1
             # After initC, jump to the tail loop when K < DepthU. Under PLSIN the
-            # FUSED NLL bodies sit between here and SkipToEnd and push it past the
-            # +-simm16 short-branch range, so this arm needs the 32-bit form.
+            # fused-store + epilogue footprint sits between here and SkipToEnd and
+            # pushes it past the +-simm16 short-branch range, so this arm needs the
+            # 32-bit form.
             if plsin:
                 tailJump = writer.longBranchScc1(
                     endLabel, posNeg=1,
