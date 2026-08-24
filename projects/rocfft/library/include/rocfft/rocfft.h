@@ -371,14 +371,14 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  *  Tdata load_cb(Tdata* data, size_t offset, void* cbdata, void* sharedMem);
  *  @endcode
  *
- *  'Tdata' is the type of a single element of the input buffer.  It is
+ *  `Tdata` is the type of a single element of the input buffer.  It is
  *  the caller's responsibility to ensure that the function type is
  *  appropriate for the plan (for example, a single-precision
  *  real-to-complex transform would load single-precision real
  *  elements).
  *
- *  If either of 'symbol_name' or 'bitcode_data' is null, or if
- *  'bitcode_len_bytes' is 0, any previously registered load callback
+ *  If either of `symbol_name` or `bitcode_data` is null, or if
+ *  `bitcode_len_bytes` is 0, any previously registered load callback
  *  is cleared.
  *
  *  Symbol names must only contain alphabetic characters (A-Z, a-z),
@@ -386,10 +386,10 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  *  with digits.
  *
  *  ::rocfft_execution_info_set_load_callback_data can optionally be
- *  used to set the 'cbdata' value received by the callback function.
- *  rocFFT will pass nullptr for 'cbdata' by default.
+ *  used to set the `cbdata` value received by the callback function.
+ *  rocFFT will pass nullptr for `cbdata` by default.
  *
- *  Currently, 'shared_mem_bytes' must be 0.  Callbacks are not
+ *  Currently, `shared_mem_bytes` must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
  *  or output.
  *
@@ -419,14 +419,14 @@ ROCFFT_EXPORT rocfft_status
  *  void store_cb(Tdata* data, size_t offset, Tdata element, void* cbdata, void* sharedMem);
  *  @endcode
  *
- *  'Tdata' is the type of a single element of the output buffer.  It is
+ *  `Tdata` is the type of a single element of the output buffer.  It is
  *  the caller's responsibility to ensure that the function type is
  *  appropriate for the plan (for example, a single-precision
  *  real-to-complex transform would store single-precision complex
  *  elements).
  *
- *  If either of 'symbol_name' or 'bitcode_data' is null, or if
- *  'bitcode_len_bytes' is 0, any previously registered store callback
+ *  If either of `symbol_name` or `bitcode_data` is null, or if
+ *  `bitcode_len_bytes` is 0, any previously registered store callback
  *  is cleared.
  *
  *  Symbol names must only contain alphabetic characters (A-Z, a-z),
@@ -434,9 +434,9 @@ ROCFFT_EXPORT rocfft_status
  *  with digits.
  *
  *  ::rocfft_execution_info_set_store_callback_data can optionally be
- *  used to set the 'cbdata' value received by the callback function.
+ *  used to set the `cbdata` value received by the callback function.
  *
- *  Currently, 'shared_mem_bytes' must be 0.  Callbacks are not
+ *  Currently, `shared_mem_bytes` must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
  *  or output.
  *
@@ -719,9 +719,9 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *  used at plan creation.
  * 
  *  The provided data pointers replace any previously-specified
- *  load callback data for this execution info handle.  'cb_data' may
+ *  load callback data for this execution info handle.  `cb_data` may
  *  be nullptr along with a count of zero, to indicate that all load
- *  callbacks should receive nullptr for their 'cbdata' parameters.
+ *  callbacks should receive nullptr for their `cbdata` parameters.
  *
  *  @param[in] info execution info handle
  *  @param[in] cb_data callback function data, passed to the JIT-compiled load callback when it is called
@@ -795,9 +795,9 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_store_callback(rocfft_exec
  *  used at plan creation.
  *
  *  The provided data pointers replace any previously-specified
- *  store callback data for this execution info handle.  'cb_data' may be
+ *  store callback data for this execution info handle.  `cb_data` may be
  *  nullptr, to indicate that all store callbacks should receive
- *  nullptr for their 'cbdata' parameters.
+ *  nullptr for their `cbdata` parameters.
  *
  *  @param[in] info execution info handle
  *  @param[in] cb_data callback function data, passed to the JIT-compiled store callback when it is called
