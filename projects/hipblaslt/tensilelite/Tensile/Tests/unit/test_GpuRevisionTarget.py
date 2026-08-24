@@ -131,7 +131,11 @@ class TestDetectGpuRevisionTarget:
         with mock.patch.object(gpu_rev, "detect_gpu_arch", return_value="gfx1250"), \
              mock.patch.object(gpu_rev, "_probe_asic_revision", return_value=("gfx1250", revision)):
             assert gpu_rev.detect_gpu_revision_target() == target
-        assert str(revision) in capsys.readouterr().out
+        # Reported on stderr so stdout stays a clean, capturable target value
+        # (callers do TENSILE_TARGET=$(invoke get-gpu-revision-target)).
+        captured = capsys.readouterr()
+        assert str(revision) in captured.err
+        assert captured.out == ""
 
 
 def _completed(stdout="", returncode=0, stderr=""):
