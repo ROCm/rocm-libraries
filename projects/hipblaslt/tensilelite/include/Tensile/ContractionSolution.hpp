@@ -53,6 +53,22 @@
 
 namespace TensileLite
 {
+    // Elements in one synchronizer slot, i.e. the inter-workgroup flag region a
+    // single (stream, problem index) pair owns. Stream-K indexes these by
+    // workgroup id, so a slot holds one int per Stream-K workgroup. Solutions
+    // whose flag usage exceeds it must not be selected (SynchronizerSizeCheck,
+    // both in ContractionSolution and in the predicate of the same name).
+    //
+    // Must stay in sync with _rocblaslt_handle::c_syncSlotElements.
+    constexpr uint32_t SynchronizerSlotElements = 2048;
+
+    // Problems a grouped GEMM can be given private slots for, i.e. the width of
+    // one stream's block. A wider group cannot be isolated per problem, so no
+    // synchronizer-using solution may be selected for it.
+    //
+    // Must stay in sync with _rocblaslt_handle::c_syncSlotsPerStream.
+    constexpr uint32_t SynchronizerGroupedSlots = 16;
+
     template <typename TAct>
     struct DeviceUserArguments
     {

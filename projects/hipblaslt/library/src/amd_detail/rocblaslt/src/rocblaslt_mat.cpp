@@ -171,6 +171,18 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     {
         workspaceSizeInBytes = std::min<size_t>(workspaceSizeInBytes, algo->max_workspace_bytes);
     }
+
+    void*                  streamSynchronizer = nullptr;
+    const rocblaslt_status syncStatus
+        = handle->synchronizerForStream(stream, 0, &streamSynchronizer);
+    if(syncStatus != rocblaslt_status_success)
+    {
+        log_error(__func__,
+                  "no Stream-K synchronizer slot left: this handle has already handed one to "
+                  "c_syncStreamSlots distinct streams");
+        return syncStatus;
+    }
+
     RocblasltContractionProblem problem{opA,
                                         opB,
                                         m,
@@ -230,7 +242,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         matmul_descr->act0,
                                         matmul_descr->act1,
                                         stream,
-                                        handle->synchronizerForStream(stream),
+                                        streamSynchronizer,
                                         swizzleA,
                                         swizzleB,
                                         batch_mode,
@@ -726,7 +738,11 @@ rocblaslt_status
                                         matmul_descr[i]->act0,
                                         matmul_descr[i]->act1,
                                         0,
-                                        (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
+                                        // Placeholder: the stream is not known
+                                        // until initialize(), so makeArgument()
+                                        // rebinds this to the (stream, i) slot
+                                        // before the kernel arguments are built.
+                                        handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
@@ -1404,7 +1420,9 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
+                                        // Placeholder: rebound per (stream, i)
+                                        // by makeArgument(), see above.
+                                        handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,

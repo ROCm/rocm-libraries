@@ -3828,6 +3828,20 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->inputs.workspaceSize = workspaceSizeInBytes;
             data->problem.setWorkspaceSize(workspaceSizeInBytes);
 
+            // The object API learns its stream here, not at create time, and the
+            // synchronizer pointer is baked into the kernel arguments by solve()
+            // just below. Bind the per-stream flag region now so two Gemm objects
+            // initialized on different streams cannot share one.
+            if(rocblaslt_status s
+               = handle->synchronizerForStream(stream, 0, &data->inputs.Synchronizer);
+               s != rocblaslt_status_success)
+            {
+                log_error(__func__,
+                          "no Stream-K synchronizer slot left: this handle has already handed "
+                          "one to c_syncStreamSlots distinct streams");
+                return s;
+            }
+
             data->kernels = solution->solve(data->problem, data->inputs, *hardware);
         }
         else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -3904,6 +3918,27 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             {
                 data->problem.gemms[i].setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
                 data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
+            }
+
+            // Isolation has to cover the stream as well as the problem index:
+            // offsetting by index alone keeps one grouped call internally safe
+            // but still shares the region with every other stream.
+            for(size_t i = 0; i < data->inputs.grouped.size(); i++)
+            {
+                // SynchronizerSizeCheck refuses every synchronizer-using solution
+                // once the group is wider than c_syncSlotsPerStream, so problems
+                // past the block never read this pointer. Give them the stream's
+                // first slot rather than failing a call that runs fine without it.
+                const size_t slot = i < _rocblaslt_handle::c_syncSlotsPerStream ? i : 0;
+                if(rocblaslt_status s = handle->synchronizerForStream(
+                       stream, slot, &data->inputs.grouped[i].Synchronizer);
+                   s != rocblaslt_status_success)
+                {
+                    log_error(__func__,
+                              "no Stream-K synchronizer slot left: this handle has already "
+                              "handed one to c_syncStreamSlots distinct streams");
+                    return s;
+                }
             }
 
             data->useUserArgs = useUserArgs;
