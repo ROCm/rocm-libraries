@@ -240,9 +240,9 @@ void testing_csr2hyb(Arguments argus)
     std::vector<T>   hhyb_coo_val_gold;
 
     // Host csr2hyb conversion
-    int ell_width = 0;
-    int ell_nnz   = 0;
-    int coo_nnz   = 0;
+    int     ell_width = 0;
+    int64_t ell_nnz   = 0;
+    int     coo_nnz   = 0;
 
     if(part == HIPSPARSE_HYB_PARTITION_AUTO || part == HIPSPARSE_HYB_PARTITION_USER)
     {
