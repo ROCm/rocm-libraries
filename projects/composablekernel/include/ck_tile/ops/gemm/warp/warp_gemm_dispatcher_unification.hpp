@@ -319,10 +319,12 @@ struct UnificationDispatcher
                                                          AttrNumAccessBV,
                                                          UsePackedNumAccess>::Type;
 
-    // Use legacy IterateK for the cases that led to scheduling differences in GPU assembly.
+    // Use legacy IterateK on gfx942 for the cases that led to scheduling differences in GPU
+    // assembly.
     static constexpr bool UseLegacyIterateK =
-        !IsMx && !TransposeC && SwizzleFactor == 1 && !UsePackedNumAccess && MPerWave == 16 &&
-        NPerWave == 16 && std::is_same_v<AType, BType> &&
+        core::amdgcn_compiler_target_state::CK_TILE_ARCH_GFX942 && !IsMx && !TransposeC &&
+        SwizzleFactor == 1 && !UsePackedNumAccess && MPerWave == 16 && NPerWave == 16 &&
+        std::is_same_v<AType, BType> &&
         ((KPerWave == 32 && (std::is_same_v<AType, half_t> || std::is_same_v<AType, bf16_t>)) ||
          (KPerWave == 64 && (std::is_same_v<AType, fp8_t> || std::is_same_v<AType, bf8_t>)));
 
