@@ -22,6 +22,7 @@ Run:
 """
 
 import argparse
+import pytest
 import logging
 import math
 import sys
@@ -259,7 +260,7 @@ def _make_bf16_inputs(M, N, K, gK, gN, seed=42):
 _N_SWEEP = (128, 256, 512)
 
 
-def test_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def _case_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     # K=768 = 3*TileK(256): use num_loop=3 (TailNumber::Odd) for better coverage.
     # num_loop=2 works but exercises only the no-hot-loop/Even tail path; 3 gives
     # the no-hot-loop/Odd tail path and exercises the BQ scale prefetch more robustly.
@@ -276,7 +277,7 @@ def test_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     return PASS, f"C4/fp8: PASS for N in {_N_SWEEP}"
 
 
-def test_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def _case_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     # K=768 = 3*TileK(256): use num_loop=3 for the same reason as test_c4_fp8.
     M, K, gK, gN = 16, 768, 128, 1
     cfg = default_bf8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
@@ -291,7 +292,7 @@ def test_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     return PASS, f"C4/bf8: PASS for N in {_N_SWEEP}"
 
 
-def test_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def _case_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     # K=256 = 2*TileK(128): MicroscaleCompV3 needs num_loop>=2 to avoid OOB second prefetch
     M, K, gK, gN = 128, 256, 32, 1
     cfg = default_mx_bf16bf16_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
@@ -307,7 +308,7 @@ def test_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     return PASS, f"H3/mx_bf16bf16: PASS for N in {_N_SWEEP}"
 
 
-def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def _case_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     # K=384 = 3*TileK(128): use num_loop=3 (TailNumber::Odd) for broader pipeline coverage.
     M, K, gK, gN = 128, 384, 128, 1
     cfg = default_mx_bf16bf8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
@@ -326,7 +327,7 @@ def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     return PASS, f"H3/mx_bf16bf8: PASS for N in {_N_SWEEP}"
 
 
-def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def _case_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     # pk_fp4: 2 fp4 values per byte -> B buffer is K*N/2 bytes.
     # K=256 = 2*TileK(128): MicroscaleCompV3 needs num_loop>=2 to avoid OOB second prefetch.
     M, K, gK, gN = 128, 256, 32, 1
@@ -352,7 +353,7 @@ def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     return PASS, f"H3/mx_bf16fp4: PASS for N in {_N_SWEEP}"
 
 
-def test_c_i4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+def _case_c_i4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     """Round-6: fp8i4 / bf8i4 must be exact once BQ is encoded to the kernel's
     QDataType (fp8/bf8, 1 byte).  The round-5 float32 BQ produced NaN.  Swept over
     N to also exercise the per-N-tile de-permute.  B is pk_int4 (2 per byte)."""
@@ -408,13 +409,31 @@ def test_c_i4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 TESTS = [
-    ("C4/fp8",          test_c4_fp8),
-    ("C4/bf8",          test_c4_bf8),
-    ("C/i4",            test_c_i4),
-    ("H3/mx_bf16bf16",  test_h3_mx_bf16bf16),
-    ("H3/mx_bf16bf8",   test_h3_mx_bf16bf8),
-    ("H3/mx_bf16fp4",   test_h3_mx_bf16fp4),
+    ("C4/fp8",          _case_c4_fp8),
+    ("C4/bf8",          _case_c4_bf8),
+    ("C/i4",            _case_c_i4),
+    ("H3/mx_bf16bf16",  _case_h3_mx_bf16bf16),
+    ("H3/mx_bf16bf8",   _case_h3_mx_bf16bf8),
+    ("H3/mx_bf16fp4",   _case_h3_mx_bf16fp4),
 ]
+
+
+@pytest.mark.parametrize("case_name,case_fn", TESTS, ids=[t[0] for t in TESTS])
+def test_bquant_gpu_c4_h3(case_name, case_fn, gpu_arch, tmp_path):
+    """C4/H3 bquant GPU correctness -- one pytest case per TESTS entry.
+
+    Runs on a real GPU (the gpu_arch fixture skips cleanly on CPU-only boxes).
+    MX (H3) variants need gfx950 e8m0 hardware; on any other arch they skip.
+    """
+    try:
+        status, detail = case_fn(tmp_path, gpu_arch)
+    except Exception as exc:  # noqa: BLE001
+        if "requires gfx950" in str(exc):
+            pytest.skip(f"{case_name}: MX is gfx950-only (arch={gpu_arch})")
+        raise
+    if status == SKIP:
+        pytest.skip(detail)
+    assert status == PASS, detail
 
 
 def _gpu_and_hipcc_available() -> bool:

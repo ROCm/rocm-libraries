@@ -363,6 +363,18 @@ class TensorQuantGpuGemmRunner:
 # Subprocess helpers (self-contained, do not call ctypes_utils.py)
 # =============================================================================
 
+_SUPPORTED_ARCHS = ("gfx942", "gfx950")
+
+
+def _validate_arch(arch: str) -> str:
+    """Return arch if supported, else raise. Mirrors the C++ runtime arch check."""
+    if not arch or not any(arch.startswith(a) for a in _SUPPORTED_ARCHS):
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r} for TensorQuant bridge "
+            f"(supported: {', '.join(_SUPPORTED_ARCHS)})"
+        )
+    return arch
+
 
 def _detect_gpu_arch() -> str:
     """Detect current GPU arch via rocm_agent_enumerator. Raises if none found.
