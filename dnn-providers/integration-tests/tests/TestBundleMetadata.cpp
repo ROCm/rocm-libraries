@@ -10,7 +10,14 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+
+// getpid() below stamps the temp path per process. MSVC ships no <unistd.h>;
+// it spells the same call _getpid() in <process.h>.
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include "harness/BundleMetadata.hpp"
 
@@ -29,6 +36,16 @@ using hipdnn_test_sdk::utilities::isMetaJsonFile;
 namespace
 {
 
+/// This process's id. MSVC has no <unistd.h> and spells the call _getpid().
+int currentProcessId()
+{
+#ifdef _WIN32
+    return _getpid();
+#else
+    return ::getpid();
+#endif
+}
+
 /// Claims a uniquely-named temp directory. Seeded from the clock, the pid and a
 /// per-call counter, so neither a sibling process nor a second TempBundle in this one
 /// draws the same name.
@@ -42,7 +59,7 @@ hipdnn_test_sdk::utilities::ScopedDirectory makeUniqueBundleDir()
     const auto base = std::filesystem::temp_directory_path();
     const auto seed
         = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())
-          ^ (static_cast<uint64_t>(::getpid()) << 32U);
+          ^ (static_cast<uint64_t>(currentProcessId()) << 32U);
 
     for(int attempt = 0; attempt < 64; ++attempt)
     {
