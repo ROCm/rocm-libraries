@@ -30,11 +30,15 @@
 # CHECK-NEXT: s_load_b64
 # CHECK-NEXT: s_wait_kmcnt
 # CHECK-SAME: kmcnt = 0
+# Scalar loads touch no counter but kmcnt, so every other field stays unused.
+# CHECK-SAME: vlcnt = -1
+# CHECK-SAME: vscnt = -1
+# CHECK-SAME: dlcnt = -1
+# CHECK-SAME: dscnt = -1
 # CHECK-NEXT: s_add_u32
 # CHECK-NEXT: s_add_u32
 # One full drain covers both loads; a second wait would be redundant.
 # CHECK-NOT: s_wait_kmcnt
-# Scalar loads only touch kmcnt; no other counter wait should be emitted.
 # CHECK-NOT: s_wait_dscnt
 # CHECK-NOT: s_wait_loadcnt
 # CHECK-NOT: s_wait_tensorcnt
