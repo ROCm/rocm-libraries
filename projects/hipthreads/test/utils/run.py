@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import os
 import platform
+import signal
 import subprocess
 import tempfile
 
@@ -154,51 +155,81 @@ def main():
     # A hipThreads test can hang (e.g. a hip::wthread whose persistent scheduler
     # never reaches the state join() waits for). Without a timeout, one hung test
     # would block the whole lit run until the CI job's global timeout, cancelling
-    # every later test. So we run the child in its own process group and kill the
-    # entire group if it exceeds HIPTHREADS_TEST_TIMEOUT seconds (default 30, 0 to
-    # disable). Using killpg to kill the whole process group (not just the
-    # immediate child like the timeout command) is required in case a test
-    # launches a sub-process. A timed-out test returns non-zero, which lit records
-    # as a normal FAIL/XFAIL instead of a hang.
+    # every later test. So we run the child in its own process group and tear that
+    # whole group down if it exceeds HIPTHREADS_TEST_TIMEOUT seconds (default 30, 0
+    # to disable). Killing the group rather than just the immediate child (as the
+    # timeout command would) is required in case a test launches a sub-process; the
+    # two platforms spell the group and the kill differently, see below. A timed-out
+    # test returns non-zero, which lit records as a normal FAIL/XFAIL instead of a
+    # hang.
     try:
         timeout = float(os.environ.get("HIPTHREADS_TEST_TIMEOUT", "30"))
     except ValueError:
         timeout = 30.0
 
-    if not timeout or platform.system() == "Windows":
-        # No timeout requested, or process-group semantics below are POSIX-only.
+    if not timeout:
+        # No timeout requested.
         return subprocess.call(
             commandLine, executable=executable, cwd=execdir, env=env, shell=False
         )
 
-    proc = subprocess.Popen(
-        commandLine,
-        executable=executable,
-        cwd=execdir,
-        env=env,
-        shell=False,
-        start_new_session=True,
+    timed_out_msg = (
+        f"run.py: command timed out after {timeout:g}s and was killed: "
+        f"{' '.join(commandLine)}"
     )
-    try:
-        return proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        import signal
 
-        # Graduated shutdown - send SIGTERM to request graceful shutdown and give
-        # it 5 seconds to gracefully shut down before forcefully killing it with
-        # SIGKILL.
-        pgid = os.getpgid(proc.pid)
-        os.killpg(pgid, signal.SIGTERM)
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(pgid, signal.SIGKILL)
-            proc.wait()
-        print(
-            f"run.py: command timed out after {timeout:g}s and was killed: "
-            f"{' '.join(commandLine)}"
+    if platform.system() == "Windows":
+        # Windows has no POSIX process groups. Spawn in a new process group so we
+        # can deliver CTRL_BREAK for a graceful shutdown, then force-kill the whole
+        # tree with taskkill /T (a test may launch sub-processes).
+        proc = subprocess.Popen(
+            commandLine,
+            executable=executable,
+            cwd=execdir,
+            env=env,
+            shell=False,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
-        return 124
+        try:
+            return proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # Graduated shutdown - request a graceful break and give it 5 seconds
+            # before forcefully killing the whole process tree.
+            try:
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+                proc.wait(timeout=5)
+            except (subprocess.TimeoutExpired, OSError):
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True,
+                )
+                proc.wait()
+            print(timed_out_msg)
+            return 124
+    else:
+        proc = subprocess.Popen(
+            commandLine,
+            executable=executable,
+            cwd=execdir,
+            env=env,
+            shell=False,
+            start_new_session=True,
+        )
+        try:
+            return proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # Graduated shutdown - send SIGTERM to request graceful shutdown and
+            # give it 5 seconds to gracefully shut down before forcefully killing
+            # it with SIGKILL.
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(pgid, signal.SIGKILL)
+                proc.wait()
+            print(timed_out_msg)
+            return 124
 
 
 if __name__ == "__main__":
