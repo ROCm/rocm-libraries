@@ -55,6 +55,35 @@ from ..KernelWriterModules import hasSequentialValuC
 from math import ceil, log2
 
 
+import os as _os
+
+
+def _plsinStoreGate(name: str, default: bool = False) -> bool:
+    """Read a PLSIN store optimization gate from the environment.
+
+    The proven address-hoist optimization is enabled by default on the PLSIN1
+    fused-full-tile path. It can still be turned OFF via its env var (set to
+    0/false/off) for A/B benchmarking and bisection.
+
+    Truthy = any value other than {"", "0", "false", "False", "off", "OFF"}.
+    """
+    v = _os.environ.get(name)
+    if v is None:
+        return default
+    return v not in ("", "0", "false", "False", "off", "OFF")
+
+
+# --- AITER-style PLSIN1 BF16 store optimizations (see plsin1_direct_store plan) ---
+# Component B: hoist the redundant per-store `v_add addrDVgpr + lane_group*8` so the
+#   lane-adjusted dwordx4 base is computed once per (addr,N-group) and reused via the
+#   MUBUF immediate offsets 0/64/128/192.  Pure reorder of address arithmetic; the
+#   store data path is unchanged.
+PLSIN_STORE_HOIST_ADDR = _plsinStoreGate("PLSIN_STORE_HOIST_ADDR", default=True)
+# Component A: when Bias/ScaleAlphaVec are proven identity at runtime (null pointers),
+#   take a direct ACC->bf16 path that skips the bias/SAV LDS reads and packed FMAs.
+PLSIN_STORE_DIRECT_EPILOGUE = _plsinStoreGate("PLSIN_STORE_DIRECT_EPILOGUE")
+
+
 def _scmpGtU32(writer, src, imm, comment=""):
     """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR."""
     if writer.states.asmCaps["HasSCMPK"]:
@@ -139,6 +168,14 @@ class GlobalWriteBatchWriter:
     self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
     self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
+    # Component B (PLSIN_STORE_HOIST_ADDR): the lane-adjusted dwordx4 base
+    # (addrDVgpr + lane_group*8) is identical for every paired store that shares
+    # the same addrDVgpr and N-group (the M-subtile stride is carried by the MUBUF
+    # immediate offset 0/64/128/192, not by addrDVgpr).  Track the (addrDVgpr
+    # index, blockIdxN) that vgprAddrScratch currently holds so Phase1 recomputes
+    # it only when that key changes.  -1 = invalid / not yet computed.
+    self._subtileHoistedAddrDVgpr = -1
+    self._subtileHoistedAddrBlockN = -1
     self.numBatches = numBatches
 
     # CompactLoopStore: stash the "next batch's first elt rowInc" passed in via
@@ -2968,7 +3005,24 @@ class GlobalWriteBatchWriter:
     #   1. Compute the adjusted D store address (VALU).
     #   2. Compute the exec mask for partial M/N blocks (SALU) — suppresses OOB lanes
     #      at tile boundaries without adding latency to the critical path.
-    if addrScaleShift:
+    # Component B (PLSIN_STORE_HOIST_ADDR): vAddrScratch = (scaled addrDVgpr) +
+    # lane_group*8 is identical for every paired store that shares this addrDVgpr and
+    # N-group -- the per-M-subtile-pair stride is carried by the MUBUF immediate offset
+    # (0/64/128/192) in Phase2, not by addrDVgpr.  So compute it once and reuse.
+    #
+    # Safe ONLY in the full-tile fused store (_fusedFullTileNoGuards): there every
+    # paired store in the N-group is emitted straight-line and unconditionally
+    # executed, so the register is guaranteed live at every reuse.  In the guarded
+    # path a runtime scalar/fallback branch may skip the producer, so we keep the
+    # original per-store recompute there.  Recompute whenever the addrDVgpr register
+    # or the N-group changes.
+    hoistAddr = PLSIN_STORE_HOIST_ADDR and self._fusedFullTileNoGuards()
+    addrAlreadyLive = (hoistAddr
+                       and self._subtileHoistedAddrDVgpr == addrDVgpr
+                       and self._subtileHoistedAddrBlockN == blockIdxN)
+    if addrAlreadyLive:
+      module.addComment1(f"reuse hoisted dwordx4 base in v{vAddrScratch} (addrDVgpr={addrDVgpr}, N={blockIdxN})")
+    elif addrScaleShift:
       module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
                                  src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
       module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vLGDelta),
@@ -2976,6 +3030,9 @@ class GlobalWriteBatchWriter:
     else:
       module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vLGDelta),
                          comment="adjusted D addr = addrDVgpr + lane_group*8"))
+    if hoistAddr:
+      self._subtileHoistedAddrDVgpr = addrDVgpr
+      self._subtileHoistedAddrBlockN = blockIdxN
     if useAlign8:
       self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
                                mGuardOffset=2, rowScaleShift=1)
@@ -3085,6 +3142,10 @@ class GlobalWriteBatchWriter:
     """
     module = Module("16bitSubtileScalarStore")
     isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
+    # Component B: an orphan/scalar store changes the addressing context; drop any
+    # hoisted paired-store base so the next paired store recomputes vAddrScratch.
+    self._subtileHoistedAddrDVgpr = -1
+    self._subtileHoistedAddrBlockN = -1
 
     ntd = self.kernel["NonTemporalD"]
     isGlc = bool(ntd & 0x1)
