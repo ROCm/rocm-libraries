@@ -31,7 +31,7 @@ sample grew from n=219 to n=996 the geomean moved **13 points** while wall-clock
 | Add gfx1101 to Origami (9 sites) | done; navi32 was previously unrecognised entirely |
 | Re-fork `WorkGroupMapping` for 60 CUs | **null** — re-confirmed at real 30 WGPs, 0.57 pt spread vs a 0.07 pt floor |
 | Switch to an Origami Prediction library | **rejected** — but only 3.3 pt geomean / 1.3 pt wall at matched 60 CUs |
-| Extend the catalog past ~300 solutions | **rejected** — oracle over all arms is only +2.8% |
+| Extend the catalog past ~300 solutions | **rejected** — real oracle over everything built is +1.71 pt at 60 CUs, once a noise floor is subtracted |
 | `ROC_GLOBAL_CU_MASK` to emulate 60 CUs | **cosmetic** — replaced with a per-stream mask |
 
 The gain concentrates where a sparse lookup table hurts most: **GEMV 1.7-2.6x**, tiny/small
