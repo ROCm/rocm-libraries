@@ -82,11 +82,21 @@ test_categories:
   #     - "full"
   #     - "all"
 
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: Smoke GPU cases"
+    test_patterns:
+      - "Smoke/*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   category_timeouts:
-    # standard now runs the Smoke set (~4-5 min); keep a generous ceiling.
+    # standard now runs the quick-tier bundles; keep a generous ceiling.
     standard: 2700
+    ffm-quick: 7200  # 2 hours
     # comprehensive: 25200
     # full: 28800
