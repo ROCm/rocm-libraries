@@ -63,18 +63,6 @@ add_library(
     heuristics/SelectionHeuristic.cpp
     heuristics/config/ConfigBuiltIn.cpp
     heuristics/static_ordering/StaticOrderingBuiltIn.cpp
-    heuristics/uhd/EngineRegistry.cpp
-    heuristics/uhd/JsonLogicEvaluator.cpp
-    heuristics/uhd/FeatureExtractor.cpp
-    heuristics/uhd/SelectionEngine.cpp
-    heuristics/uhd/Sha256.cpp
-    heuristics/uhd/UhdBuiltIn.cpp
-    heuristics/uhd/UhdLoader.cpp
-    heuristics/uhd/adapters/TreeDataAdapter.cpp
-    heuristics/uhd/adapters/TableAdapter.cpp
-    heuristics/uhd/adapters/OnnxAdapter.cpp
-    heuristics/uhd/adapters/CustomLibraryAdapter.cpp
-    heuristics/uhd/adapters/NativeAdapter.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
     plugin/HeuristicPlugin.cpp
@@ -108,6 +96,28 @@ hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
 hipdnn_enable_spdlog(hipdnn_backend_private)
 
 clang_tidy_check(hipdnn_backend_private)
+
+# RFC 0019 UHD selection. Gated with the kernel ingestor: both implement the
+# RFC 0017 descriptor family, both are experimental, and the UHD native adapter
+# resolves its scorer through the ingestor's NativeRegistry.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_sources(
+        hipdnn_backend_private
+        PRIVATE
+        heuristics/uhd/EngineRegistry.cpp
+        heuristics/uhd/JsonLogicEvaluator.cpp
+        heuristics/uhd/FeatureExtractor.cpp
+        heuristics/uhd/SelectionEngine.cpp
+        heuristics/uhd/Sha256.cpp
+        heuristics/uhd/UhdBuiltIn.cpp
+        heuristics/uhd/UhdLoader.cpp
+        heuristics/uhd/adapters/TreeDataAdapter.cpp
+        heuristics/uhd/adapters/TableAdapter.cpp
+        heuristics/uhd/adapters/OnnxAdapter.cpp
+        heuristics/uhd/adapters/CustomLibraryAdapter.cpp
+        heuristics/uhd/adapters/NativeAdapter.cpp
+    )
+endif()
 
 add_library(hipdnn_backend SHARED HipdnnBackend.cpp)
 

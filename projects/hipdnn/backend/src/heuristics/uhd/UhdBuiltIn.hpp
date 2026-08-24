@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include "plugin/HeuristicPlugin.hpp"
 
 namespace hipdnn_backend::heuristics::uhd
@@ -13,3 +15,5 @@ namespace hipdnn_backend::heuristics::uhd
 hipdnn_backend::plugin::HeuristicPluginFunctionTable populateFunctionTable();
 
 } // namespace hipdnn_backend::heuristics::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -60,10 +60,15 @@ TEST(TestNativeScorerRegistry, DuplicateRegistrationRejected)
                  std::runtime_error);
 }
 
-TEST(TestNativeScorerRegistry, NullScorerRejected)
+TEST(TestNativeScorerRegistry, NullRegistrationDegradesRatherThanCrashes)
 {
-    EXPECT_THROW(NativeScorerRegistry::registerSymbol("null_scorer", nullptr),
-                 std::runtime_error);
+    // The shared ingestor registry accepts any T, including a null function
+    // pointer. NativeAdapter resolves through tryResolve, so a null entry reads
+    // as unresolved and selection degrades to static_order instead of calling
+    // through a null pointer.
+    const ScopedNativeScorer scope("null_scorer", nullptr);
+
+    EXPECT_EQ(NativeAdapter::resolve("null_scorer", 3, "sha256:abc"), nullptr);
 }
 
 TEST(TestNativeScorerRegistry, ScopeUnregistersOnDestruction)

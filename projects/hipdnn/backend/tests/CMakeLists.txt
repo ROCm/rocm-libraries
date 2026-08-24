@@ -126,20 +126,6 @@ add_executable(
     heuristics/TestDeviceProperties.cpp
     heuristics/TestEngineOverrideConfig.cpp
     heuristics/TestStaticOrderingBuiltIn.cpp
-    heuristics/TestJsonLogicEvaluator.cpp
-    heuristics/TestFeatureExtractor.cpp
-    heuristics/TestDerivedValues.cpp
-    heuristics/TestTreeDataAdapter.cpp
-    heuristics/TestNativeAdapter.cpp
-    heuristics/TestTableAdapter.cpp
-    heuristics/TestOnnxAdapter.cpp
-    heuristics/TestCustomLibraryAdapter.cpp
-    heuristics/TestUhdBuiltIn.cpp
-    heuristics/TestUhdSelectionFlow.cpp
-    heuristics/TestUhdTraceRetrieval.cpp
-    heuristics/uhd/TestEngineRegistryArchResolution.cpp
-    heuristics/uhd/TestUhdLoader.cpp
-    heuristics/uhd/TestUhdLoaderMultiArch.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestEnginePluginOverride.cpp
@@ -245,6 +231,30 @@ install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_
 )
 
 # libhipdnn_test_scorer_lib.so or hipdnn_test_scorer_lib.dll (used by TestCustomLibraryAdapter.cpp)
+# RFC 0019 UHD selection tests, gated with the sources they cover.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_sources(
+        hipdnn_backend_tests
+        PRIVATE
+        heuristics/TestJsonLogicEvaluator.cpp
+        heuristics/TestFeatureExtractor.cpp
+        heuristics/TestDerivedValues.cpp
+        heuristics/TestTreeDataAdapter.cpp
+        heuristics/TestNativeAdapter.cpp
+        heuristics/TestTableAdapter.cpp
+        heuristics/TestOnnxAdapter.cpp
+        heuristics/TestCustomLibraryAdapter.cpp
+        heuristics/TestUhdBuiltIn.cpp
+        heuristics/TestUhdSelectionFlow.cpp
+        heuristics/TestUhdTraceRetrieval.cpp
+        heuristics/uhd/TestEngineRegistryArchResolution.cpp
+        heuristics/uhd/TestUhdLoader.cpp
+        heuristics/uhd/TestUhdLoaderMultiArch.cpp
+    )
+endif()
+
+# Only TestCustomLibraryAdapter loads this, and that test is gated above.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 add_library(hipdnn_test_scorer_lib SHARED heuristics/test_scorer_lib.cpp)
 set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
 target_compile_options(hipdnn_test_scorer_lib PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -262,6 +272,7 @@ set_target_properties(
 install(TARGETS hipdnn_test_scorer_lib LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
+endif()
 
 # Add dependencies on heuristic test plugins (built in tests/test_plugins/)
 # Note: These targets are forward references - they will be created when tests/test_plugins/
