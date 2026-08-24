@@ -111,6 +111,48 @@ One sub-threshold lead, recorded not claimed: on **skinny** shapes both alternat
 by ~1.5 pt (101.90 / 101.91 against a 100.44 local A/A, n=62). Two independent arms agreeing
 is more than a single stratum usually offers. Not enough to act on.
 
+## Third use: the Origami `Prediction` rejection was half artefact
+
+The campaign rejected an Origami `Prediction` library as "13 pt worse than GridBased". That
+measurement carried a **systematic asymmetry**:
+
+* Origami was asked to predict for **60 CUs** (`--sm_count_target 60`, verified reporting
+  `N_CU 60`);
+* GridBased's table came from **navi31 tuning at 96 CUs**;
+* both then executed on **96 CUs**.
+
+That penalises precisely the arm whose choices were made for a machine it was not run on. With
+the CU mask, Origami's prediction target matches execution reality for the first time.
+
+Both libraries hold the **identical 298-solution pool** (verified: `pred298` is
+`PredictionMatching`, `wgm8` is `GridBasedMatching`), so this isolates the selector.
+
+`pred298` vs `gridcat`, same 206 shapes, same aggregation:
+
+| regime | geomean | wall-clock |
+|---|---|---|
+| 96-CU execution (original) | 91.31% | 97.11% |
+| **60-CU execution (matched)** | **96.72%** | **98.73%** |
+| A/A floor, 96-CU | 99.78% | 102.09% |
+| A/A floor, 60-CU | 99.61% | **99.46%** |
+
+**About half the gap was the regime, not the selector.** Geomean deficit 8.7 pt -> 3.3 pt;
+wall-clock 2.9 pt -> 1.3 pt. Measured standalone by `analyze.py` at 60 CUs, `pred298` scores
+**97.32% geomean / 99.12% wall-clock** against a 100.09 / 99.68 A/A — i.e. **within 0.7 pt of
+the control on the time-weighted metric**, essentially wall-clock parity.
+
+Where it still loses is unchanged in character, only in size — by wall-clock:
+**GEMV 87.4%, tiny 96.1%, small 94.6%**, while **large 99.1% and medium 100.2% are at parity**.
+Small shapes are many by count and few by time, which is exactly why the per-shape geomean
+penalty (3.3 pt) exceeds the wall-clock penalty (1.3 pt).
+
+**The rejection stands, but far less emphatically, and for a narrower reason.** GridBased's
+dense table beats analytical selection *on small shapes*; on everything else the two are
+equivalent. A selector that used Origami above a size threshold and the table below it would
+plausibly capture both — the same problem-size predicate that an earlier campaign concluded
+needs a C++ row predicate rather than a catalog.
+
+
 ## Reproduce
 
 ```bash
