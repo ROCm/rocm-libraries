@@ -51,20 +51,38 @@ not error; the process wedges at 1% GPU and needs `kill -9`. Clamp and warn.
 **Verify the mask by throughput, never by a reported count.** A real N/M restriction must
 show ~N/M on a compute-bound GEMM. Ours reads 62.4% against an ideal 62.5%.
 
-## 2. The masked stream is unusable for long sweeps
+## 2. The masked stream hangs 2% of runs — USABLE, despite what this section used to say
 
 `hipExtStreamCreateWithCUMask` intermittently wedges: the run emits its result row and then
-never exits, holding the GPU lock. Same 8 shapes, same library, back to back:
-
-| | completed | timeouts |
-|---|---|---|
-| unmasked | 8 | 0 |
-| masked | 5 | **3** |
-
-It is a teardown race, not a bad shape — isolated retries always pass. It is also
-**position-dependent, not library-dependent**: in a 5-arm interleave the *same library* had
-0 timeouts as the first arm and 2 as the last. Budget accordingly, and always give each run a
+never exits, holding the GPU lock. It is a teardown race, not a bad shape — isolated retries
+always pass — and it is **position-dependent, not library-dependent**: in a 5-arm interleave
+the *same library* had 0 timeouts as the first arm and 2 as the last. Always give each run a
 tight `timeout` plus a `pkill` of the hung child, or one hang stalls every later arm.
+
+**The rate, measured properly:**
+
+| sample | masked timeouts | rate |
+|---|---|---|
+| original 8-run probe | 3 of 8 | 37% — *this section's original claim* |
+| **1 242-run sweep** | **25 of 1 242** | **2.0%** |
+
+**An 8-run sample cannot tell 37% from 2%** (the 95% CI on 3/8 reaches down to ~8%), and the
+first masked run after an idle GPU reliably hangs — which is exactly what a short probe
+oversamples. On that 8-run basis the campaign fell back to selection fidelity and left its
+central premise untested for the whole run.
+
+**Execution fidelity is affordable: a full 998-shape masked sweep costs ~3 hours.** Prefer it.
+See [`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md), which used it to confirm the
+catalog win at genuine 60 CUs (+22.7% wall-clock against a 0.11 pt A/A floor).
+
+**Rule: measure a failure rate at the scale you intend to run at.** A rate estimated from a
+handful of runs is a decision about the whole campaign made on almost no data.
+
+## 2b. `HIPBLASLT_TENSILE_LIBPATH` must point at the arch subdirectory
+
+`.../libs/<arm>/library/gfx1100` — not the arm root, not `.../library`. Point it one level up
+and *every* row comes back `status=error`, at full speed, with rows appearing at the normal
+rate. Check `status` counts before reading any number out of a sweep.
 
 ## 3. Retargeting a logic file has TWO ISA sites
 

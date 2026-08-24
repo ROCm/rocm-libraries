@@ -152,6 +152,16 @@ Emulation is done in two independent halves, and every result must say which it 
 
 Using only the first gives correct *choices* timed on the wrong machine.
 
+> **This campaign used selection fidelity only — and that has since been validated.**
+> The masked stream was believed to hang ~37% of runs (a rate estimated from 8 runs; the true
+> rate over 1 242 runs is **2.0%**), so the sweeps below all ran on 96 CUs. A follow-up
+> 207-shape sweep under **genuine 60-CU execution** puts the same comparison at **+22.7%
+> wall-clock / +25.2% geomean against a 0.11 pt A/A floor**, versus +25.7% / +25.6% on the
+> identical shapes at 96 CUs. Geomean is unchanged (+0.1 pt); wall-clock is 2.9 pt lower, and
+> the 96-CU sweep's own A/A control sat at 102.1%, so most of that gap is arm-position drift
+> in the earlier run rather than a regime effect. **The headline stands, with a ~1 pt haircut.**
+> Full detail: [`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md).
+
 ---
 
 ## P1 — Origami gfx1101 support
