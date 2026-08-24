@@ -41,14 +41,15 @@ def _sig(spec):
     """Kernel signature for `spec` — varlen adds cu_seqlens/chunk_offsets/T_flat,
     and the SSM-state dtype tracks STATE_DTYPE_BF16."""
     st = "bf16" if spec.STATE_DTYPE_BF16 else "f32"
+    out = "bf16" if spec.OUTPUT_DTYPE_BF16 else "f32"
     sig = [
         {"name": "Kt", "type": "ptr<bf16,global>"},
         {"name": "Wt", "type": "ptr<bf16,global>"},
         {"name": "Ut", "type": "ptr<bf16,global>"},
         {"name": "Gate", "type": "ptr<f32,global>"},
         {"name": "H0", "type": f"ptr<{st},global>"},
-        {"name": "Vnew", "type": "ptr<f32,global>"},
-        {"name": "Hout", "type": "ptr<f32,global>"},
+        {"name": "Vnew", "type": f"ptr<{out},global>"},
+        {"name": "Hout", "type": f"ptr<{out},global>"},
         {"name": "Ht", "type": f"ptr<{st},global>"},
         {"name": "T_val", "type": "i32"},
         {"name": "NT_val", "type": "i32"},
@@ -119,6 +120,9 @@ class Case:
 def build_case(label, seqlens, H, BV, NR, gate="gk", extra=None, *,
                K=128, V=128, arch="gfx942", seed=0, Hg=None,
                vgpr_form=False, swizzle=True, prefetch=False,
+               prefetch_w_early=False,
+               prefetch_k_early=False,
+               prefetch_k_interleave=False,
                buffer_desc=False, xcd_remap=False, fence=True,
                want_refs=True):
     """Build + compile the kernel and pack inputs for one shape.
@@ -136,12 +140,16 @@ def build_case(label, seqlens, H, BV, NR, gate="gk", extra=None, *,
 
     # base harness layout, unless the config's `extra` overrides it
     layout = dict(IS_VARLEN=False, WU_CONTIGUOUS=False,
-                  G_IS_LOG2_SCALED=False, STATE_DTYPE_BF16=False)
+                  G_IS_LOG2_SCALED=False, STATE_DTYPE_BF16=False,
+                  OUTPUT_DTYPE_BF16=False)
     layout.update(extra)
     spec = GdnStateScanSpec(
         K=K, V=V, BV=BV, H=H, Hg=Hg, NR_SPLIT=NR,
         USE_G=not use_gk, USE_GK=use_gk, arch=arch,
         MFMA_VGPR_FORM=vgpr_form, LDS_SWIZZLE=swizzle, PREFETCH=prefetch,
+        PREFETCH_W_EARLY=prefetch_w_early,
+        PREFETCH_K_EARLY=prefetch_k_early,
+        PREFETCH_K_INTERLEAVE=prefetch_k_interleave,
         BUFFER_DESC=buffer_desc, XCD_REMAP=xcd_remap,
         **layout)
 
@@ -188,6 +196,7 @@ def build_case(label, seqlens, H, BV, NR, gate="gk", extra=None, *,
 
     # -- pack kernel inputs --------------------------------------------------
     st_dt = torch.bfloat16 if spec.STATE_DTYPE_BF16 else torch.float32
+    out_dt = torch.bfloat16 if spec.OUTPUT_DTYPE_BF16 else torch.float32
     # k is always token-major packed [1, T_flat, Hg, K]
     Kt = torch.cat([x.reshape(1, sl, Hg, K) for x, sl in zip(seg_k, seqlens)], dim=1)
     if spec.WU_CONTIGUOUS:
@@ -209,8 +218,8 @@ def build_case(label, seqlens, H, BV, NR, gate="gk", extra=None, *,
         Gate = (Gate * LOG2E).contiguous()
     H0 = torch.cat([x for x in seg_h0], dim=0).to(st_dt)      # [N, H, V, K]
 
-    Vn = torch.zeros(T_flat * H * V, dtype=torch.float32, device=dev)
-    Ho = torch.zeros(NT_total * H * V * K, dtype=torch.float32, device=dev)
+    Vn = torch.zeros(T_flat * H * V, dtype=out_dt, device=dev)
+    Ho = torch.zeros(NT_total * H * V * K, dtype=out_dt, device=dev)
     Ht = torch.zeros(N * H * V * K, dtype=st_dt, device=dev)
 
     vals = {"Kt": Kt.reshape(-1).contiguous(), "Wt": Wt, "Ut": Ut,
@@ -240,10 +249,16 @@ def build_case(label, seqlens, H, BV, NR, gate="gk", extra=None, *,
 def run_one(label, seqlens, H, BV, NR, gate="gk", extra=None, *,
             K=128, V=128, arch="gfx942", seed=0, verbose=False,
             vgpr_form=False, swizzle=True, prefetch=False,
+            prefetch_w_early=False,
+            prefetch_k_early=False,
+            prefetch_k_interleave=False,
             buffer_desc=False, xcd_remap=False):
     case = build_case(label, seqlens, H, BV, NR, gate, extra, K=K, V=V,
                       arch=arch, seed=seed, vgpr_form=vgpr_form, swizzle=swizzle,
-                      prefetch=prefetch, buffer_desc=buffer_desc,
+                      prefetch=prefetch, prefetch_w_early=prefetch_w_early,
+                      prefetch_k_early=prefetch_k_early,
+                      prefetch_k_interleave=prefetch_k_interleave,
+                      buffer_desc=buffer_desc,
                       xcd_remap=xcd_remap, fence=True, want_refs=True)
     spec = case.spec
     case.launch()
@@ -304,6 +319,21 @@ def main(argv=None) -> int:
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--prefetch", action="store_true",
                     help="enable loop-carried prefetch (PERF_PLAN P5)")
+    ap.add_argument(
+        "--prefetch-w-early",
+        action="store_true",
+        help="issue next-chunk w reads before GEMM1 (requires --prefetch)",
+    )
+    ap.add_argument(
+        "--prefetch-k-early",
+        action="store_true",
+        help="load current-chunk K rows before the first barrier",
+    )
+    ap.add_argument(
+        "--prefetch-k-interleave",
+        action="store_true",
+        help="interleave current-chunk K row loads across GEMM1",
+    )
     ap.add_argument("--buffer-desc", action="store_true",
                     help="global loads via bounds-checked descriptors (P6)")
     ap.add_argument("--xcd-remap", action="store_true",
@@ -328,6 +358,9 @@ def main(argv=None) -> int:
                        vgpr_form=args.vgpr_form,
                        swizzle=not args.no_swizzle,
                        prefetch=args.prefetch,
+                       prefetch_w_early=args.prefetch_w_early,
+                       prefetch_k_early=args.prefetch_k_early,
+                       prefetch_k_interleave=args.prefetch_k_interleave,
                        buffer_desc=args.buffer_desc,
                        xcd_remap=args.xcd_remap) for c in configs]
     n_ok = sum(results)

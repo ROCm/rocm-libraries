@@ -99,28 +99,15 @@ class _Loader:
 
 
 def _grp_col(b, row, col, ng):
-    """Group-major + XOR swizzled column, matching the FlyDSL parent exactly.
+    """Group-major + folded-XOR swizzled column.
 
     A logical ``[R, C]`` tile is stored ``[R][C/4][4]``: each row is ``ng = C/4``
     groups of 4 bf16 (8 B — one MFMA fragment), and the group index is XORed by
-    a key derived from the row::
-
-        mask = (row ^ (row >> 3)) & (ng - 1)
-        col' = (col/4 ^ mask) * 4
-
-    The ``>> 3`` fold matters: under the ``k`` store-transpose write pattern a
-    plain ``row & (ng-1)`` takes too few distinct values across the 16 lanes of
-    one fragment, which reintroduces the conflicts the swizzle exists to remove.
-
-    ``col`` must be 4-aligned, and ``ng`` a power of two. Both hold here — every
-    LDS access in this kernel is fragment-granular.
-
-    **This is the only place the permutation is written.** Producer and consumer
-    must agree and nothing checks that they do, so a second copy of this formula
-    is a silent-wrong-answer waiting to happen.
+    a key that includes row bits 3+ to cover transposed store patterns.
     """
     grp = b.lshr(col, b.const_i32(2))
-    mask = b.land(b.xor(row, b.lshr(row, b.const_i32(3))), b.const_i32(ng - 1))
+    mask = b.land(b.xor(row, b.lshr(row, b.const_i32(3))),
+                  b.const_i32(ng - 1))
     return b.shl(b.xor(grp, mask), b.const_i32(2))
 
 
@@ -224,8 +211,44 @@ def _stage_tile_store(b, *, smem, regs, rows, cols, block_threads, tid, ng=None)
                                 _regroup(b, v, g * 4), 4)
 
 
+def _init_k_transposed(b, *, spec, tid, nthreads):
+    """Return per-thread K-transpose records with no global loads issued."""
+    BT, K = spec.BT, spec.K
+    KVW = min(STAGE_VEC, max(2, (BT // 4) * K // nthreads))
+    assert KVW & (KVW - 1) == 0, f"K vector width {KVW} must be a power of two"
+    assert K % KVW == 0, f"K={K} must be divisible by the vector width {KVW}"
+    col_groups = K // KVW
+    slots = (BT // 4) * col_groups
+    assert slots % nthreads == 0, (
+        f"k transpose slots ({slots}) must tile block_threads={nthreads}")
+    records = []
+    c_cg = b.const_i32(col_groups)
+    for it in range(slots // nthreads):
+        slot = b.add(b.const_i32(it * nthreads), tid)
+        bt0 = b.mul(b.div(slot, c_cg), b.const_i32(4))
+        k0 = b.mul(b.mod(slot, c_cg), b.const_i32(KVW))
+        records.append((bt0, k0, []))
+    return records
+
+
+def _load_k_transposed_row(b, *, src, staged, row, spec, t_base, i_hg,
+                           T_val, Hg, ldr=None, bos=None):
+    """Append one of the four row loads to each K-transpose record."""
+    KVW = min(STAGE_VEC, max(2, (spec.BT // 4) * spec.K // spec.block_threads))
+    for bt0, k0, rows in staged:
+        t_loc = b.add(b.add(t_base, bt0), b.const_i32(row))
+        in_range = b.cmp_lt(t_loc, T_val)
+        t_loc = (t_loc if (ldr is not None and ldr.bounds_checked)
+                 else b.select(in_range, t_loc, b.const_i32(0)))
+        t_glob = b.add(bos, t_loc) if bos is not None else t_loc
+        off = b.add(b.mul(b.add(b.mul(t_glob, b.const_i32(Hg)), i_hg),
+                          b.const_i32(spec.K)), k0)
+        rows.append(ldr.vN(off, BF16, KVW) if ldr is not None
+                    else b.global_load_vN(src, off, BF16, KVW))
+
+
 def _stage_k_transposed(b, *, src, smem, spec, tid, nthreads, t_base, i_hg,
-                        T_val, Hg, ng=None, ldr=None, bos=None):
+                        T_val, Hg, ng=None, ldr=None, bos=None, staged=None):
     """Stage ``k[BT, K]`` from global into ``sKT[K, BT]`` — a real transpose.
 
     gfx942 has no ``ds_read_*_tr_*`` (CDNA4 only), so a transposed operand must
@@ -254,29 +277,28 @@ def _stage_k_transposed(b, *, src, smem, spec, tid, nthreads, t_base, i_hg,
     assert slots % nthreads == 0, (
         f"k transpose slots ({slots}) must tile block_threads={nthreads}")
 
-    c_cg = b.const_i32(col_groups)
-    for it in range(slots // nthreads):
-        slot = b.add(b.const_i32(it * nthreads), tid)
-        bt0 = b.mul(b.div(slot, c_cg), b.const_i32(4))      # first of 4 BT rows
-        k0 = b.mul(b.mod(slot, c_cg), b.const_i32(KVW))     # first of KVW k-cols
-        rows = []
+    if staged is None:
+        staged = _init_k_transposed(
+            b, spec=spec, tid=tid, nthreads=nthreads,
+        )
         for r in range(4):
-            t_loc = b.add(b.add(t_base, bt0), b.const_i32(r))   # within-sequence
-            in_range = b.cmp_lt(t_loc, T_val)
-            t_loc = (t_loc if (ldr is not None and ldr.bounds_checked)
-                     else b.select(in_range, t_loc, b.const_i32(0)))
-            # global (packed) token = bos + within-sequence token
-            t_glob = b.add(bos, t_loc) if bos is not None else t_loc
-            off = b.add(b.mul(b.add(b.mul(t_glob, b.const_i32(Hg)), i_hg),
-                              b.const_i32(K)), k0)
-            rows.append(ldr.vN(off, BF16, KVW) if ldr is not None
-                        else b.global_load_vN(src, off, BF16, KVW))
+            _load_k_transposed_row(
+                b, src=src, staged=staged, row=r, spec=spec,
+                t_base=t_base, i_hg=i_hg, T_val=T_val, Hg=Hg,
+                ldr=ldr, bos=bos,
+            )
+
+    if smem is None:
+        return staged
+
+    for bt0, k0, rows in staged:
         for j in range(KVW):
             col = b.vector_splat(b.vec_extract(rows[0], j), 4)
             for r in range(1, 4):
                 col = b.vec_insert(col, b.vec_extract(rows[r], j), r)
             row = b.add(k0, b.const_i32(j))
             b.smem_store_vN(smem, [row, _swz(b, row, bt0, ng)], col, 4)
+    return staged
 
 
 def _drain_h(b, *, sH, dst, spec, tid, nthreads, chunk, i_h, v_base, ng=None):
@@ -299,14 +321,14 @@ def _drain_h(b, *, sH, dst, spec, tid, nthreads, chunk, i_h, v_base, ng=None):
         base = b.add(b.mul(b.add(b.mul(b.add(b.mul(chunk, b.const_i32(H)), i_h),
                                        b.const_i32(V)), v_abs),
                            b.const_i32(K)), k0)
-        # P4: one wide LDS read, then f32 stores in 4-wide groups. The values
+        # P4: one wide LDS read, then stores in 4-wide groups. The values
         # are contiguous in both LDS (K-major) and HBM (K innermost), so the
         # only reason this was ever scalar was expedience.
         for g in range(STAGE_VEC // 4):
             c = b.add(k0, b.const_i32(g * 4))
             val = b.smem_load_vN(sH, row, _swz(b, row, c, ng), dtype=BF16, n=4)
-            quad = _pack_f32x4(
-                b, [b.cast_to_f32(b.vec_extract(val, j)) for j in range(4)])
+            quad = (val if spec.OUTPUT_DTYPE_BF16 else _pack_f32x4(
+                b, [b.cast_to_f32(b.vec_extract(val, j)) for j in range(4)]))
             b.global_store_vN(dst, b.add(base, b.const_i32(g * 4)), quad, 4)
 
 
@@ -459,16 +481,17 @@ def build_k5(spec: GdnStateScanSpec):
 
         Kt   bf16 [T, Hg, K]      Wt bf16 [T, H, K]      Ut bf16 [T, H, V]
         Gk   f32  [T, H,  K]      H0 f32  [N, H, V, K]
-        Vnew f32  [T, H,  V]      Hout f32 [NT, H, V, K]  Ht f32 [N, H, V, K]
+        Vnew out  [T, H,  V]      Hout out [NT, H, V, K]  Ht state [N, H, V, K]
 
     Grid ``(ceil(V/BV), N*H, 1)``.
     """
     # STATE_DTYPE_BF16: the initial/final SSM state lives in bf16 in HBM to halve
     # its bandwidth/footprint; the kernel still accumulates in f32 and converts
     # only at the H0 load and the Ht store (matching the parent). The per-chunk
-    # snapshot ``Hout`` stays f32 — only h0/ht change dtype.
+    # OUTPUT_DTYPE_BF16 independently controls the materialized K5 outputs.
     state_dt = BF16 if spec.STATE_DTYPE_BF16 else F32
     state_bytes = 2 if spec.STATE_DTYPE_BF16 else 4
+    output_dt = BF16 if spec.OUTPUT_DTYPE_BF16 else F32
 
     atom = mfma_atom("bf16", 16, 16, spec.mfma_k)
     BT, K, BV, V, H, Hg = spec.BT, spec.K, spec.BV, spec.V, spec.H, spec.Hg
@@ -512,8 +535,8 @@ def build_k5(spec: GdnStateScanSpec):
     Gate = b.param("Gate", PtrType(F32, "global"), noalias=True, readonly=True,
                    align=16)
     H0 = b.param("H0", PtrType(state_dt, "global"), noalias=True, readonly=True, align=16)
-    Vn = b.param("Vnew", PtrType(F32, "global"), noalias=True, align=16)
-    Ho = b.param("Hout", PtrType(F32, "global"), noalias=True, align=16)
+    Vn = b.param("Vnew", PtrType(output_dt, "global"), noalias=True, align=16)
+    Ho = b.param("Hout", PtrType(output_dt, "global"), noalias=True, align=16)
     Ht = b.param("Ht", PtrType(state_dt, "global"), noalias=True, align=16)
     T_val = b.param("T_val", I32)
     NT_val = b.param("NT_val", I32)
@@ -671,49 +694,57 @@ def build_k5(spec: GdnStateScanSpec):
     #     — anything that consumes a load here forces a wait here.
     #   * issue/unpack are structural inverses. scf_yield ordering is unchecked
     #     and this list is long, so they walk the same sequence by construction.
-    def _pf_issue(i_t_n):
-        """Raw reads for chunk ``i_t_n``. Returns a flat list of Values."""
+    def _pf_issue_parts(i_t_n, *, issue_w=True, issue_ug=True):
+        """Raw reads for one chunk, split into ``w`` / ``u`` / gate parts."""
         t_b = b.mul(i_t_n, b.const_i32(BT))
-        out = [] if not _PF_W else list(_stage_tile_load(
+        w_part = [] if not (_PF_W and issue_w) else list(_stage_tile_load(
             b, src_ptr=Wt, rows=BT, cols=K, row_stride_src=w_stride,
             src_row_base=t_b, block_threads=nthreads, tid=tid,
             elem_off=_w_base, clamp=T_local, ldr=ld_w))
-        _U_MARK = len(out)
+        u_part = []
         # u, gathered in the MMA's C-fragment layout
-        for nr in (range(NRL) if _PF_U else []):
+        for nr in (range(NRL) if (_PF_U and issue_ug) else []):
             for e in range(atom.c_per_lane):
                 r_in, c_in = atom.lane_to_output(b, lane, e)
                 t_abs = b.add(t_b, b.add(b.mul(wid_m, c16), r_in))
                 t_safe = b.select(b.cmp_lt(t_abs, T_local), t_abs, b.const_i32(0))
                 col = b.add(b.add(v_tile[nr], c_in), b.const_i32(0))
-                out.append(ld_u.scalar(
+                u_part.append(ld_u.scalar(
                     b.add(wu_row_off(_u_base, t_safe, u_stride), col), BF16))
-        _G_MARK = len(out)
+        g_part = []
         # gate
         t_last = b.sub(b.smin(b.add(t_b, b.const_i32(BT)), T_local), b.const_i32(1))
-        if not _PF_G:
+        if not (_PF_G and issue_ug):
             pass
         elif spec.USE_GK:
             row = b.mul(b.add(b.mul(b.add(bos, t_last), cH), i_h), cK)
             for kb in range(NKB):
-                out.append(ld_g.vN(b.add(row, b.add(k_tile[kb], k_lane)), F32, 4))
+                g_part.append(
+                    ld_g.vN(b.add(row, b.add(k_tile[kb], k_lane)), F32, 4)
+                )
         elif True:
             g_base = _g_base
-            out.append(ld_g.scalar(b.add(g_base, t_last), F32))
+            g_part.append(ld_g.scalar(b.add(g_base, t_last), F32))
             for e in range(atom.c_per_lane):
                 r_in, _c = atom.lane_to_output(b, lane, e)
                 t_abs = b.add(t_b, b.add(b.mul(wid_m, c16), r_in))
                 t_safe = b.select(b.cmp_lt(t_abs, T_local), t_abs, b.const_i32(0))
-                out.append(ld_g.scalar(b.add(g_base, t_safe), F32))
+                g_part.append(ld_g.scalar(b.add(g_base, t_safe), F32))
+        return w_part, u_part, g_part
+
+    def _pf_pack(w_part, u_part, g_part):
+        """Pack prefetch parts in the backend-safe loop-carried phi order."""
         # Carry order. `[w][gate][u]` (vector-group phis before the bfloat u
         # phis) is the layout the AMDGPU backend compiles correctly; the
         # scalar-first `[w][u][gate]` is miscompiled (PERF_PLAN.md §P5,
         # repro_phi_order.py). The switch exists only to reproduce the bug.
-        u_part = out[_U_MARK:_G_MARK]
-        g_part = out[_G_MARK:]
         if spec.PREFETCH_VEC_FIRST:
-            return out[:_U_MARK] + g_part + u_part
-        return out                                    # [w][u][gate] — miscompiled
+            return w_part + g_part + u_part
+        return w_part + u_part + g_part               # miscompiled repro order
+
+    def _pf_issue(i_t_n):
+        """Raw reads for chunk ``i_t_n``. Returns a flat list of Values."""
+        return _pf_pack(*_pf_issue_parts(i_t_n))
 
     def _pf_unpack(vals):
         """Structural inverse of :func:`_pf_issue`."""
@@ -788,6 +819,19 @@ def build_k5(spec: GdnStateScanSpec):
                                   row_stride_src=w_stride, src_row_base=t_base,
                                   block_threads=nthreads, tid=tid,
                                   elem_off=_w_base, clamp=T_local, ldr=ld_w))
+        nxt_w = []
+        k_staged = None
+        if spec.PREFETCH_K_EARLY or spec.PREFETCH_K_INTERLEAVE:
+            k_staged = _init_k_transposed(
+                b, spec=spec, tid=tid, nthreads=nthreads,
+            )
+        if spec.PREFETCH_K_EARLY:
+            for r in range(4):
+                _load_k_transposed_row(
+                    b, src=Kt, staged=k_staged, row=r, spec=spec,
+                    t_base=t_base, i_hg=i_hg, T_val=T_local, Hg=Hg,
+                    ldr=ld_k, bos=bos,
+                )
         b.sync()
 
         if spec.STORE_H:
@@ -801,6 +845,14 @@ def build_k5(spec: GdnStateScanSpec):
             acc = atom.zero_acc(b)
             for kb in range(NKB):
                 for ks in range(spec.k_steps_per_block):
+                    k_load_slot = kb * spec.k_steps_per_block + ks
+                    if (spec.PREFETCH_K_INTERLEAVE and nr == 0
+                            and k_load_slot < 4):
+                        _load_k_transposed_row(
+                            b, src=Kt, staged=k_staged, row=k_load_slot,
+                            spec=spec, t_base=t_base, i_hg=i_hg,
+                            T_val=T_local, Hg=Hg, ldr=ld_k, bos=bos,
+                        )
                     k0 = b.add(b.const_i32(kb * 64 + ks * spec.mfma_k), k_lane)
                     af = b.smem_load_vN(sW, bt_row, _swz(b, bt_row, k0, ng_k),
                                         dtype=BF16, n=atom.a_per_lane)
@@ -860,7 +912,10 @@ def build_k5(spec: GdnStateScanSpec):
                 per_e.append((val, gated, off, ok))
                 if spec.SAVE_NEW_VALUE:
                     with b.scf_if(ok):
-                        b.global_store(Vn, off, val, align=4)
+                        if spec.OUTPUT_DTYPE_BF16:
+                            b.global_store(Vn, off, _to_bf16_fast(b, val), align=2)
+                        else:
+                            b.global_store(Vn, off, val, align=4)
             vn.append(per_e)
 
         # -- v_new -> sVN [BV, BT]; k -> sKT [K, BT] ----------------------
@@ -872,7 +927,14 @@ def build_k5(spec: GdnStateScanSpec):
                             _to_bf16_fast(b, packed, 4), 4)
         _stage_k_transposed(b, src=Kt, smem=sKT, spec=spec, tid=tid,
                             nthreads=nthreads, t_base=t_base, i_hg=i_hg,
-                            T_val=T_local, Hg=Hg, ng=ng_t, ldr=ld_k, bos=bos)
+                            T_val=T_local, Hg=Hg, ng=ng_t, ldr=ld_k, bos=bos,
+                            staged=k_staged)
+        if spec.PREFETCH and spec.PREFETCH_W_EARLY:
+            nxt_w, _, _ = _pf_issue_parts(
+                b.add(i_t, b.const_i32(1)),
+                issue_w=True,
+                issue_ug=False,
+            )
         b.sync()
 
         # P5/P8: issue chunk i+1's reads *before* GEMM2 — matching the parent's
@@ -880,7 +942,15 @@ def build_k5(spec: GdnStateScanSpec):
         # loads and their consumption"). The loads are independent of GEMM2, so
         # emitting them first lets the backend overlap their latency with the
         # GEMM2 MFMA chain rather than exposing it at the next iteration's top.
-        nxt = _pf_issue(b.add(i_t, b.const_i32(1))) if spec.PREFETCH else []
+        if spec.PREFETCH and spec.PREFETCH_W_EARLY:
+            _, nxt_u, nxt_g = _pf_issue_parts(
+                b.add(i_t, b.const_i32(1)),
+                issue_w=False,
+                issue_ug=True,
+            )
+            nxt = _pf_pack(nxt_w, nxt_u, nxt_g)
+        else:
+            nxt = _pf_issue(b.add(i_t, b.const_i32(1))) if spec.PREFETCH else []
 
         # -- state decay, then GEMM2 ---------------------------------------
         # USE_GK: h[v, k] *= exp(gk_last[k]) — per channel. Slot e is

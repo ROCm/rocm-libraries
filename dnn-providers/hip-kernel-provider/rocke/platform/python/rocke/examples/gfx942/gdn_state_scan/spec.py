@@ -76,6 +76,7 @@ class GdnStateScanSpec:
     IS_VARLEN: bool = True
     WU_CONTIGUOUS: bool = True
     STATE_DTYPE_BF16: bool = False
+    OUTPUT_DTYPE_BF16: bool = False
     G_IS_LOG2_SCALED: bool = False
 
     # -- wave widening --
@@ -112,6 +113,20 @@ class GdnStateScanSpec:
     #: the ``bfloat`` u phis, which the backend compiles correctly. False
     #: reproduces the miscompiled scalar-first order. No effect unless PREFETCH.
     PREFETCH_VEC_FIRST: bool = True
+
+    #: Issue the next chunk's ``w`` loads before the pre-GEMM2 barrier. ATT
+    #: shows the default post-barrier issue still waiting on ``w`` at the next
+    #: iteration's LDS store. This adds barrier overlap without keeping W live
+    #: across GEMM1, while U and gate remain at the lower-pressure late point.
+    PREFETCH_W_EARLY: bool = False
+
+    #: Load the current chunk's four K rows before the first barrier, then
+    #: gather and transpose-store them before GEMM2.
+    PREFETCH_K_EARLY: bool = False
+
+    #: Spread the four K-row loads across the first four GEMM1 MFMA steps.
+    #: This is the lower-vmcnt-pressure schedule for wider blocks.
+    PREFETCH_K_INTERLEAVE: bool = False
 
     #: Route global **loads** through bounds-checked buffer descriptors
     #: (``buffer_rsrc`` + ``buffer_load_*``) instead of raw pointers, letting
@@ -163,7 +178,8 @@ class GdnStateScanSpec:
             raise ValueError(f"H={self.H} must be divisible by Hg={self.Hg} (GQA)")
         if (self.SCALE is not None) != self.COMPUTE_OUTPUT:
             raise ValueError("SCALE is required iff COMPUTE_OUTPUT")
-
+        if self.PREFETCH_K_EARLY and self.PREFETCH_K_INTERLEAVE:
+            raise ValueError("choose one K prefetch schedule")
         # group-XOR is a bank bijection only with >= 16 groups per row
         if self.K // 4 < 16 or self.BT // 4 < 16:
             raise ValueError("group-XOR swizzle needs >= 16 groups per row "
