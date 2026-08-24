@@ -165,6 +165,12 @@ device functions specified as function pointers to
 :cpp:func:`rocfft_execution_info_set_store_callback`.  This
 functionality will be removed in a future release.
 
+.. note::
+
+   Function pointer callbacks are not functional on the gfx1250
+   architecture and :cpp:func:`rocfft_execute` will return an error
+   on this architecture if they are specified.
+
 Legacy callback functions are passed as arrays of function pointers, with
 one function per brick in the :ref:`input or output field<input_output_fields>`.  For example, to
 specify a load callback on a transform with 4 input bricks, pass an
