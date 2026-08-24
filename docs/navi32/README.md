@@ -76,10 +76,14 @@ the top end). **~A quarter of the oracle is reachable; the rest is not separable
 geometry.** Against the C++ work of adding a row predicate to the selector, that is probably not
 worth it — **so there is no known lever left on this catalog.**
 
-**The same defect ships on five more RDNA3 parts, and navi33 is now measured.** navi33's TN
-catalog is a *byte-identical copy* of navi32's (same 60 kernel symbols, same 73 solutions);
-at its 32 CUs, widening is worth **+15.3% wall-clock / +25.2% geomean against a 0.00 pt A/A
-floor** — [`NAVI33_EVIDENCE.md`](NAVI33_EVIDENCE.md). Not shipped: evidence for a decision.
+**The thin catalog is one artefact shipped on five architectures.** navi32 (pre-fix), navi33,
+gfx1103, gfx1150 and gfx1152 ship *identical* logic files for all four thin TN ProblemTypes —
+a raw diff of any pair is 152 lines of 14 674, containing only the PCI device ID, the arch
+name and 73 ISA tuples. Not one solution parameter differs. gfx1151 is the counter-example:
+the only RDNA3 part with its own tuning campaign, and the only one with a full-size catalog.
+navi33 is now measured too — at its 32 CUs widening is worth **+15.3% wall-clock / +25.2%
+geomean against a 0.00 pt A/A floor** ([`NAVI33_EVIDENCE.md`](NAVI33_EVIDENCE.md)). Not
+shipped: evidence for a decision. **This branch fixes one of the five.**
 
 **The runbook exists because three separate checks returned a reassuring signal while doing
 nothing** — a CU mask that reported 30 CUs but restricted nothing, a `--logic-filter` build

@@ -4,7 +4,7 @@
 evidence needed to decide whether a navi33 campaign is worth authorising, gathered because that
 question cannot be answered without it.
 
-## 1. navi33 ships a byte-identical copy of navi32's thin catalog
+## 1. The thin catalog is ONE artefact shipped on FIVE architectures
 
 Earlier notes recorded the cross-architecture gap as "same counts, same profile". It is
 stronger than that:
@@ -91,7 +91,8 @@ metric down. Nothing about the catalog changed; the mix did.
 ## 4. What this does and does not establish
 
 **Established:**
-- navi33's catalog is the same thin artefact navi32 shipped (identical kernels).
+- navi33's catalog is **the identical file** navi32 shipped — as are gfx1103's, gfx1150's
+  and gfx1152's, for all four thin ProblemTypes. One artefact, copied five times.
 - Widening it is worth **~+15% wall-clock / +25% geomean** at navi33's CU count, against a
   0.00 pt A/A floor.
 - **Buildability is not a blocker**: navi31's four TN catalogs retargeted to gfx1102 build
