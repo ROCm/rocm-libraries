@@ -1,0 +1,48 @@
+name: "Sparse Checkout rocm-libraries"
+description: |
+  Shallow partial checkout of rocm-libraries using git init + fetch --filter=blob:none
+  + sparse-checkout. Avoids cloning the full monorepo; checks out only requested paths.
+inputs:
+  ref:
+    description: "Branch, tag, or SHA to checkout"
+    required: true
+  paths:
+    description: "Space-separated paths to include in sparse-checkout"
+    required: true
+  path:
+    description: "Directory to check out into (created if needed)"
+    required: false
+    default: "."
+outputs:
+  sha:
+    description: "Checked-out commit SHA (full)"
+    value: ${{ steps.checkout.outputs.sha }}
+  short-sha:
+    description: "Checked-out commit SHA (7-char)"
+    value: ${{ steps.checkout.outputs.short-sha }}
+runs:
+  using: "composite"
+  steps:
+    - name: Sparse checkout
+      id: checkout
+      shell: bash
+      run: |
+        set -euo pipefail
+        TARGET_DIR="${{ inputs.path }}"
+        REF="${{ inputs.ref }}"
+
+        mkdir -p "$TARGET_DIR"
+        pushd "$TARGET_DIR" > /dev/null
+
+        git init -q
+        git remote add origin https://github.com/ROCm/rocm-libraries.git
+        git fetch --depth 1 --filter=blob:none origin "$REF"
+        git sparse-checkout init --cone
+        git sparse-checkout set ${{ inputs.paths }}
+        git checkout FETCH_HEAD
+
+        SHA=$(git rev-parse HEAD)
+        echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+        echo "short-sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+        popd > /dev/null
