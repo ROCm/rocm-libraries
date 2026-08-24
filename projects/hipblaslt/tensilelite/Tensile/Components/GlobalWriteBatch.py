@@ -3429,9 +3429,7 @@ class GlobalWriteBatchWriter:
       sumIdx1:      elementSumIdx for the sba=1 element.
       prefixOffset: parentWriter.states.c.startVgprValu (offset into ValuC).
       tt0:          thread-tile M index (same for both sba=0 and sba=1).
-      forceSlc:     force the slc bit (prints as sc1 on gfx950) regardless of
-                    NonTemporalD -- used by the fused-A2A PUSH pass so the tile
-                    bypasses L2 and is visible in HBM to the SDMA engine.
+      forceSlc:     force the slc bit regardless of NonTemporalD.
     """
     module = Module("16bitSubtilePairedStore")
     isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
@@ -3484,19 +3482,6 @@ class GlobalWriteBatchWriter:
 
     useAlign8 = self.parentWriter.states.storeAlign8
 
-    # Row-major D (UseInitialStridesCD): M (index0) is the strided dim.  addrDVgpr already
-    # carries coord0*StrideD0 (folded by the generic AsmAddressCalculation), but the
-    # lane-group M offset (vLGDelta = LG*4*bpe) is column-major and the 8 packed M-rows are
-    # no longer contiguous -- they are StrideD0*bpe apart -- so the wide dwordx4 degrades to
-    # a per-M-row b16 scatter.
-    strideD0 = self.parentWriter.strideRef('D', 0)
-    rowMajorD = not self.parentWriter.isConstUnitStride(strideD0)
-
-    # vLGDelta is precomputed once per batch and read by every store in the batch, so it must
-    # stay intact.  The row-major path needs a scratch VGPR for the lane-group scaling and the
-    # b16 hi-half extraction; take one from the pool (freed at the end of this store).
-    vRMTmp = self.parentWriter.vgprPool.checkOut(1, tag="subtilePairedRowMajorTmp") if rowMajorD else -1
-
     def emitAddrWhilePermuting(module):
       """Callback emitted between ds_bpermute and s_waitcnt lgkmcnt(0).
 
@@ -3508,37 +3493,14 @@ class GlobalWriteBatchWriter:
            latency to the critical path.
       `module` is the permute Module, so instructions emitted here land
       between the ds_bpermute issue and the s_waitcnt that consumes results."""
-      if not rowMajorD:
-        if addrScaleShift:
-          module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
-                                     src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
-          module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vLGDelta),
-                             comment="adjusted D addr = scaled addrDVgpr + lane_group*8"))
-        else:
-          module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vLGDelta),
-                             comment="adjusted D addr = addrDVgpr + lane_group*8"))
+      if addrScaleShift:
+        module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
+                                   src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
+        module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vLGDelta),
+                           comment="adjusted D addr = scaled addrDVgpr + lane_group*8"))
       else:
-        # Row-major: base = scaled addrDVgpr (already carries coord0*StrideD0) plus the
-        # lane-group M offset = LG*4 * StrideD0 * bpe (the column-major vLGDelta term, which
-        # is LG*4*bpe, rescaled from bpe to StrideD0*bpe).
-        if addrScaleShift:
-          module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
-                                     src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
-        else:
-          module.add(VMovB32(dst=vgpr(vAddrScratch), src=vgpr(addrDVgpr), comment="base D addr (row-major)"))
-        # lane_group element count = (vLGDelta = LG*4*bpe) >> log2(bpe) = LG*4; keep vLGDelta
-        # intact (shared per batch) by staging into vRMTmp.  tmpS23 is used here for the
-        # StrideD0*bpe product because the align8 mask below reuses tmpS01/tmpS23 last, so
-        # the scatter loop recomputes the step into tmpS01 after align8 rather than relying
-        # on a value produced before it.
-        module.add(VLShiftRightB32(dst=vgpr(vRMTmp), shiftHex=int(log2(bpeDest)), src=vgpr(vLGDelta),
-                                   comment="lane_group*4 (M-row element count) = vLGDelta >> log2(bpe)"))
-        module.add(SMulI32(dst=sgpr(self.tmpS23), src0=strideD0, src1=bpeDest,
-                           comment="StrideD0*bpe (row-major M-row byte stride)"))
-        module.add(VMulLOU32(dst=vgpr(vRMTmp), src0=vgpr(vRMTmp), src1=sgpr(self.tmpS23),
-                             comment="lane_group_M_off = LG*4 * StrideD0 * bpe"))
-        module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vRMTmp),
-                           comment="row-major D addr = scaled addrDVgpr + lane_group_M_off"))
+        module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vLGDelta),
+                           comment="adjusted D addr = addrDVgpr + lane_group*8"))
       if useAlign8:
         self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
                                  mGuardOffset=2, rowScaleShift=1)
@@ -3549,57 +3511,23 @@ class GlobalWriteBatchWriter:
       tmpS = self.tmpS01
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpS, self.laneSGPRC), "apply exec mask"))
 
-    if not rowMajorD:
-      # Column-major: 8 M-rows contiguous -> one wide dwordx4 store.
-      module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
-      module.add(BufferStoreB128(
-        src=vgpr(vPack, 4),
-        vaddr=vgpr(vAddrScratch),
-        saddr=sgpr("SrdD", 4),
-        soffset=0,
-        mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
-        comment=f"16bit paired dwordx4 store tt0={tt0},{tt0+1}"
-      ))
-    else:
-      # Row-major: 8 M-rows StrideD0*bpe apart -> per-M-row b16 scatter.  vPack holds the
-      # 8 packed 16bit values as 4 dwords: dword d = M-rows (2d, 2d+1) lo/hi.  Rows 0..3 are
-      # sba=0, rows 4..7 are sba=1 (the wide store wrote them as 8 contiguous M-rows, so the
-      # sba=1 block sits 4 M-rows above sba=0).  globalOffset (coordOffset0) is already in
-      # addrDVgpr, so offset12=0.  Recompute StrideD0*bpe into tmpS01 here because align8
-      # reuses tmpS01/tmpS23 during the permute callback.
-      module.addComment1(f"buffer_store_b16 x8: scatter 8 {typeStr} M-rows StrideD0*bpe apart (row-major paired)")
-      module.add(SMulI32(dst=sgpr(self.tmpS01), src0=strideD0, src1=bpeDest,
-                         comment="StrideD0*bpe (M-row byte step)"))
-      for row in range(8):
-        srcVgpr = vPack + (row // 2)
-        if row % 2 == 1:  # hi 16bit half of the packed dword
-          module.add(VLShiftRightB32(dst=vgpr(vRMTmp), shiftHex=16, src=vgpr(srcVgpr),
-                                     comment=f"M-row+{row}: hi 16bit -> lo"))
-          storeSrc = vRMTmp
-        else:
-          storeSrc = srcVgpr
-        module.add(BufferStoreB16(
-          src=vgpr(storeSrc),
-          vaddr=vgpr(vAddrScratch),
-          saddr=sgpr("SrdD", 4),
-          soffset=0,
-          mubuf=MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT),
-          comment=f"paired tt0={tt0},{tt0+1} M-row+{row} (row-major scatter)"
-        ))
-        if row != 7:
-          module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=sgpr(self.tmpS01),
-                             comment="advance vaddr by StrideD0*bpe (next M-row)"))
+    module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
+    module.add(BufferStoreB128(
+      src=vgpr(vPack, 4),
+      vaddr=vgpr(vAddrScratch),
+      saddr=sgpr("SrdD", 4),
+      soffset=0,
+      mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
+      comment=f"16bit paired dwordx4 store tt0={tt0},{tt0+1}"
+    ))
 
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
 
-    # WAR hazard: the store reads vPack[0:3] as source operands.
+    # WAR hazard: buffer_store_dwordx4 reads vPack[0:3] as source operands.
     # The next paired store's v_cvt_pk_bf16_f32 will overwrite vPack.
     # Insert nop to ensure the store has latched its source VGPRs.
     module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
-
-    if rowMajorD:
-      self.parentWriter.vgprPool.checkIn(vRMTmp)
 
     return module
 
@@ -3632,8 +3560,7 @@ class GlobalWriteBatchWriter:
       addrCalc:     AddrCalculation for the element.
       sumIdx0:      elementSumIdx for the element.
       prefixOffset: parentWriter.states.c.startVgprValu (offset into ValuC).
-      forceSlc:     force the slc bit (prints as sc1 on gfx950) regardless of
-                    NonTemporalD -- see _emit16bitSubtilePairedStore.
+      forceSlc:     force the slc bit regardless of NonTemporalD.
     """
     module = Module("16bitSubtileScalarStore")
     isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
@@ -3666,15 +3593,6 @@ class GlobalWriteBatchWriter:
     indexChar = self.parentWriter.states.indexChars[packedC1[0]]
     strideD1J = "StrideD%s" % indexChar
 
-    # Row-major D (UseInitialStridesCD): M (index0) is the strided dim, so every M-row
-    # advance is StrideD0*bpe apart instead of the column-major bpe.  strideRef('D',0)
-    # returns the StrideD0 sgpr when UseInitialStridesCD is on and the const string
-    # "constStrideD0<idx>" (unit stride) otherwise, so isConstUnitStride is the exact
-    # column-major/row-major switch: column-major keeps the original wide store, row-major
-    # scales every M offset by StrideD0 and scatters the wide store into per-M-row b16.
-    strideD0 = self.parentWriter.strideRef('D', 0)
-    rowMajorD = not self.parentWriter.isConstUnitStride(strideD0)
-
     ws     = self.kernel["WavefrontSize"]
     miwg0  = self.kernel["MIWaveGroup"][0]
     miwg1  = self.kernel["MIWaveGroup"][1]
@@ -3693,12 +3611,11 @@ class GlobalWriteBatchWriter:
     #         + waveId1*waveN_stride*StrideD1J*bpe  [N-wave offset, if miwg1>1]
     # The SRD already encodes wg1*MT1*StrideD1J*bpe (N-WG offset).
     tmpS = self.tmpS01
+    mt0bpe = self.kernel["MacroTile0"] * bpe
 
     module.addComment1("compute per-lane orphan vaddr = N_col_off + LG_M_off + wg0_M_off [+ wave offsets]")
 
-    # N-col byte offset: (lane_id & 15) * StrideD1J * bpe.  Unchanged for both layouts:
-    # row-major D has StrideD1J==1 (N is the contiguous dim) so this naturally collapses
-    # to (lane&15)*bpe; column-major keeps StrideD1J==LDD.
+    # N-col byte offset: (lane_id & 15) * StrideD1J * bpe
     module.add(VAndB32(dst=vgpr(vPack+2), src0=15, src1=vgpr("Serial"),
                        comment="col_in_wave = lane_id & 15  (N-column index)"))
     module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+2), src1=sgpr(strideD1J),
@@ -3710,82 +3627,33 @@ class GlobalWriteBatchWriter:
       module.add(VMulLOU32(dst=vgpr(vPack+2), src0=vgpr(vPack+3), src1=bpe,
                            comment="N_col_off = col_in_wave * StrideD1J * bpe"))
 
-    # M byte offsets.  Column-major (row-first): a row is bpe apart, so MT0/vLGDelta/wave
-    # terms are pre-scaled by bpe.  Row-major (UseInitialStridesCD): a row is StrideD0*bpe
-    # apart, so each M-element count is scaled by StrideD0*bpe instead.  The coordOffset0
-    # (globalOffset/offset12) M-tile position must also fold into the vaddr under row-major
-    # because offset12 is an immediate and cannot carry the StrideD0 sgpr product.
-    if not rowMajorD:
-      mt0bpe = self.kernel["MacroTile0"] * bpe
+    # Add LG M-row offset: vLGDelta = LG*4*bpe = LG*8 bytes (pre-computed at batch start)
+    module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=vgpr(vLGDelta),
+                       comment="vaddr += LG_M_off (= vLGDelta = LG*4*bpe)"))
 
-      # Add LG M-row offset: vLGDelta = LG*4*bpe = LG*8 bytes (pre-computed at batch start)
-      module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=vgpr(vLGDelta),
-                         comment="vaddr += LG_M_off (= vLGDelta = LG*4*bpe)"))
+    # Add M-WG offset: wg0 * MT0 * bpe
+    module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=mt0bpe,
+                       comment="wg0_M_off = WorkGroup0 * MT0 * bpe"))
+    module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=sgpr(tmpS),
+                       comment="vaddr += wg0_M_off"))
 
-      # Add M-WG offset: wg0 * MT0 * bpe
-      module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=mt0bpe,
-                         comment="wg0_M_off = WorkGroup0 * MT0 * bpe"))
-      module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=sgpr(tmpS),
-                         comment="vaddr += wg0_M_off"))
-
-      # Add M-wave offset: waveId0 * MIWaveTile[0] * matM * bpe.
-      if miwg0 > 1:
-        wsLog2 = int(log2(ws))
-        waveM_stride_bpe = self.kernel["MIWaveTile"][0] * matM * bpe
-        module.add(VLShiftRightB32(dst=vgpr(vPack+3), shiftHex=wsLog2, src=vgpr("Serial"),
-                                   comment=f"waveId = Serial >> {wsLog2}"))
-        if miwg0 & (miwg0 - 1) == 0:  # power of 2 — use AND mask
-          module.add(VAndB32(dst=vgpr(vPack+3), src0=miwg0 - 1, src1=vgpr(vPack+3),
-                             comment=f"waveId0 = waveId & {miwg0-1}"))
-        else:
-          raise NotImplementedError(f"Non-power-of-2 MIWaveGroup[0]={miwg0} not supported in orphan store")
-        module.add(SMovB32(dst=sgpr(tmpS), src=waveM_stride_bpe,
-                           comment=f"waveM_stride_bpe={waveM_stride_bpe}"))
-        module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=sgpr(tmpS),
-                             comment=f"wave_M_off = waveId0 * {waveM_stride_bpe}"))
-        module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=vgpr(vPack+3),
-                           comment="vaddr += wave_M_off"))
-    else:
-      # Row-major: accumulate the full M element count (LG*4 + wg0*MT0 + waveId0*MIWT0*matM
-      # + coordOffset0) into vPack+3, then scale once by StrideD0*bpe and add to vaddr.
-      # LG*4 = vLGDelta>>1 (vLGDelta = LG*4*bpe = LG*8, bpe==2 for 16bit dest).
-      module.add(VLShiftRightB32(dst=vgpr(vPack+3), shiftHex=int(log2(bpe)), src=vgpr(vLGDelta),
-                                 comment="LG*4 (M-row element count for this lane group)"))
-      # + wg0*MT0 (M workgroup base in elements)
-      module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=self.kernel["MacroTile0"],
-                         comment="wg0_M_elems = WorkGroup0 * MT0"))
-      module.add(VAddU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=sgpr(tmpS),
-                         comment="M elems += wg0_M_elems"))
-      # + coordOffset0 (this element's M-tile position; folded in from offset12)
-      if addrCalc.coordOffset0:
-        module.add(SMovB32(dst=sgpr(tmpS), src=addrCalc.coordOffset0,
-                           comment=f"coordOffset0={addrCalc.coordOffset0}"))
-        module.add(VAddU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=sgpr(tmpS),
-                           comment="M elems += coordOffset0"))
-      # + waveId0*MIWaveTile[0]*matM (M-wave offset in elements)
-      if miwg0 > 1:
-        wsLog2 = int(log2(ws))
-        waveM_stride = self.kernel["MIWaveTile"][0] * matM
-        module.add(VLShiftRightB32(dst=vgpr(vPack+0), shiftHex=wsLog2, src=vgpr("Serial"),
-                                   comment=f"waveId = Serial >> {wsLog2}"))
-        if miwg0 & (miwg0 - 1) == 0:  # power of 2 — use AND mask
-          module.add(VAndB32(dst=vgpr(vPack+0), src0=miwg0 - 1, src1=vgpr(vPack+0),
-                             comment=f"waveId0 = waveId & {miwg0-1}"))
-        else:
-          raise NotImplementedError(f"Non-power-of-2 MIWaveGroup[0]={miwg0} not supported in orphan store")
-        module.add(SMovB32(dst=sgpr(tmpS), src=waveM_stride,
-                           comment=f"waveM_stride(elems)={waveM_stride}"))
-        module.add(VMulLOU32(dst=vgpr(vPack+0), src0=vgpr(vPack+0), src1=sgpr(tmpS),
-                             comment=f"wave_M_elems = waveId0 * {waveM_stride}"))
-        module.add(VAddU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=vgpr(vPack+0),
-                           comment="M elems += wave_M_elems"))
-      # Scale total M element count by StrideD0*bpe and add to the N-col byte offset.
-      module.add(SMulI32(dst=sgpr(tmpS), src0=strideD0, src1=bpe,
-                         comment="StrideD0*bpe (row-major M-row byte stride)"))
+    # Add M-wave offset: waveId0 * MIWaveTile[0] * matM * bpe.
+    if miwg0 > 1:
+      wsLog2 = int(log2(ws))
+      waveM_stride_bpe = self.kernel["MIWaveTile"][0] * matM * bpe
+      module.add(VLShiftRightB32(dst=vgpr(vPack+3), shiftHex=wsLog2, src=vgpr("Serial"),
+                                 comment=f"waveId = Serial >> {wsLog2}"))
+      if miwg0 & (miwg0 - 1) == 0:  # power of 2 — use AND mask
+        module.add(VAndB32(dst=vgpr(vPack+3), src0=miwg0 - 1, src1=vgpr(vPack+3),
+                           comment=f"waveId0 = waveId & {miwg0-1}"))
+      else:
+        raise NotImplementedError(f"Non-power-of-2 MIWaveGroup[0]={miwg0} not supported in orphan store")
+      module.add(SMovB32(dst=sgpr(tmpS), src=waveM_stride_bpe,
+                         comment=f"waveM_stride_bpe={waveM_stride_bpe}"))
       module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=sgpr(tmpS),
-                           comment="M_byte_off = M_elems * StrideD0 * bpe"))
+                           comment=f"wave_M_off = waveId0 * {waveM_stride_bpe}"))
       module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=vgpr(vPack+3),
-                         comment="vaddr += M_byte_off (row-major)"))
+                         comment="vaddr += wave_M_off"))
 
     # Add N-wave offset: waveId1 * MIWaveTile[1] * matN * StrideD1J * bpe.
     if miwg1 > 1:
@@ -3822,44 +3690,15 @@ class GlobalWriteBatchWriter:
                                mGuardOffset=1, rowScaleShift=2)
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
 
-    if not rowMajorD:
-      # Column-major: the 4 M-rows are bpe apart (contiguous in memory) -> one wide store.
-      module.addComment1(f"buffer_store_b64: write 4 {typeStr} M-rows at fixed N-col (orphan subtile)")
-      module.add(BufferStoreB64(
-        src=vgpr(vPack+0, 2),
-        vaddr=vgpr(vPack+2),
-        saddr=sgpr("SrdD", 4),
-        soffset=0,
-        mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
-        comment=f"orphan tt0={tt0} vc=0..3: 4 consecutive M-rows at fixed N-col"
-      ))
-    else:
-      # Row-major: the 4 M-rows are StrideD0*bpe apart, so the wide store degrades to a
-      # per-M-row b16 scatter.  offset12 is 0 because the
-      # coordOffset0 M-tile position was already folded into the vaddr above.  vPack+2
-      # holds M-row 0's byte offset; step by StrideD0*bpe after each store.
-      module.addComment1(f"buffer_store_b16 x4: scatter 4 {typeStr} M-rows StrideD0*bpe apart (row-major orphan)")
-      module.add(SMulI32(dst=sgpr(tmpS), src0=strideD0, src1=bpe,
-                         comment="StrideD0*bpe (M-row byte step)"))
-      for row in range(4):
-        srcVgpr = vPack + (row // 2)
-        if row % 2 == 1:  # hi 16bit half of the packed dword
-          module.add(VLShiftRightB32(dst=vgpr(vPack+3), shiftHex=16, src=vgpr(srcVgpr),
-                                     comment=f"M-row+{row}: hi 16bit -> lo"))
-          storeSrc = vPack + 3
-        else:
-          storeSrc = srcVgpr
-        module.add(BufferStoreB16(
-          src=vgpr(storeSrc),
-          vaddr=vgpr(vPack+2),
-          saddr=sgpr("SrdD", 4),
-          soffset=0,
-          mubuf=MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT),
-          comment=f"orphan tt0={tt0} M-row+{row} (row-major scatter)"
-        ))
-        if row != 3:
-          module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=sgpr(tmpS),
-                             comment="advance vaddr by StrideD0*bpe (next M-row)"))
+    module.addComment1(f"buffer_store_b64: write 4 {typeStr} M-rows at fixed N-col (orphan subtile)")
+    module.add(BufferStoreB64(
+      src=vgpr(vPack+0, 2),
+      vaddr=vgpr(vPack+2),
+      saddr=sgpr("SrdD", 4),
+      soffset=0,
+      mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
+      comment=f"orphan tt0={tt0} vc=0..3: 4 consecutive M-rows at fixed N-col"
+    ))
 
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
