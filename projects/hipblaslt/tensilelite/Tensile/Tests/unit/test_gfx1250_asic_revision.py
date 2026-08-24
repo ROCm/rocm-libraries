@@ -1127,18 +1127,15 @@ def test_qualified_gpu_targets_stay_accepted(
     assert captured["archNames"] == [target]
 
 
-def _run_createlibrary(monkeypatch, tmp_path, arch, logicArchName=None):
+def _logicFileName(architectureName, scheduleName, tag=""):
+    return f"{scheduleName}_{architectureName}{tag}.yaml"
+
+
+def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     """Drives ``TensileCreateLibrary.run()`` for one requested architecture with
-    every expensive step stubbed, and returns what the production wiring produced.
-
-    Several separate behaviors are observed here -- the capability overrides, the
-    compiler-target normalization, and which logic files survive the filter --
-    and they get one test each, so that none is left without coverage if another
-    breaks first.
-
-    ``logicArchName`` writes one logic file declaring that architecture into the
-    otherwise empty logic directory. The real glob and filter always run; without
-    a file they simply have nothing to select.
+    every expensive step stubbed. ``logicFiles`` writes minimal logic files
+    (arch name, schedule name) into the logic dir; the real glob and filter run,
+    so the selection observed is the production wiring's.
     """
     from unittest.mock import MagicMock
 
@@ -1146,13 +1143,14 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicArchName=None):
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
-    if logicArchName is not None:
-        # The filter reads only the third sequence item (CustomYamlLoader's
-        # load_logic_gfx_arch), so a full logic file is not needed to exercise it.
-        (logic_dir / f"{logicArchName}_test.yaml").write_text(
+    for architectureName, scheduleName, *tag in logicFiles:
+        # The filter reads only the second and third sequence items
+        # (CustomYamlLoader's load_logic_schedule_name and load_logic_gfx_arch),
+        # so a full logic file is not needed to exercise it.
+        (logic_dir / _logicFileName(architectureName, scheduleName, *tag)).write_text(
             "- {MinimumRequiredVersion: 4.33.0}\n"
-            f"- {SCHEDULE_NAME}\n"
-            f"- {logicArchName}\n"
+            f"- {scheduleName}\n"
+            f"- {architectureName}\n"
         )
     captured = {}
     writeSignature = inspect.signature(RunModule.writeSolutionsAndKernelsTCL)
@@ -1269,23 +1267,96 @@ def test_createlibrary_entry_point_leaves_v1_capabilities_untouched(
     assert captured["cmdlineArchs"] == [GFX1250]
 
 
-def test_v0_build_consumes_the_architectures_logic_files(
+# One logic tree holds both revisions' tuning, so every selection test below
+# runs against a directory holding both: what has to be pinned is the partition,
+# not that a lone file survives. Each entry is (ArchitectureName, ScheduleName);
+# the revision's tuning declares the architecture's name because the two share
+# one ISA and one compiler target, leaving ScheduleName as the only difference.
+_ARCH_LOGIC = (GFX1250, GFX1250)
+# A second architecture file, so the report's selected and dropped counts can be
+# made to differ. Equal counts let the two be swapped in the message unnoticed.
+_ARCH_LOGIC_2 = (GFX1250, GFX1250, "_b")
+_REVISION_LOGIC = (GFX1250, GFX1250V0)
+_OTHER_ARCH_LOGIC = ("gfx942", "aquavanjaram")
+
+
+def test_v0_build_selects_only_the_asic_revisions_logic(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """v0 has no tuned logic of its own and is not planned to get any: it reuses
-    gfx1250's and re-derives under v0 capabilities. The only thing that lets it is
-    ``archMatch``'s ``a.startswith(arch)`` clause, written for xnack variants, so
-    the whole feature rests on the ASIC revision name extending its architecture's.
+    """Reaching the revision's own logic at all rests entirely on ``archMatch``'s
+    ``a.startswith(arch)`` clause, written for xnack variants, and so on the
+    revision name extending its architecture's: a name that is not a
+    prefix-extension (``gfx1250-v0``) selects nothing.
 
-    Pinned here because it fails silently: a name that is not a prefix-extension
-    (``gfx1250-v0``) filters every logic file out and the build then reports
-    success having written an empty library.
+    Excluding the architecture's own logic is the other half. Those solutions
+    were selected under capabilities v0 does not have, and ``ArchitectureName``
+    cannot tell the two apart.
+
+    Both halves fail silently -- the build reports success having written a
+    library that is empty, or full of the wrong revision's solutions.
     """
     captured = _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250V0, logicArchName=GFX1250
+        monkeypatch, tmp_path, GFX1250V0, logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC]
     )
 
-    assert captured["logicFiles"] == [f"{GFX1250}_test.yaml"]
+    assert captured["logicFiles"] == [_logicFileName(*_REVISION_LOGIC)]
+
+
+def test_v1_build_selects_only_the_architectures_logic(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """The mirror, and the isolation the v1 revision needs: v0's logic
+    sits in the same tree and declares the same architecture, so a plain
+    gfx1250 build globs it up unless ``ScheduleName`` excludes it. It would
+    otherwise ship v0-derived solutions in every gfx1250 library built after v0
+    lands, while the build itself stays byte-identical to before the split.
+    """
+    captured = _run_createlibrary(
+        monkeypatch, tmp_path, GFX1250, logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC]
+    )
+
+    assert captured["logicFiles"] == [_logicFileName(*_ARCH_LOGIC)]
+
+
+def test_all_build_excludes_the_asic_revisions_logic(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """``all`` is the default distribution build and reaches the filter as the
+    architectures it expands to -- a list that cannot name an ASIC revision,
+    since a revision shares its architecture's ISA. The revision's logic must
+    therefore be excluded from it for the same reason as a plain gfx1250 build,
+    and every other architecture's must survive.
+    """
+    captured = _run_createlibrary(
+        monkeypatch,
+        tmp_path,
+        "all",
+        logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC, _OTHER_ARCH_LOGIC],
+    )
+
+    assert sorted(captured["logicFiles"]) == sorted(
+        [_logicFileName(*_ARCH_LOGIC), _logicFileName(*_OTHER_ARCH_LOGIC)]
+    )
+
+
+def test_asic_revision_filter_spares_other_architectures(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """The filter is scoped to architectures that have ASIC revisions. A
+    multi-architecture build that includes the revision must still consume
+    every other architecture's logic, whose ``ScheduleName`` names neither
+    revision and would be dropped if the scoping were lost.
+    """
+    captured = _run_createlibrary(
+        monkeypatch,
+        tmp_path,
+        f"gfx942_{GFX1250V0}",
+        logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC, _OTHER_ARCH_LOGIC],
+    )
+
+    assert sorted(captured["logicFiles"]) == sorted(
+        [_logicFileName(*_REVISION_LOGIC), _logicFileName(*_OTHER_ARCH_LOGIC)]
+    )
 
 
 def test_v0_build_ignores_an_unrelated_architectures_logic_files(
@@ -1294,10 +1365,120 @@ def test_v0_build_ignores_an_unrelated_architectures_logic_files(
     """The control for the prefix rule above: it must stay a prefix match on the
     requested name, not degrade into accepting whatever logic is on disk."""
     captured = _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250V0, logicArchName="gfx942"
+        monkeypatch, tmp_path, GFX1250V0, logicFiles=[_OTHER_ARCH_LOGIC]
     )
 
     assert captured["logicFiles"] == []
+
+
+# =========================================================================== #
+# What the build says it did. The filter replaces an arch's tuning, so an
+# incomplete v0 build writes a library missing problem types that only fail at
+# runtime -- the build log is the only place to catch it. These tests pin the
+# report line and the warning.
+# =========================================================================== #
+def test_a_revision_build_reports_the_revision_and_what_it_dropped(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """The plain file total looks the same whether v0 tuning was found or the
+    arch's whole tree was discarded, so the per-arch counts must show it. Counts
+    differ here so swapping them in the message is visible."""
+    _run_createlibrary(
+        monkeypatch,
+        tmp_path,
+        GFX1250V0,
+        logicFiles=[_ARCH_LOGIC, _ARCH_LOGIC_2, _REVISION_LOGIC],
+    )
+
+    out = capsys.readouterr().out
+    assert f"{GFX1250} ASIC revision: v0 (1 selected, 2 dropped" in out
+
+
+def test_a_revision_build_warns_that_the_dropped_tuning_has_no_replacement(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """A dropped file is a problem type the v0 library will not serve, so the
+    warning names the replacement semantics, the counts, and the remedy."""
+    _run_createlibrary(
+        monkeypatch, tmp_path, GFX1250V0, logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC]
+    )
+
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert f"replaces {GFX1250}'s rather than adding to it" in out
+    assert "1 selected, 1 dropped" in out
+    assert "fail at runtime" in out
+    assert "without a revision for v1" in out
+
+
+def test_the_v1_revision_reports_itself_without_warning(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """A v1 build drops the revision's logic the other way -- the correct, full
+    outcome. Warning here would train readers to ignore the one that matters."""
+    _run_createlibrary(
+        monkeypatch, tmp_path, GFX1250, logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC]
+    )
+
+    out = capsys.readouterr().out
+    assert f"{GFX1250} ASIC revision: v1" in out
+    assert "WARNING" not in out
+
+
+def test_a_build_without_a_revisioned_architecture_stays_silent(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """Most builds have nothing to do with revisions and should print no line.
+    The revision's logic is dropped even here, so drop-counting alone would
+    wrongly report on every build."""
+    _run_createlibrary(
+        monkeypatch, tmp_path, "gfx942", logicFiles=[_REVISION_LOGIC, _OTHER_ARCH_LOGIC]
+    )
+
+    assert "ASIC revision" not in capsys.readouterr().out
+
+
+def test_a_revision_build_that_finds_no_logic_at_all_says_so(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """A v0 directory never added, or a ``--logic-filter`` on the arch's own
+    path, leaves the revision with nothing while the build still succeeds."""
+    _run_createlibrary(monkeypatch, tmp_path, GFX1250V0, logicFiles=[_ARCH_LOGIC])
+
+    out = capsys.readouterr().out
+    assert f"{GFX1250} ASIC revision: v0" in out
+    assert "0 selected" in out
+    assert "WARNING" in out
+    assert f"replaces {GFX1250}'s rather than adding to it" in out
+    assert "fail at runtime" in out
+
+
+def test_a_revision_build_warns_even_when_it_dropped_nothing_either(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """Zero selected and zero dropped is the emptiest library and the case a
+    drop-counting warning misses: a LogicPath or ``--logic-filter`` that reached
+    neither revision's tree leaves nothing to count."""
+    _run_createlibrary(monkeypatch, tmp_path, GFX1250V0, logicFiles=[_OTHER_ARCH_LOGIC])
+
+    out = capsys.readouterr().out
+    assert f"{GFX1250} ASIC revision: v0 (0 selected, 0 dropped" in out
+    assert "WARNING" in out
+    assert f"replaces {GFX1250}'s rather than adding to it" in out
+    assert "fail at runtime" in out
+
+
+def test_a_complete_revision_tree_is_reported_without_a_warning(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """The goal state: every type the build sees has v0 tuning, nothing dropped.
+    A warning here would be permanent and so ignored -- the failure this block
+    guards against."""
+    _run_createlibrary(monkeypatch, tmp_path, GFX1250V0, logicFiles=[_REVISION_LOGIC])
+
+    out = capsys.readouterr().out
+    assert f"{GFX1250} ASIC revision: v0 (1 selected, 0 dropped" in out
+    assert "WARNING" not in out
 
 
 # =========================================================================== #
@@ -1408,12 +1589,13 @@ def test_client_writer_receives_the_requested_names(monkeypatch, tmp_path):
 
 
 # =========================================================================== #
-# Logic-file architecture names. v0 has no tuned logic of its own: it reuses
-# gfx1250's and re-derives every solution under v0 capabilities, which is what
-# makes the ASIC revision free of solution parameters. A logic file that names the
-# ASIC revision instead is therefore a mistake, and one that would otherwise cost a
-# whole build to notice -- masterLibraries is keyed by the declared name while
-# the per-architecture writes are keyed by the ISA-derived one.
+# Logic-file architecture names. v0 ships its own tuned logic, tagged by
+# ScheduleName gfx1250v0, but every v0 logic file must still declare
+# ArchitectureName gfx1250 -- the ISA-derived name the two revisions share. A
+# logic file that names the ASIC revision in ArchitectureName instead is a
+# mistake, and one that would otherwise cost a whole build to notice --
+# masterLibraries is keyed by the declared name while the per-architecture
+# writes are keyed by the ISA-derived one.
 # =========================================================================== #
 SCHEDULE_NAME = "Aldebaran_Cijk_Ailk_Bljk_SB"
 
@@ -1527,3 +1709,525 @@ def test_fallback_logic_is_still_merged_and_popped(
 
     assert list(masterLibraries) == [GFX1250]
     libraries[GFX1250].merge.assert_called_once_with(libraries["fallback"])
+
+
+# =========================================================================== #
+# Library output identity. A silicon stepping (gfx1250v0) collapses to its
+# architecture's ISA and compiler target for every internal key and for
+# compilation, but its library must ship in its own library/<stepping>/ subtree
+# so the runtime can select it by ASIC revision. computeOutputArchNames() is the
+# single source of truth for that base -> output-name mapping; it is the identity
+# for every ordinary architecture, which is what keeps their output byte-identical.
+# =========================================================================== #
+def test_output_arch_names_is_identity_for_ordinary_archs():
+    """An ordinary build maps every architecture to itself, so threading the map
+    through the writers cannot move or rename a single non-stepping artifact."""
+    from Tensile.TensileCreateLibrary.Run import computeOutputArchNames
+
+    assert computeOutputArchNames(["gfx942"]) == {"gfx942": "gfx942"}
+    assert computeOutputArchNames(["gfx90a", "gfx942"]) == {
+        "gfx90a": "gfx90a",
+        "gfx942": "gfx942",
+    }
+    # A qualified name round-trips to identity too, so no ordinary artifact moves.
+    assert computeOutputArchNames(["gfx942:xnack+"]) == {"gfx942": "gfx942"}
+
+
+def test_output_arch_names_maps_a_stepping_to_its_own_subtree():
+    """gfx1250v0 shares gfx1250's ISA, so its base is gfx1250, but the value is the
+    stepping name: that is what redirects its master/mapping/shard writes into
+    library/gfx1250v0/ while leaving the ISA-keyed internals on gfx1250."""
+    from Tensile.TensileCreateLibrary.Run import computeOutputArchNames
+
+    assert computeOutputArchNames([GFX1250V0]) == {GFX1250: GFX1250V0}
+    # The plain architecture is still the identity, so a v1 build is unchanged.
+    assert computeOutputArchNames([GFX1250]) == {GFX1250: GFX1250}
+
+
+def test_output_arch_names_rejects_two_names_sharing_one_isa():
+    """A stepping and its base (or two steppings) would name two output subtrees
+    for one ISA, so the map cannot pick one. Reject it here rather than silently
+    resolve it by dict-insertion order, since the inverse the helper cache relies
+    on would otherwise be ill-defined."""
+    from Tensile.TensileCreateLibrary.Run import computeOutputArchNames
+
+    with pytest.raises(ValueError, match="share an ISA"):
+        computeOutputArchNames([GFX1250, GFX1250V0])
+
+
+def _run_createlibrary_to_writes(
+    monkeypatch, tmp_path, arch, masterKey, mappingValue, shardNames=()
+):
+    """Drives ``run()`` all the way through the per-arch master/mapping write loops
+    with the heavy steps stubbed, capturing every ``LibraryIO.write`` path and the
+    arguments handed to ``writeSolutionsAndKernelsTCL``. Unlike ``_run_createlibrary``
+    this does not stop early, so the output-naming of the writes is what is pinned.
+
+    ``shardNames`` populates the master library's ``lazyLibraries`` so the shard
+    write loop (``writeMsl``) actually runs; the ``ParallelMap2`` stub invokes the
+    callable rather than swallowing it, so the shard routing is exercised too.
+    """
+    from unittest.mock import MagicMock
+
+    import Tensile.TensileCreateLibrary.Run as RunModule
+
+    logic_dir = tmp_path / "logic"
+    logic_dir.mkdir()
+    captured = {"writes": [], "wsk": {}}
+    writeSignature = inspect.signature(RunModule.writeSolutionsAndKernelsTCL)
+
+    lazyLibraries = {name: MagicMock() for name in shardNames}
+
+    def _iim(isas, _cxx):
+        return {isa: IsaInfo({"SupportedISA": True}, {}, {}, {}) for isa in isas}
+
+    def _wsk(*args, **kwargs):
+        bound = writeSignature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        captured["wsk"]["cmdlineArchs"] = bound.arguments["cmdlineArchs"]
+        captured["wsk"]["outputArchNames"] = bound.arguments.get("outputArchNames")
+        return (0, [], [])
+
+    def _glds(logicFiles, *a, **kw):
+        return ([], {masterKey: MagicMock(lazyLibraries=lazyLibraries)}, {0: mappingValue})
+
+    def _capture_write(filename, *a, **kw):
+        captured["writes"].append(str(filename))
+
+    monkeypatch.setattr(
+        RunModule,
+        "parseArguments",
+        lambda: {
+            "PrintLevel": 1,
+            "OutputPath": str(tmp_path / "out"),
+            "CxxCompiler": "/fake/hipcc",
+            "CCompiler": "/fake/hipcc",
+            "OffloadBundler": "/fake/clang-offload-bundler",
+            "Assembler": "/fake/assembler",
+            "CodeObjectVersion": "4",
+            "BuildIdKind": "sha1",
+            "AsmDebug": False,
+            "AsanBuild": False,
+            "Architecture": arch,
+            "LogicPath": str(logic_dir),
+            "LogicFormat": "yaml",
+            "LibraryFormat": "msgpack",
+            "CpuThreads": 1,
+            "LazyLibraryLoading": True,
+            "GenSolTable": False,
+            "Experimental": False,
+            "LogicFilter": "*",
+            "DisableAsmComments": False,
+            "UseCompression": False,
+            "KeepBuildTmp": True,
+        },
+    )
+    monkeypatch.setattr(RunModule, "setVerbosity", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        RunModule,
+        "validateToolchain",
+        lambda *a: ("/fake/hipcc", None, "/fake/bundler", None, None),
+    )
+    monkeypatch.setattr(RunModule, "makeIsaInfoMap", _iim)
+    monkeypatch.setattr(RunModule, "assignGlobalParameters", lambda *a, **kw: None)
+    monkeypatch.setattr(RunModule, "makeAssemblyToolchain", lambda *a, **kw: MagicMock())
+    monkeypatch.setattr(RunModule, "makeSourceToolchain", lambda *a, **kw: MagicMock())
+    monkeypatch.setattr(RunModule, "KernelWriterAssembly", lambda *a, **kw: MagicMock())
+    monkeypatch.setattr(RunModule, "generateLogicDataAndSolutions", _glds)
+    monkeypatch.setattr(
+        RunModule, "generateKernelObjectsFromSolutions", lambda *a, **kw: []
+    )
+    monkeypatch.setattr(RunModule, "generateKernelHelperObjects", lambda *a, **kw: [])
+    monkeypatch.setattr(RunModule, "copyStaticFiles", lambda *a, **kw: [])
+    monkeypatch.setattr(RunModule, "writeSolutionsAndKernelsTCL", _wsk)
+    monkeypatch.setattr(RunModule, "passPostKernelInfoToLibrary", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        RunModule, "ParallelMap2", lambda fn, it, *a, **kw: [fn(*x) for x in it]
+    )
+    monkeypatch.setattr(RunModule, "state", lambda x: x)
+    monkeypatch.setattr(RunModule.LibraryIO, "write", _capture_write)
+
+    RunModule.run()
+    return captured
+
+
+def test_v0_build_writes_master_and_mapping_into_its_own_subtree(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """The runtime selects the subtree by ASIC revision and only then forms the
+    filename, from the compiler target -- so the master and Mapping must land in
+    library/gfx1250v0/ while keeping the plain gfx1250 token. A write into
+    library/gfx1250/ is the silent-empty-library failure this prevents."""
+    captured = _run_createlibrary_to_writes(
+        monkeypatch, tmp_path, GFX1250V0, GFX1250, "prefix_" + GFX1250
+    )
+
+    writes = captured["writes"]
+    assert any(
+        w.endswith(f"library/{GFX1250V0}/TensileLibrary_lazy_{GFX1250}")
+        for w in writes
+    ), writes
+    assert any(
+        w.endswith(f"library/{GFX1250V0}/TensileLiteLibrary_lazy_{GFX1250}_Mapping")
+        for w in writes
+    ), writes
+    # Nothing for this build may fall back into the ISA-derived subtree.
+    assert not any(f"library/{GFX1250}/" in w for w in writes), writes
+
+
+def test_a_v0_builds_shards_route_to_its_subtree_keeping_the_isa_token(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """The shards are the actual kernel payload: a master in library/gfx1250v0/
+    whose shards landed in library/gfx1250/ is the silent-empty-library failure
+    this whole design exists to prevent. Drive the shard write loop and assert
+    each shard lands in the v0 subtree under its ISA-derived name -- the stepping
+    lives in the directory and in no filename, which is what lets the same tree
+    load on v1 silicon and keeps the helper kernels shared."""
+    shard = "TensileLibrary_lazy_" + GFX1250 + "_0"
+    captured = _run_createlibrary_to_writes(
+        monkeypatch,
+        tmp_path,
+        GFX1250V0,
+        GFX1250,
+        "prefix_" + GFX1250,
+        shardNames=(shard,),
+    )
+
+    writes = captured["writes"]
+    assert any(
+        w.endswith(f"library/{GFX1250V0}/{shard}") for w in writes
+    ), writes
+    # No write for this build may fall into the ISA-derived subtree, and the
+    # stepping token appears in no filename at all.
+    assert not any(f"library/{GFX1250}/" in w for w in writes), writes
+    for w in writes:
+        assert GFX1250V0 not in Path(w).name, w
+
+
+def test_a_v0_build_precreates_only_its_own_subtree(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """LibraryIO.write cannot create directories, so the write loops depend on the
+    pre-create loop having made library/gfx1250v0/. A stray library/gfx1250/ would
+    be shipped by a packaging glob as an empty v1 subtree, so assert it is absent."""
+    _run_createlibrary_to_writes(
+        monkeypatch, tmp_path, GFX1250V0, GFX1250, "prefix_" + GFX1250
+    )
+
+    assert (tmp_path / "out" / "library" / GFX1250V0).is_dir()
+    assert not (tmp_path / "out" / "library" / GFX1250).exists()
+
+
+def test_a_v0_build_forwards_the_output_map_into_both_code_object_builders(
+    monkeypatch, tmp_path
+):
+    """run() -> writer -> the two builders is the chain that routes every .co and
+    .hsaco. The writer receiving the map (asserted elsewhere) is worthless if it
+    forwards nowhere, so pin that writeSolutionsAndKernelsTCL hands the same map to
+    both buildAssemblyCodeObjectFiles and buildSourceCodeObjectFiles."""
+    from unittest.mock import MagicMock
+
+    import Tensile.TensileCreateLibrary.Run as RunModule
+
+    seen = {}
+
+    def _asm(*a, **kw):
+        seen["asm"] = kw.get("outputArchNames")
+        return []
+
+    def _src(*a, **kw):
+        seen["src"] = kw.get("outputArchNames")
+        return []
+
+    monkeypatch.setattr(RunModule, "buildAssemblyCodeObjectFiles", _asm)
+    monkeypatch.setattr(RunModule, "buildSourceCodeObjectFiles", _src)
+    monkeypatch.setattr(RunModule, "ParallelMap2", lambda *a, **kw: [])
+    monkeypatch.setattr(RunModule, "writeHelpers", lambda *a, **kw: None)
+    monkeypatch.setattr(RunModule, "rocisa", MagicMock())
+
+    outMap = {GFX1250: GFX1250V0}
+    RunModule.writeSolutionsAndKernelsTCL(
+        str(tmp_path),          # outputPath
+        MagicMock(),            # asmToolchain
+        MagicMock(),            # srcToolchain
+        [],                     # solutions
+        [],                     # kernels
+        [],                     # kernelHelperObjs
+        MagicMock(),            # kernelWriterAssembly
+        [GFX1250],              # cmdlineArchs
+        outputArchNames=outMap,
+    )
+
+    assert seen["asm"] == outMap
+    assert seen["src"] == outMap
+
+
+def test_v0_build_threads_the_output_name_map_to_the_kernel_writer(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """The .co and helper kernels are routed by the writer, not this loop, so the
+    map has to reach it; the compiler target must still be the plain gfx1250 name
+    clang accepts for --offload-arch."""
+    captured = _run_createlibrary_to_writes(
+        monkeypatch, tmp_path, GFX1250V0, GFX1250, "prefix_" + GFX1250
+    )
+
+    assert captured["wsk"]["outputArchNames"] == {GFX1250: GFX1250V0}
+    assert captured["wsk"]["cmdlineArchs"] == [GFX1250]
+
+
+def test_ordinary_build_output_paths_are_unchanged(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """The regression guard: a gfx942 build must write exactly where it does today
+    and hand the writer an identity map, so the group-free output-naming change is
+    provably inert for every architecture but the stepping."""
+    captured = _run_createlibrary_to_writes(
+        monkeypatch, tmp_path, "gfx942", "gfx942", "prefix_gfx942"
+    )
+
+    writes = captured["writes"]
+    assert any(
+        w.endswith("library/gfx942/TensileLibrary_lazy_gfx942") for w in writes
+    ), writes
+    assert any(
+        w.endswith("library/gfx942/TensileLiteLibrary_lazy_gfx942_Mapping")
+        for w in writes
+    ), writes
+    assert captured["wsk"]["outputArchNames"] == {"gfx942": "gfx942"}
+    assert captured["wsk"]["cmdlineArchs"] == ["gfx942"]
+
+
+# =========================================================================== #
+# Toolchain destination routing. The code objects and helper kernels are fanned
+# out into library/<base>/ by the assembly and source builders, keyed off the
+# ISA the kernel canonicalizes to. A stepping build must place them under
+# library/<stepping>/ instead -- but the *filenames* keep the ISA-derived token,
+# because the shards are resolved relative to the directory the runtime already
+# selected, and the helper kernel is loaded by the (unrevisioned) compiler-target
+# name. Only the directory moves; the mapping is the identity for ordinary archs.
+# =========================================================================== #
+def test_assembly_co_routes_to_the_output_subtree_keeping_the_isa_token(tmp_path):
+    from unittest.mock import MagicMock
+
+    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+
+    kernel = {
+        "ISA": ISA_GFX1250,
+        "BaseName": "k0",
+        "codeObjectFile": "TensileLibrary_lazy_" + GFX1250,
+    }
+    coFiles = buildAssemblyCodeObjectFiles(
+        MagicMock(),
+        MagicMock(),
+        [kernel],
+        tmp_path,
+        tmp_path,
+        compress=True,
+        outputArchNames={GFX1250: GFX1250V0},
+    )
+
+    assert len(coFiles) == 1
+    assert str(coFiles[0]).endswith(
+        f"{GFX1250V0}/TensileLibrary_lazy_{GFX1250}.co"
+    ), coFiles
+    assert (tmp_path / GFX1250V0).is_dir()
+
+
+def test_assembly_co_is_unchanged_for_ordinary_archs(tmp_path):
+    from unittest.mock import MagicMock
+
+    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+
+    kernel = {
+        "ISA": gfxToIsa("gfx942"),
+        "BaseName": "k0",
+        "codeObjectFile": "TensileLibrary_lazy_gfx942",
+    }
+    coFiles = buildAssemblyCodeObjectFiles(
+        MagicMock(), MagicMock(), [kernel], tmp_path, tmp_path, compress=True
+    )
+
+    assert len(coFiles) == 1
+    assert str(coFiles[0]).endswith("gfx942/TensileLibrary_lazy_gfx942.co"), coFiles
+
+
+def _run_build_source(tmp_path, monkeypatch, bundlerTarget, cmdlineArchs, outputArchNames):
+    from unittest.mock import MagicMock
+
+    from Tensile.Toolchain import Source as SourceMod
+
+    monkeypatch.setenv("TENSILE_DISABLE_HELPER_CACHE", "1")
+    monkeypatch.setattr(SourceMod.shutil, "move", lambda s, d: None)
+
+    bundler = MagicMock()
+    bundler.targets = lambda objPath: [bundlerTarget]
+    kernelPath = tmp_path / "Kernels.cpp"
+    kernelPath.write_text("")
+
+    return SourceMod.buildSourceCodeObjectFiles(
+        MagicMock(),
+        bundler,
+        tmp_path / "lib",
+        tmp_path / "tmpobj",
+        tmp_path / "inc",
+        kernelPath,
+        cmdlineArchs,
+        outputArchNames=outputArchNames,
+    )
+
+
+def test_source_helper_co_routes_to_the_output_subtree(tmp_path, monkeypatch):
+    coPaths = _run_build_source(
+        tmp_path, monkeypatch, GFX1250, [GFX1250], {GFX1250: GFX1250V0}
+    )
+
+    assert len(coPaths) == 1
+    assert str(coPaths[0]).endswith(
+        f"{GFX1250V0}/Kernels.so-000-{GFX1250}.hsaco"
+    ), coPaths
+
+
+def test_source_helper_co_is_unchanged_for_ordinary_archs(tmp_path, monkeypatch):
+    coPaths = _run_build_source(tmp_path, monkeypatch, "gfx942", ["gfx942"], None)
+
+    assert len(coPaths) == 1
+    assert str(coPaths[0]).endswith("gfx942/Kernels.so-000-gfx942.hsaco"), coPaths
+
+
+def test_helper_cache_restore_routes_to_the_output_subtree(tmp_path, monkeypatch):
+    """A v0 build compiles the helper for the plain gfx1250 target, so it shares a
+    cache key with a v1 build; the restored file must still be routed into the
+    stepping's subtree, not the ISA-derived one the cache entry was stored under."""
+    from unittest.mock import MagicMock
+
+    from Tensile.Toolchain import HelperKernelCache as HKC
+
+    monkeypatch.setattr(HKC, "_computeCacheKey", lambda *a, **kw: "KEY")
+    entry = tmp_path / "cache" / "KEY" / GFX1250
+    entry.mkdir(parents=True)
+    (entry / "x.hsaco").write_text("data")
+    monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
+
+    cache = HKC.HelperKernelCache()
+    hit, coPaths = cache.restore(
+        tmp_path / "Kernels.cpp",
+        tmp_path / "inc",
+        [GFX1250],
+        MagicMock(),
+        tmp_path / "lib",
+        outputArchNames={GFX1250: GFX1250V0},
+    )
+
+    assert hit
+    assert len(coPaths) == 1
+    assert str(coPaths[0]).endswith(f"{GFX1250V0}/x.hsaco"), coPaths
+
+
+HELPER_HSACO = f"Kernels.so-000-{GFX1250}.hsaco"
+
+
+def _cacheAfterAV0Store(tmp_path, monkeypatch):
+    """Runs a v0 build's cache miss and subsequent store, and returns the cache
+    root. The v0 build's helper lives in the stepping's subtree, which is exactly
+    the name that must not become the stored one."""
+    from unittest.mock import MagicMock
+
+    from Tensile.Toolchain import HelperKernelCache as HKC
+
+    monkeypatch.setattr(HKC, "_computeCacheKey", lambda *a, **kw: "KEY")
+    cacheRoot = tmp_path / "cache"
+    monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cacheRoot))
+    monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
+
+    v0Dir = tmp_path / "libv0" / GFX1250V0
+    v0Dir.mkdir(parents=True)
+    (v0Dir / HELPER_HSACO).write_text("data")
+
+    cache = HKC.HelperKernelCache()
+    hit, _ = cache.restore(
+        tmp_path / "Kernels.cpp",
+        tmp_path / "inc",
+        [GFX1250],
+        MagicMock(),
+        tmp_path / "libv0",
+        outputArchNames={GFX1250: GFX1250V0},
+    )
+    assert not hit
+    cache.store(
+        [str(v0Dir / HELPER_HSACO)], outputArchNames={GFX1250: GFX1250V0}
+    )
+    return cacheRoot
+
+
+def test_helper_cache_stores_under_the_base_arch_not_the_output_subtree(
+    tmp_path, monkeypatch
+):
+    """The cache key is computed from the compiler targets, which are identical
+    for the two steppings, so a v0 build and a v1 build share an entry. Storing
+    under the directory the files happen to sit in would put the stepping's name
+    inside the shared entry; the stored name has to be the base arch, the same
+    name restore() maps forward from."""
+    cacheRoot = _cacheAfterAV0Store(tmp_path, monkeypatch)
+
+    assert (cacheRoot / "KEY" / GFX1250 / HELPER_HSACO).is_file()
+    assert not (cacheRoot / "KEY" / GFX1250V0).exists()
+
+
+def test_a_v1_build_restores_a_v0_builds_cache_entry_into_its_own_subtree(
+    tmp_path, monkeypatch
+):
+    """The end-to-end consequence of the above: build v0 then v1 in one workspace
+    and the v1 tree must still get its helper kernel. A stepping-named cache entry
+    would silently deposit it in library/gfx1250v0/ and ship a v1 tree with none."""
+    from unittest.mock import MagicMock
+
+    from Tensile.Toolchain import HelperKernelCache as HKC
+
+    _cacheAfterAV0Store(tmp_path, monkeypatch)
+
+    cache = HKC.HelperKernelCache()
+    hit, coPaths = cache.restore(
+        tmp_path / "Kernels.cpp",
+        tmp_path / "inc",
+        [GFX1250],
+        MagicMock(),
+        tmp_path / "libv1",
+        outputArchNames={GFX1250: GFX1250},
+    )
+
+    assert hit
+    assert [str(p) for p in coPaths] == [
+        str(tmp_path / "libv1" / GFX1250 / HELPER_HSACO)
+    ]
+
+
+def test_helper_cache_store_is_unchanged_for_ordinary_archs(tmp_path, monkeypatch):
+    """The regression guard: with no map, or an identity one, the stored layout is
+    the directory layout, exactly as before."""
+    from unittest.mock import MagicMock
+
+    from Tensile.Toolchain import HelperKernelCache as HKC
+
+    monkeypatch.setattr(HKC, "_computeCacheKey", lambda *a, **kw: "KEY")
+    cacheRoot = tmp_path / "cache"
+    monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cacheRoot))
+    monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
+
+    libDir = tmp_path / "lib" / "gfx942"
+    libDir.mkdir(parents=True)
+    (libDir / "Kernels.so-000-gfx942.hsaco").write_text("data")
+
+    cache = HKC.HelperKernelCache()
+    cache.restore(
+        tmp_path / "Kernels.cpp",
+        tmp_path / "inc",
+        ["gfx942"],
+        MagicMock(),
+        tmp_path / "lib",
+    )
+    cache.store([str(libDir / "Kernels.so-000-gfx942.hsaco")])
+
+    assert (cacheRoot / "KEY" / "gfx942" / "Kernels.so-000-gfx942.hsaco").is_file()

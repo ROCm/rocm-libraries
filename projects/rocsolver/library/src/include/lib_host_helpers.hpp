@@ -68,6 +68,13 @@ T const* cast2constType(T* array)
     return array;
 }
 
+// keep existing const
+template <typename T>
+T const* cast2constType(T const* array)
+{
+    return array;
+}
+
 template <typename T>
 T const* const* cast2constType(T* const* array)
 {
