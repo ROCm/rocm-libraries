@@ -152,6 +152,7 @@ typedef enum {
 typedef enum {
   HIPBLASLT_REQUANT_SCALE_PER_TENSOR    = 0, /**<One scalar scale for the whole result tensor. Scale/amax shape ``[1]``.*/
   HIPBLASLT_REQUANT_SCALE_PER_ROW       = 1, /**<One scale per output row/token. Scale/amax shape ``[M]``.*/
+  HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX  = 2, /**<MX microscaling — one UE8M0 exponent scale per 1x32 block along the N (inner) dimension; output is fp8 e4m3, scale tensor is UE8M0 bytes.*/
 } hipblasLtRequantScaleGranularity_t;
 
 /*! \ingroup types_module
@@ -167,6 +168,10 @@ typedef enum {
   HIPBLASLT_FUSED_EPILOGUE_REQUANT_AMAX_POINTER = 6, /**<Optional device pointer that receives the result amax side output, with the same granularity as the scale. If unset in dynamic mode, amax is computed internally only to derive the scale. Data type: ``void*`` (f32 elements).*/
   HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_COMPUTE_MODE = 7, /**<How the output scale is obtained (static vs dynamic-from-amax). Defaults to static. Data type: ``hipblasLtRequantScaleComputeMode_t``.*/
   HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_GRANULARITY = 8, /**<Shape shared by the scale and amax outputs (per-tensor or per-row). Defaults to per-tensor. Data type: ``hipblasLtRequantScaleGranularity_t``.*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_SCALE_POINTER = 9,  /**<Device pointer to the UE8M0 MX block-scale OUTPUT tensor; required when granularity is PER_BLOCK_MX; Data type: void* (UE8M0 bytes).*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_BLOCK_SIZE    = 10, /**<Elements per MX block along N; default 32; Data type: int32_t.*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_OUTPUT_TYPE   = 11, /**<Narrow output element type for MX quant; only HIP_R_8F_E4M3 supported; default HIP_R_8F_E4M3; Data type: hipDataType.*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_RESIDUAL_OUT_POINTER = 12, /**<Optional device pointer to a bf16 output buffer that receives the pre-quantization residual value (H + residual) with the same [M,N] shape/layout as D but bf16 elements. When set with PER_BLOCK_MX granularity, the PartialRMS MXFP8 epilogue additionally stores this bf16 tensor. Data type: void* (bf16 elements).*/
 } hipblasLtFusedEpilogueAttribute_t;
 
 /*! \ingroup types_module
