@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: MIT
+// Auto-generated AQuant (A-only quantized) GEMM kernel header.
+// DO NOT EDIT -- regenerate via unified_gemm_aquant_codegen.py
+#pragma once
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/ops/gemm_quant.hpp"
+#include "ck_tile/ops/epilogue.hpp"
+
+namespace ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant {
+
+constexpr const char* KERNEL_NAME = "gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant";
+
+using ADataType   = ck_tile::pk_int4_t;
+using BDataType   = ck_tile::bf8_t;
+using CDataType   = ck_tile::half_t;
+using QDataType   = ck_tile::bf8_t;
+using AccDataType = float;
+
+using ALayout  = ck_tile::tensor_layout::gemm::RowMajor;
+using BLayout  = ck_tile::tensor_layout::gemm::ColumnMajor;
+using CLayout  = ck_tile::tensor_layout::gemm::RowMajor;
+using AQLayout = ck_tile::tensor_layout::gemm::RowMajor;
+using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
+
+// QuantGroupShape<sequence<gM, gN, gK>> -- same type used for the AQ slot in the
+// pipeline template; BQ is disabled via bq_ptr=nullptr at runtime for AQuant-only.
+using QuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<
+    1, 1, 128>>;
+
+struct Kernel_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant {
+    using ADataType   = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::ADataType;
+    using BDataType   = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::BDataType;
+    using CDataType   = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::CDataType;
+    using QDataType   = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::QDataType;
+    using AccDataType = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::AccDataType;
+
+    static constexpr ck_tile::index_t TileM      = 16;
+    static constexpr ck_tile::index_t TileN      = 64;
+    static constexpr ck_tile::index_t TileK      = 256;
+    static constexpr ck_tile::index_t WarpM      = 1;
+    static constexpr ck_tile::index_t WarpN      = 4;
+    static constexpr ck_tile::index_t WarpK      = 1;
+    static constexpr ck_tile::index_t WarpTileM  = 16;
+    static constexpr ck_tile::index_t WarpTileN  = 16;
+    static constexpr ck_tile::index_t WarpTileK  = 64;
+    static constexpr ck_tile::index_t BlockSize  = 256;
+    static constexpr int               kBlockPerCu = 1;
+    static constexpr ck_tile::index_t GroupSizeK = 128;
+
+    static constexpr bool kPadM           = false;
+    static constexpr bool kPadN           = false;
+    static constexpr bool kPadK           = false;
+    static constexpr bool APreshuffleQuant = true;
+    static constexpr bool BPreshuffleQuant = false;
+    static constexpr bool PreshuffleB     = false;
+    static constexpr bool TransposeC      = false;
+    static constexpr bool DoubleSmemBuffer = false;
+
+    using TileShape = ck_tile::TileGemmShape<
+        ck_tile::sequence<TileM, TileN, TileK>,
+        ck_tile::sequence<WarpM, WarpN, WarpK>,
+        ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
+
+    using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>;
+
+    using GemmTraits = ck_tile::TileGemmQuantTraits<
+        kPadM, kPadN, kPadK,
+        APreshuffleQuant, BPreshuffleQuant, PreshuffleB,
+        ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::ALayout, ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::BLayout, ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::CLayout,
+        ck_tile::QuantType::AQuantGrouped,
+        ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::AQLayout, ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::BQLayout,
+        TransposeC, DoubleSmemBuffer>;
+
+    using GemmPipelineProblemBase = ck_tile::GemmPipelineProblemBase<
+        ADataType, BDataType, AccDataType, TileShape, GemmTraits>;
+
+    using BaseGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblemBase>;
+
+    static float launch(const ck_tile::QuantGemmHostArgs& args,
+                        const ck_tile::stream_config& s)
+    {
+        // hot-loop / tail dispatch -- mirrors run_gemm_quant_example.inc
+        const ck_tile::index_t K_split =
+            (args.k_batch == 1)
+                ? ck_tile::integer_least_multiple(args.K, TileK)
+                : ck_tile::get_splitk_batch_k_read(args.K, args.k_batch, WarpTileK);
+
+        const ck_tile::index_t num_loop  = TilePartitioner::GetLoopNum(K_split);
+        const bool has_hot_loop          = BaseGemmPipeline::BlockHasHotloop(num_loop);
+        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
+
+        const auto Run = [&](auto has_hot_loop_, auto tail_number_) {
+            // GemmAQuantPipelineProblem<A, AQ, B, C(=Acc), Shape, Traits,
+            //   AQuantGroupSize, TransposeC, ComputeDataType, Scheduler, hot, tail>
+            using PipelineProblem = ck_tile::GemmAQuantPipelineProblem<
+                ADataType,
+                QDataType,
+                BDataType,
+                AccDataType,
+                TileShape,
+                GemmTraits,
+                QuantGroupSize,
+                TransposeC,
+                ADataType,        // ComputeDataType
+                ck_tile::GemmPipelineScheduler::Intrawave,
+                has_hot_loop_.value,
+                tail_number_.value>;
+
+            using GemmPipeline = ck_tile::AQuantGemmPipelineAgBgCrCompV3<PipelineProblem>;
+
+            using GemmEpilogue = ck_tile::CShuffleEpilogue<
+                ck_tile::CShuffleEpilogueProblem<
+                    typename PipelineProblem::AComputeDataType,
+                    typename PipelineProblem::BComputeDataType,
+                    ck_tile::tuple<>,
+                    AccDataType,
+                    CDataType,
+                    ck_tile::tuple<>,
+                    ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::CLayout,
+                    ck_tile::element_wise::PassThrough,
+                    TilePartitioner::MPerBlock,
+                    TilePartitioner::NPerBlock,
+                    WarpM, WarpN,
+                    WarpTileM, WarpTileN, WarpTileK,
+                    TransposeC>>;
+
+            using Kernel = ck_tile::QuantGemmKernel<
+                TilePartitioner, GemmPipeline, GemmEpilogue,
+                ck_tile::QuantType::AQuantGrouped>;
+
+            auto kargs = Kernel::MakeKernelArgs(args);
+            if(!Kernel::IsSupportedArgument(kargs))
+                return -1.0f;
+
+            const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
+            const dim3 blocks = Kernel::BlockSize();
+            return ck_tile::launch_kernel(
+                s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+        };
+
+        return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+    }
+};
+
+using SelectedKernel = Kernel_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant;
+
+} // namespace ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant
+
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+using SelectedKernel = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::Kernel_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant;
+constexpr const char* KERNEL_NAME = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::KERNEL_NAME;
+using ADataType   = ck_tile::pk_int4_t;
+using BDataType   = ck_tile::bf8_t;
+using CDataType   = ck_tile::half_t;
+using QDataType   = ck_tile::bf8_t;
+using AccDataType = float;
+using QuantGroupSize = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::QuantGroupSize;
+using ALayout = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::ALayout;
+using BLayout = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::BLayout;
+using CLayout = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::CLayout;
+// AQ scale-tensor layout: always RowMajor (matches Old-TE, which hardcodes
+// AQLayout=RowMajor for every layout). The ctypes lib derives stride_AQ from
+// this compile-time type (RowMajor -> QK_A).
+using AQLayout = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::AQLayout;
+constexpr ck_tile::index_t GroupSizeK = ns_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::Kernel_gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant::GroupSizeK;
+#endif // CK_TILE_SINGLE_KERNEL_INCLUDE

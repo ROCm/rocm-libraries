@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: MIT
+// Auto-generated non-grouped gemm_bquant (block-scale) GEMM kernel header.
+// DO NOT EDIT -- regenerate via unified_gemm_bquant_codegen.py
+#pragma once
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/ops/gemm_quant.hpp"
+#include "ck_tile/ops/epilogue.hpp"
+
+namespace ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb {
+
+constexpr const char* KERNEL_NAME = "gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb";
+
+using ADataType   = ck_tile::fp8_t;
+using BDataType   = ck_tile::fp8_t;
+using CDataType   = ck_tile::half_t;
+using QDataType   = float;
+using AccDataType = float;
+
+using ALayout  = ck_tile::tensor_layout::gemm::RowMajor;
+using BLayout  = ck_tile::tensor_layout::gemm::ColumnMajor;
+using CLayout  = ck_tile::tensor_layout::gemm::RowMajor;
+using AQLayout = ck_tile::tensor_layout::gemm::RowMajor;
+using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
+
+// Single QuantGroupSize alias -- same type used for both AQ and BQ slots in the
+// pipeline template; AQ is disabled via aq_ptr=nullptr at runtime for BQuant-only.
+using QuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<
+    1, 1, 128>>;
+
+struct Kernel_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb {
+    using ADataType   = ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::ADataType;
+    using BDataType   = ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::BDataType;
+    using CDataType   = ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::CDataType;
+    using QDataType   = ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::QDataType;
+    using AccDataType = ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::AccDataType;
+
+    static constexpr ck_tile::index_t TileM      = 128;
+    static constexpr ck_tile::index_t TileN      = 128;
+    static constexpr ck_tile::index_t TileK      = 128;
+    static constexpr ck_tile::index_t WarpM      = 1;
+    static constexpr ck_tile::index_t WarpN      = 4;
+    static constexpr ck_tile::index_t WarpK      = 1;
+    static constexpr ck_tile::index_t WarpTileM  = 16;
+    static constexpr ck_tile::index_t WarpTileN  = 16;
+    static constexpr ck_tile::index_t WarpTileK  = 64;
+    static constexpr ck_tile::index_t BlockSize  = 256;
+    static constexpr int               kBlockPerCu = 2;
+    static constexpr ck_tile::index_t GroupSizeK = 128;
+
+    static constexpr bool kPadM           = false;
+    static constexpr bool kPadN           = false;
+    static constexpr bool kPadK           = true;
+    static constexpr bool APreshuffleQuant = false;
+    static constexpr bool BPreshuffleQuant = false;
+    static constexpr bool PreshuffleB     = true;
+    static constexpr bool TransposeC      = false;
+    static constexpr bool DoubleSmemBuffer = true;
+    // TiledMMAPermuteN: selects shuffle_b_permuteN + bq_permuteN vs plain shuffle_b
+    // for the B weight matrix / BQ scale tensor (see gemm_bquant_ctypes_lib.cpp).
+    // Mirrors GemmConfigPreshuffleB_BQuant_Prefill (gemm_utils.hpp:214-215).
+    static constexpr bool TiledMMAPermuteN = true;
+
+    using TileShape = ck_tile::TileGemmShape<
+        ck_tile::sequence<TileM, TileN, TileK>,
+        ck_tile::sequence<WarpM, WarpN, WarpK>,
+        ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
+
+    using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
+
+    // Config exposing the member names ck_tile::shuffle_b / shuffle_b_permuteN /
+    // bq_permuteN expect (N_Tile, N_Warp, N_Warp_Tile, K_Warp_Tile). Used by the
+    // ctypes lib to pre-shuffle the B weight matrix and BQ scales for PreshuffleB
+    // kernels, matching Old-TE's host-side shuffle in
+    // run_gemm_quant_example.inc:770-789 and the bq_permuteN at :799-815.
+    struct BShuffleConfig {
+        static constexpr ck_tile::index_t N_Tile      = TileN;
+        static constexpr ck_tile::index_t N_Warp      = WarpN;
+        static constexpr ck_tile::index_t N_Warp_Tile = WarpTileN;
+        static constexpr ck_tile::index_t K_Warp_Tile = WarpTileK;
+    };
+
+    using GemmTraits = ck_tile::TileGemmQuantTraits<
+        kPadM, kPadN, kPadK,
+        APreshuffleQuant, BPreshuffleQuant, PreshuffleB,
+        ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::ALayout, ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::BLayout, ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::CLayout,
+        ck_tile::QuantType::BQuantGrouped,
+        ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::AQLayout, ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::BQLayout,
+        TransposeC, DoubleSmemBuffer>;
+
+    using GemmPipelineProblemBase = ck_tile::GemmPipelineProblemBase<
+        ADataType, BDataType, AccDataType, TileShape, GemmTraits>;
+
+    using BaseGemmPipeline = ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblemBase>;
+
+    static float launch(const ck_tile::QuantGemmHostArgs& args,
+                        const ck_tile::stream_config& s)
+    {
+        // hot-loop / tail dispatch -- mirrors run_gemm_quant_example.inc
+        const ck_tile::index_t K_split =
+            (args.k_batch == 1)
+                ? ck_tile::integer_least_multiple(args.K, TileK)
+                : ck_tile::get_splitk_batch_k_read(args.K, args.k_batch, TileK);
+
+        const ck_tile::index_t num_loop  = TilePartitioner::GetLoopNum(K_split);
+        const bool has_hot_loop          = BaseGemmPipeline::BlockHasHotloop(num_loop);
+        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
+
+        const auto Run = [&](auto has_hot_loop_, auto tail_number_) {
+            using PipelineProblem = ck_tile::GemmBQuantPipelineProblem<
+                ADataType,
+                BDataType,
+                QDataType,
+                AccDataType,
+                TileShape,
+                GemmTraits,
+                QuantGroupSize,
+                ADataType,        // ComputeDataType
+                ck_tile::GemmPipelineScheduler::Intrawave,
+                has_hot_loop_.value,
+                tail_number_.value,
+                ck_tile::CastPolicy::BeforeLDSWrite>;  // BCastPolicy -- Old-TE: A==B ? BeforeLDSWrite : AfterLDSRead
+
+            using GemmPipeline = ck_tile::WPQuantBPipelineAgBgCrV2<PipelineProblem>;
+
+            using GemmEpilogue = ck_tile::PermuteNEpilogue<
+                ck_tile::PermuteNEpilogueProblem<
+                    typename PipelineProblem::AComputeDataType,
+                    typename PipelineProblem::BComputeDataType,
+                    ck_tile::tuple<>,
+                    AccDataType,
+                    CDataType,
+                    ck_tile::tuple<>,
+                    ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::CLayout,
+                    ck_tile::element_wise::PassThrough,
+                    TilePartitioner::MPerBlock,
+                    TilePartitioner::NPerBlock,
+                    WarpM, WarpN,
+                    WarpTileM, WarpTileN, WarpTileK,
+                    TransposeC,
+                    false,
+                    1>>;
+
+            using Kernel = ck_tile::QuantGemmKernel<
+                TilePartitioner, GemmPipeline, GemmEpilogue,
+                ck_tile::QuantType::BQuantGrouped>;
+
+            auto kargs = Kernel::MakeKernelArgs(args);
+            if(!Kernel::IsSupportedArgument(kargs))
+                return -1.0f;
+
+            const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
+            const dim3 blocks = Kernel::BlockSize();
+            return ck_tile::launch_kernel(
+                s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+        };
+
+        return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+    }
+};
+
+using SelectedKernel = Kernel_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb;
+
+} // namespace ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb
+
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+using SelectedKernel = ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::Kernel_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb;
+constexpr const char* KERNEL_NAME = ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::KERNEL_NAME;
+using ADataType   = ck_tile::fp8_t;
+using BDataType   = ck_tile::fp8_t;
+using CDataType   = ck_tile::half_t;
+using QDataType   = float;
+using AccDataType = float;
+using QuantGroupSize = ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::QuantGroupSize;
+constexpr ck_tile::index_t GroupSizeK = ns_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::Kernel_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb::GroupSizeK;
+#endif // CK_TILE_SINGLE_KERNEL_INCLUDE

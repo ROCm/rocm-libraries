@@ -1,0 +1,189 @@
+// SPDX-License-Identifier: MIT
+// Auto-generated Gemm TensorQuant kernel header.
+// DO NOT EDIT -- regenerate via unified_gemm_tensor_quant_codegen.py
+#pragma once
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/ops/gemm_quant.hpp"
+#include "ck_tile/ops/epilogue.hpp"
+
+namespace ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32 {
+
+constexpr const char* KERNEL_NAME = "gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32";
+
+using ADataType   = ck_tile::fp8_t;
+using BDataType   = ck_tile::fp8_t;
+using CDataType   = ck_tile::half_t;
+using QDataType   = float;
+using AccDataType = float;
+
+using ALayout  = ck_tile::tensor_layout::gemm::RowMajor;
+using BLayout  = ck_tile::tensor_layout::gemm::ColumnMajor;
+using CLayout  = ck_tile::tensor_layout::gemm::RowMajor;
+using AQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
+using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
+
+// Placeholder QuantGroupSize -- TensorQuant applies one scalar scale for A and
+// one scalar scale for B, so the group size is unused (matches the example's
+// QuantGroupShape<1,1,1> place holder).
+using QuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<1, 1, 1>>;
+
+struct Kernel_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32 {
+    using ADataType   = ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::ADataType;
+    using BDataType   = ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::BDataType;
+    using CDataType   = ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::CDataType;
+    using QDataType   = ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::QDataType;
+    using AccDataType = ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::AccDataType;
+
+    static constexpr ck_tile::index_t TileM      = 16;
+    static constexpr ck_tile::index_t TileN      = 64;
+    static constexpr ck_tile::index_t TileK      = 256;
+    static constexpr ck_tile::index_t WarpM      = 1;
+    static constexpr ck_tile::index_t WarpN      = 4;
+    static constexpr ck_tile::index_t WarpK      = 1;
+    static constexpr ck_tile::index_t WarpTileM  = 16;
+    static constexpr ck_tile::index_t WarpTileN  = 16;
+    static constexpr ck_tile::index_t WarpTileK  = 32;
+    static constexpr ck_tile::index_t BlockSize  = 256;
+    static constexpr int               kBlockPerCu = 1;
+
+    static constexpr bool kPadM            = false;
+    static constexpr bool kPadN            = false;
+    static constexpr bool kPadK            = true;
+    static constexpr bool APreshuffleQuant = false;
+    static constexpr bool BPreshuffleQuant = false;
+    static constexpr bool PreshuffleB      = false;
+    static constexpr bool TransposeC       = false;
+    static constexpr bool DoubleSmemBuffer = false;
+
+    using TileShape = ck_tile::TileGemmShape<
+        ck_tile::sequence<TileM, TileN, TileK>,
+        ck_tile::sequence<WarpM, WarpN, WarpK>,
+        ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
+
+    using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
+
+    using GemmTraits = ck_tile::TileGemmQuantTraits<
+        kPadM, kPadN, kPadK,
+        APreshuffleQuant, BPreshuffleQuant, PreshuffleB,
+        ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::ALayout, ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::BLayout, ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::CLayout,
+        ck_tile::QuantType::TensorQuant,
+        ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::AQLayout, ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::BQLayout,
+        TransposeC, DoubleSmemBuffer>;
+
+    // ComputeDataType for the base pipeline problem: the example uses
+    // AComputeDataType=void for the non-fp8-blockscale TensorQuant path.
+    using GemmPipelineProblemBase = ck_tile::GemmPipelineProblemBase<
+        ADataType, BDataType, AccDataType, TileShape, GemmTraits>;
+
+    using BaseGemmPipeline = ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblemBase>;
+
+    static float launch(const ck_tile::QuantGemmHostArgs& args,
+                        const ck_tile::stream_config& s)
+    {
+        // hot-loop / tail dispatch -- mirrors run_gemm_quant_example.inc.
+        // K1 = WarpTileK; K_split uses K_Tile for k_batch==1.
+        constexpr ck_tile::index_t K1 = WarpTileK;
+        const ck_tile::index_t K_split =
+            (args.k_batch == 1)
+                ? ck_tile::integer_least_multiple(args.K, TileK)
+                : ck_tile::get_splitk_batch_k_read(args.K, args.k_batch, K1);
+
+        const ck_tile::index_t num_loop  = TilePartitioner::GetLoopNum(K_split);
+        const bool has_hot_loop          = BaseGemmPipeline::BlockHasHotloop(num_loop);
+        const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
+
+        const auto Run = [&](auto has_hot_loop_, auto tail_number_) {
+            // TensorQuant reuses the regular GEMM compute pipeline via
+            // GemmRowColTensorQuantPipelineProblem; the scalar scales are applied
+            // in the epilogue (see gemm_quant_kernel.hpp TensorQuant branch).
+            // Mirrors run_gemm_quant_example.inc: the compute pipeline's C slot is
+            // AccDataType (float), NOT the final CDataType (half). The half
+            // down-conversion happens in the CShuffle epilogue. Passing CDataType
+            // here selects a non-existent fp8x(16x16x128)->half warp-gemm.
+            using PipelineProblem = ck_tile::GemmRowColTensorQuantPipelineProblem<
+                ADataType,
+                BDataType,
+                AccDataType,      // CDataType slot = AccDataType (float)
+                AccDataType,
+                TileShape,
+                GemmTraits,
+                TransposeC,
+                void,             // AComputeDataType (void for non-fp8-blockscale TensorQuant; mirrors run_gemm_quant_example.inc)
+                ck_tile::GemmPipelineScheduler::Intrawave,
+                has_hot_loop_.value,
+                tail_number_.value>;
+
+            using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;
+
+            using GemmEpilogue = ck_tile::CShuffleEpilogue<
+                ck_tile::CShuffleEpilogueProblem<
+                    typename PipelineProblem::AComputeDataType,
+                    typename PipelineProblem::BComputeDataType,
+                    ck_tile::tuple<>,
+                    AccDataType,
+                    CDataType,
+                    ck_tile::tuple<>,
+                    ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::CLayout,
+                    ck_tile::element_wise::PassThrough,
+                    TilePartitioner::MPerBlock,
+                    TilePartitioner::NPerBlock,
+                    WarpM, WarpN,
+                    WarpTileM, WarpTileN, WarpTileK,
+                    TransposeC>>;
+
+            using Kernel = ck_tile::QuantGemmKernel<
+                TilePartitioner, GemmPipeline, GemmEpilogue,
+                ck_tile::QuantType::TensorQuant>;
+
+            auto kargs = Kernel::MakeKernelArgs(args);
+            if(!Kernel::IsSupportedArgument(kargs))
+                return -1.0f;
+
+            const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
+            const dim3 blocks = Kernel::BlockSize();
+
+            // Launch through the SAME kernel_attr<...> / kentry overload Old-TE
+            // uses (run_gemm_quant_example.inc), NOT the plain make_kernel path.
+            // Old-TE computes:
+            //   eight_waves = IS_FP8BLOCKSCALE && (M_Warp*N_Warp*K_Warp == 8) &&
+            //                 K_Warp_Tile == 128;   // under CK_GFX950_SUPPORT
+            // For TensorQuant IS_FP8BLOCKSCALE is false, so eight_waves is always
+            // false here -- but we mirror the full expression so the emitted
+            // kentry<Attr, MinBlockPerCu, ...> specialization is byte-for-byte the
+            // same instantiation Old-TE compiles (this is what makes the resulting
+            // kernel identical: VGPR 132 to match Old-TE, vs 136 for the plain
+            // make_kernel<kBlockPerCu> / kentry<MinBlockPerCu, ...> overload).
+            constexpr bool eight_waves =
+#ifdef CK_GFX950_SUPPORT
+                false /* IS_FP8BLOCKSCALE=false for TensorQuant */ &&
+                (WarpM * WarpN * WarpK == 8) && (WarpTileK == 128);
+#else
+                false;
+#endif
+            using k_attr_t = ck_tile::kernel_attr<eight_waves>;
+            return ck_tile::launch_kernel(
+                s,
+                ck_tile::make_kernel<kBlockPerCu, k_attr_t>(
+                    Kernel{}, grids, blocks, 0, kargs));
+        };
+
+        return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+    }
+};
+
+using SelectedKernel = Kernel_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32;
+
+} // namespace ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32
+
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+using SelectedKernel = ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::Kernel_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32;
+constexpr const char* KERNEL_NAME = ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::KERNEL_NAME;
+using ADataType   = ck_tile::fp8_t;
+using BDataType   = ck_tile::fp8_t;
+using CDataType   = ck_tile::half_t;
+using QDataType   = float;
+using AccDataType = float;
+using QuantGroupSize = ns_gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32::QuantGroupSize;
+#endif // CK_TILE_SINGLE_KERNEL_INCLUDE

@@ -1,0 +1,307 @@
+{
+  "_comment": "NON-QUANT TRIPWIRE golden byte-hashes.  Freezes the output of the generators that share codegen/codegen_common.py (gemm_universal, grouped_conv, fmha) plus mx_gemm/batched_contraction bonus coverage, so the upcoming quant-engine refactor cannot silently perturb shared codegen behavior.  Regenerate intentionally with: python3 tests/test_codegen_golden.py --update",
+  "case_count": 16,
+  "cases": {
+    "batched_contraction_utils::default_fp16_config::gfx942": {
+      "argv": [
+        "--config-json",
+        "{\"block_size\": 256, \"datatype\": \"fp16\", \"elementwise\": \"PassThrough\", \"epilogue\": \"cshuffle\", \"k_block_per_cu\": 1, \"layout\": \"rcr\", \"num_d_tensors\": 0, \"num_dim_g\": 1, \"num_dim_k\": 1, \"num_dim_m\": 1, \"num_dim_n\": 1, \"pad_k\": false, \"pad_m\": false, \"pad_n\": false, \"persistent\": false, \"pipeline\": \"compv3\", \"scheduler\": \"intrawave\", \"tile_config\": {\"tile_k\": 64, \"tile_m\": 128, \"tile_n\": 128, \"warp_k\": 1, \"warp_m\": 2, \"warp_n\": 2, \"warp_tile_k\": 16, \"warp_tile_m\": 32, \"warp_tile_n\": 32}}"
+      ],
+      "emitted_hpp": "batched_contraction_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_128x128x64_2x2x1_32x32x16_g1m1n1k1",
+      "generator": "utils",
+      "op": "batched_contraction",
+      "sha256": "a581f87dcd40449271d330db41914498072c5a486f3fc6d2a760f62aeed6a27d"
+    },
+    "batched_contraction_utils::default_fp16_config::gfx950": {
+      "argv": [
+        "--config-json",
+        "{\"block_size\": 256, \"datatype\": \"fp16\", \"elementwise\": \"PassThrough\", \"epilogue\": \"cshuffle\", \"k_block_per_cu\": 1, \"layout\": \"rcr\", \"num_d_tensors\": 0, \"num_dim_g\": 1, \"num_dim_k\": 1, \"num_dim_m\": 1, \"num_dim_n\": 1, \"pad_k\": false, \"pad_m\": false, \"pad_n\": false, \"persistent\": false, \"pipeline\": \"compv3\", \"scheduler\": \"intrawave\", \"tile_config\": {\"tile_k\": 64, \"tile_m\": 128, \"tile_n\": 128, \"warp_k\": 1, \"warp_m\": 2, \"warp_n\": 2, \"warp_tile_k\": 16, \"warp_tile_m\": 32, \"warp_tile_n\": 32}}"
+      ],
+      "emitted_hpp": "batched_contraction_fp16_rcr_compv3_cshuffle_intrawave_False_False_False_False_128x128x64_2x2x1_32x32x16_g1m1n1k1",
+      "generator": "utils",
+      "op": "batched_contraction",
+      "sha256": "a581f87dcd40449271d330db41914498072c5a486f3fc6d2a760f62aeed6a27d"
+    },
+    "fmha::fwd_bf16_default": {
+      "argv": [
+        "--gpu-target",
+        "gfx950",
+        "--no-parallel",
+        "--config-json",
+        "{\"arch\": \"gfx950\", \"signature\": {\"family\": \"fwd\", \"data_type\": \"bf16\", \"mode\": \"batch\", \"vlayout\": \"r\", \"hdim_q\": 128, \"hdim_v\": 128, \"mask\": \"no\", \"bias\": \"no\", \"lse\": false, \"dropout\": false, \"qscale\": \"no\", \"rope\": \"none\", \"logits\": false, \"paged_kv\": false, \"fp8_static_quant\": false, \"skip_min_seqlen_q\": false, \"sink\": false, \"dbias\": false, \"store_randval\": false, \"deterministic\": false, \"dropout_variant\": \"\", \"kv_memory_layout\": \"vectorized\", \"kv_lookup_table\": \"sglang\", \"page_size\": 1}, \"algorithm\": {\"pipeline\": \"qr_async\", \"tile\": [128, 128, 32, 128, 32, 128], \"wave\": [4, 1, 1, 4, 1, 1, 1, 1, 1], \"warp\": [32, 32, 16, 32, 32, 16, 16, 16, 16], \"padding\": [1, 1, 1, 1], \"block_per_cu\": -1, \"num_wave_groups\": 1, \"max_splits_log2\": 0, \"max_seq_len_q\": 0, \"use_trload\": false}}"
+      ],
+      "emitted_hpp": "fmha_fwd_bf16_batch_h128x128_qr_async_cb3c3c4e5986",
+      "generator": "fmha",
+      "op": "fmha",
+      "sha256": "a3ef4f8f61a6c83450fac22e0cd03b2efa2afbd5ab5c5f635a5cb563cc3b79a7"
+    },
+    "fmha::fwd_fp16_default": {
+      "argv": [
+        "--gpu-target",
+        "gfx950",
+        "--no-parallel",
+        "--config-json",
+        "{\"arch\": \"gfx950\", \"signature\": {\"family\": \"fwd\", \"data_type\": \"fp16\", \"mode\": \"batch\", \"vlayout\": \"r\", \"hdim_q\": 128, \"hdim_v\": 128, \"mask\": \"no\", \"bias\": \"no\", \"lse\": false, \"dropout\": false, \"qscale\": \"no\", \"rope\": \"none\", \"logits\": false, \"paged_kv\": false, \"fp8_static_quant\": false, \"skip_min_seqlen_q\": false, \"sink\": false, \"dbias\": false, \"store_randval\": false, \"deterministic\": false, \"dropout_variant\": \"\", \"kv_memory_layout\": \"vectorized\", \"kv_lookup_table\": \"sglang\", \"page_size\": 1}, \"algorithm\": {\"pipeline\": \"qr_async\", \"tile\": [128, 128, 32, 128, 32, 128], \"wave\": [4, 1, 1, 4, 1, 1, 1, 1, 1], \"warp\": [32, 32, 16, 32, 32, 16, 16, 16, 16], \"padding\": [1, 1, 1, 1], \"block_per_cu\": -1, \"num_wave_groups\": 1, \"max_splits_log2\": 0, \"max_seq_len_q\": 0, \"use_trload\": false}}"
+      ],
+      "emitted_hpp": "fmha_fwd_fp16_batch_h128x128_qr_async_a1e9d045518e",
+      "generator": "fmha",
+      "op": "fmha",
+      "sha256": "c2a06b128b199f7727131e6859e4cb623f6e70b6a4495bb8aa10e2cca63da992"
+    },
+    "gemm_universal::bf16_rrr_standard": {
+      "argv": [
+        "--datatype",
+        "bf16",
+        "--layout",
+        "rrr",
+        "--gpu-target",
+        "gfx942",
+        "--variants",
+        "standard",
+        "--no-parallel",
+        "--tile-config-json",
+        "{\"tile_config\": {\"tile_k\": [32], \"tile_m\": [128], \"tile_n\": [128], \"warp_k\": [1], \"warp_m\": [2], \"warp_n\": [2], \"warp_tile_k\": [16], \"warp_tile_m\": [16], \"warp_tile_n\": [16]}, \"trait_config\": {\"epilogue\": [\"cshuffle\"], \"pad_k\": [false], \"pad_m\": [false], \"pad_n\": [false], \"persistent\": [false], \"pipeline\": [\"compv4\"], \"scheduler\": [\"intrawave\"]}}"
+      ],
+      "emitted_hpp": "gemm_bf16_rrr_compv4_cshuffle_intrawave_False_False_False_False_128x128x32_2x2x1_16x16x16",
+      "generator": "gemm_universal",
+      "op": "gemm_universal",
+      "sha256": "3f6fd63e5d63d75129728a2e730a0bb8eec3b1504df3a19aefdb75ee078770c3"
+    },
+    "gemm_universal::fp16_multi_d_relu": {
+      "argv": [
+        "--datatype",
+        "fp16",
+        "--layout",
+        "rcr",
+        "--gpu-target",
+        "gfx942",
+        "--variants",
+        "multi_d",
+        "--no-parallel",
+        "--tile-config-json",
+        "{\"multi_d_config\": {\"elementwise_ops\": [\"Relu\"], \"num_d_tensors\": [1]}, \"tile_config\": {\"tile_k\": [32], \"tile_m\": [128], \"tile_n\": [128], \"warp_k\": [1], \"warp_m\": [2], \"warp_n\": [2], \"warp_tile_k\": [16], \"warp_tile_m\": [16], \"warp_tile_n\": [16]}, \"trait_config\": {\"epilogue\": [\"cshuffle\"], \"pad_k\": [false], \"pad_m\": [false], \"pad_n\": [false], \"persistent\": [false], \"pipeline\": [\"compv4\"], \"scheduler\": [\"intrawave\"]}}"
+      ],
+      "emitted_hpp": "gemm_fp16_rcrr_compv4_cshuffle_intrawave_False_False_False_False_128x128x32_2x2x1_16x16x16_multid_Relu_d1",
+      "generator": "gemm_universal",
+      "op": "gemm_universal",
+      "sha256": "40a64900cab872adcb17b8db67527303bbf8a2f83392a4f098d7210bf2ecd95d"
+    },
+    "gemm_universal::fp16_rcr_persistent": {
+      "argv": [
+        "--datatype",
+        "fp16",
+        "--layout",
+        "rcr",
+        "--gpu-target",
+        "gfx942",
+        "--variants",
+        "standard",
+        "--no-parallel",
+        "--tile-config-json",
+        "{\"tile_config\": {\"tile_k\": [32], \"tile_m\": [256], \"tile_n\": [256], \"warp_k\": [1], \"warp_m\": [2], \"warp_n\": [2], \"warp_tile_k\": [16], \"warp_tile_m\": [16], \"warp_tile_n\": [16]}, \"trait_config\": {\"epilogue\": [\"cshuffle\"], \"pad_k\": [false], \"pad_m\": [false], \"pad_n\": [false], \"persistent\": [true], \"pipeline\": [\"compv4\"], \"scheduler\": [\"intrawave\"]}}"
+      ],
+      "emitted_hpp": "gemm_fp16_rcr_compv4_cshuffle_intrawave_False_False_False_True_256x256x32_2x2x1_16x16x16",
+      "generator": "gemm_universal",
+      "op": "gemm_universal",
+      "sha256": "6fd5a22ba65b75a64969dbf1bebe944c9ceb7e154cc08fea3c3eee0618b74a2f"
+    },
+    "gemm_universal::fp16_rcr_standard": {
+      "argv": [
+        "--datatype",
+        "fp16",
+        "--layout",
+        "rcr",
+        "--gpu-target",
+        "gfx942",
+        "--variants",
+        "standard",
+        "--no-parallel",
+        "--tile-config-json",
+        "{\"tile_config\": {\"tile_k\": [32], \"tile_m\": [128], \"tile_n\": [128], \"warp_k\": [1], \"warp_m\": [2], \"warp_n\": [2], \"warp_tile_k\": [16], \"warp_tile_m\": [16], \"warp_tile_n\": [16]}, \"trait_config\": {\"epilogue\": [\"cshuffle\"], \"pad_k\": [false], \"pad_m\": [false], \"pad_n\": [false], \"persistent\": [false], \"pipeline\": [\"compv4\"], \"scheduler\": [\"intrawave\"]}}"
+      ],
+      "emitted_hpp": "gemm_fp16_rcr_compv4_cshuffle_intrawave_False_False_False_False_128x128x32_2x2x1_16x16x16",
+      "generator": "gemm_universal",
+      "op": "gemm_universal",
+      "sha256": "4124ae63e1e923dbd5daf6ae9133c3dbde8370bb8b224a21238a7bd56c2d049c"
+    },
+    "gemm_universal::fp8_rcr_standard_wtk32": {
+      "argv": [
+        "--datatype",
+        "fp8",
+        "--layout",
+        "rcr",
+        "--gpu-target",
+        "gfx950",
+        "--variants",
+        "standard",
+        "--no-parallel",
+        "--tile-config-json",
+        "{\"tile_config\": {\"tile_k\": [64], \"tile_m\": [128], \"tile_n\": [128], \"warp_k\": [1], \"warp_m\": [2], \"warp_n\": [2], \"warp_tile_k\": [16], \"warp_tile_m\": [32], \"warp_tile_n\": [32]}, \"trait_config\": {\"epilogue\": [\"cshuffle\"], \"pad_k\": [false], \"pad_m\": [false], \"pad_n\": [false], \"persistent\": [false], \"pipeline\": [\"compv4\"], \"scheduler\": [\"intrawave\"]}}"
+      ],
+      "emitted_hpp": "gemm_fp8_rcr_compv4_cshuffle_intrawave_False_False_False_False_128x128x64_2x2x1_32x32x16",
+      "generator": "gemm_universal",
+      "op": "gemm_universal",
+      "sha256": "13cdde9fe0c71d76640992db1d189ea4f05a2d2e80a9862f97021679c64e77b2"
+    },
+    "grouped_conv::fwd_bf16_2d": {
+      "argv": [
+        "-d",
+        "bf16",
+        "-v",
+        "forward",
+        "-n",
+        "2",
+        "-a",
+        "gfx942",
+        "--tile-m",
+        "128",
+        "--tile-n",
+        "128",
+        "--tile-k",
+        "64",
+        "--warp-m",
+        "2",
+        "--warp-n",
+        "2",
+        "--warp-k",
+        "1",
+        "--warp-tile-m",
+        "32",
+        "--warp-tile-n",
+        "32",
+        "--warp-tile-k",
+        "16",
+        "--pipeline",
+        "compv4",
+        "--scheduler",
+        "intrawave",
+        "--epilogue",
+        "cshuffle"
+      ],
+      "emitted_hpp": "grouped_conv_fwd_bf16_nhwgc_2d_compv4_cshuffle_intrawave_128x128x64_2x2x1_32x32x16_dsb",
+      "generator": "grouped_conv",
+      "op": "grouped_conv",
+      "sha256": "f7e5a023eddbde2a41d93fe1f9153e22916c731a42a3f675b1dd353e34425952"
+    },
+    "grouped_conv::fwd_fp16_2d": {
+      "argv": [
+        "-d",
+        "fp16",
+        "-v",
+        "forward",
+        "-n",
+        "2",
+        "-a",
+        "gfx942",
+        "--tile-m",
+        "128",
+        "--tile-n",
+        "128",
+        "--tile-k",
+        "64",
+        "--warp-m",
+        "2",
+        "--warp-n",
+        "2",
+        "--warp-k",
+        "1",
+        "--warp-tile-m",
+        "32",
+        "--warp-tile-n",
+        "32",
+        "--warp-tile-k",
+        "16",
+        "--pipeline",
+        "compv4",
+        "--scheduler",
+        "intrawave",
+        "--epilogue",
+        "cshuffle"
+      ],
+      "emitted_hpp": "grouped_conv_fwd_fp16_nhwgc_2d_compv4_cshuffle_intrawave_128x128x64_2x2x1_32x32x16_dsb",
+      "generator": "grouped_conv",
+      "op": "grouped_conv",
+      "sha256": "5dbf59d5795544829ff6da0f44ee3e8bcdf3d10ba11f0b2d3fa985eea59b8da4"
+    },
+    "grouped_conv::fwd_fp16_3d": {
+      "argv": [
+        "-d",
+        "fp16",
+        "-v",
+        "forward",
+        "-n",
+        "3",
+        "-a",
+        "gfx942",
+        "--tile-m",
+        "128",
+        "--tile-n",
+        "128",
+        "--tile-k",
+        "64",
+        "--warp-m",
+        "2",
+        "--warp-n",
+        "2",
+        "--warp-k",
+        "1",
+        "--warp-tile-m",
+        "32",
+        "--warp-tile-n",
+        "32",
+        "--warp-tile-k",
+        "16",
+        "--pipeline",
+        "compv4",
+        "--scheduler",
+        "intrawave",
+        "--epilogue",
+        "cshuffle"
+      ],
+      "emitted_hpp": "grouped_conv_fwd_fp16_nhwgc_3d_compv4_cshuffle_intrawave_128x128x64_2x2x1_32x32x16_dsb",
+      "generator": "grouped_conv",
+      "op": "grouped_conv",
+      "sha256": "064dba40b09a3e60961744d35b1f4c50d37204755919573355ea9b9e579b4cdf"
+    },
+    "mx_gemm_utils::default_fp4_config::gfx942": {
+      "argv": [
+        "--config-json",
+        "{\"datatype\": \"fp4\", \"epilogue\": \"cshuffle\", \"gpu_target\": \"gfx942\", \"k_block_per_cu\": 1, \"layout\": \"rcr\", \"pad_k\": false, \"pad_m\": false, \"pad_n\": false, \"persistent\": false, \"pipeline\": \"comp_async\", \"scheduler\": \"intrawave\", \"tile_config\": {\"tile_k\": 128, \"tile_m\": 128, \"tile_n\": 128, \"warp_k\": 1, \"warp_m\": 2, \"warp_n\": 2, \"warp_tile_k\": 128, \"warp_tile_m\": 16, \"warp_tile_n\": 16}}"
+      ],
+      "emitted_hpp": "mx_gemm_fp4_rcr_comp_async_cshuffle_intrawave_False_False_False_False_128x128x128_2x2x1_16x16x128",
+      "generator": "utils",
+      "op": "mx_gemm",
+      "sha256": "bbcd4680e9d5ed7325482d97352a173c511769517d3813782c33097ad5a58f6b"
+    },
+    "mx_gemm_utils::default_fp4_config::gfx950": {
+      "argv": [
+        "--config-json",
+        "{\"datatype\": \"fp4\", \"epilogue\": \"cshuffle\", \"gpu_target\": \"gfx950\", \"k_block_per_cu\": 1, \"layout\": \"rcr\", \"pad_k\": false, \"pad_m\": false, \"pad_n\": false, \"persistent\": false, \"pipeline\": \"comp_async\", \"scheduler\": \"intrawave\", \"tile_config\": {\"tile_k\": 128, \"tile_m\": 128, \"tile_n\": 128, \"warp_k\": 1, \"warp_m\": 2, \"warp_n\": 2, \"warp_tile_k\": 128, \"warp_tile_m\": 16, \"warp_tile_n\": 16}}"
+      ],
+      "emitted_hpp": "mx_gemm_fp4_rcr_comp_async_cshuffle_intrawave_False_False_False_False_128x128x128_2x2x1_16x16x128",
+      "generator": "utils",
+      "op": "mx_gemm",
+      "sha256": "bbcd4680e9d5ed7325482d97352a173c511769517d3813782c33097ad5a58f6b"
+    },
+    "mx_gemm_utils::default_fp8_config::gfx942": {
+      "argv": [
+        "--config-json",
+        "{\"datatype\": \"fp8\", \"epilogue\": \"cshuffle\", \"gpu_target\": \"gfx942\", \"k_block_per_cu\": 1, \"layout\": \"rcr\", \"pad_k\": false, \"pad_m\": false, \"pad_n\": false, \"persistent\": false, \"pipeline\": \"comp_async\", \"scheduler\": \"intrawave\", \"tile_config\": {\"tile_k\": 128, \"tile_m\": 128, \"tile_n\": 128, \"warp_k\": 1, \"warp_m\": 2, \"warp_n\": 2, \"warp_tile_k\": 128, \"warp_tile_m\": 16, \"warp_tile_n\": 16}}"
+      ],
+      "emitted_hpp": "mx_gemm_fp8_rcr_comp_async_cshuffle_intrawave_False_False_False_False_128x128x128_2x2x1_16x16x128",
+      "generator": "utils",
+      "op": "mx_gemm",
+      "sha256": "a503dc8154c6d75031c4e5c6531c534fb240a446959ab9af2316d5922ef3db30"
+    },
+    "mx_gemm_utils::default_fp8_config::gfx950": {
+      "argv": [
+        "--config-json",
+        "{\"datatype\": \"fp8\", \"epilogue\": \"cshuffle\", \"gpu_target\": \"gfx950\", \"k_block_per_cu\": 1, \"layout\": \"rcr\", \"pad_k\": false, \"pad_m\": false, \"pad_n\": false, \"persistent\": false, \"pipeline\": \"comp_async\", \"scheduler\": \"intrawave\", \"tile_config\": {\"tile_k\": 128, \"tile_m\": 128, \"tile_n\": 128, \"warp_k\": 1, \"warp_m\": 2, \"warp_n\": 2, \"warp_tile_k\": 128, \"warp_tile_m\": 16, \"warp_tile_n\": 16}}"
+      ],
+      "emitted_hpp": "mx_gemm_fp8_rcr_comp_async_cshuffle_intrawave_False_False_False_False_128x128x128_2x2x1_16x16x128",
+      "generator": "utils",
+      "op": "mx_gemm",
+      "sha256": "a503dc8154c6d75031c4e5c6531c534fb240a446959ab9af2316d5922ef3db30"
+    }
+  }
+}

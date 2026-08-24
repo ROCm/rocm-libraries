@@ -1,0 +1,5984 @@
+{
+  "_comment": "Golden byte-hashes for the block-scale quant GEMM code generators. Regenerate intentionally with: python3 tests/test_codegen_golden.py --update",
+  "arches": [
+    "gfx942",
+    "gfx950"
+  ],
+  "case_count": 140,
+  "cases": {
+    "gemm_abquant_utils::default_bf8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": false,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_abquant_bf8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x1x128",
+      "factory": "default_bf8_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "3685db554c24b5a1cfe8cad69bf0680d9722a8cf7620f565732bec061664b61a"
+    },
+    "gemm_abquant_utils::default_bf8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": false,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_abquant_bf8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_aqg1x1x128_bqg1x1x128",
+      "factory": "default_bf8_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "b069560b56e7dec6bd5d693c031a9dadb083793c0773bb5e129f20f7acb2ca94"
+    },
+    "gemm_abquant_utils::default_bf8_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": true,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_abquant_bf8_rcr_preshuffleb_cshuffle_intrawave_128x128x128_2x2x1_16x16x64_aqg1x1x128_bqg1x1x128_preshuffleb",
+      "factory": "default_bf8_preshuffleb_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "e69acefaf98e02f1a226412c5a97621aa4857ac372672220c7dfb0fda1d5faf7"
+    },
+    "gemm_abquant_utils::default_bf8_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": true,
+        "eight_waves": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "eightwaves",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 192,
+            "tile_n": 256,
+            "warp_k": 1,
+            "warp_m": 4,
+            "warp_n": 2,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_abquant_bf8_rcr_eightwaves_cshuffle_intrawave_192x256x128_4x2x1_16x16x128_aqg1x1x128_bqg1x1x128_preshuffleb_eightwaves",
+      "factory": "default_bf8_preshuffleb_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "7c4ea416ee6280b7ebbd9bc1ad4ba0a53dade2583bcb414ce5dd31e8b803c856"
+    },
+    "gemm_abquant_utils::default_fp4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 128
+          }
+        ],
+        "double_smem_buffer": false,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp4"
+        ]
+      },
+      "config_name": "gemm_abquant_fp4_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x128x128",
+      "factory": "default_fp4_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "f011fae30de5d15f22e269a0fa7382044cf4c8d7c3b9c5a90b1a37c7c60f70c1"
+    },
+    "gemm_abquant_utils::default_fp4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 128
+          }
+        ],
+        "double_smem_buffer": false,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp4"
+        ]
+      },
+      "config_name": "gemm_abquant_fp4_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x128x128",
+      "factory": "default_fp4_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "f011fae30de5d15f22e269a0fa7382044cf4c8d7c3b9c5a90b1a37c7c60f70c1"
+    },
+    "gemm_abquant_utils::default_fp4_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 128
+          }
+        ],
+        "double_smem_buffer": true,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "fp4"
+        ]
+      },
+      "config_name": "gemm_abquant_fp4_rcr_preshuffleb_cshuffle_intrawave_128x128x128_2x2x1_16x16x64_aqg1x1x128_bqg1x128x128_preshuffleb",
+      "factory": "default_fp4_preshuffleb_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "f4f0bede7ef872d1da5369e6378ab57c4ec1d8aae5aedb929cf2ed8a3f3ed5ea"
+    },
+    "gemm_abquant_utils::default_fp4_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 128
+          }
+        ],
+        "double_smem_buffer": true,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "fp4"
+        ]
+      },
+      "config_name": "gemm_abquant_fp4_rcr_preshuffleb_cshuffle_intrawave_128x128x128_2x2x1_16x16x32_aqg1x1x128_bqg1x128x128_preshuffleb",
+      "factory": "default_fp4_preshuffleb_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "68432ceec48672c637f9bc6309637c3bdd0fa0044b28fd70b5807a05d7c0397f"
+    },
+    "gemm_abquant_utils::default_fp8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": false,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_abquant_fp8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x1x128",
+      "factory": "default_fp8_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "18ac40aeff07276392df8205b62ef66a43464134d2ad6b914ed8fe87f604ed5a"
+    },
+    "gemm_abquant_utils::default_fp8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": false,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_abquant_fp8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_aqg1x1x128_bqg1x1x128",
+      "factory": "default_fp8_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "fbc510194eba7b5b1fe89052236ac4820d462ebc103d6690f687ab82e1be4e22"
+    },
+    "gemm_abquant_utils::default_fp8_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": true,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_abquant_fp8_rcr_preshuffleb_cshuffle_intrawave_128x128x128_2x2x1_16x16x64_aqg1x1x128_bqg1x1x128_preshuffleb",
+      "factory": "default_fp8_preshuffleb_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "9a832c917c1bfbfa76e97e662830441e152650da982bd9caaa66c762ad57cf92"
+    },
+    "gemm_abquant_utils::default_fp8_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": true,
+        "eight_waves": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "eightwaves",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 192,
+            "tile_n": 256,
+            "warp_k": 1,
+            "warp_m": 4,
+            "warp_n": 2,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_abquant_fp8_rcr_eightwaves_cshuffle_intrawave_192x256x128_4x2x1_16x16x128_aqg1x1x128_bqg1x1x128_preshuffleb_eightwaves",
+      "factory": "default_fp8_preshuffleb_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "5bf3864fd6face0cb0907ee672943534e3be88e4c82b73992171e2171d63d09a"
+    },
+    "gemm_abquant_utils::default_fp8_preshuffleb_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": true,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_abquant_fp8_rcr_preshuffleb_cshuffle_intrawave_128x128x128_2x2x1_16x16x64_aqg1x1x128_bqg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_fp8_preshuffleb_preshufflequant_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "08d3ba6c0b4b6d47a28508083e7b313c33db5012bcd442572b3aa150dd58a5a2"
+    },
+    "gemm_abquant_utils::default_fp8_preshuffleb_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": true,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": false,
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_abquant_fp8_rcr_preshuffleb_cshuffle_intrawave_128x128x128_2x2x1_16x16x128_aqg1x1x128_bqg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_fp8_preshuffleb_preshufflequant_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "8ac4e6bbf5c6af1c3228f923944e0c2e044d402e64e90ee10307231afb74c143"
+    },
+    "gemm_abquant_utils::default_fp8_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": false,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": true,
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_abquant_fp8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x1x128_preshufflebq",
+      "factory": "default_fp8_preshufflequant_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "a174bec92a849b27f9fed5804b09af3efd2cabb5f600ba279cb582748d899e79"
+    },
+    "gemm_abquant_utils::default_fp8_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_group_k": 128,
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": false,
+        "eight_waves": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pad_k": true,
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_abquant_fp8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_aqg1x1x128_bqg1x1x128_preshufflebq",
+      "factory": "default_fp8_preshufflequant_config",
+      "module": "gemm_abquant_utils",
+      "sha256": "528f36872e6929c9e653c64716502fbf60e1d50d1445e575e4bfc0ebeebc1637"
+    },
+    "gemm_aquant_utils::default_bf8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "interwave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_aquant_bf8_rcr_mem_cshuffle_interwave_16x64x256_1x4x1_16x16x32_qg1x1x128",
+      "factory": "default_bf8_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "054ebac38467978e4ee43c99204315c2534c607624ecfeb28a06dc8a5dbcff74"
+    },
+    "gemm_aquant_utils::default_bf8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "interwave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_aquant_bf8_rcr_mem_cshuffle_interwave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_bf8_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "feee323e7869fb1f6565144e70722bf5505a451e726814f64e1d71e8f80b1c7d"
+    },
+    "gemm_aquant_utils::default_bf8_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_aquant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant",
+      "factory": "default_bf8_preshufflequant_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "033d5c0e66574083a68520407b433b8614c564c7fa89e38557e6dd6b653c2674"
+    },
+    "gemm_aquant_utils::default_bf8_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_aquant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128_preshufflequant",
+      "factory": "default_bf8_preshufflequant_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "6671ebed0e7a33d0942a455b2afd9cf4d92de6e74ed9091ebef4de95b6f36786"
+    },
+    "gemm_aquant_utils::default_bf8i4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "interwave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_aquant_bf8i4_rcr_mem_cshuffle_interwave_16x64x256_1x4x1_16x16x32_qg1x1x128",
+      "factory": "default_bf8i4_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "b4dcfd340e35bbf609fc4e13de896e8fb8ba15a9be649d5217263f4a7730bd6f"
+    },
+    "gemm_aquant_utils::default_bf8i4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "interwave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_aquant_bf8i4_rcr_mem_cshuffle_interwave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_bf8i4_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "511f3fb61061bf74fae906ea73e6ed224772570f7423d8a9f739dda084cd6522"
+    },
+    "gemm_aquant_utils::default_bf8i4_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant",
+      "factory": "default_bf8i4_preshufflequant_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "2c91cc18c110f9bb01370a5352b9c02e8712a87fdd2b5820e836afafb1df1630"
+    },
+    "gemm_aquant_utils::default_bf8i4_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_aquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128_preshufflequant",
+      "factory": "default_bf8i4_preshufflequant_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "56915e428e8a826ff93cbc4d68a0054ddb4a0113c4f29609ac6def2024afc62d"
+    },
+    "gemm_aquant_utils::default_fp8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "interwave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_aquant_fp8_rcr_mem_cshuffle_interwave_16x64x256_1x4x1_16x16x32_qg1x1x128",
+      "factory": "default_fp8_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "ec384c22b96da94bc52c320f07d3e4f336b695ba41ae91aca6a8473a28098ab3"
+    },
+    "gemm_aquant_utils::default_fp8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "interwave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_aquant_fp8_rcr_mem_cshuffle_interwave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_fp8_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "cc461bd85d32fef9b5d61cf9df15da0418152d3f0fdf3c8302f893df36e3ed78"
+    },
+    "gemm_aquant_utils::default_fp8_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_aquant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant",
+      "factory": "default_fp8_preshufflequant_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "ab9e9908c5ed5a0bd2ed153b7d2c39b32f70fe68f6c574cd3e4e96075f2f3011"
+    },
+    "gemm_aquant_utils::default_fp8_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_aquant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128_preshufflequant",
+      "factory": "default_fp8_preshufflequant_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "9e8c63e46f3ce491469d955faa20af97a134298be8eb9550246c06e9af6852da"
+    },
+    "gemm_aquant_utils::default_fp8i4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "interwave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_aquant_fp8i4_rcr_mem_cshuffle_interwave_16x64x256_1x4x1_16x16x32_qg1x1x128",
+      "factory": "default_fp8i4_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "e99cadec0450ce74010342529c9b89d55d28452dab0659a00111e0f33149dcfb"
+    },
+    "gemm_aquant_utils::default_fp8i4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "interwave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_aquant_fp8i4_rcr_mem_cshuffle_interwave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_fp8i4_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "76acbb0668d9abfbebf9ad6c05fedefb09fe94f35f09eb6454c8c6528f811c7e"
+    },
+    "gemm_aquant_utils::default_fp8i4_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_aquant_fp8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x64_qg1x1x128_preshufflequant",
+      "factory": "default_fp8i4_preshufflequant_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "9bb57356a347757c3a593c6257bac3237936c21ddfbddf692d8299a594490655"
+    },
+    "gemm_aquant_utils::default_fp8i4_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogues": [
+          "cshuffle"
+        ],
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "preshuffle_aquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_aquant_fp8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128_preshufflequant",
+      "factory": "default_fp8i4_preshufflequant_config",
+      "module": "gemm_aquant_utils",
+      "sha256": "ac7d017b0a986587609a464b0ae0841cbfe083f07b2d87405595385d7c25d214"
+    },
+    "gemm_bquant_utils::default_bf8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_qg1x1x128",
+      "factory": "default_bf8_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "466f40553e160d8c7830f77feacd14b66c1f14afe8fd637d3ce124a4ad1a7890"
+    },
+    "gemm_bquant_utils::default_bf8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_bf8_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "17960e98a5e4c68fffd5409dae40075803d7f2755e5635e4fdfab0537116ae02"
+    },
+    "gemm_bquant_utils::default_bf8_preshuffleb_bquant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_bf8_preshuffleb_bquant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "dfce93ec9c92aa9599a7e0c76ee30d7b344ffb8c6f3dede566dea140bbba6495"
+    },
+    "gemm_bquant_utils::default_bf8_preshuffleb_bquant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_bf8_preshuffleb_bquant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "c2d323ed4ccc9e218d554cc97eb19c811e8a69afa609bf200d0da82a6e308d60"
+    },
+    "gemm_bquant_utils::default_bf8_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb",
+      "factory": "default_bf8_preshuffleb_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "63e8e64c9069cd88136e3841c1a3e298413a1cd95a1750406d30395e3238d0b6"
+    },
+    "gemm_bquant_utils::default_bf8_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb",
+      "factory": "default_bf8_preshuffleb_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "10b624d377c3f7d1189b6965c186518eb852db7c15f6586b9326c78a70b529aa"
+    },
+    "gemm_bquant_utils::default_bf8_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshufflebq",
+      "factory": "default_bf8_preshufflequant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "a56ee7d0a1e6635cc13f715a8ad94b4fa28cdc9a20aa2dc11e0f39e02b897d82"
+    },
+    "gemm_bquant_utils::default_bf8_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshufflebq",
+      "factory": "default_bf8_preshufflequant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "d33317b50377fe1007409e559e566f0024c45b6be0440ea6587f4d197768e947"
+    },
+    "gemm_bquant_utils::default_bf8i4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_qg1x1x128",
+      "factory": "default_bf8i4_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "0949103da24b58a993186b89fdf7b7da5a6fa98826d0574d61729f4ce29f0c95"
+    },
+    "gemm_bquant_utils::default_bf8i4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_bf8i4_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "67c69faa798d646d212c72740268c42e4c2835b47a19c04283bab955ddf48520"
+    },
+    "gemm_bquant_utils::default_bf8i4_preshuffleb_bquant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_bf8i4_preshuffleb_bquant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "d95114ebb919c5b2420ff6c514cb510286403a77a5f84460041beae9c07f7222"
+    },
+    "gemm_bquant_utils::default_bf8i4_preshuffleb_bquant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_bf8i4_preshuffleb_bquant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "f9b81963af090b7182037aba28f41403a8e8379c3504a4df590871417229db0a"
+    },
+    "gemm_bquant_utils::default_bf8i4_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb",
+      "factory": "default_bf8i4_preshuffleb_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "9f075c534be25ca81f0872c6c2903d271532eefd95db1a3b7326a77a56c9f0a2"
+    },
+    "gemm_bquant_utils::default_bf8i4_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb",
+      "factory": "default_bf8i4_preshuffleb_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "46b112463bd5e982b2723fc314c3cadb671888f81a7d95fd8f3a12df168eb261"
+    },
+    "gemm_bquant_utils::default_bf8i4_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8i4_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshufflebq",
+      "factory": "default_bf8i4_preshufflequant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "3a1064d92304a571cc1afcc1a48a2ee16cbe0540ceab55506cdb220526dd1b95"
+    },
+    "gemm_bquant_utils::default_bf8i4_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_bf8i4_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshufflebq",
+      "factory": "default_bf8i4_preshufflequant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "579f4de1a2dda4818115af00c9dd9a67582bfe55fd6a75421b638da7fef986dc"
+    },
+    "gemm_bquant_utils::default_fp8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_qg1x1x128",
+      "factory": "default_fp8_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "e3ca0435404d2ba27646970e69373200758d2c304f01d696d3c93e056682bca1"
+    },
+    "gemm_bquant_utils::default_fp8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_fp8_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "988647352e1e2938c580cc1c968e2112b9413090e5fdcfee6059721b484dfb2c"
+    },
+    "gemm_bquant_utils::default_fp8_preshuffleb_bquant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_fp8_preshuffleb_bquant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "af1460658cf026b05f40829545c25a7506203e1ffe03d17532b5fa87efdc0d37"
+    },
+    "gemm_bquant_utils::default_fp8_preshuffleb_bquant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_fp8_preshuffleb_bquant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "121f60d797fa5e459d0b2b98b9e14ac014709825cd13facd6e35b6afdd4b2386"
+    },
+    "gemm_bquant_utils::default_fp8_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb",
+      "factory": "default_fp8_preshuffleb_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "619d30e049a946b64fcd392cac7f056493a598c127a314fe166ee9dd7bc1c853"
+    },
+    "gemm_bquant_utils::default_fp8_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb",
+      "factory": "default_fp8_preshuffleb_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "8ef86924013f3f8c153ba88aa11cdea029ac72e9e1efc6b492f79b1f9a38c594"
+    },
+    "gemm_bquant_utils::default_fp8_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshufflebq",
+      "factory": "default_fp8_preshufflequant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "58f74a7ef0ea75210fb9887210d0fb5ed15d37b307e134f86ae3e3f844ad83a0"
+    },
+    "gemm_bquant_utils::default_fp8_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshufflebq",
+      "factory": "default_fp8_preshufflequant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "5fb1e267473e64d2615aa40e4ddab2ca926f41f01dba7a7863933979d486e45b"
+    },
+    "gemm_bquant_utils::default_fp8i4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_qg1x1x128",
+      "factory": "default_fp8i4_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "951c88fa653101816ff04de5ce08423d86cb9bdceb61aa9df72e9aafab5edbce"
+    },
+    "gemm_bquant_utils::default_fp8i4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_fp8i4_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "3bf0bd506b5010e7dfb7419815c1475a9927ca72bec1603e9bf8cddacb4a76e9"
+    },
+    "gemm_bquant_utils::default_fp8i4_preshuffleb_bquant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_fp8i4_preshuffleb_bquant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "c186c7b7f503aed6495f78d8491e738db73160ab6686e1d9111ea895067ed7e2"
+    },
+    "gemm_bquant_utils::default_fp8i4_preshuffleb_bquant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_fp8i4_preshuffleb_bquant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "1a52b7891372c0015ddd5b4ce988b25bb4dc6285be5acb1753e503a49d3ef466"
+    },
+    "gemm_bquant_utils::default_fp8i4_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128_preshuffleb",
+      "factory": "default_fp8i4_preshuffleb_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "5d414d3ab7643cb9ffafda7f46967923d6e925ea6d9d97442368e6a90ad4bbd0"
+    },
+    "gemm_bquant_utils::default_fp8i4_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb",
+      "factory": "default_fp8i4_preshuffleb_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "d5c03a55f1770c587df0b40e834a98bc20acff5bc46e447b9ebfd5c39a68fb20"
+    },
+    "gemm_bquant_utils::default_fp8i4_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8i4_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshufflebq",
+      "factory": "default_fp8i4_preshufflequant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "efea3bb3d5c785b29f0cbcfa8f91e3556611f77167006782fcfb8b1a8db156f5"
+    },
+    "gemm_bquant_utils::default_fp8i4_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "gemm_bquant_fp8i4_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshufflebq",
+      "factory": "default_fp8i4_preshufflequant_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "586670e1f8f1c3cbc088c29132e8591d317b1c3e468e74fcd79d4a10e8579585"
+    },
+    "gemm_bquant_utils::default_mx_bf16bf16_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 32,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16bf16"
+        ]
+      },
+      "config_name": "gemm_bquant_mx_bf16bf16_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x32",
+      "factory": "default_mx_bf16bf16_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "605ed1b1d8d5333ddcf996f0ef208bb716b7e2b904b7dd79f5b9a3068d60303f"
+    },
+    "gemm_bquant_utils::default_mx_bf16bf16_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 32,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16bf16"
+        ]
+      },
+      "config_name": "gemm_bquant_mx_bf16bf16_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x32",
+      "factory": "default_mx_bf16bf16_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "605ed1b1d8d5333ddcf996f0ef208bb716b7e2b904b7dd79f5b9a3068d60303f"
+    },
+    "gemm_bquant_utils::default_mx_bf16bf8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16bf8"
+        ]
+      },
+      "config_name": "gemm_bquant_mx_bf16bf8_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128",
+      "factory": "default_mx_bf16bf8_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "c1101c8734bb434753f9c1bcd50aeb2c4aa4a17b22a10527287c33390e88ae85"
+    },
+    "gemm_bquant_utils::default_mx_bf16bf8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16bf8"
+        ]
+      },
+      "config_name": "gemm_bquant_mx_bf16bf8_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128",
+      "factory": "default_mx_bf16bf8_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "c1101c8734bb434753f9c1bcd50aeb2c4aa4a17b22a10527287c33390e88ae85"
+    },
+    "gemm_bquant_utils::default_mx_bf16fp4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 32,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16fp4"
+        ]
+      },
+      "config_name": "gemm_bquant_mx_bf16fp4_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x32",
+      "factory": "default_mx_bf16fp4_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "6053c8ebe69c1d03a625aaf484a6f20f9d76e1c2fae66d5d122ebbcc79a504a5"
+    },
+    "gemm_bquant_utils::default_mx_bf16fp4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 32,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16fp4"
+        ]
+      },
+      "config_name": "gemm_bquant_mx_bf16fp4_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x32",
+      "factory": "default_mx_bf16fp4_config",
+      "module": "gemm_bquant_utils",
+      "sha256": "6053c8ebe69c1d03a625aaf484a6f20f9d76e1c2fae66d5d122ebbcc79a504a5"
+    },
+    "gemm_rowcolquant_utils::default_bf8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_rowcolquant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32",
+      "factory": "default_bf8_config",
+      "module": "gemm_rowcolquant_utils",
+      "sha256": "64a75ad89e12204d8509c9e319abfd18ed85a1c7d08e15519c501e681f3f8670"
+    },
+    "gemm_rowcolquant_utils::default_bf8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_rowcolquant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128",
+      "factory": "default_bf8_config",
+      "module": "gemm_rowcolquant_utils",
+      "sha256": "cedc52a185cc4a48c0fef0dd84cb3f569e42c6b3b3bf9caa7c9d58fb859df173"
+    },
+    "gemm_rowcolquant_utils::default_fp8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_rowcolquant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32",
+      "factory": "default_fp8_config",
+      "module": "gemm_rowcolquant_utils",
+      "sha256": "e0e7488009644cc2ab55b692d07bcaa16c0c24aae5abac58eb04a8f225907fd3"
+    },
+    "gemm_rowcolquant_utils::default_fp8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_rowcolquant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128",
+      "factory": "default_fp8_config",
+      "module": "gemm_rowcolquant_utils",
+      "sha256": "bdd19f77610e8e5e4dad38ab78d506f90894b9a61e31a90060556606ccde1297"
+    },
+    "gemm_tensor_quant_utils::default_bf8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_tensor_quant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32",
+      "factory": "default_bf8_config",
+      "module": "gemm_tensor_quant_utils",
+      "sha256": "2688dc04b73acd0f0ae1d21b54626ca58ee1fd1bc39030798303d8a0f8c90c88"
+    },
+    "gemm_tensor_quant_utils::default_bf8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "gemm_tensor_quant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128",
+      "factory": "default_bf8_config",
+      "module": "gemm_tensor_quant_utils",
+      "sha256": "328b346b059452643f8172020905515f2940c3ee62e77f23efc031e229c5a5ee"
+    },
+    "gemm_tensor_quant_utils::default_fp8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x32",
+      "factory": "default_fp8_config",
+      "module": "gemm_tensor_quant_utils",
+      "sha256": "bacb29bae12893cde2a9ecd9b27a0cb042bc171ef765ccb5805b72428cb0cf0e"
+    },
+    "gemm_tensor_quant_utils::default_fp8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "gemm_tensor_quant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128",
+      "factory": "default_fp8_config",
+      "module": "gemm_tensor_quant_utils",
+      "sha256": "80d18480a016e111a9fb9d833ee5ea01d88818c9eb5fa4e2af9e02b7fc062f9e"
+    },
+    "grouped_gemm_abquant_utils::default_bf8_compv3_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_aq": false,
+        "preshuffle_b": false,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_bf8_rcr_compv3_permute_n_intrawave_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x1x128",
+      "factory": "default_bf8_compv3_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "5a233b152405a010369fa445ff40fec7429598ad67e388d14d170b448d495b38"
+    },
+    "grouped_gemm_abquant_utils::default_bf8_compv3_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_aq": false,
+        "preshuffle_b": false,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_bf8_rcr_compv3_permute_n_intrawave_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x1x128",
+      "factory": "default_bf8_compv3_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "5a233b152405a010369fa445ff40fec7429598ad67e388d14d170b448d495b38"
+    },
+    "grouped_gemm_abquant_utils::default_bf8_eightwaves_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 128
+          }
+        ],
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "eightwaves",
+        "preshuffle_aq": false,
+        "preshuffle_b": false,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 192,
+            "tile_n": 256,
+            "warp_k": 1,
+            "warp_m": 4,
+            "warp_n": 2,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_bf8_rcr_eightwaves_cshuffle_intrawave_192x256x128_4x2x1_16x16x32_aqg1x1x128_bqg1x128x128_transposec",
+      "factory": "default_bf8_eightwaves_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "aaaaaffe4361d0efee0f09df97a7259a26c3523cd2d1132e94a7f9ccfcc2ef4d"
+    },
+    "grouped_gemm_abquant_utils::default_bf8_eightwaves_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 128
+          }
+        ],
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "eightwaves",
+        "preshuffle_aq": false,
+        "preshuffle_b": false,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 192,
+            "tile_n": 256,
+            "warp_k": 1,
+            "warp_m": 4,
+            "warp_n": 2,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_bf8_rcr_eightwaves_cshuffle_intrawave_192x256x128_4x2x1_16x16x128_aqg1x1x128_bqg1x128x128_transposec",
+      "factory": "default_bf8_eightwaves_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "053a981d09b2b6b6e5101c6d302c068699ff025d77f93b1a8a15f85a6ab0a1dd"
+    },
+    "grouped_gemm_abquant_utils::default_bf8_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_aq": false,
+        "preshuffle_b": true,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_bf8_rcr_preshuffleb_cshuffle_intrawave_128x128x128_2x2x1_16x16x64_aqg1x1x128_bqg1x1x128_preshuffleb_transposec",
+      "factory": "default_bf8_preshuffleb_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "f0a04e916e7ae9a6db56a539143b9456702c49b5eab6927756d252044993359d"
+    },
+    "grouped_gemm_abquant_utils::default_bf8_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_aq": false,
+        "preshuffle_b": true,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_bf8_rcr_preshuffleb_cshuffle_intrawave_128x128x128_2x2x1_16x16x128_aqg1x1x128_bqg1x1x128_preshuffleb_transposec",
+      "factory": "default_bf8_preshuffleb_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "2bd57094b8059c19a210965977656a6a69a3278104183686dbef2922fbb4e186"
+    },
+    "grouped_gemm_abquant_utils::default_fp8_compv3_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_aq": false,
+        "preshuffle_b": false,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_fp8_rcr_compv3_permute_n_intrawave_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x1x128",
+      "factory": "default_fp8_compv3_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "cf2dca2d11d85153507d2ad5039f9d3bfff56a849de1bcd5e0a1788b1cf52e77"
+    },
+    "grouped_gemm_abquant_utils::default_fp8_compv3_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_aq": false,
+        "preshuffle_b": false,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_fp8_rcr_compv3_permute_n_intrawave_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x1x128",
+      "factory": "default_fp8_compv3_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "cf2dca2d11d85153507d2ad5039f9d3bfff56a849de1bcd5e0a1788b1cf52e77"
+    },
+    "grouped_gemm_abquant_utils::default_fp8_eightwaves_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 128
+          }
+        ],
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "eightwaves",
+        "preshuffle_aq": false,
+        "preshuffle_b": false,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 192,
+            "tile_n": 256,
+            "warp_k": 1,
+            "warp_m": 4,
+            "warp_n": 2,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_fp8_rcr_eightwaves_cshuffle_intrawave_192x256x128_4x2x1_16x16x32_aqg1x1x128_bqg1x128x128_transposec",
+      "factory": "default_fp8_eightwaves_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "497e696175df2723e938fd8054b31a7c51b31e2bd1b57a2f6502a15b09137254"
+    },
+    "grouped_gemm_abquant_utils::default_fp8_eightwaves_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 128
+          }
+        ],
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "eightwaves",
+        "preshuffle_aq": false,
+        "preshuffle_b": false,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 192,
+            "tile_n": 256,
+            "warp_k": 1,
+            "warp_m": 4,
+            "warp_n": 2,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_fp8_rcr_eightwaves_cshuffle_intrawave_192x256x128_4x2x1_16x16x128_aqg1x1x128_bqg1x128x128_transposec",
+      "factory": "default_fp8_eightwaves_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "f947a4385730f6baa5736ff49b528306ce688ccf9f22f80494339461e067bc23"
+    },
+    "grouped_gemm_abquant_utils::default_fp8_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_aq": false,
+        "preshuffle_b": true,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_fp8_rcr_preshuffleb_cshuffle_intrawave_128x128x128_2x2x1_16x16x64_aqg1x1x128_bqg1x1x128_preshuffleb_transposec",
+      "factory": "default_fp8_preshuffleb_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "578f5cd6b32708466119ceb40688335e02106e7375eafaca3a7f90560a918783"
+    },
+    "grouped_gemm_abquant_utils::default_fp8_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "aquant_groups": [
+          {
+            "aquant_group_k": 128,
+            "aquant_group_m": 1,
+            "aquant_group_n": 1
+          }
+        ],
+        "bquant_groups": [
+          {
+            "bquant_group_k": 128,
+            "bquant_group_m": 1,
+            "bquant_group_n": 1
+          }
+        ],
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_aq": false,
+        "preshuffle_b": true,
+        "preshuffle_bq": false,
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": true,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_abquant_fp8_rcr_preshuffleb_cshuffle_intrawave_128x128x128_2x2x1_16x16x128_aqg1x1x128_bqg1x1x128_preshuffleb_transposec",
+      "factory": "default_fp8_preshuffleb_config",
+      "module": "grouped_gemm_abquant_utils",
+      "sha256": "7c411ef31e81c05f3de6fee28f884dc3857305d67bd4c13bb8e3f85a2d5dd188"
+    },
+    "grouped_gemm_aquant_utils::default_bf8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "mem",
+        "preshuffle_aq": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_bf8_rcr_mem_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_aqg1x1x128",
+      "factory": "default_bf8_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "4e864ec02e2471ce0f440948d6731e928509bd75c98af5c4ce5e293ab563c629"
+    },
+    "grouped_gemm_aquant_utils::default_bf8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "mem",
+        "preshuffle_aq": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_bf8_rcr_mem_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_aqg1x1x128",
+      "factory": "default_bf8_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "4e864ec02e2471ce0f440948d6731e928509bd75c98af5c4ce5e293ab563c629"
+    },
+    "grouped_gemm_aquant_utils::default_bf8_preshuffleaq_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_aq": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_aqg1x1x128_preshuffleaq",
+      "factory": "default_bf8_preshuffleaq_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "dff892d9ce1e88de477f866d18ffaaedf7e5eb46fbf6edc3f851d88fff6b7833"
+    },
+    "grouped_gemm_aquant_utils::default_bf8_preshuffleaq_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_aq": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_aqg1x1x128_preshuffleaq",
+      "factory": "default_bf8_preshuffleaq_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "dff892d9ce1e88de477f866d18ffaaedf7e5eb46fbf6edc3f851d88fff6b7833"
+    },
+    "grouped_gemm_aquant_utils::default_bf8i4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "mem",
+        "preshuffle_aq": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_bf8i4_rcr_mem_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_aqg1x1x128",
+      "factory": "default_bf8i4_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "c5c899b75adac6d5fe779536d4ad4558419fe19058372285178a64b08f060186"
+    },
+    "grouped_gemm_aquant_utils::default_bf8i4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "mem",
+        "preshuffle_aq": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_bf8i4_rcr_mem_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_aqg1x1x128",
+      "factory": "default_bf8i4_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "c5c899b75adac6d5fe779536d4ad4558419fe19058372285178a64b08f060186"
+    },
+    "grouped_gemm_aquant_utils::default_fp8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "mem",
+        "preshuffle_aq": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_fp8_rcr_mem_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_aqg1x1x128",
+      "factory": "default_fp8_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "a246d81ed22c80987bcdd2178430b214c5be700021f2ae1543416120bb05cfef"
+    },
+    "grouped_gemm_aquant_utils::default_fp8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "mem",
+        "preshuffle_aq": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_fp8_rcr_mem_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_aqg1x1x128",
+      "factory": "default_fp8_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "a246d81ed22c80987bcdd2178430b214c5be700021f2ae1543416120bb05cfef"
+    },
+    "grouped_gemm_aquant_utils::default_fp8_preshuffleaq_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_aq": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_aqg1x1x128_preshuffleaq",
+      "factory": "default_fp8_preshuffleaq_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "fa390f76f6310a2ca91b724d772cae39d34c88f96fe3de4da3efbd0f9fbb040c"
+    },
+    "grouped_gemm_aquant_utils::default_fp8_preshuffleaq_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_aq": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_aqg1x1x128_preshuffleaq",
+      "factory": "default_fp8_preshuffleaq_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "fa390f76f6310a2ca91b724d772cae39d34c88f96fe3de4da3efbd0f9fbb040c"
+    },
+    "grouped_gemm_aquant_utils::default_fp8i4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "mem",
+        "preshuffle_aq": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_fp8i4_rcr_mem_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_aqg1x1x128",
+      "factory": "default_fp8i4_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "a6c04dffea0bdbac3ee2a87eb945c603b0b2965c172f9f65f38e3f9eb1403c4b"
+    },
+    "grouped_gemm_aquant_utils::default_fp8i4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "mem",
+        "preshuffle_aq": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "transpose_c": false,
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_aquant_fp8i4_rcr_mem_cshuffle_intrawave_16x64x256_1x4x1_16x16x32_aqg1x1x128",
+      "factory": "default_fp8i4_config",
+      "module": "grouped_gemm_aquant_utils",
+      "sha256": "a6c04dffea0bdbac3ee2a87eb945c603b0b2965c172f9f65f38e3f9eb1403c4b"
+    },
+    "grouped_gemm_bquant_utils::default_bf8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_bf8_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "61f3832c4e7237f7add25de11f3488e7719c455c46d02811e9c9540d6af3b109"
+    },
+    "grouped_gemm_bquant_utils::default_bf8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_bf8_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "61f3832c4e7237f7add25de11f3488e7719c455c46d02811e9c9540d6af3b109"
+    },
+    "grouped_gemm_bquant_utils::default_bf8_preshuffleb_bquant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_bf8_preshuffleb_bquant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "50e334ffe7a8950ed16736b4e8a0a11435009ce26caeeff6deb08010fb742c8f"
+    },
+    "grouped_gemm_bquant_utils::default_bf8_preshuffleb_bquant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_bf8_preshuffleb_bquant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "50e334ffe7a8950ed16736b4e8a0a11435009ce26caeeff6deb08010fb742c8f"
+    },
+    "grouped_gemm_bquant_utils::default_bf8_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb",
+      "factory": "default_bf8_preshuffleb_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "9b2efa7aac97f674c5c0eaff13061270fc69b7fc5043a09c87c579d8342549ed"
+    },
+    "grouped_gemm_bquant_utils::default_bf8_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb",
+      "factory": "default_bf8_preshuffleb_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "9b2efa7aac97f674c5c0eaff13061270fc69b7fc5043a09c87c579d8342549ed"
+    },
+    "grouped_gemm_bquant_utils::default_bf8_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshufflebq",
+      "factory": "default_bf8_preshufflequant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "597164d23584347cacd963a533c1280d63b98287fce6ec668e1a11432ad51769"
+    },
+    "grouped_gemm_bquant_utils::default_bf8_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshufflebq",
+      "factory": "default_bf8_preshufflequant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "597164d23584347cacd963a533c1280d63b98287fce6ec668e1a11432ad51769"
+    },
+    "grouped_gemm_bquant_utils::default_bf8i4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 16,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x16_qg1x1x128",
+      "factory": "default_bf8i4_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "fbf5a3fce16c50460501eb2f8e4f2c4ea11bfd51e26edfb7a2bff82dad8d0033"
+    },
+    "grouped_gemm_bquant_utils::default_bf8i4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 16,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x16_qg1x1x128",
+      "factory": "default_bf8i4_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "fbf5a3fce16c50460501eb2f8e4f2c4ea11bfd51e26edfb7a2bff82dad8d0033"
+    },
+    "grouped_gemm_bquant_utils::default_bf8i4_preshuffleb_bquant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_bf8i4_preshuffleb_bquant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "e5fac1c5d092ab7f541b04b9ed7ec0cd9438ed5d383e224ee848e2605e43acf8"
+    },
+    "grouped_gemm_bquant_utils::default_bf8i4_preshuffleb_bquant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_bf8i4_preshuffleb_bquant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "e5fac1c5d092ab7f541b04b9ed7ec0cd9438ed5d383e224ee848e2605e43acf8"
+    },
+    "grouped_gemm_bquant_utils::default_bf8i4_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb",
+      "factory": "default_bf8i4_preshuffleb_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "2cc00bb295e332be1ad7df9dd4a5b70c18a87649a0962efc2c39b1a7f497ba0f"
+    },
+    "grouped_gemm_bquant_utils::default_bf8i4_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb",
+      "factory": "default_bf8i4_preshuffleb_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "2cc00bb295e332be1ad7df9dd4a5b70c18a87649a0962efc2c39b1a7f497ba0f"
+    },
+    "grouped_gemm_bquant_utils::default_bf8i4_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8i4_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshufflebq",
+      "factory": "default_bf8i4_preshufflequant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "9e2a5b90f6e8d907191d07016b6581b1b412c1d8babc53feea765763cd81e12b"
+    },
+    "grouped_gemm_bquant_utils::default_bf8i4_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "bf8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_bf8i4_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshufflebq",
+      "factory": "default_bf8i4_preshufflequant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "9e2a5b90f6e8d907191d07016b6581b1b412c1d8babc53feea765763cd81e12b"
+    },
+    "grouped_gemm_bquant_utils::default_fp8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_fp8_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "bf536f89bf407b1b3bedbc9d92923ed9b532be7efc91b4493daa45a246b172cd"
+    },
+    "grouped_gemm_bquant_utils::default_fp8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x128_qg1x1x128",
+      "factory": "default_fp8_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "bf536f89bf407b1b3bedbc9d92923ed9b532be7efc91b4493daa45a246b172cd"
+    },
+    "grouped_gemm_bquant_utils::default_fp8_preshuffleb_bquant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_fp8_preshuffleb_bquant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "337f3e742b7b805bfb026c5613443c05083c36e0b9ba6158f857076dd86d5bec"
+    },
+    "grouped_gemm_bquant_utils::default_fp8_preshuffleb_bquant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_fp8_preshuffleb_bquant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "337f3e742b7b805bfb026c5613443c05083c36e0b9ba6158f857076dd86d5bec"
+    },
+    "grouped_gemm_bquant_utils::default_fp8_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb",
+      "factory": "default_fp8_preshuffleb_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "81b87f46f091df5a402e1c3a43551de033a9610144fc4d02cd5d6cb681db4eef"
+    },
+    "grouped_gemm_bquant_utils::default_fp8_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb",
+      "factory": "default_fp8_preshuffleb_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "81b87f46f091df5a402e1c3a43551de033a9610144fc4d02cd5d6cb681db4eef"
+    },
+    "grouped_gemm_bquant_utils::default_fp8_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshufflebq",
+      "factory": "default_fp8_preshufflequant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "b6bff62a79cfb30cc0f72b9b01c29b5b8523b463017a4b6cb0afd862558b7d6d"
+    },
+    "grouped_gemm_bquant_utils::default_fp8_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x128_qg1x1x128_preshufflebq",
+      "factory": "default_fp8_preshufflequant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "b6bff62a79cfb30cc0f72b9b01c29b5b8523b463017a4b6cb0afd862558b7d6d"
+    },
+    "grouped_gemm_bquant_utils::default_fp8i4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 16,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x16_qg1x1x128",
+      "factory": "default_fp8i4_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "9a76be424f4f73840326046d2e5c6c24cec0c08a81d1119256394a0c34eaddea"
+    },
+    "grouped_gemm_bquant_utils::default_fp8i4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 256,
+            "tile_m": 16,
+            "tile_n": 64,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 16,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8i4_rcr_compv3_cshuffle_intrawave_16x64x256_1x4x1_16x16x16_qg1x1x128",
+      "factory": "default_fp8i4_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "9a76be424f4f73840326046d2e5c6c24cec0c08a81d1119256394a0c34eaddea"
+    },
+    "grouped_gemm_bquant_utils::default_fp8i4_preshuffleb_bquant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_fp8i4_preshuffleb_bquant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "749fdb0abe458703c91d414ca989289e9bb790faff6978212b831736cb0cb15a"
+    },
+    "grouped_gemm_bquant_utils::default_fp8i4_preshuffleb_bquant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb_preshufflebq",
+      "factory": "default_fp8i4_preshuffleb_bquant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "749fdb0abe458703c91d414ca989289e9bb790faff6978212b831736cb0cb15a"
+    },
+    "grouped_gemm_bquant_utils::default_fp8i4_preshuffleb_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb",
+      "factory": "default_fp8i4_preshuffleb_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "79433e104a586ecf3eca07af2cdc384fec0664f4a64f56d88b5a77d83e43d06e"
+    },
+    "grouped_gemm_bquant_utils::default_fp8i4_preshuffleb_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": true,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 2,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "preshuffleb",
+        "preshuffle_b": true,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8i4_rcr_preshuffleb_permute_n_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb",
+      "factory": "default_fp8i4_preshuffleb_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "79433e104a586ecf3eca07af2cdc384fec0664f4a64f56d88b5a77d83e43d06e"
+    },
+    "grouped_gemm_bquant_utils::default_fp8i4_preshufflequant_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8i4_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshufflebq",
+      "factory": "default_fp8i4_preshufflequant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "22f1b3a8f98d902864ed3dc61702f5a77eefcbd4334fc90105a176b192c673b1"
+    },
+    "grouped_gemm_bquant_utils::default_fp8i4_preshufflequant_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "compv3",
+        "preshuffle_b": false,
+        "preshuffle_bquant": true,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "fp8i4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_fp8i4_rcr_compv3_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x128_preshufflebq",
+      "factory": "default_fp8i4_preshufflequant_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "22f1b3a8f98d902864ed3dc61702f5a77eefcbd4334fc90105a176b192c673b1"
+    },
+    "grouped_gemm_bquant_utils::default_mx_bf16bf16_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 32,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16bf16"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_mx_bf16bf16_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x32",
+      "factory": "default_mx_bf16bf16_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "1ca480418db63b14b4b31aecaa26048a477a897e1b648b3ee2962d3ca939d845"
+    },
+    "grouped_gemm_bquant_utils::default_mx_bf16bf16_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 32,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16bf16"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_mx_bf16bf16_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x32",
+      "factory": "default_mx_bf16bf16_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "1ca480418db63b14b4b31aecaa26048a477a897e1b648b3ee2962d3ca939d845"
+    },
+    "grouped_gemm_bquant_utils::default_mx_bf16bf8_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_mx_bf16bf8_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128",
+      "factory": "default_mx_bf16bf8_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "75abc4a053d069cb80e64040da52acc83bdcf66517eb566d399f01ae053cb579"
+    },
+    "grouped_gemm_bquant_utils::default_mx_bf16bf8_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 128,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 64,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16bf8"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_mx_bf16bf8_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x64_qg1x1x128",
+      "factory": "default_mx_bf16bf8_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "75abc4a053d069cb80e64040da52acc83bdcf66517eb566d399f01ae053cb579"
+    },
+    "grouped_gemm_bquant_utils::default_mx_bf16fp4_config::gfx942": {
+      "arch": "gfx942",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 32,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16fp4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_mx_bf16fp4_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x32",
+      "factory": "default_mx_bf16fp4_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "945a304b3f8ddb5987beb52f3299561675f1bbff60ec380796a699b4537ee2c5"
+    },
+    "grouped_gemm_bquant_utils::default_mx_bf16fp4_config::gfx950": {
+      "arch": "gfx950",
+      "config": {
+        "double_smem_buffer": false,
+        "epilogue": "cshuffle",
+        "k_block_per_cu": 1,
+        "layouts": [
+          "rcr"
+        ],
+        "pipeline": "microscale",
+        "preshuffle_b": false,
+        "preshuffle_bquant": false,
+        "quant_groups": [
+          {
+            "quant_group_k": 32,
+            "quant_group_m": 1,
+            "quant_group_n": 1
+          }
+        ],
+        "scheduler": "intrawave",
+        "tile_configs": [
+          {
+            "tile_k": 128,
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_k": 1,
+            "warp_m": 1,
+            "warp_n": 4,
+            "warp_tile_k": 32,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16
+          }
+        ],
+        "variant_keys": [
+          "mx_bf16fp4"
+        ]
+      },
+      "config_name": "grouped_gemm_bquant_mx_bf16fp4_rcr_microscale_cshuffle_intrawave_128x128x128_1x4x1_16x16x32_qg1x1x32",
+      "factory": "default_mx_bf16fp4_config",
+      "module": "grouped_gemm_bquant_utils",
+      "sha256": "945a304b3f8ddb5987beb52f3299561675f1bbff60ec380796a699b4537ee2c5"
+    }
+  },
+  "modules": [
+    "gemm_aquant_utils",
+    "gemm_abquant_utils",
+    "gemm_bquant_utils",
+    "gemm_rowcolquant_utils",
+    "gemm_tensor_quant_utils",
+    "grouped_gemm_aquant_utils",
+    "grouped_gemm_abquant_utils",
+    "grouped_gemm_bquant_utils"
+  ]
+}
