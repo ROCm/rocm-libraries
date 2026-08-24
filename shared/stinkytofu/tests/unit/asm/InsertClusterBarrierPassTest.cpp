@@ -1120,6 +1120,99 @@ TEST_F(InsertClusterBarrierPassTest, Rule3SignalAnchorAbortsWhenSccIsLiveAtItsWa
         "SCC live at the wait");
 }
 
+// The downward correction is allowed through one kind of wall, and this is the shape that asks
+// it to be. The range is held open by the exit branch itself -- a branch with no compare of
+// its own, reading what the def above it left -- so the first spot outside the range is the
+// one the branch falls through to, on the far side of a segment boundary:
+//
+//     label_TestLoop:
+//     s_sub_u32 s90, s90, 1     <- def: the exit predicate
+//     v_wmma ... (x150)         <- climbed, but every spot here is inside the range
+//     s_cbranch_scc1 label_TestLoopEnd   <- the reader, and a segment boundary
+//     v_wmma ...                <- the only spot left, and it is below the boundary
+//     s_barrier_signal -1       <- the wait
+//
+// Refusing to step over that branch would leave the scan with nothing and send the signal
+// onto the wait's own spot, giving up a lead it was entitled to. Stepping over it is safe
+// because the walk only moves towards the wait, so it stays on the path the wait is on.
+//
+// What must not happen is the anchor landing in the stretch above the branch: the handshake
+// opens with `s_cmp_eq_u32 sgprWaveIdx, 0`, and that would hand the exit branch the wave
+// comparison instead of the loop's own predicate.
+// Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
+IF_RULE3_CROSS_LOOP(TEST_F(InsertClusterBarrierPassTest,
+                           DownwardScanLandsOnTheFallThroughSideOfAnExitBranch) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* sccDef = createSSubWritingSgprAndScc(/*sgpr=*/90);
+    // Long enough that climbing clear of the range would cost more than the ceiling allows,
+    // which is what turns the climb around and puts the downward scan in charge.
+    for (int i = 0; i < 150; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* exitBranch =
+        createBranchReadingScc(GFX::s_cbranch_scc1, "label_TestLoopEnd");
+    StinkyInstruction* landing = createWMMA(16, 0, 8);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createGuardedBranch(GFX::s_cbranch_scc0, /*sgpr=*/92, "label_TestLoop");
+    createLabel("label_TestLoopEnd");
+    createWMMA(8, 0, 8);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+
+    // The premise, before the pass moves anything: taking the whole stretch above the branch
+    // would break the ceiling. On a shorter one the climb would settle up there legitimately
+    // and this test would be watching the wrong thing.
+    {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+        const auto cyclesAt = [&](const StinkyInstruction* inst) -> int64_t {
+            auto it = cycleMap.find(inst);
+            return (it == cycleMap.end()) ? -1 : static_cast<int64_t>(it->second);
+        };
+        ASSERT_GE(cyclesAt(trigger), 0);
+        ASSERT_GE(cyclesAt(sccDef), 0);
+        ASSERT_GT(cyclesAt(trigger) - cyclesAt(sccDef), 900)
+            << "the range has to be deeper than the ceiling for the climb to turn around:"
+            << blockListing(*bb);
+    }
+
+    runPass();
+
+    StinkyInstruction* handshakeCmp = findClusterWaveCmpAfter(indexOf(loopHead));
+    ASSERT_NE(handshakeCmp, nullptr) << "the pass planted no Rule 3 handshake";
+    const size_t handshakeIdx = indexOf(handshakeCmp);
+
+    EXPECT_GT(handshakeIdx, indexOf(exitBranch))
+        << "the only spot outside the range is below the exit branch, so the scan had to step "
+           "over it to get there:"
+        << blockListing(*bb);
+    EXPECT_LT(handshakeIdx, indexOf(trigger))
+        << "the signal must still lead its workgroup barrier rather than collapse onto it:"
+        << blockListing(*bb);
+    EXPECT_LT(handshakeIdx, indexOf(landing))
+        << "the handshake goes in front of the spot the scan picked, which is the branch's "
+           "fall-through:"
+        << blockListing(*bb);
+
+    // What the step-over is not allowed to cost: the branch has to keep reading the def.
+    const StinkyInstruction* lastWriter = lastSccWriterBefore(indexOf(exitBranch));
+    ASSERT_NE(lastWriter, nullptr);
+    EXPECT_FALSE(isClusterWaveCmp(*lastWriter))
+        << "the exit branch must still see the predicate s_sub_u32 s90, s90, 1 computed:"
+        << blockListing(*bb);
+
+    // The anchor stayed in the wait's own segment, so no edge leaves holding a token.
+    EXPECT_EQ(inFlightAt(indexOf(loopHead)), 0)
+        << "nothing crossed the back edge, so the loop must not be entered expecting a token:"
+        << blockListing(*bb);
+    EXPECT_EQ(findLabelNamed("label_TestLoopEnd_skipCBWait"), nullptr)
+        << "no token leaves this loop, so there is no drain to route anything around:"
+        << blockListing(*bb);
+
+    expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
+})
+
 // A climb can cross edges and still come back empty-handed. Here the opening segment's signal
 // follows the latch across the back edge, lands in the tail segment, and finds SCC live from
 // the moment it arrives until the latch that reads it -- the whole segment is one live range,
