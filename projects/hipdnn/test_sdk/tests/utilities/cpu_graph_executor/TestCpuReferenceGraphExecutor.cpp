@@ -20,6 +20,8 @@
 #include "LayernormGraphUtils.hpp"
 #include "LayernormTensorBundles.hpp"
 #include "MatmulGraphUtils.hpp"
+#include "MoeGroupedMatmulBwdGraphUtils.hpp"
+#include "MoeGroupedMatmulBwdTensorBundles.hpp"
 #include "MoeGroupedMatmulGraphUtils.hpp"
 #include "MoeGroupedMatmulTensorBundles.hpp"
 #include "PointwiseGraphUtils.hpp"
@@ -38,6 +40,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMoeGroupedMatmul.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMoeGroupedMatmulBwd.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceResampleFwd.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -336,6 +339,63 @@ public:
 
         const CpuFpReferenceValidation<OutputType> validator(0.0F, 0.0F);
         EXPECT_TRUE(validator.allClose(directOutput, execOutput));
+    }
+
+    template <typename InputType, typename DweightType, typename ComputeType>
+    static void
+        runMoeGroupedMatmulBwdTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
+                                   bool rowMajorDweight = false)
+    {
+        constexpr int64_t EXPERTS = 2;
+        constexpr int64_t HIDDEN_K = 3;
+        constexpr int64_t OUTPUT_N = 4;
+        constexpr int64_t TOKEN_ROWS = 8;
+
+        const unsigned int seed = getGlobalTestSeed();
+
+        // Column-major is only the layout the node infers for an unset dweight, not a
+        // requirement of the operation. Running the executor through a row-major dweight
+        // while the direct reference keeps the column-major default makes the comparison
+        // below cross-layout: allClose() indexes logically, so the values have to land in
+        // the same logical positions either way.
+        const std::vector<int64_t> execDweightStrides
+            = rowMajorDweight ? generateStrides({EXPERTS, HIDDEN_K, OUTPUT_N})
+                              : std::vector<int64_t>{};
+
+        // Two bundles from the same seed: the executor writes through the first
+        // one's buffers, leaving the second with pristine inputs for the direct
+        // reference call.
+        MoeGroupedMatmulBwdTensorBundle<InputType, DweightType> execBundle(
+            EXPERTS, HIDDEN_K, OUTPUT_N, TOKEN_ROWS, seed, execDweightStrides);
+        MoeGroupedMatmulBwdTensorBundle<InputType, DweightType> directBundle(
+            EXPERTS, HIDDEN_K, OUTPUT_N, TOKEN_ROWS, seed);
+
+        auto graphTuple = buildMoeGroupedMatmulBwdGraph(execBundle, inputDataType, computeDataType);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+        CpuReferenceGraphExecutor executor;
+        ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+        executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+        CpuFpReferenceMoeGroupedMatmulBwd::backward<InputType, InputType, DweightType, ComputeType>(
+            directBundle.doutputTensor,
+            directBundle.tokenTensor,
+            directBundle.firstTokenOffsetTensor,
+            directBundle.dweightTensor);
+
+        // Both sides run the same deterministic reference code over identical
+        // seeded inputs, so the comparison is bit-exact.
+        const CpuFpReferenceValidation<DweightType> validator(0.0F, 0.0F);
+        EXPECT_TRUE(validator.allClose(directBundle.dweightTensor, execBundle.dweightTensor));
     }
 
     static void
@@ -795,6 +855,47 @@ TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterFloatInputBFloat16Out
 {
     TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, bfloat16, float>(
         MoeGroupedMatmulMode::SCATTER, DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<float, float, float>(DataType::FLOAT,
+                                                                                   DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<half, half, float>(DataType::HALF,
+                                                                                 DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<bfloat16, bfloat16, float>(
+        DataType::BFLOAT16, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdHalfInputFloatDweight)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<half, float, float>(DataType::HALF,
+                                                                                  DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdBFloat16InputFloatDweight)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<bfloat16, float, float>(
+        DataType::BFLOAT16, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdFloatInputHalfDweight)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<float, half, float>(DataType::FLOAT,
+                                                                                  DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdFloatInputBFloat16Dweight)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<float, bfloat16, float>(
+        DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdRowMajorDweight)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<float, float, float>(
+        DataType::FLOAT, DataType::FLOAT, /*rowMajorDweight=*/true);
 }
 
 TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
