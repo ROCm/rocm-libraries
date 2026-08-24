@@ -1,56 +1,116 @@
 #!/usr/bin/env bash
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
 
-#set -eux
+show_help() {
+    cat << EOF
 
-# benchmarks to run
-# valid options are: (default will run all of them)
-# syevd         -> eigensolver D&C + QR algorithm (heevd in complex precision)
-# syevdx        -> eigensolver D&C + bisection (heevdx in complex precision)
-# syevj         -> eigensolver Jacobi (heevj in complex precision)
-# syevjBatch    -> eigensolver Jacobi batch version (heevjBatch in complex precision)
-# gesvd         -> SVD QR algorithm
-# gesvdj        -> SVD Jacobi
-# gesvdjBatch   -> SVD Jacobi batch version
-# potrf         -> Cholesky factorization
-# potrfBatch    -> Cholesky factorization batch version
-# geqrf         -> Orthogonal factorization
-# (note: several can be selected)
-Slist="syevd syevdx syevj syevjBatch gesvd gesvdj gesvdjBatch potrf potrfBatch geqrf"
+Usage: $(basename "$0") [benchmarks] [precisions] [sizes]
 
-# precisions to use
-# valid options are: (default is d)
-# s -> real single precision
-# d -> real double precision
-# c -> complex single precision
-# z -> complex double precision
-# (note: several can be selected)
-Plist="s d c z"
+benchmarks to run
+valid options are: (default will run all of them)
+potrf             -> Cholesky factorization (symmetric/Hermitian positive-definite)
+potrfBatch        -> Cholesky factorization batch version
+potrs             -> linear system solver with Cholesky 
+potrsBatch        -> linear system solver with Cholesky batch version
+potri             -> matrix inversion with Cholesky
+sytrf             -> Bunch-Kaufman factorization (symmetric indefinite)
+sytrs             -> linear system solver with Bunch-Kaufman
+getrf             -> LU factorization
+getrfBatch        -> LU factorization batch version
+getrfNpvt         -> LU factorization without pivoting
+getrfNpvtBatch    -> LU factorization without pivoting batch version
+getrs             -> linear system solver with LU
+getrsBatch        -> linear system solver with LU batch version
+getrsNpvt         -> linear system solver with no pivoting LU 
+getrsNpvtBatch    -> linear system solver with no pivoting LU batch version
+getriBatch        -> matrix inversion with LU batch version
+getriOOPBatch     -> Out-of-place matrix inversion with LU batch version
+trtri             -> triangular matrix inversion
+geqrf             -> QR factorization
+geqrfBatch        -> QR factorization batch version
+cholqr            -> Cholesky QR factorization 
+cholqrBatch       -> Cholesky QR factorization batch version
+gels              -> Overdetermined linear system solver (least squares)
+gelsBatch         -> Overdetermined linear system solver batch version
+xxgqr             -> QR factorization Orthonormal/Unitary matrix construction
+xxmqr             -> QR factorization Orthonormal/Unitary matrix multiply
+larft             -> Triangular block reflector construction
+xxtrd             -> Symmetric/Hermitian matrix tridiagonalization
+xxgtr             -> to test QL factorization Orthonormal/Unitary matrix construction
+xxmtr             -> to test QL factorization Orthonormal/Unitary matrix multiply
+gebrd             -> General matrix bidiagonalization
+xxgbr             -> to test LQ factorization Orthonormal/Unitary matrix construction
+stedc             -> Tridiagonal eigenvalue problem (Divide and Conquer)
+xxevd             -> Symmetric/Hermitian eigenvalue problem (Divide and Conquer)
+xxgvd             -> Symmetric/Hermitian generalized eigenvalue problem (Divide and Conquer)
+xxevdBatch        -> Symmetric/Hermitian eigenvalue problem (Divide and Conquer) batch version
+xxevBatch         -> Symmetric/Hermitian eigenvalue problem (classic QR algorithm) batch version
+xxevdx            -> Symmetric/Hermitian partial eigenvalue decomposition
+xxgvdx            -> Symmetric/Hermitian partial generalized eigenvalue decomposition
+xxevj             -> Symmetric/Hermitian eigenvalue problem (Jacobi iteration)
+xxgvj             -> Symmetric/Hermitian generalized eigenvalue problem (Jacobi iteration)
+xxevjBatch        -> Symmetric/Hermitian eigenvalue problem (Jacobi iteration) batch version
+gesvd             -> Singular Value Decomposition (classic QR algorithm)
+gesdd             -> Singular Value Decomposition (Divide & Conquer)
+gesvdj            -> Singular Value Decomposition (Jacobi iteration)
+gesvdjBatch       -> Singular Value Decomposition (Jacobi iteration) batch version
+(note: several can be selected)
 
-# size cases to run:
-# valid options are: (default is large)
-# small  -> see definitions in rocsolver-perfoptim-suite.py for included size values  
-# medium -> see definitions in rocsolver-perfoptim-suite.py for included size values
-# large  -> see definitions in rocsolver-perfoptim-suite.py for included size values
-# (note: select only one as small is a sub-set of medium which is a sub-set of large)
-Clist="small medium large"
+precisions to use
+valid options are: (default is s,d)
+s -> real single precision
+d -> real double precision
+c -> complex single precision
+z -> complex double precision
+(note: several can be selected)
+
+size cases to run:
+valid options are: (default is small, medium, large)
+small  -> see definitions in rocsolver_suites.py for included size values  
+medium -> see definitions in rocsolver_suites.py for included size values
+large  -> see definitions in rocsolver_suites.py for included size values
+huge   -> see definitions in rocsolver_suites.py for included size values
+(note: several can be selected)
+
+EOF
+}
+
+
+# --------------------------------- #
+# Show help message if requested
+# --------------------------------- #
+if [ $1 == "-h" ]; then
+    show_help
+    exit 0
+fi
+
  
+# --------------------------------- #
+# Define list of valid arguments:
+# --------------------------------- #
+Plist="s d c z"
+Clist="small medium large huge"
+Slist="potrf potrfBatch potrs potrsBatch potri sytrf sytrs getrf getrfBatch getrfNpvt getrfNpvtBatch
+        getrs getrsBatch getrsNpvt getrsNpvtBatch getriBatch getriOOPBatch trtri geqrf geqrfBatch
+        cholqr cholqrBatch gels gelsBatch xxgqr xxmqr larft xxtrd xxgtr xxmtr gebrd xxgbr stedc xxevd
+        xxgvd xxevdBatch xxevBatch xxevdx xxgvdx xxevj xxgvj xxevjBatch gesvd gesdd gesvdj gesvdjBatch"
 
+
+# --------------------------------- #
 # Get and validate input arguments:
-error=true
-havecase=false
+# --------------------------------- #
 suite=""
 precision=""
 case=""
 
 if [ $# == 0 ]; then
-    error=false
     suite=$Slist
-    precision="d"
-    case="large"
+    precision="s d"
+    case="small medium large"
 else
     args=$@
     for a in $args; do
+        error=true
         for s in $Slist; do
             if [ $a == $s ]; then
                 new=true
@@ -85,47 +145,59 @@ else
         done  
         for c in $Clist; do
             if [ $a == $c ]; then
-                if $havecase; then
-                    error=true
-                else
-                    error=false
-                    havecase=true
+                new=true
+                error=false
+                for cc in $case; do
+                    if [ $a == $cc ]; then
+                        new=false
+                        break
+                    fi
+                done
+                if $new; then
                     case+="$c "
                 fi
                 break
             fi
         done  
+        if $error; then
+            echo ""
+            echo "Incorrect arguments..."
+            show_help
+            exit 1
+        fi
     done
 fi
 
-if $error; then
-    echo "Incorrect arguments..."
-    exit 1 
-fi
 if [ -z "$suite" ]; then
     suite=$Slist
 fi
 if [ -z "$precision" ]; then
-    precision="d"
+    precision="s d"
 fi
 if [ -z "$case" ]; then
-    case="large"
+    case="small medium large"
 fi
 
 
+# --------------------------------- #
 # ensure this script is in the cwd
+# --------------------------------- #
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+
+# --------------------------------- #
 # setup output directory 
+# --------------------------------- #
 output_dir=rocsolver_customer01_benchmarks
 mkdir -p "$output_dir"
 
+
+# --------------------------------- #
 # run benchmarks
+# --------------------------------- #
 for s in $suite; do
     for p in $precision; do
-        for c in $case; do
-            python3 rocsolver-perfoptim-suite.py -v -o "$output_dir/$p${s}_benchmarks.csv" $s $p $c
-        done
+        python3 rocsolver-perfoptim-suite.py -v -o "$output_dir/$p${s}_benchmarks.csv" $s $p $case
     done
 done
 

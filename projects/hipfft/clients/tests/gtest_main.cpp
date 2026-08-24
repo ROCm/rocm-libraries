@@ -94,6 +94,12 @@ double max_l2_eps_single   = 0.0;
 double max_linf_eps_half   = 0.0;
 double max_l2_eps_half     = 0.0;
 
+// Minimum number of random probes per device in hipfftXt data distribution verification
+size_t min_probes_per_dev_for_xt;
+
+// Token string for manual hipfftXt test
+std::string hipfftxt_test_token;
+
 // Control whether we use FFTW's wisdom (which we use to imply FFTW_MEASURE).
 bool use_fftw_wisdom = false;
 
@@ -563,6 +569,16 @@ int main(int argc, char* argv[])
                    skip_runtime_fails,
                    "Skip the test if there is a runtime failure")
         ->default_val(true);
+    app.add_option("--min_probes_per_dev_for_xt",
+                   min_probes_per_dev_for_xt,
+                   "Minimum number of random probes per device in hipfftXt data distribution "
+                   "verification")
+        ->default_val(10)
+        ->check(CLI::PositiveNumber);
+    app.add_option("--hipfftxt_test_token",
+                   hipfftxt_test_token,
+                   "Token string for manual hipfftXt single-process, multi-GPU tests")
+        ->default_val("");
     app.add_option("-w, --wise", use_fftw_wisdom, "Use FFTW wisdom");
     // Filename for fftw and fftwf wisdom.
     std::string fftw_wisdom_filename;

@@ -608,6 +608,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An
     // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.
     rv["RequiresXCntForVolatileVMEM"]  = checkInList(isaVersion, {{12, 5, 0}});
+    rv["EnableXnackReplay"]            = checkInList(isaVersion, {{12, 5, 0}});
     rv["DefaultScopeIsCULocal"]        = checkInList(isaVersion, {{12, 5, 0}});
 
     // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.
