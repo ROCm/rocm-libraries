@@ -81,8 +81,9 @@ Implementation status (the optimization plan holds the full ordered work list)
 -----------------------------------------------------------------------------
   * P0  enablement + 32x32x8 atom + K-loop doubling ............ DONE (this file)
   * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128 fp16)
-  * P2  exp2_fast + fused/lazy rescale ........................ DONE (exp2_fast all
-        but bf16 D128; fused rescale bit-identical, enables bf16 D64 exp2_fast)
+  * P2  exp2_fast + fused rescale .............................. DONE (exp2_fast for
+        ALL configs incl. bf16 D128; fused rescale bit-identical, and is what
+        enabled bf16 D64 exp2_fast)
   * P3  occupancy: waves-per-eu tune (bf16 D64 -> wpe4 = 2 WG/CU),
         D64 K bank-pad, wide4 (WG=256), K single-buffer ........... IN PROGRESS
         (waves-per-eu DONE via _tuned_waves_per_eu; **D64 K bank-pad DONE and ADOPTED**
@@ -114,7 +115,8 @@ P5 is deliberately no-op for this kernel (a decision, not code):
     recorded. It is a double-buffered pipelining lever and this kernel is
     single-buffered (NBUF=1), so there is no prefetch to partially overlap. The old
     "NBUF=2 does not fit 64 KB LDS at D128" justification is only true at the shipped
-    ``block_n=64``: at ``block_n=32`` D128 LDS roughly halves and NBUF=2 DOES fit.
+    ``block_n=64`` (fp16 33 KB, 2x overflows): at ``block_n=32`` the K tile halves (V
+    stays width-64), D128 LDS drops to ~24.5 KB and NBUF=2 DOES fit.
     That door is closed by measurement instead -- ``block_n=32`` was GPU-timed in the
     Step-0 funnel and is proven-negative for fp16 D128 and only part-dependently
     positive for bf16 D128 (halving the KV tile doubles the tile/grid count and the
@@ -224,10 +226,11 @@ class Gfx942DenseTuning:
 
     Tri-state fields: ``None`` means "use the measured policy"
     ---------------------------------------------------------
-    ``use_cfvst`` / ``use_exp2_fast`` / ``waves_per_eu`` default to ``None``, which
-    resolves through the shipping policy (:func:`_use_cfvst`, :func:`_use_exp2_fast`,
-    and ``spec.waves_per_eu`` -- which the gfx942 dispatch fills from
-    :func:`_tuned_waves_per_eu`). That tri-state is the whole point of the struct: a
+    ``use_cfvst`` / ``use_exp2_fast`` / ``waves_per_eu`` / ``v_row_pad`` /
+    ``use_v_swizzle`` default to ``None``, which resolves through the shipping policy
+    (:func:`_use_cfvst`, :func:`_use_exp2_fast`, ``spec.waves_per_eu`` from
+    :func:`_tuned_waves_per_eu`, :func:`_v_row_pad`, and :func:`_use_v_swizzle`). That
+    tri-state is the whole point of the struct: a
     harness that omits a VALUED field freezes the config at whatever the default
     happened to be the day it was written and then silently reports a stale verdict
     (that is exactly how a real +79% got reported as -17% in this tree). A harness
@@ -302,19 +305,20 @@ class Gfx942DenseTuning:
     #   optimization plan; THIS field is the knob that sweep turns.
     lds_row_pad: int = 8
 
-    # v_row_pad: V^T row (token axis) bank-conflict pad, in elements, for the P1
-    #   conflict-free-V store. V_lds is transposed to [D, block_n] (dim-major, token
-    #   inner) so the PV A-operand read is a contiguous ds_read_b64; the pad spaces
-    #   the dim rows so the per-lane 4-token reads land in distinct banks (token
-    #   stride block_n+8 dwords -> 8-bank / 4-way at block_n=64, matching the D128 QK
-    #   path). Lifted from the proven ``attention_tiled_2d`` cfvst vehicle (v_pad=8).
-    #   Same status as ``lds_row_pad``: pad REMOVAL is settled-negative, the pad VALUE
-    #   is inherited-and-not-re-derived-for-gfx942 and therefore OPEN -- and this is
-    #   the very pad whose gfx950 sweep found 8 ~= no pad at all (see above).
-    #   Read in exactly two places -- the :func:`_lds_bytes` budget and the ``V_lds``
-    #   allocation in the builder -- and BOTH read this one field, so the budget can
-    #   no longer drift from the allocation.
-    v_row_pad: int = 8
+    # v_row_pad: V^T row (token axis) width pad, in elements, for the P1 conflict-free-V
+    #   store. V_lds is transposed to [D, block_n+pad] so the PV A-operand read is a
+    #   contiguous ds_read_b64. On the cfvst path (fp16-D128) the pad is DERIVED from
+    #   block_n by :func:`_v_row_pad` so the row is the smallest pow2 the XOR bank-
+    #   conflict swizzle needs (:func:`_v_swizzle_width`): pad 64->0, 32->32, 128->0; 8
+    #   (the original unswizzled layout) elsewhere. The pad VALUE is no longer OPEN --
+    #   the derivation supersedes the inherited-8 pad-value sweep, since the swizzle
+    #   constrains the row to a pow2 (an arbitrary swept pad would just disable it).
+    #   REMOVAL is still settled-negative (see ``lds_row_pad``). Whether the swizzle is
+    #   EMITTED is the separate, independently-sweepable ``use_v_swizzle`` knob, so a
+    #   pad sweep no longer silently toggles it. Resolved via
+    #   :meth:`resolved_v_row_pad`, read by both the ``V_lds`` alloc and the
+    #   :func:`_lds_bytes` budget so the two cannot drift.
+    v_row_pad: int | None = None
 
     # use_cfvst: force the P1 conflict-free perm_b32 store-path V transpose on/off.
     #   None (default) -> :func:`_use_cfvst`, which owns the measured verdict.
@@ -324,11 +328,21 @@ class Gfx942DenseTuning:
     #   pin it on where it already is.
     use_cfvst: bool | None = None
 
+    # use_v_swizzle: force the V^T XOR bank-conflict swizzle on/off, INDEPENDENTLY of
+    #   the pad value -- so the pad-value sweep can vary ``v_row_pad`` without silently
+    #   toggling the swizzle (an explicit non-derived pad used to turn it off by making
+    #   the row non-pow2). None (default) -> :func:`_use_v_swizzle` (the cfvst path).
+    #   Only the transposed-V (fp16-D128) store has a V_lds to swizzle; forcing it ON
+    #   off that path, or with a pad that leaves V_LDROW non-pow2 / < 64, is REJECTED
+    #   by supports_attention_dense rather than silently mis-addressing LDS.
+    use_v_swizzle: bool | None = None
+
     # use_exp2_fast: force the P2 single-instruction exp2 on/off.
     #   None (default) -> :func:`_use_exp2_fast`, which owns the measured verdict
-    #   (on everywhere except bf16 D128, which spills). Numerically safe in both
-    #   directions here -- both softmax arguments are always <= 0 -- so unlike
-    #   ``use_cfvst`` this one is a pure perf A/B and is not gated.
+    #   (now on for ALL configs; the former bf16-D128 spill holdout is stale).
+    #   Numerically safe in both directions here -- both softmax arguments are
+    #   always <= 0 -- so unlike ``use_cfvst`` this one is a pure perf A/B and
+    #   is not gated.
     use_exp2_fast: bool | None = None
 
     # waves_per_eu: override the emitted ``amdgpu-waves-per-eu`` attribute.
@@ -371,6 +385,26 @@ class Gfx942DenseTuning:
         if self.use_cfvst is None:
             return _use_cfvst(spec.head_size, spec.dtype)
         return bool(self.use_cfvst)
+
+    def resolved_v_row_pad(self, spec: AttentionDenseSpec) -> int:
+        """Resolved V^T row pad (``None`` -> :func:`_v_row_pad`).
+
+        Read by both the builder's ``V_lds`` alloc and the :func:`_lds_bytes` budget, so
+        the two cannot drift."""
+        if self.v_row_pad is None:
+            return _v_row_pad(spec.head_size, spec.dtype, spec.block_n)
+        return int(self.v_row_pad)
+
+    def resolved_use_v_swizzle(self, spec: AttentionDenseSpec) -> bool:
+        """Resolved V^T bank-conflict swizzle. Gated on the cfvst path (only the
+        transposed-V store has a V_lds to swizzle), and within it independent of
+        ``v_row_pad`` so the pad sweep never silently toggles it. ``None`` -> policy
+        (:func:`_use_v_swizzle`)."""
+        if not self.resolved_use_cfvst(spec):
+            return False
+        if self.use_v_swizzle is None:
+            return _use_v_swizzle(spec.head_size, spec.dtype)
+        return bool(self.use_v_swizzle)
 
     def resolved_use_exp2_fast(self, spec: AttentionDenseSpec) -> bool:
         """Resolved exp2_fast decision (``None`` -> :func:`_use_exp2_fast`)."""
@@ -434,11 +468,17 @@ def _tuning_name_tags(spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning") -> 
         parts.append(f"bm{tuning.block_m}")
     if tuning.lds_row_pad != _DEFAULT_TUNING.lds_row_pad:
         parts.append(f"krowpad{tuning.lds_row_pad}")
-    if tuning.v_row_pad != _DEFAULT_TUNING.v_row_pad:
-        parts.append(f"vrowpad{tuning.v_row_pad}")
+    vp = tuning.resolved_v_row_pad(spec)
+    if vp != _v_row_pad(spec.head_size, spec.dtype, spec.block_n):
+        parts.append(f"vrowpad{vp}")
     cfvst = tuning.resolved_use_cfvst(spec)
     if cfvst != _use_cfvst(spec.head_size, spec.dtype):
         parts.append("cfvst1" if cfvst else "cfvst0")
+    swz = tuning.resolved_use_v_swizzle(spec)
+    if swz != (
+        tuning.resolved_use_cfvst(spec) and _use_cfvst(spec.head_size, spec.dtype)
+    ):
+        parts.append("vswz1" if swz else "vswz0")
     e2f = tuning.resolved_use_exp2_fast(spec)
     if e2f != _use_exp2_fast(spec.head_size, spec.dtype):
         parts.append("e2f1" if e2f else "e2f0")
@@ -518,22 +558,23 @@ def _rows_per_instr(head_size: int) -> int:
 def _use_exp2_fast(head_size: int, dtype: str) -> bool:
     """Whether softmax uses ``exp2_fast`` (one v_exp_f32, no range-reduction guard).
 
-    Enabled everywhere EXCEPT bf16 D128. exp2_fast is a strict VALU reduction and the
-    dominant P2 lever on the (post-P1) VALU-bound path, and is always numerically safe
-    here -- both softmax args (alpha's m_i - m_new and p's s - m_new) are <= 0, exactly
-    exp2_fast's precondition.
+    Enabled for all configs. exp2_fast is a strict VALU reduction and the dominant P2
+    lever on the (post-P1) VALU-bound path, and is always numerically safe here -- both
+    softmax args (alpha's m_i - m_new and p's s - m_new) are <= 0, exactly exp2_fast's
+    precondition, independent of head_size and dtype.
 
-    bf16 D128 is the sole holdout. Its ``.1k`` MFMA schedule keeps more registers live,
-    and exp2_fast makes the exp result available in one instruction (vs plain exp2's
-    ~5-op range reduction), which the scheduler hoists -- lengthening the exp live
-    ranges. Measured post-fused-rescale (plan §6.1): bf16 D128 goes 175 VGPR / 0 spill
-    (plain exp2) -> 256 VGPR / 22 spill (exp2_fast), over the waves-per-eu=2 cap. The
-    fused rescale freed ~28 VGPR but not enough to absorb that hoist on the .1k path;
-    fp16 D128 (213, cfvst) and bf16 D64 (215) both have the headroom. A bf16 D128
-    exp2_fast unblock is a P3 occupancy/scheduling item. Spill re-verified across the
-    fp16/bf16 x D64/D128 cohort.
+    bf16 D128 was previously the sole holdout, disabled on a measurement (plan §6.1:
+    175 -> 256 VGPR / 22 spill over the waves-per-eu=2 cap) that no longer reproduces
+    on the current kernel: rocprofv3 register capture on the shipped bf16-D128 causal
+    kernel (GQA 32/8, Sq 1024-16384, both the default and persistent grids) reads a
+    lower VGPR count with exp2_fast than without, 0 scratch, numerically identical to
+    plain exp2. The softmax/rescale body has not changed since the kernel was first
+    committed, so this is a stale measurement rather than a schedule that shifted under
+    it; the holdout is removed. head_size is no longer a gate -- correctness holds for
+    every head_size (the <= 0 precondition is universal); a new head_size would only
+    warrant a fresh occupancy check, never a correctness one.
     """
-    return dtype == "fp16" or head_size != 128
+    return True
 
 
 def _use_cfvst(head_size: int, dtype: str) -> bool:
@@ -553,6 +594,49 @@ def _use_cfvst(head_size: int, dtype: str) -> bool:
     return _rows_per_instr(head_size) == 1 and dtype == "fp16"
 
 
+def _v_swizzle_width(block_n: int) -> int:
+    """V^T row width (elements) the XOR bank-conflict swizzle needs: the smallest pow2
+    >= max(64, block_n). SINGLE source of truth -- the derived pad (:func:`_v_row_pad`),
+    the emitted swizzle mask (``V_LDROW // 4 - 1``), and the swizzle-engages test all
+    take the width from here, so they cannot drift. 64 (not 128) is the minimum that
+    spreads all 32 banks: only bits 2..5 of the multiple-of-4 column reach the bank
+    field, so a 4-bit key saturates it and a 5th bit only doubles the row for no gain.
+
+    Chosen over the sibling ``attention_tiled_2d`` V^T scheme, which spreads the token
+    axis with an 8-element ROTATION (``_v_t_pad``, ~2 KB at D128) behind an explicit
+    ``SWIZZLE_VLDS`` knob that auto-disables on an LDS-headroom check. The pow2+XOR form
+    here is a bijection that leaves the read conflict-free (1-way) rather than merely
+    reduced, at the cost of a pow2 row; the auto-disable is not replicated because
+    :func:`supports_attention_dense` rejects an over-budget spec upstream instead of
+    silently dropping the swizzle.
+    """
+    return max(64, 1 << (block_n - 1).bit_length())
+
+
+def _use_v_swizzle(head_size: int, dtype: str) -> bool:
+    """Policy for the V^T bank-conflict swizzle: rides the :func:`_use_cfvst` gate,
+    since only the transposed-V (fp16-D128) store has a V_lds to swizzle."""
+    return _use_cfvst(head_size, dtype)
+
+
+def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
+    """V^T row (token-axis) pad, in elements, on the cfvst path (fp16-D128); 8 (no
+    swizzle, original layout) everywhere else. On the cfvst path the row is widened to
+    :func:`_v_swizzle_width` so the XOR swizzle (``col' = key ^ ((dim & (V_LDROW//4-1))
+    << 2)``) stays in-bounds and engages at EVERY tile width (pad 64->0, 32->32,
+    128->0). V footprint ``head_size * width * 2`` scales with the tile (16 KB at
+    D128/block_n=64, not block_n-invariant); total LDS 33 KB -- below develop's +8-pad
+    layout (35 KB) and the old fixed-width-128 row (49 KB), but still ~1 KB over the
+    32 KB 2-WG/CU ceiling, so that door needs the register floor cut, not this widening.
+    Whether the swizzle is actually EMITTED is a
+    separate, independently-sweepable decision (:meth:`resolved_use_v_swizzle`), so the
+    pad value and the swizzle no longer silently toggle each other.
+    """
+    if not _use_cfvst(head_size, dtype):
+        return 8
+    return _v_swizzle_width(block_n) - block_n
+
+
 def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
     """Tuned ``amdgpu-waves-per-eu`` per config (P3 occupancy).
 
@@ -569,7 +653,7 @@ def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
         schedule ALREADY hides the latency via ILP (the 214 VGPR is scheduler headroom
         spent on in-flight LDS reads, plan §6.1) -- halving per-wave registers loses
         more ILP than the 2nd WG buys (S2048 81.5 -> 79.8, slightly negative).
-      * D128 (either dtype): LDS-bound at ~35 KB, so 2 x 35 > 64 KB -- no wpe value
+      * D128 (either dtype): LDS-bound at ~33-34 KB, so 2 x > 64 KB -- no wpe value
         reaches a 2nd WG/CU. Occupancy there is an LDS-footprint problem (P3 K/V-pad
         or single-buffer work), not a waves-per-eu knob.
 
@@ -671,7 +755,7 @@ def _lds_bytes(
 
     K keeps the natural ``[token, dim]`` layout with :func:`_lds_row_stride` (async
     DMA target). V is TRANSPOSED to ``[dim, token]`` for the P1 conflict-free store, so
-    its footprint is ``D * (block_n + tuning.v_row_pad)`` rather than
+    its footprint is ``D * (block_n + resolved_v_row_pad)`` rather than
     ``block_n * row_stride``. 2 bytes/element is exact for every dtype in
     ``_SUPPORTED_DTYPES`` (bf16/fp16) and
     must be revisited if a narrower or wider element type is added. Shared with the
@@ -682,9 +766,9 @@ def _lds_bytes(
     +``spec.lds_k_group_pad`` elements per group (D128 and the kpad-off D64 path are
     unchanged).
 
-    ``tuning.v_row_pad`` is read HERE and in the builder's ``V_lds`` allocation, and
-    nowhere else. Both sites read the same resolved struct, which is what stops the
-    budget from silently under-counting the allocation.
+    ``resolved_v_row_pad`` is read HERE and in the builder's ``V_lds`` allocation; both
+    sites go through the same resolver, so the budget cannot silently under-count the
+    allocation.
     """
     if _k_group_pad_active(spec, tuning):
         rpi = _rows_per_instr(spec.head_size)
@@ -693,7 +777,7 @@ def _lds_bytes(
         k_bytes = spec.block_n * _lds_row_stride(spec.head_size, tuning) * 2
     if tuning.resolved_use_cfvst(spec):
         # V transposed to [dim, token+pad] for the conflict-free store (D128).
-        v_bytes = spec.head_size * (spec.block_n + tuning.v_row_pad) * 2
+        v_bytes = spec.head_size * (spec.block_n + tuning.resolved_v_row_pad(spec)) * 2
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64, naive read).
         v_bytes = spec.block_n * _lds_row_stride(spec.head_size, tuning) * 2
@@ -784,6 +868,8 @@ def supports_attention_dense(
         return False, "gfx942 attention_dense: ragged not yet supported"
     if spec.sliding_window:
         return False, "gfx942 attention_dense: sliding_window not yet supported"
+    if spec.use_sinks:
+        return False, "gfx942 attention_dense: sinks not yet supported"
 
     # --- Tuning struct (gfx942-private sweep knobs). Validated here rather than only
     # in the builder because the module contract is support() => build(): a knob that
@@ -827,7 +913,7 @@ def supports_attention_dense(
     # the same failure mode the spec's lds_k_group_pad % 8 check guards for ds_read_b128.
     for _pad_name, _pad in (
         ("lds_row_pad", tuning.lds_row_pad),
-        ("v_row_pad", tuning.v_row_pad),
+        ("v_row_pad", tuning.resolved_v_row_pad(spec)),
     ):
         if _pad < 0 or _pad % 4 != 0:
             return False, (
@@ -855,6 +941,26 @@ def supports_attention_dense(
             f"and regresses; bf16 D128 spills past the waves-per-eu cap), and it is "
             f"only tile-exact on the rows-per-DMA==1 fp16 path -- see _use_cfvst"
         )
+    # use_v_swizzle forced ON where there is no transposed-V buffer to swizzle. Only the
+    # cfvst path builds V_lds[dim, token]; on the naive path the flag is a no-op, so
+    # reject an explicit True there rather than silently ignoring it.
+    if tuning.use_v_swizzle is True and not tuning.resolved_use_cfvst(spec):
+        return False, (
+            f"tuning.use_v_swizzle=True is rejected at D{spec.head_size}/{spec.dtype}: "
+            f"the XOR bank-conflict swizzle only exists on the conflict-free-V "
+            f"(fp16-D128) path -- there is no transposed V_lds to swizzle otherwise"
+        )
+    # The swizzle mask (V_LDROW//4 - 1) only tiles a pow2 >= 64 row; an explicit
+    # v_row_pad that leaves V_LDROW non-pow2 while the swizzle is on would emit an
+    # out-of-bounds column. Reject loudly (set use_v_swizzle=False to sweep the pad).
+    if tuning.resolved_use_v_swizzle(spec):
+        _vldrow = spec.block_n + tuning.resolved_v_row_pad(spec)
+        if _vldrow < 64 or (_vldrow & (_vldrow - 1)) != 0:
+            return False, (
+                f"tuning.use_v_swizzle needs a pow2 V^T row >= 64 but block_n="
+                f"{spec.block_n} + v_row_pad gives V_LDROW={_vldrow}; leave "
+                f"v_row_pad=None (derived) or set use_v_swizzle=False to sweep the pad"
+            )
 
     # --- Tile geometry. The causal KV-loop clamp uses n_per = block_m //
     # block_n, a FLOOR: a block_n that does not divide the query tile silently drops
@@ -1052,16 +1158,28 @@ def _build_attention_dense_single_buffer(
         K_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Klds")
     if USE_CFVST:
         # V stored TRANSPOSED (P1 conflict-free V): [dim, token] with token inner and
-        # padded by tuning.v_row_pad, so the PV A-operand read is a contiguous
+        # padded by resolved_v_row_pad, so the PV A-operand read is a contiguous
         # ds_read_b64 rather than P0's 4 element-wise ds_read_u16. Filled by the
-        # perm_b32 store path below. This is one of exactly TWO reads of v_row_pad --
+        # perm_b32 store path below. This is one of exactly TWO reads that SIZE V_lds --
         # the other is the _lds_bytes budget -- and both take it from the same
         # resolved struct, so the budget cannot under-count this allocation.
-        V_LDROW = BN + tuning.v_row_pad
+        V_LDROW = BN + tuning.resolved_v_row_pad(spec)
         V_lds = b.smem_alloc(dtype, [1, D, V_LDROW], name_hint="VldsT")
+        # V^T bank-conflict swizzle (col' = key ^ ((dim & V_SWZ_MASK) << 2)). Whether it
+        # is emitted is an independent tuning decision (resolved_use_v_swizzle), NOT
+        # derived from the row width, so the pad-value sweep cannot silently toggle it;
+        # supports_attention_dense has already rejected swizzle-on with a non-pow2 / <64
+        # row, so the mask (derived from the row so store and read can't drift) is always
+        # in-bounds here. 4 bits (15) saturate the 32-bank field at width 64, 31 at 128.
+        SWZ_V = tuning.resolved_use_v_swizzle(spec)
+        V_SWZ_MASK = V_LDROW // 4 - 1
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64: VGPR-bound, cfvst
-        # regresses it -- see _use_cfvst); read element-wise in read_v.
+        # regresses it -- see _use_cfvst); read element-wise in read_v. No V^T buffer to
+        # swizzle here; default the flags the read_v / _cfvst_store_v closures capture so
+        # a future call on this path is a no-op, not a NameError.
+        SWZ_V = False
+        V_SWZ_MASK = 0
         V_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Vlds")
 
     n_ktiles = Skv // BN
@@ -1141,15 +1259,28 @@ def _build_attention_dense_single_buffer(
                 x0, x1, b.const_i32(0x03020706)
             )  # (V[t0,d0+1], V[t1,d0+1])
             d1 = b.add(d0, b.const_i32(1))
+            if SWZ_V:
+                # Emit the (and, shl 2, xor) triple as separate ops in that exact order
+                # instead of nesting sub-expressions inside b.shl/b.xor argument lists: a
+                # C++ builder mirror may evaluate call arguments in a different order and
+                # renumber SSA, tripping a parity gate. Same order here = same IR.
+                m0 = b.land(d0, b.const_i32(V_SWZ_MASK))
+                s0 = b.shl(m0, b.const_i32(2))
+                c0 = b.xor(t0, s0)
+                m1 = b.land(d1, b.const_i32(V_SWZ_MASK))
+                s1 = b.shl(m1, b.const_i32(2))
+                c1 = b.xor(t0, s1)
+            else:
+                c0, c1 = t0, t0
             b.smem_store_vN(
                 V_lds,
-                [b.const_i32(0), d0, t0],
+                [b.const_i32(0), d0, c0],
                 b.bitcast(row_d0, VectorType(dtype, 2)),
                 2,
             )
             b.smem_store_vN(
                 V_lds,
-                [b.const_i32(0), d1, t0],
+                [b.const_i32(0), d1, c1],
                 b.bitcast(row_d1, VectorType(dtype, 2)),
                 2,
             )
@@ -1161,14 +1292,24 @@ def _build_attention_dense_single_buffer(
         so this is ONE ds_read_b64 vs the naive path's 4 element-wise ds_read_u16.
         The values delivered to the MFMA are bit-identical between the two paths (same
         (dim, key) mapping); only the LDS layout and read width differ.
+        The XOR swizzle takes this read from 4-way (the pre-swizzle +8-pad develop
+        layout) to 1-way / conflict-free -- that is the reviewable win, not removal of a
+        pre-existing 32-way jam (the 32-way state only appears if the row is widened to a
+        32-dword multiple, and the swizzle then digs back out of it). The residual bank
+        conflicts live on the STORE (8-way -> 4-way: within a wave t0 is constant and
+        d0 = 2*lane, so (d0 & mask) takes only 8 values), so further conflict work
+        belongs there, not on this read.
         naive (D64 / bf16-D128): element-wise from V_lds[key, dim] (bank-heavy, but
         those configs are VGPR-bound / spill under cfvst, not LDS-read-bound)."""
         if USE_CFVST:
             dim_row = b.add(b.const_i32(dt * 32), lane_m)
             key0 = b.add(b.const_i32(kk * 8), d_base)
-            return b.smem_load_vN(
-                V_lds, b.const_i32(0), dim_row, key0, dtype=dtype, n=4
-            )
+            col = key0
+            if SWZ_V:
+                m = b.land(dim_row, b.const_i32(V_SWZ_MASK))
+                s = b.shl(m, b.const_i32(2))
+                col = b.xor(key0, s)
+            return b.smem_load_vN(V_lds, b.const_i32(0), dim_row, col, dtype=dtype, n=4)
         dim_col = b.add(b.const_i32(dt * 32), lane_m)
         elems = []
         for j in range(4):
@@ -1447,12 +1588,12 @@ def _build_attention_dense_single_buffer(
             # s) -- exactly exp2_fast's precondition (no overflow; v_exp_f32 flushes
             # large negatives to 0). Cuts ~99 VALU/tile at D128, the dominant
             # MFMA-starving residual once conflict-free V (P1) lands. Enabled for
-            # every config except bf16 D128, which spills on the .1k schedule -- the
-            # spill rationale and the matrix live in _use_exp2_fast's docstring.
+            # every config, including bf16 D128 -- its former spill holdout no
+            # longer reproduces; rationale + matrix in _use_exp2_fast's docstring.
             exp2 = b.exp2_fast if tuning.resolved_use_exp2_fast(spec) else b.exp2
             alpha = exp2(b.fsub(m_i, m_new))
 
-            # P2 fused/lazy rescale: compute each exp2 inline, accumulate l_local, and
+            # P2 fused rescale: compute each exp2 inline, accumulate l_local, and
             # cast->pack it into the PV B-operand in ONE pass. The f32 p value dies
             # after its two uses (the l_local fadd + the dtype cast) instead of
             # staying live across the whole l_local reduction AND a separate cast/pack
