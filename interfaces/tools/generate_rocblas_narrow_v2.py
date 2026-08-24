@@ -11,7 +11,14 @@ import json
 from pathlib import Path
 
 
-CUSTOM = {"rocblas_create_handle", "rocblas_destroy_handle"}
+CUSTOM = {
+    "rocblas_create_handle",
+    "rocblas_destroy_handle",
+    "rocblas_get_pointer_mode",
+    "rocblas_get_stream",
+    "rocblas_set_pointer_mode",
+    "rocblas_set_stream",
+}
 REQUEST = {
     "vector_transform": "rocm_blas_v2_vector_transform_request",
     "vector_reduce": "rocm_blas_v2_vector_reduce_request",

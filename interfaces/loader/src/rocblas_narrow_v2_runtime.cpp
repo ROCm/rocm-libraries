@@ -131,4 +131,28 @@ rocblas_status rocblas_destroy_handle(rocblas_handle h) {
     delete h;
     return rocblas_status_success;
 }
+rocblas_status rocblas_set_stream(rocblas_handle h, hipStream_t stream) {
+    if (!h) return rocblas_status_invalid_handle;
+    h->stream = stream;
+    return rocblas_status_success;
+}
+rocblas_status rocblas_get_stream(rocblas_handle h, hipStream_t* stream) {
+    if (!h) return rocblas_status_invalid_handle;
+    if (!stream) return rocblas_status_invalid_pointer;
+    *stream = h->stream;
+    return rocblas_status_success;
+}
+rocblas_status rocblas_set_pointer_mode(rocblas_handle h, rocblas_pointer_mode mode) {
+    if (!h) return rocblas_status_invalid_handle;
+    if (mode != rocblas_pointer_mode_host && mode != rocblas_pointer_mode_device)
+        return rocblas_status_invalid_value;
+    h->pointer_mode = mode;
+    return rocblas_status_success;
+}
+rocblas_status rocblas_get_pointer_mode(rocblas_handle h, rocblas_pointer_mode* mode) {
+    if (!h) return rocblas_status_invalid_handle;
+    if (!mode) return rocblas_status_invalid_pointer;
+    *mode = h->pointer_mode;
+    return rocblas_status_success;
+}
 }
