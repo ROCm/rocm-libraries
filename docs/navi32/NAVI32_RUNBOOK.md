@@ -12,16 +12,21 @@ independent halves and they are **not** interchangeable:
 | half | mechanism | what it buys | cost |
 |---|---|---|---|
 | selection | `--sm_count_target 60` | kernel choice + StreamK grid as a 60-CU part | none |
-| execution | `HIPBLASLT_BENCH_CU_MASK=60` | real 60-CU timing (measured 62.4% vs ideal 62.5%) | **~37% of runs hang** |
+| execution | `HIPBLASLT_BENCH_CU_MASK=60` | real 60-CU timing (measured 62.4% vs ideal 62.5%) | **2.0% of runs hang** (see §2) |
 
 Neither emulates navi32's **memory system**: this card keeps ~960 GB/s and 96 MB Infinity
 Cache against navi32's 624 GB/s / 64 MB. Memory-bound shapes therefore look better than real
 navi32 no matter which half you use. Say so next to every memory-bound number.
 
-**Practical protocol:** run the full sweep with selection fidelity only (fast, 0 hangs), and
-validate the ranking on a smaller masked subset. Because every arm then runs on the same
-96 CUs, the execution error is common-mode and **arm ratios stay meaningful** — only absolute
-throughput is optimistic.
+**Practical protocol: use BOTH halves.** At a 2% hang rate a full 998-shape masked sweep costs
+~3 hours, which is affordable. This campaign's sweeps used selection fidelity only, on a hang
+rate estimated from 8 runs that turned out to be ~18x too high (§2) — the arm ratios survived
+that ([`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md): +22.7% at real 60 CUs vs
++25.7% at 96), but the premise went untested for the whole campaign, which was avoidable.
+
+If you do fall back to selection fidelity, every arm runs on the same 96 CUs, so the execution
+error is common-mode and **arm ratios stay meaningful** — only absolute throughput is
+optimistic. Validate on a masked subset before quoting anything.
 
 ## 1. CU masking — three traps, in the order you will hit them
 

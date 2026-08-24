@@ -39,10 +39,14 @@ recognise the architecture at all before (`arch_name_to_enum("gfx1101")` returne
 ## Three things worth knowing before extending this
 
 **It was developed on a gfx1100 part emulating navi32.** Selection is navi32-correct via
-`--sm_count_target 60`; execution ran on all 96 CUs because a real per-stream CU mask hangs
-~37% of runs. Arm *ratios* are sound (common-mode error) but absolute throughput is
-optimistic. ~73% of kernel time is compute-bound, so the result transfers despite the
-bandwidth difference — see the report's arithmetic-intensity section.
+`--sm_count_target 60`; the main sweeps executed on all 96 CUs, on a belief that a real
+per-stream CU mask hung ~37% of runs. **That rate was wrong — it is 2.0% over 1 242 runs** —
+and the premise has since been checked directly: at **genuine 60-CU execution** the catalog
+win is **+22.7% wall-clock / +25.2% geomean against a 0.11 pt A/A floor**, versus +25.7% on
+the same shapes at 96 CUs ([`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md)). Arm
+ratios were sound; absolute throughput is optimistic. ~73% of kernel time is compute-bound, so
+the result transfers despite the bandwidth difference — see the report's arithmetic-intensity
+section.
 
 **Three hypotheses were tested and rejected.** Do not retry them without new evidence:
 re-forking `WorkGroupMapping` for 60 CUs (null: 6/8/10 within 0.33 pt), switching to an
