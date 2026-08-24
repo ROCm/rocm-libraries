@@ -119,7 +119,7 @@ using index_t = int32_t;
 
 #if(LAYOUT_NHWC == 1)
 
-#ifdef USE_CHANNEL_BASED and \
+#if defined(USE_CHANNEL_BASED) && \
     !defined(EXTREME_LARGE) // Channel based execution with tiling, shared memory
 
 #ifndef LOCAL_MEM_SIZE

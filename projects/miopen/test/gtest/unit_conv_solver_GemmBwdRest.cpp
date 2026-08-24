@@ -138,6 +138,7 @@ auto GetConvTestCases(miopenDataType_t datatype)
         TestCase{{2, 3, 8, 16, 16}, {16, 3, 1, 3, 3}, {0, 1, 1}, {1, 1, 1}, {1, 1, 1}, datatype, datatype, datatype, miopenTensorNDHWC, miopenTensorNDHWC},
         TestCase{{1, 16, 10, 8, 8}, {16, 16, 3, 1, 1}, {1, 0, 0}, {1, 1, 1}, {1, 1, 1}, datatype, datatype, datatype, miopenTensorNDHWC, miopenTensorNDHWC},
         TestCase{{1, 4, 7, 9, 11}, {8, 4, 3, 2, 4}, {0, 1, 0}, {1, 2, 3}, {2, 1, 1}, datatype, datatype, datatype, miopenTensorNDHWC, miopenTensorNDHWC},
+        TestCase{{2, 8, 3, 3, 3}, {16, 8, 3, 3, 3}, {0, 0, 0}, {3, 3, 3}, {1, 1, 1}, datatype, datatype, datatype, miopenTensorNDHWC, miopenTensorNDHWC},
 
         TestCase{{2, 16, 5, 5, 5}, {32, 8, 1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, datatype, datatype, datatype, miopenTensorNDHWC, miopenTensorNDHWC, 2},
         TestCase{{1, 64, 7, 7, 7}, {16, 32, 1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, datatype, datatype, datatype, miopenTensorNDHWC, miopenTensorNDHWC, 2},
@@ -268,6 +269,20 @@ TEST_P(CPU_UnitTestConvSolverDevApplicabilityGemmBwdRestBwd_NONE, GemmBwdRest)
 {
     this->RunTest(miopen::solver::conv::GemmBwdRest{});
 };
+
+TEST(CPU_UnitTestConvSolverGemmBwdRestBwd_NONE, RejectsPackedLayout)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    const auto test_case = TestCase{
+        {1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, miopenFloat, miopenTensorNCHWc4};
+    const auto problem = test_case.GetProblemDescription(miopen::conv::Direction::BackwardData);
+    auto context       = miopen::ExecutionContext{&get_handle()};
+    problem.SetupFloats(context);
+    problem.SetupComputeType(context);
+
+    EXPECT_FALSE(miopen::solver::conv::GemmBwdRest{}.IsApplicable(context, problem));
+}
 
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
