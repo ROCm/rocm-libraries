@@ -201,12 +201,12 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
         zero_slot(slot_base, slot_bytes);
         if(!wave_active) // wave-uniform, so it skips every call or none of them
             return;
-        const int clamp_lo = max(0, -col_base);
-        const int clamp_hi = max(0, col_base + num_cols - w_dim);
-        const int tile_w   = num_cols - clamp_lo - clamp_hi;
-        const bool exists  = row >= 0 && row < h_dim && tile_w > 0;
-        const int row0     = exists ? row : 0;
-        const int col0     = exists ? col_base + clamp_lo : 0;
+        const int clamp_lo      = max(0, -col_base);
+        const int clamp_hi      = max(0, col_base + num_cols - w_dim);
+        const int tile_w        = num_cols - clamp_lo - clamp_hi;
+        const bool exists       = row >= 0 && row < h_dim && tile_w > 0;
+        const int row0          = exists ? row : 0;
+        const int col0          = exists ? col_base + clamp_lo : 0;
         const size_t addr_elems = ((size_t)n * h_dim + row0) * w_dim * (size_t)C_total +
                                   (size_t)col0 * (size_t)C_total + (size_t)chan_base;
         const unsigned long long gaddr =

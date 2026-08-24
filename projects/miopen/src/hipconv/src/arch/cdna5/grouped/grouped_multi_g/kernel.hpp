@@ -612,7 +612,7 @@ __device__ void conv2d_grouped_multi_g_nhwc_cdna5_impl(const ::ToType<DT>* __res
     // Per-col LDS stride is PER_COL_PADDED_BYTES (40B) due to TDM padding; the
     // clamp shift uses the padded stride, not raw G*sizeof.
     const unsigned row_lds_clamp_off = (unsigned)row_clamp_lo * PER_COL_PADDED_BYTES;
-    auto load_input_row = [&]<bool CheckBounds>(int y, unsigned slot) {
+    auto load_input_row              = [&]<bool CheckBounds>(int y, unsigned slot) {
         if constexpr(CheckBounds)
         {
             if(!wave_active || y < 0 || y >= hi || row_tile_w <= 0)
@@ -1233,7 +1233,7 @@ __device__ void conv2d_grouped_g32_nhwc_cdna5_impl(const ::ToType<DT>* __restric
     const unsigned long long row_stride_bytes =
         (unsigned long long)wi * (unsigned long long)C_total * sizeof(ElemT);
     const unsigned row_lds_clamp_off = (unsigned)row_clamp_lo * PER_COL_PADDED_BYTES;
-    auto load_input_row = [&]<bool CheckBounds>(int y, unsigned slot) {
+    auto load_input_row              = [&]<bool CheckBounds>(int y, unsigned slot) {
         if constexpr(CheckBounds)
         {
             if(!wave_active || y < 0 || y >= hi || row_tile_w <= 0)
