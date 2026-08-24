@@ -656,6 +656,7 @@ public:
         fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
     }
 
+    // BOOLEAN has no out-of-band value; its sentinel is true and cannot detect an unwritten mask.
     void fillWithSentinelValue() override
     {
         if constexpr(std::numeric_limits<T>::has_quiet_NaN)
