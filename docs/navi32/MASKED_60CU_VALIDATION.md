@@ -47,10 +47,14 @@ Restricting both regimes to the **same 206 shapes**:
 | **60-CU execution (this run)** | **125.7%** | **122.7%** | **99.9%** |
 | difference | **+0.1 pt** | **-2.9 pt** | |
 
-**Geomean is identical.** Wall-clock is 2.9 pt lower under real 60-CU execution — and note
-which measurement is the shakier one: the 96-CU sweep's *own* A/A control sat at **102.1%**,
-i.e. that run carried ~2 pt of arm-position drift, while this one carries 0.11 pt. Most of the
-2.9 pt gap is plausibly that drift rather than a genuine regime effect.
+**Geomean is identical.** Wall-clock is 2.9 pt lower under real 60-CU execution. The 96-CU
+sweep's *own* A/A control sat at **102.1%** — ~2 pt of arm-position drift against this run's
+0.11 pt — so for HHS alone, drift is a plausible explanation.
+
+> **It is not the explanation in general.** Once the other three ProblemTypes were measured
+> (below), BBS shows a **-3.2 pt** shift against a 96-CU A/A of just **100.18%**. Drift of
+> 0.18 pt cannot produce a 3.2 pt shift, so a real regime effect exists independently. See the
+> all-four table.
 
 Mechanically the residual makes sense too: **large shapes gain least (121.4%) and dominate
 wall-clock**, so any regime change that slightly favours large shapes moves the time-weighted
@@ -152,6 +156,40 @@ equivalent. A selector that used Origami above a size threshold and the table be
 plausibly capture both — the same problem-size predicate that an earlier campaign concluded
 needs a C++ row predicate rather than a catalog.
 
+
+## All four catalogs at real 60 CUs — the shipped wins hold
+
+HHS was validated first; the other three shipped catalogs still rested on the 96-CU regime.
+Measured on one shape per stratum (109 shapes, full stratum coverage), 3 arms x 2 reps each.
+Comparison is on the **identical shape subset** in both regimes.
+
+| PT | n | 96-CU wall | **60-CU wall** | shift | 96-CU A/A | 60-CU A/A |
+|---|---|---|---|---|---|---|
+| HHS | 206 | 125.7% | **122.7%** | -2.9 | 102.09% | 99.92% |
+| BBS | 109 | 124.1% | **120.8%** | -3.2 | 100.18% | 99.52% |
+| AuxH | 109 | 119.9% | **118.7%** | -1.2 | 100.35% | 99.56% |
+| AuxB | 109 | 117.4% | **117.4%** | +0.0 | 100.56% | 100.24% |
+
+**Every shipped catalog win survives genuine 60-CU execution** — +17.4% to +22.7% on these
+subsets, against the shipped +18.8% to +23.9% measured on the full 998 at 96 CUs.
+
+**The 96-CU regime overstates the win by 0 to 3.2 pt, never understates it.** That is not a
+uniform constant to subtract: three of four move down, AuxB is flat. But no ProblemType gains
+from the more faithful regime, so the shipped headline numbers should be read as a **ceiling**
+for a real 60-CU part, not a point estimate.
+
+Standalone 60-CU numbers from `analyze.py` (vs each catalog's own A/A floor):
+
+| PT | geomean | wall-clock | A/A wall |
+|---|---|---|---|
+| HHS | 125.22% | 122.71% | 99.89% |
+| BBS | 112.49% | 121.36% | 100.04% |
+| AuxH | 114.55% | 118.66% | 99.78% |
+| AuxB | 113.33% | 117.91% | 100.25% |
+
+**Caveat stated rather than buried:** the 96-CU sweeps ran `--reps 1` and these `--reps 2`. The
+contrast takes best-of-reps per shape, so more reps can only make the 60-CU arm look *better* —
+which means the measured shift is, if anything, conservative.
 
 ## Reproduce
 
