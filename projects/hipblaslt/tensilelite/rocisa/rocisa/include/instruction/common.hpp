@@ -2708,13 +2708,13 @@ namespace rocisa
 
     // s_wait_xcnt N drains in-flight VMEM ops to defeat XNACK-replay
     // reordering before a subsequent volatile/atomic VMEM op. Required on
-    // archs whose `RequiresXCntForVolatileVMEM` arch capability is set
-    // (e.g. gfx1250). The default `xcnt = 0` ("wait for all in-flight
-    // XNACK-replay tracking to drain") differs from the `-1` sentinel used
-    // by sibling `_SWait*cnt` classes because those are only emitted as
-    // members of the `SWaitCnt` composite (which uses `-1` to mean "skip
-    // this counter"); `SWaitXCnt` is a standalone wait, so the most useful
-    // default is the actual drain-everything immediate.
+    // archs whose `RequiresXCntForVolatileVMEM`/ `EnableXnackReplay` arch
+    // capability is set (e.g. gfx1250). The default `xcnt = 0` ("wait for
+    // all in-flight XNACK-replay tracking to drain") differs from the `-1`
+    // sentinel used by sibling `_SWait*cnt` classes because those are only
+    // emitted as members of the `SWaitCnt` composite (which uses `-1` to
+    // mean "skip this counter"); `SWaitXCnt` is a standalone wait, so the
+    // most usefuldefault is the actual drain-everything immediate.
     struct SWaitXCnt : public Instruction
     {
         SWaitXCnt(int xcnt = 0, const std::string& comment = "")

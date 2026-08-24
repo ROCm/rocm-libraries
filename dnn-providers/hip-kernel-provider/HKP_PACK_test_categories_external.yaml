@@ -21,6 +21,14 @@ test_categories:
       - "unit_test"
       - "hip-kernel-provider"
       - "host"
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks"
+    test_patterns:
+      - "hip-kernel-provider-hkp-pack-quick"
+    labels:
+      - "ffm-full"
+
   standard:
     description: "hkp descriptor-packaging pytest: full suite (real compile)"
     test_patterns:

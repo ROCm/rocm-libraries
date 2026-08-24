@@ -6484,8 +6484,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB))
 
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-          module.addComment1("local read reset offsets metadata")
-          module.add(self.localReadResetOffsets(kernel, tPM))
+          if needResetLROffsets or kernel["StreamK"]:
+            module.addComment1("local read reset offsets metadata")
+            module.add(self.localReadResetOffsets(kernel, tPM))
           module.addComment1("local read init pointers metadata")
           module.add(self.localReadInitPointers(kernel, tensorParametersA, tPM))
 
@@ -6867,6 +6868,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # s_wait_xcnt drains to order them.
                                "RequiresXCntForVolatileVMEM": bool(
                                    self.states.archCaps["RequiresXCntForVolatileVMEM"]),
+                               "EnableXnackReplay": bool(
+                                   self.states.archCaps["EnableXnackReplay"]),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.

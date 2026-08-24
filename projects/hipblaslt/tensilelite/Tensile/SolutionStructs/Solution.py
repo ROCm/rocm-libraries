@@ -59,7 +59,7 @@ from Tensile.Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
-from .Utilities import isSubtileIterateMode, reject, roundupRatio, pvar
+from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
@@ -3542,6 +3542,18 @@ class Solution(collections.abc.Mapping):
                 reject(state, printRejectionReason,
                        f"TDMIterateMode set for {tc} but LdsBlockSizePerPad{tc}=0; "
                        f"iterate-mode needs a non-zero pad block.")
+                return
+              # Iterate mode only exists to reach pad blocks the pad_interval field
+              # cannot encode. Up to the limit the plain pad_interval path produces
+              # the same layout with one descriptor and no walk, so a pad block that
+              # fits is a sign the iterate bit was set by mistake.
+              if (state.get("_TDMIterateMode%s" % tc, False)
+                  and val <= TDM_PAD_INTERVAL_LIMIT):
+                reject(state, printRejectionReason,
+                       f"TDMIterateMode set for {tc} but LdsBlockSizePerPad{tc}={val} "
+                       f"is within the {TDM_PAD_INTERVAL_LIMIT}B pad_interval limit, "
+                       f"which non-iterate mode already covers; clear the "
+                       f"TDMIterateMode bit for {tc}.")
                 return
               continue
             if val == 0: continue
