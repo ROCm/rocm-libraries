@@ -873,6 +873,28 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.codes.perIterGlobalRead[lateIter].add(late)
 
+  def _dcpApplyThickWait1(self, kernel, asm):
+    """Relax only waits immediately owned by the divergent thick header fill."""
+    if not self._dcpDivergent(kernel) or kernel.get("TDMFuse", 0) == 5:
+      return asm
+
+    lines = asm.splitlines(keepends=True)
+    changed = 0
+    for i, line in enumerate(lines):
+      if not re.match(r"^s_wait_tensorcnt\s+0(?:\s|$)", line):
+        continue
+      # StinkyTofu preserves the stage label even though it removes and
+      # reinserts tensor waits.  A wait within three instructions of this label
+      # is the thick header producer's consumer edge; thin late waits have a
+      # DcpLateFill label and remain full drains with their WG fence.
+      if any("DcpEarlyFill" in prev and prev.rstrip().endswith(":")
+             for prev in lines[max(0, i - 3):i]):
+        lines[i] = re.sub(r"^(s_wait_tensorcnt\s+)0(\s|$)", r"\g<1>2\2", line, count=1)
+        changed += 1
+
+    assert changed == 2,       "Henry wait1 expected two cloned thick-header waits, found %u" % changed
+    return "".join(lines)
+
   ##############################################################################
   # packItemsConditional: pack src items into dst items until numPack or searchString is found
   # returns number of items packed
@@ -7075,6 +7097,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if stModule is not None:
       t2_start = time.perf_counter()
       st_asm = stModule.emitAssembly()
+      st_asm = self._dcpApplyThickWait1(kernel, st_asm)
       t2_end = time.perf_counter()
       print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
 
