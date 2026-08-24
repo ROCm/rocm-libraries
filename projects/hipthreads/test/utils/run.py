@@ -154,12 +154,13 @@ def main():
     # A hipThreads test can hang (e.g. a hip::wthread whose persistent scheduler
     # never reaches the state join() waits for). Without a timeout, one hung test
     # would block the whole lit run until the CI job's global timeout, cancelling
-    # every later test. So we run the child in its own process group and kill the
-    # entire group if it exceeds HIPTHREADS_TEST_TIMEOUT seconds (default 30, 0 to
-    # disable). Using killpg to kill the whole process group (not just the
-    # immediate child like the timeout command) is required in case a test
-    # launches a sub-process. A timed-out test returns non-zero, which lit records
-    # as a normal FAIL/XFAIL instead of a hang.
+    # every later test. So we run the child in its own process group and tear that
+    # whole group down if it exceeds HIPTHREADS_TEST_TIMEOUT seconds (default 30, 0
+    # to disable). Killing the group rather than just the immediate child (as the
+    # timeout command would) is required in case a test launches a sub-process; the
+    # two platforms spell the group and the kill differently, see below. A timed-out
+    # test returns non-zero, which lit records as a normal FAIL/XFAIL instead of a
+    # hang.
     try:
         timeout = float(os.environ.get("HIPTHREADS_TEST_TIMEOUT", "30"))
     except ValueError:
