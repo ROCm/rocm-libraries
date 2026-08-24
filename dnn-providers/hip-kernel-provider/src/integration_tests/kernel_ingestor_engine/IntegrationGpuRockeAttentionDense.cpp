@@ -318,9 +318,17 @@ TEST_F(IntegrationGpuRockeAttentionDense, DeclinesAGraphWhoseLayoutItCannotServe
     auto result = graph->build_operation_graph(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
+    // Both outcomes mean the same thing here: rocKE is not in the ranking. Which one
+    // occurs depends on whether any OTHER engine claims a BHSD SDPA graph on this
+    // device, which is not this test's subject. On gfx942 today nothing else does, so
+    // ranking reports GRAPH_NOT_SUPPORTED and returns an empty list -- the arch gate in
+    // SetUp cannot help, because the device is right and it is the LAYOUT being refused.
     std::vector<int64_t> rankedEngineIds;
     result = graph->get_ranked_engine_ids(rankedEngineIds);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_TRUE(result.code == ErrorCode::OK || result.code == ErrorCode::GRAPH_NOT_SUPPORTED)
+        << "expected either a ranking without the rocKE engine, or no supported engine at "
+           "all; got "
+        << result.err_msg;
 
     EXPECT_EQ(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), rockeEngineId()),
               rankedEngineIds.end())
