@@ -306,10 +306,38 @@ pool contributes the entire +20.5%. Flat at every jackknife depth and in every s
 
 **This corrects the mental model, not the conclusion.** "The win is the catalog" stands — but
 the mechanism is *coverage*, not *mapping quality*. The thin catalog is slow because the pool
-does not contain a well-sized tile for the shape, and no re-mapping can conjure one. Someone
-tuning these architectures should **add kernels, not re-run the shape-table fit** — which is
+does not contain a well-sized tile for the shape, and no re-mapping can conjure one — which is
 also why gfx1153's mapping pass (a real one: ~940 of its 472 rows differ) bought nothing
 measurable.
+
+> ### Correction: "do not re-fit the table" was too strong
+>
+> I originally wrote that the table contributes nothing and that one should **"add kernels, not
+> re-run the shape-table fit"**. That over-generalised from a thin pool to every pool, and the
+> follow-up experiment shows it is wrong for the pool that actually ships.
+>
+> Holding the *pool* at 306 solutions and sparsifying only the *table* — 9 692 rows down to 471,
+> stratified so all 306 solutions stay reachable (a naive random subsample reaches only 160 of
+> 306 and would confound the two variables):
+>
+> | arm | pool | table | wall-clock |
+> |---|---|---|---|
+> | `wide` | 306 | 9 692 | 100% |
+> | A/A control | — | — | 100.38% |
+> | **`wsparse`** | **306** | **471** | **96.62%** |
+> | `thin` | 64 | 471 | 82.84% |
+>
+> So the 17.2 pt gap decomposes roughly **80/20**:
+> **pool 13.8 pt, table 3.4 pt** — the table effect is ~9x the A/A floor, so it is real.
+>
+> **Both results hold; they are conditional on each other.** Over a *thin* pool the table is
+> worthless (99.79% vs a 99.70% control) — there is nothing worth pointing at, so a denser
+> lookup cannot help. Over a *rich* pool it is worth ~3.4 pt. The table's value is a function of
+> the pool's, which is precisely what a single experiment at one pool size could not show.
+>
+> Corrected advice: **widen the pool first — it is ~4x the lever — then the table fit becomes
+> worth doing.** By size, the table matters most on tiny shapes (91.4%) and not at all on small
+> (100.0%).
 
 **Caveat, stated because it cuts both ways.** gfx1153's table was fitted for gfx1153, not for
 this configuration, so this is not a test of an *optimally* fitted table. But note the result is
