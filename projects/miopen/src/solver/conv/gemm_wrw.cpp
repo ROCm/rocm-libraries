@@ -182,6 +182,8 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
 #if MIOPEN_USE_GEMM
     if(!GemmWrwBase::IsApplicable(context, problem))
         return false;
+    if(!problem.IsLayoutDefault())
+        return false;
 
     const auto& dwDesc = problem.GetWeights();
     const auto& conv   = problem.GetConv();

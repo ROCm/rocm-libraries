@@ -77,6 +77,21 @@ TEST_P(CPU_UnitTestConvSolverGemmWrw1x1Stride1DevApplicabilityWrw_NONE, GemmWrw1
     this->RunTest(miopen::solver::conv::GemmWrw1x1_stride1{});
 };
 
+TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NHWCUsesUniversalSolver)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    const auto test_case =
+        TestCase{{1, 8, 8, 8}, {8, 8, 1, 1}, {0, 0}, {1, 1}, {1, 1}, miopenFloat, miopenTensorNHWC};
+    const auto problem = test_case.GetProblemDescription(miopen::conv::Direction::BackwardWeights);
+    auto context       = miopen::ExecutionContext{&get_handle()};
+    problem.SetupFloats(context);
+    problem.SetupComputeType(context);
+
+    EXPECT_FALSE(miopen::solver::conv::GemmWrw1x1_stride1{}.IsApplicable(context, problem));
+    EXPECT_TRUE(miopen::solver::conv::GemmWrwUniversal{}.IsApplicable(context, problem));
+}
+
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP16,

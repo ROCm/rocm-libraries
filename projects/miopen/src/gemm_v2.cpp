@@ -9,7 +9,6 @@
 #include <miopen/handle.hpp>
 #include <miopen/datatype.hpp>
 #include <miopen/hipoc_kernel.hpp>
-#include <unistd.h>
 
 #if MIOPEN_USE_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
@@ -705,8 +704,6 @@ miopenStatus_t CallGemm(const Handle& handle,
         switch(gemm_desc.dataType)
         {
         case miopenInt8: {
-            // assert(gemm_desc.k % 4 == 0);
-
             auto alpha = int(gemm_desc.alpha);
             auto beta  = int(gemm_desc.beta);
 
@@ -1819,8 +1816,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const conv::ProblemDescription& p
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
     int k           = wei_k;
     int lda         = m;
-    int ldb = problem.IsLayoutNHWC() ? k : n;
-    int ldc = problem.IsLayoutNHWC() ? m : n;
+    int ldb         = problem.IsLayoutNHWC() ? k : n;
+    int ldc         = problem.IsLayoutNHWC() ? m : n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(0);
@@ -2264,8 +2261,8 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const conv::ProblemDescripti
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
     int k           = wei_k / groupCount;
     int lda         = m;
-    int ldb = problem.IsLayoutNHWC() ? groupCount * k : n;
-    int ldc = problem.IsLayoutNHWC() ? m : n;
+    int ldb         = problem.IsLayoutNHWC() ? groupCount * k : n;
+    int ldc         = problem.IsLayoutNHWC() ? m : n;
     int batch_count = groupCount;
     auto strideA    = static_cast<long long>(m) * k;
     auto strideB    = problem.IsLayoutNHWC() ? k : static_cast<long long>(k) * n;
@@ -2316,11 +2313,11 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const conv::ProblemDescrip
     bool transA     = problem.IsLayoutNHWC();
     bool transB     = !problem.IsLayoutNHWC();
     int m           = wei_k / group_count;
-    int n           = (in_c / group_count) *
-            static_cast<int>(std::accumulate(wei_spatial.begin(),
-                                             wei_spatial.end(),
-                                             std::size_t{1},
-                                             std::multiplies<std::size_t>()));
+    int n =
+        (in_c / group_count) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                wei_spatial.end(),
+                                                                std::size_t{1},
+                                                                std::multiplies<std::size_t>()));
     int k           = static_cast<int>(std::accumulate(
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
     int lda         = problem.IsLayoutNHWC() ? m * group_count : k;

@@ -49,6 +49,8 @@ float Im2d2ColGPU(const Handle& handle,
         "_" + std::to_string(in_w) +
         "w" + std::to_string(wei_h) +
         "_" + std::to_string(wei_w) +
+        "o" + std::to_string(out_h) +
+        "_" + std::to_string(out_w) +
         "p" + std::to_string(pad_h) +
         "_" + std::to_string(pad_w) +
         "s" + std::to_string(stride_h) +
@@ -64,7 +66,7 @@ float Im2d2ColGPU(const Handle& handle,
 
     const int data_size_bound = c * in_h * in_w;
 
-    if(!kernels.empty())
+    if(!kernels.empty() && layoutNHWC)
     {
         auto kernel = kernels.front();
         kernel(data_size_bound,
@@ -90,10 +92,7 @@ float Im2d2ColGPU(const Handle& handle,
 
         std::string params;
 
-        auto add_params = [&](std::string param) {
-            params += param;
-            network_config += param;
-        };
+        auto add_params = [&](const std::string& param) { params += param; };
         int num_ch_per_wg;
         if((out_h <= 8 && out_w <= 8) && (stride_h == 1 && stride_w == 1) && (c_pack % 4 == 0))
             num_ch_per_wg = 4;
@@ -167,7 +166,8 @@ float Im2d2ColGPU(const Handle& handle,
                 }
             }
         }
-        add_params(" -DLOCAL_MEM_SIZE=" + std::to_string(local_mem_sz));
+        if(!layoutNHWC)
+            add_params(" -DLOCAL_MEM_SIZE=" + std::to_string(local_mem_sz));
         add_params(" -DSTRIDE_GT_1=" + std::to_string(static_cast<int>(stride_h * stride_w > 1)));
         add_params(" -DNUM_IM_BLKS_EQ_1=" + std::to_string(static_cast<int>(num_blks == 1)));
         add_params(" -DUSE_IM_OFF_GUARD=1"); // always one
@@ -261,15 +261,14 @@ float Im2d2ColGPU(const Handle& handle,
 
             if(use_channel_based)
             {
-                add_params(" -DUSE_CHANNEL_BASED");
-
                 const int tile_out_h            = 16;
                 const int tile_out_w            = 16;
-                const int max_local_memory_size = 65536;
+                const int max_local_memory_size = MAX_LOCAL_MEM;
 
-                int im_rows_wg        = (tile_out_h * stride_h) + (wei_h - 1) * dilation_h;
-                int im_cols_wg        = (tile_out_w * stride_w) + (wei_w - 1) * dilation_w;
-                int local_memory_size = im_rows_wg * im_cols_wg * get_data_size(type);
+                const int im_rows_wg = (tile_out_h - 1) * stride_h + (wei_h - 1) * dilation_h + 1;
+                const int im_cols_wg = (tile_out_w - 1) * stride_w + (wei_w - 1) * dilation_w + 1;
+                const int local_memory_elements = im_rows_wg * im_cols_wg;
+                const int local_memory_size     = local_memory_elements * get_data_size(type);
 
                 if(local_memory_size > max_local_memory_size)
                 {
@@ -278,6 +277,8 @@ float Im2d2ColGPU(const Handle& handle,
                 }
                 else
                 {
+                    add_params(" -DUSE_CHANNEL_BASED");
+                    add_params(" -DLOCAL_MEM_SIZE=" + std::to_string(local_memory_elements));
                     add_params(" -DTILE_OUT_H=" + std::to_string(tile_out_h));
                     add_params(" -DTILE_OUT_W=" + std::to_string(tile_out_w));
 
@@ -401,7 +402,7 @@ float Im2d2ColGPU(const Handle& handle,
             assert(vgd.size() == 3);
 
             handle.AddKernel(
-                "miopenIm2Col", network_config, program_name, kernel_name, vld, vgd, params)(
+                "miopenIm2d2Col", network_config, program_name, kernel_name, vld, vgd, params)(
                 data_size_bound,
                 im,
                 im_offset,
@@ -425,7 +426,7 @@ float Im2d2ColGPU(const Handle& handle,
         {
             const std::vector<size_t> vgd{global_threads, 1, 1};
             handle.AddKernel(
-                "miopenIm2Col", network_config, program_name, kernel_name, vld, vgd, params)(
+                "miopenIm2d2Col", network_config, program_name, kernel_name, vld, vgd, params)(
                 data_size_bound,
                 im,
                 im_offset,
