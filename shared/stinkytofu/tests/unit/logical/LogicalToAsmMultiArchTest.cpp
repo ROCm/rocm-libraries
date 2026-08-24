@@ -666,10 +666,12 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VLShiftLeftAddU32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VAddNCU64:
             return VAddNCU64(vgpr(0), vgpr(1), vgpr(2));
+        // Lane select must be scalar (ssrc); v_readlane writes an SGPR and
+        // v_writelane reads its data operand from one.
         case logical::VReadlaneB32:
-            return VReadlaneB32(vgpr(0), vgpr(1), vgpr(2));
+            return VReadlaneB32(sgpr(0), vgpr(1), sgpr(2));
         case logical::VWritelaneB32:
-            return VWritelaneB32(vgpr(0), vgpr(1), vgpr(2));
+            return VWritelaneB32(vgpr(0), sgpr(1), sgpr(2));
         case logical::VPermlane16SwapB32:
             return VPermlane16SwapB32(vgpr(0), vgpr(1));
         case logical::VPermlane32SwapB32:
@@ -866,6 +868,8 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::VLShiftRightB64, "v_lshrrev_b64"},
     // Vector Other
     {logical::VReadfirstlaneB32, "v_readfirstlane_b32"},
+    {logical::VReadlaneB32, "v_readlane_b32"},
+    {logical::VWritelaneB32, "v_writelane_b32"},
     // Scalar Compare
     {logical::SCmpEQI32, "s_cmp_eq_i32"},
     {logical::SCmpEQU32, "s_cmp_eq_u32"},
@@ -1112,8 +1116,6 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         logical::SCmpKGtU32,
         logical::SCmpKLGU32,
         logical::SFlbitI32B32,
-        logical::VReadlaneB32,
-        logical::VWritelaneB32,
         logical::VPermlane16SwapB32,
         logical::VPermlane32SwapB32,
         logical::BufferLoadB16,
@@ -1354,6 +1356,76 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions) {
         EXPECT_EQ(numSrcs, 4) << "TensorLoadToLds with optional sources: Expected 4 operands";
         if (numSrcs == 4) {
             std::cout << "  ? TensorLoadToLds with 4 sources (optional) works correctly\n";
+        }
+    }
+}
+
+/**
+ * @brief Lane-select instructions lower with an immediate lane index
+ *
+ * AllInstructionsAllArchitectures builds these with an SGPR lane select. The
+ * auto-WGMXCC path (WorkGroupMappingXCC: -1) instead passes a compile-time lane
+ * index, so the ssrc operand arrives as a literal rather than a register. That
+ * form skips the register type check entirely, so cover it here as well.
+ */
+TEST(LogicalToAsmComprehensive, LaneSelectImmediateLowering) {
+    std::cout << "\n=== Lane-Select Immediate Test ===\n";
+
+    struct LaneCase {
+        const char* name;
+        LogicalInstruction* (*build)();
+        const char* expectedMnemonic;
+    };
+
+    std::vector<LaneCase> cases = {
+        {"VReadlaneB32", [] { return VReadlaneB32(sgpr(0), vgpr(1), literal(1)); },
+         "v_readlane_b32"},
+        {"VWritelaneB32", [] { return VWritelaneB32(vgpr(0), sgpr(1), literal(1)); },
+         "v_writelane_b32"},
+    };
+
+    for (const auto& c : cases) {
+        Function func("kernel");
+        BasicBlock* bb = func.createBasicBlock("test");
+
+        PassManager pm;
+        GemmTileConfig config;
+        config.arch = {12, 5, 0};
+        config.TileA0 = 16;
+        config.TileB0 = 16;
+        config.TileM0 = 16;
+        config.NumGRA = 4;
+        config.NumGRB = 4;
+        config.NumGRM = 4;
+        config.NumWaves = 1;
+        pm.setGemmTileConfig(config);
+
+        bb->appendIR(static_cast<IRBase*>(c.build()));
+
+        pm.addPass(createCompositeInstructionLoweringPass());
+        pm.addPass(createToStinkyAsmPass());
+        pm.run(func);
+
+        size_t stinkyInsts = 0;
+        std::string actualMnemonic;
+        for (BasicBlock& block : func) {
+            for (IRBase& ir : block) {
+                if (ir.getType() == IRBase::IRType::StinkyTofu) {
+                    stinkyInsts++;
+                    actualMnemonic =
+                        static_cast<StinkyInstruction*>(&ir)->getHwInstDesc()->mnemonic;
+                }
+            }
+        }
+
+        EXPECT_GT(stinkyInsts, 0) << "gfx1250: " << c.name
+                                  << " with immediate lane select failed to lower";
+        if (stinkyInsts > 0) {
+            EXPECT_EQ(actualMnemonic, c.expectedMnemonic)
+                << c.name << ": Expected mnemonic '" << c.expectedMnemonic << "', got '"
+                << actualMnemonic << "'";
+            std::cout << "  ? " << c.name << " lowered with immediate lane select"
+                      << " (mnemonic: " << actualMnemonic << ")\n";
         }
     }
 }
