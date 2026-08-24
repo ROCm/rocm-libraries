@@ -372,10 +372,7 @@ static void test_fp8_guards(void)
         spec = fp8_spec();
         rocke_fused_mega_kernel_spec_fp8_post_init(&spec);
         ll = fp8_lower(&spec, wave32_arches[i], err, sizeof(err));
-        snprintf(needle,
-                 sizeof(needle),
-                 "spec wave_size 64 != %s wave_size 32",
-                 wave32_arches[i]);
+        snprintf(needle, sizeof(needle), "spec wave_size 64 != %s wave_size 32", wave32_arches[i]);
         if(ll != NULL)
         {
             free(ll);

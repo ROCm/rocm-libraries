@@ -99,9 +99,7 @@ def mega_lds_pool_bytes(allocs: Sequence[LdsAlloc]) -> int:
     return (end + 15) & ~15
 
 
-def validate_mega_lds_budget(
-    allocs: Sequence[LdsAlloc], arch: str
-) -> Tuple[bool, str]:
+def validate_mega_lds_budget(allocs: Sequence[LdsAlloc], arch: str) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a mega's total LDS against ``arch``'s budget."""
     from ...core.arch import ArchTarget
 
