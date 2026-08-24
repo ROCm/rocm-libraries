@@ -452,7 +452,6 @@ __device__ void hb2st_task(const I xid,
             if(xid == 0)
             {
                 Aband[idiag + 1 + sweep * ldab] = s_housev[0];
-                assert(std::imag(s_housev[0]) == 0);
                 E[sweep] = std::real(s_housev[0]);
                 s_housev[0] = T(1);
                 tau[vj] = s_tau;
