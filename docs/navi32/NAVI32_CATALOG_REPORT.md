@@ -7,6 +7,11 @@ Written incrementally, one section per phase, so a crash preserves findings.
 
 ## Summary
 
+> **All four re-validated at genuine 60-CU execution** (2026-08-25): the wins hold —
+> HHS +22.7%, BBS +20.8%, AuxH +18.7%, AuxB +17.4% on stratified subsets. The 96-CU regime
+> used below **overstates by 0 to 3.2 pt and never understates**, so read the headline figures
+> as a *ceiling* for a real 60-CU part. [`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md).
+
 **Shipped: all four of navi32's thin TN catalogs widened, +18.8% to +23.9% wall-clock**, on
 branch `vmijovic/navi32` (18 commits, pushed). All four measured, not inferred.
 
