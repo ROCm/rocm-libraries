@@ -22,9 +22,10 @@
 
 CMAKE_MINIMUM_REQUIRED( VERSION 3.16 )
 
-project( hipfft-clients-samples-rocfft LANGUAGES CXX )
-
-# We use C++20 features, this will add compile option: -std=c++20
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( hipfft-clients-samples-rocfft LANGUAGES CXX )
+endif()
+  
 set( CMAKE_CXX_STANDARD 20 )
 
 if( NOT TARGET hipfft )
@@ -83,7 +84,6 @@ foreach( sample ${sample_list} )
     PRIVATE
     $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
     ${HIP_ROOT_DIR}
     )
   
