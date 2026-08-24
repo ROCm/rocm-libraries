@@ -59,7 +59,7 @@ derive_slug() {
 emit_json() {
   local out_file="$1"
   PF_OUT_FILE="$out_file" python3 - <<'PY'
-import json, os
+import json, os, tempfile
 
 def val(name):
     v = os.environ.get(name, "")
@@ -101,14 +101,20 @@ data = {
 }
 
 out = os.environ["PF_OUT_FILE"]
-tmp = out + ".tmp"
+directory = os.path.dirname(out) or "."
+fd, tmp = tempfile.mkstemp(prefix=".env.json.tmp.", dir=directory)
 try:
-    with open(tmp, "w") as fh:
+    with os.fdopen(fd, "w") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)
         fh.write("\n")
         fh.flush()
         os.fsync(fh.fileno())
     os.replace(tmp, out)  # atomic; never truncates a prior valid env.json on failure
+    dir_fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
 except Exception:
     try:
         os.unlink(tmp)
@@ -148,6 +154,7 @@ ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
 if [[ -z "$ROOT" ]]; then
   ROOT="$(cd "$SCRIPT_DIR/../../../../../../.." && pwd)"
 fi
+ROOT="$(readlink -f -- "$ROOT")" || die "cannot canonicalize repository root"
 cd "$ROOT" || die "cannot cd to repo root: $ROOT"
 
 SLUG="$(derive_slug "$MODULE")"
@@ -158,7 +165,19 @@ if [[ -z "$OUT" ]]; then
 fi
 
 # ------------------------------------------------------------ source dir check
+[[ "$SRC" == /* ]] || SRC="$ROOT/$SRC"
 [[ -d "$SRC" ]] || die "source dir missing: $SRC (cwd=$ROOT)"
+SRC="$(readlink -f -- "$SRC")" || die "cannot canonicalize source dir: $SRC"
+case "$SRC" in
+  "$ROOT"|"$ROOT"/*) ;;
+  *) die "source dir must be inside the current Git worktree: $SRC" ;;
+esac
+SOURCE_GIT_ROOT="$(git -C "$SRC" rev-parse --show-toplevel 2>/dev/null)" \
+  || die "source dir is not in a Git worktree: $SRC"
+SOURCE_GIT_ROOT="$(readlink -f -- "$SOURCE_GIT_ROOT")" \
+  || die "cannot canonicalize source Git root"
+[[ "$SOURCE_GIT_ROOT" == "$ROOT" ]] \
+  || die "source dir belongs to a different Git worktree: $SRC"
 
 # --------------------------------------------------------------- docker checks
 command -v docker >/dev/null 2>&1 || die "docker is unavailable (binary not found)"
@@ -171,13 +190,27 @@ docker inspect --type container "$CONTAINER" >/dev/null 2>&1 \
 # file (e.g. a new characterization test) is NOT dirty tracked source. This is
 # tracked-source-clean, not worktree-clean, so sync/ and work/ artifacts (both
 # outside $SRC, and untracked) never count.
+INDEX_FLAGS_OUTPUT="$(git -C "$SRC" ls-files -v -- . 2>/dev/null)" \
+  || die "could not inspect source index flags: $SRC"
+while IFS= read -r index_entry; do
+  [[ -n "$index_entry" ]] || continue
+  index_tag="${index_entry:0:1}"
+  case "$index_tag" in
+    S|[a-z])
+      die "tracked source uses skip-worktree or assume-unchanged: ${index_entry:2}"
+      ;;
+  esac
+done <<< "$INDEX_FLAGS_OUTPUT"
+
 DIRTY_FILES=""
+STATUS_OUTPUT="$(git -C "$SRC" status --porcelain -- . 2>/dev/null)" \
+  || die "could not inspect tracked source state: $SRC"
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
   status="${line:0:2}"
   [[ "$status" == "??" ]] && continue          # untracked -> not dirty source
   DIRTY_FILES+="${line:3}"$'\n'
-done < <(git status --porcelain -- "$SRC" 2>/dev/null || true)
+done <<< "$STATUS_OUTPUT"
 
 if [[ -n "$DIRTY_FILES" ]]; then
   printf 'slice-preflight: ERROR: tracked source is dirty under %s:\n' "$SRC" >&2
@@ -187,8 +220,10 @@ fi
 TRACKED_CLEAN="true"
 
 # --------------------------------------------------------- gather source facts
-SHA="$(git -C "$SRC" rev-parse HEAD 2>/dev/null || true)"
-BRANCH="$(git -C "$SRC" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+SHA="$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" \
+  || die "could not resolve source HEAD: $SRC"
+BRANCH="$(git -C "$SRC" rev-parse --abbrev-ref HEAD 2>/dev/null)" \
+  || die "could not resolve source branch: $SRC"
 
 # ------------------------------------------------------ gather container facts
 CONTAINER_STATUS="$(docker inspect --type container "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || true)"
@@ -200,13 +235,14 @@ if [[ -n "$IMAGE_ID" ]]; then
 fi
 
 # mutmut version: best-effort. A stopped container -> null (do NOT start it, do
-# NOT fail). Take the last whitespace token of the output (mutmut prints e.g.
-# "mutmut version 3.6.0" or just the version).
+# NOT fail). Read package metadata instead of invoking mutmut's CLI: supported
+# mutmut 3.x releases do not provide a reliable, non-interactive version flag.
 MUTMUT_VERSION=""
 if [[ "$CONTAINER_STATUS" == "running" ]]; then
-  raw_ver="$(docker exec "$CONTAINER" sh -lc 'mutmut version 2>/dev/null || mutmut --version 2>/dev/null' 2>/dev/null || true)"
-  raw_ver="$(printf '%s' "$raw_ver" | tr -d '\r' | tail -n1)"
-  MUTMUT_VERSION="${raw_ver##* }"
+  MUTMUT_VERSION="$(docker exec "$CONTAINER" \
+    /opt/tl-mut/mutation-unit/bin/python -c \
+    'from importlib.metadata import version; print(version("mutmut"))' \
+    2>/dev/null | tr -d '\r' | tail -n1 || true)"
 fi
 
 # ---------------------------------------------------------------- emit artifact

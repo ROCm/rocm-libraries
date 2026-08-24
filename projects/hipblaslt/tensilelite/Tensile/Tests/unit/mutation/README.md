@@ -7,10 +7,11 @@ These scripts provide the safety-critical foundation for a serial mutmut run:
 - `pyproject-mutmut.sh` backs up, rewrites, restores, and verifies the
   `[tool.mutmut]` configuration in `pyproject.toml`.
 - `mutmut-verify.sh` proves individual kills by running one pytest node against
-  clean and mutated source, then restoring the source file.
+  clean and mutated source, then restoring every detected mutation change.
 
-Mutmut itself runs without these wrappers. The wrappers preserve the
-TensileLite-specific campaign contract across reruns:
+Mutmut itself runs without these wrappers. The wrappers add the following
+TensileLite-specific reproducibility and safety guarantees across repeated
+runs:
 
 - record the exact source, container image, and mutmut version used;
 - change per-slice pyproject selections without leaving tracked changes;
@@ -22,33 +23,42 @@ TensileLite-specific campaign contract across reruns:
 
 ## Platform support
 
-The supported campaign environment is Linux or WSL, normally using the mutation
-Docker container. Mutmut 3.6 does not support native Windows: it exits with a
-request to use WSL and relies on `fork`, Unix resource limits, and Unix signals.
-These Bash helpers therefore do not reduce the supported platform set for the
-actual mutation run. Native PowerShell execution is not supported.
+Mutmut requires a Linux environment. On Windows, use Windows Subsystem for
+Linux (WSL) or another Linux environment; native Windows and PowerShell are
+unsupported because mutmut 3.6 relies on `fork`, Unix resource limits, and Unix
+signals. The documented workflow normally runs in Docker.
+
+Docker is not required for ordinary TensileLite tests, and mutmut itself can run
+in any compatible Linux environment with rocisa installed. The
+`mutation-unit` tox environment is opt-in and is not part of tox's default
+environment list. Of the helpers in this directory, `pyproject-mutmut.sh` runs
+on the host, while the current `slice-preflight.sh` and `mutmut-verify.sh`
+implementations require a named Docker container.
 
 Run all examples from the `rocm-libraries` repository root. The repository does
-not publish a prebuilt `tl-mut` image: `tl-mut` is a user-provisioned ROCm
-development container. Build the starting image from the hipBLASLt Dockerfile,
-mount the current worktree at `/work`, and provision the mutation tox environment
-as follows:
+not publish a prebuilt image. Build the dedicated mutation image, mount the
+current worktree read-write at `/work`, and provision the mutation tox
+environment and rocisa from that mounted revision:
 
 ```bash
-docker build -t hipblaslt-dev projects/hipblaslt/docker
+docker build \
+  -f projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/Dockerfile \
+  -t hipblaslt-mutation \
+  projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation
 
 docker run -d --name tl-mut \
   --mount type=bind,source="$(pwd -P)",target=/work \
-  --workdir /work/projects/hipblaslt/tensilelite \
-  --env PATH=/work/projects/hipblaslt/tensilelite/.tox/mutation-unit/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  hipblaslt-dev sleep infinity
+  hipblaslt-mutation
 
-docker exec tl-mut python3 -m pip install tox
-docker exec -w /work/projects/hipblaslt/tensilelite tl-mut \
-  tox -e mutation-unit --notest
-docker exec -w /work/projects/hipblaslt/tensilelite tl-mut \
-  .tox/mutation-unit/bin/pip install ./rocisa
+docker exec tl-mut /opt/tl-mut-tools/bin/tox -e mutation-unit --notest
+docker exec tl-mut \
+  /opt/tl-mut/mutation-unit/bin/pip install ./rocisa
 ```
+
+The image contains the ROCm, Python, native-build, and tox bootstrap tooling,
+but it does not copy or clone the repository. Its default working directory is
+the mounted TensileLite project, and it keeps the mutation tox environment at
+`/opt/tl-mut/mutation-unit` so dependencies are not written into the worktree.
 
 The `/work` mount must point to the same worktree passed through `--root` (or the
 current worktree when `--root` is omitted). `mutmut-verify.sh` rejects a missing,
@@ -57,8 +67,9 @@ that a different tree was restored. Replace `tl-mut` when using another containe
 
 ## 1. Record preflight state
 
-The preflight command is read-only. It requires a clean tracked source tree and
-an existing Docker container. Untracked mutation output does not fail the check.
+The preflight command is read-only with respect to source; it writes only its
+`env.json` output. It requires a clean tracked source tree and an existing
+Docker container. Untracked mutation output does not fail the check.
 
 ```bash
 bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/slice-preflight.sh \
@@ -83,7 +94,8 @@ writing a new artifact.
 
 ## 2. Configure a mutation slice safely
 
-Back up the complete project file before changing the mutmut selection:
+Start a transaction by backing up the complete project file before changing the
+mutmut selection:
 
 ```bash
 bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
@@ -93,8 +105,16 @@ bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut
 Expected output:
 
 ```text
-pyproject-mutmut: backup projects/hipblaslt/tensilelite/pyproject.toml -> work/mutation/pyproject.toml.bak
+pyproject-mutmut: backup <absolute-source>/pyproject.toml -> <absolute-backup>/pyproject.toml.bak
+pyproject-mutmut: metadata <absolute-backup>/pyproject.toml.bak.meta.json
 ```
+
+The backup records the source path, current Git `HEAD`, original file hash and
+mode, and the hash and mode produced by each successful `set`. An existing
+backup is not overwritten: complete the active transaction before starting
+another one. `set` rejects a stale or unrelated source state and atomically
+replaces the project file only after generating and validating the complete
+result.
 
 Set one or more source modules and pytest selections:
 
@@ -110,7 +130,7 @@ Expected output:
 
 ```text
 pyproject-mutmut: set rewrote only_mutate, pytest_add_cli_args_test_selection
-pyproject-mutmut: set OK in projects/hipblaslt/tensilelite/pyproject.toml
+pyproject-mutmut: set OK in <absolute-source>/pyproject.toml
 ```
 
 Do not restore the backup yet. Run and inspect the slice first.
@@ -120,17 +140,29 @@ Do not restore the backup yet. Run and inspect the slice first.
 Run the configured slice in the container. Always bound worker count; the
 committed timeout multiplier assumes no more than 32 concurrent children.
 
-The supported tox entry point applies the same cap by default:
+The supported tox entry point runs the complete campaign and applies the same
+cap by default:
 
 ```bash
-tox -e mutation-unit
+docker exec tl-mut /opt/tl-mut-tools/bin/tox -e mutation-unit
 ```
+
+Alternatively, after provisioning the environment, invoke mutmut directly:
 
 ```bash
 docker exec \
   -w /work/projects/hipblaslt/tensilelite \
   tl-mut \
   mutmut run --max-children 32
+```
+
+For an intentionally smaller campaign, pass the environment variable into the
+container when using tox, or pass a lower `--max-children` value directly.
+Values above the reviewed default of 32 are unsupported:
+
+```bash
+docker exec -e MUTMUT_MAX_CHILDREN=8 tl-mut \
+  /opt/tl-mut-tools/bin/tox -e mutation-unit
 ```
 
 `mutmut run` renders interactive progress while it collects tests, generates
@@ -160,11 +192,41 @@ docker exec \
   mutmut run Tensile.Common.Utilities.x__mutmut_1 --max-children 1
 ```
 
-## 4. Verify survivor-killing tests
+## 4. Restore the mutation configuration
+
+After the mutmut run, restore the byte-exact backup and verify that
+`pyproject.toml` matches `HEAD` before running the survivor verifier, which
+requires a clean tracked worktree. Restore validates the transaction's source
+path, Git `HEAD`, recorded hashes, and file mode first; it refuses to overwrite
+unrelated edits or use a stale backup:
+
+```bash
+bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
+  restore --src projects/hipblaslt/tensilelite
+
+bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
+  assert-clean --src projects/hipblaslt/tensilelite
+```
+
+Expected output:
+
+```text
+pyproject-mutmut: restore <absolute-backup>/pyproject.toml.bak -> <absolute-source>/pyproject.toml
+pyproject-mutmut: cleared backup transaction
+pyproject-mutmut: assert-clean OK (pyproject.toml == HEAD)
+```
+
+## 5. Verify survivor-killing tests
 
 `mutmut-verify.sh` changes tracked source while each mutant is active. Run only
-one verifier at a time. The exit trap restores the active manifest target after
-interruption.
+one verifier at a time and start from a clean tracked worktree. It discovers
+every tracked path and every newly created, non-ignored path changed by mutant
+application, then checks that set against the manifest declaration. Cleanup
+restores those paths and verifies the complete tracked state plus the original
+set of untracked path names, including after an interruption. Existing ignored
+artifacts and the contents of existing untracked files are outside that
+baseline. A stale target declaration or an unexpected multi-file change fails
+the row instead of leaving detected source changes behind.
 
 Create a tab-separated manifest. The header and column order are required:
 
@@ -172,6 +234,12 @@ Create a tab-separated manifest. The header and column order are required:
 mutant_id	file	apply_method	test_node	expect_clean_rc	expect_mutant_rc_nonzero
 Tensile.Common.Utilities.x__mutmut_1	Tensile/Common/Utilities.py	mutmut_apply	Tensile/Tests/unit/characterization/CommonUtilities/test_example.py::test_example	0	true
 ```
+
+For kill-proof rows, `expect_clean_rc` must be `0`: a test that already fails on
+clean source cannot prove that a mutant was killed. Set
+`expect_mutant_rc_nonzero` to `true` when the mutant must produce pytest's
+assertion-failure status `1`. The verifier rejects an empty, malformed, or
+duplicate manifest before it changes source.
 
 Then run the verifier:
 
@@ -189,43 +257,41 @@ A successful kill has output like:
 MUTANT                       VERDICT DETAIL
 Tensile...__mutmut_1         KILLED   base_rc=0 mut_rc=1
 ============================================================
-CLEAN: no mutated-source leak.
-RESULT: ALL KILLED
-kill_matrix: work/mutation/verify/kill_matrix.tsv
+CLEAN: tracked worktree and untracked path set match the pre-run baseline.
+RESULT: ALL KILLED (1)
+kill_matrix: <absolute-output>/kill_matrix.tsv
 ```
 
 The verifier writes:
 
 - `kill_matrix.tsv`: one structured result row per manifest entry.
 - `verify-report.txt`: a human-readable summary.
+- `row-*-clean.log` and `row-*-mutant.log`: the retained pytest output for each
+  clean and mutated execution.
 
 Verdict rules are intentionally strict:
 
-- `KILLED`: the clean node returned its expected status, the mutated node
-  returned pytest assertion status `1`, and restoration was clean.
+- `KILLED`: the clean node returned status `0`, the mutated node returned pytest
+  assertion status `1`, and restoration was clean.
+- `OK`: an explicitly expected-pass row remained at status `0`. It is successful
+  but is not counted as a kill.
 - `BAD`: the clean baseline was wrong, the mutant survived, application failed,
   or restoration leaked changes.
 - `INCONCLUSIVE`: pytest collection, usage, internal, interruption, or another
   non-assertion error occurred. Infrastructure errors are never counted as kills.
 
-Any `BAD` or `INCONCLUSIVE` row makes the verifier exit non-zero.
+Any `BAD` or `INCONCLUSIVE` row makes the verifier exit non-zero. A successful
+report containing only kills says `ALL KILLED` and includes the kill count. A
+successful report containing an expected-pass row instead says `SUCCESS` and
+reports separate `KILLED` and `EXPECTED_PASS` counts.
 
-## 5. Restore the mutation configuration
+## 6. Run the safety-core self-tests
 
-After the run and survivor verification, restore the byte-exact backup and
-verify that `pyproject.toml` matches `HEAD`:
+The safety tests use temporary Git repositories and a fake Docker client. They
+exercise preflight failures, manifest validation, result classification,
+interruption cleanup, changed-path restoration, and configuration transaction
+recovery without contacting a Docker daemon or running a mutation campaign:
 
 ```bash
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
-  restore --src projects/hipblaslt/tensilelite
-
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
-  assert-clean --src projects/hipblaslt/tensilelite
-```
-
-Expected output:
-
-```text
-pyproject-mutmut: restore work/mutation/pyproject.toml.bak -> projects/hipblaslt/tensilelite/pyproject.toml
-pyproject-mutmut: assert-clean OK (pyproject.toml == HEAD)
+bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/tests/run-selftests.sh
 ```
