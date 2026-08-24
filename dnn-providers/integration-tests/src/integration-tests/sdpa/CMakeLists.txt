@@ -6,10 +6,7 @@ target_sources(${INTEGRATION_TESTS_EXE}
         IntegrationCpuSdpaFwdBwdChained.cpp
 )
 
-if(BUILD_CPP_GRAPH_TESTS)
-    target_sources(${INTEGRATION_TESTS_EXE}
-        PRIVATE
-            IntegrationGpuSdpaBackward.cpp
-            IntegrationGpuSdpaFwdInference.cpp
-    )
-endif()
+add_cpp_graph_test_sources(
+    IntegrationGpuSdpaBackward.cpp
+    IntegrationGpuSdpaFwdInference.cpp
+)
