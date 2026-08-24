@@ -78,35 +78,6 @@ from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
 
 _DEFAULT_HIPCC = "hipcc"
 
-_COERCE_FLAG_SUPPORTED = None
-
-
-def _coerce_flag_supported(hipcc: str = _DEFAULT_HIPCC) -> bool:
-    """True if the local clang accepts -amdgpu-coerce-illegal-types (LLVM opt).
-
-    clang >= 22 (ROCm 7.2) removed the flag and aborts the compile when it is
-    passed. It only tightens EightWaves register allocation on older toolchains;
-    the kernel is bit-accurate without it, so probe once and drop it when the
-    toolchain rejects it. Cached for the process lifetime.
-    """
-    global _COERCE_FLAG_SUPPORTED
-    if _COERCE_FLAG_SUPPORTED is None:
-        try:
-            clang = subprocess.run(
-                [hipcc, "-print-prog-name=clang++"],
-                capture_output=True, text=True, timeout=30,
-            ).stdout.strip() or "clang++"
-            probe = subprocess.run(
-                [clang, "-x", "c++", "-c", "-o", "/dev/null",
-                 "-mllvm", "-amdgpu-coerce-illegal-types=1", "-"],
-                input="int main(){return 0;}",
-                capture_output=True, text=True, timeout=60,
-            )
-            _COERCE_FLAG_SUPPORTED = "Unknown command line argument" not in (probe.stderr or "")
-        except Exception:
-            _COERCE_FLAG_SUPPORTED = True
-    return _COERCE_FLAG_SUPPORTED
-
 # Architectures the ABQuant bridge supports. NEVER default to gfx942 silently:
 # the arch must be detected (get_arch) or explicitly supplied, and unknown archs
 # raise (Python) / return an error (C++ runtime check in the ctypes lib).

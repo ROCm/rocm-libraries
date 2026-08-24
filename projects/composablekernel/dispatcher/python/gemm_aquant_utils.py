@@ -331,22 +331,6 @@ class AQuantDispatcherLib(DispatcherLibBase):
         )
         return rc, time_ms.value
 
-    def get_kernel_name(self) -> str:
-        raw = self._lib.dispatcher_get_kernel_name()
-        return raw.decode("utf-8") if raw else ""
-
-    def get_kernel_count(self) -> int:
-        return self._lib.dispatcher_get_kernel_count()
-
-    def cleanup(self):
-        self._lib.dispatcher_cleanup()
-
-    def __del__(self):
-        try:
-            self._lib.dispatcher_cleanup()
-        except Exception:
-            pass
-
 
 # =============================================================================
 # AQuantGpuGemmRunner -- high-level runner

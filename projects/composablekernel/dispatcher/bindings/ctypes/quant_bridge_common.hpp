@@ -58,6 +58,12 @@
 // Emit the C API boilerplate shared by every bridge. Invoke once at the top of
 // each op's `extern "C"` block (it declares the file-local g_initialized flag
 // that the op's run() guard checks). KERNEL_NAME is force-included.
+//
+// Threading/lifecycle contract: g_initialized is a plain (non-atomic) file-local
+// flag. dispatcher_initialize()/dispatcher_cleanup()/run() are NOT synchronized;
+// this ABI is intended for single-threaded use (the Python ctypes harness).
+// Callers must initialize before run() and must not invoke these entry points
+// concurrently across threads.
 #define QUANT_BRIDGE_C_API()                                         \
     static bool g_initialized = false;                               \
     int dispatcher_initialize()                                      \
