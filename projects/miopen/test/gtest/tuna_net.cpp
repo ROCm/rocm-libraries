@@ -48,7 +48,7 @@ std::vector<TunaNetTestCase> GetGfx90aFloatTestCases()
               miopen::conv::Direction::Forward,
               miopenFloat,
               miopenTensorNCHW},
-             6,
+             5,
              "gfx90a"}};
 }
 
