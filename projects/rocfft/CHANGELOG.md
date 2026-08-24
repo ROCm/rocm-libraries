@@ -20,9 +20,9 @@ Documentation for rocFFT is available at
 
 ### Changed
 
-  The `rocfft_execution_info_set_load_callback` and `rocfft_execution_info_set_store_callback` APIs are now 
-  deprecated and will be removed in a future release.  They allow for specifying callbacks as device function 
-  pointers at plan execution time, but rocFFT cannot optimize the combined code.  Instead, users should specify JIT 
+* The `rocfft_execution_info_set_load_callback` and `rocfft_execution_info_set_store_callback` APIs are now
+  deprecated and will be removed in a future release.  They allow for specifying callbacks as device function
+  pointers at plan execution time, but rocFFT cannot optimize the combined code.  Instead, users should specify JIT
   callbacks on plan descriptions.
 
 ### Resolved issues
