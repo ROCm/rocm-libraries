@@ -40,7 +40,9 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( rocfft-clients-samples-rocfft LANGUAGES CXX )
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( rocfft-clients-samples-rocfft LANGUAGES CXX )
+endif()
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
@@ -82,6 +84,7 @@ foreach( sample ${sample_list} )
   target_link_libraries(
     ${sample}
     PRIVATE roc::rocfft
+    hip::device
     )
 
   if( USE_HIPRAND )
