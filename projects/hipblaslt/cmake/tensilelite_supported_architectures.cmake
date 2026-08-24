@@ -18,6 +18,7 @@ set(SUPPORTED_ARCHITECTURES
     "gfx1200"
     "gfx1201"
     "gfx1250"
+    "gfx1250:xnack-"
     "gfx908:xnack+"
     "gfx908:xnack-"
     "gfx90a:xnack+"
@@ -124,5 +125,24 @@ function(tensilelite_normalize_targets output_var)
         tensilelite_offload_target(_target "${_arch}")
         list(APPEND _normalized "${_target}")
     endforeach()
+    set(${output_var} "${_normalized}" PARENT_SCOPE)
+endfunction()
+
+function(tensilelite_normalize_xnack_archs output_var)
+    # Platforms that accept xnack_any — no explicit :xnack+/:xnack- needed
+    set(_xnack_any_platforms gfx1250)
+
+    set(_normalized "")
+    foreach(_arch IN LISTS ARGN)
+        string(REPLACE ":" ";" _parts "${_arch}")
+        list(GET _parts 0 _base_arch)
+
+        if(_base_arch IN_LIST _xnack_any_platforms)
+            list(APPEND _normalized "${_base_arch}")
+        else()
+            list(APPEND _normalized "${_arch}")
+        endif()
+    endforeach()
+
     set(${output_var} "${_normalized}" PARENT_SCOPE)
 endfunction()

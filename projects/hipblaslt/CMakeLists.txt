@@ -122,6 +122,17 @@ endif()
 tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
+# Save original targets (with :xnack- suffix) for TensileCreateLibrary.
+# Only set if not already provided externally (e.g. from the superbuild).
+if(NOT TENSILELITE_GPU_TARGETS)
+    set(TENSILELITE_GPU_TARGETS "${GPU_TARGETS}" CACHE STRING "AMD GFX targets for Tensilelite" FORCE)
+endif()
+
+# Strip xnack suffix from xnack_any platforms (e.g. gfx1250) for hip::device
+# offload targets. find_package(hip) bakes GPU_TARGETS into --offload-arch on
+# hip::device, and xnack_any platforms must use the bare arch.
+tensilelite_normalize_xnack_archs(GPU_TARGETS ${GPU_TARGETS})
+
 find_package(hip REQUIRED)
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)

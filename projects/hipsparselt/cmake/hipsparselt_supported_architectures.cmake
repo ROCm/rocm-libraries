@@ -16,7 +16,7 @@ else()
 
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
     list(APPEND SUPPORTED_ARCHITECTURES "gfx942:xnack+" "gfx942:xnack-" "gfx950:xnack+"
-         "gfx950:xnack-" "gfx1250"
+         "gfx950:xnack-" "gfx1250:xnack-"
     )
 endif()
 
@@ -63,4 +63,21 @@ endfunction()
 # Sets <output_var> to the full list including xnack variants.
 function(hipsparselt_get_supported_architectures output_var)
     set(${output_var} ${SUPPORTED_ARCHITECTURES} PARENT_SCOPE)
+endfunction()
+
+
+
+function(hipsparselt_normalize_xnack_archs output_var)
+    set(_xnack_any_platforms gfx1250)
+    set(_normalized "")
+    foreach(_arch IN LISTS ARGN)
+        string(REPLACE ":" ";" _parts "${_arch}")
+        list(GET _parts 0 _base_arch)
+        if(_base_arch IN_LIST _xnack_any_platforms)
+            list(APPEND _normalized "${_base_arch}")
+        else()
+            list(APPEND _normalized "${_arch}")
+        endif()
+    endforeach()
+    set(${output_var} "${_normalized}" PARENT_SCOPE)
 endfunction()

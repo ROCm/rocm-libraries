@@ -95,6 +95,15 @@ if(NOT HIPSPARSELT_ENABLE_CUDA)
     else()
         hipsparselt_validate_gpu_targets("${GPU_TARGETS}")
     endif()
+
+    # Save original targets (with :xnack- suffix) for TensileCreateLibrary
+    set(TENSILELITE_GPU_TARGETS "${GPU_TARGETS}" CACHE STRING "AMD GFX targets for Tensilelite" FORCE)
+
+    # Strip xnack suffix from xnack_any platforms (e.g. gfx1250) for hip::device
+    # offload targets. find_package(hip) bakes GPU_TARGETS into --offload-arch on
+    # hip::device, and xnack_any platforms must use the bare arch.
+    hipsparselt_normalize_xnack_archs(GPU_TARGETS ${GPU_TARGETS})
+
     message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 endif()
 
