@@ -923,7 +923,7 @@ def writeSolutionsAndKernels(
         p, isa, wavefrontsize, _ = ret
         o_path = p.with_suffix(".o")
         targetGfx = archNames.get(isa) or isaToGfx(isa)
-        _alignAmdgcnTargetToStepping(p, isa, compilerTargetOf(targetGfx))
+        _alignAmdgcnTargetToStepping(p, isa, compilerTargetOf(targetGfx, asmToolchain.assembler.path))
         try:
             asmToolchain.assembler(targetGfx, wavefrontsize, str(p), str(o_path))
         except RuntimeError as e:
@@ -1049,7 +1049,7 @@ def writeSolutionsAndKernelsTCL(
         asmPath, isa, wavefrontsize, result = ret
         o_path = asmPath.with_suffix(".o")
         targetGfx = archNames.get(isa) or isaToGfx(isa)
-        _alignAmdgcnTargetToStepping(asmPath, isa, compilerTargetOf(targetGfx))
+        _alignAmdgcnTargetToStepping(asmPath, isa, compilerTargetOf(targetGfx, asmToolchain.assembler.path))
         asmToolchain.assembler(targetGfx, wavefrontsize, str(asmPath), str(o_path))
         if _stinky_asm_verify_wanted(isa):
             _verify_stinky_asm_comment_vs_elf_text(asmPath, o_path, asmPath.stem)
@@ -1300,7 +1300,8 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     splitGSU = False
     printSolutionRejectionReason = True
     printIndexAssignmentInfo = False
-    archRenames = {tuningArchOf(a): compilerTargetOf(a) for a in archs if tuningArchOf(a) != compilerTargetOf(a)}
+    archRenames = {tuningArchOf(a): compilerTargetOf(a, assembler.path)
+                   for a in archs if tuningArchOf(a) != compilerTargetOf(a, assembler.path)}
 
     fIter = zip(
         logicFiles,
@@ -1827,7 +1828,7 @@ def run():
     #
     # Files are named by the library name and written under the requested one,
     # which differ only for a build alias (library/gfx1250v0/*_gfx1250*).
-    outDirs = {compilerTargetOf(a): a for a in archs}
+    outDirs = {compilerTargetOf(a, asmToolchain.assembler.path): a for a in archs}
     for archName, outDir in outDirs.items():
         archMapping = {
             idx: name
