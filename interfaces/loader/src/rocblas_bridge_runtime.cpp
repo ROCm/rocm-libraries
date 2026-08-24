@@ -4,12 +4,17 @@
 
 #include <cstdarg>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <vector>
 
 #include "rocm/interfaces/runtime/provider_registry.h"
+
+#ifndef ROCM_INTERFACES_DEFAULT_ROCBLAS_MANIFEST
+#define ROCM_INTERFACES_DEFAULT_ROCBLAS_MANIFEST ""
+#endif
 
 struct _rocblas_handle {
     const rocm_rocblas_bridge_v1* table = nullptr;
@@ -29,10 +34,20 @@ const Bridge* bridge() noexcept {
     static std::unique_ptr<Bridge> value;
     std::call_once(once, [] {
         try {
-            const char* path = std::getenv("ROCM_INTERFACES_ROCBLAS_BRIDGE_PROVIDER");
-            if (!path || !*path) return;
             auto registry = std::make_shared<ProviderRegistry>();
-            registry->add_module(ROCM_INTERFACES_DOMAIN_ROCBLAS_BRIDGE, 0, 0, path);
+            const char* direct = std::getenv("ROCM_INTERFACES_ROCBLAS_BRIDGE_PROVIDER");
+            const char* configured_manifest =
+                std::getenv("ROCM_INTERFACES_ROCBLAS_PROVIDER_MANIFEST");
+            if (direct && *direct) {
+                registry->add_module(ROCM_INTERFACES_DOMAIN_ROCBLAS_BRIDGE, 0, 0, direct);
+            } else {
+                std::filesystem::path manifest =
+                    configured_manifest && *configured_manifest
+                        ? std::filesystem::path(configured_manifest)
+                        : std::filesystem::path(ROCM_INTERFACES_DEFAULT_ROCBLAS_MANIFEST);
+                if (manifest.empty() || !std::filesystem::is_regular_file(manifest)) return;
+                registry->load_manifest(manifest);
+            }
             auto lease = registry->select(ROCM_INTERFACES_DOMAIN_ROCBLAS_BRIDGE, 0,
                                           sizeof(rocm_rocblas_bridge_v1));
             auto* table = static_cast<const rocm_rocblas_bridge_v1*>(lease->table());

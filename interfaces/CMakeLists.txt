@@ -12,8 +12,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(ROCM_INTERFACES_BUILD_TOOLS "Build Clang-based API extraction tools" ON)
 option(ROCM_INTERFACES_BUILD_EXAMPLES "Build recording providers and shadow loaders" ON)
+option(ROCM_INTERFACES_BUILD_REAL_ROCBLAS_PROVIDER
+  "Build the noncanonical provider backed by a canonical rocBLAS DSO" ON)
+option(ROCM_INTERFACES_ENABLE_GPU_TESTS
+  "Enable numerical differential tests that require a usable AMD GPU" OFF)
 option(ROCM_INTERFACES_CHECK_API_DRIFT
   "Register the API-snapshot drift check as a ctest gate" ON)
+set(ROCM_INTERFACES_ROCBLAS_BACKEND_SONAME "librocblas.so.5" CACHE STRING
+  "Default canonical rocBLAS DSO loaded by the real providers")
 set(ROCM_INTERFACES_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH
     "Path to the rocm-libraries source tree")
 find_package(hip CONFIG REQUIRED)
@@ -200,6 +206,7 @@ set(ROCM_INTERFACES_ROCBLAS_GENERATED
   "${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge_generated.h"
   "${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge_facade.cpp"
   "${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge_provider.cpp"
+  "${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_forwarding_provider.cpp"
   "${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge_link_test.cpp"
   "${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge.map"
   "${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge.exports")
@@ -297,6 +304,15 @@ endif()
 
 if(ROCM_INTERFACES_BUILD_EXAMPLES)
   add_subdirectory(providers/recording)
+endif()
+
+if(ROCM_INTERFACES_BUILD_REAL_ROCBLAS_PROVIDER)
+  if(UNIX AND NOT APPLE)
+    add_subdirectory(providers/rocblas)
+  else()
+    message(FATAL_ERROR
+      "ROCM_INTERFACES_BUILD_REAL_ROCBLAS_PROVIDER currently requires Linux/ELF")
+  endif()
 endif()
 
 if(ROCM_INTERFACES_BUILD_TOOLS)

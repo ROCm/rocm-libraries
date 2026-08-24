@@ -5,8 +5,13 @@
 #include <algorithm>
 #include <cstddef>
 #include <fstream>
+#include <initializer_list>
+#include <iterator>
+#include <limits>
 #include <nlohmann/json.hpp>
+#include <set>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 namespace rocm::interfaces {
@@ -30,6 +35,33 @@ rocm_interfaces_domain parse_domain(const std::string& value) {
     throw std::invalid_argument("unknown provider domain: " + value);
 }
 
+void require_object_shape(const nlohmann::json& value, std::initializer_list<const char*> required,
+                          std::initializer_list<const char*> allowed, const std::string& context) {
+    if (!value.is_object()) throw std::invalid_argument(context + " must be an object");
+    std::set<std::string> allowed_keys;
+    for (const char* key : allowed) allowed_keys.emplace(key);
+    for (auto iterator = value.begin(); iterator != value.end(); ++iterator) {
+        if (!allowed_keys.contains(iterator.key()))
+            throw std::invalid_argument(context + " has unknown key: " + iterator.key());
+    }
+    for (const char* key : required) {
+        if (!value.contains(key)) throw std::invalid_argument(context + " is missing key: " + key);
+    }
+}
+
+std::string required_string(const nlohmann::json& value, const char* key,
+                            const std::string& context) {
+    const auto& field = value.at(key);
+    if (!field.is_string() || field.get_ref<const std::string&>().empty())
+        throw std::invalid_argument(context + "." + key + " must be a nonempty string");
+    return field.get<std::string>();
+}
+
+bool is_within(const std::filesystem::path& base, const std::filesystem::path& candidate) {
+    const std::filesystem::path relative = candidate.lexically_relative(base);
+    return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
+}
+
 }  // namespace
 
 ProviderRegistry::ProviderRegistry(rocm_interfaces_host_services host_services)
@@ -41,41 +73,80 @@ void ProviderRegistry::load_manifest(const std::filesystem::path& path) {
     std::ifstream stream(path);
     if (!stream) throw std::runtime_error("cannot open provider manifest: " + path.string());
     nlohmann::json document;
-    stream >> document;
-    if (!document.is_object() || document.value("schema_version", 0) != 1 ||
-        !document.contains("providers") || !document["providers"].is_array()) {
-        throw std::invalid_argument("invalid provider manifest schema: " + path.string());
+    try {
+        stream >> document;
+    } catch (const nlohmann::json::exception& error) {
+        throw std::invalid_argument("invalid provider manifest JSON " + path.string() + ": "
+                                    + error.what());
     }
+    require_object_shape(document, {"schema_version", "providers"},
+                         {"schema_version", "providers"}, "provider manifest");
+    if (!document["schema_version"].is_number_integer()
+        || document["schema_version"].get<int>() != 1 || !document["providers"].is_array()
+        || document["providers"].empty())
+        throw std::invalid_argument("invalid provider manifest schema: " + path.string());
+
     const std::filesystem::path base = std::filesystem::weakly_canonical(path).parent_path();
+    std::vector<Entry> parsed;
+    std::set<std::tuple<rocm_interfaces_domain, uint32_t, std::string>> identities;
     for (const nlohmann::json& item : document["providers"]) {
-        if (!item.is_object()) throw std::invalid_argument("provider entry must be an object");
-        const std::string id = item.at("id").get<std::string>();
-        const rocm_interfaces_domain domain = parse_domain(item.at("domain").get<std::string>());
-        const std::filesystem::path relative = item.at("module").get<std::string>();
-        if (id.empty() || relative.empty() || relative.is_absolute()) {
-            throw std::invalid_argument("provider id and relative module path are required");
-        }
+        require_object_shape(item, {"id", "domain", "module"},
+                             {"id", "domain", "module", "cohort", "query_symbol", "priority",
+                              "gfx"},
+                             "provider entry");
+        const std::string id = required_string(item, "id", "provider entry");
+        const rocm_interfaces_domain domain =
+            parse_domain(required_string(item, "domain", "provider entry"));
+        const std::filesystem::path relative =
+            required_string(item, "module", "provider entry");
+        if (relative.is_absolute())
+            throw std::invalid_argument("provider module path must be relative");
         const std::filesystem::path module = std::filesystem::weakly_canonical(base / relative);
-        const auto mismatch = std::mismatch(base.begin(), base.end(), module.begin(), module.end());
-        if (mismatch.first != base.end()) {
+        if (!is_within(base, module)) {
             throw std::invalid_argument("provider module escapes manifest directory");
         }
-        const int priority = item.value("priority", 0);
-        const std::string cohort = item.value("cohort", std::string{});
-        const std::string query_symbol =
-            item.value("query_symbol", std::string(ROCM_INTERFACES_PROVIDER_QUERY_SYMBOL));
+        if (!std::filesystem::is_regular_file(module))
+            throw std::invalid_argument("provider module is not a regular file: "
+                                        + module.string());
+
+        int priority = 0;
+        if (item.contains("priority")) {
+            if (!item["priority"].is_number_integer())
+                throw std::invalid_argument("provider priority must be an integer");
+            const int64_t raw = item["priority"].get<int64_t>();
+            if (raw < std::numeric_limits<int>::min() || raw > std::numeric_limits<int>::max())
+                throw std::invalid_argument("provider priority is out of range");
+            priority = static_cast<int>(raw);
+        }
+        std::string cohort;
+        if (item.contains("cohort")) {
+            if (!item["cohort"].is_string())
+                throw std::invalid_argument("provider cohort must be a string");
+            cohort = item["cohort"].get<std::string>();
+        }
+        std::string query_symbol = ROCM_INTERFACES_PROVIDER_QUERY_SYMBOL;
+        if (item.contains("query_symbol"))
+            query_symbol = required_string(item, "query_symbol", "provider entry");
         const nlohmann::json gfx = item.value("gfx", nlohmann::json::array({0}));
         if (!gfx.is_array() || gfx.empty())
             throw std::invalid_argument("gfx must be a nonempty array");
         for (const nlohmann::json& architecture : gfx) {
-            if (!architecture.is_number_unsigned() && !architecture.is_number_integer()) {
+            if (!architecture.is_number_integer()) {
                 throw std::invalid_argument("gfx entries must be numeric; zero means wildcard");
             }
-            std::lock_guard lock(mutex_);
-            entries_.push_back({domain, architecture.get<uint32_t>(), priority, id, cohort, module,
-                                query_symbol, nullptr, nullptr});
+            const int64_t raw = architecture.get<int64_t>();
+            if (raw < 0 || static_cast<uint64_t>(raw) > std::numeric_limits<uint32_t>::max())
+                throw std::invalid_argument("gfx entry is out of range");
+            const uint32_t arch = static_cast<uint32_t>(raw);
+            if (!identities.emplace(domain, arch, id).second)
+                throw std::invalid_argument("duplicate provider id/domain/gfx entry: " + id);
+            parsed.push_back(
+                {domain, arch, priority, id, cohort, module, query_symbol, nullptr, nullptr});
         }
     }
+    std::lock_guard lock(mutex_);
+    entries_.insert(entries_.end(), std::make_move_iterator(parsed.begin()),
+                    std::make_move_iterator(parsed.end()));
 }
 
 void ProviderRegistry::add_module(rocm_interfaces_domain domain, uint32_t gfx_arch, int priority,

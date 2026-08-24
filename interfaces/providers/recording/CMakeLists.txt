@@ -2,7 +2,7 @@ function(add_recording_provider target source output_name)
   add_library(${target} MODULE ${source})
   target_include_directories(${target} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/protocols/include
+    ${PROJECT_SOURCE_DIR}/protocols/include
     ${ROCM_INTERFACES_STAGED_INCLUDE}
   )
   target_compile_definitions(${target} PRIVATE __HIP_PLATFORM_AMD__=1)
@@ -15,8 +15,8 @@ function(add_recording_provider target source output_name)
     PREFIX "lib"
   )
   target_link_options(${target} PRIVATE
-    "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/recording_provider.map")
-  set_property(GLOBAL APPEND PROPERTY ROCM_INTERFACES_RECORDING_PROVIDERS ${target})
+    "LINKER:--version-script=${PROJECT_SOURCE_DIR}/providers/provider.map")
+  set_property(GLOBAL APPEND PROPERTY ROCM_INTERFACES_PROVIDER_TARGETS ${target})
 endfunction()
 
 add_recording_provider(rocm_blas_provider_recording blas_provider.cpp
@@ -37,7 +37,7 @@ add_library(rocm_rocblas_bridge_provider_recording MODULE
 add_dependencies(rocm_rocblas_bridge_provider_recording
   rocm_interfaces_rocblas_bridge_generated)
 target_include_directories(rocm_rocblas_bridge_provider_recording PRIVATE
-  ${CMAKE_SOURCE_DIR}/protocols/include
+  ${PROJECT_SOURCE_DIR}/protocols/include
   ${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}
   ${ROCM_INTERFACES_STAGED_INCLUDE})
 target_compile_definitions(rocm_rocblas_bridge_provider_recording PRIVATE
@@ -50,6 +50,6 @@ set_target_properties(rocm_rocblas_bridge_provider_recording PROPERTIES
   OUTPUT_NAME rocblas-provider-bruteforce-recording
   PREFIX "lib")
 target_link_options(rocm_rocblas_bridge_provider_recording PRIVATE
-  "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/recording_provider.map")
-set_property(GLOBAL APPEND PROPERTY ROCM_INTERFACES_RECORDING_PROVIDERS
+  "LINKER:--version-script=${PROJECT_SOURCE_DIR}/providers/provider.map")
+set_property(GLOBAL APPEND PROPERTY ROCM_INTERFACES_PROVIDER_TARGETS
   rocm_rocblas_bridge_provider_recording)
