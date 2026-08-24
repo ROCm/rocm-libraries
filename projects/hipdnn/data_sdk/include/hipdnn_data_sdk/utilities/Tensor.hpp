@@ -454,6 +454,12 @@ private:
     /// proposes splitting the predicate; this is the iteration half of that split,
     /// scoped to the one caller whose correctness depends on ORDER rather than extent.
     ///
+    /// An axis of extent 1 is exempt. Its index is always 0, so its stride never
+    /// reaches an offset and cannot change the visit order. Requiring the canonical
+    /// value there would demote correct layouts to the slow walk for no reason --
+    /// NHWC activations with 1x1 spatial extent, for one, carry a spatial stride of
+    /// C rather than 1.
+    ///
     /// Defined out-of-line below: ITensor is only forward-declared at this point.
     static bool visitsInIndexOrder(const ITensor& tensor);
 
@@ -611,7 +617,8 @@ bool ITensorIterator<IsConst>::visitsInIndexOrder(const ITensor& tensor)
     int64_t expected = 1;
     for(size_t axis = dims.size(); axis-- > 0;)
     {
-        if(strides[axis] != expected)
+        // Extent 1 pins the index to 0, so this stride never reaches an offset.
+        if(dims[axis] != 1 && strides[axis] != expected)
         {
             return false;
         }

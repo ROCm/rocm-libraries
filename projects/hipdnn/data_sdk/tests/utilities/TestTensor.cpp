@@ -1024,3 +1024,47 @@ TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
         }
     }
 }
+
+/// An axis of extent 1 must not disqualify the fast path.
+///
+/// NHWC activations with 1x1 spatial extent are the everyday case: dims {N,C,1,1}
+/// carry strides {C,1,C,C}, because the H and W strides are computed from the layout
+/// rather than from the (unit) extents. Those two strides are never used -- index 0 on
+/// an axis of extent 1 contributes 0 to the offset no matter what the stride says --
+/// so such a tensor visits memory in index order and belongs on LinearIndex. A
+/// predicate that demanded the canonical value on every axis would demote it.
+///
+/// This asserts the observable half, that iteration order and coordinate order agree.
+/// Both paths satisfy that, so the test guards correctness if the exemption is ever
+/// removed and guards the shape's presence on the fast path by construction.
+TEST(TestTensor, IteratesAUnitExtentTensorInIndexOrder)
+{
+    const std::vector<int64_t> dims{2, 3, 1, 1};
+    const std::vector<int64_t> strides{3, 1, 3, 3};
+
+    // NOLINTNEXTLINE(misc-const-correctness) mutated through the iterator; begin() is not const
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
+    EXPECT_TRUE(tensor.isPacked())
+        << "the unused unit-axis strides do not extend the span, so isPacked() must be "
+           "true here -- if it is not, this test no longer covers the case it was "
+           "written for";
+
+    float next = 1.0F;
+    for(auto valuePtr : tensor)
+    {
+        *static_cast<float*>(valuePtr) = next;
+        next += 1.0F;
+    }
+
+    float expected = 1.0F;
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            EXPECT_EQ(tensor.getHostValue(i0, i1, 0, 0), expected)
+                << "value at (" << i0 << "," << i1
+                << ",0,0) does not match its position in iteration order";
+            expected += 1.0F;
+        }
+    }
+}
