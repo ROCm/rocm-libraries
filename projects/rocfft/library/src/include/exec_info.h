@@ -111,6 +111,11 @@ private:
     // map InternalTempBuffers from a plan to actual pointers - this
     // map is set during rocfft_execute.
     std::map<const InternalTempBuffer*, void*> tempBufferPtrs;
+
+    // Check that the number of JIT callback data pointers (if
+    // specified) matches the number of input/output brick pointers.
+    // Throws if there is a mismatch.
+    void validate_jit_data_ptr_count(const rocfft_plan_t& plan) const;
 };
 
 #endif
