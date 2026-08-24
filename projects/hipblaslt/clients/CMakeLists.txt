@@ -8,10 +8,7 @@ target_include_directories(hipblaslt-clients-common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
-    PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
 )
 
 if(HIPBLASLT_ENABLE_COVERAGE)
