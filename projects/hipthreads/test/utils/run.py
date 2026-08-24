@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import os
 import platform
+import signal
 import subprocess
 import tempfile
 
@@ -176,8 +177,6 @@ def main():
         f"run.py: command timed out after {timeout:g}s and was killed: "
         f"{' '.join(commandLine)}"
     )
-
-    import signal
 
     if platform.system() == "Windows":
         # Windows has no POSIX process groups. Spawn in a new process group so we
