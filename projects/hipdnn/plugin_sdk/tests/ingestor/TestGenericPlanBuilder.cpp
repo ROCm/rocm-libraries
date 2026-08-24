@@ -3,8 +3,11 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -17,6 +20,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/KnobWrapper.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -27,6 +31,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
@@ -74,7 +79,7 @@ public:
 
 struct KnobFilterSettings
 {
-    KnobFilter ingestorKnobFilter;
+    IngestorSettings ingestorSettings;
 };
 
 struct KnobFilterContext
@@ -89,19 +94,40 @@ struct KnobFilterContext
         return _settings;
     }
 
+    /// buildPlan() calls this with a GenericPlan on the benchmarking-off branch and a
+    /// BenchmarkPlan on the benchmarking-on one. Only the former may be narrowed below,
+    /// so record which arrived. RTTI is off in this build, so the type cannot be
+    /// recovered from the plan itself.
+    void setPlan(std::unique_ptr<GenericPlan<TestHandle>> plan)
+    {
+        _plan = std::move(plan);
+        _planIsGeneric = true;
+    }
+
     void setPlan(std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> plan)
     {
         _plan = std::move(plan);
+        _planIsGeneric = false;
     }
 
+    /// @throws if buildPlan() produced anything but a plain GenericPlan. Narrowing a
+    /// BenchmarkPlan here would be UB; a stray HIPDNN_FORCE_BENCHMARKING is the way that
+    /// happens, and it must fail the test rather than corrupt it.
     const GenericPlan<TestHandle>& plan() const
     {
+        if(!_planIsGeneric)
+        {
+            throw std::runtime_error(
+                "expected a plain GenericPlan; buildPlan() produced a different plan type "
+                "(benchmarking unexpectedly on?)");
+        }
         return static_cast<const GenericPlan<TestHandle>&>(*_plan);
     }
 
 private:
     KnobFilterSettings _settings;
     std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> _plan;
+    bool _planIsGeneric = false;
 };
 
 using TestPlanBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, KnobFilterContext>;
@@ -603,6 +629,425 @@ TEST(TestIngestorGenericPlanBuilder, AnUnstampedGraphReadsAsTheBaselineAndMatche
     const TestGraph graph(makeGraphId(0xA3));
 
     EXPECT_TRUE(builder.isApplicable(0, graph));
+}
+
+// ---------------------------------------------------------------------------
+// The benchmarking knob composes with the knob filter and buildPlan()
+// ---------------------------------------------------------------------------
+
+/// Every case below asserts what the knob alone decides, so a runner carrying a stray
+/// HIPDNN_FORCE_BENCHMARKING must not be able to flip the result. The guard clears the
+/// variable for the case's duration and restores whatever was there.
+class TestIngestorGenericPlanBuilderBenchmarking : public ::testing::Test
+{
+private:
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _forceBenchmarkingGuard{
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME};
+};
+
+TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
+       BenchmarkingKnobSetToOneLeavesTheFilterEmptyWhileEnablingTheFlag)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xB0));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    // Not a metadata field: it must never narrow the catalog through readKnobFilter.
+    EXPECT_TRUE(settings.ingestorSettings.knobFilter.empty());
+    EXPECT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+}
+
+TEST_F(TestIngestorGenericPlanBuilderBenchmarking, BenchmarkingKnobSetToZeroLeavesTheFlagFalse)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 0);
+    const TestGraph graph(makeGraphId(0xB1));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    EXPECT_TRUE(settings.ingestorSettings.knobFilter.empty());
+    EXPECT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+}
+
+TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
+       NonIntBenchmarkingKnobSettingThrowsInvalidValueNamingTheKnob)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeStringKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "fast");
+    const TestGraph graph(makeGraphId(0xB2));
+    KnobFilterSettings settings;
+
+    try
+    {
+        builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(ex.getMessage().find(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME),
+                  std::string::npos);
+    }
+}
+
+TEST_F(TestIngestorGenericPlanBuilderBenchmarking, AnInvalidEngineConfigLeavesBenchmarkingFalse)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper invalidConfig(nullptr,
+                                                                                          0);
+    const TestGraph graph(makeGraphId(0xB3));
+    KnobFilterSettings settings;
+
+    builder.initializeExecutionSettings(0, graph, invalidConfig, settings);
+
+    EXPECT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+}
+
+/// Three kernels, no matchers, so all three survive to become benchmarking candidates.
+/// ScopedConstantScore ties every kernel at 1.0, so rank() falls through to priority
+/// and kernel_64 becomes the ranked front. The catalog's workspace max (256, from
+/// kernel_256) stays strictly larger than the front's own (64), which is what makes
+/// "front alone" and "max across all candidates" distinguishable.
+std::unique_ptr<KernelIngestorStateManager<TestHandle>> makeThreeKernelWorkspaceStateManager()
+{
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.name = "test schema";
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "test pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeKernel(testId(0x70), "kernel_64", 64, "FLOAT", /*priority=*/10),
+                    makeKernel(testId(0x71), "kernel_128", 128, "FLOAT", /*priority=*/0),
+                    makeKernel(testId(0x72), "kernel_256", 256, "FLOAT", /*priority=*/0)};
+
+    ensureNoopDispatchRegistered<TestHandle>("test.dispatch");
+    return std::make_unique<KernelIngestorStateManager<TestHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(CONSTANT_SCORE_SYMBOL),
+        "test.graph");
+}
+
+/// KnobFilterContext narrows its stored plan to GenericPlan, which the benchmarking-on
+/// case cannot: buildPlan() hands it a BenchmarkPlan. This one keeps the IPlan.
+struct BenchmarkContext
+{
+    void setExecutionSettings(const KnobFilterSettings& settings)
+    {
+        _settings = settings;
+    }
+
+    const KnobFilterSettings& executionSettings() const
+    {
+        return _settings;
+    }
+
+    void setPlan(std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> plan)
+    {
+        _plan = std::move(plan);
+    }
+
+    const hipdnn_plugin_sdk::IPlan<TestHandle>& plan() const
+    {
+        return *_plan;
+    }
+
+private:
+    KnobFilterSettings _settings;
+    std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> _plan;
+};
+
+using BenchmarkPlanBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, BenchmarkContext>;
+
+/// With benchmarking on, the plan the context receives reports the workspace max over
+/// all three knob-filtered candidates (256, kernel_256's), not the ranked front's own
+/// 64.
+TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
+       BuildPlanWithBenchmarkingOnSizesForTheMaxAcrossAllCandidates)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xB4));
+    const TestHandle handle;
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().getWorkspaceSize(handle), 256U);
+}
+
+/// With benchmarking unset, buildPlan() takes the single-plan branch: the plan is sized
+/// for the ranked front alone (64), not the catalog max (256) the case above reports
+/// for the same catalog and knob filter.
+TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
+       BuildPlanWithBenchmarkingOffSizesForTheRankedFrontAlone)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xB5));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().getWorkspaceSize(0), 64U);
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
+}
+
+// ---------------------------------------------------------------------------
+// HIPDNN_FORCE_BENCHMARKING composes as value_or, never an OR
+// ---------------------------------------------------------------------------
+
+/// Unset and never touched vs. unset via ScopedEnvironmentVariableSetter's one-arg
+/// clearing form must produce identical IngestorSettings, independent of how the test
+/// harness represents "unset".
+TEST(TestIngestorGenericPlanBuilderOverride, UnsetOverrideWithNoKnobChangesNothing)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME);
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xC0));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    EXPECT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+    EXPECT_TRUE(settings.ingestorSettings.knobFilter.empty());
+}
+
+/// With the knob set to 1, an unset override must not change the outcome.
+TEST(TestIngestorGenericPlanBuilderOverride, UnsetOverrideWithKnobSetToOneStillWins)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME);
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xC1));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    EXPECT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+}
+
+/// Forces on with no knob at all: the plain-execute path with no autotune.
+TEST(TestIngestorGenericPlanBuilderOverride, OverrideOnForcesBenchmarkingWithNoKnobSet)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1");
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xC2));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    EXPECT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+}
+
+/// Forces on even with an invalid IEngineConfig: the override is consulted outside the
+/// config's early return, and an invalid config is what a plain hipdnnExecute presents.
+TEST(TestIngestorGenericPlanBuilderOverride, OverrideOnForcesBenchmarkingWithAnInvalidConfig)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "true");
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper invalidConfig(nullptr,
+                                                                                          0);
+    const TestGraph graph(makeGraphId(0xC3));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, invalidConfig, settings);
+
+    EXPECT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+}
+
+/// `0` forces off even when the knob asked for on, which an `||` composition could not
+/// express: a false override term never clears a true knob term.
+TEST(TestIngestorGenericPlanBuilderOverride, OverrideOffForcesBenchmarkingFalseEvenWithKnobSetToOne)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "0");
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xC4));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    EXPECT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+}
+
+/// An unrecognized value degrades to unset, not to on -- a typo must never silently
+/// turn benchmarking on.
+TEST(TestIngestorGenericPlanBuilderOverride, UnrecognizedOverrideValueBehavesAsUnset)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "onn");
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xC5));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    EXPECT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+}
+
+/// The override never populates the knob filter -- it is a plain on/off, not a
+/// metadata-narrowing setting, exactly like the knob it overrides.
+TEST(TestIngestorGenericPlanBuilderOverride, OverrideNeverPopulatesTheKnobFilter)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1");
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeIntKnobEngineConfig(fbb, BLOCK_SIZE, 64);
+    const TestGraph graph(makeGraphId(0xC6));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
+    EXPECT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+    EXPECT_EQ(settings.ingestorSettings.knobFilter.size(), 1U);
+    EXPECT_EQ(settings.ingestorSettings.knobFilter.count(BLOCK_SIZE), 1U);
+    EXPECT_EQ(settings.ingestorSettings.knobFilter.count(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME),
+              0U);
+}
+
+/// Read per call, never cached: flipping the variable between two
+/// initializeExecutionSettings() calls on the same builder must be reflected in each.
+TEST(TestIngestorGenericPlanBuilderOverride, TheOverrideIsReReadOnEveryCallNotCached)
+{
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1");
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xC7));
+
+    KnobFilterSettings firstCall;
+    builder.initializeExecutionSettings(0, graph, engineConfig, firstCall);
+    EXPECT_TRUE(firstCall.ingestorSettings.benchmarkingEnabled);
+
+    guard.setValue("0");
+
+    KnobFilterSettings secondCall;
+    builder.initializeExecutionSettings(0, graph, engineConfig, secondCall);
+    EXPECT_FALSE(secondCall.ingestorSettings.benchmarkingEnabled);
 }
 
 } // namespace

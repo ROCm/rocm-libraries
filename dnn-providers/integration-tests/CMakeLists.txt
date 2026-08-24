@@ -117,6 +117,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # under integration-test-bundles/, re-run cmake to pick up the changes.
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration-test-bundles/"
      DESTINATION "${CMAKE_BINARY_DIR}/lib/integration-test-bundles")
+
 if(Python3_FOUND)
     add_test(
         NAME hipdnn_bundle_verifier_python_tests
@@ -139,6 +140,7 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    src/harness/bundle/SupportClaims.cpp
     src/harness/input-init/FillInputs.cpp
 )
 
