@@ -604,7 +604,7 @@ private:
 
     std::string render_template()
     {
-        return "<" + data.scalar_type.render() + ">";
+        return "<" + data.scalar_type.render() + "," + data.index_type.render() + ">";
     }
 
     const std::vector<std::string> function_name = {"bluestein_load_cc_fwd_chirp_device",
@@ -718,6 +718,7 @@ private:
     {
         TemplateList tpls;
         tpls.append(blueData.scalar_type);
+        tpls.append(blueData.index_type);
 
         return tpls;
     }
