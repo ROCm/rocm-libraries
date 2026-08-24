@@ -20,7 +20,7 @@ Widening all four affected TN ProblemTypes measured, on 996–997 stratified sha
 | `Cijk_Alik_Bljk_HHS_BH_Bias_AuxH_HAS_SAV` | 73 → 313 | **+20.4%** | 100.42% |
 | `Cijk_Alik_Bljk_BBS_BH_Bias_AuxB_HAS_SAV` | 64 → 316 | **+18.8%** | 100.19% |
 
-15 122 measurements, zero failures. Origami also gained gfx1101 support — it did not
+15 122 measurements in those sweeps and 22 400+ across the campaign, zero failures. Origami also gained gfx1101 support — it did not
 recognise the architecture at all before (`arch_name_to_enum("gfx1101")` returned `Count`).
 
 ## Files
@@ -35,6 +35,13 @@ recognise the architecture at all before (`arch_name_to_enum("gfx1101")` returne
 | `retarget_logic.py` | retarget a logic file between gfx1100 and gfx1101 (**two ISA sites**) |
 | `to_prediction.py` | GridBased → Prediction (Origami-selected) conversion |
 | `wgm_variant.py` | rewrite `WorkGroupMapping` across a whole logic file |
+| `MASKED_60CU_VALIDATION.md` | all four catalogs re-validated at **genuine 60-CU execution**, plus the WGM, Prediction, oracle and hybrid-gate re-tests |
+| `NAVI33_OCCUPANCY.md` | navi33's smaller register file costs only 10.1% of kernel time — LDS binds 88% of these kernels |
+| `NAVI33_EVIDENCE.md` | navi33 ships an identical catalog; widening is worth ~+15% at its 32 CUs. Evidence, not a change |
+| `regime_all.py` / `aa_floors.py` | 96-CU vs 60-CU comparison on matched shapes, and per-run A/A floors |
+| `oracle60.py` | oracle over every library built, **with a cardinality-matched noise floor** |
+| `hybrid_gate.py` | out-of-sample test of a size-gated GridBased/Prediction selector |
+| `navi33_occupancy.py` / `occ_lib.py` | RDNA3 occupancy from a `.co`, honouring **both** the VGPR and LDS limits |
 
 ## Three things worth knowing before extending this
 

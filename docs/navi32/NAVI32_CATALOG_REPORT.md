@@ -892,6 +892,15 @@ be exactly the over-reach this campaign spent its time avoiding — the same rea
 non-HHS navi32 catalogs were measured rather than shipped on analogy. **Recorded as a
 finding, not acted on.**
 
+> **navi33 has since been measured** ([`NAVI33_EVIDENCE.md`](NAVI33_EVIDENCE.md)) — still not
+> shipped, but no longer only an analogy. It turns out navi33 ships a **byte-identical copy** of
+> navi32's thin catalog (same 60 kernel symbols, same 73 solutions, same 471-row table), so the
+> five affected parts share this because the catalog was *copied*, not independently
+> under-tuned. At navi33's **32 CUs**, widening is worth **+15.3% wall-clock / +25.2% geomean
+> against a 0.00 pt A/A floor**. The remaining gap to a shippable result is that kernels were
+> built and executed on gfx1100: the CU count is emulated faithfully, the register file and
+> memory system are not.
+
 ### Follow-up: navi33 (gfx1102) — it builds, but that is not the question
 
 The wiki flags navi33 as having a **smaller VGPR file: 1024 vs 1536 VGPRs/SIMD**. The
