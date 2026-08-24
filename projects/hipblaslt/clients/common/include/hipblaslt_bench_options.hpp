@@ -18,9 +18,14 @@
 // ("unset"): a negative value tells the bench to leave the attribute untouched
 // so the library default applies. streamk_tile_scheduling_mode_str() holds the raw
 // CLI token (off|on|auto or 0|1|2) before client.cpp resolves it.
+//
+// uniform_summation_order maps to HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT
+// as {0=off, 1=on} and follows the same convention.
 namespace hipblaslt_bench_options
 {
     int32_t&     sm_count_target();
     int32_t&     streamk_tile_scheduling_mode();
     std::string& streamk_tile_scheduling_mode_str();
+    int32_t&     uniform_summation_order();
+    std::string& uniform_summation_order_str();
 }
