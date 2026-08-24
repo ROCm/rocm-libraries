@@ -144,11 +144,12 @@ class StreamKMemoryOrdering(Component):
     def preVolatileVmem(self, writer, comment="") -> Module:
         """Drain in-flight VMEM (XNACK-replay) before a volatile/atomic VMEM op.
 
-        Required on arches with `RequiresXCntForVolatileVMEM`. No-op
-        elsewhere.
+        Required on arches with `RequiresXCntForVolatileVMEM` or
+        `EnableXnackReplay`. No-op elsewhere.
         """
         module = Module("StreamK pre-volatile VMEM drain")
-        if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
+        if writer.states.archCaps["RequiresXCntForVolatileVMEM"] or \
+                writer.states.archCaps["EnableXnackReplay"]:
             module.add(SWaitXCnt(xcnt=0, comment=comment))
         return module
 
