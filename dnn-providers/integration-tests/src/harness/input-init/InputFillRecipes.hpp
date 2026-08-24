@@ -4,13 +4,11 @@
 #pragma once
 
 #include <cstdint>
+#include <flatbuffers/flatbuffers.h>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <vector>
-
-#include <flatbuffers/flatbuffers.h>
-#include <nlohmann/json.hpp>
 
 #include "harness/input-init/FillRecipe.hpp"
 
@@ -96,20 +94,6 @@ public:
     {
         auto it = _fills.find(uid);
         return it != _fills.end() ? it->second : FillRecipe{};
-    }
-
-    std::vector<int64_t> unfilled(const std::vector<int64_t>& ownedUids) const
-    {
-        std::vector<int64_t> result;
-        for(const int64_t uid : ownedUids)
-        {
-            const auto f = fill(uid);
-            if(f.kind != FillRecipe::Kind::FREE && f.kind != FillRecipe::Kind::FIXED)
-            {
-                result.push_back(uid);
-            }
-        }
-        return result;
     }
 
     // ── Seed config ─────────────────────────────────────────────────────
@@ -218,10 +202,6 @@ private:
             return "free";
         case FillRecipe::Kind::FIXED:
             return "fixed";
-        case FillRecipe::Kind::STRUCTURED:
-            return "structured";
-        case FillRecipe::Kind::DERIVED:
-            return "derived";
         default:
             return "free";
         }
@@ -232,14 +212,6 @@ private:
         if(s == "fixed")
         {
             return FillRecipe::Kind::FIXED;
-        }
-        if(s == "structured")
-        {
-            return FillRecipe::Kind::STRUCTURED;
-        }
-        if(s == "derived")
-        {
-            return FillRecipe::Kind::DERIVED;
         }
         return FillRecipe::Kind::FREE;
     }

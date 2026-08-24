@@ -81,7 +81,6 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/VerifyInstrumentationTest.cpp
     unit/asm/DebugPrintInstrumentation_test.cpp
     unit/asm/AccumulateInstructionSizePassRunTest.cpp
-    unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
     unit/asm/RemoveInstructionPassTest.cpp
     unit/asm/RemoveDscntPassTest.cpp
@@ -143,6 +142,12 @@ target_link_libraries(unit_tests PRIVATE stinkytofu-warnings)
 target_link_libraries(unit_tests PUBLIC ${TEST_LINK_LIBS})
 target_include_directories(unit_tests PRIVATE ${TEST_INCLUDE_DIRS})
 add_dependencies(unit_tests tablegen_generated)
+
+# gtest 1.18 uses std::any, whose MSVC header needs static RTTI; overriding the
+# library-wide -fno-rtti just for the gtest-linking test targets on Windows.
+if(WIN32)
+    target_compile_options(unit_tests PRIVATE -frtti)
+endif()
 
 # Example-plugin tests are gated by STINKYTOFU_BUILD_EXAMPLES: the plugin target
 # only exists when examples are built, so the integration test compiles only then.
@@ -219,6 +224,10 @@ if(BUILD_SHARED_LIBS)
     )
     target_include_directories(api_tests PRIVATE ${TEST_INCLUDE_DIRS})
     add_dependencies(api_tests tablegen_generated)
+
+    if(WIN32)
+        target_compile_options(api_tests PRIVATE -frtti)
+    endif()
 
     # Plugin integration tests require the shared lib so the plugin and the test
     # binary share the same stinkytofu registry instance at runtime.

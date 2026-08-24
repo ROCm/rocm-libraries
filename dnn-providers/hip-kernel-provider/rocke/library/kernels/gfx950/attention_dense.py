@@ -225,6 +225,9 @@ class AttentionDenseSpec:
     # num_kv_blocks: total physical blocks in the paged cache (key_cache.shape[0]).
     #   Bounds the paged buffer resource. Required >0 when paged.
     num_kv_blocks: int = 0
+    # use_sinks: A per-query-head learned scalar logit that participates in the softmax
+    # denominator but has no value vector, acting as a repository for unnecessary attention mass.
+    use_sinks: bool = False
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -375,6 +378,10 @@ class AttentionDenseSpec:
                 raise ValueError(
                     "paged not yet implemented for plain-causal (sliding_window>0 only)"
                 )
+        if self.use_sinks and self.paged:
+            raise ValueError("use_sinks is not yet supported with paged KV")
+        if self.use_sinks and self.varlen:
+            raise ValueError("use_sinks is not yet supported with varlen")
 
     @property
     def num_waves(self) -> int:
@@ -427,6 +434,8 @@ class AttentionDenseSpec:
             parts.append("ragged")
         if self.sliding_window > 0:
             parts.append(f"swa{self.sliding_window}")
+        if self.use_sinks:
+            parts.append("sinks")
         if self.varlen:
             parts.append("varlen")
         if self.paged:
@@ -487,6 +496,7 @@ def build_attention_dense(
     varlen = spec.varlen
     RAGGED = spec.ragged
     LAZY_RESCALE = spec.lazy_rescale
+    use_sinks = spec.use_sinks
 
     K_STEPS = D // 16
     D_TILES = D // 32
@@ -519,6 +529,10 @@ def build_attention_dense(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    if use_sinks:
+        sinks = b.param(
+            "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        )
     if varlen:
         cu_q = b.param(
             "cu_seqlens_q", PtrType(I32, "global"), noalias=True, readonly=True, align=4
@@ -550,6 +564,9 @@ def build_attention_dense(
     lane_h = b.div(lane, b.const_i32(32))
     d_base = b.mul(lane_h, b.const_i32(8))
     neg_inf = b.const_f32(-1e30)
+    if use_sinks:
+        rcp_ln2 = b.const_f32(LOG2E)
+        one_f = b.const_f32(1.0)
 
     qb = b.block_id_x()
     hq = b.block_id_y()
@@ -989,7 +1006,17 @@ def build_attention_dense(
         do_mask(s0, start_tile)
     if RAG_KBOUND:
         do_kbound_mask(s0, start_tile)
-    m0, _alpha0, _skip0 = softmax_max(s0, neg_inf)
+
+    if use_sinks:
+        # Load sink value for this query head and convert to log2 domain
+        sink_h = b.global_load(sinks, hq, dtype, align=2)
+        sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
+        m_init = sink_f
+        l_init = one_f
+    else:
+        m_init = neg_inf
+
+    m0, alpha0, _skip0 = softmax_max(s0, m_init)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
     p0_vals = [
         [_exp2(b.fsub(s0[nsub][i], m0)) for i in range(16)] for nsub in range(N_SUB)
@@ -999,6 +1026,10 @@ def build_attention_dense(
         for i in range(16):
             l0_local = b.fadd(l0_local, p0_vals[nsub][i])
     l0 = b.fadd(l0_local, b.warp_shuffle_xor(l0_local, 32))
+    if use_sinks:
+        # Rescale l_init by alpha0: when m0 > m_init (sink), multiply by alpha0 to change
+        # the sink's contribution from exp(sink - m_init) = 1.0 to exp(sink - m0).
+        l0 = b.fadd(l0, b.fmul(l_init, alpha0))
     o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
     pk0 = relayout_p(p0_vals)
 
@@ -1213,6 +1244,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     SW = spec.sliding_window  # sliding-window length (0 = disabled)
     SWt = SW // BN  # window length in KV tiles
     LAZY_RESCALE = spec.lazy_rescale
+    use_sinks = spec.use_sinks
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -1231,6 +1263,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    if use_sinks:
+        sinks = b.param(
+            "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        )
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
     _exp2 = b.exp2_fast
 
@@ -1242,6 +1278,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     lane_h = b.div(lane, b.const_i32(32))
     d_base = b.mul(lane_h, b.const_i32(8))
     neg_inf = b.const_f32(-1e30)
+    if use_sinks:
+        rcp_ln2 = b.const_f32(LOG2E)
+        one_f = b.const_f32(1.0)
 
     # 1 row/instr => per-row padded pitch (bank-conflict fix); packed D<128 =>
     # pad between DMA row-GROUPS on K, unpadded on V (see the default builder).
@@ -1506,7 +1545,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             alpha = _exp2(b.fsub(m_i, m_new))
             return m_new, alpha, skip
 
-        def softmax_stats(s_reg, m_i):
+        def softmax_stats(s_reg, m_i, l_i=None):
             m_new, alpha, _skip = softmax_max(s_reg, m_i)
             p = [
                 [_exp2(b.fsub(s_reg[nsub][i], m_new)) for i in range(16)]
@@ -1517,6 +1556,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 for i in range(16):
                     l_local = b.fadd(l_local, p[nsub][i])
             l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
+            if use_sinks:
+                # Rescale l_i by alpha: when m_new > m_i, multiply by alpha to change
+                # the sink's contribution from exp(sink - m_i) to exp(sink - m_new).
+                l_tile = b.fadd(l_tile, b.fmul(l_i, alpha))
             return m_new, alpha, p, l_tile
 
         def relayout_p(p):
@@ -1692,7 +1735,17 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             do_mask(s0, start_tile)
         if RAG_KBOUND:
             do_kbound_mask(s0, start_tile)
-        m0, _alpha0, p0, l0 = softmax_stats(s0, neg_inf)
+
+        if use_sinks:
+            # Load sink value for this query head and convert to log2 domain
+            sink_h = b.global_load(sinks, hq, dtype, align=2)
+            sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
+            m_init = sink_f
+            l_init = one_f
+            m0, _alpha0, p0, l0 = softmax_stats(s0, m_init, l_init)
+        else:
+            m0, _alpha0, p0, l0 = softmax_stats(s0, neg_inf)
+
         o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
         pk0 = relayout_p(p0)
 
@@ -1834,8 +1887,8 @@ def attention_dense_block(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
 
 def attention_dense_signature(spec: AttentionDenseSpec):
     """ABI signature for :class:`KernelLauncher`. q/k/v/o pointers + f32 scale,
-    plus the two ``cu_seqlens`` i32 pointers when ``spec.varlen`` (the kernel
-    emits a 7-arg ABI in that case -- see :func:`build_attention_dense`)."""
+    plus optional sink_ptr when ``spec.use_sinks``, and the two ``cu_seqlens``
+    i32 pointers when ``spec.varlen`` (see :func:`build_attention_dense`)."""
     from rocke.helpers.spec import SignatureBuilder
 
     sig = (
@@ -1846,6 +1899,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.use_sinks:
+        sig = sig.ptr("sink_ptr", spec.dtype)
     if spec.varlen:
         sig = sig.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
     if spec.paged:
@@ -1879,6 +1934,7 @@ def run_attention_dense_torch(
     cu_seqlens_kv=None,
     block_tables=None,
     kv_lens=None,
+    sinks=None,
     validate_paged: bool = True,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
@@ -1913,7 +1969,13 @@ def run_attention_dense_torch(
     tiles, so a shorter ``kv_len`` reads page 0 for the uncovered tiles ->
     wrong output). Pass False on the hot / graph-captured path to skip the sync
     (block ids then rely on the bounds-checked cache SRD reading 0, and the
-    ``kv_lens == seqlen_kv`` contract becomes the caller's responsibility)."""
+    ``kv_lens == seqlen_kv`` contract becomes the caller's responsibility).
+
+    Sinks (``spec.use_sinks``): Attention sinks -- learned scalar
+    logits that participate in the softmax denominator but have no value vector.
+    Pass ``sinks`` (``spec.dtype`` ``[num_query_heads]``); a ``ValueError`` is
+    raised if ``sinks`` is ``None`` when ``spec.use_sinks`` is True, or if
+    ``sinks`` is provided when ``spec.use_sinks`` is False."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
@@ -1989,6 +2051,22 @@ def run_attention_dense_torch(
                             "malformed entry reads 0 via the bounds-checked cache "
                             "SRD -> silently wrong output"
                         )
+    if not spec.use_sinks and sinks is not None:
+        raise ValueError("sinks provided but spec.use_sinks is False")
+    if spec.use_sinks:
+        if sinks is None:
+            raise ValueError("spec.use_sinks=True requires sinks that are not None")
+        if sinks.shape != (spec.num_query_heads,):
+            raise ValueError(
+                f"sinks must have shape ({spec.num_query_heads},), got {tuple(sinks.shape)}"
+            )
+        if sinks.dtype != q.dtype:
+            raise ValueError(f"sinks dtype {sinks.dtype} must match q dtype {q.dtype}")
+        if not sinks.is_contiguous():
+            raise ValueError("sinks must be contiguous")
+        if not sinks.is_cuda:
+            raise ValueError("sinks must be a CUDA tensor")
+
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
@@ -2022,6 +2100,8 @@ def run_attention_dense_torch(
         vals["block_tables"] = block_tables
         vals["kv_lens"] = kv_lens
         vals["block_table_stride"] = int(block_tables.stride(0))
+    if spec.use_sinks:
+        vals["sink_ptr"] = sinks
     launcher(
         vals,
         config=LaunchConfig(

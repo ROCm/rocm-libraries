@@ -118,9 +118,10 @@ def load_collection(lib_dir: str | Path) -> LibraryCollection:
 
 
 def _library_supports_epilogues(lib: Library) -> bool:
-    """Return False for f64 (DGEMM) libraries; Tensile epilogues are not supported."""
+    """Return False for f64 and complex libraries; epilogues are not supported."""
+    _NO_EPILOGUE_TYPES = ("f64_r", "f32_c", "f64_c")
     data_type = lib.problem.get("DataType")
-    return INDEX_TYPE_MAP.get(data_type) != "f64_r"
+    return INDEX_TYPE_MAP.get(data_type) not in _NO_EPILOGUE_TYPES
 
 
 def merge_solutions(
