@@ -261,13 +261,18 @@ add_library(rocblas_narrow_v2_loader_shadow SHARED
   loader/src/rocblas_narrow_v2_runtime.cpp
   "${ROCM_INTERFACES_ROCBLAS_NARROW_V2_CPP}")
 add_dependencies(rocblas_narrow_v2_loader_shadow rocm_interfaces_rocblas_bridge_generated)
-target_include_directories(rocblas_narrow_v2_loader_shadow PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/loader/src
-  ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/protocols/include
-  ${ROCM_INTERFACES_STAGED_INCLUDE})
+target_include_directories(rocblas_narrow_v2_loader_shadow
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/loader/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/protocols/include
+  PUBLIC
+    $<BUILD_INTERFACE:${ROCM_INTERFACES_STAGED_INCLUDE}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(rocblas_narrow_v2_loader_shadow PRIVATE rocm_interfaces_runtime hip::host)
 target_compile_definitions(rocblas_narrow_v2_loader_shadow PRIVATE __HIP_PLATFORM_AMD__=1)
+target_compile_definitions(rocblas_narrow_v2_loader_shadow PRIVATE
+  "ROCM_INTERFACES_DEFAULT_ROCBLAS_NARROW_V2_MANIFEST=\"${CMAKE_INSTALL_FULL_LIBDIR}/rocm/interfaces/providers/rocblas-narrow-v2-system.json\"")
 set_target_properties(rocblas_narrow_v2_loader_shadow PROPERTIES
   OUTPUT_NAME rocblas-loader-narrow-v2 VERSION 5.0.0 SOVERSION 5
   C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
@@ -287,9 +292,12 @@ target_include_directories(rocblas_loader_shadow
     ${CMAKE_CURRENT_SOURCE_DIR}/protocols/include
     ${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}
   PUBLIC
-    ${ROCM_INTERFACES_STAGED_INCLUDE})
+    $<BUILD_INTERFACE:${ROCM_INTERFACES_STAGED_INCLUDE}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(rocblas_loader_shadow PRIVATE rocm_interfaces_runtime PUBLIC hip::host)
 target_compile_definitions(rocblas_loader_shadow PUBLIC __HIP_PLATFORM_AMD__=1)
+target_compile_definitions(rocblas_loader_shadow PRIVATE
+  "ROCM_INTERFACES_DEFAULT_ROCBLAS_MANIFEST=\"${CMAKE_INSTALL_FULL_LIBDIR}/rocm/interfaces/providers/rocblas-system.json\"")
 set_target_properties(rocblas_loader_shadow PROPERTIES
   OUTPUT_NAME rocblas-loader
   VERSION 5.0.0
@@ -357,19 +365,32 @@ endif()
 
 install(TARGETS rocm_interfaces_runtime rocm_interfaces_loader
   EXPORT ROCmInterfacesTargets
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT rocm-interfaces
 )
 install(TARGETS rocblas_loader_shadow
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  EXPORT ROCmInterfacesTargets
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT rocm-interfaces
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT rocm-interfaces
 )
+set_target_properties(rocblas_loader_shadow PROPERTIES EXPORT_NAME rocblas_loader)
+install(TARGETS rocblas_narrow_v2_loader_shadow
+  EXPORT ROCmInterfacesTargets
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT rocm-interfaces
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT rocm-interfaces)
+set_target_properties(rocblas_narrow_v2_loader_shadow PROPERTIES
+  EXPORT_NAME rocblas_narrow_v2_loader)
 install(DIRECTORY protocols/include/ runtime/include/ loader/include/
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  COMPONENT rocm-interfaces
   FILES_MATCHING PATTERN "*.h"
 )
 install(DIRECTORY "${ROCM_INTERFACES_STAGED_INCLUDE}/"
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  COMPONENT rocm-interfaces
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+install(FILES "${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge_generated.h"
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm/interfaces/experimental
+  COMPONENT rocm-interfaces)
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ROCmInterfacesShadowConfig.cmake.in"
   "${CMAKE_CURRENT_BINARY_DIR}/ROCmInterfacesShadowConfig.cmake"
@@ -382,8 +403,10 @@ install(EXPORT ROCmInterfacesTargets
   FILE ROCmInterfacesTargets.cmake
   NAMESPACE ROCmInterfacesShadow::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ROCmInterfacesShadow
+  COMPONENT rocm-interfaces
 )
 install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/ROCmInterfacesShadowConfig.cmake"
   "${CMAKE_CURRENT_BINARY_DIR}/ROCmInterfacesShadowConfigVersion.cmake"
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ROCmInterfacesShadow)
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ROCmInterfacesShadow
+  COMPONENT rocm-interfaces)

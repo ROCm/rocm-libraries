@@ -97,6 +97,13 @@ shared/
 
 To begin contributing or building, see the [CONTRIBUTING.md](./CONTRIBUTING.md) guide. It includes setup instructions, sparse-checkout configuration, development workflow, and pull request guidelines.
 
+### Experimental math-library interfaces
+
+The noncanonical math-library loader/provider migration slice can be added to the root build
+with `-DROCM_LIBS_ENABLE_INTERFACES=ON`. The option defaults to `OFF` and does not replace or
+rename any canonical ROCm library. See [`interfaces/README.md`](./interfaces/README.md) for
+its standalone and root-build workflows, provider manifests, and current scope.
+
 ## License
 
 This super-repo contains multiple subprojects, each of which retains the license under which it was originally published.

@@ -65,7 +65,7 @@ add_test(NAME rocm_interfaces.rocblas_narrow_v2_all_symbols COMMAND rocblas_narr
 
 add_executable(rocm_blas_narrow_c_header_test narrow_header_c_test.c)
 target_include_directories(rocm_blas_narrow_c_header_test PRIVATE
-  ${CMAKE_SOURCE_DIR}/protocols/include
+  ${PROJECT_SOURCE_DIR}/protocols/include
   ${ROCM_INTERFACES_STAGED_INCLUDE})
 target_link_libraries(rocm_blas_narrow_c_header_test PRIVATE hip::host)
 target_compile_definitions(rocm_blas_narrow_c_header_test PRIVATE __HIP_PLATFORM_AMD__=1)
@@ -129,7 +129,22 @@ add_test(NAME rocm_interfaces.install_consumer
     -DPROJECT_BINARY_DIR=${CMAKE_BINARY_DIR}
     -DCONSUMER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/install_consumer
     -DDEPENDENCY_PREFIX=${CMAKE_PREFIX_PATH}
+    -DINSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
+    -DREAL_ROCBLAS_LIBRARY=${ROCM_INTERFACES_SYSTEM_ROCBLAS_LIBRARY}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/check_install.cmake)
+
+if(PROJECT_IS_TOP_LEVEL)
+  add_test(NAME rocm_interfaces.root_opt_in_build
+    COMMAND ${CMAKE_COMMAND}
+      -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/root-integration-test
+      -DSOURCE_ROOT=${ROCM_INTERFACES_SOURCE_ROOT}
+      -DC_COMPILER=${CMAKE_C_COMPILER}
+      -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DDEPENDENCY_PREFIX=${CMAKE_PREFIX_PATH}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_root_integration.cmake)
+  set_tests_properties(rocm_interfaces.root_opt_in_build PROPERTIES
+    RUN_SERIAL TRUE TIMEOUT 600)
+endif()
 
 if(UNIX AND NOT APPLE)
   function(add_abi03_provider target abi_ver soname version_script)
@@ -395,7 +410,7 @@ int main(){ rocrand_cpp::error e(ROCRAND_STATUS_SUCCESS); return e.what()==nullp
   endif()
 endif()
 
-set(_lto_guard_module ${CMAKE_SOURCE_DIR}/cmake/rocm_interfaces_lto_linker_guard.cmake)
+set(_lto_guard_module ${PROJECT_SOURCE_DIR}/cmake/rocm_interfaces_lto_linker_guard.cmake)
 set(_lto_guard_driver ${CMAKE_CURRENT_SOURCE_DIR}/check_lto_linker_guard.cmake)
 
 add_test(NAME rocm_interfaces.lto_linker_guard_rejects_gnu_lld

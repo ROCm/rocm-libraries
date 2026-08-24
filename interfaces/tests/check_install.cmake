@@ -3,6 +3,7 @@ file(MAKE_DIRECTORY "${TEST_ROOT}")
 
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --install "${PROJECT_BINARY_DIR}" --prefix "${TEST_ROOT}/prefix"
+    --component rocm-interfaces
   RESULT_VARIABLE install_result
   OUTPUT_VARIABLE install_output
   ERROR_VARIABLE install_error)
@@ -30,4 +31,17 @@ execute_process(
   ERROR_VARIABLE build_error)
 if(NOT build_result EQUAL 0)
   message(FATAL_ERROR "installed consumer build failed:\n${build_output}\n${build_error}")
+endif()
+
+if(REAL_ROCBLAS_LIBRARY)
+  execute_process(
+    COMMAND "${TEST_ROOT}/build/rocm_interfaces_install_consumer"
+      "${TEST_ROOT}/prefix/${INSTALL_LIBDIR}/rocm/interfaces/providers/rocblas-system.json"
+      "${REAL_ROCBLAS_LIBRARY}"
+    RESULT_VARIABLE run_result
+    OUTPUT_VARIABLE run_output
+    ERROR_VARIABLE run_error)
+  if(NOT run_result EQUAL 0)
+    message(FATAL_ERROR "installed manifest consumer failed:\n${run_output}\n${run_error}")
+  endif()
 endif()

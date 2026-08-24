@@ -3,11 +3,16 @@
 #include "rocblas_narrow_v2_runtime.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <new>
 
 #include "rocm/interfaces/runtime/provider_registry.h"
+
+#ifndef ROCM_INTERFACES_DEFAULT_ROCBLAS_NARROW_V2_MANIFEST
+#define ROCM_INTERFACES_DEFAULT_ROCBLAS_NARROW_V2_MANIFEST ""
+#endif
 
 struct _rocblas_handle {
     const rocm_blas_v2_provider* table = nullptr;
@@ -30,10 +35,21 @@ const Selected* selected() noexcept {
     static std::unique_ptr<Selected> value;
     std::call_once(once, [] {
         try {
-            const char* path = std::getenv("ROCM_INTERFACES_BLAS_V2_PROVIDER");
-            if (!path || !*path) return;
             auto registry = std::make_shared<ProviderRegistry>();
-            registry->add_module(ROCM_INTERFACES_DOMAIN_BLAS_V2, 0, 0, path);
+            const char* direct = std::getenv("ROCM_INTERFACES_BLAS_V2_PROVIDER");
+            const char* configured_manifest =
+                std::getenv("ROCM_INTERFACES_BLAS_V2_PROVIDER_MANIFEST");
+            if (direct && *direct) {
+                registry->add_module(ROCM_INTERFACES_DOMAIN_BLAS_V2, 0, 0, direct);
+            } else {
+                std::filesystem::path manifest =
+                    configured_manifest && *configured_manifest
+                        ? std::filesystem::path(configured_manifest)
+                        : std::filesystem::path(
+                              ROCM_INTERFACES_DEFAULT_ROCBLAS_NARROW_V2_MANIFEST);
+                if (manifest.empty() || !std::filesystem::is_regular_file(manifest)) return;
+                registry->load_manifest(manifest);
+            }
             auto lease = registry->select(ROCM_INTERFACES_DOMAIN_BLAS_V2, 0,
                                           sizeof(rocm_blas_v2_provider));
             auto* table = static_cast<const rocm_blas_v2_provider*>(lease->table());
