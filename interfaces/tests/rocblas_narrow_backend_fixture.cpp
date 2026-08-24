@@ -29,10 +29,25 @@ extern "C" rocblas_status rocblas_set_stream(rocblas_handle handle, hipStream_t 
     return rocblas_status_success;
 }
 
+extern "C" rocblas_status rocblas_get_stream(rocblas_handle handle, hipStream_t* stream) {
+    if (!handle) return rocblas_status_invalid_handle;
+    if (!stream) return rocblas_status_invalid_pointer;
+    *stream = handle->stream;
+    return rocblas_status_success;
+}
+
 extern "C" rocblas_status rocblas_set_pointer_mode(rocblas_handle handle,
                                                    rocblas_pointer_mode mode) {
     if (!handle) return rocblas_status_invalid_handle;
     handle->pointer_mode = mode;
+    return rocblas_status_success;
+}
+
+extern "C" rocblas_status rocblas_get_pointer_mode(rocblas_handle handle,
+                                                   rocblas_pointer_mode* mode) {
+    if (!handle) return rocblas_status_invalid_handle;
+    if (!mode) return rocblas_status_invalid_pointer;
+    *mode = handle->pointer_mode;
     return rocblas_status_success;
 }
 
@@ -41,7 +56,7 @@ rocblas_status axpy(rocblas_handle handle, Index n, const float* alpha, const fl
                     float* y, Index incy) {
     if (!handle) return rocblas_status_invalid_handle;
     if (!alpha || !x || !y) return rocblas_status_invalid_pointer;
-    if (n < 0 || !incx || !incy) return rocblas_status_invalid_size;
+    if (n < 0) return rocblas_status_invalid_size;
     for (Index i = 0; i < n; ++i) y[i * incy] += *alpha * x[i * incx];
     return rocblas_status_success;
 }
@@ -51,7 +66,7 @@ rocblas_status copy(rocblas_handle handle, Index n, const float* x, Index incx, 
                     Index incy) {
     if (!handle) return rocblas_status_invalid_handle;
     if (!x || !y) return rocblas_status_invalid_pointer;
-    if (n < 0 || !incx || !incy) return rocblas_status_invalid_size;
+    if (n < 0) return rocblas_status_invalid_size;
     for (Index i = 0; i < n; ++i) y[i * incy] = x[i * incx];
     return rocblas_status_success;
 }
@@ -60,7 +75,7 @@ template <typename Index>
 rocblas_status scal(rocblas_handle handle, Index n, const float* alpha, float* x, Index incx) {
     if (!handle) return rocblas_status_invalid_handle;
     if (!alpha || !x) return rocblas_status_invalid_pointer;
-    if (n < 0 || !incx) return rocblas_status_invalid_size;
+    if (n < 0) return rocblas_status_invalid_size;
     for (Index i = 0; i < n; ++i) x[i * incx] *= *alpha;
     return rocblas_status_success;
 }
@@ -69,7 +84,7 @@ template <typename Index>
 rocblas_status swap(rocblas_handle handle, Index n, float* x, Index incx, float* y, Index incy) {
     if (!handle) return rocblas_status_invalid_handle;
     if (!x || !y) return rocblas_status_invalid_pointer;
-    if (n < 0 || !incx || !incy) return rocblas_status_invalid_size;
+    if (n < 0) return rocblas_status_invalid_size;
     for (Index i = 0; i < n; ++i) std::swap(x[i * incx], y[i * incy]);
     return rocblas_status_success;
 }

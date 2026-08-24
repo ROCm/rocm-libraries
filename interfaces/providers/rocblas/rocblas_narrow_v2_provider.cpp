@@ -165,10 +165,6 @@ rocblas_status vector_transform(void* opaque,
     if (!request->x.memory.base) return rocblas_status_invalid_pointer;
     if (request->operation != ROCM_BLAS_V2_VECTOR_SCALE && !request->y.memory.base)
         return rocblas_status_invalid_pointer;
-    if (!request->x.increment ||
-        (request->operation != ROCM_BLAS_V2_VECTOR_SCALE && !request->y.increment))
-        return rocblas_status_invalid_size;
-
     auto* context = static_cast<Context*>(opaque);
     const bool needs_scalar = request->operation == ROCM_BLAS_V2_VECTOR_SCALE ||
                               request->operation == ROCM_BLAS_V2_VECTOR_AXPY;
