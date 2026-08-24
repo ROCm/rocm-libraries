@@ -716,6 +716,20 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return false;
     };
 
+    // Two program points end the climb outright, with no say for the lead or the hop budget:
+    // a cluster barrier wait, which this signal may not be lifted over because the pairing is
+    // what the wait is for, and a prior handshake's trigger, whose own barrier has to stay
+    // above this signal. Neither is a segment boundary, so they are asked about first and the
+    // spot they hand back is the same either way -- below the workgroup barrier that follows
+    // them, which is where the group is gathered again.
+    auto hardStopAnchor = [&](StinkyInstruction* inst) -> IRBase* {
+        if (isClusterBarrierWait(*inst))
+            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
+        if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0)
+            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+        return nullptr;
+    };
+
     auto it = BasicBlock::iterator(referenceAnchor);
     while (it != bbBegin) {
         --it;
@@ -728,9 +742,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         // boundaries as read would walk straight into the range it has to stay out of.
         sccLive = readsScc(*inst) || (sccLive && !writesScc(*inst));
 
-        if (isClusterBarrierWait(*inst)) {
-            return report(clearSccNote(anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor)));
-        }
+        if (IRBase* stop = hardStopAnchor(inst)) return report(clearSccNote(stop));
         if (isSegmentBoundary(*inst)) {
             // A climb holding its lead comes to rest below the boundary rather than spending
             // a hop on more of it: at the segment start, or -- when a live range covers that
@@ -763,10 +775,6 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
             curSegBegin = segmentBeginBefore(it, bbBegin);
             continue;
         }
-        if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0) {
-            return report(clearSccNote(anchorAfterWorkgroupBarrierPair(inst, defaultAnchor)));
-        }
-
         if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
 
         auto cycleIt = cycleMap.find(inst);
@@ -893,9 +901,20 @@ IRBase* anchorJustBelow(StinkyInstruction* behind, StinkyInstruction* limit) {
 
 /// Where the compensating signal goes in the preheader (`kRule3CrossLoop` only).
 ///
-/// Climb from the loop head upward and take the nearest of ``s_barrier_wait -1``,
-/// ``label_*``, or ``tensor_load_to_lds``. Signal-only after an existing workgroup wait;
-/// plant a workgroup barrier pair before the signal after a label or load.
+/// Climb from the loop head upward and stop below the first thing the signal may not be
+/// lifted over: ``s_barrier_wait -1``, ``s_barrier_wait -3``, ``label_*``, or
+/// ``tensor_load_to_lds``. Everything the climb steps over ends up ahead of the signal,
+/// which is why the nearest one wins -- sitting behind a further one would announce this
+/// workgroup ready with the work in between still to do.
+///
+/// Only ``s_barrier_wait -1`` proves the group has gathered, so that is the one stop the
+/// signal can take as it is. Behind anything else the pass brings a workgroup barrier pair
+/// of its own, and the signal goes below the wait of that pair, so either way the signal
+/// ends up below a ``s_barrier_wait -1``.
+///
+/// A ``s_barrier_wait -3`` matters for a second reason: it drinks a cluster token, so a
+/// signal placed above one would be swallowed there instead of surviving into the loop for
+/// the first trip's wait, which is the whole point of the compensation.
 PreLoopSignalAnchor findPreLoopSignalAnchor(StinkyInstruction* loopHead) {
     BasicBlock* parent = (loopHead != nullptr) ? loopHead->getParent() : nullptr;
     if (parent == nullptr) return {};
@@ -913,7 +932,7 @@ PreLoopSignalAnchor findPreLoopSignalAnchor(StinkyInstruction* loopHead) {
             needsWorkgroupBarrier = false;
         } else if (isKernelLabelForPreLoopClimb(*inst)) {
             behind = inst;
-        } else if (!isPseudoInst(inst) && isTensorLoad(*inst)) {
+        } else if (!isPseudoInst(inst) && (isClusterBarrierWait(*inst) || isTensorLoad(*inst))) {
             behind = inst;
         } else {
             continue;

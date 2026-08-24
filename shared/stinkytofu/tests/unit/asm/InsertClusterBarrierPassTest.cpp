@@ -435,6 +435,21 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return found;
     }
 
+    /// First cluster signal strictly between \p afterIdx and \p beforeIdx. Names a signal by
+    /// the window it has to land in, for blocks holding more than one.
+    StinkyInstruction* findClusterSignalBetween(size_t afterIdx, size_t beforeIdx) const {
+        size_t idx = 0;
+        for (IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const size_t here = idx++;
+            if (here <= afterIdx) continue;
+            if (here >= beforeIdx) break;
+            auto* inst = cast<StinkyInstruction>(&ir);
+            if (isClusterBarrierWithLiteral(*inst, /*wantSignal=*/true)) return inst;
+        }
+        return nullptr;
+    }
+
     StinkyInstruction* realInstBefore(const StinkyInstruction* anchor) const {
         StinkyInstruction* prev = nullptr;
         for (IRBase& ir : *bb) {
@@ -1516,6 +1531,101 @@ IF_RULE3_CROSS_LOOP(TEST_F(InsertClusterBarrierPassTest,
     EXPECT_GT(indexOf(preSignal), indexOf(lastLoad))
         << "with no preheader label, the signal falls back below the last run-up load:"
         << blockListing(*bb);
+
+    expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
+})
+
+// A preheader whose last stop before the loop is a cluster wait rather than a barrier:
+//
+//     s_barrier_signal -1
+//     s_barrier_wait -1         <- the workgroup barrier, further from the loop
+//     v_wmma x3
+//     s_barrier_signal -3
+//     s_barrier_wait -3         <- closer to the loop, and it drinks a cluster token
+//     v_wmma x3
+//     label_TestLoop:
+//
+// The signal the first trip is owed has to go *below* that wait. Above it the wait would
+// drink it on the way in, leaving the loop head empty-handed again while the exit still
+// drains a token nobody has -- the compensation would pay for itself twice and land nothing.
+// A cluster wait says nothing about where the workgroup's other waves are, so unlike a
+// s_barrier_wait -1 this stop still needs a barrier planted with the signal.
+// Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
+IF_RULE3_CROSS_LOOP(TEST_F(InsertClusterBarrierPassTest,
+                           PreheaderSignalStaysBelowAClusterWaitThatWouldDrinkIt) {
+    createLabel(kGSU1LabelName);
+    createWMMA(24, 0, 8);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/60, /*src1Reg=*/64);
+    StinkyInstruction* wgSignal = createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* wgWait = createBarrierWait(kWorkgroupBarrierId);
+    for (int i = 0; i < 3; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    // Paired, so the token this wait drinks is one the preheader itself posted and the test
+    // is about placement rather than about an unbalanced block.
+    createBarrierSignal(kClusterBarrierId);
+    StinkyInstruction* clusterWait = createBarrierWait(kClusterBarrierId);
+    for (int i = 0; i < 3; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+
+    createLabel("label_TestLoop");
+    // Short, so its signal leaves across the back edge and the preheader has to serve the
+    // first trip.
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/90, "label_TestLoopEnd");
+    for (int i = 0; i < 70; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+    createGuardedBranch(GFX::s_cbranch_scc0, /*sgpr=*/92, "label_TestLoop");
+    createLabel("label_TestLoopEnd");
+    createWMMA(8, 0, 8);
+
+    runPass();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    EXPECT_EQ(inFlightAt(indexOf(loopHead)), 1)
+        << "the opening segment's signal left across the back edge, so the first trip has to "
+           "be handed a token by the preheader:"
+        << blockListing(*bb);
+
+    // Named by where it is rather than by being the last one before the loop: the preheader
+    // already holds cluster signals of its own -- Rule 1's and this test's -- so "the last
+    // one above the loop head" would name whichever of those the compensation failed to get
+    // below, and the assertion would then be reading its own premise.
+    StinkyInstruction* compensation =
+        findClusterSignalBetween(indexOf(clusterWait), indexOf(loopHead));
+    ASSERT_NE(compensation, nullptr)
+        << "no compensating signal between the cluster wait and the loop: one placed above "
+           "that wait is drunk by it instead of reaching the first trip:"
+        << blockListing(*bb);
+    EXPECT_GT(indexOf(compensation), indexOf(wgWait))
+        << "the cluster wait is nearer the loop than the workgroup barrier, so stopping at "
+           "the barrier would put the signal above it:"
+        << blockListing(*bb);
+
+    // The cluster wait gathers nothing, so the pass owes this signal a barrier of its own,
+    // planted between the wait it stopped at and the signal.
+    StinkyInstruction* plantedSignal = nullptr;
+    size_t idx = 0;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        if (idx >= indexOf(compensation)) break;
+        auto* inst = const_cast<StinkyInstruction*>(cast<StinkyInstruction>(&ir));
+        if (isWorkgroupBarrierSignalInst(*inst)) plantedSignal = inst;
+        ++idx;
+    }
+    ASSERT_NE(plantedSignal, nullptr) << blockListing(*bb);
+    EXPECT_GT(indexOf(plantedSignal), indexOf(clusterWait))
+        << "wave 0 may not announce the group ready before the group has gathered, and the "
+           "cluster wait it stopped at does not gather it:"
+        << blockListing(*bb);
+    EXPECT_NE(plantedSignal, wgSignal)
+        << "the barrier above the signal must be a planted one, not the pre-existing pair:"
+        << blockListing(*bb);
+    StinkyInstruction* plantedWait = firstRealInstAfter(plantedSignal);
+    ASSERT_NE(plantedWait, nullptr);
+    EXPECT_TRUE(isWorkgroupBarrierWaitInst(*plantedWait))
+        << "the planted barrier is a pair, and the signal goes below its wait:"
+        << blockListing(*bb);
+    EXPECT_LT(indexOf(plantedWait), indexOf(compensation))
+        << "the signal goes below the wait of the pair the pass planted:" << blockListing(*bb);
 
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
 })
