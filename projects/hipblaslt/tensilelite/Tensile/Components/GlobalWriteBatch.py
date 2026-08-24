@@ -2827,6 +2827,78 @@ class GlobalWriteBatchWriter:
     kw.sgprPool.checkIn(cachedIdxSgpr)
     kw.sgprPool.checkIn(cursorOffSgpr)
 
+  def _emitFusedA2AOutboundSignal(self, module, dstRankSgpr, myRankSgpr):
+    """Submit an ATOMIC ADD_RTN_32 raising THIS card's own outbound counter by 1,
+    on the queue this work-group just handed its band to.
+
+    One reservation, one 8-dword packet, no COPY.  The target is
+    peer_flagPtr[my_rank] + FUSED_A2A_OUTBOUND_OFFSET, so once every queue has
+    carried one of these the counter reads W.
+
+    MUST be emitted after _emitFusedA2ASdmaIssue's submit on this queue.
+
+    Args:
+      dstRankSgpr: 1 SGPR, the peer rank whose queue carries the signal.
+      myRankSgpr:  1 SGPR, this card's rank.
+    """
+    from .Signature import (FUSED_A2A_OUTBOUND_OFFSET, fusedA2AKernArgLayout)
+    from .SdmaPacketEmitter import SdmaPacketEmitter, ATOMIC_PACKET_DWORDS
+    from .SdmaRingEmitter import SdmaRingEmitter, CURSOR_PAIR_BYTES
+
+    kw        = self.parentWriter
+    layout    = fusedA2AKernArgLayout()
+    fusedBase = kw.states.fusedA2AKernArgBase
+    pkt       = SdmaPacketEmitter()
+    ring      = SdmaRingEmitter(groupImm=fusedBase + layout["peer_0_flagPtr"])
+
+    module.addComment1("fused-A2A: build + submit the SDMA outbound-completion ATOMIC")
+
+    # A SCRATCH group offset: the loader overwrites it, and the ring emitters
+    # below need FusedPeerGroupPtr left pointing at dst_rank's queue.
+    selfBaseSgpr = kw.sgprPool.checkOutAligned(4, 4, tag="fusedA2A_obSelfBase", preventOverflow=False)
+    grpTmpSgpr   = kw.sgprPool.checkOut(1, tag="fusedA2A_obGroup", preventOverflow=False)
+    self._fusedA2ALoadFlagBaseByRank(module, selfBaseSgpr, myRankSgpr, grpTmpSgpr)
+    kw.sgprPool.checkIn(grpTmpSgpr)
+
+    module.add(SAddU32(dst=sgpr(selfBaseSgpr + 0), src0=sgpr(selfBaseSgpr + 0),
+                       src1=FUSED_A2A_OUTBOUND_OFFSET,
+                       comment="outbound counter lo = peer_flagPtr[my_rank] + %d"
+                               % FUSED_A2A_OUTBOUND_OFFSET))
+    module.add(SAddCU32(dst=sgpr(selfBaseSgpr + 1), src0=sgpr(selfBaseSgpr + 1), src1=0,
+                        comment="outbound counter hi (carry)"))
+
+    cursorOffSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_obCursorOff", preventOverflow=False)
+    module.add(SLShiftLeftB32(dst=sgpr(cursorOffSgpr), src=sgpr(dstRankSgpr),
+                              shiftHex=int(log2(CURSOR_PAIR_BYTES)),
+                              comment="cursor pair byte offset = dst_rank * %d" % CURSOR_PAIR_BYTES))
+
+    cachedIdxSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_obCachedIdx", preventOverflow=False)
+    ring.emitRefreshCache(module, kw, "FusedPeerGroupPtr", cachedIdxSgpr)
+
+    pktSgpr = kw.sgprPool.checkOutAligned(ATOMIC_PACKET_DWORDS, 4,
+                                          tag="fusedA2A_obPacket", preventOverflow=False)
+    pkt.emitBuildAtomicPacket(module, pktSgpr, selfBaseSgpr)
+
+    curSgpr  = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_obCur", preventOverflow=False)
+    pendSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_obPend", preventOverflow=False)
+    offSgpr  = kw.sgprPool.checkOut(1, tag="fusedA2A_obOff", preventOverflow=False)
+    ring.emitReserveQueueSpace(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr,
+                               cachedIdxSgpr, ATOMIC_PACKET_DWORDS * 4, curSgpr, offSgpr)
+    module.add(SMovB64(dst=sgpr(pendSgpr, 2), src=sgpr(curSgpr, 2),
+                       comment="pending = reserved base"))
+    ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktSgpr, ATOMIC_PACKET_DWORDS,
+                         pendSgpr, offSgpr)
+    ring.emitSubmitPacket(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr,
+                          curSgpr, pendSgpr)
+
+    kw.sgprPool.checkIn(offSgpr)
+    kw.sgprPool.checkIn(pendSgpr)
+    kw.sgprPool.checkIn(curSgpr)
+    kw.sgprPool.checkIn(pktSgpr)
+    kw.sgprPool.checkIn(cachedIdxSgpr)
+    kw.sgprPool.checkIn(cursorOffSgpr)
+    kw.sgprPool.checkIn(selfBaseSgpr)
+
   def _emitFusedA2AWave0Election(self, module, skipLabelName):
     """Elect wave 0 as the work-group's single writer, then narrow EXEC to lane 0.
 
@@ -2868,7 +2940,9 @@ class GlobalWriteBatchWriter:
     #     emission order below reads as the structure it implements.  Sub-Modules
     #     render transparently. ---
     from .Signature import (FUSED_A2A_COUNTER1_OFFSET, FUSED_A2A_COUNTER2_OFFSET,
-                            FUSED_A2A_COUNTER3_OFFSET, fusedA2AKernArgLayout)
+                            FUSED_A2A_COUNTER3_OFFSET, FUSED_A2A_DRAIN_RECV,
+                            FUSED_A2A_DRAIN_SEND, FUSED_A2A_OUTBOUND_OFFSET,
+                            fusedA2AKernArgLayout)
     layout = fusedA2AKernArgLayout()
     fusedBase = kw.states.fusedA2AKernArgBase
     mt0 = self.kernel["MacroTile0"]
@@ -2992,8 +3066,8 @@ class GlobalWriteBatchWriter:
     # It is incremented AFTER _emitFusedA2ASdmaIssue returns, so old2+1 == tokenTiles
     # identifies the WG that submitted this card's LAST packet to dst_rank.
     #
-    # counter3 (below) owns the DRAIN election; this one only gates the SDMA-submit
-    # machinery it shares with step (4).
+    # counter3 (below) owns the DRAIN election; this one elects the work-group that
+    # signals outbound completion on this card's queue to dst_rank.
     counter2PtrSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_hsCounter2Ptr", preventOverflow=False)
     module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(dstRankSgpr), shiftHex=2,
                               comment="dst_rank * 4 (u32 counter byte offset)"))
@@ -3015,8 +3089,10 @@ class GlobalWriteBatchWriter:
     module.add(SCmpEQU32(src0=sgpr(tmpSgpr2), src1=sgpr(tokenTilesSgpr),
                          comment="old2+1 == tokenTiles? (this card's last packet to dst_rank)"))
     module.add(SCBranchSCC0(labelName=skipReleaseLabel.getLabelName(),
-                            comment="not the last submitter for dst_rank -> skip ahead "
-                                    "(inert: counter3 elects the DRAIN owner)"))
+                            comment="not the last submitter for dst_rank -> skip the "
+                                    "outbound-completion signal"))
+
+    self._emitFusedA2AOutboundSignal(module, dstRankSgpr, myRankSgpr)
 
     module.add(skipReleaseLabel)
     # The PUSH path has already done its wave-0 election, so it jumps OVER the local
@@ -3087,30 +3163,36 @@ class GlobalWriteBatchWriter:
     # fused kernel into drain-on/off variants).
     skipDrainLabel = Label(kw.labels.getNameInc("fusedA2A_drain_skip"),
                            "fused-A2A: FusedDrain==0 -> no drain barrier")
+    skipRecvLabel  = Label(kw.labels.getNameInc("fusedA2A_drain_skiprecv"),
+                           "fused-A2A: DRAIN_RECV clear -> skip the inbound segment")
+    skipSendLabel  = Label(kw.labels.getNameInc("fusedA2A_drain_skipsend"),
+                           "fused-A2A: DRAIN_SEND clear -> skip the outbound segment")
     drainPollLabel = Label(kw.labels.getNameInc("fusedA2A_drain_poll"),
                            "fused-A2A: DRAIN poll all W self flags until each == tokenTiles")
+    sendPollLabel  = Label(kw.labels.getNameInc("fusedA2A_drain_sendpoll"),
+                           "fused-A2A: drainSend poll the outbound counter until == W")
 
     # runtime gate: FusedDrain == 0 -> skip the whole barrier.
     drainSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_drainFlag", preventOverflow=False)
     module.add(kw.argLoader.loadKernArg(drainSgpr, "KernArgAddress",
       sgprOffset=hex(fusedBase + layout["FusedDrain"]), dword=1))
     module.add(SWaitCnt(kmcnt=0, comment="wait FusedDrain"))
-    module.add(SCmpEQU32(src0=sgpr(drainSgpr), src1=0, comment="FusedDrain == 0?"))
-    kw.sgprPool.checkIn(drainSgpr)
+    module.add(SCmpEQU32(src0=sgpr(drainSgpr), src1=0, comment="FusedDrain == 0? (neither bit)"))
     module.add(SCBranchSCC1(labelName=skipDrainLabel.getLabelName(),
                             comment="FusedDrain==0 -> skip drain barrier"))
 
     # Second runtime gate: AM_tiles == 0 -> nothing to wait for.  No work-group
     # passes the PUSH gate on any card, so not one SDMA packet is submitted, every
-    # flag slot stays 0, and the owner would spin forever on the poll's
-    # `flag == tokenTiles`.  This is the grid-wide form of the PUSH gate's own
+    # flag slot and the outbound counter stay 0, and the owner would spin forever
+    # on either poll.  This is the grid-wide form of the PUSH gate's own
     # predicate, reusing the value it already computed: WorkGroup0 has minimum 0,
     # so "some WG satisfies AM_tiles > WorkGroup0" is exactly "AM_tiles > 0".
     module.add(SCmpEQU32(src0=sgpr(amTilesSgpr), src1=0,
-                         comment="AM_tiles == 0? (no PUSH WG -> no packet -> no flag)"))
+                         comment="AM_tiles == 0? (no PUSH WG -> no packet -> no signal)"))
     kw.sgprPool.checkIn(amTilesSgpr)
     module.add(SCBranchSCC1(labelName=skipDrainLabel.getLabelName(),
-                            comment="AM_tiles==0 -> nothing will ever set a flag, skip drain barrier"))
+                            comment="AM_tiles==0 -> nothing will ever raise a flag or the "
+                                    "outbound counter, skip drain barrier"))
 
     # self flag base = peer_flagPtr[my_rank] (THIS card's own flag buffer).  Loaded here
     # rather than reused from argModule: the winner is frequently a LOCAL WG, which
@@ -3119,8 +3201,9 @@ class GlobalWriteBatchWriter:
     drainFlagBase = kw.sgprPool.checkOutAligned(4, 4, tag="fusedA2A_drainFlagBase", preventOverflow=False)
     drainTmp      = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_drainTmp", preventOverflow=False)
     drainTmp2     = kw.sgprPool.checkOut(1, tag="fusedA2A_drainGroup", preventOverflow=False)
+    drainBitSgpr  = kw.sgprPool.checkOut(1, tag="fusedA2A_drainBit", preventOverflow=False)
     # W is read HERE, past both the election and the FusedDrain gate, because the
-    # mask below and the poll predicate are its only remaining readers and exactly
+    # mask below and both poll predicates are its only remaining readers and exactly
     # one work-group in the grid reaches them.
     c3WSgpr  = kw.sgprPool.checkOut(1, tag="fusedA2A_c3W", preventOverflow=False)
     module.add(kw.argLoader.loadKernArg(drainRankSgpr, "KernArgAddress",
@@ -3130,6 +3213,12 @@ class GlobalWriteBatchWriter:
     module.add(SWaitCnt(kmcnt=0, comment="wait FusedMyRank/FusedW"))
     self._fusedA2ALoadFlagBaseByRank(module, drainFlagBase, drainRankSgpr, drainTmp2)
     kw.sgprPool.checkIn(drainRankSgpr)
+
+    module.add(SAndB32(dst=sgpr(drainBitSgpr), src0=sgpr(drainSgpr), src1=FUSED_A2A_DRAIN_RECV,
+                       comment="FusedDrain & DRAIN_RECV"))
+    module.add(SCmpEQU32(src0=sgpr(drainBitSgpr), src1=0, comment="DRAIN_RECV clear?"))
+    module.add(SCBranchSCC1(labelName=skipRecvLabel.getLabelName(),
+                            comment="DRAIN_RECV clear -> skip the inbound poll"))
 
     # EXEC must cover W lanes for the poll: everything above ran at EXEC=1, but a
     # vector load issued at that width would see lane 0 only, and VCCZ would look
@@ -3143,7 +3232,6 @@ class GlobalWriteBatchWriter:
                         comment="fused-A2A: (1 << W) - 1, one lane per peer flag slot"))
     module.add(self.getEdgeMovInstType()(dst=EXEC(), src=maskReg,
                         comment="fused-A2A: widen EXEC to W lanes for the DRAIN poll"))
-    kw.sgprPool.checkIn(c3WSgpr)
 
     # lane j polls slot j: voffset = j*4, saddr = peer_flagPtr[my_rank].  Serial is the
     # thread id within the WG, so for wave 0 lane j it is exactly j.  The saddr form
@@ -3169,7 +3257,32 @@ class GlobalWriteBatchWriter:
     # Back to a single lane so the whole single-writer region has one EXEC width;
     # afterLabel then restores full EXEC for the vector code that follows.
     module.add(self.getEdgeMovInstType()(EXEC(), 1, "fused-A2A: back to lane 0 after the DRAIN poll"))
+    module.add(skipRecvLabel)
+
+    module.add(SAndB32(dst=sgpr(drainBitSgpr), src0=sgpr(drainSgpr), src1=FUSED_A2A_DRAIN_SEND,
+                       comment="FusedDrain & DRAIN_SEND"))
+    module.add(SCmpEQU32(src0=sgpr(drainBitSgpr), src1=0, comment="DRAIN_SEND clear?"))
+    module.add(SCBranchSCC1(labelName=skipSendLabel.getLabelName(),
+                            comment="DRAIN_SEND clear -> skip the outbound poll"))
+
+    module.add(VMovB32(dst=vgpr(vCntAddr), src=0, comment="voffset = 0 (single counter)"))
+    module.add(sendPollLabel)
+    module.add(GlobalLoadB32(
+      dst=vgpr(vOld), vaddr=vgpr(vCntAddr), saddr=sgpr(drainFlagBase, 2),
+      modifier=GLOBALModifiers(offset=FUSED_A2A_OUTBOUND_OFFSET, glc=True, slc=True,
+                               scope=CacheScope.SCOPE_NONE, isStore=False),
+      comment="poll the outbound counter (system scope, sc0 sc1)"))
+    module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait outbound poll load"))
+    module.add(VCmpNeU32(VCC(), vgpr(vOld), sgpr(c3WSgpr),
+                         comment="outbound != W? (a queue is still reading D)"))
+    module.add(SCBranchVCCNZ(labelName=sendPollLabel.getLabelName(),
+                             comment="some queue incomplete -> spin (poll again)"))
+
+    module.add(skipSendLabel)
     module.add(skipDrainLabel)
+    kw.sgprPool.checkIn(c3WSgpr)
+    kw.sgprPool.checkIn(drainBitSgpr)
+    kw.sgprPool.checkIn(drainSgpr)
     kw.sgprPool.checkIn(drainTmp2)
     kw.sgprPool.checkIn(drainTmp)
     kw.sgprPool.checkIn(drainFlagBase)

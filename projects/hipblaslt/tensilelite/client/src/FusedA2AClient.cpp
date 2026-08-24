@@ -47,9 +47,12 @@ namespace TensileLite
                         ClientProblemFactory& problemFactory)
         {
 #ifdef TENSILELITE_ENABLE_SDMA_A2A
-            const int  W        = args["fused-a2a-world"].as<int>();
-            const int  drain    = args["fused-a2a-drain"].as<int>() ? 1 : 0;
-            const bool validate = args["fused-a2a-validate"].as<int>() != 0;
+            const int  W         = args["fused-a2a-world"].as<int>();
+            const int  drainRecv = args["fused-a2a-drain-recv"].as<int>() ? 1 : 0;
+            const int  drainSend = args["fused-a2a-drain-send"].as<int>() ? 1 : 0;
+            const bool validate  = args["fused-a2a-validate"].as<int>() != 0;
+            const uint32_t drain = (drainRecv ? FUSED_A2A_DRAIN_RECV : 0u)
+                                   | (drainSend ? FUSED_A2A_DRAIN_SEND : 0u);
 
             // Bound W before it is used as a divisor further down.
             if(!fusedA2AWorldSizeValid(W))
@@ -201,9 +204,9 @@ namespace TensileLite
             // with no edge clamp.
             const size_t nTokenPad = (size_t)tokenTiles * macroTileN;
             const size_t recvBytes = (size_t)W * nTokenPad * nShard * sizeof(uint16_t); // bf16
-            // One u32 flag slot per source rank. Must stay in step with
-            // emitComputeFlagAddr's *4 stride and the DRAIN poll's j*4.
-            const size_t flagBytes = (size_t)W * sizeof(uint32_t);
+            // Per-launch reset range. Must stay in step with emitComputeFlagAddr's
+            // *4 stride and the DRAIN poll's j*4.
+            const size_t flagBytes = FUSED_A2A_FLAG_BLOCK_BYTES;
             // SDMA cursor pairs, counter2[dst_rank], counter3, then
             // counter[dst_rank][token-tile], then a guard tail
             // (FusedA2ACounterSentinel.hpp). Only counterBytes is memset per launch.
@@ -216,8 +219,9 @@ namespace TensileLite
 
             std::cout << "[fused-a2a] nFeature(M)=" << M << " nToken(N)=" << N << " K=" << K
                       << " AM=" << AM << " nShard=" << nShard << " tilesPerRank=" << tilesPerRank
-                      << " tokenTiles=" << tokenTiles << " mTiles=" << mTiles << " drain=" << drain
-                      << "\n";
+                      << " tokenTiles=" << tokenTiles << " mTiles=" << mTiles
+                      << " drainRecv=" << drainRecv << " drainSend=" << drainSend
+                      << " drain=" << drain << "\n";
 
             // Physical layouts come from the tensor descriptors, never hardcoded:
             // A(m,k) sits at m*aFreeStride + k*aBoundStride, likewise B(k,n), D(m,n).
@@ -338,8 +342,8 @@ namespace TensileLite
             // and recv as independent pointers; carving both from one allocation is
             // this client's choice, not a layout the kernel knows about.
             constexpr size_t kFlagBytes = 4096;
-            static_assert(FUSED_A2A_MAX_RANKS * sizeof(uint32_t) <= kFlagBytes,
-                          "flag array must fit ahead of recv in the shared allocation");
+            static_assert(FUSED_A2A_FLAG_BLOCK_BYTES <= kFlagBytes,
+                          "flag block must fit ahead of recv in the shared allocation");
             std::vector<void*> peer(W, nullptr), counter(W, nullptr);
             // Views into peer[d]: flag first, recv past kFlagBytes.
             std::vector<void*> recv(W, nullptr), flag(W, nullptr);
@@ -502,6 +506,8 @@ namespace TensileLite
             bool                             anyHipError    = false;
             bool guardFail = false; // counter guard tail corrupted (see below)
             bool wptrFail  = false; // an engine write pointer went backwards (see below)
+            bool sendFail  = false; // outbound completion counter never reached W (see below)
+            constexpr int kOutboundPolls = 1000;
 
             // Per-queue engine write pointer, carried across iterations. Must
             // never go backwards; the engine would read the difference as ~4 GB
@@ -561,7 +567,7 @@ namespace TensileLite
                                    counter[d],
                                    (uint32_t)d, // my_rank
                                    (uint32_t)W,
-                                   (uint32_t)drain,
+                                   drain,
                                    // kernarg "FusedAM" (Signature.py); pass AM as
                                    // the value to keep the client/kernel ABI matched.
                                    (uint32_t)AM);
@@ -663,6 +669,42 @@ namespace TensileLite
                                   << "-byte payload" << std::endl;
                         guardFail = true;
                         ok        = false;
+                    }
+                }
+
+                for(int d = 0; AM != 0 && d < W; d++)
+                {
+                    HIP_CHECK_EXC(hipSetDevice(d));
+                    uint32_t   outbound = 0;
+                    hipError_t oe       = hipSuccess;
+                    for(int spin = 0; spin < kOutboundPolls && outbound != (uint32_t)W; spin++)
+                    {
+                        oe = hipMemcpy(&outbound,
+                                       (const char*)flag[d] + FUSED_A2A_OUTBOUND_OFFSET,
+                                       sizeof(outbound),
+                                       hipMemcpyDeviceToHost);
+                        if(oe != hipSuccess)
+                            break;
+                    }
+                    if(oe != hipSuccess)
+                    {
+                        std::cerr << "[fused-a2a] WARNING: could not read the outbound counter "
+                                     "on device "
+                                  << d << " (iter " << it << "): " << hipGetErrorString(oe)
+                                  << std::endl;
+                    }
+                    else if(outbound != (uint32_t)W)
+                    {
+                        std::cerr << "[fused-a2a] OUTBOUND SIGNAL SHORT iter=" << it
+                                  << " device=" << d << ": counter at byte "
+                                  << FUSED_A2A_OUTBOUND_OFFSET << " of the flag block reads "
+                                  << outbound << " after " << kOutboundPolls
+                                  << " polls, expected " << W
+                                  << " -- some queue never carried its completion ATOMIC, so "
+                                     "drainSend would hang on it"
+                                  << std::endl;
+                        sendFail = true;
+                        ok       = false;
                     }
                 }
 
@@ -945,15 +987,16 @@ namespace TensileLite
 
             std::cout << "[fused-a2a] overall " << (raceFail ? "FAILED" : "PASSED") << std::endl;
             // Exit codes: 2 = a kernel returned a HIP error in some iteration, a
-            //     counter guard tail came back corrupted, or an engine write
-            //     pointer went backwards -- all hard runtime faults rather than
+            //     counter guard tail came back corrupted, an engine write
+            //     pointer went backwards, or the outbound completion counter
+            //     never reached W -- all hard runtime faults rather than
             //     numeric disagreement;
             // 3 = all kernels ran but some iteration failed numeric validation
             //     (only reachable when validate=1);
             // 0 = every iteration passed (validate=1: dual-segment numeric check
             //     plus the write-pointer invariant; validate=0: clean exit on
             //     all iterations).
-            if(anyHipError || guardFail || wptrFail)
+            if(anyHipError || guardFail || wptrFail || sendFail)
                 return 2;
             return raceFail ? 3 : 0;
 #else

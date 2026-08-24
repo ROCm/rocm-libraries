@@ -22,7 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "FusedA2AKernArg.hpp" // FUSED_A2A_MAX_RANKS
+#include "FusedA2AKernArg.hpp" // FUSED_A2A_MAX_RANKS, fusedA2AAlignLine
 
 namespace TensileLite
 {
@@ -37,14 +37,6 @@ namespace TensileLite
         // [0] reservation, [1] commit. Interleaved per queue so the kernel
         // reaches both from one base and never needs W.
         constexpr size_t FUSED_A2A_CURSORS_PER_QUEUE = 2;
-
-        constexpr size_t FUSED_A2A_LINE_BYTES = 64;
-
-        constexpr size_t fusedA2AAlignLine(size_t nbytes)
-        {
-            return (nbytes + FUSED_A2A_LINE_BYTES - 1) / FUSED_A2A_LINE_BYTES
-                   * FUSED_A2A_LINE_BYTES;
-        }
 
         // Twinned with FUSED_A2A_COUNTER*_OFFSET in Tensile/Components/Signature.py.
         constexpr size_t FUSED_A2A_COUNTER2_OFFSET = fusedA2AAlignLine(

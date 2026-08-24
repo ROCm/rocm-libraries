@@ -61,10 +61,6 @@ if FUSED_A2A_MAX_RANKS > 31:
 
 from .SdmaRingEmitter import CURSOR_PAIR_BYTES, FUSED_A2A_PEER_FIELDS, PEER_GROUP_BYTES
 
-# Counter-block region offsets, twinned with FUSED_A2A_COUNTER*_OFFSET in
-# client/include/FusedA2ACounterSentinel.hpp. The three leading regions are
-# sized by FUSED_A2A_MAX_RANKS rather than the runtime W. Each region starts on
-# a 64-byte line; the trailing variable-size region gets no tail padding.
 FUSED_A2A_LINE_BYTES = 64
 
 
@@ -72,10 +68,19 @@ def _fusedA2AAlignLine(nbytes):
     return -(-nbytes // FUSED_A2A_LINE_BYTES) * FUSED_A2A_LINE_BYTES
 
 
+# Counter-block region offsets, twinned with FUSED_A2A_COUNTER*_OFFSET in
+# client/include/FusedA2ACounterSentinel.hpp; the flag-block offset and the
+# FusedDrain bits with their namesakes in client/include/FusedA2AKernArg.hpp.
+# The three leading counter regions are sized by FUSED_A2A_MAX_RANKS rather than
+# the runtime W. Each region starts on a 64-byte line; the trailing
+# variable-size region gets no tail padding.
 FUSED_A2A_COUNTER2_OFFSET = _fusedA2AAlignLine(FUSED_A2A_MAX_RANKS * CURSOR_PAIR_BYTES)
 FUSED_A2A_COUNTER3_OFFSET = _fusedA2AAlignLine(
     FUSED_A2A_COUNTER2_OFFSET + FUSED_A2A_MAX_RANKS * 4)
 FUSED_A2A_COUNTER1_OFFSET = _fusedA2AAlignLine(FUSED_A2A_COUNTER3_OFFSET + 4)
+FUSED_A2A_OUTBOUND_OFFSET = _fusedA2AAlignLine(FUSED_A2A_MAX_RANKS * 4)
+FUSED_A2A_DRAIN_RECV = 1
+FUSED_A2A_DRAIN_SEND = 2
 
 # (argName, byteSize) in addArg() order. Both the offset map and the segment
 # size derive from this one list, so an arg added to the segment cannot reach

@@ -39,6 +39,22 @@ namespace TensileLite
                       "arrived. That is a wrong answer, not a hang. Re-derive the mask "
                       "before raising this.");
 
+        constexpr size_t FUSED_A2A_LINE_BYTES = 64;
+
+        constexpr size_t fusedA2AAlignLine(size_t nbytes)
+        {
+            return (nbytes + FUSED_A2A_LINE_BYTES - 1) / FUSED_A2A_LINE_BYTES
+                   * FUSED_A2A_LINE_BYTES;
+        }
+
+        // Twinned with their namesakes in Tensile/Components/Signature.py.
+        constexpr size_t FUSED_A2A_OUTBOUND_OFFSET
+            = fusedA2AAlignLine((size_t)FUSED_A2A_MAX_RANKS * sizeof(uint32_t));
+        constexpr size_t FUSED_A2A_FLAG_BLOCK_BYTES
+            = fusedA2AAlignLine(FUSED_A2A_OUTBOUND_OFFSET + sizeof(uint32_t));
+        constexpr uint32_t FUSED_A2A_DRAIN_RECV = 1u;
+        constexpr uint32_t FUSED_A2A_DRAIN_SEND = 2u;
+
         // One group per peer: flag base, recv base, then the queue pointers.
         // Order is the contract with SdmaRingEmitter.py FUSED_A2A_PEER_FIELDS.
         constexpr size_t FUSED_A2A_PEER_QUEUE_FIELDS = 4;
