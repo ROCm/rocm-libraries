@@ -69,5 +69,8 @@ endif()
 if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
   target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
+if(ROCSOLVER_ENABLE_EIG_2STAGE)
+  target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
+endif()
 
 rocm_install(TARGETS rocsolver-bench COMPONENT benchmarks)
