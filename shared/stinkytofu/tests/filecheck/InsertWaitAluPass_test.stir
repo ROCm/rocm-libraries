@@ -424,3 +424,17 @@ st.func @valu_to_global_prefetch_suppressed() {
   v7 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 5 }
   "st.global_prefetch_b8"(v0, s[0:1]) { issueCycles = 1, latencyCycles = 1 }
 }
+
+#--- Async LDS->global store reads its address VGPRs; a later VALU clobbering
+#--- one is a vm_vsrc WAR, same as any VMEM read.
+# CHECK-LABEL: @async_store_to_valu_war
+# CHECK: "st.global_store_async_from_lds_b64"
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @async_store_to_valu_war() {
+^entry:
+  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
