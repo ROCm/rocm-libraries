@@ -3844,3 +3844,65 @@ def test_gfx1250v0_assembles_and_compiles_for_gfx1250_with_strict_features(monke
     assert "--offload-arch=gfx1250" in v0Cc and _features(v0Cc, "-Xclang") == expected
     assert "--offload-arch=gfx1250-strict" in strictCc and not _features(strictCc, "-Xclang")
     assert not any(GFX1250V0 in a for a in v0Asm + v0Cc)
+
+
+# ``Architecture:`` beside a detected name. The enumerator reads the hardware,
+# and gfx1250 and gfx1250:xnack- are one chip under two driver configurations,
+# so it reports the bare name for both -- the config is the only place the mode
+# can be said. It may qualify what was detected, and nothing else.
+
+
+def _fromConfig(configArchitecture, isaList, archNames):
+    from Tensile.Tensile import archNamesFromConfig
+
+    return archNamesFromConfig(configArchitecture, isaList, list(archNames))
+
+
+@pytest.mark.parametrize(
+    "detected,configured",
+    [
+        (GFX1250, f"{GFX1250}:xnack-"),
+        (GFX1250, f"{GFX1250}:xnack+"),
+        (GFX1250_STRICT, f"{GFX1250_STRICT}:xnack-"),
+        ("gfx942", "gfx942:xnack-"),
+    ],
+)
+def test_config_may_qualify_the_detected_architecture(detected, configured):
+    """Without this the qualifier is unsayable: detection cannot report it, and
+    the only other way to be heard is ``ISA:``, which skips detection entirely
+    and with it the guard against tuning one stepping on the other's hardware."""
+    assert _fromConfig(configured, [gfxToIsa(detected)], [detected]) == [configured]
+
+
+@pytest.mark.parametrize(
+    "detected,configured",
+    [
+        (GFX1250, GFX1250_STRICT),          # a stepping of the detected ISA
+        (GFX1250_STRICT, GFX1250),          # ... and the other way round
+        (GFX1250, f"{GFX1250_STRICT}:xnack-"),
+        (GFX1250, "gfx942:xnack-"),         # a different architecture entirely
+    ],
+)
+def test_config_cannot_replace_the_detected_architecture(detected, configured):
+    """Only a qualifier on the detected name is taken. Anything else is passed
+    over, so the config cannot tune one stepping on the other's hardware."""
+    assert _fromConfig(configured, [gfxToIsa(detected)], [detected]) == [detected]
+
+
+def test_config_qualifier_is_taken_from_the_entry_that_matches():
+    """``Architecture:`` is a list, and only the entry naming what was detected
+    has anything to say about it."""
+    configured = f"gfx942:xnack-;{GFX1250}:xnack-;{GFX1250_STRICT}"
+    assert _fromConfig(configured, [ISA_GFX1250], [GFX1250]) == [f"{GFX1250}:xnack-"]
+
+
+def test_config_architecture_is_still_validated_beside_a_detected_name():
+    """Passed over is not unread: a typo is reported rather than ignored."""
+    with pytest.raises(ValueError, match="Unrecognized Architecture in config"):
+        _fromConfig("gfx1250v1", [ISA_GFX1250], [GFX1250])
+
+
+def test_config_architecture_without_detection_is_unchanged():
+    """The ``ISA:`` path hands in no name, so entries are appended as before."""
+    assert _fromConfig(f"{GFX1250}:xnack-", [ISA_GFX1250], []) == [f"{GFX1250}:xnack-"]
+    assert _fromConfig(GFX1250_STRICT, [ISA_GFX1250], []) == [GFX1250_STRICT]

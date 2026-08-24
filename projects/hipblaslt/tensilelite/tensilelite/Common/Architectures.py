@@ -20,11 +20,13 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+import os
 import re
 import collections
 
+from functools import lru_cache
 from pathlib import Path
-from subprocess import run, PIPE
+from subprocess import run, PIPE, DEVNULL
 from typing import List, Optional, Set, Tuple, Union, NamedTuple, Dict
 
 from .Types import IsaVersion
@@ -75,6 +77,9 @@ architectureMap = {
     # SUPPORTED_ISA cannot name it; this entry is where `all` picks it up.
     "gfx1250-strict": "gfx1250-strict",
     "gfx1250v0": "gfx1250v0",
+    "gfx1250v0:xnack-": "gfx1250v0",
+    "gfx1250:xnack-": "gfx1250",
+    "gfx1250-strict:xnack-": "gfx1250-strict",
 }
 
 # Names that build another architecture's codegen for an existing target,
@@ -98,15 +103,86 @@ ARCH_BUILD_ALIASES = {
 }
 
 
+@lru_cache(maxsize=None)
+def _targetIdAccepted(compiler: str, targetId: str) -> bool:
+    """Whether the compiler driver accepts a target ID.
+
+    Asked with ``-###``, a driver dry run: the target ID is validated but
+    nothing is compiled, so one answer costs about 10ms and is then cached for
+    the life of the process.
+    """
+    try:
+        return run(
+            [
+                compiler,
+                "--target=amdgcn-amd-amdhsa",
+                f"-mcpu={targetId}",
+                "-###",
+                "-c",
+                "-x",
+                "c++",
+                os.devnull,
+            ],
+            stdout=DEVNULL,
+            stderr=DEVNULL,
+        ).returncode == 0
+    except OSError:
+        # No such compiler, or not executable. Nothing can be concluded about
+        # the target ID, which is what a False says here; see compilerTargetOf.
+        return False
+
+
+def _withoutXnack(spec: str) -> str:
+    """``spec`` with every xnack qualifier removed, the others kept in order."""
+    base, _, qualifiers = spec.partition(":")
+    kept = [q for q in qualifiers.split(":") if q and not q.startswith("xnack")]
+    return ":".join([base, *kept]) if kept else base
+
+
 def _buildAlias(spec: str) -> Optional[dict]:
     return ARCH_BUILD_ALIASES.get(baseArchName(spec))
 
 
-def compilerTargetOf(spec: str) -> str:
+def compilerTargetOf(spec: str, compiler: Optional[Union[str, Path]] = None) -> str:
     """The compiler target a spec is built for, and the name its library files
-    carry; the spec itself unless aliased."""
+    carry; the spec itself unless aliased.
+
+    Args:
+        spec: A requested architecture spec, qualified or not.
+        compiler: The compiler to ask about target IDs, usually the ``path`` of
+            a toolchain component. Without one no spec is altered, which is what
+            a caller that only wants alias resolution wants anyway.
+
+    An xnack qualifier the compiler will not accept is dropped. The spec is put
+    to the compiler, and if the target ID is refused the bare form is tried
+    instead. The suffix stays meaningful inside TensileLite, where it selects
+    ``ARCH_CAP_OVERRIDES``, so it is carried the whole way and let go of here,
+    at the compiler boundary. Detected rather than tabulated, so no list here
+    tracks which target IDs the compiler takes and a change on that side needs
+    no edit; ``tensilelite_normalize_xnack_archs`` in cmake/ asks the same
+    question for the hip::device side, and the two must agree or the code
+    objects and the offload targets part ways.
+
+    Only the xnack token goes, so other qualifiers survive. And a spec refused
+    for some other reason -- a typo in the processor name -- has to stay refused
+    rather than quietly degrade to its base name, so the stripped form is asked
+    about too and the spec comes back untouched unless dropping xnack is
+    precisely what makes it acceptable. That also covers a compiler that knows
+    nothing about AMDGPU, or none being given at all: nothing is dropped, and
+    the real compile reports the real error.
+    """
     alias = _buildAlias(spec)
-    return alias["target"] if alias else spec
+    if alias:
+        return alias["target"]
+    if compiler is None or ":" not in spec:
+        return spec
+    compiler = str(compiler)
+    if _targetIdAccepted(compiler, spec):
+        return spec
+    stripped = _withoutXnack(spec)
+    if stripped != spec and _targetIdAccepted(compiler, stripped):
+        return stripped
+    return spec
 
 
 def tuningArchOf(spec: str) -> str:
@@ -127,14 +203,22 @@ def withArchBuildAliases(archs: List[str]) -> List[str]:
     gfx1250 gains gfx1250v0; gfx1250-strict names a different target and does
     not expand.
 
+    The alias inherits whatever qualified the spec that asked for it, so
+    ``gfx1250:xnack-`` brings in ``gfx1250v0:xnack-`` and not a bare
+    ``gfx1250v0``. The suffix is what picks capabilities out of
+    ``ARCH_CAP_OVERRIDES``; dropping it would build the alias with XNACK replay
+    still on while its own target had it off.
+
     Call before ``isaCollisionFreeGroups``: the alias shares its ISA with what
     it expands from and has to reach the partitioner that splits them.
     """
-    named = {baseArchName(a) for a in archs}
+    requested = {}
+    for a in archs:
+        requested.setdefault(baseArchName(a), a)
     return archs + [
-        alias
+        alias + requested[fields["target"]][len(fields["target"]):]
         for alias, fields in ARCH_BUILD_ALIASES.items()
-        if fields["target"] in named and alias not in named
+        if fields["target"] in requested and alias not in requested
     ]
 
 gfxVariantMap = {
@@ -158,6 +242,27 @@ ARCH_CAP_OVERRIDES = {
             "HasTDMMulticast": False,
             # RequiresXCntForVolatileVMEM is deliberately absent: gfx1250-strict
             # still needs the XNACK-replay xcnt drain, so it inherits the probed True.
+        },
+    },
+    # xnack- variants: XNACK replay is disabled at the hardware level, so full
+    # replay protection (EnableXnackReplay) is not needed.
+    # RequiresXCntForVolatileVMEM is NOT cleared: the s_waitcnt drain before
+    # atomics is still required for correct memory ordering regardless of the
+    # xnack mode. These overrides are layered on top of any base-name overrides
+    # (e.g. gfx1250v0:xnack- inherits gfx1250v0's stepping deltas first).
+    "gfx1250:xnack-": {
+        "archCaps": {
+            "EnableXnackReplay": False,
+        },
+    },
+    "gfx1250v0:xnack-": {
+        "archCaps": {
+            "EnableXnackReplay": False,
+        },
+    },
+    "gfx1250-strict:xnack-": {
+        "archCaps": {
+            "EnableXnackReplay": False,
         },
     },
 }
@@ -262,7 +367,9 @@ def supportedSteppings() -> List[str]:
     A stepping shares the ISA of the architecture it steps from, so
     ``SUPPORTED_ISA`` cannot name one; they are read off ``architectureMap``
     instead. Only steppings of an architecture already covered qualify: being a
-    stepping does not make an unsupported architecture supported.
+    stepping does not make an unsupported architecture supported. Qualified keys
+    (``gfx1250-strict:xnack-``) exist to carry cap overrides, not to name another
+    thing to build, so only the bare names qualify.
 
     Returns:
         The supported stepping names.
@@ -271,7 +378,9 @@ def supportedSteppings() -> List[str]:
     return [
         name
         for name in architectureMap
-        if steppingArchOf(name) in covered and name not in ARCH_BUILD_ALIASES
+        if name == baseArchName(name)
+        and steppingArchOf(name) in covered
+        and name not in ARCH_BUILD_ALIASES
     ]
 
 
@@ -313,7 +422,6 @@ def baseArchName(spec: str) -> str:
     """The bare architecture name in a spec, without predicates or qualifiers."""
     return spec.split("[")[0].split(":")[0].strip()
 
-
 def archMacroNames(isa: IsaVersion) -> List[str]:
     """The macros clang predefines for every architecture sharing an ISA.
 
@@ -336,7 +444,7 @@ def archMacroNames(isa: IsaVersion) -> List[str]:
         {
             baseArchName(name)
             for name in architectureMap
-            if gfxToIsa(name) == isa and name not in ARCH_BUILD_ALIASES
+            if gfxToIsa(name) == isa and baseArchName(name) not in ARCH_BUILD_ALIASES
         }
     )
     return ["__" + name.replace("-", "_") + "__" for name in names]
