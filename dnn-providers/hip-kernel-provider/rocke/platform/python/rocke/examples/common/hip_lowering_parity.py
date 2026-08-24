@@ -114,20 +114,44 @@ class Case:
     name: str
     group: str
     build: Callable[[], object]
+    # ``expect`` distinguishes an op that should lower cleanly ("ok") from one
+    # whose HIP lowering is *intentionally* rejected on this target ("reject")
+    # -- e.g. a WMMA atom on a CDNA/MFMA arch. For a "reject" case a
+    # ``NotImplementedError`` from the HIP lowerer is the PASS condition; a
+    # clean lowering is the FAILURE (it would mean the arch gate silently
+    # dropped and the op mis-compiled). This is the guard the requirement asks
+    # for against accidental handler drift.
+    expect: str = "ok"
+    # Optional per-case arch override. The arch-gated micro-kernels (WMMA needs
+    # gfx11/gfx12, the async-DMA ops need gfx1250) pin the arch where they are
+    # valid rather than inheriting the harness-wide ``--arch``.
+    arch: Optional[str] = None
 
 
 @dataclass
 class AuditResult:
     name: str
     group: str
+    expect: str = "ok"
+    arch: str = ""
     llvm_ok: bool = False
     hip_ok: bool = False
     hip_compile_ok: Optional[bool] = None
+    # Set True when ``expect == "reject"`` and the HIP lowerer raised the
+    # intended ``NotImplementedError`` (the documented arch gate fired).
+    rejected_ok: bool = False
     hip_chars: int = 0
     error: str = ""
 
     @property
     def ok(self) -> bool:
+        if self.expect == "reject":
+            # An intentional-rejection case passes iff the HIP lowerer refused
+            # the op with the documented NotImplementedError. (Some arch gates
+            # -- e.g. WMMA on a CDNA target -- are symmetric: the LLVM lowerer
+            # refuses it too, so we do NOT require ``llvm_ok`` here. The point
+            # is that HIP never silently emits a mis-compiling handler.)
+            return self.rejected_ok
         if not (self.llvm_ok and self.hip_ok):
             return False
         return self.hip_compile_ok is not False
@@ -171,6 +195,172 @@ def _conv_problem() -> ConvProblem:
         dH=1,
         dW=1,
     )
+
+
+def _micro_cases() -> List[Case]:
+    """Single-op micro-kernels for the ops added to close the HIP-lowering gap.
+
+    Each kernel wires exactly one new op (plus the loads/stores needed to make
+    it a valid ``__global__``) so a failure points unambiguously at that op's
+    handler rather than at a large fused kernel. The arch-gated ops pin the
+    arch where they are valid; two ``expect="reject"`` cases assert the WMMA
+    arch gate fires on a CDNA target instead of silently mis-compiling.
+
+    Imports are local so the harness's module import (used by the broad instance
+    audit) does not depend on the low-level IR builder API.
+    """
+    from rocke.core.ir import (  # noqa: PLC0415
+        BF16,
+        F32,
+        FP8E4M3,
+        BF8E5M2,
+        I32,
+        IRBuilder,
+        PtrType,
+        VectorType,
+    )
+
+    def _vector_max() -> object:
+        b = IRBuilder("micro_vector_max")
+        A = b.param("A", PtrType(F32, "global"))
+        B = b.param("B", PtrType(F32, "global"))
+        C = b.param("C", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        b.global_store_vN(
+            C,
+            tid,
+            b.vector_max(
+                b.global_load_vN(A, tid, F32, 4), b.global_load_vN(B, tid, F32, 4)
+            ),
+            4,
+        )
+        b.ret()
+        return b.kernel
+
+    def _cvt_scalef32(kind: str) -> object:
+        elem = FP8E4M3 if kind == "fp8" else BF8E5M2
+        b = IRBuilder(f"micro_cvt_scalef32_{kind}")
+        A = b.param("A", PtrType(elem, "global"))
+        S = b.param("S", PtrType(F32, "global"))
+        C = b.param("C", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        v = b.global_load_vN(A, tid, elem, 4)
+        scale = b.global_load_f32(S, tid)
+        r = (
+            b.cvt_scalef32_pk_f32_fp8x4(v, scale)
+            if kind == "fp8"
+            else b.cvt_scalef32_pk_f32_bf8x4(v, scale)
+        )
+        b.global_store_vN(C, tid, r, 4)
+        b.ret()
+        return b.kernel
+
+    def _wmma_bf16(name: str, width: int, gfx12: bool) -> object:
+        b = IRBuilder(name)
+        A = b.param("A", PtrType(BF16, "global"))
+        B = b.param("B", PtrType(BF16, "global"))
+        C = b.param("C", PtrType(F32, "global"))
+        O = b.param("O", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        a = b.global_load_vN(A, tid, BF16, width)
+        bb = b.global_load_vN(B, tid, BF16, width)
+        c = b.global_load_vN(C, tid, F32, 8)
+        r = (
+            b.wmma_gfx12_f32_16x16x16_bf16(a, bb, c)
+            if gfx12
+            else b.wmma_f32_16x16x16_bf16(a, bb, c)
+        )
+        b.global_store_vN(O, tid, r, 8)
+        b.ret()
+        return b.kernel
+
+    def _mfma_hero() -> object:
+        b = IRBuilder("micro_mfma_f32_16x16x128_fp8")
+        A = b.param("A", PtrType(I32, "global"))
+        B = b.param("B", PtrType(I32, "global"))
+        C = b.param("C", PtrType(F32, "global"))
+        O = b.param("O", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        a = b.bitcast(b.global_load_vN(A, tid, I32, 8), VectorType(FP8E4M3, 32))
+        bb = b.bitcast(b.global_load_vN(B, tid, I32, 8), VectorType(FP8E4M3, 32))
+        c = b.global_load_vN(C, tid, F32, 4)
+        b.global_store_vN(O, tid, b.mma("mfma_f32_16x16x128_fp8", a, bb, c), 4)
+        b.ret()
+        return b.kernel
+
+    def _s_wait_asynccnt() -> object:
+        b = IRBuilder("micro_s_wait_asynccnt")
+        A = b.param("A", PtrType(F32, "global"))
+        O = b.param("O", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        v = b.global_load_f32(A, tid)
+        b.s_wait_asynccnt(0)
+        b.global_store_vN(O, tid, v, 1)
+        b.ret()
+        return b.kernel
+
+    def _global_load_lds() -> object:
+        b = IRBuilder("micro_global_load_lds")
+        A = b.param("A", PtrType(F32, "global"))
+        smem = b.smem_alloc(F32, [256], "lds")
+        base = b.smem_addr_of(smem)
+        b.global_load_lds(A, b.const_i32(0), base, 16)
+        b.ret()
+        return b.kernel
+
+    def _global_load_async_to_lds() -> object:
+        b = IRBuilder("micro_global_load_async_to_lds")
+        A = b.param("A", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        smem = b.smem_alloc(F32, [256], "lds")
+        b.global_load_async_to_lds(A, tid, smem, [tid], width_bytes=16)
+        b.s_wait_asynccnt(0)
+        b.ret()
+        return b.kernel
+
+    return [
+        # -- P0: available on the default CDNA target --
+        Case("micro.vector_max", "micro", _vector_max),
+        Case("micro.cvt_scalef32_fp8", "micro", lambda: _cvt_scalef32("fp8")),
+        Case("micro.cvt_scalef32_bf8", "micro", lambda: _cvt_scalef32("bf8")),
+        Case("micro.mfma_f32_16x16x128_fp8", "micro", _mfma_hero, arch="gfx950"),
+        Case("micro.global_load_lds", "micro", _global_load_lds, arch="gfx950"),
+        # -- P1: arch-gated ops pinned to a supporting arch --
+        Case(
+            "micro.wmma_bf16",
+            "micro",
+            lambda: _wmma_bf16("micro_wmma_bf16", 16, False),
+            arch="gfx1151",
+        ),
+        Case(
+            "micro.wmma_gfx12_bf16",
+            "micro",
+            lambda: _wmma_bf16("micro_wmma_gfx12_bf16", 8, True),
+            arch="gfx1201",
+        ),
+        Case("micro.s_wait_asynccnt", "micro", _s_wait_asynccnt, arch="gfx1250"),
+        Case(
+            "micro.global_load_async_to_lds",
+            "micro",
+            _global_load_async_to_lds,
+            arch="gfx1250",
+        ),
+        # -- arch-gate assertions: WMMA must be REJECTED on a CDNA target --
+        Case(
+            "micro.wmma_bf16.reject_cdna",
+            "micro",
+            lambda: _wmma_bf16("micro_wmma_bf16_rej", 16, False),
+            expect="reject",
+            arch="gfx950",
+        ),
+        Case(
+            "micro.wmma_gfx12_bf16.reject_cdna",
+            "micro",
+            lambda: _wmma_bf16("micro_wmma_gfx12_bf16_rej", 8, True),
+            expect="reject",
+            arch="gfx950",
+        ),
+    ]
 
 
 def make_cases(*, arch: str = "gfx950") -> List[Case]:
@@ -729,6 +919,10 @@ def make_cases(*, arch: str = "gfx950") -> List[Case]:
         ]
     )
 
+    # Single-op micro-kernels for the ops added to close the HIP-lowering gap
+    # (P0 cvt-scalef32 / vector.max, P1 arch-gated WMMA / async-DMA / fp8 hero).
+    cases.extend(_micro_cases())
+
     return cases
 
 
@@ -788,10 +982,44 @@ def audit_cases(
     results: List[AuditResult] = []
     try:
         for case in cases:
-            result = AuditResult(name=case.name, group=case.group)
+            # Per-case arch override: arch-gated micro-kernels pin the arch
+            # where they are valid (WMMA -> gfx11/gfx12, async DMA -> gfx1250).
+            case_arch = case.arch or arch
+            result = AuditResult(
+                name=case.name,
+                group=case.group,
+                expect=case.expect,
+                arch=case_arch,
+            )
+            if case.expect == "reject":
+                # Rejection cases assert the HIP arch gate fires. Attempt LLVM
+                # independently (it may also refuse a symmetric arch gate; that
+                # is fine and recorded), then require HIP to raise the
+                # documented NotImplementedError.
+                try:
+                    kernel = case.build()
+                except Exception as exc:  # noqa: BLE001
+                    result.error = f"build: {type(exc).__name__}: {exc}"
+                    results.append(result)
+                    continue
+                try:
+                    lower_kernel_to_llvm(kernel, arch=case_arch)
+                    result.llvm_ok = True
+                except Exception:  # noqa: BLE001 - symmetric gate; not required
+                    pass
+                try:
+                    lower_kernel_to_hip(kernel, arch=case_arch)
+                    result.error = "HIP lowered an op expected to be rejected"
+                except NotImplementedError as nie:
+                    result.rejected_ok = True
+                    result.error = f"NotImplementedError: {nie}"
+                except Exception as exc:  # noqa: BLE001
+                    result.error = f"{type(exc).__name__}: {exc}"
+                results.append(result)
+                continue
             try:
                 kernel = case.build()
-                lower_kernel_to_llvm(kernel, arch=arch)
+                lower_kernel_to_llvm(kernel, arch=case_arch)
                 result.llvm_ok = True
                 # Thread arch through the HIP lowering too: the HIP path is
                 # arch-aware (s_waitcnt encoding, MFMA-vs-WMMA builtin family,
@@ -799,14 +1027,14 @@ def audit_cases(
                 # gfx950 (default) MFMA source and then compiles it with
                 # ``--offload-arch={arch}``, which silently mis-tests a non-CDNA
                 # target (e.g. MFMA builtins on the WMMA-only gfx1151).
-                hip_source = lower_kernel_to_hip(kernel, arch=arch)
+                hip_source = lower_kernel_to_hip(kernel, arch=case_arch)
                 result.hip_ok = True
                 result.hip_chars = len(hip_source)
                 if compile_hip:
                     _compile_hip_source(
                         hip_source,
                         name=case.name,
-                        arch=arch,
+                        arch=case_arch,
                         output_dir=output_dir,
                         timeout_s=compile_timeout_s,
                     )
@@ -991,12 +1219,17 @@ def main() -> int:
     )
     for r in results:
         compile_status = ""
-        if args.compile_hip:
+        if args.compile_hip and r.expect != "reject":
             compile_status = f" hipcc={'OK' if r.hip_compile_ok else 'FAIL'}"
         status = "OK" if r.ok else "FAIL"
+        if r.expect == "reject":
+            # For a rejection case, "hip" means "was the op refused as intended".
+            hip_col = "REJECTED" if r.rejected_ok else "LOWERED!"
+        else:
+            hip_col = "OK" if r.hip_ok else "FAIL"
         print(
-            f"{status:4} {r.group:9} {r.name:28} "
-            f"llvm={'OK' if r.llvm_ok else 'FAIL'} hip={'OK' if r.hip_ok else 'FAIL'} "
+            f"{status:4} {r.group:9} {r.name:34} arch={r.arch:8} "
+            f"llvm={'OK' if r.llvm_ok else 'FAIL'} hip={hip_col} "
             f"chars={r.hip_chars}{compile_status}"
         )
         if r.error:
