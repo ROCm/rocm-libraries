@@ -281,8 +281,6 @@ public:
                     load_jit_cb_state->symbol,
                     load_jit_cb_state->func.data(),
                     load_jit_cb_state->func.size(),
-                    load_jit_cb_state->data.empty() ? nullptr
-                                                    : load_jit_cb_state->get_raw_data_ptrs().data(),
                     load_jit_cb_state->shared_mem_bytes);
                 if(fft_status != rocfft_status_success)
                 {
@@ -293,9 +291,6 @@ public:
                     store_jit_cb_state->symbol,
                     store_jit_cb_state->func.data(),
                     store_jit_cb_state->func.size(),
-                    store_jit_cb_state->data.empty()
-                        ? nullptr
-                        : store_jit_cb_state->get_raw_data_ptrs().data(),
                     store_jit_cb_state->shared_mem_bytes);
                 if(fft_status != rocfft_status_success)
                 {
@@ -342,6 +337,29 @@ public:
                 throw std::runtime_error("rocfft_plan_get_work_buffer_size failed");
             }
         }
+
+        // Set JIT callback data if necessary
+        if(run_callbacks == fft_callback_type_jit)
+        {
+            fft_status = rocfft.execution_info_set_load_callback_data(
+                info,
+                load_jit_cb_state->get_raw_data_ptrs().data(),
+                load_jit_cb_state->get_raw_data_ptrs().size());
+            if(fft_status != rocfft_status_success)
+            {
+                throw std::runtime_error("rocfft_execution_info_set_load_callback_data failed");
+            }
+
+            fft_status = rocfft.execution_info_set_store_callback_data(
+                info,
+                store_jit_cb_state->get_raw_data_ptrs().data(),
+                store_jit_cb_state->get_raw_data_ptrs().size());
+            if(fft_status != rocfft_status_success)
+            {
+                throw std::runtime_error("rocfft_execution_info_set_store_callback_data failed");
+            }
+        }
+
         return fft_status_from_rocfftparams(fft_status);
     }
 
@@ -758,6 +776,8 @@ struct rocfft_funcs
     ROCFFT_API_WRAP(execution_info_destroy);
     ROCFFT_API_WRAP(execution_info_set_load_callback);
     ROCFFT_API_WRAP(execution_info_set_store_callback);
+    ROCFFT_API_WRAP(execution_info_set_load_callback_data);
+    ROCFFT_API_WRAP(execution_info_set_store_callback_data);
     ROCFFT_API_WRAP(execution_info_set_work_buffer);
     ROCFFT_API_WRAP(field_add_brick);
     ROCFFT_API_WRAP(field_create);
@@ -843,6 +863,8 @@ struct dyna_rocfft_funcs
     ROCFFT_DYNA_API_WRAP(execution_info_destroy);
     ROCFFT_DYNA_API_WRAP(execution_info_set_load_callback);
     ROCFFT_DYNA_API_WRAP(execution_info_set_store_callback);
+    ROCFFT_DYNA_API_WRAP(execution_info_set_load_callback_data);
+    ROCFFT_DYNA_API_WRAP(execution_info_set_store_callback_data);
     ROCFFT_DYNA_API_WRAP(execution_info_set_work_buffer);
     ROCFFT_DYNA_API_WRAP(field_add_brick);
     ROCFFT_DYNA_API_WRAP(field_create);
@@ -876,6 +898,8 @@ struct dyna_rocfft_funcs
         ROCFFT_DYNA_API_LOAD(execution_info_destroy);
         ROCFFT_DYNA_API_LOAD(execution_info_set_load_callback);
         ROCFFT_DYNA_API_LOAD(execution_info_set_store_callback);
+        ROCFFT_DYNA_API_LOAD(execution_info_set_load_callback_data);
+        ROCFFT_DYNA_API_LOAD(execution_info_set_store_callback_data);
         ROCFFT_DYNA_API_LOAD(execution_info_set_work_buffer);
         ROCFFT_DYNA_API_LOAD(field_add_brick);
         ROCFFT_DYNA_API_LOAD(field_create);
@@ -916,6 +940,10 @@ struct dyna_rocfft_funcs
         std::swap(this->execution_info_destroy, other.execution_info_destroy);
         std::swap(this->execution_info_set_load_callback, other.execution_info_set_load_callback);
         std::swap(this->execution_info_set_store_callback, other.execution_info_set_store_callback);
+        std::swap(this->execution_info_set_load_callback_data,
+                  other.execution_info_set_load_callback_data);
+        std::swap(this->execution_info_set_store_callback_data,
+                  other.execution_info_set_store_callback_data);
         std::swap(this->execution_info_set_work_buffer, other.execution_info_set_work_buffer);
         std::swap(this->field_add_brick, other.field_add_brick);
         std::swap(this->field_create, other.field_create);
