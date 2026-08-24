@@ -324,6 +324,168 @@ class TestConvDgradCorrectness(unittest.TestCase):
             label="fp16 resnet N8H56W56C64K64",
         )
 
+    # ---- grouped (grid-per-group on blockIdx.y) ------------------------------
+
+    def test_fp16_grouped_stride1(self):
+        """fp16 grouped dgrad, groups=4 (cpg=kpg=16), stride=1 direct store."""
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "64",
+            "--K",
+            "64",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--groups",
+            "4",
+            "--split-k",
+            "1",
+            label="fp16 grouped g4 stride=1",
+        )
+
+    def test_bf16_grouped_stride1(self):
+        """bf16 grouped dgrad, groups=4, stride=1."""
+        self._verify(
+            "--dtype",
+            "bf16",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "64",
+            "--K",
+            "64",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--groups",
+            "4",
+            "--split-k",
+            "1",
+            label="bf16 grouped g4 stride=1",
+        )
+
+    def test_fp16_grouped_stride2(self):
+        """fp16 grouped dgrad, groups=4, stride=2 — tilde decomposition path."""
+        if ARCH not in _CDNA_ARCHES:
+            self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "64",
+            "--K",
+            "64",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--sH",
+            "2",
+            "--sW",
+            "2",
+            "--groups",
+            "4",
+            "--split-k",
+            "1",
+            label="fp16 grouped g4 stride=2",
+        )
+
+    def test_fp16_grouped_odd_kpg(self):
+        """Non-power-of-two kpg (C=K=48, groups=8 -> cpg=kpg=6): guards against
+        the k_sub decode-divisor trap (must divide by kpg, not total K)."""
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "48",
+            "--K",
+            "48",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--groups",
+            "8",
+            "--split-k",
+            "1",
+            label="fp16 grouped g8 cpg=kpg=6",
+        )
+
+    def test_fp16_grouped_split_k(self):
+        """fp16 grouped dgrad with split_k>1 — group on y, split_k on z compose;
+        even cpg (=16) keeps the packed <2 x f16> atomic pairs in-group."""
+        if ARCH not in _CDNA_ARCHES:
+            self.skipTest(f"split_k dgrad requires CDNA atomic-add; running on {ARCH}")
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "4",
+            "--Hi",
+            "28",
+            "--Wi",
+            "28",
+            "--C",
+            "64",
+            "--K",
+            "128",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--groups",
+            "4",
+            "--split-k",
+            "-1",
+            label="fp16 grouped g4 split_k=auto",
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

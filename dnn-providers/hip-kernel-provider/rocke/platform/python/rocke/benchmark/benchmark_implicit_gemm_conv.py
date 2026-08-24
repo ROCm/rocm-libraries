@@ -2174,7 +2174,10 @@ def _run_dgrad_sweep(
         )
 
     _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-    _W_f32 = _make(p.K, p.Y, p.X, p.C)
+    # Weight is stored per-group packed: KYXC with channel extent cpg = C/groups
+    # (== C when groups == 1), matching the dgrad w_descriptor and the forward
+    # make_b_descriptor.  dY/dX carry full K/C (the group rides the k_out/c index).
+    _W_f32 = _make(p.K, p.Y, p.X, p.cpg)
     dX_t = torch.empty(p.N, p.Hi, p.Wi, p.C, dtype=_torch_dtype)
 
     dY_t = _dY_f32.to(_torch_dtype)
@@ -2183,7 +2186,9 @@ def _run_dgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
 
-    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.C, p.K, dtype)
+    # Per-group channel runs (cpg/kpg) bound the vector widths for grouped dgrad
+    # so loads/stores never straddle a group boundary (cpg==C, kpg==K ungrouped).
+    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.cpg, p.kpg, dtype)
     base_sig = conv_args_signature(dtype)
     ext_sig = base_sig + [
         {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
@@ -2355,7 +2360,10 @@ def _run_dgrad_sweep(
             len(buf_bytes),
         )
         flat_tiles = sub_gemms[-1].block_end
-        grid = (flat_tiles, 1, resolved_split_k)
+        # Conv group rides blockIdx.y (see conv_implicit_gemm_dgrad); the tilde
+        # sub-GEMM geometry is channel-independent so flat_tiles is per-group.
+        _groups = max(int(spec.problem.groups), 1)
+        grid = (flat_tiles, _groups, resolved_split_k)
         values = {
             "A": dY_dev,
             "B": W_dev,

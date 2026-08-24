@@ -1236,6 +1236,11 @@ def cases():
     # ConvProblem positional args: (N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW)
     dgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)  # stride=1
     dgrad2 = (2, 16, 16, 32, 32, 3, 3, 2, 2, 1, 1, 1, 1)  # stride=2, 4 sub-GEMMs
+    # Grouped dgrad (14th tuple element = ConvProblem.groups). C=K=64, groups=4
+    # -> cpg=kpg=16; grid-per-group on blockIdx.y (byte-identical to groups=1
+    # for the ungrouped path).
+    dgrad_g4 = (1, 8, 8, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 4)  # stride=1 grouped
+    dgrad_g4_s2 = (1, 8, 8, 64, 64, 3, 3, 2, 2, 1, 1, 1, 1, 4)  # stride=2 grouped tilde
     add(
         "conv_dgrad",
         "conv_dgrad/gfx942/n1h8c16k32r3_s1",
@@ -1338,6 +1343,76 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=64,
+        ),
+    )
+    # Grouped dgrad (groups=4, cpg=kpg=16) -- grid-per-group on blockIdx.y.
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx942/n1h8c64k64r3_g4",
+        "gfx942",
+        build_dgrad(
+            "irhash_dgrad_942_g4_s1",
+            "gfx942",
+            dgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=8,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx942/n1h8c64k64r3_g4_s2",
+        "gfx942",
+        build_dgrad(
+            "irhash_dgrad_942_g4_s2",
+            "gfx942",
+            dgrad_g4_s2,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n1h8c64k64r3_g4",
+        "gfx950",
+        build_dgrad(
+            "irhash_dgrad_950_g4_s1",
+            "gfx950",
+            dgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    # gfx1151 WMMA grouped (wave32, 16x16x16) -- stride=1 only.
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx1151/n1h8c64k64r3_g4",
+        "gfx1151",
+        build_dgrad(
+            "irhash_dgrad_1151_g4_s1",
+            "gfx1151",
+            dgrad_g4,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=16,
         ),
     )
 

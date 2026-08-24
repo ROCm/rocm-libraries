@@ -16,10 +16,10 @@ degenerates trivially.
 
 Grid layout
 -----------
-The grid is always 1-D in X (``flat_tiles``):
+The grid is flat-tile on X, conv group on Y, split_k on Z:
 
     flat_tiles = sub_gemms[-1].block_end
-    grid = (flat_tiles, 1, split_k)
+    grid = (flat_tiles, groups, split_k)   # groups == 1 -> (flat_tiles, 1, split_k)
 
 Candidates (fp16 dgrad)
 -----------------------
@@ -138,6 +138,7 @@ def _problem(req: ConvDgradRequest) -> ConvProblem:
         pW=int(req.pad_w),
         dH=int(req.dilation_h),
         dW=int(req.dilation_w),
+        groups=int(req.G),
     )
 
 
@@ -150,8 +151,16 @@ def _request_errors(req: OperatorRequest) -> List[str]:
     for f in ("N", "C", "K", "Hi", "Wi", "Y", "X"):
         if int(getattr(req, f)) <= 0:
             errors.append(f"{f} must be positive")
-    if int(req.G) != 1:
-        errors.append("only groups=1 (G=1) dgrad is implemented")
+    G = int(req.G)
+    if G < 1:
+        errors.append(f"groups (G) must be >= 1; got {G}")
+    elif G > 1:
+        if int(req.C) % G != 0:
+            errors.append(f"C={req.C} not divisible by groups={G}")
+        elif int(req.C) // G == 1:
+            errors.append("depthwise dgrad (channels-per-group == 1) is not supported")
+        if int(req.K) % G != 0:
+            errors.append(f"K={req.K} not divisible by groups={G}")
     if _dgrad_dtype(req.dtype) not in ("fp16", "bf16", "fp32"):
         errors.append(f"unsupported dtype {req.dtype!r}; fp16/bf16/fp32 only")
     if req.layout.upper() != "NHWC":
@@ -309,10 +318,17 @@ def _spec_rdna_wmma(req: ConvDgradRequest, name: str) -> DgradConvSpec:
 
 
 def _grid(spec: DgradConvSpec, req: OperatorRequest) -> Tuple[int, int, int]:
-    """1-D flat-tile grid over all sub-GEMMs, Z = split_k."""
+    """Flat-tile grid on X, conv group on Y, split_k on Z.
+
+    The tilde sub-GEMM geometry is channel-independent, so the same flat-tile
+    count and ``sub_gemm_buf`` serve every group; the conv group rides
+    ``blockIdx.y`` (see ``conv_implicit_gemm_dgrad._build_tilde_dgrad``).  For
+    ``groups==1`` this reduces to ``(flat_tiles, 1, split_k)`` exactly as before.
+    """
     sub_gemms = spec.compute_sub_gemms()
     flat_tiles = sub_gemms[-1].block_end
-    return (flat_tiles, 1, max(spec.split_k, 1))
+    groups = max(int(spec.problem.groups), 1)
+    return (flat_tiles, groups, max(spec.split_k, 1))
 
 
 def _signature(spec: DgradConvSpec) -> Sequence[dict]:

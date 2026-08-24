@@ -38,9 +38,34 @@ class TestConvDgradDispatch(unittest.TestCase):
         with self.assertRaises(ValueError):
             dispatch_conv_dgrad(_dgrad("gfx950", dtype="fp8"))
 
-    def test_rejects_groups(self):
+    def test_grouped_admitted_grid_per_group(self):
+        # Grouped dgrad is grid-per-group: the conv group rides blockIdx.y, so
+        # grid[1] == G (x = per-group flat tiles, z = split_k = 1).
+        for arch in ("gfx942", "gfx950"):
+            r = dispatch_conv_dgrad(_dgrad(arch, G=4))
+            self.assertEqual(r.spec.problem.groups, 4)
+            self.assertEqual(r.spec.problem.cpg, 16)
+            self.assertEqual(r.spec.problem.kpg, 16)
+            self.assertEqual(r.grid[1], 4, "y must be one index per group")
+            self.assertEqual(r.grid[2], 1)
+            self.assertGreater(r.grid[0], 0)
+
+    def test_grouped_stride2_admitted(self):
+        # stride=2 grouped: tilde decomposition on x, group on y.
+        r = dispatch_conv_dgrad(_dgrad("gfx942", G=4, stride_h=2, stride_w=2))
+        self.assertEqual(r.grid[1], 4)
+        sub_gemms = r.spec.compute_sub_gemms()
+        self.assertEqual(r.grid[0], sub_gemms[-1].block_end)
+
+    def test_rejects_indivisible_groups(self):
+        # C=64, K=64 not divisible by G=5.
         with self.assertRaises(ValueError):
-            dispatch_conv_dgrad(_dgrad("gfx950", G=2))
+            dispatch_conv_dgrad(_dgrad("gfx950", G=5))
+
+    def test_rejects_depthwise(self):
+        # G == C -> channels-per-group == 1 (depthwise) is out of scope.
+        with self.assertRaises(ValueError):
+            dispatch_conv_dgrad(_dgrad("gfx950", G=64))
 
     def test_rejects_unknown_arch(self):
         with self.assertRaises(ValueError):
