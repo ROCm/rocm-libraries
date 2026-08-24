@@ -18,6 +18,7 @@
 // gtest suite has no such token, so it would be invisible to every ctest preset.
 
 #include <gtest/gtest.h>
+#include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
@@ -33,10 +34,6 @@
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
-// dataTypeInfo.hpp is the umbrella; bf16.hpp includes it first, so including
-// bf16.hpp directly skips DGen::bf16 under #pragma once and the HIP compile
-// of this TU then fails looking up unqualified bf16.
-#include <mxDataGenerator/dataTypeInfo.hpp>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -292,8 +289,8 @@ namespace
     // reference below must see the same numbers the kernel does, or its
     // order-sensitivity self-check describes a different problem.
     //
-    // HIP_R_16BF goes through mxDataGenerator's bf16 convert so this harness
-    // does not keep a second rounding implementation.
+    // HIP_R_16BF uses hip_bfloat16. hipBLASLt leaves mxDataGenerator off on
+    // Windows, so this harness cannot depend on DGen headers.
     std::vector<uint8_t> encodeOperand(std::vector<float>& values, hipDataType type)
     {
         std::vector<uint8_t> bytes(values.size() * elementSizeOf(type));
@@ -306,12 +303,9 @@ namespace
         auto* out = reinterpret_cast<uint16_t*>(bytes.data());
         for(size_t idx = 0; idx < values.size(); ++idx)
         {
-            const auto packed
-                = static_cast<uint16_t>(DGen::satConvertToType<DGen::bf16>(values[idx]));
-            out[idx] = packed;
-            uint8_t packedBytes[sizeof(packed)];
-            std::memcpy(packedBytes, &packed, sizeof(packed));
-            values[idx] = DGen::toFloat<DGen::bf16>(packedBytes, packedBytes, 0, 0);
+            const hip_bfloat16 packed{values[idx]};
+            out[idx]     = packed.data;
+            values[idx]  = static_cast<float>(packed);
         }
         return bytes;
     }
