@@ -100,7 +100,19 @@ struct AsmCapsConfig {
     VgprMsbMode vgprMsbMode = VgprMsbMode::None;
 
     /// rocisa archCaps `RequiresXCntForVolatileVMEM`. False on the standalone
-    /// path, which has no rocisa to ask; see Gfx1250HazardPass.
+    /// path, which has no rocisa to ask.
+    /// When set alone (without `enableXnackReplay`), Gfx1250HazardPass only
+    /// inserts atomic drains (Rule 4a). See Gfx1250HazardPass for the full
+    /// rule set (Rules 1–4).
     bool requiresXCntForVolatileVMEM = false;
+
+    /// Enable full XNACK replay protection in Gfx1250HazardPass:
+    ///   - Source-clobber checks: SMEM Rule 3, FLAT Rule 2
+    ///   - Boundary drains: ForeverSleep, ScalarPrefetch, VgprMsb
+    ///   - Atomic drains: Rule 4a (implies `requiresXCntForVolatileVMEM`)
+    /// When false, all of the above are skipped; only Rule 4a remains
+    /// active if `requiresXCntForVolatileVMEM` is set independently.
+    /// See Gfx1250HazardPass for the complete rule definitions.
+    bool enableXnackReplay = false;
 };
 }  // namespace stinkytofu
