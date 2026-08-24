@@ -355,48 +355,33 @@ extern "C" __global__ void Im2d2Col_v2(const int data_size_off,
 
     // The size of the "K" dimension in the GEMM for a single group
     const int patch_size_per_group = WEI_H * WEI_W * channels_per_group;
+    const int patch_size           = WEI_H * WEI_W * CHANNELS;
 
-#pragma clang loop unroll(full)
-    for(int i = 0; i < CHANNELS; i += local_size)
+    for(int patch_idx = lid; patch_idx < patch_size; patch_idx += local_size)
     {
-        const int c = i + lid;
-        if(c < CHANNELS)
+        const int c  = patch_idx % CHANNELS;
+        const int kw = (patch_idx / CHANNELS) % WEI_W;
+        const int kh = patch_idx / (CHANNELS * WEI_W);
+
+        const int current_group            = c / channels_per_group;
+        const int channel_in_current_group = c % channels_per_group;
+        const int group_offset             = current_group * (output_size * patch_size_per_group);
+        const int patch_offset             = grp_id * patch_size_per_group;
+
+        const int src_h = oh * stride_h + kh * dilation_h - pad_h;
+        const int src_w = ow * stride_w + kw * dilation_w - pad_w;
+        const int ok    = (src_h >= 0) & (src_h < h) & (src_w >= 0) & (src_w < w);
+
+        data_t v = (data_t)0;
+        if(ok)
         {
-            // Determine which group this channel belongs to, and its sub-index
-            const int current_group            = c / channels_per_group;
-            const int channel_in_current_group = c % channels_per_group;
-
-            const int group_offset = current_group * (output_size * patch_size_per_group);
-
-            const int patch_offset = grp_id * patch_size_per_group;
-
-#pragma clang loop unroll(full)
-            for(int kh = 0; kh < WEI_H; ++kh)
-            {
-                const int src_h  = oh * stride_h + kh * dilation_h - pad_h;
-                const int row_ok = (src_h >= 0) & (src_h < h);
-
-#pragma clang loop unroll(full)
-                for(int kw = 0; kw < WEI_W; ++kw)
-                {
-                    const int src_w = ow * stride_w + kw * dilation_w - pad_w;
-                    const int ok    = row_ok & (src_w >= 0) & (src_w < w);
-
-                    const int input_idx = ((src_h * w + src_w) * CHANNELS) + c;
-
-                    const int col_idx = group_offset + patch_offset +
-                                        (kh * wei_w + kw) * channels_per_group +
-                                        channel_in_current_group;
-
-                    data_t v = (data_t)0;
-                    if(ok)
-                    {
-                        v = im_off[input_idx];
-                    }
-                    col[col_idx] = v;
-                }
-            }
+            const int input_idx = ((src_h * w + src_w) * CHANNELS) + c;
+            v                   = im_off[input_idx];
         }
+
+        const int col_idx = group_offset + patch_offset + (kh * WEI_W + kw) * channels_per_group +
+                            channel_in_current_group;
+        col[col_idx] = v;
     }
 }
 
