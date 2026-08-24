@@ -3,56 +3,56 @@
     {
       "file": "rocrand_normal.h",
       "kind": "typedef",
-      "line": 368,
+      "line": 379,
       "name": "bm_helper",
       "underlying_type": "rocrand_device::detail::engine_boxmuller_helper<rocrand_state_philox4x32_10>"
     },
     {
       "file": "rocrand_normal.h",
       "kind": "typedef",
-      "line": 444,
+      "line": 456,
       "name": "bm_helper",
       "underlying_type": "rocrand_device::detail::engine_boxmuller_helper<rocrand_state_philox4x32_10>"
     },
     {
       "file": "rocrand_normal.h",
       "kind": "typedef",
-      "line": 518,
+      "line": 529,
       "name": "bm_helper",
       "underlying_type": "rocrand_device::detail::engine_boxmuller_helper<rocrand_state_mrg31k3p>"
     },
     {
       "file": "rocrand_normal.h",
       "kind": "typedef",
-      "line": 575,
+      "line": 587,
       "name": "bm_helper",
       "underlying_type": "rocrand_device::detail::engine_boxmuller_helper<rocrand_state_mrg31k3p>"
     },
     {
       "file": "rocrand_normal.h",
       "kind": "typedef",
-      "line": 634,
+      "line": 647,
       "name": "bm_helper",
       "underlying_type": "rocrand_device::detail::engine_boxmuller_helper<rocrand_state_mrg32k3a>"
     },
     {
       "file": "rocrand_normal.h",
       "kind": "typedef",
-      "line": 691,
+      "line": 705,
       "name": "bm_helper",
       "underlying_type": "rocrand_device::detail::engine_boxmuller_helper<rocrand_state_mrg32k3a>"
     },
     {
       "file": "rocrand_normal.h",
       "kind": "typedef",
-      "line": 750,
+      "line": 765,
       "name": "bm_helper",
       "underlying_type": "rocrand_device::detail::engine_boxmuller_helper<rocrand_state_xorwow>"
     },
     {
       "file": "rocrand_normal.h",
       "kind": "typedef",
-      "line": 803,
+      "line": 819,
       "name": "bm_helper",
       "underlying_type": "rocrand_device::detail::engine_boxmuller_helper<rocrand_state_xorwow>"
     },
@@ -7787,7 +7787,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 53,
+      "line": 56,
       "linkage_name": "_ZN14rocrand_device6detail10box_mullerEjj",
       "name": "rocrand_device::detail::box_muller",
       "parameters": [
@@ -7811,7 +7811,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 70,
+      "line": 75,
       "linkage_name": "_ZN14rocrand_device6detail10box_mullerEy",
       "name": "rocrand_device::detail::box_muller",
       "parameters": [
@@ -7831,7 +7831,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 78,
+      "line": 84,
       "linkage_name": "_ZN14rocrand_device6detail17box_muller_doubleE15HIP_vector_typeIjLj4EE",
       "name": "rocrand_device::detail::box_muller_double",
       "parameters": [
@@ -7851,7 +7851,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 100,
+      "line": 106,
       "linkage_name": "_ZN14rocrand_device6detail17box_muller_doubleE15HIP_vector_typeIyLj2EE",
       "name": "rocrand_device::detail::box_muller_double",
       "parameters": [
@@ -7871,7 +7871,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 110,
+      "line": 117,
       "linkage_name": "_ZN14rocrand_device6detail15box_muller_halfEtt",
       "name": "rocrand_device::detail::box_muller_half",
       "parameters": [
@@ -8363,7 +8363,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 141,
+      "line": 143,
       "linkage_name": "_ZN14rocrand_device6detail14mrg_box_mullerEjj",
       "name": "rocrand_device::detail::mrg_box_muller",
       "parameters": [
@@ -8387,7 +8387,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 159,
+      "line": 162,
       "linkage_name": "_ZN14rocrand_device6detail21mrg_box_muller_doubleEjj",
       "name": "rocrand_device::detail::mrg_box_muller_double",
       "parameters": [
@@ -8411,7 +8411,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 325,
+      "line": 337,
       "linkage_name": "_ZN14rocrand_device6detail24mrg_normal_distribution2Ejj",
       "name": "rocrand_device::detail::mrg_normal_distribution2",
       "parameters": [
@@ -8435,7 +8435,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 332,
+      "line": 344,
       "linkage_name": "_ZN14rocrand_device6detail31mrg_normal_distribution_double2Ejj",
       "name": "rocrand_device::detail::mrg_normal_distribution_double2",
       "parameters": [
@@ -8459,7 +8459,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 339,
+      "line": 351,
       "linkage_name": "_ZN14rocrand_device6detail29mrg_normal_distribution_half2Ej",
       "name": "rocrand_device::detail::mrg_normal_distribution_half2",
       "parameters": [
@@ -8611,7 +8611,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 244,
+      "line": 252,
       "linkage_name": "_ZN14rocrand_device6detail20normal_distribution2Ejj",
       "name": "rocrand_device::detail::normal_distribution2",
       "parameters": [
@@ -8635,7 +8635,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 249,
+      "line": 258,
       "linkage_name": "_ZN14rocrand_device6detail20normal_distribution2E15HIP_vector_typeIjLj2EE",
       "name": "rocrand_device::detail::normal_distribution2",
       "parameters": [
@@ -8655,7 +8655,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 254,
+      "line": 264,
       "linkage_name": "_ZN14rocrand_device6detail20normal_distribution2Ey",
       "name": "rocrand_device::detail::normal_distribution2",
       "parameters": [
@@ -8675,7 +8675,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 259,
+      "line": 270,
       "linkage_name": "_ZN14rocrand_device6detail20normal_distribution4E15HIP_vector_typeIjLj4EE",
       "name": "rocrand_device::detail::normal_distribution4",
       "parameters": [
@@ -8695,7 +8695,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 271,
+      "line": 278,
       "linkage_name": "_ZN14rocrand_device6detail20normal_distribution4E15HIP_vector_typeIxLj2EE",
       "name": "rocrand_device::detail::normal_distribution4",
       "parameters": [
@@ -8715,7 +8715,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 278,
+      "line": 286,
       "linkage_name": "_ZN14rocrand_device6detail20normal_distribution4Eyy",
       "name": "rocrand_device::detail::normal_distribution4",
       "parameters": [
@@ -8739,7 +8739,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 230,
+      "line": 236,
       "linkage_name": "_ZN14rocrand_device6detail19normal_distributionEj",
       "name": "rocrand_device::detail::normal_distribution",
       "parameters": [
@@ -8759,7 +8759,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 237,
+      "line": 244,
       "linkage_name": "_ZN14rocrand_device6detail19normal_distributionEy",
       "name": "rocrand_device::detail::normal_distribution",
       "parameters": [
@@ -8779,7 +8779,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 300,
+      "line": 310,
       "linkage_name": "_ZN14rocrand_device6detail27normal_distribution_double2E15HIP_vector_typeIjLj4EE",
       "name": "rocrand_device::detail::normal_distribution_double2",
       "parameters": [
@@ -8799,7 +8799,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 305,
+      "line": 316,
       "linkage_name": "_ZN14rocrand_device6detail27normal_distribution_double2E15HIP_vector_typeIyLj2EE",
       "name": "rocrand_device::detail::normal_distribution_double2",
       "parameters": [
@@ -8819,7 +8819,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 286,
+      "line": 294,
       "linkage_name": "_ZN14rocrand_device6detail26normal_distribution_doubleEj",
       "name": "rocrand_device::detail::normal_distribution_double",
       "parameters": [
@@ -8839,7 +8839,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 293,
+      "line": 302,
       "linkage_name": "_ZN14rocrand_device6detail26normal_distribution_doubleEy",
       "name": "rocrand_device::detail::normal_distribution_double",
       "parameters": [
@@ -8859,7 +8859,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 310,
+      "line": 322,
       "linkage_name": "_ZN14rocrand_device6detail25normal_distribution_half2Ej",
       "name": "rocrand_device::detail::normal_distribution_half2",
       "parameters": [
@@ -8879,7 +8879,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 318,
+      "line": 329,
       "linkage_name": "_ZN14rocrand_device6detail25normal_distribution_half2Ey",
       "name": "rocrand_device::detail::normal_distribution_half2",
       "parameters": [
@@ -9043,7 +9043,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 203,
+      "line": 208,
       "linkage_name": "_ZN14rocrand_device6detail12roc_d_erfinvEd",
       "name": "rocrand_device::detail::roc_d_erfinv",
       "parameters": [
@@ -9063,7 +9063,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 176,
+      "line": 180,
       "linkage_name": "_ZN14rocrand_device6detail12roc_f_erfinvEf",
       "name": "rocrand_device::detail::roc_f_erfinv",
       "parameters": [
@@ -16595,7 +16595,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 399,
+      "line": 410,
       "linkage_name": "_Z15rocrand_normal2PN14rocrand_device20philox4x32_10_engineE",
       "name": "rocrand_normal2",
       "parameters": [
@@ -16615,7 +16615,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 550,
+      "line": 561,
       "linkage_name": "_Z15rocrand_normal2PN14rocrand_device15mrg31k3p_engineE",
       "name": "rocrand_normal2",
       "parameters": [
@@ -16635,7 +16635,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 666,
+      "line": 679,
       "linkage_name": "_Z15rocrand_normal2PN14rocrand_device15mrg32k3a_engineE",
       "name": "rocrand_normal2",
       "parameters": [
@@ -16655,7 +16655,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 779,
+      "line": 794,
       "linkage_name": "_Z15rocrand_normal2PN14rocrand_device13xorwow_engineE",
       "name": "rocrand_normal2",
       "parameters": [
@@ -16675,7 +16675,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 883,
+      "line": 897,
       "linkage_name": "_Z15rocrand_normal2PN14rocrand_device13mtgp32_engineE",
       "name": "rocrand_normal2",
       "parameters": [
@@ -16695,7 +16695,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1111,
+      "line": 1125,
       "linkage_name": "_Z15rocrand_normal2PN14rocrand_device14lfsr113_engineE",
       "name": "rocrand_normal2",
       "parameters": [
@@ -16715,7 +16715,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1196,
+      "line": 1210,
       "linkage_name": "_Z15rocrand_normal2PN14rocrand_device22threefry2x32_20_engineE",
       "name": "rocrand_normal2",
       "parameters": [
@@ -16735,7 +16735,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1276,
+      "line": 1290,
       "linkage_name": "_Z15rocrand_normal2PN14rocrand_device22threefry2x64_20_engineE",
       "name": "rocrand_normal2",
       "parameters": [
@@ -16755,7 +16755,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1352,
+      "line": 1366,
       "linkage_name": "_Z15rocrand_normal2PN14rocrand_device22threefry4x32_20_engineE",
       "name": "rocrand_normal2",
       "parameters": [
@@ -16775,7 +16775,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1431,
+      "line": 1445,
       "linkage_name": "_Z15rocrand_normal2PN14rocrand_device22threefry4x64_20_engineE",
       "name": "rocrand_normal2",
       "parameters": [
@@ -16795,7 +16795,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 422,
+      "line": 433,
       "linkage_name": "_Z15rocrand_normal4PN14rocrand_device20philox4x32_10_engineE",
       "name": "rocrand_normal4",
       "parameters": [
@@ -16815,7 +16815,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 366,
+      "line": 377,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device20philox4x32_10_engineE",
       "name": "rocrand_normal",
       "parameters": [
@@ -16835,7 +16835,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 516,
+      "line": 527,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device15mrg31k3p_engineE",
       "name": "rocrand_normal",
       "parameters": [
@@ -16855,7 +16855,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 632,
+      "line": 645,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device15mrg32k3a_engineE",
       "name": "rocrand_normal",
       "parameters": [
@@ -16875,7 +16875,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 748,
+      "line": 763,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device13xorwow_engineE",
       "name": "rocrand_normal",
       "parameters": [
@@ -16895,7 +16895,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 863,
+      "line": 877,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device13mtgp32_engineE",
       "name": "rocrand_normal",
       "parameters": [
@@ -16915,7 +16915,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 947,
+      "line": 961,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device14sobol32_engineILb0EEE",
       "name": "rocrand_normal",
       "parameters": [
@@ -16935,7 +16935,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 983,
+      "line": 997,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device24scrambled_sobol32_engineILb0EEE",
       "name": "rocrand_normal",
       "parameters": [
@@ -16955,7 +16955,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1019,
+      "line": 1033,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device14sobol64_engineILb0EEE",
       "name": "rocrand_normal",
       "parameters": [
@@ -16975,7 +16975,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1055,
+      "line": 1069,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device24scrambled_sobol64_engineILb0EEE",
       "name": "rocrand_normal",
       "parameters": [
@@ -16995,7 +16995,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1091,
+      "line": 1105,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device14lfsr113_engineE",
       "name": "rocrand_normal",
       "parameters": [
@@ -17015,7 +17015,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1176,
+      "line": 1190,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device22threefry2x32_20_engineE",
       "name": "rocrand_normal",
       "parameters": [
@@ -17035,7 +17035,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1256,
+      "line": 1270,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device22threefry2x64_20_engineE",
       "name": "rocrand_normal",
       "parameters": [
@@ -17055,7 +17055,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1332,
+      "line": 1346,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device22threefry4x32_20_engineE",
       "name": "rocrand_normal",
       "parameters": [
@@ -17075,7 +17075,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1411,
+      "line": 1425,
       "linkage_name": "_Z14rocrand_normalPN14rocrand_device22threefry4x64_20_engineE",
       "name": "rocrand_normal",
       "parameters": [
@@ -17095,7 +17095,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 471,
+      "line": 483,
       "linkage_name": "_Z22rocrand_normal_double2PN14rocrand_device20philox4x32_10_engineE",
       "name": "rocrand_normal_double2",
       "parameters": [
@@ -17115,7 +17115,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 608,
+      "line": 620,
       "linkage_name": "_Z22rocrand_normal_double2PN14rocrand_device15mrg31k3p_engineE",
       "name": "rocrand_normal_double2",
       "parameters": [
@@ -17135,7 +17135,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 724,
+      "line": 738,
       "linkage_name": "_Z22rocrand_normal_double2PN14rocrand_device15mrg32k3a_engineE",
       "name": "rocrand_normal_double2",
       "parameters": [
@@ -17155,7 +17155,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 838,
+      "line": 853,
       "linkage_name": "_Z22rocrand_normal_double2PN14rocrand_device13xorwow_engineE",
       "name": "rocrand_normal_double2",
       "parameters": [
@@ -17175,7 +17175,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 923,
+      "line": 937,
       "linkage_name": "_Z22rocrand_normal_double2PN14rocrand_device13mtgp32_engineE",
       "name": "rocrand_normal_double2",
       "parameters": [
@@ -17195,7 +17195,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1152,
+      "line": 1166,
       "linkage_name": "_Z22rocrand_normal_double2PN14rocrand_device14lfsr113_engineE",
       "name": "rocrand_normal_double2",
       "parameters": [
@@ -17215,7 +17215,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1234,
+      "line": 1248,
       "linkage_name": "_Z22rocrand_normal_double2PN14rocrand_device22threefry2x32_20_engineE",
       "name": "rocrand_normal_double2",
       "parameters": [
@@ -17235,7 +17235,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1314,
+      "line": 1328,
       "linkage_name": "_Z22rocrand_normal_double2PN14rocrand_device22threefry2x64_20_engineE",
       "name": "rocrand_normal_double2",
       "parameters": [
@@ -17255,7 +17255,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1393,
+      "line": 1407,
       "linkage_name": "_Z22rocrand_normal_double2PN14rocrand_device22threefry4x32_20_engineE",
       "name": "rocrand_normal_double2",
       "parameters": [
@@ -17275,7 +17275,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1472,
+      "line": 1486,
       "linkage_name": "_Z22rocrand_normal_double2PN14rocrand_device22threefry4x64_20_engineE",
       "name": "rocrand_normal_double2",
       "parameters": [
@@ -17295,7 +17295,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 491,
+      "line": 503,
       "linkage_name": "_Z22rocrand_normal_double4PN14rocrand_device20philox4x32_10_engineE",
       "name": "rocrand_normal_double4",
       "parameters": [
@@ -17315,7 +17315,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 442,
+      "line": 454,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device20philox4x32_10_engineE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17335,7 +17335,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 573,
+      "line": 585,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device15mrg31k3p_engineE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17355,7 +17355,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 689,
+      "line": 703,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device15mrg32k3a_engineE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17375,7 +17375,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 801,
+      "line": 817,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device13xorwow_engineE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17395,7 +17395,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 903,
+      "line": 917,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device13mtgp32_engineE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17415,7 +17415,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 965,
+      "line": 979,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device14sobol32_engineILb0EEE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17435,7 +17435,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1001,
+      "line": 1015,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device24scrambled_sobol32_engineILb0EEE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17455,7 +17455,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1037,
+      "line": 1051,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device14sobol64_engineILb0EEE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17475,7 +17475,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1073,
+      "line": 1087,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device24scrambled_sobol64_engineILb0EEE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17495,7 +17495,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1132,
+      "line": 1146,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device14lfsr113_engineE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17515,7 +17515,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1214,
+      "line": 1228,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device22threefry2x32_20_engineE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17535,7 +17535,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1294,
+      "line": 1308,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device22threefry2x64_20_engineE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17555,7 +17555,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1373,
+      "line": 1387,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device22threefry4x32_20_engineE",
       "name": "rocrand_normal_double",
       "parameters": [
@@ -17575,7 +17575,7 @@
       "file": "rocrand_normal.h",
       "inline_specified": true,
       "kind": "function",
-      "line": 1452,
+      "line": 1466,
       "linkage_name": "_Z21rocrand_normal_doublePN14rocrand_device22threefry4x64_20_engineE",
       "name": "rocrand_normal_double",
       "parameters": [

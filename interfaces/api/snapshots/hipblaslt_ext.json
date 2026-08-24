@@ -68,7 +68,7 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 435,
+      "line": 436,
       "name": "_hipblasLtMatmulAlgo_t",
       "size_bits": 192
     },
@@ -99,7 +99,7 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 456,
+      "line": 457,
       "name": "_hipblasLtMatmulHeuristicResult_t",
       "size_bits": 448
     },
@@ -139,7 +139,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 595,
+      "line": 637,
       "linkage_name": "hipblasLtCheckNumericsDrain",
       "name": "hipblasLtCheckNumericsDrain",
       "parameters": [
@@ -163,7 +163,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 497,
+      "line": 498,
       "linkage_name": "hipblasLtCreate",
       "name": "hipblasLtCreate",
       "parameters": [
@@ -183,7 +183,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 518,
+      "line": 519,
       "linkage_name": "hipblasLtDestroy",
       "name": "hipblasLtDestroy",
       "parameters": [
@@ -318,7 +318,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 477,
+      "line": 478,
       "linkage_name": "hipblasLtGetArchName",
       "name": "hipblasLtGetArchName",
       "parameters": [
@@ -338,7 +338,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 474,
+      "line": 475,
       "linkage_name": "hipblasLtGetGitRevision",
       "name": "hipblasLtGetGitRevision",
       "parameters": [
@@ -362,7 +362,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 567,
+      "line": 568,
       "linkage_name": "hipblasLtGetSmCountTarget",
       "name": "hipblasLtGetSmCountTarget",
       "parameters": [
@@ -386,7 +386,31 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 472,
+      "line": 609,
+      "linkage_name": "hipblasLtGetUniformSummationOrder",
+      "name": "hipblasLtGetUniformSummationOrder",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "uniformSummationOrder",
+          "type": "int32_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 473,
       "linkage_name": "hipblasLtGetVersion",
       "name": "hipblasLtGetVersion",
       "parameters": [
@@ -415,7 +439,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 387,
+      "line": 388,
       "name": "hipblasLtHandle_t",
       "underlying_type": "void *"
     },
@@ -438,7 +462,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1028,
+      "line": 1070,
       "linkage_name": "hipblasLtMatmul",
       "name": "hipblasLtMatmul",
       "parameters": [
@@ -518,7 +542,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 956,
+      "line": 998,
       "linkage_name": "hipblasLtMatmulAlgoGetHeuristic",
       "name": "hipblasLtMatmulAlgoGetHeuristic",
       "parameters": [
@@ -572,16 +596,9 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 443,
+      "line": 444,
       "name": "hipblasLtMatmulAlgo_t",
       "underlying_type": "struct _hipblasLtMatmulAlgo_t"
-    },
-    {
-      "file": "hipblaslt.h",
-      "kind": "typedef",
-      "line": 257,
-      "name": "hipblasLtMatmulDescAttributes_t",
-      "underlying_type": "enum hipblasLtMatmulDescAttributes_t"
     },
     {
       "file": "hipblaslt.h",
@@ -691,17 +708,28 @@
           "value": "104"
         },
         {
-          "name": "HIPBLASLT_MATMUL_DESC_MAX",
+          "name": "HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT",
           "value": "105"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_MAX",
+          "value": "106"
         }
       ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 258,
+      "name": "hipblasLtMatmulDescAttributes_t",
+      "underlying_type": "enum hipblasLtMatmulDescAttributes_t"
     },
     {
       "c_linkage": true,
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 728,
+      "line": 770,
       "linkage_name": "hipblasLtMatmulDescCreate",
       "name": "hipblasLtMatmulDescCreate",
       "parameters": [
@@ -729,7 +757,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 746,
+      "line": 788,
       "linkage_name": "hipblasLtMatmulDescDestroy",
       "name": "hipblasLtMatmulDescDestroy",
       "parameters": [
@@ -749,7 +777,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 807,
+      "line": 849,
       "linkage_name": "hipblasLtMatmulDescGetAttribute",
       "name": "hipblasLtMatmulDescGetAttribute",
       "parameters": [
@@ -791,14 +819,14 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 342,
+      "line": 343,
       "name": "hipblasLtMatmulDescOpaque_t",
       "size_bits": 256
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 344,
+      "line": 345,
       "name": "hipblasLtMatmulDescOpaque_t",
       "underlying_type": "struct hipblasLtMatmulDescOpaque_t"
     },
@@ -807,7 +835,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 771,
+      "line": 813,
       "linkage_name": "hipblasLtMatmulDescSetAttribute",
       "name": "hipblasLtMatmulDescSetAttribute",
       "parameters": [
@@ -837,14 +865,14 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 399,
+      "line": 400,
       "name": "hipblasLtMatmulDesc_t",
       "underlying_type": "hipblasLtMatmulDescOpaque_t *"
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 462,
+      "line": 463,
       "name": "hipblasLtMatmulHeuristicResult_t",
       "underlying_type": "struct _hipblasLtMatmulHeuristicResult_t"
     },
@@ -915,7 +943,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "enum",
-      "line": 262,
+      "line": 263,
       "name": "hipblasLtMatmulPreferenceAttributes_t",
       "underlying_type": "unsigned int",
       "values": [
@@ -940,7 +968,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 267,
+      "line": 268,
       "name": "hipblasLtMatmulPreferenceAttributes_t",
       "underlying_type": "enum hipblasLtMatmulPreferenceAttributes_t"
     },
@@ -949,7 +977,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 829,
+      "line": 871,
       "linkage_name": "hipblasLtMatmulPreferenceCreate",
       "name": "hipblasLtMatmulPreferenceCreate",
       "parameters": [
@@ -969,7 +997,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 846,
+      "line": 888,
       "linkage_name": "hipblasLtMatmulPreferenceDestroy",
       "name": "hipblasLtMatmulPreferenceDestroy",
       "parameters": [
@@ -989,7 +1017,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 909,
+      "line": 951,
       "linkage_name": "hipblasLtMatmulPreferenceGetAttribute",
       "name": "hipblasLtMatmulPreferenceGetAttribute",
       "parameters": [
@@ -1031,14 +1059,14 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 348,
+      "line": 349,
       "name": "hipblasLtMatmulPreferenceOpaque_t",
       "size_bits": 320
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 350,
+      "line": 351,
       "name": "hipblasLtMatmulPreferenceOpaque_t",
       "underlying_type": "struct hipblasLtMatmulPreferenceOpaque_t"
     },
@@ -1047,7 +1075,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 872,
+      "line": 914,
       "linkage_name": "hipblasLtMatmulPreferenceSetAttribute",
       "name": "hipblasLtMatmulPreferenceSetAttribute",
       "parameters": [
@@ -1077,7 +1105,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 425,
+      "line": 426,
       "name": "hipblasLtMatmulPreference_t",
       "underlying_type": "hipblasLtMatmulPreferenceOpaque_t *"
     },
@@ -1138,7 +1166,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 624,
+      "line": 666,
       "linkage_name": "hipblasLtMatrixLayoutCreate",
       "name": "hipblasLtMatrixLayoutCreate",
       "parameters": [
@@ -1174,7 +1202,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 640,
+      "line": 682,
       "linkage_name": "hipblasLtMatrixLayoutDestroy",
       "name": "hipblasLtMatrixLayoutDestroy",
       "parameters": [
@@ -1194,7 +1222,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 701,
+      "line": 743,
       "linkage_name": "hipblasLtMatrixLayoutGetAttribute",
       "name": "hipblasLtMatrixLayoutGetAttribute",
       "parameters": [
@@ -1236,14 +1264,14 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 345,
+      "line": 346,
       "name": "hipblasLtMatrixLayoutOpaque_t",
       "size_bits": 256
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 347,
+      "line": 348,
       "name": "hipblasLtMatrixLayoutOpaque_t",
       "underlying_type": "struct hipblasLtMatrixLayoutOpaque_t"
     },
@@ -1252,7 +1280,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 665,
+      "line": 707,
       "linkage_name": "hipblasLtMatrixLayoutSetAttribute",
       "name": "hipblasLtMatrixLayoutSetAttribute",
       "parameters": [
@@ -1282,7 +1310,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 412,
+      "line": 413,
       "name": "hipblasLtMatrixLayout_t",
       "underlying_type": "hipblasLtMatrixLayoutOpaque_t *"
     },
@@ -1291,7 +1319,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1131,
+      "line": 1173,
       "linkage_name": "hipblasLtMatrixTransform",
       "name": "hipblasLtMatrixTransform",
       "parameters": [
@@ -1349,7 +1377,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "enum",
-      "line": 314,
+      "line": 315,
       "name": "hipblasLtMatrixTransformDescAttributes_t",
       "underlying_type": "unsigned int",
       "values": [
@@ -1374,7 +1402,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 339,
+      "line": 340,
       "name": "hipblasLtMatrixTransformDescAttributes_t",
       "underlying_type": "enum hipblasLtMatrixTransformDescAttributes_t"
     },
@@ -1383,7 +1411,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1051,
+      "line": 1093,
       "linkage_name": "hipblasLtMatrixTransformDescCreate",
       "name": "hipblasLtMatrixTransformDescCreate",
       "parameters": [
@@ -1407,7 +1435,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1059,
+      "line": 1101,
       "linkage_name": "hipblasLtMatrixTransformDescDestroy",
       "name": "hipblasLtMatrixTransformDescDestroy",
       "parameters": [
@@ -1427,7 +1455,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1097,
+      "line": 1139,
       "linkage_name": "hipblasLtMatrixTransformDescGetAttribute",
       "name": "hipblasLtMatrixTransformDescGetAttribute",
       "parameters": [
@@ -1469,14 +1497,14 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 353,
+      "line": 354,
       "name": "hipblasLtMatrixTransformDescOpaque_t",
       "size_bits": 512
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 355,
+      "line": 356,
       "name": "hipblasLtMatrixTransformDescOpaque_t",
       "underlying_type": "struct hipblasLtMatrixTransformDescOpaque_t"
     },
@@ -1485,7 +1513,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1073,
+      "line": 1115,
       "linkage_name": "hipblasLtMatrixTransformDescSetAttribute",
       "name": "hipblasLtMatrixTransformDescSetAttribute",
       "parameters": [
@@ -1515,14 +1543,14 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 369,
+      "line": 370,
       "name": "hipblasLtMatrixTransformDesc_t",
       "underlying_type": "hipblasLtMatrixTransformDescOpaque_t *"
     },
     {
       "file": "hipblaslt.h",
       "kind": "enum",
-      "line": 272,
+      "line": 273,
       "name": "hipblasLtOrder_t",
       "underlying_type": "unsigned int",
       "values": [
@@ -1559,7 +1587,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 310,
+      "line": 311,
       "name": "hipblasLtOrder_t",
       "underlying_type": "enum hipblasLtOrder_t"
     },
@@ -1596,7 +1624,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 547,
+      "line": 548,
       "linkage_name": "hipblasLtSetSmCountTarget",
       "name": "hipblasLtSetSmCountTarget",
       "parameters": [
@@ -1614,6 +1642,37 @@
       "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t)",
       "variadic": false,
       "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 589,
+      "linkage_name": "hipblasLtSetUniformSummationOrder",
+      "name": "hipblasLtSetUniformSummationOrder",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "uniformSummationOrder",
+          "type": "int32_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 225,
+      "name": "hipblasLtStreamKTileSchedulingMode_t",
+      "underlying_type": "enum hipblasLtStreamKTileSchedulingMode_t"
     },
     {
       "file": "hipblaslt.h",
@@ -1635,13 +1694,6 @@
           "value": "2"
         }
       ]
-    },
-    {
-      "file": "hipblaslt.h",
-      "kind": "typedef",
-      "line": 225,
-      "name": "hipblasLtStreamKTileSchedulingMode_t",
-      "underlying_type": "enum hipblasLtStreamKTileSchedulingMode_t"
     },
     {
       "align_bits": 8,
@@ -2068,7 +2120,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 629,
+      "line": 643,
       "linkage_name": "_ZN13hipblaslt_ext4GemmC1EPv18hipblasOperation_tS2_11hipDataTypeS3_S3_S3_20hipblasComputeType_t",
       "name": "hipblaslt_ext::Gemm::Gemm",
       "parameters": [
@@ -2116,7 +2168,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 662,
+      "line": 676,
       "linkage_name": "_ZN13hipblaslt_ext4GemmC1EPvP27hipblasLtMatmulDescOpaque_tPKvS5_P29hipblasLtMatrixLayoutOpaque_tS5_S7_S5_S5_S7_S1_S7_",
       "name": "hipblaslt_ext::Gemm::Gemm",
       "parameters": [
@@ -2180,7 +2232,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 675,
+      "line": 689,
       "linkage_name": "_ZN13hipblaslt_ext4GemmC1ERKS0_",
       "name": "hipblaslt_ext::Gemm::Gemm",
       "parameters": [
@@ -2200,7 +2252,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 676,
+      "line": 690,
       "linkage_name": "_ZN13hipblaslt_ext4GemmC1EOS0_",
       "name": "hipblaslt_ext::Gemm::Gemm",
       "parameters": [
@@ -2220,7 +2272,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 808,
+      "line": 822,
       "linkage_name": "_ZN13hipblaslt_ext4Gemm15getProblemTypesEv",
       "name": "hipblaslt_ext::Gemm::getProblemTypes",
       "parameters": [],
@@ -2235,7 +2287,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 677,
+      "line": 691,
       "linkage_name": "_ZN13hipblaslt_ext4GemmaSERKS0_",
       "name": "hipblaslt_ext::Gemm::operator=",
       "parameters": [
@@ -2255,7 +2307,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 678,
+      "line": 692,
       "linkage_name": "_ZN13hipblaslt_ext4GemmaSEOS0_",
       "name": "hipblaslt_ext::Gemm::operator=",
       "parameters": [
@@ -2275,7 +2327,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 707,
+      "line": 721,
       "linkage_name": "_ZN13hipblaslt_ext4Gemm10setProblemEllllRNS_12GemmEpilogueERNS_10GemmInputsE",
       "name": "hipblaslt_ext::Gemm::setProblem",
       "parameters": [
@@ -2315,7 +2367,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 747,
+      "line": 761,
       "linkage_name": "_ZN13hipblaslt_ext4Gemm10setProblemEllllllllllllRNS_12GemmEpilogueERNS_10GemmInputsERNS_15GemmProblemTypeE",
       "name": "hipblaslt_ext::Gemm::setProblem",
       "parameters": [
@@ -2391,7 +2443,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 796,
+      "line": 810,
       "linkage_name": "_ZN13hipblaslt_ext4Gemm10setProblemEP27hipblasLtMatmulDescOpaque_tPKvS4_P29hipblasLtMatrixLayoutOpaque_tS4_S6_S4_S4_S6_PvS6_",
       "name": "hipblaslt_ext::Gemm::setProblem",
       "parameters": [
@@ -2457,7 +2509,7 @@
       "file": "hipblaslt-ext.hpp",
       "kind": "record",
       "layout_available": true,
-      "line": 195,
+      "line": 208,
       "name": "hipblaslt_ext::GemmEpilogue",
       "size_bits": 64
     },
@@ -2466,7 +2518,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 198,
+      "line": 211,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueC1Ev",
       "name": "hipblaslt_ext::GemmEpilogue::GemmEpilogue",
       "parameters": [],
@@ -2481,7 +2533,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 201,
+      "line": 214,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueC1ERKS0_",
       "name": "hipblaslt_ext::GemmEpilogue::GemmEpilogue",
       "parameters": [
@@ -2501,7 +2553,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 204,
+      "line": 217,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueC1EOS0_",
       "name": "hipblaslt_ext::GemmEpilogue::GemmEpilogue",
       "parameters": [
@@ -2521,7 +2573,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 242,
+      "line": 255,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue7getAct0Ev",
       "name": "hipblaslt_ext::GemmEpilogue::getAct0",
       "parameters": [],
@@ -2536,7 +2588,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 243,
+      "line": 256,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue7getAct1Ev",
       "name": "hipblaslt_ext::GemmEpilogue::getAct1",
       "parameters": [],
@@ -2551,7 +2603,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 236,
+      "line": 249,
       "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue17getAuxBatchStrideEv",
       "name": "hipblaslt_ext::GemmEpilogue::getAuxBatchStride",
       "parameters": [],
@@ -2566,7 +2618,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 232,
+      "line": 245,
       "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue14getAuxDataTypeEv",
       "name": "hipblaslt_ext::GemmEpilogue::getAuxDataType",
       "parameters": [],
@@ -2581,7 +2633,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 234,
+      "line": 247,
       "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue22getAuxLeadingDimensionEv",
       "name": "hipblaslt_ext::GemmEpilogue::getAuxLeadingDimension",
       "parameters": [],
@@ -2596,7 +2648,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 230,
+      "line": 243,
       "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue15getBiasDataTypeEv",
       "name": "hipblaslt_ext::GemmEpilogue::getBiasDataType",
       "parameters": [],
@@ -2611,7 +2663,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 229,
+      "line": 242,
       "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue7getModeEv",
       "name": "hipblaslt_ext::GemmEpilogue::getMode",
       "parameters": [],
@@ -2626,7 +2678,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 238,
+      "line": 251,
       "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue15getScalingATypeEv",
       "name": "hipblaslt_ext::GemmEpilogue::getScalingAType",
       "parameters": [],
@@ -2641,7 +2693,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 240,
+      "line": 253,
       "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue15getScalingBTypeEv",
       "name": "hipblaslt_ext::GemmEpilogue::getScalingBType",
       "parameters": [],
@@ -2656,7 +2708,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 202,
+      "line": 215,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueaSERKS0_",
       "name": "hipblaslt_ext::GemmEpilogue::operator=",
       "parameters": [
@@ -2676,7 +2728,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 205,
+      "line": 218,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueaSEOS0_",
       "name": "hipblaslt_ext::GemmEpilogue::operator=",
       "parameters": [
@@ -2696,7 +2748,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 225,
+      "line": 238,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue7setAct0Ef",
       "name": "hipblaslt_ext::GemmEpilogue::setAct0",
       "parameters": [
@@ -2716,7 +2768,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 226,
+      "line": 239,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue7setAct1Ef",
       "name": "hipblaslt_ext::GemmEpilogue::setAct1",
       "parameters": [
@@ -2736,7 +2788,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 217,
+      "line": 230,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue17setAuxBatchStrideEi",
       "name": "hipblaslt_ext::GemmEpilogue::setAuxBatchStride",
       "parameters": [
@@ -2756,7 +2808,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 212,
+      "line": 225,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue14setAuxDataTypeE11hipDataType",
       "name": "hipblaslt_ext::GemmEpilogue::setAuxDataType",
       "parameters": [
@@ -2776,7 +2828,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 215,
+      "line": 228,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue22setAuxLeadingDimensionEi",
       "name": "hipblaslt_ext::GemmEpilogue::setAuxLeadingDimension",
       "parameters": [
@@ -2796,7 +2848,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 209,
+      "line": 222,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue15setBiasDataTypeE11hipDataType",
       "name": "hipblaslt_ext::GemmEpilogue::setBiasDataType",
       "parameters": [
@@ -2816,7 +2868,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 208,
+      "line": 221,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue7setModeE19hipblasLtEpilogue_t",
       "name": "hipblaslt_ext::GemmEpilogue::setMode",
       "parameters": [
@@ -2836,7 +2888,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 220,
+      "line": 233,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue15setScalingATypeE28hipblasLtMatmulMatrixScale_t",
       "name": "hipblaslt_ext::GemmEpilogue::setScalingAType",
       "parameters": [
@@ -2856,7 +2908,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 223,
+      "line": 236,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue15setScalingBTypeE28hipblasLtMatmulMatrixScale_t",
       "name": "hipblaslt_ext::GemmEpilogue::setScalingBType",
       "parameters": [
@@ -2876,7 +2928,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 199,
+      "line": 212,
       "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueD1Ev",
       "name": "hipblaslt_ext::GemmEpilogue::~GemmEpilogue",
       "parameters": [],
@@ -2889,7 +2941,7 @@
     {
       "file": "hipblaslt-ext.hpp",
       "kind": "typedef",
-      "line": 252,
+      "line": 265,
       "name": "hipblaslt_ext::GemmEpilogueV2",
       "underlying_type": "GemmEpilogue"
     },
@@ -2904,7 +2956,7 @@
       "file": "hipblaslt-ext.hpp",
       "kind": "record",
       "layout_available": true,
-      "line": 289,
+      "line": 302,
       "name": "hipblaslt_ext::GemmInputs",
       "size_bits": 64
     },
@@ -2913,7 +2965,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 292,
+      "line": 305,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputsC1Ev",
       "name": "hipblaslt_ext::GemmInputs::GemmInputs",
       "parameters": [],
@@ -2928,7 +2980,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 295,
+      "line": 308,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputsC1ERKS0_",
       "name": "hipblaslt_ext::GemmInputs::GemmInputs",
       "parameters": [
@@ -2948,7 +3000,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 298,
+      "line": 311,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputsC1EOS0_",
       "name": "hipblaslt_ext::GemmInputs::GemmInputs",
       "parameters": [
@@ -2968,7 +3020,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 319,
+      "line": 332,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs4getAEv",
       "name": "hipblaslt_ext::GemmInputs::getA",
       "parameters": [],
@@ -2983,7 +3035,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 323,
+      "line": 336,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs8getAlphaEv",
       "name": "hipblaslt_ext::GemmInputs::getAlpha",
       "parameters": [],
@@ -2998,7 +3050,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 334,
+      "line": 347,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs8getAmaxDEv",
       "name": "hipblaslt_ext::GemmInputs::getAmaxD",
       "parameters": [],
@@ -3013,7 +3065,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 333,
+      "line": 346,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs6getAuxEv",
       "name": "hipblaslt_ext::GemmInputs::getAux",
       "parameters": [],
@@ -3028,7 +3080,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 320,
+      "line": 333,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs4getBEv",
       "name": "hipblaslt_ext::GemmInputs::getB",
       "parameters": [],
@@ -3043,7 +3095,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 324,
+      "line": 337,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs7getBetaEv",
       "name": "hipblaslt_ext::GemmInputs::getBeta",
       "parameters": [],
@@ -3058,7 +3110,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 325,
+      "line": 338,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs7getBiasEv",
       "name": "hipblaslt_ext::GemmInputs::getBias",
       "parameters": [],
@@ -3073,7 +3125,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 321,
+      "line": 334,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs4getCEv",
       "name": "hipblaslt_ext::GemmInputs::getC",
       "parameters": [],
@@ -3088,7 +3140,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 322,
+      "line": 335,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs4getDEv",
       "name": "hipblaslt_ext::GemmInputs::getD",
       "parameters": [],
@@ -3103,7 +3155,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 326,
+      "line": 339,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs9getScaleAEv",
       "name": "hipblaslt_ext::GemmInputs::getScaleA",
       "parameters": [],
@@ -3118,7 +3170,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 332,
+      "line": 345,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs16getScaleAlphaVecEv",
       "name": "hipblaslt_ext::GemmInputs::getScaleAlphaVec",
       "parameters": [],
@@ -3133,7 +3185,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 330,
+      "line": 343,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs11getScaleAuxEv",
       "name": "hipblaslt_ext::GemmInputs::getScaleAux",
       "parameters": [],
@@ -3148,7 +3200,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 327,
+      "line": 340,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs9getScaleBEv",
       "name": "hipblaslt_ext::GemmInputs::getScaleB",
       "parameters": [],
@@ -3163,7 +3215,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 328,
+      "line": 341,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs9getScaleCEv",
       "name": "hipblaslt_ext::GemmInputs::getScaleC",
       "parameters": [],
@@ -3178,7 +3230,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 329,
+      "line": 342,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs9getScaleDEv",
       "name": "hipblaslt_ext::GemmInputs::getScaleD",
       "parameters": [],
@@ -3193,7 +3245,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 296,
+      "line": 309,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputsaSERKS0_",
       "name": "hipblaslt_ext::GemmInputs::operator=",
       "parameters": [
@@ -3213,7 +3265,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 299,
+      "line": 312,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputsaSEOS0_",
       "name": "hipblaslt_ext::GemmInputs::operator=",
       "parameters": [
@@ -3233,7 +3285,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 301,
+      "line": 314,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs4setAEPKv",
       "name": "hipblaslt_ext::GemmInputs::setA",
       "parameters": [
@@ -3253,7 +3305,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 305,
+      "line": 318,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs8setAlphaEPKv",
       "name": "hipblaslt_ext::GemmInputs::setAlpha",
       "parameters": [
@@ -3273,7 +3325,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 317,
+      "line": 330,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs8setAmaxDEPKv",
       "name": "hipblaslt_ext::GemmInputs::setAmaxD",
       "parameters": [
@@ -3293,7 +3345,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 316,
+      "line": 329,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs6setAuxEPKv",
       "name": "hipblaslt_ext::GemmInputs::setAux",
       "parameters": [
@@ -3313,7 +3365,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 302,
+      "line": 315,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs4setBEPKv",
       "name": "hipblaslt_ext::GemmInputs::setB",
       "parameters": [
@@ -3333,7 +3385,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 306,
+      "line": 319,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs7setBetaEPKv",
       "name": "hipblaslt_ext::GemmInputs::setBeta",
       "parameters": [
@@ -3353,7 +3405,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 307,
+      "line": 320,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs7setBiasEPKv",
       "name": "hipblaslt_ext::GemmInputs::setBias",
       "parameters": [
@@ -3373,7 +3425,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 303,
+      "line": 316,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs4setCEPKv",
       "name": "hipblaslt_ext::GemmInputs::setC",
       "parameters": [
@@ -3393,7 +3445,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 304,
+      "line": 317,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs4setDEPKv",
       "name": "hipblaslt_ext::GemmInputs::setD",
       "parameters": [
@@ -3413,7 +3465,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 308,
+      "line": 321,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs9setScaleAEPKv",
       "name": "hipblaslt_ext::GemmInputs::setScaleA",
       "parameters": [
@@ -3433,7 +3485,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 314,
+      "line": 327,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs16setScaleAlphaVecEPKv",
       "name": "hipblaslt_ext::GemmInputs::setScaleAlphaVec",
       "parameters": [
@@ -3453,7 +3505,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 313,
+      "line": 326,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs11setScaleAuxEPKv",
       "name": "hipblaslt_ext::GemmInputs::setScaleAux",
       "parameters": [
@@ -3473,7 +3525,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 309,
+      "line": 322,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs9setScaleBEPKv",
       "name": "hipblaslt_ext::GemmInputs::setScaleB",
       "parameters": [
@@ -3493,7 +3545,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 310,
+      "line": 323,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs9setScaleCEPKv",
       "name": "hipblaslt_ext::GemmInputs::setScaleC",
       "parameters": [
@@ -3513,7 +3565,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 311,
+      "line": 324,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputs9setScaleDEPKv",
       "name": "hipblaslt_ext::GemmInputs::setScaleD",
       "parameters": [
@@ -3533,7 +3585,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 293,
+      "line": 306,
       "linkage_name": "_ZN13hipblaslt_ext10GemmInputsD1Ev",
       "name": "hipblaslt_ext::GemmInputs::~GemmInputs",
       "parameters": [],
@@ -3546,7 +3598,7 @@
     {
       "file": "hipblaslt-ext.hpp",
       "kind": "typedef",
-      "line": 344,
+      "line": 357,
       "name": "hipblaslt_ext::GemmInputsV2",
       "underlying_type": "GemmInputs"
     },
@@ -3555,7 +3607,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 399,
+      "line": 412,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceC1ERKS0_",
       "name": "hipblaslt_ext::GemmInstance::GemmInstance",
       "parameters": [
@@ -3575,7 +3627,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 401,
+      "line": 414,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceC1EOS0_",
       "name": "hipblaslt_ext::GemmInstance::GemmInstance",
       "parameters": [
@@ -3595,7 +3647,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 587,
+      "line": 600,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceC1EPvNS_8GemmTypeE",
       "name": "hipblaslt_ext::GemmInstance::GemmInstance",
       "parameters": [
@@ -3619,7 +3671,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 428,
+      "line": 441,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance16algoGetHeuristicEiRKNS_14GemmPreferenceERSt6vectorI33_hipblasLtMatmulHeuristicResult_tSaIS5_EE",
       "name": "hipblaslt_ext::GemmInstance::algoGetHeuristic",
       "parameters": [
@@ -3647,7 +3699,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 578,
+      "line": 591,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance12getGemmCountEv",
       "name": "hipblaslt_ext::GemmInstance::getGemmCount",
       "parameters": [],
@@ -3662,7 +3714,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 577,
+      "line": 590,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance11getGemmTypeEv",
       "name": "hipblaslt_ext::GemmInstance::getGemmType",
       "parameters": [],
@@ -3677,7 +3729,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 581,
+      "line": 594,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance13getKernelNameB5cxx11Ev",
       "name": "hipblaslt_ext::GemmInstance::getKernelName",
       "parameters": [],
@@ -3692,7 +3744,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 487,
+      "line": 500,
       "linkage_name": "_ZNK13hipblaslt_ext12GemmInstance20getMaxWorkspaceBytesEv",
       "name": "hipblaslt_ext::GemmInstance::getMaxWorkspaceBytes",
       "parameters": [],
@@ -3707,7 +3759,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 580,
+      "line": 593,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance15getSolutionNameB5cxx11Ev",
       "name": "hipblaslt_ext::GemmInstance::getSolutionName",
       "parameters": [],
@@ -3722,7 +3774,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 518,
+      "line": 531,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance10initializeERK22_hipblasLtMatmulAlgo_tPvbP12ihipStream_t",
       "name": "hipblaslt_ext::GemmInstance::initialize",
       "parameters": [
@@ -3754,7 +3806,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 555,
+      "line": 568,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance10initializeERK22_hipblasLtMatmulAlgo_tRNS_10GemmTuningEPvbP12ihipStream_t",
       "name": "hipblaslt_ext::GemmInstance::initialize",
       "parameters": [
@@ -3790,7 +3842,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 449,
+      "line": 462,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance15isAlgoSupportedER22_hipblasLtMatmulAlgo_tRm",
       "name": "hipblaslt_ext::GemmInstance::isAlgoSupported",
       "parameters": [
@@ -3814,7 +3866,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 470,
+      "line": 483,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance15isAlgoSupportedER22_hipblasLtMatmulAlgo_tRNS_10GemmTuningERm",
       "name": "hipblaslt_ext::GemmInstance::isAlgoSupported",
       "parameters": [
@@ -3842,7 +3894,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 400,
+      "line": 413,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceaSERKS0_",
       "name": "hipblaslt_ext::GemmInstance::operator=",
       "parameters": [
@@ -3862,7 +3914,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 402,
+      "line": 415,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceaSEOS0_",
       "name": "hipblaslt_ext::GemmInstance::operator=",
       "parameters": [
@@ -3882,7 +3934,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 575,
+      "line": 588,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance3runEP12ihipStream_tP11ihipEvent_tS4_",
       "name": "hipblaslt_ext::GemmInstance::run",
       "parameters": [
@@ -3910,7 +3962,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 480,
+      "line": 493,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstance20setMaxWorkspaceBytesEm",
       "name": "hipblaslt_ext::GemmInstance::setMaxWorkspaceBytes",
       "parameters": [
@@ -3930,7 +3982,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 398,
+      "line": 411,
       "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceD1Ev",
       "name": "hipblaslt_ext::GemmInstance::~GemmInstance",
       "parameters": [],
@@ -4015,7 +4067,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 115,
+      "line": 122,
       "linkage_name": "_ZNK13hipblaslt_ext14GemmPreference20getMaxWorkspaceBytesEv",
       "name": "hipblaslt_ext::GemmPreference::getMaxWorkspaceBytes",
       "parameters": [],
@@ -4030,13 +4082,28 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 122,
+      "line": 129,
       "linkage_name": "_ZNK13hipblaslt_ext14GemmPreference28getStreamKTileSchedulingModeEv",
       "name": "hipblaslt_ext::GemmPreference::getStreamKTileSchedulingMode",
       "parameters": [],
       "return_type": "hipblasLtStreamKTileSchedulingMode_t",
       "templated_kind": 0,
       "type": "hipblasLtStreamKTileSchedulingMode_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 135,
+      "linkage_name": "_ZNK13hipblaslt_ext14GemmPreference24getUniformSummationOrderEv",
+      "name": "hipblaslt_ext::GemmPreference::getUniformSummationOrder",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
       "variadic": false,
       "visibility": 2
     },
@@ -4125,6 +4192,26 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
+      "line": 115,
+      "linkage_name": "_ZN13hipblaslt_ext14GemmPreference24setUniformSummationOrderEb",
+      "name": "hipblaslt_ext::GemmPreference::setUniformSummationOrder",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "_Bool"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (_Bool)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
       "line": 65,
       "linkage_name": "_ZN13hipblaslt_ext14GemmPreferenceD1Ev",
       "name": "hipblaslt_ext::GemmPreference::~GemmPreference",
@@ -4138,7 +4225,7 @@
     {
       "file": "hipblaslt-ext.hpp",
       "kind": "typedef",
-      "line": 131,
+      "line": 144,
       "name": "hipblaslt_ext::GemmPreferenceV2",
       "underlying_type": "GemmPreference"
     },
@@ -4153,7 +4240,7 @@
       "file": "hipblaslt-ext.hpp",
       "kind": "record",
       "layout_available": true,
-      "line": 138,
+      "line": 151,
       "name": "hipblaslt_ext::GemmProblemType",
       "size_bits": 64
     },
@@ -4162,7 +4249,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 147,
+      "line": 160,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeC1Ev",
       "name": "hipblaslt_ext::GemmProblemType::GemmProblemType",
       "parameters": [],
@@ -4177,7 +4264,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 148,
+      "line": 161,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeC1E18hipblasOperation_tS1_11hipDataTypeS2_S2_S2_20hipblasComputeType_t",
       "name": "hipblaslt_ext::GemmProblemType::GemmProblemType",
       "parameters": [
@@ -4221,7 +4308,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 157,
+      "line": 170,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeC1ERKNS0_19GemmProblemTypeImplE",
       "name": "hipblaslt_ext::GemmProblemType::GemmProblemType",
       "parameters": [
@@ -4241,7 +4328,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 159,
+      "line": 172,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeC1ERKS0_",
       "name": "hipblaslt_ext::GemmProblemType::GemmProblemType",
       "parameters": [
@@ -4261,7 +4348,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 162,
+      "line": 175,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeC1EOS0_",
       "name": "hipblaslt_ext::GemmProblemType::GemmProblemType",
       "parameters": [
@@ -4281,7 +4368,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 176,
+      "line": 189,
       "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType6getOpAEv",
       "name": "hipblaslt_ext::GemmProblemType::getOpA",
       "parameters": [],
@@ -4296,7 +4383,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 177,
+      "line": 190,
       "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType6getOpBEv",
       "name": "hipblaslt_ext::GemmProblemType::getOpB",
       "parameters": [],
@@ -4311,7 +4398,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 183,
+      "line": 196,
       "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType9getOrderAEv",
       "name": "hipblaslt_ext::GemmProblemType::getOrderA",
       "parameters": [],
@@ -4326,7 +4413,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 184,
+      "line": 197,
       "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType9getOrderBEv",
       "name": "hipblaslt_ext::GemmProblemType::getOrderB",
       "parameters": [],
@@ -4341,7 +4428,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 178,
+      "line": 191,
       "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType8getTypeAEv",
       "name": "hipblaslt_ext::GemmProblemType::getTypeA",
       "parameters": [],
@@ -4356,7 +4443,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 179,
+      "line": 192,
       "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType8getTypeBEv",
       "name": "hipblaslt_ext::GemmProblemType::getTypeB",
       "parameters": [],
@@ -4371,7 +4458,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 180,
+      "line": 193,
       "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType8getTypeCEv",
       "name": "hipblaslt_ext::GemmProblemType::getTypeC",
       "parameters": [],
@@ -4386,7 +4473,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 182,
+      "line": 195,
       "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType14getTypeComputeEv",
       "name": "hipblaslt_ext::GemmProblemType::getTypeCompute",
       "parameters": [],
@@ -4401,7 +4488,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 181,
+      "line": 194,
       "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType8getTypeDEv",
       "name": "hipblaslt_ext::GemmProblemType::getTypeD",
       "parameters": [],
@@ -4416,7 +4503,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 158,
+      "line": 171,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeaSERKNS0_19GemmProblemTypeImplE",
       "name": "hipblaslt_ext::GemmProblemType::operator=",
       "parameters": [
@@ -4436,7 +4523,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 160,
+      "line": 173,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeaSERKS0_",
       "name": "hipblaslt_ext::GemmProblemType::operator=",
       "parameters": [
@@ -4456,7 +4543,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 163,
+      "line": 176,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeaSEOS0_",
       "name": "hipblaslt_ext::GemmProblemType::operator=",
       "parameters": [
@@ -4476,7 +4563,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 165,
+      "line": 178,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType6setOpAE18hipblasOperation_t",
       "name": "hipblaslt_ext::GemmProblemType::setOpA",
       "parameters": [
@@ -4496,7 +4583,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 166,
+      "line": 179,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType6setOpBE18hipblasOperation_t",
       "name": "hipblaslt_ext::GemmProblemType::setOpB",
       "parameters": [
@@ -4516,7 +4603,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 173,
+      "line": 186,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType9setOrderAE16hipblasLtOrder_t",
       "name": "hipblaslt_ext::GemmProblemType::setOrderA",
       "parameters": [
@@ -4536,7 +4623,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 174,
+      "line": 187,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType9setOrderBE16hipblasLtOrder_t",
       "name": "hipblaslt_ext::GemmProblemType::setOrderB",
       "parameters": [
@@ -4556,7 +4643,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 167,
+      "line": 180,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType8setTypeAE11hipDataType",
       "name": "hipblaslt_ext::GemmProblemType::setTypeA",
       "parameters": [
@@ -4576,7 +4663,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 168,
+      "line": 181,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType8setTypeBE11hipDataType",
       "name": "hipblaslt_ext::GemmProblemType::setTypeB",
       "parameters": [
@@ -4596,7 +4683,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 169,
+      "line": 182,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType8setTypeCE11hipDataType",
       "name": "hipblaslt_ext::GemmProblemType::setTypeC",
       "parameters": [
@@ -4616,7 +4703,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 172,
+      "line": 185,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType14setTypeComputeE20hipblasComputeType_t",
       "name": "hipblaslt_ext::GemmProblemType::setTypeCompute",
       "parameters": [
@@ -4636,7 +4723,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 170,
+      "line": 183,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType8setTypeDE11hipDataType",
       "name": "hipblaslt_ext::GemmProblemType::setTypeD",
       "parameters": [
@@ -4656,7 +4743,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 155,
+      "line": 168,
       "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeD1Ev",
       "name": "hipblaslt_ext::GemmProblemType::~GemmProblemType",
       "parameters": [],
@@ -4669,7 +4756,7 @@
     {
       "file": "hipblaslt-ext.hpp",
       "kind": "typedef",
-      "line": 188,
+      "line": 201,
       "name": "hipblaslt_ext::GemmProblemTypeV2",
       "underlying_type": "GemmProblemType"
     },
@@ -4684,7 +4771,7 @@
       "file": "hipblaslt-ext.hpp",
       "kind": "record",
       "layout_available": true,
-      "line": 254,
+      "line": 267,
       "name": "hipblaslt_ext::GemmTuning",
       "size_bits": 64
     },
@@ -4693,7 +4780,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 257,
+      "line": 270,
       "linkage_name": "_ZN13hipblaslt_ext10GemmTuningC1Ev",
       "name": "hipblaslt_ext::GemmTuning::GemmTuning",
       "parameters": [],
@@ -4708,7 +4795,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 260,
+      "line": 273,
       "linkage_name": "_ZN13hipblaslt_ext10GemmTuningC1ERKS0_",
       "name": "hipblaslt_ext::GemmTuning::GemmTuning",
       "parameters": [
@@ -4728,7 +4815,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 263,
+      "line": 276,
       "linkage_name": "_ZN13hipblaslt_ext10GemmTuningC1EOS0_",
       "name": "hipblaslt_ext::GemmTuning::GemmTuning",
       "parameters": [
@@ -4748,7 +4835,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 273,
+      "line": 286,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmTuning9getSplitKEv",
       "name": "hipblaslt_ext::GemmTuning::getSplitK",
       "parameters": [],
@@ -4763,7 +4850,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 274,
+      "line": 287,
       "linkage_name": "_ZNK13hipblaslt_ext10GemmTuning6getWgmEv",
       "name": "hipblaslt_ext::GemmTuning::getWgm",
       "parameters": [],
@@ -4778,7 +4865,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 261,
+      "line": 274,
       "linkage_name": "_ZN13hipblaslt_ext10GemmTuningaSERKS0_",
       "name": "hipblaslt_ext::GemmTuning::operator=",
       "parameters": [
@@ -4798,7 +4885,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 264,
+      "line": 277,
       "linkage_name": "_ZN13hipblaslt_ext10GemmTuningaSEOS0_",
       "name": "hipblaslt_ext::GemmTuning::operator=",
       "parameters": [
@@ -4818,7 +4905,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 266,
+      "line": 279,
       "linkage_name": "_ZN13hipblaslt_ext10GemmTuning9setSplitKEt",
       "name": "hipblaslt_ext::GemmTuning::setSplitK",
       "parameters": [
@@ -4838,7 +4925,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 269,
+      "line": 282,
       "linkage_name": "_ZN13hipblaslt_ext10GemmTuning6setWgmEs",
       "name": "hipblaslt_ext::GemmTuning::setWgm",
       "parameters": [
@@ -4858,7 +4945,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 258,
+      "line": 271,
       "linkage_name": "_ZN13hipblaslt_ext10GemmTuningD1Ev",
       "name": "hipblaslt_ext::GemmTuning::~GemmTuning",
       "parameters": [],
@@ -4871,7 +4958,7 @@
     {
       "file": "hipblaslt-ext.hpp",
       "kind": "typedef",
-      "line": 282,
+      "line": 295,
       "name": "hipblaslt_ext::GemmTuningV2",
       "underlying_type": "GemmTuning"
     },
@@ -4897,7 +4984,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 839,
+      "line": 853,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmC1EPv18hipblasOperation_tS2_11hipDataTypeS3_S3_S3_20hipblasComputeType_t",
       "name": "hipblaslt_ext::GroupedGemm::GroupedGemm",
       "parameters": [
@@ -4945,7 +5032,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 847,
+      "line": 861,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmC1ERKS0_",
       "name": "hipblaslt_ext::GroupedGemm::GroupedGemm",
       "parameters": [
@@ -4965,7 +5052,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 848,
+      "line": 862,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmC1EOS0_",
       "name": "hipblaslt_ext::GroupedGemm::GroupedGemm",
       "parameters": [
@@ -4985,7 +5072,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 876,
+      "line": 890,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmC1EPvRSt6vectorIP27hipblasLtMatmulDescOpaque_tSaIS4_EERS2_IS1_SaIS1_EESA_RS2_IP29hipblasLtMatrixLayoutOpaque_tSaISC_EESA_SF_SA_SA_SF_SA_SF_",
       "name": "hipblaslt_ext::GroupedGemm::GroupedGemm",
       "parameters": [
@@ -5049,7 +5136,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1032,
+      "line": 1046,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm37getDefaultValueForDeviceUserArgumentsEPv",
       "name": "hipblaslt_ext::GroupedGemm::getDefaultValueForDeviceUserArguments",
       "parameters": [
@@ -5069,7 +5156,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1019,
+      "line": 1033,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm15getProblemTypesEv",
       "name": "hipblaslt_ext::GroupedGemm::getProblemTypes",
       "parameters": [],
@@ -5084,7 +5171,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 849,
+      "line": 863,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmaSERKS0_",
       "name": "hipblaslt_ext::GroupedGemm::operator=",
       "parameters": [
@@ -5104,7 +5191,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 850,
+      "line": 864,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmaSEOS0_",
       "name": "hipblaslt_ext::GroupedGemm::operator=",
       "parameters": [
@@ -5124,7 +5211,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1050,
+      "line": 1064,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm3runEPvP12ihipStream_t",
       "name": "hipblaslt_ext::GroupedGemm::run",
       "parameters": [
@@ -5148,7 +5235,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 916,
+      "line": 930,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm10setProblemERSt6vectorIlSaIlEES4_S4_S4_RS1_INS_12GemmEpilogueESaIS5_EERS1_INS_10GemmInputsESaIS9_EE",
       "name": "hipblaslt_ext::GroupedGemm::setProblem",
       "parameters": [
@@ -5188,7 +5275,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 957,
+      "line": 971,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm10setProblemERSt6vectorIlSaIlEES4_S4_S4_S4_S4_S4_S4_S4_S4_S4_S4_RS1_INS_12GemmEpilogueESaIS5_EERS1_INS_10GemmInputsESaIS9_EERNS_15GemmProblemTypeE",
       "name": "hipblaslt_ext::GroupedGemm::setProblem",
       "parameters": [
@@ -5264,7 +5351,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1007,
+      "line": 1021,
       "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm10setProblemERSt6vectorIP27hipblasLtMatmulDescOpaque_tSaIS3_EERS1_IPvSaIS7_EESA_RS1_IP29hipblasLtMatrixLayoutOpaque_tSaISC_EESA_SF_SA_SA_SF_SA_SF_",
       "name": "hipblaslt_ext::GroupedGemm::setProblem",
       "parameters": [
@@ -5468,7 +5555,7 @@
       "file": "hipblaslt-ext.hpp",
       "kind": "record",
       "layout_available": true,
-      "line": 353,
+      "line": 366,
       "name": "hipblaslt_ext::UserArguments",
       "size_bits": 1568
     },
@@ -5477,7 +5564,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1230,
+      "line": 1244,
       "linkage_name": "_ZN13hipblaslt_ext10copyMatmulEP27hipblasLtMatmulDescOpaque_tS1_",
       "name": "hipblaslt_ext::copyMatmul",
       "parameters": [
@@ -5501,7 +5588,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1057,
+      "line": 1071,
       "linkage_name": "_ZN13hipblaslt_ext15gemmType2StringB5cxx11ENS_8GemmTypeE",
       "name": "hipblaslt_ext::gemmType2String",
       "parameters": [
@@ -5521,7 +5608,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1174,
+      "line": 1188,
       "linkage_name": "_ZN13hipblaslt_ext17getAlgosFromIndexEPvRSt6vectorIiSaIiEERS1_I33_hipblasLtMatmulHeuristicResult_tSaIS5_EE",
       "name": "hipblaslt_ext::getAlgosFromIndex",
       "parameters": [
@@ -5549,7 +5636,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1090,
+      "line": 1104,
       "linkage_name": "_ZN13hipblaslt_ext11getAllAlgosEPvNS_8GemmTypeE18hipblasOperation_tS2_11hipDataTypeS3_S3_S3_20hipblasComputeType_tRSt6vectorI33_hipblasLtMatmulHeuristicResult_tSaIS6_EE",
       "name": "hipblaslt_ext::getAllAlgos",
       "parameters": [
@@ -5605,7 +5692,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1111,
+      "line": 1125,
       "linkage_name": "_ZN13hipblaslt_ext16getIndexFromAlgoER22_hipblasLtMatmulAlgo_t",
       "name": "hipblaslt_ext::getIndexFromAlgo",
       "parameters": [
@@ -5625,7 +5712,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1144,
+      "line": 1158,
       "linkage_name": "_ZN13hipblaslt_ext21getKernelNameFromAlgoB5cxx11EPvR22_hipblasLtMatmulAlgo_t",
       "name": "hipblaslt_ext::getKernelNameFromAlgo",
       "parameters": [
@@ -5649,7 +5736,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1127,
+      "line": 1141,
       "linkage_name": "_ZN13hipblaslt_ext23getSolutionNameFromAlgoB5cxx11EPvR22_hipblasLtMatmulAlgo_t",
       "name": "hipblaslt_ext::getSolutionNameFromAlgo",
       "parameters": [
@@ -5673,7 +5760,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1270,
+      "line": 1284,
       "linkage_name": "_ZN13hipblaslt_ext19isSolutionSupportedEP33_hipblasLtMatmulHeuristicResult_tPvP27hipblasLtMatmulDescOpaque_tPKvP29hipblasLtMatrixLayoutOpaque_tS8_S6_S8_S8_PmPi",
       "name": "hipblaslt_ext::isSolutionSupported",
       "parameters": [
@@ -5733,7 +5820,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1206,
+      "line": 1220,
       "linkage_name": "_ZN13hipblaslt_ext21matmulIsAlgoSupportedEPvP27hipblasLtMatmulDescOpaque_tPKvP29hipblasLtMatrixLayoutOpaque_tS6_S4_S6_S6_R22_hipblasLtMatmulAlgo_tRm",
       "name": "hipblaslt_ext::matmulIsAlgoSupported",
       "parameters": [
@@ -5789,7 +5876,7 @@
       "file": "hipblaslt-ext.hpp",
       "inline_specified": false,
       "kind": "function",
-      "line": 1233,
+      "line": 1247,
       "linkage_name": "_ZN13hipblaslt_ext13matmulIsTunedEPvP27hipblasLtMatmulDescOpaque_tP29hipblasLtMatrixLayoutOpaque_tS4_S4_S4_",
       "name": "hipblaslt_ext::matmulIsTuned",
       "parameters": [

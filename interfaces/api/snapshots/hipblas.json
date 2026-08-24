@@ -29,7 +29,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24957,
+      "line": 25302,
       "linkage_name": "hipblasAxpyBatchedEx",
       "name": "hipblasAxpyBatchedEx",
       "parameters": [
@@ -93,7 +93,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24971,
+      "line": 25316,
       "linkage_name": "hipblasAxpyBatchedEx_64",
       "name": "hipblasAxpyBatchedEx_64",
       "parameters": [
@@ -157,7 +157,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24882,
+      "line": 25227,
       "linkage_name": "hipblasAxpyEx",
       "name": "hipblasAxpyEx",
       "parameters": [
@@ -217,7 +217,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24895,
+      "line": 25240,
       "linkage_name": "hipblasAxpyEx_64",
       "name": "hipblasAxpyEx_64",
       "parameters": [
@@ -277,7 +277,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25046,
+      "line": 25391,
       "linkage_name": "hipblasAxpyStridedBatchedEx",
       "name": "hipblasAxpyStridedBatchedEx",
       "parameters": [
@@ -349,7 +349,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25062,
+      "line": 25407,
       "linkage_name": "hipblasAxpyStridedBatchedEx_64",
       "name": "hipblasAxpyStridedBatchedEx_64",
       "parameters": [
@@ -1307,7 +1307,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21848,
+      "line": 21989,
       "linkage_name": "hipblasCdgmm",
       "name": "hipblasCdgmm",
       "parameters": [
@@ -1363,7 +1363,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21993,
+      "line": 22134,
       "linkage_name": "hipblasCdgmmBatched",
       "name": "hipblasCdgmmBatched",
       "parameters": [
@@ -1423,7 +1423,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22042,
+      "line": 22183,
       "linkage_name": "hipblasCdgmmBatched_64",
       "name": "hipblasCdgmmBatched_64",
       "parameters": [
@@ -1483,7 +1483,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22159,
+      "line": 22300,
       "linkage_name": "hipblasCdgmmStridedBatched",
       "name": "hipblasCdgmmStridedBatched",
       "parameters": [
@@ -1555,7 +1555,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22220,
+      "line": 22361,
       "linkage_name": "hipblasCdgmmStridedBatched_64",
       "name": "hipblasCdgmmStridedBatched_64",
       "parameters": [
@@ -1627,7 +1627,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21893,
+      "line": 22034,
       "linkage_name": "hipblasCdgmm_64",
       "name": "hipblasCdgmm_64",
       "parameters": [
@@ -2747,7 +2747,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19224,
+      "line": 19365,
       "linkage_name": "hipblasCgeam",
       "name": "hipblasCgeam",
       "parameters": [
@@ -2815,7 +2815,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19405,
+      "line": 19546,
       "linkage_name": "hipblasCgeamBatched",
       "name": "hipblasCgeamBatched",
       "parameters": [
@@ -2887,7 +2887,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19466,
+      "line": 19607,
       "linkage_name": "hipblasCgeamBatched_64",
       "name": "hipblasCgeamBatched_64",
       "parameters": [
@@ -2959,7 +2959,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19623,
+      "line": 19764,
       "linkage_name": "hipblasCgeamStridedBatched",
       "name": "hipblasCgeamStridedBatched",
       "parameters": [
@@ -3043,7 +3043,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19696,
+      "line": 19837,
       "linkage_name": "hipblasCgeamStridedBatched_64",
       "name": "hipblasCgeamStridedBatched_64",
       "parameters": [
@@ -3127,7 +3127,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19281,
+      "line": 19422,
       "linkage_name": "hipblasCgeam_64",
       "name": "hipblasCgeam_64",
       "parameters": [
@@ -3195,7 +3195,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23045,
+      "line": 23186,
       "linkage_name": "hipblasCgels",
       "name": "hipblasCgels",
       "parameters": [
@@ -3255,7 +3255,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23173,
+      "line": 23314,
       "linkage_name": "hipblasCgelsBatched",
       "name": "hipblasCgelsBatched",
       "parameters": [
@@ -3319,7 +3319,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23314,
+      "line": 23455,
       "linkage_name": "hipblasCgelsStridedBatched",
       "name": "hipblasCgelsStridedBatched",
       "parameters": [
@@ -3615,7 +3615,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15216,
+      "line": 15357,
       "linkage_name": "hipblasCgemmStridedBatched",
       "name": "hipblasCgemmStridedBatched",
       "parameters": [
@@ -3703,7 +3703,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15312,
+      "line": 15453,
       "linkage_name": "hipblasCgemmStridedBatched_64",
       "name": "hipblasCgemmStridedBatched_64",
       "parameters": [
@@ -4287,7 +4287,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23419,
+      "line": 23560,
       "linkage_name": "hipblasCgeqrf",
       "name": "hipblasCgeqrf",
       "parameters": [
@@ -4331,7 +4331,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23518,
+      "line": 23659,
       "linkage_name": "hipblasCgeqrfBatched",
       "name": "hipblasCgeqrfBatched",
       "parameters": [
@@ -4379,7 +4379,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23631,
+      "line": 23772,
       "linkage_name": "hipblasCgeqrfStridedBatched",
       "name": "hipblasCgeqrfStridedBatched",
       "parameters": [
@@ -5187,7 +5187,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22314,
+      "line": 22455,
       "linkage_name": "hipblasCgetrf",
       "name": "hipblasCgetrf",
       "parameters": [
@@ -5227,7 +5227,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22395,
+      "line": 22536,
       "linkage_name": "hipblasCgetrfBatched",
       "name": "hipblasCgetrfBatched",
       "parameters": [
@@ -5271,7 +5271,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22498,
+      "line": 22639,
       "linkage_name": "hipblasCgetrfStridedBatched",
       "name": "hipblasCgetrfStridedBatched",
       "parameters": [
@@ -5323,7 +5323,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22929,
+      "line": 23070,
       "linkage_name": "hipblasCgetriBatched",
       "name": "hipblasCgetriBatched",
       "parameters": [
@@ -5375,7 +5375,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22597,
+      "line": 22738,
       "linkage_name": "hipblasCgetrs",
       "name": "hipblasCgetrs",
       "parameters": [
@@ -5431,7 +5431,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22703,
+      "line": 22844,
       "linkage_name": "hipblasCgetrsBatched",
       "name": "hipblasCgetrsBatched",
       "parameters": [
@@ -5491,7 +5491,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22830,
+      "line": 22971,
       "linkage_name": "hipblasCgetrsStridedBatched",
       "name": "hipblasCgetrsStridedBatched",
       "parameters": [
@@ -5987,7 +5987,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19812,
+      "line": 19953,
       "linkage_name": "hipblasChemm",
       "name": "hipblasChemm",
       "parameters": [
@@ -6055,7 +6055,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19953,
+      "line": 20094,
       "linkage_name": "hipblasChemmBatched",
       "name": "hipblasChemmBatched",
       "parameters": [
@@ -6127,7 +6127,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19984,
+      "line": 20125,
       "linkage_name": "hipblasChemmBatched_64",
       "name": "hipblasChemmBatched_64",
       "parameters": [
@@ -6199,7 +6199,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20110,
+      "line": 20251,
       "linkage_name": "hipblasChemmStridedBatched",
       "name": "hipblasChemmStridedBatched",
       "parameters": [
@@ -6283,7 +6283,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20147,
+      "line": 20288,
       "linkage_name": "hipblasChemmStridedBatched_64",
       "name": "hipblasChemmStridedBatched_64",
       "parameters": [
@@ -6367,7 +6367,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19841,
+      "line": 19982,
       "linkage_name": "hipblasChemm_64",
       "name": "hipblasChemm_64",
       "parameters": [
@@ -7211,7 +7211,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16287,
+      "line": 16428,
       "linkage_name": "hipblasCher2k",
       "name": "hipblasCher2k",
       "parameters": [
@@ -7279,7 +7279,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16427,
+      "line": 16568,
       "linkage_name": "hipblasCher2kBatched",
       "name": "hipblasCher2kBatched",
       "parameters": [
@@ -7351,7 +7351,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16458,
+      "line": 16599,
       "linkage_name": "hipblasCher2kBatched_64",
       "name": "hipblasCher2kBatched_64",
       "parameters": [
@@ -7423,7 +7423,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16586,
+      "line": 16727,
       "linkage_name": "hipblasCher2kStridedBatched",
       "name": "hipblasCher2kStridedBatched",
       "parameters": [
@@ -7507,7 +7507,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16623,
+      "line": 16764,
       "linkage_name": "hipblasCher2kStridedBatched_64",
       "name": "hipblasCher2kStridedBatched_64",
       "parameters": [
@@ -7591,7 +7591,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16316,
+      "line": 16457,
       "linkage_name": "hipblasCher2k_64",
       "name": "hipblasCher2k_64",
       "parameters": [
@@ -7979,7 +7979,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15423,
+      "line": 15564,
       "linkage_name": "hipblasCherk",
       "name": "hipblasCherk",
       "parameters": [
@@ -8039,7 +8039,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15547,
+      "line": 15688,
       "linkage_name": "hipblasCherkBatched",
       "name": "hipblasCherkBatched",
       "parameters": [
@@ -8103,7 +8103,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15574,
+      "line": 15715,
       "linkage_name": "hipblasCherkBatched_64",
       "name": "hipblasCherkBatched_64",
       "parameters": [
@@ -8167,7 +8167,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15684,
+      "line": 15825,
       "linkage_name": "hipblasCherkStridedBatched",
       "name": "hipblasCherkStridedBatched",
       "parameters": [
@@ -8239,7 +8239,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15715,
+      "line": 15856,
       "linkage_name": "hipblasCherkStridedBatched_64",
       "name": "hipblasCherkStridedBatched_64",
       "parameters": [
@@ -8311,7 +8311,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15448,
+      "line": 15589,
       "linkage_name": "hipblasCherk_64",
       "name": "hipblasCherk_64",
       "parameters": [
@@ -8371,7 +8371,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15828,
+      "line": 15969,
       "linkage_name": "hipblasCherkx",
       "name": "hipblasCherkx",
       "parameters": [
@@ -8439,7 +8439,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15972,
+      "line": 16113,
       "linkage_name": "hipblasCherkxBatched",
       "name": "hipblasCherkxBatched",
       "parameters": [
@@ -8511,7 +8511,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16003,
+      "line": 16144,
       "linkage_name": "hipblasCherkxBatched_64",
       "name": "hipblasCherkxBatched_64",
       "parameters": [
@@ -8583,7 +8583,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16132,
+      "line": 16273,
       "linkage_name": "hipblasCherkxStridedBatched",
       "name": "hipblasCherkxStridedBatched",
       "parameters": [
@@ -8667,7 +8667,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16169,
+      "line": 16310,
       "linkage_name": "hipblasCherkxStridedBatched_64",
       "name": "hipblasCherkxStridedBatched_64",
       "parameters": [
@@ -8751,7 +8751,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15857,
+      "line": 15998,
       "linkage_name": "hipblasCherkx_64",
       "name": "hipblasCherkx_64",
       "parameters": [
@@ -11891,7 +11891,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16766,
+      "line": 16907,
       "linkage_name": "hipblasCsymm",
       "name": "hipblasCsymm",
       "parameters": [
@@ -11959,7 +11959,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16964,
+      "line": 17105,
       "linkage_name": "hipblasCsymmBatched",
       "name": "hipblasCsymmBatched",
       "parameters": [
@@ -12031,7 +12031,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17025,
+      "line": 17166,
       "linkage_name": "hipblasCsymmBatched_64",
       "name": "hipblasCsymmBatched_64",
       "parameters": [
@@ -12103,7 +12103,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17183,
+      "line": 17324,
       "linkage_name": "hipblasCsymmStridedBatched",
       "name": "hipblasCsymmStridedBatched",
       "parameters": [
@@ -12187,7 +12187,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17256,
+      "line": 17397,
       "linkage_name": "hipblasCsymmStridedBatched_64",
       "name": "hipblasCsymmStridedBatched_64",
       "parameters": [
@@ -12271,7 +12271,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16823,
+      "line": 16964,
       "linkage_name": "hipblasCsymm_64",
       "name": "hipblasCsymm_64",
       "parameters": [
@@ -13115,7 +13115,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17962,
+      "line": 18103,
       "linkage_name": "hipblasCsyr2k",
       "name": "hipblasCsyr2k",
       "parameters": [
@@ -13183,7 +13183,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18158,
+      "line": 18299,
       "linkage_name": "hipblasCsyr2kBatched",
       "name": "hipblasCsyr2kBatched",
       "parameters": [
@@ -13255,7 +13255,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18219,
+      "line": 18360,
       "linkage_name": "hipblasCsyr2kBatched_64",
       "name": "hipblasCsyr2kBatched_64",
       "parameters": [
@@ -13327,7 +13327,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18382,
+      "line": 18523,
       "linkage_name": "hipblasCsyr2kStridedBatched",
       "name": "hipblasCsyr2kStridedBatched",
       "parameters": [
@@ -13411,7 +13411,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18455,
+      "line": 18596,
       "linkage_name": "hipblasCsyr2kStridedBatched_64",
       "name": "hipblasCsyr2kStridedBatched_64",
       "parameters": [
@@ -13495,7 +13495,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18019,
+      "line": 18160,
       "linkage_name": "hipblasCsyr2k_64",
       "name": "hipblasCsyr2k_64",
       "parameters": [
@@ -13883,7 +13883,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17391,
+      "line": 17532,
       "linkage_name": "hipblasCsyrk",
       "name": "hipblasCsyrk",
       "parameters": [
@@ -13943,7 +13943,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17567,
+      "line": 17708,
       "linkage_name": "hipblasCsyrkBatched",
       "name": "hipblasCsyrkBatched",
       "parameters": [
@@ -14007,7 +14007,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17620,
+      "line": 17761,
       "linkage_name": "hipblasCsyrkBatched_64",
       "name": "hipblasCsyrkBatched_64",
       "parameters": [
@@ -14071,7 +14071,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17762,
+      "line": 17903,
       "linkage_name": "hipblasCsyrkStridedBatched",
       "name": "hipblasCsyrkStridedBatched",
       "parameters": [
@@ -14143,7 +14143,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17823,
+      "line": 17964,
       "linkage_name": "hipblasCsyrkStridedBatched_64",
       "name": "hipblasCsyrkStridedBatched_64",
       "parameters": [
@@ -14215,7 +14215,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17440,
+      "line": 17581,
       "linkage_name": "hipblasCsyrk_64",
       "name": "hipblasCsyrk_64",
       "parameters": [
@@ -14275,7 +14275,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18603,
+      "line": 18744,
       "linkage_name": "hipblasCsyrkx",
       "name": "hipblasCsyrkx",
       "parameters": [
@@ -14343,7 +14343,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18804,
+      "line": 18945,
       "linkage_name": "hipblasCsyrkxBatched",
       "name": "hipblasCsyrkxBatched",
       "parameters": [
@@ -14415,7 +14415,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18865,
+      "line": 19006,
       "linkage_name": "hipblasCsyrkxBatched_64",
       "name": "hipblasCsyrkxBatched_64",
       "parameters": [
@@ -14487,7 +14487,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19029,
+      "line": 19170,
       "linkage_name": "hipblasCsyrkxStridedBatched",
       "name": "hipblasCsyrkxStridedBatched",
       "parameters": [
@@ -14571,7 +14571,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19102,
+      "line": 19243,
       "linkage_name": "hipblasCsyrkxStridedBatched_64",
       "name": "hipblasCsyrkxStridedBatched_64",
       "parameters": [
@@ -14655,7 +14655,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18660,
+      "line": 18801,
       "linkage_name": "hipblasCsyrkx_64",
       "name": "hipblasCsyrkx_64",
       "parameters": [
@@ -16099,7 +16099,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20317,
+      "line": 20458,
       "linkage_name": "hipblasCtrmm",
       "name": "hipblasCtrmm",
       "parameters": [
@@ -16171,7 +16171,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20547,
+      "line": 20688,
       "linkage_name": "hipblasCtrmmBatched",
       "name": "hipblasCtrmmBatched",
       "parameters": [
@@ -16247,7 +16247,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20612,
+      "line": 20753,
       "linkage_name": "hipblasCtrmmBatched_64",
       "name": "hipblasCtrmmBatched_64",
       "parameters": [
@@ -16323,7 +16323,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20801,
+      "line": 20942,
       "linkage_name": "hipblasCtrmmStridedBatched",
       "name": "hipblasCtrmmStridedBatched",
       "parameters": [
@@ -16411,7 +16411,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20878,
+      "line": 21019,
       "linkage_name": "hipblasCtrmmStridedBatched_64",
       "name": "hipblasCtrmmStridedBatched_64",
       "parameters": [
@@ -16499,7 +16499,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20378,
+      "line": 20519,
       "linkage_name": "hipblasCtrmm_64",
       "name": "hipblasCtrmm_64",
       "parameters": [
@@ -16915,7 +16915,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21031,
+      "line": 21172,
       "linkage_name": "hipblasCtrsm",
       "name": "hipblasCtrsm",
       "parameters": [
@@ -16979,7 +16979,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21216,
+      "line": 21357,
       "linkage_name": "hipblasCtrsmBatched",
       "name": "hipblasCtrsmBatched",
       "parameters": [
@@ -17047,7 +17047,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21273,
+      "line": 21414,
       "linkage_name": "hipblasCtrsmBatched_64",
       "name": "hipblasCtrsmBatched_64",
       "parameters": [
@@ -17115,7 +17115,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21418,
+      "line": 21559,
       "linkage_name": "hipblasCtrsmStridedBatched",
       "name": "hipblasCtrsmStridedBatched",
       "parameters": [
@@ -17191,7 +17191,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21483,
+      "line": 21624,
       "linkage_name": "hipblasCtrsmStridedBatched_64",
       "name": "hipblasCtrsmStridedBatched_64",
       "parameters": [
@@ -17267,7 +17267,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21084,
+      "line": 21225,
       "linkage_name": "hipblasCtrsm_64",
       "name": "hipblasCtrsm_64",
       "parameters": [
@@ -17675,7 +17675,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21575,
+      "line": 21716,
       "linkage_name": "hipblasCtrtri",
       "name": "hipblasCtrtri",
       "parameters": [
@@ -17723,7 +17723,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21659,
+      "line": 21800,
       "linkage_name": "hipblasCtrtriBatched",
       "name": "hipblasCtrtriBatched",
       "parameters": [
@@ -17775,7 +17775,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21755,
+      "line": 21896,
       "linkage_name": "hipblasCtrtriStridedBatched",
       "name": "hipblasCtrtriStridedBatched",
       "parameters": [
@@ -18643,7 +18643,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21837,
+      "line": 21978,
       "linkage_name": "hipblasDdgmm",
       "name": "hipblasDdgmm",
       "parameters": [
@@ -18699,7 +18699,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21981,
+      "line": 22122,
       "linkage_name": "hipblasDdgmmBatched",
       "name": "hipblasDdgmmBatched",
       "parameters": [
@@ -18759,7 +18759,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22030,
+      "line": 22171,
       "linkage_name": "hipblasDdgmmBatched_64",
       "name": "hipblasDdgmmBatched_64",
       "parameters": [
@@ -18819,7 +18819,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22144,
+      "line": 22285,
       "linkage_name": "hipblasDdgmmStridedBatched",
       "name": "hipblasDdgmmStridedBatched",
       "parameters": [
@@ -18891,7 +18891,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22205,
+      "line": 22346,
       "linkage_name": "hipblasDdgmmStridedBatched_64",
       "name": "hipblasDdgmmStridedBatched_64",
       "parameters": [
@@ -18963,7 +18963,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21882,
+      "line": 22023,
       "linkage_name": "hipblasDdgmm_64",
       "name": "hipblasDdgmm_64",
       "parameters": [
@@ -19807,7 +19807,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19210,
+      "line": 19351,
       "linkage_name": "hipblasDgeam",
       "name": "hipblasDgeam",
       "parameters": [
@@ -19875,7 +19875,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19390,
+      "line": 19531,
       "linkage_name": "hipblasDgeamBatched",
       "name": "hipblasDgeamBatched",
       "parameters": [
@@ -19947,7 +19947,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19451,
+      "line": 19592,
       "linkage_name": "hipblasDgeamBatched_64",
       "name": "hipblasDgeamBatched_64",
       "parameters": [
@@ -20019,7 +20019,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19605,
+      "line": 19746,
       "linkage_name": "hipblasDgeamStridedBatched",
       "name": "hipblasDgeamStridedBatched",
       "parameters": [
@@ -20103,7 +20103,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19678,
+      "line": 19819,
       "linkage_name": "hipblasDgeamStridedBatched_64",
       "name": "hipblasDgeamStridedBatched_64",
       "parameters": [
@@ -20187,7 +20187,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19267,
+      "line": 19408,
       "linkage_name": "hipblasDgeam_64",
       "name": "hipblasDgeam_64",
       "parameters": [
@@ -20255,7 +20255,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23033,
+      "line": 23174,
       "linkage_name": "hipblasDgels",
       "name": "hipblasDgels",
       "parameters": [
@@ -20315,7 +20315,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23160,
+      "line": 23301,
       "linkage_name": "hipblasDgelsBatched",
       "name": "hipblasDgelsBatched",
       "parameters": [
@@ -20379,7 +20379,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23299,
+      "line": 23440,
       "linkage_name": "hipblasDgelsStridedBatched",
       "name": "hipblasDgelsStridedBatched",
       "parameters": [
@@ -20675,7 +20675,167 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15197,
+      "line": 15173,
+      "linkage_name": "hipblasDgemmGroupedBatched",
+      "name": "hipblasDgemmGroupedBatched",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasHandle_t"
+        },
+        {
+          "name": "transA_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "transB_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const double *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const double *const *"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int *"
+        },
+        {
+          "name": "Barray",
+          "type": "const double *const *"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const double *"
+        },
+        {
+          "name": "Carray",
+          "type": "double *const *"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int *"
+        },
+        {
+          "name": "group_count",
+          "type": "int"
+        },
+        {
+          "name": "group_size",
+          "type": "const int *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasHandle_t, const hipblasOperation_t *, const hipblasOperation_t *, const int *, const int *, const int *, const double *, const double *const *, const int *, const double *const *, const int *, const double *, double *const *, const int *, int, const int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblas.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 15207,
+      "linkage_name": "hipblasDgemmGroupedBatched_64",
+      "name": "hipblasDgemmGroupedBatched_64",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasHandle_t"
+        },
+        {
+          "name": "transA_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "transB_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const double *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const double *const *"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "Barray",
+          "type": "const double *const *"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const double *"
+        },
+        {
+          "name": "Carray",
+          "type": "double *const *"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "group_count",
+          "type": "int64_t"
+        },
+        {
+          "name": "group_size",
+          "type": "const int64_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasHandle_t, const hipblasOperation_t *, const hipblasOperation_t *, const int64_t *, const int64_t *, const int64_t *, const double *, const double *const *, const int64_t *, const double *const *, const int64_t *, const double *, double *const *, const int64_t *, int64_t, const int64_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblas.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 15338,
       "linkage_name": "hipblasDgemmStridedBatched",
       "name": "hipblasDgemmStridedBatched",
       "parameters": [
@@ -20763,7 +20923,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15293,
+      "line": 15434,
       "linkage_name": "hipblasDgemmStridedBatched_64",
       "name": "hipblasDgemmStridedBatched_64",
       "parameters": [
@@ -21347,7 +21507,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23411,
+      "line": 23552,
       "linkage_name": "hipblasDgeqrf",
       "name": "hipblasDgeqrf",
       "parameters": [
@@ -21391,7 +21551,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23509,
+      "line": 23650,
       "linkage_name": "hipblasDgeqrfBatched",
       "name": "hipblasDgeqrfBatched",
       "parameters": [
@@ -21439,7 +21599,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23620,
+      "line": 23761,
       "linkage_name": "hipblasDgeqrfStridedBatched",
       "name": "hipblasDgeqrfStridedBatched",
       "parameters": [
@@ -21871,7 +22031,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22311,
+      "line": 22452,
       "linkage_name": "hipblasDgetrf",
       "name": "hipblasDgetrf",
       "parameters": [
@@ -21911,7 +22071,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22387,
+      "line": 22528,
       "linkage_name": "hipblasDgetrfBatched",
       "name": "hipblasDgetrfBatched",
       "parameters": [
@@ -21955,7 +22115,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22488,
+      "line": 22629,
       "linkage_name": "hipblasDgetrfStridedBatched",
       "name": "hipblasDgetrfStridedBatched",
       "parameters": [
@@ -22007,7 +22167,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22919,
+      "line": 23060,
       "linkage_name": "hipblasDgetriBatched",
       "name": "hipblasDgetriBatched",
       "parameters": [
@@ -22059,7 +22219,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22586,
+      "line": 22727,
       "linkage_name": "hipblasDgetrs",
       "name": "hipblasDgetrs",
       "parameters": [
@@ -22115,7 +22275,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22691,
+      "line": 22832,
       "linkage_name": "hipblasDgetrsBatched",
       "name": "hipblasDgetrsBatched",
       "parameters": [
@@ -22175,7 +22335,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22815,
+      "line": 22956,
       "linkage_name": "hipblasDgetrsStridedBatched",
       "name": "hipblasDgetrsStridedBatched",
       "parameters": [
@@ -22511,7 +22671,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25240,
+      "line": 25585,
       "linkage_name": "hipblasDotBatchedEx",
       "name": "hipblasDotBatchedEx",
       "parameters": [
@@ -22575,7 +22735,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25267,
+      "line": 25612,
       "linkage_name": "hipblasDotBatchedEx_64",
       "name": "hipblasDotBatchedEx_64",
       "parameters": [
@@ -22639,7 +22799,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25130,
+      "line": 25475,
       "linkage_name": "hipblasDotEx",
       "name": "hipblasDotEx",
       "parameters": [
@@ -22699,7 +22859,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25155,
+      "line": 25500,
       "linkage_name": "hipblasDotEx_64",
       "name": "hipblasDotEx_64",
       "parameters": [
@@ -22759,7 +22919,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25360,
+      "line": 25705,
       "linkage_name": "hipblasDotStridedBatchedEx",
       "name": "hipblasDotStridedBatchedEx",
       "parameters": [
@@ -22831,7 +22991,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25391,
+      "line": 25736,
       "linkage_name": "hipblasDotStridedBatchedEx_64",
       "name": "hipblasDotStridedBatchedEx_64",
       "parameters": [
@@ -22903,7 +23063,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25253,
+      "line": 25598,
       "linkage_name": "hipblasDotcBatchedEx",
       "name": "hipblasDotcBatchedEx",
       "parameters": [
@@ -22967,7 +23127,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25280,
+      "line": 25625,
       "linkage_name": "hipblasDotcBatchedEx_64",
       "name": "hipblasDotcBatchedEx_64",
       "parameters": [
@@ -23031,7 +23191,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25142,
+      "line": 25487,
       "linkage_name": "hipblasDotcEx",
       "name": "hipblasDotcEx",
       "parameters": [
@@ -23091,7 +23251,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25167,
+      "line": 25512,
       "linkage_name": "hipblasDotcEx_64",
       "name": "hipblasDotcEx_64",
       "parameters": [
@@ -23151,7 +23311,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25375,
+      "line": 25720,
       "linkage_name": "hipblasDotcStridedBatchedEx",
       "name": "hipblasDotcStridedBatchedEx",
       "parameters": [
@@ -23223,7 +23383,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25406,
+      "line": 25751,
       "linkage_name": "hipblasDotcStridedBatchedEx_64",
       "name": "hipblasDotcStridedBatchedEx_64",
       "parameters": [
@@ -26439,7 +26599,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16752,
+      "line": 16893,
       "linkage_name": "hipblasDsymm",
       "name": "hipblasDsymm",
       "parameters": [
@@ -26507,7 +26667,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16949,
+      "line": 17090,
       "linkage_name": "hipblasDsymmBatched",
       "name": "hipblasDsymmBatched",
       "parameters": [
@@ -26579,7 +26739,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17010,
+      "line": 17151,
       "linkage_name": "hipblasDsymmBatched_64",
       "name": "hipblasDsymmBatched_64",
       "parameters": [
@@ -26651,7 +26811,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17165,
+      "line": 17306,
       "linkage_name": "hipblasDsymmStridedBatched",
       "name": "hipblasDsymmStridedBatched",
       "parameters": [
@@ -26735,7 +26895,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17238,
+      "line": 17379,
       "linkage_name": "hipblasDsymmStridedBatched_64",
       "name": "hipblasDsymmStridedBatched_64",
       "parameters": [
@@ -26819,7 +26979,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16809,
+      "line": 16950,
       "linkage_name": "hipblasDsymm_64",
       "name": "hipblasDsymm_64",
       "parameters": [
@@ -27663,7 +27823,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17948,
+      "line": 18089,
       "linkage_name": "hipblasDsyr2k",
       "name": "hipblasDsyr2k",
       "parameters": [
@@ -27731,7 +27891,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18143,
+      "line": 18284,
       "linkage_name": "hipblasDsyr2kBatched",
       "name": "hipblasDsyr2kBatched",
       "parameters": [
@@ -27803,7 +27963,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18204,
+      "line": 18345,
       "linkage_name": "hipblasDsyr2kBatched_64",
       "name": "hipblasDsyr2kBatched_64",
       "parameters": [
@@ -27875,7 +28035,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18364,
+      "line": 18505,
       "linkage_name": "hipblasDsyr2kStridedBatched",
       "name": "hipblasDsyr2kStridedBatched",
       "parameters": [
@@ -27959,7 +28119,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18437,
+      "line": 18578,
       "linkage_name": "hipblasDsyr2kStridedBatched_64",
       "name": "hipblasDsyr2kStridedBatched_64",
       "parameters": [
@@ -28043,7 +28203,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18005,
+      "line": 18146,
       "linkage_name": "hipblasDsyr2k_64",
       "name": "hipblasDsyr2k_64",
       "parameters": [
@@ -28431,7 +28591,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17379,
+      "line": 17520,
       "linkage_name": "hipblasDsyrk",
       "name": "hipblasDsyrk",
       "parameters": [
@@ -28491,7 +28651,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17554,
+      "line": 17695,
       "linkage_name": "hipblasDsyrkBatched",
       "name": "hipblasDsyrkBatched",
       "parameters": [
@@ -28555,7 +28715,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17607,
+      "line": 17748,
       "linkage_name": "hipblasDsyrkBatched_64",
       "name": "hipblasDsyrkBatched_64",
       "parameters": [
@@ -28619,7 +28779,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17747,
+      "line": 17888,
       "linkage_name": "hipblasDsyrkStridedBatched",
       "name": "hipblasDsyrkStridedBatched",
       "parameters": [
@@ -28691,7 +28851,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17808,
+      "line": 17949,
       "linkage_name": "hipblasDsyrkStridedBatched_64",
       "name": "hipblasDsyrkStridedBatched_64",
       "parameters": [
@@ -28763,7 +28923,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17428,
+      "line": 17569,
       "linkage_name": "hipblasDsyrk_64",
       "name": "hipblasDsyrk_64",
       "parameters": [
@@ -28823,7 +28983,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18589,
+      "line": 18730,
       "linkage_name": "hipblasDsyrkx",
       "name": "hipblasDsyrkx",
       "parameters": [
@@ -28891,7 +29051,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18789,
+      "line": 18930,
       "linkage_name": "hipblasDsyrkxBatched",
       "name": "hipblasDsyrkxBatched",
       "parameters": [
@@ -28963,7 +29123,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18850,
+      "line": 18991,
       "linkage_name": "hipblasDsyrkxBatched_64",
       "name": "hipblasDsyrkxBatched_64",
       "parameters": [
@@ -29035,7 +29195,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19011,
+      "line": 19152,
       "linkage_name": "hipblasDsyrkxStridedBatched",
       "name": "hipblasDsyrkxStridedBatched",
       "parameters": [
@@ -29119,7 +29279,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19084,
+      "line": 19225,
       "linkage_name": "hipblasDsyrkxStridedBatched_64",
       "name": "hipblasDsyrkxStridedBatched_64",
       "parameters": [
@@ -29203,7 +29363,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18646,
+      "line": 18787,
       "linkage_name": "hipblasDsyrkx_64",
       "name": "hipblasDsyrkx_64",
       "parameters": [
@@ -30647,7 +30807,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20302,
+      "line": 20443,
       "linkage_name": "hipblasDtrmm",
       "name": "hipblasDtrmm",
       "parameters": [
@@ -30719,7 +30879,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20531,
+      "line": 20672,
       "linkage_name": "hipblasDtrmmBatched",
       "name": "hipblasDtrmmBatched",
       "parameters": [
@@ -30795,7 +30955,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20596,
+      "line": 20737,
       "linkage_name": "hipblasDtrmmBatched_64",
       "name": "hipblasDtrmmBatched_64",
       "parameters": [
@@ -30871,7 +31031,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20782,
+      "line": 20923,
       "linkage_name": "hipblasDtrmmStridedBatched",
       "name": "hipblasDtrmmStridedBatched",
       "parameters": [
@@ -30959,7 +31119,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20859,
+      "line": 21000,
       "linkage_name": "hipblasDtrmmStridedBatched_64",
       "name": "hipblasDtrmmStridedBatched_64",
       "parameters": [
@@ -31047,7 +31207,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20363,
+      "line": 20504,
       "linkage_name": "hipblasDtrmm_64",
       "name": "hipblasDtrmm_64",
       "parameters": [
@@ -31463,7 +31623,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21018,
+      "line": 21159,
       "linkage_name": "hipblasDtrsm",
       "name": "hipblasDtrsm",
       "parameters": [
@@ -31527,7 +31687,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21202,
+      "line": 21343,
       "linkage_name": "hipblasDtrsmBatched",
       "name": "hipblasDtrsmBatched",
       "parameters": [
@@ -31595,7 +31755,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21259,
+      "line": 21400,
       "linkage_name": "hipblasDtrsmBatched_64",
       "name": "hipblasDtrsmBatched_64",
       "parameters": [
@@ -31663,7 +31823,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21402,
+      "line": 21543,
       "linkage_name": "hipblasDtrsmStridedBatched",
       "name": "hipblasDtrsmStridedBatched",
       "parameters": [
@@ -31739,7 +31899,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21467,
+      "line": 21608,
       "linkage_name": "hipblasDtrsmStridedBatched_64",
       "name": "hipblasDtrsmStridedBatched_64",
       "parameters": [
@@ -31815,7 +31975,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21071,
+      "line": 21212,
       "linkage_name": "hipblasDtrsm_64",
       "name": "hipblasDtrsm_64",
       "parameters": [
@@ -32223,7 +32383,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21566,
+      "line": 21707,
       "linkage_name": "hipblasDtrtri",
       "name": "hipblasDtrtri",
       "parameters": [
@@ -32271,7 +32431,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21649,
+      "line": 21790,
       "linkage_name": "hipblasDtrtriBatched",
       "name": "hipblasDtrtriBatched",
       "parameters": [
@@ -32323,7 +32483,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21743,
+      "line": 21884,
       "linkage_name": "hipblasDtrtriStridedBatched",
       "name": "hipblasDtrtriStridedBatched",
       "parameters": [
@@ -32911,7 +33071,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23937,
+      "line": 24078,
       "linkage_name": "hipblasGemmBatchedEx",
       "name": "hipblasGemmBatchedEx",
       "parameters": [
@@ -33007,7 +33167,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23958,
+      "line": 24099,
       "linkage_name": "hipblasGemmBatchedExWithFlags",
       "name": "hipblasGemmBatchedExWithFlags",
       "parameters": [
@@ -33107,7 +33267,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24002,
+      "line": 24143,
       "linkage_name": "hipblasGemmBatchedExWithFlags_64",
       "name": "hipblasGemmBatchedExWithFlags_64",
       "parameters": [
@@ -33207,7 +33367,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23981,
+      "line": 24122,
       "linkage_name": "hipblasGemmBatchedEx_64",
       "name": "hipblasGemmBatchedEx_64",
       "parameters": [
@@ -33303,7 +33463,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23761,
+      "line": 23902,
       "linkage_name": "hipblasGemmEx",
       "name": "hipblasGemmEx",
       "parameters": [
@@ -33395,7 +33555,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23781,
+      "line": 23922,
       "linkage_name": "hipblasGemmExWithFlags",
       "name": "hipblasGemmExWithFlags",
       "parameters": [
@@ -33491,7 +33651,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23823,
+      "line": 23964,
       "linkage_name": "hipblasGemmExWithFlags_64",
       "name": "hipblasGemmExWithFlags_64",
       "parameters": [
@@ -33587,7 +33747,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23803,
+      "line": 23944,
       "linkage_name": "hipblasGemmEx_64",
       "name": "hipblasGemmEx_64",
       "parameters": [
@@ -33715,7 +33875,463 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24128,
+      "line": 24264,
+      "linkage_name": "hipblasGemmGroupedBatchedEx",
+      "name": "hipblasGemmGroupedBatchedEx",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasHandle_t"
+        },
+        {
+          "name": "transA_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "transB_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "aType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int *"
+        },
+        {
+          "name": "Barray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "bType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Carray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "cType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int *"
+        },
+        {
+          "name": "Darray",
+          "type": "void *const *"
+        },
+        {
+          "name": "dType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldd_array",
+          "type": "const int *"
+        },
+        {
+          "name": "group_count",
+          "type": "int"
+        },
+        {
+          "name": "group_size",
+          "type": "const int *"
+        },
+        {
+          "name": "computeType",
+          "type": "hipblasComputeType_t"
+        },
+        {
+          "name": "algo",
+          "type": "hipblasGemmAlgo_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasHandle_t, const hipblasOperation_t *, const hipblasOperation_t *, const int *, const int *, const int *, const void *, const void *const *, hipDataType, const int *, const void *const *, hipDataType, const int *, const void *, const void *const *, hipDataType, const int *, void *const *, hipDataType, const int *, int, const int *, hipblasComputeType_t, hipblasGemmAlgo_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblas.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 24290,
+      "linkage_name": "hipblasGemmGroupedBatchedExWithFlags",
+      "name": "hipblasGemmGroupedBatchedExWithFlags",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasHandle_t"
+        },
+        {
+          "name": "transA_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "transB_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "aType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int *"
+        },
+        {
+          "name": "Barray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "bType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Carray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "cType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int *"
+        },
+        {
+          "name": "Darray",
+          "type": "void *const *"
+        },
+        {
+          "name": "dType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldd_array",
+          "type": "const int *"
+        },
+        {
+          "name": "group_count",
+          "type": "int"
+        },
+        {
+          "name": "group_size",
+          "type": "const int *"
+        },
+        {
+          "name": "computeType",
+          "type": "hipblasComputeType_t"
+        },
+        {
+          "name": "algo",
+          "type": "hipblasGemmAlgo_t"
+        },
+        {
+          "name": "flags",
+          "type": "hipblasGemmFlags_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasHandle_t, const hipblasOperation_t *, const hipblasOperation_t *, const int *, const int *, const int *, const void *, const void *const *, hipDataType, const int *, const void *const *, hipDataType, const int *, const void *, const void *const *, hipDataType, const int *, void *const *, hipDataType, const int *, int, const int *, hipblasComputeType_t, hipblasGemmAlgo_t, hipblasGemmFlags_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblas.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 24343,
+      "linkage_name": "hipblasGemmGroupedBatchedExWithFlags_64",
+      "name": "hipblasGemmGroupedBatchedExWithFlags_64",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasHandle_t"
+        },
+        {
+          "name": "transA_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "transB_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "aType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "Barray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "bType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Carray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "cType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "Darray",
+          "type": "void *const *"
+        },
+        {
+          "name": "dType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldd_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "group_count",
+          "type": "int64_t"
+        },
+        {
+          "name": "group_size",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "computeType",
+          "type": "hipblasComputeType_t"
+        },
+        {
+          "name": "algo",
+          "type": "hipblasGemmAlgo_t"
+        },
+        {
+          "name": "flags",
+          "type": "hipblasGemmFlags_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasHandle_t, const hipblasOperation_t *, const hipblasOperation_t *, const int64_t *, const int64_t *, const int64_t *, const void *, const void *const *, hipDataType, const int64_t *, const void *const *, hipDataType, const int64_t *, const void *, const void *const *, hipDataType, const int64_t *, void *const *, hipDataType, const int64_t *, int64_t, const int64_t *, hipblasComputeType_t, hipblasGemmAlgo_t, hipblasGemmFlags_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblas.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 24317,
+      "linkage_name": "hipblasGemmGroupedBatchedEx_64",
+      "name": "hipblasGemmGroupedBatchedEx_64",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasHandle_t"
+        },
+        {
+          "name": "transA_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "transB_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "aType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "Barray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "bType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const void *"
+        },
+        {
+          "name": "Carray",
+          "type": "const void *const *"
+        },
+        {
+          "name": "cType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "Darray",
+          "type": "void *const *"
+        },
+        {
+          "name": "dType",
+          "type": "hipDataType"
+        },
+        {
+          "name": "ldd_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "group_count",
+          "type": "int64_t"
+        },
+        {
+          "name": "group_size",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "computeType",
+          "type": "hipblasComputeType_t"
+        },
+        {
+          "name": "algo",
+          "type": "hipblasGemmAlgo_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasHandle_t, const hipblasOperation_t *, const hipblasOperation_t *, const int64_t *, const int64_t *, const int64_t *, const void *, const void *const *, hipDataType, const int64_t *, const void *const *, hipDataType, const int64_t *, const void *, const void *const *, hipDataType, const int64_t *, void *const *, hipDataType, const int64_t *, int64_t, const int64_t *, hipblasComputeType_t, hipblasGemmAlgo_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblas.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 24473,
       "linkage_name": "hipblasGemmStridedBatchedEx",
       "name": "hipblasGemmStridedBatchedEx",
       "parameters": [
@@ -33823,7 +34439,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24153,
+      "line": 24498,
       "linkage_name": "hipblasGemmStridedBatchedExWithFlags",
       "name": "hipblasGemmStridedBatchedExWithFlags",
       "parameters": [
@@ -33935,7 +34551,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24204,
+      "line": 24549,
       "linkage_name": "hipblasGemmStridedBatchedExWithFlags_64",
       "name": "hipblasGemmStridedBatchedExWithFlags_64",
       "parameters": [
@@ -34047,7 +34663,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24179,
+      "line": 24524,
       "linkage_name": "hipblasGemmStridedBatchedEx_64",
       "name": "hipblasGemmStridedBatchedEx_64",
       "parameters": [
@@ -35129,7 +35745,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24515,
+      "line": 24860,
       "linkage_name": "hipblasHerkEx",
       "name": "hipblasHerkEx",
       "parameters": [
@@ -35425,7 +36041,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15159,
+      "line": 15300,
       "linkage_name": "hipblasHgemmStridedBatched",
       "name": "hipblasHgemmStridedBatched",
       "parameters": [
@@ -35513,7 +36129,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15255,
+      "line": 15396,
       "linkage_name": "hipblasHgemmStridedBatched_64",
       "name": "hipblasHgemmStridedBatched_64",
       "parameters": [
@@ -37668,7 +38284,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25523,
+      "line": 25868,
       "linkage_name": "hipblasNrm2BatchedEx",
       "name": "hipblasNrm2BatchedEx",
       "parameters": [
@@ -37720,7 +38336,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25534,
+      "line": 25879,
       "linkage_name": "hipblasNrm2BatchedEx_64",
       "name": "hipblasNrm2BatchedEx_64",
       "parameters": [
@@ -37772,7 +38388,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25462,
+      "line": 25807,
       "linkage_name": "hipblasNrm2Ex",
       "name": "hipblasNrm2Ex",
       "parameters": [
@@ -37820,7 +38436,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25472,
+      "line": 25817,
       "linkage_name": "hipblasNrm2Ex_64",
       "name": "hipblasNrm2Ex_64",
       "parameters": [
@@ -37868,7 +38484,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25592,
+      "line": 25937,
       "linkage_name": "hipblasNrm2StridedBatchedEx",
       "name": "hipblasNrm2StridedBatchedEx",
       "parameters": [
@@ -37924,7 +38540,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25604,
+      "line": 25949,
       "linkage_name": "hipblasNrm2StridedBatchedEx_64",
       "name": "hipblasNrm2StridedBatchedEx_64",
       "parameters": [
@@ -38032,7 +38648,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25757,
+      "line": 26102,
       "linkage_name": "hipblasRotBatchedEx",
       "name": "hipblasRotBatchedEx",
       "parameters": [
@@ -38100,7 +38716,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25772,
+      "line": 26117,
       "linkage_name": "hipblasRotBatchedEx_64",
       "name": "hipblasRotBatchedEx_64",
       "parameters": [
@@ -38168,7 +38784,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25671,
+      "line": 26016,
       "linkage_name": "hipblasRotEx",
       "name": "hipblasRotEx",
       "parameters": [
@@ -38232,7 +38848,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25685,
+      "line": 26030,
       "linkage_name": "hipblasRotEx_64",
       "name": "hipblasRotEx_64",
       "parameters": [
@@ -38296,7 +38912,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25851,
+      "line": 26196,
       "linkage_name": "hipblasRotStridedBatchedEx",
       "name": "hipblasRotStridedBatchedEx",
       "parameters": [
@@ -38372,7 +38988,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25868,
+      "line": 26213,
       "linkage_name": "hipblasRotStridedBatchedEx_64",
       "name": "hipblasRotStridedBatchedEx_64",
       "parameters": [
@@ -38984,7 +39600,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25978,
+      "line": 26323,
       "linkage_name": "hipblasScalBatchedEx",
       "name": "hipblasScalBatchedEx",
       "parameters": [
@@ -39036,7 +39652,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25989,
+      "line": 26334,
       "linkage_name": "hipblasScalBatchedEx_64",
       "name": "hipblasScalBatchedEx_64",
       "parameters": [
@@ -39088,7 +39704,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25920,
+      "line": 26265,
       "linkage_name": "hipblasScalEx",
       "name": "hipblasScalEx",
       "parameters": [
@@ -39136,7 +39752,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 25930,
+      "line": 26275,
       "linkage_name": "hipblasScalEx_64",
       "name": "hipblasScalEx_64",
       "parameters": [
@@ -39184,7 +39800,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 26045,
+      "line": 26390,
       "linkage_name": "hipblasScalStridedBatchedEx",
       "name": "hipblasScalStridedBatchedEx",
       "parameters": [
@@ -39240,7 +39856,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 26057,
+      "line": 26402,
       "linkage_name": "hipblasScalStridedBatchedEx_64",
       "name": "hipblasScalStridedBatchedEx_64",
       "parameters": [
@@ -40048,7 +40664,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21826,
+      "line": 21967,
       "linkage_name": "hipblasSdgmm",
       "name": "hipblasSdgmm",
       "parameters": [
@@ -40104,7 +40720,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21969,
+      "line": 22110,
       "linkage_name": "hipblasSdgmmBatched",
       "name": "hipblasSdgmmBatched",
       "parameters": [
@@ -40164,7 +40780,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22018,
+      "line": 22159,
       "linkage_name": "hipblasSdgmmBatched_64",
       "name": "hipblasSdgmmBatched_64",
       "parameters": [
@@ -40224,7 +40840,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22129,
+      "line": 22270,
       "linkage_name": "hipblasSdgmmStridedBatched",
       "name": "hipblasSdgmmStridedBatched",
       "parameters": [
@@ -40296,7 +40912,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22190,
+      "line": 22331,
       "linkage_name": "hipblasSdgmmStridedBatched_64",
       "name": "hipblasSdgmmStridedBatched_64",
       "parameters": [
@@ -40368,7 +40984,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21871,
+      "line": 22012,
       "linkage_name": "hipblasSdgmm_64",
       "name": "hipblasSdgmm_64",
       "parameters": [
@@ -41540,7 +42156,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19196,
+      "line": 19337,
       "linkage_name": "hipblasSgeam",
       "name": "hipblasSgeam",
       "parameters": [
@@ -41608,7 +42224,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19375,
+      "line": 19516,
       "linkage_name": "hipblasSgeamBatched",
       "name": "hipblasSgeamBatched",
       "parameters": [
@@ -41680,7 +42296,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19436,
+      "line": 19577,
       "linkage_name": "hipblasSgeamBatched_64",
       "name": "hipblasSgeamBatched_64",
       "parameters": [
@@ -41752,7 +42368,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19587,
+      "line": 19728,
       "linkage_name": "hipblasSgeamStridedBatched",
       "name": "hipblasSgeamStridedBatched",
       "parameters": [
@@ -41836,7 +42452,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19660,
+      "line": 19801,
       "linkage_name": "hipblasSgeamStridedBatched_64",
       "name": "hipblasSgeamStridedBatched_64",
       "parameters": [
@@ -41920,7 +42536,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19253,
+      "line": 19394,
       "linkage_name": "hipblasSgeam_64",
       "name": "hipblasSgeam_64",
       "parameters": [
@@ -41988,7 +42604,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23021,
+      "line": 23162,
       "linkage_name": "hipblasSgels",
       "name": "hipblasSgels",
       "parameters": [
@@ -42048,7 +42664,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23147,
+      "line": 23288,
       "linkage_name": "hipblasSgelsBatched",
       "name": "hipblasSgelsBatched",
       "parameters": [
@@ -42112,7 +42728,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23284,
+      "line": 23425,
       "linkage_name": "hipblasSgelsStridedBatched",
       "name": "hipblasSgelsStridedBatched",
       "parameters": [
@@ -42408,7 +43024,167 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15178,
+      "line": 15156,
+      "linkage_name": "hipblasSgemmGroupedBatched",
+      "name": "hipblasSgemmGroupedBatched",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasHandle_t"
+        },
+        {
+          "name": "transA_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "transB_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const float *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const float *const *"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int *"
+        },
+        {
+          "name": "Barray",
+          "type": "const float *const *"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const float *"
+        },
+        {
+          "name": "Carray",
+          "type": "float *const *"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int *"
+        },
+        {
+          "name": "group_count",
+          "type": "int"
+        },
+        {
+          "name": "group_size",
+          "type": "const int *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasHandle_t, const hipblasOperation_t *, const hipblasOperation_t *, const int *, const int *, const int *, const float *, const float *const *, const int *, const float *const *, const int *, const float *, float *const *, const int *, int, const int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblas.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 15190,
+      "linkage_name": "hipblasSgemmGroupedBatched_64",
+      "name": "hipblasSgemmGroupedBatched_64",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasHandle_t"
+        },
+        {
+          "name": "transA_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "transB_array",
+          "type": "const hipblasOperation_t *"
+        },
+        {
+          "name": "m_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "n_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "k_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "alpha_array",
+          "type": "const float *"
+        },
+        {
+          "name": "Aarray",
+          "type": "const float *const *"
+        },
+        {
+          "name": "lda_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "Barray",
+          "type": "const float *const *"
+        },
+        {
+          "name": "ldb_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "beta_array",
+          "type": "const float *"
+        },
+        {
+          "name": "Carray",
+          "type": "float *const *"
+        },
+        {
+          "name": "ldc_array",
+          "type": "const int64_t *"
+        },
+        {
+          "name": "group_count",
+          "type": "int64_t"
+        },
+        {
+          "name": "group_size",
+          "type": "const int64_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasHandle_t, const hipblasOperation_t *, const hipblasOperation_t *, const int64_t *, const int64_t *, const int64_t *, const float *, const float *const *, const int64_t *, const float *const *, const int64_t *, const float *, float *const *, const int64_t *, int64_t, const int64_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblas.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 15319,
       "linkage_name": "hipblasSgemmStridedBatched",
       "name": "hipblasSgemmStridedBatched",
       "parameters": [
@@ -42496,7 +43272,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15274,
+      "line": 15415,
       "linkage_name": "hipblasSgemmStridedBatched_64",
       "name": "hipblasSgemmStridedBatched_64",
       "parameters": [
@@ -43080,7 +43856,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23403,
+      "line": 23544,
       "linkage_name": "hipblasSgeqrf",
       "name": "hipblasSgeqrf",
       "parameters": [
@@ -43124,7 +43900,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23500,
+      "line": 23641,
       "linkage_name": "hipblasSgeqrfBatched",
       "name": "hipblasSgeqrfBatched",
       "parameters": [
@@ -43172,7 +43948,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23609,
+      "line": 23750,
       "linkage_name": "hipblasSgeqrfStridedBatched",
       "name": "hipblasSgeqrfStridedBatched",
       "parameters": [
@@ -43604,7 +44380,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22308,
+      "line": 22449,
       "linkage_name": "hipblasSgetrf",
       "name": "hipblasSgetrf",
       "parameters": [
@@ -43644,7 +44420,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22379,
+      "line": 22520,
       "linkage_name": "hipblasSgetrfBatched",
       "name": "hipblasSgetrfBatched",
       "parameters": [
@@ -43688,7 +44464,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22478,
+      "line": 22619,
       "linkage_name": "hipblasSgetrfStridedBatched",
       "name": "hipblasSgetrfStridedBatched",
       "parameters": [
@@ -43740,7 +44516,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22909,
+      "line": 23050,
       "linkage_name": "hipblasSgetriBatched",
       "name": "hipblasSgetriBatched",
       "parameters": [
@@ -43792,7 +44568,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22575,
+      "line": 22716,
       "linkage_name": "hipblasSgetrs",
       "name": "hipblasSgetrs",
       "parameters": [
@@ -43848,7 +44624,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22679,
+      "line": 22820,
       "linkage_name": "hipblasSgetrsBatched",
       "name": "hipblasSgetrsBatched",
       "parameters": [
@@ -43908,7 +44684,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22800,
+      "line": 22941,
       "linkage_name": "hipblasSgetrsStridedBatched",
       "name": "hipblasSgetrsStridedBatched",
       "parameters": [
@@ -47392,7 +48168,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16738,
+      "line": 16879,
       "linkage_name": "hipblasSsymm",
       "name": "hipblasSsymm",
       "parameters": [
@@ -47460,7 +48236,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16934,
+      "line": 17075,
       "linkage_name": "hipblasSsymmBatched",
       "name": "hipblasSsymmBatched",
       "parameters": [
@@ -47532,7 +48308,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16995,
+      "line": 17136,
       "linkage_name": "hipblasSsymmBatched_64",
       "name": "hipblasSsymmBatched_64",
       "parameters": [
@@ -47604,7 +48380,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17147,
+      "line": 17288,
       "linkage_name": "hipblasSsymmStridedBatched",
       "name": "hipblasSsymmStridedBatched",
       "parameters": [
@@ -47688,7 +48464,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17220,
+      "line": 17361,
       "linkage_name": "hipblasSsymmStridedBatched_64",
       "name": "hipblasSsymmStridedBatched_64",
       "parameters": [
@@ -47772,7 +48548,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16795,
+      "line": 16936,
       "linkage_name": "hipblasSsymm_64",
       "name": "hipblasSsymm_64",
       "parameters": [
@@ -48616,7 +49392,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17934,
+      "line": 18075,
       "linkage_name": "hipblasSsyr2k",
       "name": "hipblasSsyr2k",
       "parameters": [
@@ -48684,7 +49460,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18128,
+      "line": 18269,
       "linkage_name": "hipblasSsyr2kBatched",
       "name": "hipblasSsyr2kBatched",
       "parameters": [
@@ -48756,7 +49532,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18189,
+      "line": 18330,
       "linkage_name": "hipblasSsyr2kBatched_64",
       "name": "hipblasSsyr2kBatched_64",
       "parameters": [
@@ -48828,7 +49604,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18346,
+      "line": 18487,
       "linkage_name": "hipblasSsyr2kStridedBatched",
       "name": "hipblasSsyr2kStridedBatched",
       "parameters": [
@@ -48912,7 +49688,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18419,
+      "line": 18560,
       "linkage_name": "hipblasSsyr2kStridedBatched_64",
       "name": "hipblasSsyr2kStridedBatched_64",
       "parameters": [
@@ -48996,7 +49772,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17991,
+      "line": 18132,
       "linkage_name": "hipblasSsyr2k_64",
       "name": "hipblasSsyr2k_64",
       "parameters": [
@@ -49384,7 +50160,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17367,
+      "line": 17508,
       "linkage_name": "hipblasSsyrk",
       "name": "hipblasSsyrk",
       "parameters": [
@@ -49444,7 +50220,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17541,
+      "line": 17682,
       "linkage_name": "hipblasSsyrkBatched",
       "name": "hipblasSsyrkBatched",
       "parameters": [
@@ -49508,7 +50284,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17594,
+      "line": 17735,
       "linkage_name": "hipblasSsyrkBatched_64",
       "name": "hipblasSsyrkBatched_64",
       "parameters": [
@@ -49572,7 +50348,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17732,
+      "line": 17873,
       "linkage_name": "hipblasSsyrkStridedBatched",
       "name": "hipblasSsyrkStridedBatched",
       "parameters": [
@@ -49644,7 +50420,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17793,
+      "line": 17934,
       "linkage_name": "hipblasSsyrkStridedBatched_64",
       "name": "hipblasSsyrkStridedBatched_64",
       "parameters": [
@@ -49716,7 +50492,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17416,
+      "line": 17557,
       "linkage_name": "hipblasSsyrk_64",
       "name": "hipblasSsyrk_64",
       "parameters": [
@@ -49776,7 +50552,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18575,
+      "line": 18716,
       "linkage_name": "hipblasSsyrkx",
       "name": "hipblasSsyrkx",
       "parameters": [
@@ -49844,7 +50620,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18774,
+      "line": 18915,
       "linkage_name": "hipblasSsyrkxBatched",
       "name": "hipblasSsyrkxBatched",
       "parameters": [
@@ -49916,7 +50692,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18835,
+      "line": 18976,
       "linkage_name": "hipblasSsyrkxBatched_64",
       "name": "hipblasSsyrkxBatched_64",
       "parameters": [
@@ -49988,7 +50764,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18993,
+      "line": 19134,
       "linkage_name": "hipblasSsyrkxStridedBatched",
       "name": "hipblasSsyrkxStridedBatched",
       "parameters": [
@@ -50072,7 +50848,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19066,
+      "line": 19207,
       "linkage_name": "hipblasSsyrkxStridedBatched_64",
       "name": "hipblasSsyrkxStridedBatched_64",
       "parameters": [
@@ -50156,7 +50932,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18632,
+      "line": 18773,
       "linkage_name": "hipblasSsyrkx_64",
       "name": "hipblasSsyrkx_64",
       "parameters": [
@@ -50224,7 +51000,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 26078,
+      "line": 26423,
       "linkage_name": "hipblasStatusToString",
       "name": "hipblasStatusToString",
       "parameters": [
@@ -51691,7 +52467,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20287,
+      "line": 20428,
       "linkage_name": "hipblasStrmm",
       "name": "hipblasStrmm",
       "parameters": [
@@ -51763,7 +52539,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20515,
+      "line": 20656,
       "linkage_name": "hipblasStrmmBatched",
       "name": "hipblasStrmmBatched",
       "parameters": [
@@ -51839,7 +52615,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20580,
+      "line": 20721,
       "linkage_name": "hipblasStrmmBatched_64",
       "name": "hipblasStrmmBatched_64",
       "parameters": [
@@ -51915,7 +52691,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20763,
+      "line": 20904,
       "linkage_name": "hipblasStrmmStridedBatched",
       "name": "hipblasStrmmStridedBatched",
       "parameters": [
@@ -52003,7 +52779,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20840,
+      "line": 20981,
       "linkage_name": "hipblasStrmmStridedBatched_64",
       "name": "hipblasStrmmStridedBatched_64",
       "parameters": [
@@ -52091,7 +52867,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20348,
+      "line": 20489,
       "linkage_name": "hipblasStrmm_64",
       "name": "hipblasStrmm_64",
       "parameters": [
@@ -52507,7 +53283,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21005,
+      "line": 21146,
       "linkage_name": "hipblasStrsm",
       "name": "hipblasStrsm",
       "parameters": [
@@ -52571,7 +53347,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21188,
+      "line": 21329,
       "linkage_name": "hipblasStrsmBatched",
       "name": "hipblasStrsmBatched",
       "parameters": [
@@ -52639,7 +53415,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21245,
+      "line": 21386,
       "linkage_name": "hipblasStrsmBatched_64",
       "name": "hipblasStrsmBatched_64",
       "parameters": [
@@ -52707,7 +53483,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21386,
+      "line": 21527,
       "linkage_name": "hipblasStrsmStridedBatched",
       "name": "hipblasStrsmStridedBatched",
       "parameters": [
@@ -52783,7 +53559,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21451,
+      "line": 21592,
       "linkage_name": "hipblasStrsmStridedBatched_64",
       "name": "hipblasStrsmStridedBatched_64",
       "parameters": [
@@ -52859,7 +53635,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21058,
+      "line": 21199,
       "linkage_name": "hipblasStrsm_64",
       "name": "hipblasStrsm_64",
       "parameters": [
@@ -53267,7 +54043,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21557,
+      "line": 21698,
       "linkage_name": "hipblasStrtri",
       "name": "hipblasStrtri",
       "parameters": [
@@ -53315,7 +54091,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21639,
+      "line": 21780,
       "linkage_name": "hipblasStrtriBatched",
       "name": "hipblasStrtriBatched",
       "parameters": [
@@ -53367,7 +54143,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21731,
+      "line": 21872,
       "linkage_name": "hipblasStrtriStridedBatched",
       "name": "hipblasStrtriStridedBatched",
       "parameters": [
@@ -53427,7 +54203,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24295,
+      "line": 24640,
       "linkage_name": "hipblasSyrkEx",
       "name": "hipblasSyrkEx",
       "parameters": [
@@ -53499,7 +54275,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24658,
+      "line": 25003,
       "linkage_name": "hipblasTrsmBatchedEx",
       "name": "hipblasTrsmBatchedEx",
       "parameters": [
@@ -53579,7 +54355,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24433,
+      "line": 24778,
       "linkage_name": "hipblasTrsmEx",
       "name": "hipblasTrsmEx",
       "parameters": [
@@ -53655,7 +54431,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 24816,
+      "line": 25161,
       "linkage_name": "hipblasTrsmStridedBatchedEx",
       "name": "hipblasTrsmStridedBatchedEx",
       "parameters": [
@@ -54315,7 +55091,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21859,
+      "line": 22000,
       "linkage_name": "hipblasZdgmm",
       "name": "hipblasZdgmm",
       "parameters": [
@@ -54371,7 +55147,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22005,
+      "line": 22146,
       "linkage_name": "hipblasZdgmmBatched",
       "name": "hipblasZdgmmBatched",
       "parameters": [
@@ -54431,7 +55207,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22054,
+      "line": 22195,
       "linkage_name": "hipblasZdgmmBatched_64",
       "name": "hipblasZdgmmBatched_64",
       "parameters": [
@@ -54491,7 +55267,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22174,
+      "line": 22315,
       "linkage_name": "hipblasZdgmmStridedBatched",
       "name": "hipblasZdgmmStridedBatched",
       "parameters": [
@@ -54563,7 +55339,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22235,
+      "line": 22376,
       "linkage_name": "hipblasZdgmmStridedBatched_64",
       "name": "hipblasZdgmmStridedBatched_64",
       "parameters": [
@@ -54635,7 +55411,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21904,
+      "line": 22045,
       "linkage_name": "hipblasZdgmm_64",
       "name": "hipblasZdgmm_64",
       "parameters": [
@@ -56315,7 +57091,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19238,
+      "line": 19379,
       "linkage_name": "hipblasZgeam",
       "name": "hipblasZgeam",
       "parameters": [
@@ -56383,7 +57159,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19420,
+      "line": 19561,
       "linkage_name": "hipblasZgeamBatched",
       "name": "hipblasZgeamBatched",
       "parameters": [
@@ -56455,7 +57231,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19481,
+      "line": 19622,
       "linkage_name": "hipblasZgeamBatched_64",
       "name": "hipblasZgeamBatched_64",
       "parameters": [
@@ -56527,7 +57303,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19641,
+      "line": 19782,
       "linkage_name": "hipblasZgeamStridedBatched",
       "name": "hipblasZgeamStridedBatched",
       "parameters": [
@@ -56611,7 +57387,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19714,
+      "line": 19855,
       "linkage_name": "hipblasZgeamStridedBatched_64",
       "name": "hipblasZgeamStridedBatched_64",
       "parameters": [
@@ -56695,7 +57471,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19295,
+      "line": 19436,
       "linkage_name": "hipblasZgeam_64",
       "name": "hipblasZgeam_64",
       "parameters": [
@@ -56763,7 +57539,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23057,
+      "line": 23198,
       "linkage_name": "hipblasZgels",
       "name": "hipblasZgels",
       "parameters": [
@@ -56823,7 +57599,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23186,
+      "line": 23327,
       "linkage_name": "hipblasZgelsBatched",
       "name": "hipblasZgelsBatched",
       "parameters": [
@@ -56887,7 +57663,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23329,
+      "line": 23470,
       "linkage_name": "hipblasZgelsStridedBatched",
       "name": "hipblasZgelsStridedBatched",
       "parameters": [
@@ -57183,7 +57959,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15235,
+      "line": 15376,
       "linkage_name": "hipblasZgemmStridedBatched",
       "name": "hipblasZgemmStridedBatched",
       "parameters": [
@@ -57271,7 +58047,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15331,
+      "line": 15472,
       "linkage_name": "hipblasZgemmStridedBatched_64",
       "name": "hipblasZgemmStridedBatched_64",
       "parameters": [
@@ -57855,7 +58631,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23427,
+      "line": 23568,
       "linkage_name": "hipblasZgeqrf",
       "name": "hipblasZgeqrf",
       "parameters": [
@@ -57899,7 +58675,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23527,
+      "line": 23668,
       "linkage_name": "hipblasZgeqrfBatched",
       "name": "hipblasZgeqrfBatched",
       "parameters": [
@@ -57947,7 +58723,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 23642,
+      "line": 23783,
       "linkage_name": "hipblasZgeqrfStridedBatched",
       "name": "hipblasZgeqrfStridedBatched",
       "parameters": [
@@ -58755,7 +59531,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22317,
+      "line": 22458,
       "linkage_name": "hipblasZgetrf",
       "name": "hipblasZgetrf",
       "parameters": [
@@ -58795,7 +59571,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22403,
+      "line": 22544,
       "linkage_name": "hipblasZgetrfBatched",
       "name": "hipblasZgetrfBatched",
       "parameters": [
@@ -58839,7 +59615,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22508,
+      "line": 22649,
       "linkage_name": "hipblasZgetrfStridedBatched",
       "name": "hipblasZgetrfStridedBatched",
       "parameters": [
@@ -58891,7 +59667,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22939,
+      "line": 23080,
       "linkage_name": "hipblasZgetriBatched",
       "name": "hipblasZgetriBatched",
       "parameters": [
@@ -58943,7 +59719,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22608,
+      "line": 22749,
       "linkage_name": "hipblasZgetrs",
       "name": "hipblasZgetrs",
       "parameters": [
@@ -58999,7 +59775,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22715,
+      "line": 22856,
       "linkage_name": "hipblasZgetrsBatched",
       "name": "hipblasZgetrsBatched",
       "parameters": [
@@ -59059,7 +59835,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 22845,
+      "line": 22986,
       "linkage_name": "hipblasZgetrsStridedBatched",
       "name": "hipblasZgetrsStridedBatched",
       "parameters": [
@@ -59555,7 +60331,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19826,
+      "line": 19967,
       "linkage_name": "hipblasZhemm",
       "name": "hipblasZhemm",
       "parameters": [
@@ -59623,7 +60399,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19968,
+      "line": 20109,
       "linkage_name": "hipblasZhemmBatched",
       "name": "hipblasZhemmBatched",
       "parameters": [
@@ -59695,7 +60471,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19999,
+      "line": 20140,
       "linkage_name": "hipblasZhemmBatched_64",
       "name": "hipblasZhemmBatched_64",
       "parameters": [
@@ -59767,7 +60543,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20128,
+      "line": 20269,
       "linkage_name": "hipblasZhemmStridedBatched",
       "name": "hipblasZhemmStridedBatched",
       "parameters": [
@@ -59851,7 +60627,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20165,
+      "line": 20306,
       "linkage_name": "hipblasZhemmStridedBatched_64",
       "name": "hipblasZhemmStridedBatched_64",
       "parameters": [
@@ -59935,7 +60711,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19855,
+      "line": 19996,
       "linkage_name": "hipblasZhemm_64",
       "name": "hipblasZhemm_64",
       "parameters": [
@@ -60779,7 +61555,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16301,
+      "line": 16442,
       "linkage_name": "hipblasZher2k",
       "name": "hipblasZher2k",
       "parameters": [
@@ -60847,7 +61623,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16442,
+      "line": 16583,
       "linkage_name": "hipblasZher2kBatched",
       "name": "hipblasZher2kBatched",
       "parameters": [
@@ -60919,7 +61695,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16473,
+      "line": 16614,
       "linkage_name": "hipblasZher2kBatched_64",
       "name": "hipblasZher2kBatched_64",
       "parameters": [
@@ -60991,7 +61767,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16604,
+      "line": 16745,
       "linkage_name": "hipblasZher2kStridedBatched",
       "name": "hipblasZher2kStridedBatched",
       "parameters": [
@@ -61075,7 +61851,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16641,
+      "line": 16782,
       "linkage_name": "hipblasZher2kStridedBatched_64",
       "name": "hipblasZher2kStridedBatched_64",
       "parameters": [
@@ -61159,7 +61935,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16330,
+      "line": 16471,
       "linkage_name": "hipblasZher2k_64",
       "name": "hipblasZher2k_64",
       "parameters": [
@@ -61547,7 +62323,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15435,
+      "line": 15576,
       "linkage_name": "hipblasZherk",
       "name": "hipblasZherk",
       "parameters": [
@@ -61607,7 +62383,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15560,
+      "line": 15701,
       "linkage_name": "hipblasZherkBatched",
       "name": "hipblasZherkBatched",
       "parameters": [
@@ -61671,7 +62447,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15587,
+      "line": 15728,
       "linkage_name": "hipblasZherkBatched_64",
       "name": "hipblasZherkBatched_64",
       "parameters": [
@@ -61735,7 +62511,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15699,
+      "line": 15840,
       "linkage_name": "hipblasZherkStridedBatched",
       "name": "hipblasZherkStridedBatched",
       "parameters": [
@@ -61807,7 +62583,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15730,
+      "line": 15871,
       "linkage_name": "hipblasZherkStridedBatched_64",
       "name": "hipblasZherkStridedBatched_64",
       "parameters": [
@@ -61879,7 +62655,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15460,
+      "line": 15601,
       "linkage_name": "hipblasZherk_64",
       "name": "hipblasZherk_64",
       "parameters": [
@@ -61939,7 +62715,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15842,
+      "line": 15983,
       "linkage_name": "hipblasZherkx",
       "name": "hipblasZherkx",
       "parameters": [
@@ -62007,7 +62783,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15987,
+      "line": 16128,
       "linkage_name": "hipblasZherkxBatched",
       "name": "hipblasZherkxBatched",
       "parameters": [
@@ -62079,7 +62855,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16018,
+      "line": 16159,
       "linkage_name": "hipblasZherkxBatched_64",
       "name": "hipblasZherkxBatched_64",
       "parameters": [
@@ -62151,7 +62927,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16150,
+      "line": 16291,
       "linkage_name": "hipblasZherkxStridedBatched",
       "name": "hipblasZherkxStridedBatched",
       "parameters": [
@@ -62235,7 +63011,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16187,
+      "line": 16328,
       "linkage_name": "hipblasZherkxStridedBatched_64",
       "name": "hipblasZherkxStridedBatched_64",
       "parameters": [
@@ -62319,7 +63095,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 15871,
+      "line": 16012,
       "linkage_name": "hipblasZherkx_64",
       "name": "hipblasZherkx_64",
       "parameters": [
@@ -64803,7 +65579,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16780,
+      "line": 16921,
       "linkage_name": "hipblasZsymm",
       "name": "hipblasZsymm",
       "parameters": [
@@ -64871,7 +65647,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16979,
+      "line": 17120,
       "linkage_name": "hipblasZsymmBatched",
       "name": "hipblasZsymmBatched",
       "parameters": [
@@ -64943,7 +65719,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17040,
+      "line": 17181,
       "linkage_name": "hipblasZsymmBatched_64",
       "name": "hipblasZsymmBatched_64",
       "parameters": [
@@ -65015,7 +65791,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17201,
+      "line": 17342,
       "linkage_name": "hipblasZsymmStridedBatched",
       "name": "hipblasZsymmStridedBatched",
       "parameters": [
@@ -65099,7 +65875,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17274,
+      "line": 17415,
       "linkage_name": "hipblasZsymmStridedBatched_64",
       "name": "hipblasZsymmStridedBatched_64",
       "parameters": [
@@ -65183,7 +65959,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 16837,
+      "line": 16978,
       "linkage_name": "hipblasZsymm_64",
       "name": "hipblasZsymm_64",
       "parameters": [
@@ -66027,7 +66803,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17976,
+      "line": 18117,
       "linkage_name": "hipblasZsyr2k",
       "name": "hipblasZsyr2k",
       "parameters": [
@@ -66095,7 +66871,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18173,
+      "line": 18314,
       "linkage_name": "hipblasZsyr2kBatched",
       "name": "hipblasZsyr2kBatched",
       "parameters": [
@@ -66167,7 +66943,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18234,
+      "line": 18375,
       "linkage_name": "hipblasZsyr2kBatched_64",
       "name": "hipblasZsyr2kBatched_64",
       "parameters": [
@@ -66239,7 +67015,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18400,
+      "line": 18541,
       "linkage_name": "hipblasZsyr2kStridedBatched",
       "name": "hipblasZsyr2kStridedBatched",
       "parameters": [
@@ -66323,7 +67099,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18473,
+      "line": 18614,
       "linkage_name": "hipblasZsyr2kStridedBatched_64",
       "name": "hipblasZsyr2kStridedBatched_64",
       "parameters": [
@@ -66407,7 +67183,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18033,
+      "line": 18174,
       "linkage_name": "hipblasZsyr2k_64",
       "name": "hipblasZsyr2k_64",
       "parameters": [
@@ -66795,7 +67571,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17403,
+      "line": 17544,
       "linkage_name": "hipblasZsyrk",
       "name": "hipblasZsyrk",
       "parameters": [
@@ -66855,7 +67631,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17580,
+      "line": 17721,
       "linkage_name": "hipblasZsyrkBatched",
       "name": "hipblasZsyrkBatched",
       "parameters": [
@@ -66919,7 +67695,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17633,
+      "line": 17774,
       "linkage_name": "hipblasZsyrkBatched_64",
       "name": "hipblasZsyrkBatched_64",
       "parameters": [
@@ -66983,7 +67759,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17777,
+      "line": 17918,
       "linkage_name": "hipblasZsyrkStridedBatched",
       "name": "hipblasZsyrkStridedBatched",
       "parameters": [
@@ -67055,7 +67831,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17838,
+      "line": 17979,
       "linkage_name": "hipblasZsyrkStridedBatched_64",
       "name": "hipblasZsyrkStridedBatched_64",
       "parameters": [
@@ -67127,7 +67903,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 17452,
+      "line": 17593,
       "linkage_name": "hipblasZsyrk_64",
       "name": "hipblasZsyrk_64",
       "parameters": [
@@ -67187,7 +67963,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18617,
+      "line": 18758,
       "linkage_name": "hipblasZsyrkx",
       "name": "hipblasZsyrkx",
       "parameters": [
@@ -67255,7 +68031,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18819,
+      "line": 18960,
       "linkage_name": "hipblasZsyrkxBatched",
       "name": "hipblasZsyrkxBatched",
       "parameters": [
@@ -67327,7 +68103,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18880,
+      "line": 19021,
       "linkage_name": "hipblasZsyrkxBatched_64",
       "name": "hipblasZsyrkxBatched_64",
       "parameters": [
@@ -67399,7 +68175,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19047,
+      "line": 19188,
       "linkage_name": "hipblasZsyrkxStridedBatched",
       "name": "hipblasZsyrkxStridedBatched",
       "parameters": [
@@ -67483,7 +68259,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 19120,
+      "line": 19261,
       "linkage_name": "hipblasZsyrkxStridedBatched_64",
       "name": "hipblasZsyrkxStridedBatched_64",
       "parameters": [
@@ -67567,7 +68343,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 18674,
+      "line": 18815,
       "linkage_name": "hipblasZsyrkx_64",
       "name": "hipblasZsyrkx_64",
       "parameters": [
@@ -69011,7 +69787,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20332,
+      "line": 20473,
       "linkage_name": "hipblasZtrmm",
       "name": "hipblasZtrmm",
       "parameters": [
@@ -69083,7 +69859,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20563,
+      "line": 20704,
       "linkage_name": "hipblasZtrmmBatched",
       "name": "hipblasZtrmmBatched",
       "parameters": [
@@ -69159,7 +69935,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20628,
+      "line": 20769,
       "linkage_name": "hipblasZtrmmBatched_64",
       "name": "hipblasZtrmmBatched_64",
       "parameters": [
@@ -69235,7 +70011,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20820,
+      "line": 20961,
       "linkage_name": "hipblasZtrmmStridedBatched",
       "name": "hipblasZtrmmStridedBatched",
       "parameters": [
@@ -69323,7 +70099,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20897,
+      "line": 21038,
       "linkage_name": "hipblasZtrmmStridedBatched_64",
       "name": "hipblasZtrmmStridedBatched_64",
       "parameters": [
@@ -69411,7 +70187,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 20393,
+      "line": 20534,
       "linkage_name": "hipblasZtrmm_64",
       "name": "hipblasZtrmm_64",
       "parameters": [
@@ -69827,7 +70603,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21044,
+      "line": 21185,
       "linkage_name": "hipblasZtrsm",
       "name": "hipblasZtrsm",
       "parameters": [
@@ -69891,7 +70667,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21230,
+      "line": 21371,
       "linkage_name": "hipblasZtrsmBatched",
       "name": "hipblasZtrsmBatched",
       "parameters": [
@@ -69959,7 +70735,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21287,
+      "line": 21428,
       "linkage_name": "hipblasZtrsmBatched_64",
       "name": "hipblasZtrsmBatched_64",
       "parameters": [
@@ -70027,7 +70803,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21434,
+      "line": 21575,
       "linkage_name": "hipblasZtrsmStridedBatched",
       "name": "hipblasZtrsmStridedBatched",
       "parameters": [
@@ -70103,7 +70879,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21499,
+      "line": 21640,
       "linkage_name": "hipblasZtrsmStridedBatched_64",
       "name": "hipblasZtrsmStridedBatched_64",
       "parameters": [
@@ -70179,7 +70955,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21097,
+      "line": 21238,
       "linkage_name": "hipblasZtrsm_64",
       "name": "hipblasZtrsm_64",
       "parameters": [
@@ -70587,7 +71363,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21584,
+      "line": 21725,
       "linkage_name": "hipblasZtrtri",
       "name": "hipblasZtrtri",
       "parameters": [
@@ -70635,7 +71411,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21669,
+      "line": 21810,
       "linkage_name": "hipblasZtrtriBatched",
       "name": "hipblasZtrtriBatched",
       "parameters": [
@@ -70687,7 +71463,7 @@
       "file": "hipblas.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 21767,
+      "line": 21908,
       "linkage_name": "hipblasZtrtriStridedBatched",
       "name": "hipblasZtrtriStridedBatched",
       "parameters": [

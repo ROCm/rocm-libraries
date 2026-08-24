@@ -68,7 +68,7 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 435,
+      "line": 436,
       "name": "_hipblasLtMatmulAlgo_t",
       "size_bits": 192
     },
@@ -99,7 +99,7 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 456,
+      "line": 457,
       "name": "_hipblasLtMatmulHeuristicResult_t",
       "size_bits": 448
     },
@@ -139,7 +139,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 595,
+      "line": 637,
       "linkage_name": "hipblasLtCheckNumericsDrain",
       "name": "hipblasLtCheckNumericsDrain",
       "parameters": [
@@ -163,7 +163,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 497,
+      "line": 498,
       "linkage_name": "hipblasLtCreate",
       "name": "hipblasLtCreate",
       "parameters": [
@@ -183,7 +183,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 518,
+      "line": 519,
       "linkage_name": "hipblasLtDestroy",
       "name": "hipblasLtDestroy",
       "parameters": [
@@ -318,7 +318,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 477,
+      "line": 478,
       "linkage_name": "hipblasLtGetArchName",
       "name": "hipblasLtGetArchName",
       "parameters": [
@@ -338,7 +338,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 474,
+      "line": 475,
       "linkage_name": "hipblasLtGetGitRevision",
       "name": "hipblasLtGetGitRevision",
       "parameters": [
@@ -362,7 +362,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 567,
+      "line": 568,
       "linkage_name": "hipblasLtGetSmCountTarget",
       "name": "hipblasLtGetSmCountTarget",
       "parameters": [
@@ -386,7 +386,31 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 472,
+      "line": 609,
+      "linkage_name": "hipblasLtGetUniformSummationOrder",
+      "name": "hipblasLtGetUniformSummationOrder",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "uniformSummationOrder",
+          "type": "int32_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 473,
       "linkage_name": "hipblasLtGetVersion",
       "name": "hipblasLtGetVersion",
       "parameters": [
@@ -415,7 +439,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 387,
+      "line": 388,
       "name": "hipblasLtHandle_t",
       "underlying_type": "void *"
     },
@@ -438,7 +462,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1028,
+      "line": 1070,
       "linkage_name": "hipblasLtMatmul",
       "name": "hipblasLtMatmul",
       "parameters": [
@@ -518,7 +542,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 956,
+      "line": 998,
       "linkage_name": "hipblasLtMatmulAlgoGetHeuristic",
       "name": "hipblasLtMatmulAlgoGetHeuristic",
       "parameters": [
@@ -572,7 +596,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 443,
+      "line": 444,
       "name": "hipblasLtMatmulAlgo_t",
       "underlying_type": "struct _hipblasLtMatmulAlgo_t"
     },
@@ -684,15 +708,19 @@
           "value": "104"
         },
         {
-          "name": "HIPBLASLT_MATMUL_DESC_MAX",
+          "name": "HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT",
           "value": "105"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_MAX",
+          "value": "106"
         }
       ]
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 257,
+      "line": 258,
       "name": "hipblasLtMatmulDescAttributes_t",
       "underlying_type": "enum hipblasLtMatmulDescAttributes_t"
     },
@@ -701,7 +729,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 728,
+      "line": 770,
       "linkage_name": "hipblasLtMatmulDescCreate",
       "name": "hipblasLtMatmulDescCreate",
       "parameters": [
@@ -729,7 +757,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 746,
+      "line": 788,
       "linkage_name": "hipblasLtMatmulDescDestroy",
       "name": "hipblasLtMatmulDescDestroy",
       "parameters": [
@@ -749,7 +777,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 807,
+      "line": 849,
       "linkage_name": "hipblasLtMatmulDescGetAttribute",
       "name": "hipblasLtMatmulDescGetAttribute",
       "parameters": [
@@ -791,14 +819,14 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 342,
+      "line": 343,
       "name": "hipblasLtMatmulDescOpaque_t",
       "size_bits": 256
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 344,
+      "line": 345,
       "name": "hipblasLtMatmulDescOpaque_t",
       "underlying_type": "struct hipblasLtMatmulDescOpaque_t"
     },
@@ -807,7 +835,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 771,
+      "line": 813,
       "linkage_name": "hipblasLtMatmulDescSetAttribute",
       "name": "hipblasLtMatmulDescSetAttribute",
       "parameters": [
@@ -837,14 +865,14 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 399,
+      "line": 400,
       "name": "hipblasLtMatmulDesc_t",
       "underlying_type": "hipblasLtMatmulDescOpaque_t *"
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 462,
+      "line": 463,
       "name": "hipblasLtMatmulHeuristicResult_t",
       "underlying_type": "struct _hipblasLtMatmulHeuristicResult_t"
     },
@@ -915,7 +943,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "enum",
-      "line": 262,
+      "line": 263,
       "name": "hipblasLtMatmulPreferenceAttributes_t",
       "underlying_type": "unsigned int",
       "values": [
@@ -940,7 +968,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 267,
+      "line": 268,
       "name": "hipblasLtMatmulPreferenceAttributes_t",
       "underlying_type": "enum hipblasLtMatmulPreferenceAttributes_t"
     },
@@ -949,7 +977,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 829,
+      "line": 871,
       "linkage_name": "hipblasLtMatmulPreferenceCreate",
       "name": "hipblasLtMatmulPreferenceCreate",
       "parameters": [
@@ -969,7 +997,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 846,
+      "line": 888,
       "linkage_name": "hipblasLtMatmulPreferenceDestroy",
       "name": "hipblasLtMatmulPreferenceDestroy",
       "parameters": [
@@ -989,7 +1017,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 909,
+      "line": 951,
       "linkage_name": "hipblasLtMatmulPreferenceGetAttribute",
       "name": "hipblasLtMatmulPreferenceGetAttribute",
       "parameters": [
@@ -1031,14 +1059,14 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 348,
+      "line": 349,
       "name": "hipblasLtMatmulPreferenceOpaque_t",
       "size_bits": 320
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 350,
+      "line": 351,
       "name": "hipblasLtMatmulPreferenceOpaque_t",
       "underlying_type": "struct hipblasLtMatmulPreferenceOpaque_t"
     },
@@ -1047,7 +1075,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 872,
+      "line": 914,
       "linkage_name": "hipblasLtMatmulPreferenceSetAttribute",
       "name": "hipblasLtMatmulPreferenceSetAttribute",
       "parameters": [
@@ -1077,7 +1105,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 425,
+      "line": 426,
       "name": "hipblasLtMatmulPreference_t",
       "underlying_type": "hipblasLtMatmulPreferenceOpaque_t *"
     },
@@ -1138,7 +1166,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 624,
+      "line": 666,
       "linkage_name": "hipblasLtMatrixLayoutCreate",
       "name": "hipblasLtMatrixLayoutCreate",
       "parameters": [
@@ -1174,7 +1202,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 640,
+      "line": 682,
       "linkage_name": "hipblasLtMatrixLayoutDestroy",
       "name": "hipblasLtMatrixLayoutDestroy",
       "parameters": [
@@ -1194,7 +1222,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 701,
+      "line": 743,
       "linkage_name": "hipblasLtMatrixLayoutGetAttribute",
       "name": "hipblasLtMatrixLayoutGetAttribute",
       "parameters": [
@@ -1236,14 +1264,14 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 345,
+      "line": 346,
       "name": "hipblasLtMatrixLayoutOpaque_t",
       "size_bits": 256
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 347,
+      "line": 348,
       "name": "hipblasLtMatrixLayoutOpaque_t",
       "underlying_type": "struct hipblasLtMatrixLayoutOpaque_t"
     },
@@ -1252,7 +1280,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 665,
+      "line": 707,
       "linkage_name": "hipblasLtMatrixLayoutSetAttribute",
       "name": "hipblasLtMatrixLayoutSetAttribute",
       "parameters": [
@@ -1282,7 +1310,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 412,
+      "line": 413,
       "name": "hipblasLtMatrixLayout_t",
       "underlying_type": "hipblasLtMatrixLayoutOpaque_t *"
     },
@@ -1291,7 +1319,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1131,
+      "line": 1173,
       "linkage_name": "hipblasLtMatrixTransform",
       "name": "hipblasLtMatrixTransform",
       "parameters": [
@@ -1349,7 +1377,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "enum",
-      "line": 314,
+      "line": 315,
       "name": "hipblasLtMatrixTransformDescAttributes_t",
       "underlying_type": "unsigned int",
       "values": [
@@ -1374,7 +1402,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 339,
+      "line": 340,
       "name": "hipblasLtMatrixTransformDescAttributes_t",
       "underlying_type": "enum hipblasLtMatrixTransformDescAttributes_t"
     },
@@ -1383,7 +1411,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1051,
+      "line": 1093,
       "linkage_name": "hipblasLtMatrixTransformDescCreate",
       "name": "hipblasLtMatrixTransformDescCreate",
       "parameters": [
@@ -1407,7 +1435,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1059,
+      "line": 1101,
       "linkage_name": "hipblasLtMatrixTransformDescDestroy",
       "name": "hipblasLtMatrixTransformDescDestroy",
       "parameters": [
@@ -1427,7 +1455,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1097,
+      "line": 1139,
       "linkage_name": "hipblasLtMatrixTransformDescGetAttribute",
       "name": "hipblasLtMatrixTransformDescGetAttribute",
       "parameters": [
@@ -1469,14 +1497,14 @@
       "file": "hipblaslt.h",
       "kind": "record",
       "layout_available": true,
-      "line": 353,
+      "line": 354,
       "name": "hipblasLtMatrixTransformDescOpaque_t",
       "size_bits": 512
     },
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 355,
+      "line": 356,
       "name": "hipblasLtMatrixTransformDescOpaque_t",
       "underlying_type": "struct hipblasLtMatrixTransformDescOpaque_t"
     },
@@ -1485,7 +1513,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 1073,
+      "line": 1115,
       "linkage_name": "hipblasLtMatrixTransformDescSetAttribute",
       "name": "hipblasLtMatrixTransformDescSetAttribute",
       "parameters": [
@@ -1515,14 +1543,14 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 369,
+      "line": 370,
       "name": "hipblasLtMatrixTransformDesc_t",
       "underlying_type": "hipblasLtMatrixTransformDescOpaque_t *"
     },
     {
       "file": "hipblaslt.h",
       "kind": "enum",
-      "line": 272,
+      "line": 273,
       "name": "hipblasLtOrder_t",
       "underlying_type": "unsigned int",
       "values": [
@@ -1559,7 +1587,7 @@
     {
       "file": "hipblaslt.h",
       "kind": "typedef",
-      "line": 310,
+      "line": 311,
       "name": "hipblasLtOrder_t",
       "underlying_type": "enum hipblasLtOrder_t"
     },
@@ -1596,7 +1624,7 @@
       "file": "hipblaslt.h",
       "inline_specified": false,
       "kind": "function",
-      "line": 547,
+      "line": 548,
       "linkage_name": "hipblasLtSetSmCountTarget",
       "name": "hipblasLtSetSmCountTarget",
       "parameters": [
@@ -1606,6 +1634,30 @@
         },
         {
           "name": "smCountTarget",
+          "type": "int32_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 589,
+      "linkage_name": "hipblasLtSetUniformSummationOrder",
+      "name": "hipblasLtSetUniformSummationOrder",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "uniformSummationOrder",
           "type": "int32_t"
         }
       ],
