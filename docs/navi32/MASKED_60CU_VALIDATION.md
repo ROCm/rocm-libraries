@@ -300,9 +300,12 @@ identical.
 | `tab1153` — different table, **same pool** | 100.04% | **99.79%** |
 | `wide` — navi31's 306-solution pool | 116.50% | **120.46%** |
 
-**The table contributes nothing: 0.09 pt above the A/A control, against a 0.30 pt floor.** The
-pool contributes the entire +20.5%. Flat at every jackknife depth and in every size band
-(large 99.9%, medium 99.4%, small 100.1%, tiny 100.3%).
+**Over this 64-solution pool the table contributes nothing: 0.09 pt above the A/A control,
+against a 0.30 pt floor.** The pool contributes the entire +20.5%. Flat at every jackknife depth
+and in every size band (large 99.9%, medium 99.4%, small 100.1%, tiny 100.3%).
+
+> **Scope this to the thin pool.** Read as a general claim it is wrong — over the shipped
+> 306-solution pool the table is worth 3.4 pt. See the correction below.
 
 **This corrects the mental model, not the conclusion.** "The win is the catalog" stands — but
 the mechanism is *coverage*, not *mapping quality*. The thin catalog is slow because the pool
