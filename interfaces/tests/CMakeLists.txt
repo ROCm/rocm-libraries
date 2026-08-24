@@ -293,6 +293,7 @@ if(PROJECT_IS_TOP_LEVEL)
 endif()
 
 if(UNIX AND NOT APPLE)
+  # Build an ABI fixture with a selected version node, SONAME, and linker.
   function(add_abi03_provider target abi_ver soname version_script)
     add_library(${target} SHARED abi03_fixture_rocblas.cpp)
     target_compile_definitions(${target} PRIVATE ABI_VER=${abi_ver})
@@ -355,6 +356,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 if(UNIX AND NOT APPLE)
+  # Build a rocBLAS-shaped ABI fixture for the version-resolution matrix.
   function(add_abi04_provider target abi_ver soname version_script bsymbolic)
     set(linker "${ARGV5}")
     set(outdir "${ARGV6}")

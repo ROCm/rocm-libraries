@@ -4,14 +4,14 @@
 #include <dlfcn.h>
 #include <rocblas/rocblas.h>
 
-#include "rocm/interfaces/experimental/blas_narrow_v2.h"
-#include "rocblas_bridge_generated.h"
-
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+
+#include "rocblas_bridge_generated.h"
+#include "rocm/interfaces/experimental/blas_narrow_v2.h"
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
@@ -64,8 +64,8 @@ int main() {
         rocm_interfaces_provider_response exhaustive_response{};
         exhaustive_response.header = {sizeof(exhaustive_response), ROCM_INTERFACES_ABI_MAJOR,
                                       ROCM_INTERFACES_ABI_MINOR};
-        require(exhaustive_query(&exhaustive_request, &exhaustive_response)
-                    == ROCM_INTERFACES_STATUS_SUCCESS,
+        require(exhaustive_query(&exhaustive_request, &exhaustive_response) ==
+                    ROCM_INTERFACES_STATUS_SUCCESS,
                 "real exhaustive provider did not bind canonical rocBLAS");
         const auto* exhaustive_table =
             static_cast<const rocm_rocblas_bridge_v1*>(exhaustive_response.dispatch_table);
@@ -75,8 +75,7 @@ int main() {
             require(exhaustive_table->rocblas_sgemm_grouped_batched(
                         reinterpret_cast<rocblas_handle>(1), nullptr, nullptr, nullptr, nullptr,
                         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                        nullptr, 0, nullptr)
-                        == rocblas_status_success,
+                        nullptr, 0, nullptr) == rocblas_status_success,
                     "grouped-GEMM compatibility adapter rejected an empty group list");
 
         const auto direct_status_to_string =
@@ -111,8 +110,8 @@ int main() {
         std::string provider_text(provider_size, '\0');
         require(direct_version(direct_text.data(), direct_text.size()) == rocblas_status_success,
                 "direct version query failed");
-        require(rocblas_get_version_string(provider_text.data(), provider_text.size())
-                    == rocblas_status_success,
+        require(rocblas_get_version_string(provider_text.data(), provider_text.size()) ==
+                    rocblas_status_success,
                 "provider version query failed");
         require(direct_text == provider_text,
                 "version result differs between direct and provider paths");
@@ -120,8 +119,8 @@ int main() {
         float alpha = 1.0f;
         float x = 0.0f;
         float y = 0.0f;
-        require(direct_saxpy(nullptr, 1, &alpha, &x, 1, &y, 1)
-                    == rocblas_saxpy(nullptr, 1, &alpha, &x, 1, &y, 1),
+        require(direct_saxpy(nullptr, 1, &alpha, &x, 1, &y, 1) ==
+                    rocblas_saxpy(nullptr, 1, &alpha, &x, 1, &y, 1),
                 "invalid-handle SAXPY behavior differs");
 
         rocblas_handle direct_handle = nullptr;
@@ -132,24 +131,24 @@ int main() {
                 "handle creation status differs between direct and provider paths");
         if (direct_create_status == rocblas_status_success) {
             require(direct_handle && provider_handle, "successful handle creation returned null");
-            require(direct_set_pointer(direct_handle, rocblas_pointer_mode_device)
-                        == rocblas_set_pointer_mode(provider_handle, rocblas_pointer_mode_device),
+            require(direct_set_pointer(direct_handle, rocblas_pointer_mode_device) ==
+                        rocblas_set_pointer_mode(provider_handle, rocblas_pointer_mode_device),
                     "set-pointer-mode status differs");
             rocblas_pointer_mode direct_mode = rocblas_pointer_mode_host;
             rocblas_pointer_mode provider_mode = rocblas_pointer_mode_host;
-            require(direct_get_pointer(direct_handle, &direct_mode)
-                        == rocblas_get_pointer_mode(provider_handle, &provider_mode),
+            require(direct_get_pointer(direct_handle, &direct_mode) ==
+                        rocblas_get_pointer_mode(provider_handle, &provider_mode),
                     "get-pointer-mode status differs");
             require(direct_mode == provider_mode, "pointer modes differ");
 
             if (direct_grouped)
-                require(direct_grouped(direct_handle, nullptr, nullptr, nullptr, nullptr,
+                require(direct_grouped(direct_handle, nullptr, nullptr, nullptr, nullptr, nullptr,
                                        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                                       nullptr, nullptr, nullptr, 0, nullptr)
-                            == rocblas_sgemm_grouped_batched(
-                                provider_handle, nullptr, nullptr, nullptr, nullptr, nullptr,
-                                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                                nullptr, 0, nullptr),
+                                       nullptr, nullptr, 0, nullptr) ==
+                            rocblas_sgemm_grouped_batched(provider_handle, nullptr, nullptr,
+                                                          nullptr, nullptr, nullptr, nullptr,
+                                                          nullptr, nullptr, nullptr, nullptr,
+                                                          nullptr, nullptr, nullptr, 0, nullptr),
                         "native grouped-GEMM behavior differs");
 
             require(direct_destroy(direct_handle) == rocblas_status_success,
@@ -171,8 +170,7 @@ int main() {
         rocm_interfaces_provider_response narrow_response{};
         narrow_response.header = {sizeof(narrow_response), ROCM_INTERFACES_ABI_MAJOR,
                                   ROCM_INTERFACES_ABI_MINOR};
-        require(narrow_query(&narrow_request, &narrow_response)
-                    == ROCM_INTERFACES_STATUS_SUCCESS,
+        require(narrow_query(&narrow_request, &narrow_response) == ROCM_INTERFACES_STATUS_SUCCESS,
                 "real narrow provider did not bind canonical rocBLAS");
         const auto* narrow_table =
             static_cast<const rocm_blas_v2_provider*>(narrow_response.dispatch_table);

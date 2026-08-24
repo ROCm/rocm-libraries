@@ -68,10 +68,9 @@ void stress_concurrent_select_shared_registry() {
             try {
                 for (unsigned i = 0; i < kIterations; ++i) {
                     if (t < 2) {
-                        registry->add_module(ROCM_INTERFACES_DOMAIN_BLAS, 0, 0,
-                                             BLAS_CLASSIC_PROVIDER_PATH,
-                                             ROCM_INTERFACES_PROVIDER_QUERY_SYMBOL,
-                                             "recording-blas-cohort");
+                        registry->add_module(
+                            ROCM_INTERFACES_DOMAIN_BLAS, 0, 0, BLAS_CLASSIC_PROVIDER_PATH,
+                            ROCM_INTERFACES_PROVIDER_QUERY_SYMBOL, "recording-blas-cohort");
                     }
                     auto lease = registry->select(ROCM_INTERFACES_DOMAIN_BLAS, 942,
                                                   sizeof(rocm_blas_provider_v1));
@@ -174,14 +173,16 @@ rocblas_status probe_create_context(const rocm_blas_context_options* options, vo
     return rocblas_status_success;
 }
 
-void probe_destroy_context(void* opaque) { delete static_cast<ProbeContext*>(opaque); }
+void probe_destroy_context(void* opaque) {
+    delete static_cast<ProbeContext*>(opaque);
+}
 
 rocblas_status probe_vector_execute(void* opaque, const rocm_blas_vector_request*) {
     if (!opaque) return rocblas_status_invalid_handle;
     int cur = g_inflight.fetch_add(1, std::memory_order_acq_rel) + 1;
     int prev = g_max_inflight.load(std::memory_order_relaxed);
-    while (cur > prev && !g_max_inflight.compare_exchange_weak(prev, cur, std::memory_order_relaxed))
-        ;
+    while (cur > prev &&
+           !g_max_inflight.compare_exchange_weak(prev, cur, std::memory_order_relaxed));
     volatile int sink = 0;
     for (int spin = 0; spin < 2000; ++spin) sink = sink + 1;
     (void)sink;
@@ -253,7 +254,9 @@ rocblas_status jit_create_context(const rocm_blas_context_options* options, void
     return rocblas_status_success;
 }
 
-void jit_destroy_context(void* opaque) { delete static_cast<JitContext*>(opaque); }
+void jit_destroy_context(void* opaque) {
+    delete static_cast<JitContext*>(opaque);
+}
 
 rocblas_status jit_vector_execute(void* opaque, const rocm_blas_vector_request* request) {
     if (!opaque || !request) return rocblas_status_invalid_handle;

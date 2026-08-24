@@ -68,13 +68,11 @@ void test_table_abi_negotiation() {
         provider_accepted(static_cast<uint16_t>(runtime_minor + 1), required * 2, required);
     const bool ample_old_minor =
         provider_accepted(static_cast<uint16_t>(runtime_minor - 1), required * 2, required);
-    require(ample_new_minor && !ample_old_minor,
-            "accept/reject must toggle on abi_minor alone");
+    require(ample_new_minor && !ample_old_minor, "accept/reject must toggle on abi_minor alone");
 
     const bool ample_table = provider_accepted(runtime_minor, required, required);
     const bool short_table = provider_accepted(runtime_minor, required - 1, required);
-    require(ample_table && !short_table,
-            "accept/reject must toggle on dispatch_table_size alone");
+    require(ample_table && !short_table, "accept/reject must toggle on dispatch_table_size alone");
 }
 
 }  // namespace

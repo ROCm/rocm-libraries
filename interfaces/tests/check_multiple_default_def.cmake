@@ -27,6 +27,7 @@ file(WRITE "${src7_ctrl}"
 "extern \"C\" int impl7(void) { return 7; }\n"
 "__asm__(\".symver impl7, rocblas_sgemm@ROCBLAS_ABI_7\");\n")
 
+# Compile one source file for the duplicate-default-definition link probes.
 function(_compile src out)
   execute_process(
     COMMAND ${CXX} -O2 -fPIC -std=c++17 -c "${src}" -o "${out}"

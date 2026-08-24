@@ -41,11 +41,19 @@ def enum_shapes(document: dict[str, object], path: Path) -> dict[str, EnumShape]
         name = declaration.get("name")
         underlying = declaration.get("underlying_type")
         raw_values = declaration.get("values")
-        if not isinstance(name, str) or not isinstance(underlying, str) or not isinstance(raw_values, list):
+        if (
+            not isinstance(name, str)
+            or not isinstance(underlying, str)
+            or not isinstance(raw_values, list)
+        ):
             raise ValueError(f"{path}: malformed enum declaration")
         values: dict[str, str] = {}
         for item in raw_values:
-            if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not isinstance(item.get("value"), str):
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("name"), str)
+                or not isinstance(item.get("value"), str)
+            ):
                 raise ValueError(f"{path}: malformed enumerator in {name}")
             values[item["name"]] = item["value"]
         result[name] = EnumShape(underlying, values)
@@ -71,7 +79,10 @@ def check_policy(snapshot_path: Path, policy_path: Path) -> None:
         classification = entry.get("classification")
         if classification not in VALID_CLASSES:
             errors.append(f"{name}: invalid classification {classification!r}")
-        if declaration.get("kind") == "function" and classification in {"protocol", "facade"}:
+        if declaration.get("kind") == "function" and classification in {
+            "protocol",
+            "facade",
+        }:
             if not isinstance(entry.get("cluster"), str) or not entry["cluster"]:
                 errors.append(f"{name}: callable policy requires a cluster")
     if errors:
@@ -93,7 +104,9 @@ def check_enum_evolution(baseline_path: Path, current_path: Path) -> None:
             if new.values.get(enumerator) != value:
                 errors.append(f"{name}.{enumerator}: value changed or was removed")
     if errors:
-        raise ValueError("public enum compatibility check failed:\n" + "\n".join(errors))
+        raise ValueError(
+            "public enum compatibility check failed:\n" + "\n".join(errors)
+        )
 
 
 def main() -> None:

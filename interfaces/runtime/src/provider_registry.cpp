@@ -76,29 +76,28 @@ void ProviderRegistry::load_manifest(const std::filesystem::path& path) {
     try {
         stream >> document;
     } catch (const nlohmann::json::exception& error) {
-        throw std::invalid_argument("invalid provider manifest JSON " + path.string() + ": "
-                                    + error.what());
+        throw std::invalid_argument("invalid provider manifest JSON " + path.string() + ": " +
+                                    error.what());
     }
-    require_object_shape(document, {"schema_version", "providers"},
-                         {"schema_version", "providers"}, "provider manifest");
-    if (!document["schema_version"].is_number_integer()
-        || document["schema_version"].get<int>() != 1 || !document["providers"].is_array()
-        || document["providers"].empty())
+    require_object_shape(document, {"schema_version", "providers"}, {"schema_version", "providers"},
+                         "provider manifest");
+    if (!document["schema_version"].is_number_integer() ||
+        document["schema_version"].get<int>() != 1 || !document["providers"].is_array() ||
+        document["providers"].empty())
         throw std::invalid_argument("invalid provider manifest schema: " + path.string());
 
     const std::filesystem::path base = std::filesystem::weakly_canonical(path).parent_path();
     std::vector<Entry> parsed;
     std::set<std::tuple<rocm_interfaces_domain, uint32_t, std::string>> identities;
     for (const nlohmann::json& item : document["providers"]) {
-        require_object_shape(item, {"id", "domain", "module"},
-                             {"id", "domain", "module", "cohort", "query_symbol", "priority",
-                              "gfx"},
-                             "provider entry");
+        require_object_shape(
+            item, {"id", "domain", "module"},
+            {"id", "domain", "module", "cohort", "query_symbol", "priority", "gfx"},
+            "provider entry");
         const std::string id = required_string(item, "id", "provider entry");
         const rocm_interfaces_domain domain =
             parse_domain(required_string(item, "domain", "provider entry"));
-        const std::filesystem::path relative =
-            required_string(item, "module", "provider entry");
+        const std::filesystem::path relative = required_string(item, "module", "provider entry");
         if (relative.is_absolute())
             throw std::invalid_argument("provider module path must be relative");
         const std::filesystem::path module = std::filesystem::weakly_canonical(base / relative);
@@ -106,8 +105,8 @@ void ProviderRegistry::load_manifest(const std::filesystem::path& path) {
             throw std::invalid_argument("provider module escapes manifest directory");
         }
         if (!std::filesystem::is_regular_file(module))
-            throw std::invalid_argument("provider module is not a regular file: "
-                                        + module.string());
+            throw std::invalid_argument("provider module is not a regular file: " +
+                                        module.string());
 
         int priority = 0;
         if (item.contains("priority")) {

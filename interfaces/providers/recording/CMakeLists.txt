@@ -1,3 +1,4 @@
+# Add a single-export recording provider and register it for export validation.
 function(add_recording_provider target source output_name)
   add_library(${target} MODULE ${source})
   target_include_directories(${target} PRIVATE

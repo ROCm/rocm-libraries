@@ -1,12 +1,12 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
-#include "rocm/interfaces/loader.h"
-
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <string>
+
+#include "rocm/interfaces/loader.h"
 
 int main(int argc, char** argv) {
     try {
@@ -29,8 +29,8 @@ int main(int argc, char** argv) {
         auto narrow_lease = narrow_registry.select(ROCM_INTERFACES_DOMAIN_BLAS_V2, 0, 1);
         if (!narrow_lease || narrow_lease->provider_id() != "system-rocblas-narrow-v2") return 5;
         size_t version_size = 0;
-        if (rocblas_get_version_string_size(&version_size) != rocblas_status_success
-            || !version_size)
+        if (rocblas_get_version_string_size(&version_size) != rocblas_status_success ||
+            !version_size)
             return 4;
         std::cout << "installed provider manifest selected " << lease->provider_id() << '\n';
         return 0;

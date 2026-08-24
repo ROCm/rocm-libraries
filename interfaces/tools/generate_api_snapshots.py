@@ -40,8 +40,11 @@ def load_profiles(path: Path, include_root: Path) -> tuple[list[Profile], list[s
             isinstance(item, str) for item in raw_arguments
         ):
             raise ValueError(f"{path}: malformed arguments for profile {name}")
-        profiles.append(Profile(name, (include_root / header).resolve(), language,
-                                tuple(raw_arguments)))
+        profiles.append(
+            Profile(
+                name, (include_root / header).resolve(), language, tuple(raw_arguments)
+            )
+        )
     if not all(isinstance(item, str) for item in raw_definitions):
         raise ValueError(f"{path}: definitions must be strings")
     return profiles, raw_definitions
@@ -57,7 +60,9 @@ def generate(
     output: Path,
 ) -> None:
     if not profile.header.is_file():
-        raise FileNotFoundError(f"{profile.name}: header does not exist: {profile.header}")
+        raise FileNotFoundError(
+            f"{profile.name}: header does not exist: {profile.header}"
+        )
     output.parent.mkdir(parents=True, exist_ok=True)
     command = [
         str(extractor),
@@ -97,7 +102,9 @@ def main() -> None:
     if not extractor.is_file():
         raise FileNotFoundError(f"extractor does not exist: {extractor}")
     if not resource_dir.is_dir():
-        raise FileNotFoundError(f"Clang resource directory does not exist: {resource_dir}")
+        raise FileNotFoundError(
+            f"Clang resource directory does not exist: {resource_dir}"
+        )
     profiles, definitions = load_profiles(args.profiles, include_root)
     selected = set(args.selected or [])
     unknown = selected.difference(profile.name for profile in profiles)
@@ -106,9 +113,15 @@ def main() -> None:
     for profile in profiles:
         if selected and profile.name not in selected:
             continue
-        generate(extractor, profile, include_root, resource_dir, definitions,
-                 args.extra_include,
-                 args.output_dir / f"{profile.name}.json")
+        generate(
+            extractor,
+            profile,
+            include_root,
+            resource_dir,
+            definitions,
+            args.extra_include,
+            args.output_dir / f"{profile.name}.json",
+        )
 
 
 if __name__ == "__main__":

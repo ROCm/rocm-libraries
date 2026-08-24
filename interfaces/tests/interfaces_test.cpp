@@ -188,8 +188,7 @@ void test_manifest_validation() {
         require(failed, label);
         bool mutated = false;
         try {
-            (void)registry.select(ROCM_INTERFACES_DOMAIN_BLAS, 942,
-                                  sizeof(rocm_blas_provider_v1));
+            (void)registry.select(ROCM_INTERFACES_DOMAIN_BLAS, 942, sizeof(rocm_blas_provider_v1));
             mutated = true;
         } catch (const std::runtime_error&) {
         }
@@ -214,8 +213,7 @@ void test_manifest_validation() {
     rejected(
         R"({"schema_version":1,"providers":[{"id":"recording-blas-legacy","domain":"blas","module":"blas-provider.so","gfx":[942,942]}]})",
         "manifest accepted a duplicate id/domain/gfx entry");
-    rejected(R"({"schema_version":1,"providers":[]})",
-             "manifest accepted an empty provider list");
+    rejected(R"({"schema_version":1,"providers":[]})", "manifest accepted an empty provider list");
     rejected(
         R"({"schema_version":1,"providers":[{"id":"recording-blas-legacy","domain":"blas","module":"blas-provider.so"},{"id":"broken","domain":"blas","module":"blas-provider.so","unknown":true}]})",
         "manifest accepted a partially valid document");

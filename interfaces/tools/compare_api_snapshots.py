@@ -25,15 +25,20 @@ def main() -> None:
     actual = snapshots(args.actual)
     missing = sorted(expected.keys() - actual.keys())
     extra = sorted(actual.keys() - expected.keys())
-    changed = sorted(name for name in expected.keys() & actual.keys()
-                     if expected[name] != actual[name])
+    changed = sorted(
+        name
+        for name in expected.keys() & actual.keys()
+        if expected[name] != actual[name]
+    )
     if missing or extra or changed:
         details = [
             f"missing regenerated snapshots: {', '.join(missing) or '-'}",
             f"unexpected regenerated snapshots: {', '.join(extra) or '-'}",
             f"changed snapshots: {', '.join(changed) or '-'}",
         ]
-        raise ValueError("API snapshots are stale; regenerate them:\n" + "\n".join(details))
+        raise ValueError(
+            "API snapshots are stale; regenerate them:\n" + "\n".join(details)
+        )
 
 
 if __name__ == "__main__":

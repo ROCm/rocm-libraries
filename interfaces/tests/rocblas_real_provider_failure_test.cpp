@@ -35,14 +35,12 @@ int main(int argc, char** argv) {
         host.header = {sizeof(host), ROCM_INTERFACES_ABI_MAJOR, ROCM_INTERFACES_ABI_MINOR};
         host.trace = trace;
         rocm_interfaces_provider_request request{};
-        request.header = {sizeof(request), ROCM_INTERFACES_ABI_MAJOR,
-                          ROCM_INTERFACES_ABI_MINOR};
+        request.header = {sizeof(request), ROCM_INTERFACES_ABI_MAJOR, ROCM_INTERFACES_ABI_MINOR};
         request.domain = ROCM_INTERFACES_DOMAIN_ROCBLAS_BRIDGE;
         request.required_table_size = sizeof(rocm_rocblas_bridge_v1);
         request.host = &host;
         rocm_interfaces_provider_response response{};
-        response.header = {sizeof(response), ROCM_INTERFACES_ABI_MAJOR,
-                           ROCM_INTERFACES_ABI_MINOR};
+        response.header = {sizeof(response), ROCM_INTERFACES_ABI_MAJOR, ROCM_INTERFACES_ABI_MINOR};
         if (query(&request, &response) != ROCM_INTERFACES_STATUS_PROVIDER_FAILURE)
             throw std::runtime_error("bad backend did not fail provider negotiation");
         if (trace_message.empty())

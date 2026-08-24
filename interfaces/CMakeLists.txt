@@ -221,7 +221,8 @@ add_custom_command(
     "${CMAKE_CURRENT_SOURCE_DIR}/api/snapshots/rocblas.json"
   COMMENT "Generating the complete typed rocBLAS compatibility bridge")
 add_custom_target(rocm_interfaces_rocblas_bridge_generated
-  DEPENDS ${ROCM_INTERFACES_ROCBLAS_GENERATED})
+  DEPENDS ${ROCM_INTERFACES_ROCBLAS_GENERATED}
+  COMMENT "Ensuring generated rocBLAS compatibility sources are current")
 
 set(ROCM_INTERFACES_ROCBLAS_CATEGORIZATION
   "${CMAKE_CURRENT_BINARY_DIR}/generated/rocblas-categorization.json")
@@ -387,7 +388,7 @@ install(DIRECTORY protocols/include/ runtime/include/ loader/include/
 install(DIRECTORY "${ROCM_INTERFACES_STAGED_INCLUDE}/"
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   COMPONENT rocm-interfaces
-  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+  FILES_MATCHING REGEX ".*\\.(h|hpp)$")
 install(FILES "${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge_generated.h"
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm/interfaces/experimental
   COMPONENT rocm-interfaces)

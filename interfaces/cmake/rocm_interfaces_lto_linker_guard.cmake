@@ -1,3 +1,4 @@
+# Reject the GCC-LTO/lld combination that drops version-script symbols.
 function(rocm_interfaces_assert_lto_linker_supported)
   set(_lto OFF)
   if(CMAKE_INTERPROCEDURAL_OPTIMIZATION)

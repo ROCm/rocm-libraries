@@ -30,7 +30,7 @@ extern "C" rocblas_status rocblas_set_stream(rocblas_handle handle, hipStream_t 
 }
 
 extern "C" rocblas_status rocblas_set_pointer_mode(rocblas_handle handle,
-                                                    rocblas_pointer_mode mode) {
+                                                   rocblas_pointer_mode mode) {
     if (!handle) return rocblas_status_invalid_handle;
     handle->pointer_mode = mode;
     return rocblas_status_success;
@@ -86,8 +86,8 @@ extern "C" rocblas_status rocblas_scopy(rocblas_handle h, rocblas_int n, const f
                                         rocblas_int ix, float* y, rocblas_int iy) {
     return copy(h, n, x, ix, y, iy);
 }
-extern "C" rocblas_status rocblas_scopy_64(rocblas_handle h, int64_t n, const float* x,
-                                           int64_t ix, float* y, int64_t iy) {
+extern "C" rocblas_status rocblas_scopy_64(rocblas_handle h, int64_t n, const float* x, int64_t ix,
+                                           float* y, int64_t iy) {
     return copy(h, n, x, ix, y, iy);
 }
 extern "C" rocblas_status rocblas_sscal(rocblas_handle h, rocblas_int n, const float* a, float* x,

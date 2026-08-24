@@ -62,14 +62,20 @@ def load_functions(path: Path) -> list[Function]:
         return_type = declaration.get("return_type")
         parameters = declaration.get("parameters")
         variadic = declaration.get("variadic")
-        if (not isinstance(name, str) or not isinstance(return_type, str)
-                or not isinstance(parameters, list) or not isinstance(variadic, bool)):
+        if (
+            not isinstance(name, str)
+            or not isinstance(return_type, str)
+            or not isinstance(parameters, list)
+            or not isinstance(variadic, bool)
+        ):
             raise ValueError(f"{path}: malformed function declaration")
         parsed: list[Parameter] = []
         for parameter in parameters:
-            if (not isinstance(parameter, dict)
-                    or not isinstance(parameter.get("name"), str)
-                    or not isinstance(parameter.get("type"), str)):
+            if (
+                not isinstance(parameter, dict)
+                or not isinstance(parameter.get("name"), str)
+                or not isinstance(parameter.get("type"), str)
+            ):
                 raise ValueError(f"{path}: malformed parameter in {name}")
             parsed.append(Parameter(parameter["name"], cpp_type(parameter["type"])))
         result.append(Function(name, cpp_type(return_type), tuple(parsed), variadic))
@@ -85,7 +91,9 @@ def load_functions(path: Path) -> list[Function]:
 
 
 def signature(function: Function) -> str:
-    parameters = [f"{parameter.type} {parameter.name}" for parameter in function.parameters]
+    parameters = [
+        f"{parameter.type} {parameter.name}" for parameter in function.parameters
+    ]
     if function.variadic:
         parameters.append("...")
     return ", ".join(parameters) if parameters else "void"
@@ -133,19 +141,21 @@ def write_header(functions: list[Function], path: Path) -> None:
             f"  {function.return_type} (ROCM_INTERFACES_CALL* {function.name})"
             f"({signature(function)});"
         )
-    lines.extend([
-        "  rocblas_status (ROCM_INTERFACES_CALL* rocblas_device_malloc_alloc_sizes)(",
-        "      rocblas_handle, struct rocblas_device_malloc_base**, size_t, const size_t*);",
-        "  rocblas_status (ROCM_INTERFACES_CALL* rocblas_set_optimal_device_memory_sizes)(",
-        "      rocblas_handle, size_t, const size_t*);",
-        "} rocm_rocblas_bridge_v1;",
-        "",
-        "#ifdef __cplusplus",
-        "}",
-        "#endif",
-        "#endif",
-        "",
-    ])
+    lines.extend(
+        [
+            "  rocblas_status (ROCM_INTERFACES_CALL* rocblas_device_malloc_alloc_sizes)(",
+            "      rocblas_handle, struct rocblas_device_malloc_base**, size_t, const size_t*);",
+            "  rocblas_status (ROCM_INTERFACES_CALL* rocblas_set_optimal_device_memory_sizes)(",
+            "      rocblas_handle, size_t, const size_t*);",
+            "} rocm_rocblas_bridge_v1;",
+            "",
+            "#ifdef __cplusplus",
+            "}",
+            "#endif",
+            "#endif",
+            "",
+        ]
+    )
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -161,7 +171,9 @@ def write_facade(functions: list[Function], path: Path) -> None:
         if function.name in CUSTOM_FACADE:
             continue
         lines.append("")
-        lines.append(f"{function.return_type} {function.name}({signature(function)}) {{")
+        lines.append(
+            f"{function.return_type} {function.name}({signature(function)}) {{"
+        )
         if function.has_handle:
             if function.return_type == "rocblas_status":
                 lines.append("  if (!handle) return rocblas_status_invalid_handle;")
@@ -169,13 +181,22 @@ def write_facade(functions: list[Function], path: Path) -> None:
                 lines.append("  if (!handle) return false;")
             else:
                 raise ValueError(f"unsupported handle return type in {function.name}")
-            lines.append("  const auto* table = rocm::interfaces::rocblas_bridge_table(handle);")
+            lines.append(
+                "  const auto* table = rocm::interfaces::rocblas_bridge_table(handle);"
+            )
         else:
-            lines.append("  const auto* table = rocm::interfaces::rocblas_bridge_table();")
-        unavailable = ("std::abort();" if function.name == "rocblas_abort"
-                       else fallback(function.return_type))
+            lines.append(
+                "  const auto* table = rocm::interfaces::rocblas_bridge_table();"
+            )
+        unavailable = (
+            "std::abort();"
+            if function.name == "rocblas_abort"
+            else fallback(function.return_type)
+        )
         lines.append(f"  if (!table || !table->{function.name}) {{ {unavailable} }}")
-        call = f"table->{function.name}({call_arguments(function, replace_handle=True)})"
+        call = (
+            f"table->{function.name}({call_arguments(function, replace_handle=True)})"
+        )
         lines.append("  try {")
         if function.return_type == "void":
             lines.append(f"    {call};")
@@ -184,8 +205,11 @@ def write_facade(functions: list[Function], path: Path) -> None:
         else:
             lines.append(f"    return {call};")
         lines.append("  } catch (...) {")
-        caught = ("std::abort();" if function.name == "rocblas_abort"
-                  else fallback(function.return_type))
+        caught = (
+            "std::abort();"
+            if function.name == "rocblas_abort"
+            else fallback(function.return_type)
+        )
         lines.append(f"    {caught}")
         lines.append("  }")
         lines.append("}")
@@ -209,7 +233,11 @@ def stub_body(function: Function) -> list[str]:
             "  return rocblas_status_success;",
         ]
     if function.return_type == "rocblas_status":
-        prefix = ["  if (!handle) return rocblas_status_invalid_handle;"] if function.has_handle else []
+        prefix = (
+            ["  if (!handle) return rocblas_status_invalid_handle;"]
+            if function.has_handle
+            else []
+        )
         return prefix + ["  return rocblas_status_not_implemented;"]
     if function.return_type == "void":
         return ["  return;"]
@@ -237,50 +265,59 @@ def write_provider(functions: list[Function], path: Path) -> None:
         "namespace {",
     ]
     for function in functions:
-        lines.extend(["", f"{function.return_type} stub_{function.name}({signature(function)}) {{"])
+        lines.extend(
+            [
+                "",
+                f"{function.return_type} stub_{function.name}({signature(function)}) {{",
+            ]
+        )
         lines.extend(f"  (void){parameter.name};" for parameter in function.parameters)
         lines.extend(stub_body(function))
         lines.append("}")
-    lines.extend([
-        "",
-        "rocblas_status stub_device_malloc_alloc_sizes(",
-        "    rocblas_handle handle, struct rocblas_device_malloc_base**, size_t, const size_t*) {",
-        "  return handle ? rocblas_status_not_implemented : rocblas_status_invalid_handle;",
-        "}",
-        "",
-        "rocblas_status stub_set_optimal_device_memory_sizes(",
-        "    rocblas_handle handle, size_t, const size_t*) {",
-        "  return handle ? rocblas_status_not_implemented : rocblas_status_invalid_handle;",
-        "}",
-        "",
-        "const rocm_rocblas_bridge_v1 table = {",
-        "  {sizeof(rocm_rocblas_bridge_v1), ROCM_INTERFACES_ABI_MAJOR, ROCM_INTERFACES_ABI_MINOR},",
-    ])
+    lines.extend(
+        [
+            "",
+            "rocblas_status stub_device_malloc_alloc_sizes(",
+            "    rocblas_handle handle, struct rocblas_device_malloc_base**, size_t, const size_t*) {",
+            "  return handle ? rocblas_status_not_implemented : rocblas_status_invalid_handle;",
+            "}",
+            "",
+            "rocblas_status stub_set_optimal_device_memory_sizes(",
+            "    rocblas_handle handle, size_t, const size_t*) {",
+            "  return handle ? rocblas_status_not_implemented : rocblas_status_invalid_handle;",
+            "}",
+            "",
+            "const rocm_rocblas_bridge_v1 table = {",
+            "  {sizeof(rocm_rocblas_bridge_v1), ROCM_INTERFACES_ABI_MAJOR, ROCM_INTERFACES_ABI_MINOR},",
+        ]
+    )
     lines.extend(f"  stub_{function.name}," for function in functions)
-    lines.extend([
-        "  stub_device_malloc_alloc_sizes,",
-        "  stub_set_optimal_device_memory_sizes,",
-        "};",
-        "}  // namespace",
-        "",
-        'extern "C" ROCM_INTERFACES_EXPORT rocm_interfaces_status ROCM_INTERFACES_CALL',
-        "rocm_interfaces_provider_query_v1(const rocm_interfaces_provider_request* request,",
-        "                                  rocm_interfaces_provider_response* response) {",
-        "  if (!request || !response || request->domain != ROCM_INTERFACES_DOMAIN_ROCBLAS_BRIDGE ||",
-        "      request->header.abi_major != ROCM_INTERFACES_ABI_MAJOR ||",
-        "      request->required_table_size > sizeof(table))",
-        "    return ROCM_INTERFACES_STATUS_INCOMPATIBLE_ABI;",
-        "  response->header = {sizeof(*response), ROCM_INTERFACES_ABI_MAJOR,",
-        "                      ROCM_INTERFACES_ABI_MINOR};",
-        '  response->provider_id = "recording-rocblas-bruteforce";',
-        '  response->build_id = "interfaces-spike-v1";',
-        "  response->dispatch_table = &table;",
-        "  response->dispatch_table_size = sizeof(table);",
-        "  response->capability_mask = 0;",
-        "  return ROCM_INTERFACES_STATUS_SUCCESS;",
-        "}",
-        "",
-    ])
+    lines.extend(
+        [
+            "  stub_device_malloc_alloc_sizes,",
+            "  stub_set_optimal_device_memory_sizes,",
+            "};",
+            "}  // namespace",
+            "",
+            'extern "C" ROCM_INTERFACES_EXPORT rocm_interfaces_status ROCM_INTERFACES_CALL',
+            "rocm_interfaces_provider_query_v1(const rocm_interfaces_provider_request* request,",
+            "                                  rocm_interfaces_provider_response* response) {",
+            "  if (!request || !response || request->domain != ROCM_INTERFACES_DOMAIN_ROCBLAS_BRIDGE ||",
+            "      request->header.abi_major != ROCM_INTERFACES_ABI_MAJOR ||",
+            "      request->required_table_size > sizeof(table))",
+            "    return ROCM_INTERFACES_STATUS_INCOMPATIBLE_ABI;",
+            "  response->header = {sizeof(*response), ROCM_INTERFACES_ABI_MAJOR,",
+            "                      ROCM_INTERFACES_ABI_MINOR};",
+            '  response->provider_id = "recording-rocblas-bruteforce";',
+            '  response->build_id = "interfaces-spike-v1";',
+            "  response->dispatch_table = &table;",
+            "  response->dispatch_table_size = sizeof(table);",
+            "  response->capability_mask = 0;",
+            "  return ROCM_INTERFACES_STATUS_SUCCESS;",
+            "}",
+            "",
+        ]
+    )
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -294,8 +331,10 @@ def write_forwarding_provider(functions: list[Function], path: Path) -> None:
     compatibility with rocBLAS 5 DSOs that predate those public spellings.
     """
     by_name = {function.name: function for function in functions}
-    missing = sorted((set(GROUPED_GEMM_COMPAT_SHIMS) |
-                      set(GROUPED_GEMM_COMPAT_SHIMS.values())) - by_name.keys())
+    missing = sorted(
+        (set(GROUPED_GEMM_COMPAT_SHIMS) | set(GROUPED_GEMM_COMPAT_SHIMS.values()))
+        - by_name.keys()
+    )
     if missing:
         raise ValueError(f"rocBLAS forwarding-provider inputs are missing: {missing}")
 
@@ -361,188 +400,223 @@ def write_forwarding_provider(functions: list[Function], path: Path) -> None:
         "}",
     ]
 
-    for name in ("rocblas_sgemm_grouped_batched", "rocblas_dgemm_grouped_batched",
-                 "rocblas_sgemm_grouped_batched_64", "rocblas_dgemm_grouped_batched_64"):
+    for name in (
+        "rocblas_sgemm_grouped_batched",
+        "rocblas_dgemm_grouped_batched",
+        "rocblas_sgemm_grouped_batched_64",
+        "rocblas_dgemm_grouped_batched_64",
+    ):
         function = by_name[name]
         base = GROUPED_GEMM_COMPAT_SHIMS[name]
         index_type = "int64_t" if name.endswith("_64") else "rocblas_int"
-        lines.extend([
-            "",
-            f"rocblas_status compat_{name}({signature(function)}) {{",
-            "  if (!handle) return rocblas_status_invalid_handle;",
-            "  if (group_count < 0) return rocblas_status_invalid_size;",
-            "  if (group_count == 0) return rocblas_status_success;",
-            "  if (!transa_array || !transb_array || !m_array || !n_array || !k_array ||",
-            "      !alpha_array || !lda_array || !ldb_array || !beta_array || !ldc_array ||",
-            "      !group_size)",
-            "    return rocblas_status_invalid_pointer;",
-            "  int64_t problem_count = 0;",
-            f"  for ({index_type} group = 0; group < group_count; ++group) {{",
-            "    if (group_size[group] < 0) return rocblas_status_invalid_size;",
-            "    problem_count += group_size[group];",
-            "  }",
-            "  if (problem_count && (!Aarray || !Barray || !Carray))",
-            "    return rocblas_status_invalid_pointer;",
-            f"  {index_type} offset = 0;",
-            f"  for ({index_type} group = 0; group < group_count; ++group) {{",
-            f"    for ({index_type} item = 0; item < group_size[group]; ++item) {{",
-            f"      rocblas_status status = table.{base}(",
-            "          handle, transa_array[group], transb_array[group], m_array[group],",
-            "          n_array[group], k_array[group], &alpha_array[group], Aarray[offset + item],",
-            "          lda_array[group], Barray[offset + item], ldb_array[group],",
-            "          &beta_array[group], Carray[offset + item], ldc_array[group]);",
-            "      if (status != rocblas_status_success) return status;",
-            "    }",
-            "    offset += group_size[group];",
-            "  }",
-            "  return rocblas_status_success;",
-            "}",
-        ])
+        lines.extend(
+            [
+                "",
+                f"rocblas_status compat_{name}({signature(function)}) {{",
+                "  if (!handle) return rocblas_status_invalid_handle;",
+                "  if (group_count < 0) return rocblas_status_invalid_size;",
+                "  if (group_count == 0) return rocblas_status_success;",
+                "  if (!transa_array || !transb_array || !m_array || !n_array || !k_array ||",
+                "      !alpha_array || !lda_array || !ldb_array || !beta_array || !ldc_array ||",
+                "      !group_size)",
+                "    return rocblas_status_invalid_pointer;",
+                "  int64_t problem_count = 0;",
+                f"  for ({index_type} group = 0; group < group_count; ++group) {{",
+                "    if (group_size[group] < 0) return rocblas_status_invalid_size;",
+                "    problem_count += group_size[group];",
+                "  }",
+                "  if (problem_count && (!Aarray || !Barray || !Carray))",
+                "    return rocblas_status_invalid_pointer;",
+                f"  {index_type} offset = 0;",
+                f"  for ({index_type} group = 0; group < group_count; ++group) {{",
+                f"    for ({index_type} item = 0; item < group_size[group]; ++item) {{",
+                f"      rocblas_status status = table.{base}(",
+                "          handle, transa_array[group], transb_array[group], m_array[group],",
+                "          n_array[group], k_array[group], &alpha_array[group], Aarray[offset + item],",
+                "          lda_array[group], Barray[offset + item], ldb_array[group],",
+                "          &beta_array[group], Carray[offset + item], ldc_array[group]);",
+                "      if (status != rocblas_status_success) return status;",
+                "    }",
+                "    offset += group_size[group];",
+                "  }",
+                "  return rocblas_status_success;",
+                "}",
+            ]
+        )
 
-    for name in ("rocblas_gemm_grouped_batched_ex", "rocblas_gemm_grouped_batched_ex_64"):
+    for name in (
+        "rocblas_gemm_grouped_batched_ex",
+        "rocblas_gemm_grouped_batched_ex_64",
+    ):
         function = by_name[name]
         base = GROUPED_GEMM_COMPAT_SHIMS[name]
         index_type = "int64_t" if name.endswith("_64") else "rocblas_int"
-        lines.extend([
-            "",
-            f"rocblas_status compat_{name}({signature(function)}) {{",
-            "  if (!handle) return rocblas_status_invalid_handle;",
-            "  if (group_count < 0) return rocblas_status_invalid_size;",
-            "  if (group_count == 0) return rocblas_status_success;",
-            "  if (!transa_array || !transb_array || !m_array || !n_array || !k_array ||",
-            "      !alpha_array || !lda_array || !ldb_array || !beta_array || !ldc_array ||",
-            "      !ldd_array || !group_size)",
-            "    return rocblas_status_invalid_pointer;",
-            "  const size_t value_size = scalar_size(compute_type);",
-            "  if (!value_size) return rocblas_status_invalid_value;",
-            "  const auto* alphas = static_cast<const unsigned char*>(alpha_array);",
-            "  const auto* betas = static_cast<const unsigned char*>(beta_array);",
-            "  int64_t problem_count = 0;",
-            f"  for ({index_type} group = 0; group < group_count; ++group) {{",
-            "    if (group_size[group] < 0) return rocblas_status_invalid_size;",
-            "    problem_count += group_size[group];",
-            "  }",
-            "  if (problem_count && (!Aarray || !Barray || !Carray || !Darray))",
-            "    return rocblas_status_invalid_pointer;",
-            f"  {index_type} offset = 0;",
-            f"  for ({index_type} group = 0; group < group_count; ++group) {{",
-            f"    for ({index_type} item = 0; item < group_size[group]; ++item) {{",
-            f"      rocblas_status status = table.{base}(",
-            "          handle, transa_array[group], transb_array[group], m_array[group],",
-            "          n_array[group], k_array[group], alphas + group * value_size,",
-            "          Aarray[offset + item], a_type, lda_array[group], Barray[offset + item],",
-            "          b_type, ldb_array[group], betas + group * value_size, Carray[offset + item],",
-            "          c_type, ldc_array[group], Darray[offset + item], d_type, ldd_array[group],",
-            "          compute_type, algo, 0, flags);",
-            "      if (status != rocblas_status_success) return status;",
-            "    }",
-            "    offset += group_size[group];",
-            "  }",
-            "  return rocblas_status_success;",
-            "}",
-        ])
+        lines.extend(
+            [
+                "",
+                f"rocblas_status compat_{name}({signature(function)}) {{",
+                "  if (!handle) return rocblas_status_invalid_handle;",
+                "  if (group_count < 0) return rocblas_status_invalid_size;",
+                "  if (group_count == 0) return rocblas_status_success;",
+                "  if (!transa_array || !transb_array || !m_array || !n_array || !k_array ||",
+                "      !alpha_array || !lda_array || !ldb_array || !beta_array || !ldc_array ||",
+                "      !ldd_array || !group_size)",
+                "    return rocblas_status_invalid_pointer;",
+                "  const size_t value_size = scalar_size(compute_type);",
+                "  if (!value_size) return rocblas_status_invalid_value;",
+                "  const auto* alphas = static_cast<const unsigned char*>(alpha_array);",
+                "  const auto* betas = static_cast<const unsigned char*>(beta_array);",
+                "  int64_t problem_count = 0;",
+                f"  for ({index_type} group = 0; group < group_count; ++group) {{",
+                "    if (group_size[group] < 0) return rocblas_status_invalid_size;",
+                "    problem_count += group_size[group];",
+                "  }",
+                "  if (problem_count && (!Aarray || !Barray || !Carray || !Darray))",
+                "    return rocblas_status_invalid_pointer;",
+                f"  {index_type} offset = 0;",
+                f"  for ({index_type} group = 0; group < group_count; ++group) {{",
+                f"    for ({index_type} item = 0; item < group_size[group]; ++item) {{",
+                f"      rocblas_status status = table.{base}(",
+                "          handle, transa_array[group], transb_array[group], m_array[group],",
+                "          n_array[group], k_array[group], alphas + group * value_size,",
+                "          Aarray[offset + item], a_type, lda_array[group], Barray[offset + item],",
+                "          b_type, ldb_array[group], betas + group * value_size, Carray[offset + item],",
+                "          c_type, ldc_array[group], Darray[offset + item], d_type, ldd_array[group],",
+                "          compute_type, algo, 0, flags);",
+                "      if (status != rocblas_status_success) return status;",
+                "    }",
+                "    offset += group_size[group];",
+                "  }",
+                "  return rocblas_status_success;",
+                "}",
+            ]
+        )
 
-    def variadic_dispatch(helper_name: str, target_name: str, with_result: bool) -> None:
+    def variadic_dispatch(
+        helper_name: str, target_name: str, with_result: bool
+    ) -> None:
         prefix = "handle, result, count" if with_result else "handle, count"
-        lines.extend([
-            "",
-            f"rocblas_status {helper_name}(",
-            ("    rocblas_handle handle, struct rocblas_device_malloc_base** result,"
-             " size_t count, const size_t* sizes) {" if with_result else
-             "    rocblas_handle handle, size_t count, const size_t* sizes) {"),
-            "  if (!handle) return rocblas_status_invalid_handle;",
-            "  if (count && !sizes) return rocblas_status_invalid_pointer;",
-            "  switch (count) {",
-        ])
+        lines.extend(
+            [
+                "",
+                f"rocblas_status {helper_name}(",
+                (
+                    "    rocblas_handle handle, struct rocblas_device_malloc_base** result,"
+                    " size_t count, const size_t* sizes) {"
+                    if with_result
+                    else "    rocblas_handle handle, size_t count, const size_t* sizes) {"
+                ),
+                "  if (!handle) return rocblas_status_invalid_handle;",
+                "  if (count && !sizes) return rocblas_status_invalid_pointer;",
+                "  switch (count) {",
+            ]
+        )
         for count in range(33):
             arguments = ", ".join(f"sizes[{index}]" for index in range(count))
             suffix = f", {arguments}" if arguments else ""
-            lines.append(f"    case {count}: return table.{target_name}({prefix}{suffix});")
-        lines.extend([
-            "    default: return rocblas_status_invalid_size;",
-            "  }",
-            "}",
-        ])
+            lines.append(
+                f"    case {count}: return table.{target_name}({prefix}{suffix});"
+            )
+        lines.extend(
+            [
+                "    default: return rocblas_status_invalid_size;",
+                "  }",
+                "}",
+            ]
+        )
 
-    variadic_dispatch("forward_device_malloc_alloc_sizes", "rocblas_device_malloc_alloc", True)
-    variadic_dispatch("forward_set_optimal_device_memory_sizes",
-                      "rocblas_set_optimal_device_memory_size_impl", False)
+    variadic_dispatch(
+        "forward_device_malloc_alloc_sizes", "rocblas_device_malloc_alloc", True
+    )
+    variadic_dispatch(
+        "forward_set_optimal_device_memory_sizes",
+        "rocblas_set_optimal_device_memory_size_impl",
+        False,
+    )
 
-    lines.extend([
-        "",
-        "void initialize_backend() {",
-        "  std::call_once(backend_once, [] {",
-        "    int flags = RTLD_NOW | RTLD_LOCAL;",
-        "#if defined(RTLD_DEEPBIND) && !defined(ROCM_INTERFACES_SANITIZED_BUILD)",
-        "    flags |= RTLD_DEEPBIND;",
-        "#endif",
-        "    void* opened = dlopen(backend_path(), flags);",
-        "    if (!opened) {",
-        "      const char* error = dlerror();",
-        "      throw std::runtime_error(std::string(\"cannot load canonical rocBLAS backend: \") +",
-        "                               (error ? error : \"unknown loader error\"));",
-        "    }",
-        "    std::unique_ptr<void, DlCloser> guard(opened);",
-        "    rocm_rocblas_bridge_v1 candidate{};",
-        "    candidate.header = {sizeof(candidate), ROCM_INTERFACES_ABI_MAJOR,",
-        "                        ROCM_INTERFACES_ABI_MINOR};",
-    ])
+    lines.extend(
+        [
+            "",
+            "void initialize_backend() {",
+            "  std::call_once(backend_once, [] {",
+            "    int flags = RTLD_NOW | RTLD_LOCAL;",
+            "#if defined(RTLD_DEEPBIND) && !defined(ROCM_INTERFACES_SANITIZED_BUILD)",
+            "    flags |= RTLD_DEEPBIND;",
+            "#endif",
+            "    void* opened = dlopen(backend_path(), flags);",
+            "    if (!opened) {",
+            "      const char* error = dlerror();",
+            '      throw std::runtime_error(std::string("cannot load canonical rocBLAS backend: ") +',
+            '                               (error ? error : "unknown loader error"));',
+            "    }",
+            "    std::unique_ptr<void, DlCloser> guard(opened);",
+            "    rocm_rocblas_bridge_v1 candidate{};",
+            "    candidate.header = {sizeof(candidate), ROCM_INTERFACES_ABI_MAJOR,",
+            "                        ROCM_INTERFACES_ABI_MINOR};",
+        ]
+    )
     for function in functions:
         if function.name in GROUPED_GEMM_COMPAT_SHIMS:
-            lines.extend([
-                f'    if (!resolve(opened, candidate.{function.name}, "{function.name}"))',
-                f"      candidate.{function.name} = compat_{function.name};",
-            ])
+            lines.extend(
+                [
+                    f'    if (!resolve(opened, candidate.{function.name}, "{function.name}"))',
+                    f"      candidate.{function.name} = compat_{function.name};",
+                ]
+            )
         else:
-            lines.extend([
-                f'    if (!resolve(opened, candidate.{function.name}, "{function.name}"))',
-                f'      throw std::runtime_error("canonical rocBLAS backend is missing {function.name}");',
-            ])
-    lines.extend([
-        "    candidate.rocblas_device_malloc_alloc_sizes = forward_device_malloc_alloc_sizes;",
-        "    candidate.rocblas_set_optimal_device_memory_sizes =",
-        "        forward_set_optimal_device_memory_sizes;",
-        "    table = candidate;",
-        "    backend_handle = guard.release();",
-        "  });",
-        "}",
-        "",
-        "void trace_failure(const rocm_interfaces_provider_request* request, const char* message) {",
-        "  if (request && request->host && request->host->trace)",
-        "    request->host->trace(request->host->user_data, \"rocblas_bridge\",",
-        "                         \"backend_load_failure\", message, std::char_traits<char>::length(message));",
-        "}",
-        "}  // namespace",
-        "",
-        'extern "C" ROCM_INTERFACES_EXPORT rocm_interfaces_status ROCM_INTERFACES_CALL',
-        "rocm_interfaces_provider_query_v1(const rocm_interfaces_provider_request* request,",
-        "                                  rocm_interfaces_provider_response* response) {",
-        "  if (!request || !response || request->domain != ROCM_INTERFACES_DOMAIN_ROCBLAS_BRIDGE ||",
-        "      request->header.abi_major != ROCM_INTERFACES_ABI_MAJOR ||",
-        "      response->header.struct_size < sizeof(*response) ||",
-        "      request->required_table_size > sizeof(table))",
-        "    return ROCM_INTERFACES_STATUS_INCOMPATIBLE_ABI;",
-        "  try {",
-        "    initialize_backend();",
-        "  } catch (const std::exception& error) {",
-        "    trace_failure(request, error.what());",
-        "    return ROCM_INTERFACES_STATUS_PROVIDER_FAILURE;",
-        "  } catch (...) {",
-        '    trace_failure(request, "unknown canonical rocBLAS backend failure");',
-        "    return ROCM_INTERFACES_STATUS_PROVIDER_FAILURE;",
-        "  }",
-        "  response->header = {sizeof(*response), ROCM_INTERFACES_ABI_MAJOR,",
-        "                      ROCM_INTERFACES_ABI_MINOR};",
-        '  response->provider_id = "system-rocblas-bridge";',
-        '  response->build_id = "interfaces-real-v1";',
-        "  response->dispatch_table = &table;",
-        "  response->dispatch_table_size = sizeof(table);",
-        "  response->capability_mask = 0;",
-        "  return backend_handle ? ROCM_INTERFACES_STATUS_SUCCESS",
-        "                        : ROCM_INTERFACES_STATUS_PROVIDER_FAILURE;",
-        "}",
-        "",
-    ])
+            lines.extend(
+                [
+                    f'    if (!resolve(opened, candidate.{function.name}, "{function.name}"))',
+                    f'      throw std::runtime_error("canonical rocBLAS backend is missing {function.name}");',
+                ]
+            )
+    lines.extend(
+        [
+            "    candidate.rocblas_device_malloc_alloc_sizes = forward_device_malloc_alloc_sizes;",
+            "    candidate.rocblas_set_optimal_device_memory_sizes =",
+            "        forward_set_optimal_device_memory_sizes;",
+            "    table = candidate;",
+            "    backend_handle = guard.release();",
+            "  });",
+            "}",
+            "",
+            "void trace_failure(const rocm_interfaces_provider_request* request, const char* message) {",
+            "  if (request && request->host && request->host->trace)",
+            '    request->host->trace(request->host->user_data, "rocblas_bridge",',
+            '                         "backend_load_failure", message, std::char_traits<char>::length(message));',
+            "}",
+            "}  // namespace",
+            "",
+            'extern "C" ROCM_INTERFACES_EXPORT rocm_interfaces_status ROCM_INTERFACES_CALL',
+            "rocm_interfaces_provider_query_v1(const rocm_interfaces_provider_request* request,",
+            "                                  rocm_interfaces_provider_response* response) {",
+            "  if (!request || !response || request->domain != ROCM_INTERFACES_DOMAIN_ROCBLAS_BRIDGE ||",
+            "      request->header.abi_major != ROCM_INTERFACES_ABI_MAJOR ||",
+            "      response->header.struct_size < sizeof(*response) ||",
+            "      request->required_table_size > sizeof(table))",
+            "    return ROCM_INTERFACES_STATUS_INCOMPATIBLE_ABI;",
+            "  try {",
+            "    initialize_backend();",
+            "  } catch (const std::exception& error) {",
+            "    trace_failure(request, error.what());",
+            "    return ROCM_INTERFACES_STATUS_PROVIDER_FAILURE;",
+            "  } catch (...) {",
+            '    trace_failure(request, "unknown canonical rocBLAS backend failure");',
+            "    return ROCM_INTERFACES_STATUS_PROVIDER_FAILURE;",
+            "  }",
+            "  response->header = {sizeof(*response), ROCM_INTERFACES_ABI_MAJOR,",
+            "                      ROCM_INTERFACES_ABI_MINOR};",
+            '  response->provider_id = "system-rocblas-bridge";',
+            '  response->build_id = "interfaces-real-v1";',
+            "  response->dispatch_table = &table;",
+            "  response->dispatch_table_size = sizeof(table);",
+            "  response->capability_mask = 0;",
+            "  return backend_handle ? ROCM_INTERFACES_STATUS_SUCCESS",
+            "                        : ROCM_INTERFACES_STATUS_PROVIDER_FAILURE;",
+            "}",
+            "",
+        ]
+    )
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -566,12 +640,16 @@ def write_link_test(functions: list[Function], path: Path) -> None:
     for function in functions:
         if not function.has_handle or function.name in CUSTOM_FACADE:
             continue
-        arguments = ", ".join(zero_argument(parameter) for parameter in function.parameters)
+        arguments = ", ".join(
+            zero_argument(parameter) for parameter in function.parameters
+        )
         if function.return_type == "rocblas_status":
-            lines.extend([
-                f"  if ({function.name}({arguments}) != rocblas_status_invalid_handle)",
-                "    return 1;",
-            ])
+            lines.extend(
+                [
+                    f"  if ({function.name}({arguments}) != rocblas_status_invalid_handle)",
+                    "    return 1;",
+                ]
+            )
         elif function.return_type == "bool":
             lines.extend([f"  if ({function.name}({arguments}))", "    return 2;"])
     lines.extend(["  return 0;", "}", ""])
@@ -586,7 +664,9 @@ def write_version_script(functions: list[Function], path: Path) -> None:
 
 
 def write_exports(functions: list[Function], path: Path) -> None:
-    path.write_text("\n".join(function.name for function in functions) + "\n", encoding="utf-8")
+    path.write_text(
+        "\n".join(function.name for function in functions) + "\n", encoding="utf-8"
+    )
 
 
 def main() -> None:
@@ -599,7 +679,9 @@ def main() -> None:
     write_header(functions, args.output_dir / "rocblas_bridge_generated.h")
     write_facade(functions, args.output_dir / "rocblas_bridge_facade.cpp")
     write_provider(functions, args.output_dir / "rocblas_bridge_provider.cpp")
-    write_forwarding_provider(functions, args.output_dir / "rocblas_forwarding_provider.cpp")
+    write_forwarding_provider(
+        functions, args.output_dir / "rocblas_forwarding_provider.cpp"
+    )
     write_link_test(functions, args.output_dir / "rocblas_bridge_link_test.cpp")
     write_version_script(functions, args.output_dir / "rocblas_bridge.map")
     write_exports(functions, args.output_dir / "rocblas_bridge.exports")

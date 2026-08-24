@@ -147,8 +147,12 @@ def categorize(declaration: dict[str, object]) -> Row:
     source_file = declaration.get("file")
     source_line = declaration.get("line")
     parameters = declaration.get("parameters")
-    if (not isinstance(name, str) or not isinstance(source_file, str)
-            or not isinstance(source_line, int) or not isinstance(parameters, list)):
+    if (
+        not isinstance(name, str)
+        or not isinstance(source_file, str)
+        or not isinstance(source_line, int)
+        or not isinstance(parameters, list)
+    ):
         raise ValueError("malformed rocBLAS declaration")
     operation = operation_for(name)
     if name in GROUPED_BATCHED_BRIDGE:
@@ -169,8 +173,9 @@ def categorize(declaration: dict[str, object]) -> Row:
             raise ValueError(f"unclassified rocBLAS callable: {name}")
         _, cluster, disposition = match
         primitive = "compatibility_bridge" if disposition == "bridge_only" else "none"
-    parameter_types = [parameter.get("type") for parameter in parameters
-                       if isinstance(parameter, dict)]
+    parameter_types = [
+        parameter.get("type") for parameter in parameters if isinstance(parameter, dict)
+    ]
     if any(parameter_type == "int64_t" for parameter_type in parameter_types):
         index_width: int | str = 64
     elif any(parameter_type == "rocblas_int" for parameter_type in parameter_types):
@@ -185,10 +190,21 @@ def categorize(declaration: dict[str, object]) -> Row:
         batch_kind = "pointer_array"
     else:
         batch_kind = "single"
-    explicit_datatypes = ("_ex" in name or any(parameter_type == "rocblas_datatype"
-                                                for parameter_type in parameter_types))
-    return Row(name, cluster, disposition, primitive, operation, index_width, batch_kind,
-               explicit_datatypes, source_file, source_line)
+    explicit_datatypes = "_ex" in name or any(
+        parameter_type == "rocblas_datatype" for parameter_type in parameter_types
+    )
+    return Row(
+        name,
+        cluster,
+        disposition,
+        primitive,
+        operation,
+        index_width,
+        batch_kind,
+        explicit_datatypes,
+        source_file,
+        source_line,
+    )
 
 
 def main() -> None:
@@ -201,8 +217,11 @@ def main() -> None:
     declarations = document.get("declarations")
     if not isinstance(declarations, list):
         raise ValueError("snapshot declarations must be an array")
-    rows = [categorize(declaration) for declaration in declarations
-            if isinstance(declaration, dict) and declaration.get("kind") == "function"]
+    rows = [
+        categorize(declaration)
+        for declaration in declarations
+        if isinstance(declaration, dict) and declaration.get("kind") == "function"
+    ]
     rows.sort(key=lambda row: row.name)
     counts: dict[str, int] = {}
     for row in rows:

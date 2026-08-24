@@ -37,6 +37,7 @@ set(expected_narrow
   rocblas_sgemm_strided_batched)
 list(SORT expected_narrow)
 
+# Read defined dynamic symbols and their ELF version-node associations.
 function(read_exports path names_out versions_out)
   execute_process(
     COMMAND nm -D --defined-only --with-symbol-versions ${path}
@@ -70,6 +71,7 @@ function(read_exports path names_out versions_out)
   set(${versions_out} "${pairs}" PARENT_SCOPE)
 endfunction()
 
+# Require every expected symbol to carry exactly the requested version node.
 function(assert_versions label pairs expected_names expected_version)
   set(unversioned)
   set(wrong_version)
@@ -130,8 +132,8 @@ if(PROVIDER_COUNT LESS 1)
   message(FATAL_ERROR
     "check_exports: PROVIDER_COUNT=${PROVIDER_COUNT}; auto-derivation produced an empty provider list")
 endif()
-math(EXPR _prov_last "${PROVIDER_COUNT} - 1")
-foreach(_idx RANGE 0 ${_prov_last})
+set(_idx 0)
+while(_idx LESS PROVIDER_COUNT)
   set(_label "${PROVIDER_LABEL_${_idx}}")
   set(_file "${PROVIDER_FILE_${_idx}}")
   read_exports("${_file}" actual_provider provider_pairs)
@@ -139,4 +141,5 @@ foreach(_idx RANGE 0 ${_prov_last})
     message(FATAL_ERROR "${_label} leaked exports: ${actual_provider}")
   endif()
   assert_versions("${_label}" "${provider_pairs}" "rocm_interfaces_provider_query_v1" "${EXPECTED_PROVIDER_VERSION}")
-endforeach()
+  math(EXPR _idx "${_idx} + 1")
+endwhile()

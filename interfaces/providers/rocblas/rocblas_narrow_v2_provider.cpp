@@ -1,8 +1,6 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocm/interfaces/experimental/blas_narrow_v2.h"
-
 #include <dlfcn.h>
 
 #include <cstdint>
@@ -13,6 +11,8 @@
 #include <new>
 #include <stdexcept>
 #include <string>
+
+#include "rocm/interfaces/experimental/blas_narrow_v2.h"
 
 #ifndef ROCM_INTERFACES_ROCBLAS_BACKEND_SONAME
 #define ROCM_INTERFACES_ROCBLAS_BACKEND_SONAME "librocblas.so.5"
@@ -57,8 +57,7 @@ struct DlCloser {
 
 const char* backend_path() {
     const char* override_path = std::getenv("ROCM_INTERFACES_REAL_ROCBLAS_LIBRARY");
-    return override_path && *override_path ? override_path
-                                           : ROCM_INTERFACES_ROCBLAS_BACKEND_SONAME;
+    return override_path && *override_path ? override_path : ROCM_INTERFACES_ROCBLAS_BACKEND_SONAME;
 }
 
 template <typename Pointer>
@@ -80,8 +79,8 @@ void initialize_backend() {
         void* opened = dlopen(backend_path(), flags);
         if (!opened) {
             const char* error = dlerror();
-            throw std::runtime_error(std::string("cannot load canonical rocBLAS backend: ")
-                                     + (error ? error : "unknown loader error"));
+            throw std::runtime_error(std::string("cannot load canonical rocBLAS backend: ") +
+                                     (error ? error : "unknown loader error"));
         }
         std::unique_ptr<void, DlCloser> guard(opened);
         Backend candidate;
@@ -126,8 +125,8 @@ void destroy_context(void* opaque) {
 }
 
 bool fits_i32(int64_t value) {
-    return value >= std::numeric_limits<rocblas_int>::min()
-           && value <= std::numeric_limits<rocblas_int>::max();
+    return value >= std::numeric_limits<rocblas_int>::min() &&
+           value <= std::numeric_limits<rocblas_int>::max();
 }
 
 rocblas_status prepare(Context* context, const rocm_blas_v2_execution& execution,
@@ -154,31 +153,30 @@ rocblas_status vector_transform(void* opaque,
                                 const rocm_blas_v2_vector_transform_request* request) {
     if (!opaque) return rocblas_status_invalid_handle;
     if (!request) return rocblas_status_invalid_pointer;
-    if (request->execution.batch_kind != ROCM_BLAS_V2_BATCH_SINGLE
-        || request->execution.batch_count != 1)
+    if (request->execution.batch_kind != ROCM_BLAS_V2_BATCH_SINGLE ||
+        request->execution.batch_count != 1)
         return rocblas_status_not_implemented;
     if (request->x.length < 0) return rocblas_status_invalid_size;
     if (request->x.length == 0) return rocblas_status_success;
-    if (request->x.data_type != rocblas_datatype_f32_r)
-        return rocblas_status_not_implemented;
-    if (request->operation != ROCM_BLAS_V2_VECTOR_SCALE
-        && request->y.data_type != rocblas_datatype_f32_r)
+    if (request->x.data_type != rocblas_datatype_f32_r) return rocblas_status_not_implemented;
+    if (request->operation != ROCM_BLAS_V2_VECTOR_SCALE &&
+        request->y.data_type != rocblas_datatype_f32_r)
         return rocblas_status_not_implemented;
     if (!request->x.memory.base) return rocblas_status_invalid_pointer;
     if (request->operation != ROCM_BLAS_V2_VECTOR_SCALE && !request->y.memory.base)
         return rocblas_status_invalid_pointer;
-    if (!request->x.increment
-        || (request->operation != ROCM_BLAS_V2_VECTOR_SCALE && !request->y.increment))
+    if (!request->x.increment ||
+        (request->operation != ROCM_BLAS_V2_VECTOR_SCALE && !request->y.increment))
         return rocblas_status_invalid_size;
 
     auto* context = static_cast<Context*>(opaque);
-    const bool needs_scalar = request->operation == ROCM_BLAS_V2_VECTOR_SCALE
-                              || request->operation == ROCM_BLAS_V2_VECTOR_AXPY;
-    if (needs_scalar
-        && (request->alpha.data_type != rocblas_datatype_f32_r || !request->alpha.value))
+    const bool needs_scalar = request->operation == ROCM_BLAS_V2_VECTOR_SCALE ||
+                              request->operation == ROCM_BLAS_V2_VECTOR_AXPY;
+    if (needs_scalar &&
+        (request->alpha.data_type != rocblas_datatype_f32_r || !request->alpha.value))
         return rocblas_status_invalid_pointer;
-    rocblas_status status = prepare(context, request->execution,
-                                    needs_scalar ? &request->alpha : nullptr);
+    rocblas_status status =
+        prepare(context, request->execution, needs_scalar ? &request->alpha : nullptr);
     if (status != rocblas_status_success) return status;
 
     const int64_t n = request->x.length;
@@ -187,8 +185,8 @@ rocblas_status vector_transform(void* opaque,
     const auto* x = static_cast<const float*>(request->x.memory.base);
     auto* mutable_x = static_cast<float*>(request->x.memory.base);
     auto* y = static_cast<float*>(request->y.memory.base);
-    if (request->execution.index_width == ROCM_BLAS_V2_INDEX_32
-        && (!fits_i32(n) || !fits_i32(incx) || !fits_i32(incy)))
+    if (request->execution.index_width == ROCM_BLAS_V2_INDEX_32 &&
+        (!fits_i32(n) || !fits_i32(incx) || !fits_i32(incy)))
         return rocblas_status_invalid_size;
 
     switch (request->operation) {
@@ -215,13 +213,14 @@ rocblas_status vector_transform(void* opaque,
         case ROCM_BLAS_V2_VECTOR_AXPY:
             return request->execution.index_width == ROCM_BLAS_V2_INDEX_64
                        ? backend.saxpy_64(context->handle, n,
-                                          static_cast<const float*>(request->alpha.value), x,
-                                          incx, y, incy)
+                                          static_cast<const float*>(request->alpha.value), x, incx,
+                                          y, incy)
                        : backend.saxpy(context->handle, static_cast<rocblas_int>(n),
                                        static_cast<const float*>(request->alpha.value), x,
                                        static_cast<rocblas_int>(incx), y,
                                        static_cast<rocblas_int>(incy));
-        default: return rocblas_status_not_implemented;
+        default:
+            return rocblas_status_not_implemented;
     }
 }
 
@@ -283,8 +282,8 @@ const rocm_blas_v2_provider table = {
 
 void trace_failure(const rocm_interfaces_provider_request* request, const char* message) {
     if (request && request->host && request->host->trace)
-        request->host->trace(request->host->user_data, "blas_v2", "backend_load_failure",
-                             message, std::char_traits<char>::length(message));
+        request->host->trace(request->host->user_data, "blas_v2", "backend_load_failure", message,
+                             std::char_traits<char>::length(message));
 }
 
 }  // namespace
@@ -292,10 +291,10 @@ void trace_failure(const rocm_interfaces_provider_request* request, const char* 
 extern "C" ROCM_INTERFACES_EXPORT rocm_interfaces_status ROCM_INTERFACES_CALL
 rocm_interfaces_provider_query_v1(const rocm_interfaces_provider_request* request,
                                   rocm_interfaces_provider_response* response) {
-    if (!request || !response || request->domain != ROCM_INTERFACES_DOMAIN_BLAS_V2
-        || request->header.abi_major != ROCM_INTERFACES_ABI_MAJOR
-        || response->header.struct_size < sizeof(*response)
-        || request->required_table_size > sizeof(table))
+    if (!request || !response || request->domain != ROCM_INTERFACES_DOMAIN_BLAS_V2 ||
+        request->header.abi_major != ROCM_INTERFACES_ABI_MAJOR ||
+        response->header.struct_size < sizeof(*response) ||
+        request->required_table_size > sizeof(table))
         return ROCM_INTERFACES_STATUS_INCOMPATIBLE_ABI;
     try {
         initialize_backend();
@@ -306,8 +305,7 @@ rocm_interfaces_provider_query_v1(const rocm_interfaces_provider_request* reques
         trace_failure(request, "unknown canonical rocBLAS backend failure");
         return ROCM_INTERFACES_STATUS_PROVIDER_FAILURE;
     }
-    response->header = {sizeof(*response), ROCM_INTERFACES_ABI_MAJOR,
-                        ROCM_INTERFACES_ABI_MINOR};
+    response->header = {sizeof(*response), ROCM_INTERFACES_ABI_MAJOR, ROCM_INTERFACES_ABI_MINOR};
     response->provider_id = "system-rocblas-narrow-v2";
     response->build_id = "interfaces-real-v1";
     response->dispatch_table = &table;

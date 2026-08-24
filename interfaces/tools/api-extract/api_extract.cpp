@@ -171,42 +171,42 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
         return filename.starts_with(header_root);
     }
 
-  llvm::json::Object base(const clang::NamedDecl* declaration, llvm::StringRef kind) const {
-    const clang::SourceManager& source_manager = context_.getSourceManager();
-    clang::PresumedLoc location = source_manager.getPresumedLoc(declaration->getLocation());
-    std::string file;
-    if (location.isValid()) {
-      llvm::StringRef filename = location.getFilename();
-      if (filename.consume_front(header_root)) {
-        filename = filename.ltrim("/\\");
-      }
-      file = filename.str();
-    }
-    llvm::json::Object item;
-    item["kind"] = kind;
-    item["name"] = stable_name(declaration);
-    item["file"] = file;
+    llvm::json::Object base(const clang::NamedDecl* declaration, llvm::StringRef kind) const {
+        const clang::SourceManager& source_manager = context_.getSourceManager();
+        clang::PresumedLoc location = source_manager.getPresumedLoc(declaration->getLocation());
+        std::string file;
+        if (location.isValid()) {
+            llvm::StringRef filename = location.getFilename();
+            if (filename.consume_front(header_root)) {
+                filename = filename.ltrim("/\\");
+            }
+            file = filename.str();
+        }
+        llvm::json::Object item;
+        item["kind"] = kind;
+        item["name"] = stable_name(declaration);
+        item["file"] = file;
         item["line"] = location.isValid() ? static_cast<int64_t>(location.getLine()) : 0;
         return item;
     }
 
-  void add(const clang::NamedDecl* declaration, llvm::json::Object item) {
-    collector_.add(stable_name(declaration) + ":" +
-                       std::to_string(declaration->getLocation().getRawEncoding()),
-                   std::move(item));
-  }
-
-  std::string stable_name(const clang::NamedDecl* declaration) const {
-    std::string name = declaration->getQualifiedNameAsString();
-    for (const char separator : {'/', '\\'}) {
-      const std::string prefix = header_root.getValue() + separator;
-      size_t position = 0;
-      while ((position = name.find(prefix, position)) != std::string::npos) {
-        name.erase(position, prefix.size());
-      }
+    void add(const clang::NamedDecl* declaration, llvm::json::Object item) {
+        collector_.add(stable_name(declaration) + ":" +
+                           std::to_string(declaration->getLocation().getRawEncoding()),
+                       std::move(item));
     }
-    return name;
-  }
+
+    std::string stable_name(const clang::NamedDecl* declaration) const {
+        std::string name = declaration->getQualifiedNameAsString();
+        for (const char separator : {'/', '\\'}) {
+            const std::string prefix = header_root.getValue() + separator;
+            size_t position = 0;
+            while ((position = name.find(prefix, position)) != std::string::npos) {
+                name.erase(position, prefix.size());
+            }
+        }
+        return name;
+    }
 
     clang::ASTContext& context_;
     Collector& collector_;
