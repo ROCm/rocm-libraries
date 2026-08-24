@@ -5,11 +5,11 @@
 .. _general-batched-gemm:
 
 **********************************
-General Batched GEMM
+Using general batched GEMM
 **********************************
 
-General Batched GEMM is a hipBLASLt feature that performs multiple independent
-General Matrix-Matrix Multiplication (GEMM) operations in a single API call.
+General batched GEMM is a hipBLASLt feature that performs multiple independent
+GEMM operations in a single API call.
 Each batch references its own matrices through device-resident pointer arrays
 instead of a single contiguous buffer with uniform strides.
 
@@ -18,6 +18,17 @@ Operation: ``D = alpha * op(A) * op(B) + beta * C``
 Each batch can use separate memory allocations for ``A``, ``B``, ``C``, and ``D``.
 This guide covers bench usage, the API workflow, a complete standalone example,
 and common pitfalls.
+
+.. note::
+
+   The word *general* appears twice in this topic, with different meanings.
+   In GEMM (General Matrix-Matrix Multiplication), general is standard BLAS
+   terminology for the usual rectangular matrix multiply (as opposed to symmetric,
+   triangular, or other specialized variants). In General Batched GEMM, general
+   describes the batching layout: each batch matrix may live at a separate device
+   address, referenced through a pointer array, rather than in one contiguous
+   strided buffer. The clearer synonym is Pointer Array Batched GEMM, which is
+   what ``HIPBLASLT_BATCH_MODE_POINTER_ARRAY`` selects.
 
 Prerequisites: A ROCm installation with hipBLASLt built for your target GPU
 architecture. For build instructions, see
