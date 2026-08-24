@@ -26,7 +26,7 @@ files directly (`navi32` taken from `origin/develop`, i.e. before this branch wi
 | **navi32 (pre-fix), navi33, gfx1103, gfx1150, gfx1152** | 14 674 | 12 991 | 14 674 | 12 991 |
 | navi31 | 114 299 | 117 127 | 118 846 | 119 653 |
 | gfx1151 *(the one arch with a real tuning campaign)* | 131 721 | 131 460 | 129 297 | 129 297 |
-| gfx1153 *(its own variant)* | 20 865 | 12 991 | 14 674 | 12 991 |
+| gfx1153 *(partial exception, see below)* | 20 865 | 12 991 | 14 674 | 12 991 |
 
 Those five files are **identical**, for **all four** thin ProblemTypes. A raw `diff` of any pair
 is **152 lines out of 14 674, containing only 7 distinct contents**, every one an identifier:
@@ -40,6 +40,11 @@ is **152 lines out of 14 674, containing only 7 distinct contents**, every one a
 Nothing else differs — not one solution parameter, not one of the 471 table rows. The string
 `gfx1102` occurs exactly **once** in navi33's file (the arch-name line), so kernel names are not
 arch-tagged and this is not an artefact of over-normalising.
+
+**gfx1153 is a partial exception worth stating precisely.** Its HHS pool is genuinely bigger
+(102 solutions vs 73, different names); for BBS/AuxH/AuxB the pool is *identical* to the
+group but the **shape table is not** — same 472 rows, ~940 of them different. So gfx1153
+got a real mapping pass and some extra HHS kernels, on a pool still ~1/4 of navi31's.
 
 **So the defect is one artefact copied five times, not five architectures independently
 under-tuned.** gfx1151 is the counter-example that proves the point: it is the only RDNA3 part
