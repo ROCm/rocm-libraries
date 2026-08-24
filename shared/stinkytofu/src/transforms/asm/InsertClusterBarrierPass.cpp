@@ -591,6 +591,11 @@ Rule3SignalAnchor rule3ReportAnchor(IRBase* anchor, IRBase* defaultAnchor, int h
     return result;
 }
 
+/// Whether \p loopHead 's preheader has a spot for a compensating signal. Defined next to the
+/// climb that looks for that spot; the scan below needs the answer before it crosses a back
+/// edge, which is the only thing that makes the compensation necessary.
+bool preheaderCanTakeCompensatingSignal(StinkyInstruction* loopHead);
+
 Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
@@ -771,7 +776,12 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
                 // Leaving a loop head textually would land in the preheader, which runs
                 // once; follow the latch so the signal lands on the path that repeats.
                 StinkyInstruction* latch = findLatchBranchFor(inst);
-                if (latch == nullptr)
+                // Crossing is what hands the signal to the next trip, so it is only payable
+                // while the preheader has somewhere to put the first trip's own signal. A
+                // preheader that has not -- a live SCC range covering the whole run-up, say --
+                // makes the crossing unaffordable rather than merely unhelpful, and the climb
+                // comes to rest below the head as if the hops had run out.
+                if (latch == nullptr || !preheaderCanTakeCompensatingSignal(loopHead))
                     return report(clearSccNote(settle(curSegBegin.getNodePtr(), accum)));
                 it = BasicBlock::iterator(latch);
                 // The latch is landed on rather than stepped over, so its own read of the
@@ -926,6 +936,9 @@ IRBase* anchorJustBelow(StinkyInstruction* behind, StinkyInstruction* limit) {
 /// A ``s_barrier_wait -3`` matters for a second reason: it drinks a cluster token, so a
 /// signal placed above one would be swallowed there instead of surviving into the loop for
 /// the first trip's wait, which is the whole point of the compensation.
+///
+/// A null anchor means the preheader has no spot at all, and is the scan's reason not to cross
+/// the back edge in the first place rather than something to recover from afterwards.
 PreLoopSignalAnchor findPreLoopSignalAnchor(StinkyInstruction* loopHead) {
     BasicBlock* parent = (loopHead != nullptr) ? loopHead->getParent() : nullptr;
     if (parent == nullptr) return {};
@@ -961,6 +974,10 @@ PreLoopSignalAnchor findPreLoopSignalAnchor(StinkyInstruction* loopHead) {
         return {dead, needsWorkgroupBarrier};
     }
     return {};
+}
+
+bool preheaderCanTakeCompensatingSignal(StinkyInstruction* loopHead) {
+    return findPreLoopSignalAnchor(loopHead).anchor != nullptr;
 }
 
 /// Plant `s_branch <label>` in front of \p anchor.
@@ -1309,17 +1326,15 @@ class InsertClusterBarrierPassImpl : public Pass {
                     if (found.crossedLoopHead && comp.preLoopSignal.anchor == nullptr) {
                         comp.preLoopSignal = findPreLoopSignalAnchor(head);
                         // Crossing the back edge and posting a signal in the preheader are one
-                        // decision, not two: the crossing is what hands this signal to the
-                        // next trip, and the preheader signal is what the first trip waits on
-                        // instead. A preheader with no spot to put it -- a live SCC range
-                        // covering the whole run-up, say -- cannot honour half the bargain, so
-                        // the signal stays inside the loop where its own wait can reach it.
-                        if (comp.preLoopSignal.anchor == nullptr) {
-                            found = findRule3SignalAnchorByCycleLead(
-                                trigger, tSegBegin, /*defaultAnchor=*/trigger, cycleMap,
-                                kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors,
-                                /*maxHops=*/0, head);
-                        }
+                        // decision, not two: the crossing is what hands this signal to the next
+                        // trip, and the preheader signal is what the first trip waits on
+                        // instead. Which is why the scan asks the same question before it
+                        // crosses, and stays inside the loop when the preheader has no spot --
+                        // so a crossing that arrives here has one waiting for it.
+                        if (comp.preLoopSignal.anchor == nullptr)
+                            STINKY_UNREACHABLE(
+                                "Rule 3 signal anchor: crossed the back edge with no preheader "
+                                "spot for the compensating signal");
                     }
                 }
                 pending.emplace_back(trigger, found.anchor, static_cast<IRBase*>(trigger));
