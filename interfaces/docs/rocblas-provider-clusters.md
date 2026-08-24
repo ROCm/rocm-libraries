@@ -140,7 +140,9 @@ Before adopting the request structs as ABI, peers must settle these named gaps:
    edge implementation and tests. None requires a provider-table entry.
 2. Per-operation validation, quick-return, aliasing, negative-increment, scalar-location, and
    asynchronous lifetime behavior is not reproduced by the recording provider. Differential
-   tests against legacy rocBLAS are required before converting a cluster.
+   tests against legacy rocBLAS are required before converting a cluster. The first conversion
+   is executable for single-batch FP32 AXPY, SCAL, COPY, and SWAP through the system-backed
+   narrow-v2 provider; other datatypes and batch forms remain to be migrated.
 3. Logical matrix dimensions in the requests are normalized, but transposed storage extent
    conventions and banded/packed offsets need a written invariant and adversarial tests.
 4. Classic GEMM-to-LT eligibility, no-solution fallback, solution-index observability, memory

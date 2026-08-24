@@ -32,22 +32,20 @@ the libstdc++ archive, and those are default-visibility inside the archive - the
 the provider's `.dynsym` (176 defined dynamic symbols in all, of which one is the real export). Two such providers in one process share those symbols through the
 dynamic loader, and one silently runs the other's code.
 
-**Fix.** An explicit export allowlist. `providers/recording/recording_provider.map` names
+**Fix.** An explicit export allowlist. `providers/provider.map` names
 the single symbol a provider may expose and sends everything else to `local: *`. The
-`--version-script` is applied by the `add_recording_provider()` function in
-`providers/recording/CMakeLists.txt`, so it covers all recording providers and the rocBLAS
-bridge target uniformly.
+`--version-script` is applied to every recording and system-backed provider target.
 
 **Proof.** `rocm_interfaces.exports` derives its provider list from the global
-`ROCM_INTERFACES_RECORDING_PROVIDERS` build-system property populated by every
-`add_recording_provider()` call, then asserts that each DSO exports exactly
+`ROCM_INTERFACES_PROVIDER_TARGETS` build-system property populated by every provider target,
+then asserts that each DSO exports exactly
 one defined, non-absolute dynamic symbol (`rocm_interfaces_provider_query_v1`). The checker
 runs `nm -D --defined-only --with-symbol-versions` and ignores the absolute version-node
 entry, so it is one callable export, not 176. The independent
-`rocm_interfaces.exports_provider_list_complete` control enumerates every recording-provider
-`MODULE_LIBRARY` from the build system and requires that ground truth to equal the derived
-registry list, so a newly registered provider cannot silently escape inspection. The export
-allowlist landed in `a929517`; auto-derivation and its completeness control landed in
+`rocm_interfaces.exports_provider_list_complete` control recursively enumerates every
+provider `MODULE_LIBRARY` from the build system and requires that ground truth to equal the
+derived registry list, so a newly registered provider cannot silently escape inspection.
+The export allowlist landed in `a929517`; auto-derivation and its completeness control landed in
 `61f8dc9` (`test(interfaces): make provider export coverage fail closed`).
 
 ## 2. Give the exports names, so majors can coexist (ABI-03, named nodes)

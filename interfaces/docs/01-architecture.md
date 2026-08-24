@@ -1,8 +1,9 @@
 # How the interfaces layer works
 
-Status: proposed design, prototype-backed. It builds standalone (`cmake -S interfaces`)
-and is not yet wired into the root ROCm build. Everything below is real code in this tree,
-proven by the tests named at the end.
+Status: proposed design with a working noncanonical rocBLAS implementation. It builds
+standalone (`cmake -S interfaces`) or through the default-off root option
+`ROCM_LIBS_ENABLE_INTERFACES`. Everything below is real code in this tree, proven by the
+tests named at the end.
 
 ## The problem this solves
 
@@ -52,7 +53,7 @@ typedef rocm_interfaces_status (*rocm_interfaces_provider_query_fn)(
     rocm_interfaces_provider_response*       response);
 ```
 
-And you can see it enforced. Look at `providers/recording/recording_provider.map`:
+And you can see it enforced. Look at `providers/provider.map`:
 
 ```
 ROCM_INTERFACES_PROVIDER_1 {
@@ -191,6 +192,19 @@ Providers can come from two places: `add_module` loads them from a `.so` on disk
 described by a JSON manifest), and `add_builtin` registers an in-process query function
 directly, no `dlopen`. Both land in the same entry list and compete by the same rules.
 
+The noncanonical rocBLAS path installs `rocblas-system.json` beside
+`librocblas-provider-system.so`. The shadow loader reads that manifest, and the provider then
+opens canonical `librocblas.so.5` with local binding, adding ELF deep binding in ordinary
+builds, and resolves every table slot by that handle. Sanitizer runtimes reject
+`RTLD_DEEPBIND`, so instrumented builds deliberately omit that flag and retain handle-scoped
+lookup. This second lookup is important: it prevents facade dispatch from using an accidental
+global lookup of the same-named symbol on `librocblas-loader.so.5`. A missing symbol rejects
+the provider, except for the six grouped-GEMM spellings introduced after older rocBLAS 5
+builds; those are explicitly adapted to repeated ordinary GEMM calls. The public variadic
+device-memory helpers cross the table boundary as size arrays and are expanded back into
+canonical calls for counts from zero through 32; larger counts currently return
+`rocblas_status_invalid_size` and remain migration work.
+
 ## Why the module stays loaded
 
 When `select` succeeds it returns a `std::shared_ptr<const ProviderLease>`. The lease owns
@@ -229,7 +243,7 @@ The boundary above is only real if the symbols actually behave. That is what the
 this tree proves:
 
 - The version script that exports one symbol and hides the leak
-  (`providers/recording/recording_provider.map`) is proven by the `exports` test.
+  (`providers/provider.map`) is proven by the `exports` test.
 - Named ELF version nodes give each major a distinct symbol, so co-resident majors resolve
   their own definition. What the tests lock today: `abi03_coresidency` asserts each handle's
   `dlvsym`/`dlsym` resolves to its own version node with cross-version lookups nil;
@@ -258,7 +272,8 @@ offers. If you want to know *why* each one exists and what breaks without it, re
 | `protocols/include/rocm/interfaces/` | the C contract: `common.h`, `blas.h`, `rand.h`, `solver.h` |
 | `runtime/` | `Module`, `ProviderRegistry`, `ProviderLease` - dlopen + selection |
 | `loader/` | the public C++ contexts callers use; `rocblas_loader.map` |
-| `providers/recording/` | the recording provider set + `recording_provider.map` |
+| `providers/recording/` | the recording provider set + shared single-export map |
+| `providers/rocblas/` | exhaustive canonical-rocBLAS forwarder, installed manifests, and real narrow-v2 vector-transform provider |
 | `tests/` | the ctest suite, including the ABI proof drivers |
 | `tools/` | API extraction and snapshot/policy tooling |
 | `api/` | the categorization ledger and per-header API snapshots |

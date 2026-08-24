@@ -1,9 +1,9 @@
 # Status and roadmap
 
-Status: proposed design, prototype-backed. This page separates what is proven today from
-what is planned. The three tiers below never blur: DONE means there is code and a passing
-test; COMMITTED-NEXT means it is the immediate plan; ASPIRATIONAL means it is a direction,
-not a promise.
+Status: proposed design with a working noncanonical rocBLAS implementation. This page
+separates what is proven today from what is planned. The three tiers below never blur: DONE
+means there is code and a passing test; COMMITTED-NEXT means it is the immediate plan;
+ASPIRATIONAL means it is a direction, not a promise.
 
 ## DONE (code exists, a test proves it)
 
@@ -16,7 +16,7 @@ which optional linkers and sanitizers are present, so cite names rather than a c
 | Provider single-symbol export; no libstdc++ leak | `exports` | `a929517` |
 | Named ELF version nodes on loader + provider | `exports` | `ba093ad` |
 | `exports` node-aware check extended to the narrow loader shadow (`rocblas_narrow_loader_shadow`) | `exports` | `a741064` |
-| `exports` provider list auto-derived from a global registry, so a provider added via `add_recording_provider` cannot silently escape the check (a dedicated cross-check asserts the derived list equals an independent buildsystem enumeration) | `exports`, `exports_provider_list_complete` | `61f8dc9` |
+| `exports` provider list auto-derived from a global registry, with an independent recursive enumeration of every provider `MODULE_LIBRARY`, so a new provider cannot silently escape the check | `exports`, `exports_provider_list_complete` | `61f8dc9`, generalized by current real-provider slice |
 | Versioned-provider co-residency (each handle resolves its own version node, cross-version lookup nil) and the bare-lookup interposition hazard reproduced when the version node is removed | `abi03_coresidency`, `abi03_interpose_hazard` | `8832c9a` |
 | Core versioned-symbol invariants (ordering, `-Bsymbolic` genuineness via a `DT_FLAGS` `DF_SYMBOLIC` assertion against a plain-DSO control, genuine two-default-definition (`@@`) DSO rejected with a single-`@` accept control, ldconfig stub) | `abi04_three_line_order`, `abi04_bsymbolic_inert`, `abi04_multiple_default_def_rejected`, `abi04_ldconfig_stub_preserved` | `897293e`, `-Bsymbolic` discrimination `215ede4`, dup-def strengthening `b7f3f89` |
 | Same-node negative control for the ordering proof: three DSOs on the shared `ROCBLAS_ABI_6` node with `ABI_5`/`ABI_7` lookups nil everywhere | `abi04_same_node_negative` (+ `_lld`) | `215ede4` |
@@ -30,6 +30,12 @@ which optional linkers and sanitizers are present, so cite names rather than a c
 | Default-on API snapshot and rocBLAS-categorization drift gate | `rocm_interfaces.api_snapshot_drift` | `dc2aa30947a` |
 | Linked-consumer interposition proof: a consumer whose relocation carries a versioned undefined reference (`rocblas_sgemm@ROCBLAS_ABI_7`, recorded as a `Verneed` on `libprovB.so.7`) binds to that major even though an ABI_6 provider is `NEEDED` first and earlier in scope; the plain control shares the identical link line and differs only by the single `.symver` directive, and is interposed to ABI_6 - so one directive flips the bound major 7/6 | `abi03_linked_consumer_versioned_binds`, `abi03_linked_consumer_plain_interposed` | `3396f66` |
 | Boundary of the node defense (stated, not overclaimed): with genuine version nodes present, `dlvsym` reaches `ROCBLAS_ABI_7`, yet a bare unversioned `dlsym(RTLD_DEFAULT, ...)` still takes the first-loaded `ABI_6` - the defense is scoped to versioned relocations and `dlvsym`, not bare global lookups. Discriminates from `abi03_interpose_hazard` (nodeless DSOs) on lookup form alone | `abi03_versioned_bare_lookup_uncovered` | `8235b3c` |
+| Default-off root build integration produces the shadow loader and both real provider targets without enabling them in an ordinary root build | `root_opt_in_build` | current real-provider slice |
+| Exhaustive real provider binds canonical rocBLAS by DSO handle, preserves direct behavior for version/status/handle policy calls, and fails closed with a host trace for missing or incomplete backends | `rocblas_real_provider_differential`, `real_provider_missing_backend`, `real_provider_incomplete_backend` | current real-provider slice |
+| Installed package exports the shadow loader and installs a strict same-directory provider manifest that selects the real provider | `install_consumer`, strict-manifest cases in `unit` | current real-provider slice |
+| Real-provider initialization and dispatch are concurrency-safe | `rocblas_real_provider_concurrency` (also run in the TSan configuration) | current real-provider slice |
+| First semantic migration: single-batch FP32 AXPY, SCAL, COPY, and SWAP, with both public index widths, execute through the narrow-v2 vector-transform callback into a backend DSO | `rocblas_narrow_v2_real_vector_transform` | current real-provider slice |
+| GPU differential harness compares canonical rocBLAS, the exhaustive provider, and narrow-v2 across AXPY/SCAL/COPY/SWAP, both index widths, host/device scalars, two streams, negative increments, quick returns, invalid arguments, asynchronous completion, and strided storage | `rocblas_gpu_differential` and `interfaces-gpu-ci.yml` | current GPU-validation slice |
 
 Foundational, from the POC base (`9bd0d26`): the loader/runtime/protocols architecture, the
 recording providers and rocBLAS bridge, and the narrow-v2 facade are each exercised by named
@@ -47,18 +53,17 @@ provider table. The `check_api_policy.py` policy check is still unwired.
 
 ## COMMITTED-NEXT (the immediate plan)
 
-- Push and merge mechanics (rebase, merge-tree re-verify, attaching to PR #10272) are tracked
-  in the PR/handoff, not here.
+- Push and merge mechanics (final review, force-with-lease update after the completed rebase,
+  and attaching to PR #10272) are tracked in the PR/handoff, not here.
 
 ## ASPIRATIONAL (direction, not commitment)
 
 - **More libraries.** The hardening is proven on rocBLAS-shaped and rocRAND-shaped symbols.
   hipSOLVER is a facade with representation coupling that needs its own edge classification
   before it can adopt the boundary (see [audit-findings.md](audit-findings.md)).
-- **Root-build wiring.** Today the tree builds standalone (`cmake -S interfaces`). Wiring it
-  into the root ROCm build and shipping canonical library names is deliberately deferred
-  until every exported declaration is classified, all adapters exist, package-config parity
-  is demonstrated, and coexistence tests cover the published majors.
+- **Canonical cutover.** The root build now has a default-off interfaces switch, but shipping
+  canonical library names remains deliberately deferred until all adapters, package-config
+  parity, numerical validation, and published-major coexistence criteria are complete.
 - **A broader proof suite.** The interposition story is now proven end to end - handle-scoped
   co-residency, the nodeless hazard, the linked-consumer relocation, and the bare-`RTLD_DEFAULT`
   boundary (all in DONE). Further symbol shapes and toolchains are added as they become relevant.

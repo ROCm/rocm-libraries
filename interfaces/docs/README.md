@@ -1,7 +1,8 @@
 # The ROCm interfaces layer
 
-Status: proposed design, prototype-backed. This tree builds standalone
-(`cmake -S interfaces`) and is not yet wired into the root ROCm build. Executable
+Status: proposed design with a working noncanonical rocBLAS implementation. This tree builds
+standalone (`cmake -S interfaces`) or through the default-off root option
+`ROCM_LIBS_ENABLE_INTERFACES`. Executable
 capabilities here name the CTest that proves them; intended contracts and planned work are
 marked as such and cite the implementation-status note in
 [03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md#implementation-status-prototype)

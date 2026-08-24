@@ -26,6 +26,10 @@ Manifests are strict JSON documents. Module paths are relative to the manifest a
 escape its directory. Entries name a provider, compatibility cohort, domain, query symbol,
 priority, and numeric gfx list; zero is the wildcard. An exact gfx match outranks a wildcard
 before priority is considered. A provider response is validated in two stages, not one. At
+parse time unknown keys, missing/non-string identities, absolute or escaping module paths,
+nonexistent modules, invalid priorities, negative/out-of-range gfx values, duplicate
+domain/id/gfx tuples, and empty provider arrays are rejected. Parsing is atomic: one bad
+entry leaves the registry unchanged. At
 selection the runtime checks the response's `abi_major` against
 `ROCM_INTERFACES_ABI_MAJOR`, requires its `abi_minor` to meet the runtime floor, validates the
 requested domain and cohort, and requires `dispatch_table_size` to cover the requested table
@@ -115,12 +119,14 @@ typed slot for every one of the 1,219 current rocBLAS callables and is suitable 
 implementation migration. The earlier vector/matmul table remains a small vertical test.
 The proposed destination is the experimental v2 table with ten semantic calls described in
 `rocblas-provider-clusters.md`. The public inventory contains 1,162 compute callables; a
-generated shadow facade translates 1,156 into those typed requests, and a recording provider
-implements only that narrow table. The six grouped-GEMM callables remain `bridge_only`
+generated shadow facade translates 1,156 into those typed requests. A recording provider
+covers the complete table structurally, and the system-backed provider implements the first
+migrated slice: single-batch FP32 AXPY, SCAL, COPY, and SWAP through `vector_transform`.
+The six grouped-GEMM callables remain `bridge_only`
 because the narrow matmul request cannot represent per-group shapes, operations, leading
 dimensions, and scalars; the narrow edge returns `rocblas_status_not_implemented` for a
-valid handle. This proves structural closure, not numerical or behavioral equivalence, so
-the table is intentionally not yet the adopted provider ABI.
+valid handle. This proves structural closure, not numerical or behavioral equivalence for
+the remaining clusters, so the table is intentionally not yet the adopted provider ABI.
 
 ### Operation clusters
 

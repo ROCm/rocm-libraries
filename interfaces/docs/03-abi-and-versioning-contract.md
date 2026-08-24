@@ -89,7 +89,7 @@ prototype loader/provider; test-fixture nodes exist to prove the mechanism acros
 | Node | Where | Role |
 | --- | --- | --- |
 | `ROCBLAS_ABI_5` | `loader/rocblas_loader.map` | Slice (load-bearing): tags the 11 real rocBLAS loader entry points (create/destroy handle, stream and pointer-mode accessors, `saxpy`/`sdot`, the `sgemm` family). |
-| `ROCM_INTERFACES_PROVIDER_1` | `providers/recording/recording_provider.map` | Slice (load-bearing): tags the single provider bootstrap symbol of the recording (shadow) provider; hides everything else. |
+| `ROCM_INTERFACES_PROVIDER_1` | `providers/provider.map` | Slice (load-bearing): tags the single provider bootstrap symbol of every recording and system-backed provider; hides everything else. |
 | `ROCBLAS_ABI_5` / `ROCBLAS_ABI_6` / `ROCBLAS_ABI_7` | `tests/abi04_rb5.map`, `tests/abi03_provA.map`, `tests/abi03_provB.map` | Test: three distinct majors used to prove co-residency, ordering, and interposition defeat. |
 | `ROCBLAS_ABI_6` | `tests/abi05_rocrand_cpp.map`, `tests/abi06_data.map` | Test: proves nodes attach to C++ mangled/RTTI symbols and to data objects. |
 | (anonymous, no node) | `tests/abi03_anon.map` | Test: the negative control - same symbols, no node, so interposition reproduces. |

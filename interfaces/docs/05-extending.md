@@ -15,9 +15,8 @@ add one:
    `build_id`, the `dispatch_table` pointer, its `dispatch_table_size`, and the ABI header.
 2. Fill the dispatch table for your domain (`blas.h`, `rand.h`, or `solver.h`). Start the
    table with `rocm_interfaces_abi_header` and set `struct_size` to the real size.
-3. Register the target through `add_recording_provider()` (or the equivalent) in
-   `providers/recording/CMakeLists.txt` so it inherits the `--version-script` that hides
-   everything but the one symbol.
+3. Register the target in `ROCM_INTERFACES_PROVIDER_TARGETS` and apply
+   `providers/provider.map`, which hides everything but the one bootstrap symbol.
 4. Route all logging through the host `trace` callback - never `printf`. Use the host
    `allocate`/`deallocate` callbacks for memory that crosses the ABI boundary or that the
    host must own or free; a provider's own private context (created in `create_context`,
@@ -26,13 +25,13 @@ add one:
    after the call returns.
 
 **Lock it.** `rocm_interfaces.exports` derives its provider list from the global
-`ROCM_INTERFACES_RECORDING_PROVIDERS` build-system property populated by
-`add_recording_provider()` and asserts that every listed DSO exports only
+`ROCM_INTERFACES_PROVIDER_TARGETS` build-system property populated by provider targets and
+asserts that every listed DSO exports only
 `rocm_interfaces_provider_query_v1` under the named version node. The independent
-`rocm_interfaces.exports_provider_list_complete` control enumerates recording-provider
-`MODULE_LIBRARY` targets from the build system and requires the two lists to match. Add new
-providers through `add_recording_provider()`; a registration/enumeration mismatch fails the
-completeness control instead of silently skipping export inspection.
+`rocm_interfaces.exports_provider_list_complete` control recursively enumerates all
+`MODULE_LIBRARY` targets under `providers/` and requires the two lists to match. A
+registration/enumeration mismatch fails the completeness control instead of silently
+skipping export inspection.
 
 ## Recipe: add a version node (a new ABI major)
 
