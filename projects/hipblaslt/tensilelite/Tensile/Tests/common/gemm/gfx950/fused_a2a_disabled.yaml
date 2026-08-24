@@ -1,0 +1,64 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# Fused GEMM+A2A (FusedGemmA2A=1) config for gfx950.
+#
+# "disabled" in the filename only makes the pytest config sweep skip this file
+# (Tests/common/config_helpers.py). Build by hand:
+#
+#     Tensile <this file> <output-dir> --build-only
+#
+# Benchmarking needs the fused client path (--fused-a2a --fused-a2a-world 4
+# --fused-a2a-am <AM>) on 4 gfx950 cards; the ordinary benchmark loop leaves the
+# A2A kernel arguments unset. AM must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0
+# and AM<=M.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  Device: 0
+  PrintSolutionRejectionReason: True
+  Architecture: gfx950
+  ISA: [[9, 5, 0]]
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT 256x256
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - WorkGroupMapping: [1]
+        - MIArchVgpr: [False]
+        - UseSubtileImpl: [True]
+        - FusedGemmA2A: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # One shape only: the fused client rejects multiple problems.
+          # Production shape is 18432x4096x8192 with AM 10240.
+          - Exact: [3072, 512, 1, 2048]      # AM 2048

@@ -219,6 +219,9 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if state.get("LDSSegmentInterleave") == 1:
     requiredParametersTemp.add("LDSSegmentInterleave")
 
+  if state.get("FusedGemmA2A") == 1:
+    requiredParametersTemp.add("FusedGemmA2A")
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernelName":
       continue
