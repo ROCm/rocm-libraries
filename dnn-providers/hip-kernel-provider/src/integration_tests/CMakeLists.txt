@@ -99,11 +99,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPDNN_PACKAGED_FIXTURE_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
     )
-    # Guarded rather than assumed: hkp_wire_demo() skips with a warning when hipcc is
-    # absent, and the suite is written to GTEST_SKIP in exactly that case. A hard
-    # dependency would turn a missing compiler into a configure error.
-    if(TARGET hkp_demo_packaging)
-        add_dependencies(hip_kernel_provider_integration_tests hkp_demo_packaging)
+    # Guarded rather than assumed: a root skips with a warning when hipcc is absent, and
+    # the suite is written to GTEST_SKIP in exactly that case. A hard dependency would
+    # turn a missing compiler into a configure error. hkp_descriptor_staging is the one
+    # target that owns the staged tree, whichever roots contributed to it.
+    if(TARGET hkp_descriptor_staging)
+        add_dependencies(hip_kernel_provider_integration_tests hkp_descriptor_staging)
     endif()
 endif()
 

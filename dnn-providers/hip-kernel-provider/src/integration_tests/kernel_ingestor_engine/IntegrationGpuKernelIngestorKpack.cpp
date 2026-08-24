@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
@@ -62,6 +63,12 @@ constexpr const char* PACKED_ENGINE_NAME = "hipkernel:pointwise_packed";
 /// reachable whatever state the packaged archive is in, and it claims the same single-node
 /// FLOAT add. That makes it the fallback ...SurvivesABrokenArchive requires to still serve.
 constexpr const char* SHIPPED_POINTWISE_ENGINE_NAME = "hipkernel:Pointwise";
+
+/// Distinguishes the packaged FIXTURE's archive from every other root's in the shared
+/// descriptor tree. Each source root packs under its own archive group, so the group name
+/// is what names an archive to a particular root; this is the group the fixture root is
+/// wired with in HkpPackaging.cmake (HKP_GROUP_TESTFIXTURE).
+constexpr const char* PACKED_FIXTURE_ARCHIVE_STEM = "testfixture";
 
 /// Header-length garbage: long enough that the file exists and is readable, short enough
 /// that no table of contents can be parsed out of it.
@@ -138,6 +145,31 @@ std::vector<std::filesystem::path> findKpackArchives(const std::filesystem::path
 
     std::sort(archives.begin(), archives.end());
     return archives;
+}
+
+/// The archives packed for `arch` specifically, which is not the same question as which
+/// archives exist.
+///
+/// The packer emits one shard per arch and the ingestor drops a pack whose arch the
+/// device does not satisfy, so on a device outside GPU_TARGETS the tree is full of
+/// archives that no engine here can ever claim. Asking only "was anything packed" then
+/// runs every case against an engine that cannot appear, and they fail for a reason that
+/// has nothing to do with what they test -- which cost real debugging time on a gfx90a
+/// box holding a gfx942 tree.
+std::vector<std::filesystem::path> findKpackArchivesForArch(const std::filesystem::path& root,
+                                                            const std::string& arch)
+{
+    std::vector<std::filesystem::path> matching;
+    for(const auto& archive : findKpackArchives(root))
+    {
+        // The shard directory is named for its arch: <root>/<arch>/kpack/<file>.kpack.
+        const auto shard = archive.parent_path().parent_path().filename().string();
+        if(shard == arch)
+        {
+            matching.push_back(archive);
+        }
+    }
+    return matching;
 }
 
 /// The directory holding the pristine archive. It sits beside the descriptor tree rather
@@ -226,14 +258,29 @@ protected:
             return;
         }
 
-        _archives = findKpackArchives(packagedDescriptorRoot());
-        if(_archives.empty())
+        const auto allArchives = findKpackArchives(packagedDescriptorRoot());
+        if(allArchives.empty())
         {
             GTEST_SKIP() << "packaged artifact absent -- packaging did not run. Looked for "
                             "*.kpack under "
                          << packagedDescriptorRoot()
                          << ". Configure with -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON and a hipcc "
                             "the packaging rule can find.";
+        }
+
+        // "Something was packed" is not "something was packed for THIS device". The
+        // packer emits one shard per arch and the ingestor drops a pack whose arch the
+        // device does not satisfy, so on a device outside GPU_TARGETS the engine below
+        // can never be a candidate and every case would fail asserting about it. That is
+        // environmental -- the build packed for other arches -- not a defect.
+        const auto arch = hip_kernel_provider_common::getDeviceString(_stream);
+        _archives = findKpackArchivesForArch(packagedDescriptorRoot(), arch);
+        if(_archives.empty())
+        {
+            GTEST_SKIP() << "nothing was packaged for this device (" << arch
+                         << "); the staged tree holds shards for other arches only. "
+                            "Add "
+                         << arch << " to GPU_TARGETS to exercise this suite here.";
         }
 
         // Before any case reads the staged tree, not just the one that damages it: gtest runs
@@ -323,7 +370,29 @@ protected:
             return;
         }
 
-        _victim = _archives.front();
+        // The archive THIS fixture's engine reads, chosen by name rather than by taking
+        // the first of a sorted list. Every source root stages into one descriptor tree
+        // and is told apart by its archive group, so the tree holds one .kpack per root;
+        // `front()` picked whichever sorted first, which is the product archive, and
+        // corrupting that leaves the packaged fixture engine perfectly loadable while the
+        // assertions below wait for a failure that never comes.
+        const auto victim = std::find_if(
+            _archives.begin(), _archives.end(), [](const std::filesystem::path& archive) {
+                return archive.filename().string().find(PACKED_FIXTURE_ARCHIVE_STEM)
+                       != std::string::npos;
+            });
+        ASSERT_NE(victim, _archives.end())
+            << "no staged archive is named for the packaged fixture ('"
+            << PACKED_FIXTURE_ARCHIVE_STEM << "'), so there is nothing this suite can break "
+            << "that its own engine would read. Staged archives: " << [this] {
+                   std::string names;
+                   for(const auto& archive : _archives)
+                   {
+                       names += archive.filename().string() + " ";
+                   }
+                   return names;
+               }();
+        _victim = *victim;
 
         const auto backupRoot = backupRootPath();
         const auto backupName = _victim.filename().string() + PRISTINE_SUFFIX;
