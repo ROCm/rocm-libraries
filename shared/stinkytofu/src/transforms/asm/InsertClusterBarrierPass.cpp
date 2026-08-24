@@ -699,6 +699,15 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
                                  preClampOutOfSegmentAnchor, segBegin, referenceAnchor, clamped);
     };
 
+    // Lead met but SCC still live on the climb path: scan down from the first lead point
+    // toward the wait instead of crossing into the preheader.
+    auto downwardFromLeadMet = [&]() -> Rule3SignalAnchor {
+        if (leadPoint == nullptr) return report(clearSccNote(defaultAnchor));
+        StinkyInstruction* dead = findSccDeadPointBelow(leadPoint, referenceAnchor);
+        if (dead == nullptr) return report(clearSccNote(defaultAnchor));
+        return report(clearSccNote(static_cast<IRBase*>(dead)));
+    };
+
     // kRule3CrossLoop true only: wait→head; part B latch→anchor for the remainder.
     auto scanTailForRemainder = [&](StinkyInstruction* latch, int64_t headAccum,
                                     int64_t remainder) -> Rule3SignalAnchor {
@@ -790,10 +799,11 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
                     if (latch == nullptr) return report(clearSccNote(curSegBegin.getNodePtr()));
                     return scanTailForRemainder(latch, accum, leadCycles - accum);
                 }
-                if (accum >= leadCycles) continue;
+                if (targetMet && sccLive) return downwardFromLeadMet();
             }
             // Stops at segment boundary once maxHops is exhausted (0 when kRule3CrossLoop false).
             if (hops >= maxHops || isCall(*inst) || isUnconditionalBranch(*inst)) {
+                if (targetMet && sccLive) return downwardFromLeadMet();
                 return report(clearSccNote(curSegBegin.getNodePtr()));
             }
             if (isLabel(*inst)) {
@@ -830,6 +840,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
                 targetMet = true;
             }
         }
+        if (targetMet && sccLive && accum >= maxLeadCycles) return downwardFromLeadMet();
         // clearScc has the last word even here. `sccLive` is carried along the one path the
         // climb took, while clearScc reads the range off the code below the anchor, so it
         // also covers a reader the climb never walked past.
