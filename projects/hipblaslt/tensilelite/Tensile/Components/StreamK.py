@@ -144,11 +144,12 @@ class StreamKMemoryOrdering(Component):
     def preVolatileVmem(self, writer, comment="") -> Module:
         """Drain in-flight VMEM (XNACK-replay) before a volatile/atomic VMEM op.
 
-        Required on arches with `RequiresXCntForVolatileVMEM`. No-op
-        elsewhere.
+        Required on arches with `RequiresXCntForVolatileVMEM` or
+        `EnableXnackReplay`. No-op elsewhere.
         """
         module = Module("StreamK pre-volatile VMEM drain")
-        if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
+        if writer.states.archCaps["RequiresXCntForVolatileVMEM"] or \
+                writer.states.archCaps["EnableXnackReplay"]:
             module.add(SWaitXCnt(xcnt=0, comment=comment))
         return module
 
@@ -2617,10 +2618,10 @@ class StreamK(Component):
 
         return module
     
-    def stridedBatchOrGeneralBatch(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+    def stridedBatchOrGeneralBatch(self, writer, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
         module = Module("StreamK stridedBatchOrGeneralBatch")
         if kernel["ProblemType"]["SupportUserArgs"]:
-            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+            writer.cmpNamedArgTypeEq(module, 3, "ArgType == 3 for General Batched GEMM")
             module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
             # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
             # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
@@ -2641,7 +2642,7 @@ class StreamK(Component):
         pass
 
     @abc.abstractmethod
-    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+    def routeToGeneralBatchedOrStridedBatched(self, writer, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
         pass
 
     @abc.abstractmethod
@@ -2741,7 +2742,7 @@ class StreamKOff(StreamK):
         module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="General Batched GEMM, Srd initialized to 0"))
         return module
 
-    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+    def routeToGeneralBatchedOrStridedBatched(self, writer, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
         module = Module("StreamK Off routeToGeneralBatchedOrStridedBatched")
         return module
 
@@ -3349,9 +3350,9 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
         return module        
 
-    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+    def routeToGeneralBatchedOrStridedBatched(self, writer, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
         module = Module("StreamK TwoTileDPFirst routeToGeneralBatchedOrStridedBatched")
-        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
+        module.add(self.stridedBatchOrGeneralBatch(writer, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
 
     def kernelEnd(self, writer, kernel):
@@ -3764,9 +3765,9 @@ class StreamKDynamic(StreamK):
         module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
         return module        
 
-    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+    def routeToGeneralBatchedOrStridedBatched(self, writer, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
         module = Module("StreamK Dynamic routeToGeneralBatchedOrStridedBatched")
-        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
+        module.add(self.stridedBatchOrGeneralBatch(writer, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
         
     def kernelEnd(self, writer, kernel):
@@ -4603,9 +4604,9 @@ class StreamKHybrid(StreamK):
         module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
         return module
 
-    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+    def routeToGeneralBatchedOrStridedBatched(self, writer, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
         module = Module("StreamK Hybrid routeToGeneralBatchedOrStridedBatched")
-        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
+        module.add(self.stridedBatchOrGeneralBatch(writer, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
 
     def kernelEnd(self, writer, kernel):
