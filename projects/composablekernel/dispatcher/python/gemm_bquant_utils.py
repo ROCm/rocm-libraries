@@ -29,16 +29,25 @@ import ctypes
 import json
 import functools
 import logging
-import os
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import concurrent.futures
 
 log = logging.getLogger(__name__)
+
+# Shared quant-bridge scaffolding (ctypes API install, codegen subprocess, build
+# orchestration, CK include probe). Op-specific parts stay in this file.
+if str(Path(__file__).parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent))
+from quant_bridge_base import (  # noqa: E402
+    DispatcherLibBase,
+    build_dispatchers,
+    find_ck_include_dir,
+    generate_kernel,
+)
 
 # =============================================================================
 # Constants
@@ -284,7 +293,7 @@ class BQuantGemmResult:
 # =============================================================================
 
 
-class BQuantDispatcherLib:
+class BQuantDispatcherLib(DispatcherLibBase):
     """
     Loads a compiled gemm_bquant .so and wraps its C API.
 
@@ -296,51 +305,31 @@ class BQuantDispatcherLib:
       char* dispatcher_get_kernel_name()
       int   dispatcher_get_kernel_count()
       void  dispatcher_cleanup()
+
+    The initialize / get_kernel_name / get_kernel_count / cleanup scaffold lives
+    in DispatcherLibBase; only the op-specific dispatcher_run argtypes (below) and
+    the run() marshalling stay here.
     """
 
-    def __init__(self, so_path: Path):
-        self.so_path = Path(so_path)
-        if not self.so_path.exists():
-            raise FileNotFoundError(f"BQuant .so not found: {self.so_path}")
-        self._lib = ctypes.CDLL(str(self.so_path))
-        self._setup()
-        rc = self._lib.dispatcher_initialize()
-        if rc != 0:
-            raise RuntimeError(f"dispatcher_initialize() returned {rc}")
-
-    def _setup(self):
-        lib = self._lib
-
-        lib.dispatcher_initialize.restype  = ctypes.c_int
-        lib.dispatcher_initialize.argtypes = []
-
-        lib.dispatcher_run_bquant_gemm.restype  = ctypes.c_int
-        lib.dispatcher_run_bquant_gemm.argtypes = [
-            ctypes.c_void_p,   # A
-            ctypes.c_void_p,   # B
-            ctypes.c_void_p,   # BQ
-            ctypes.c_void_p,   # C
-            ctypes.c_int64,    # M
-            ctypes.c_int64,    # N
-            ctypes.c_int64,    # K
-            ctypes.c_int64,    # stride_A
-            ctypes.c_int64,    # stride_B
-            ctypes.c_int64,    # stride_BQ
-            ctypes.c_int64,    # stride_C
-            ctypes.c_int64,    # QK_B
-            ctypes.c_int64,    # QN_B
-            ctypes.c_int,      # k_batch
-            ctypes.POINTER(ctypes.c_float),  # time_ms
-        ]
-
-        lib.dispatcher_get_kernel_name.restype  = ctypes.c_char_p
-        lib.dispatcher_get_kernel_name.argtypes = []
-
-        lib.dispatcher_get_kernel_count.restype  = ctypes.c_int
-        lib.dispatcher_get_kernel_count.argtypes = []
-
-        lib.dispatcher_cleanup.restype  = None
-        lib.dispatcher_cleanup.argtypes = []
+    _NOT_FOUND_LABEL = "BQuant"
+    _RUN_SYMBOL = "dispatcher_run_bquant_gemm"
+    _RUN_ARGTYPES = [
+        ctypes.c_void_p,   # A
+        ctypes.c_void_p,   # B
+        ctypes.c_void_p,   # BQ
+        ctypes.c_void_p,   # C
+        ctypes.c_int64,    # M
+        ctypes.c_int64,    # N
+        ctypes.c_int64,    # K
+        ctypes.c_int64,    # stride_A
+        ctypes.c_int64,    # stride_B
+        ctypes.c_int64,    # stride_BQ
+        ctypes.c_int64,    # stride_C
+        ctypes.c_int64,    # QK_B
+        ctypes.c_int64,    # QN_B
+        ctypes.c_int,      # k_batch
+        ctypes.POINTER(ctypes.c_float),  # time_ms
+    ]
 
     def run(
         self,
@@ -841,12 +830,7 @@ def _detect_gpu_arch() -> str:
 def _get_ck_include_dir() -> Optional[Path]:
     """Attempt to locate the CK include directory relative to this file."""
     # Walk up from dispatcher/python/ to find project root
-    here = Path(__file__).resolve().parent
-    for parent in [here.parent.parent, here.parent.parent.parent]:
-        candidate = parent / "include"
-        if (candidate / "ck_tile").is_dir():
-            return candidate
-    return None
+    return find_ck_include_dir()
 
 
 def _generate_bquant_kernel(
@@ -856,34 +840,7 @@ def _generate_bquant_kernel(
     """
     Run unified_gemm_bquant_codegen.py for one config; return the .hpp path or None.
     """
-    config_dict = config.to_codegen_config()
-    config_json = json.dumps(config_dict)
-
-    cmd = [
-        sys.executable,
-        str(_CODEGEN_SCRIPT),
-        "--output-dir", str(output_dir),
-        "--config-json", config_json,
-    ]
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True, text=True, timeout=120,
-        )
-        if result.returncode != 0:
-            log.error("Codegen failed for %s:\n%s", config.name, result.stderr)
-            return None
-    except subprocess.TimeoutExpired:
-        log.error("Codegen timed out for %s", config.name)
-        return None
-
-    hpp = output_dir / f"{config.name}.hpp"
-    if not hpp.exists():
-        log.error("Codegen succeeded but %s not found", hpp)
-        return None
-
-    return hpp
+    return generate_kernel(config, output_dir, _CODEGEN_SCRIPT)
 
 
 def _get_dispatcher_static_lib() -> Optional[Path]:
@@ -1031,80 +988,23 @@ def setup_multiple_bquant_dispatchers(
     for cfg in configs:
         _require_mx_arch(cfg.variant_key, arch)
 
-    base_dir = output_dir or Path(tempfile.mkdtemp(prefix="gemm_bquant_dispatcher_"))
-    base_dir.mkdir(parents=True, exist_ok=True)
-
-    headers_dir = base_dir / "generated_kernels"
-    so_dir      = base_dir / "libs"
-    headers_dir.mkdir(exist_ok=True)
-    so_dir.mkdir(exist_ok=True)
-
-    log.info(
-        "Building %d gemm_bquant kernel(s) for %s into %s",
-        len(configs), arch, base_dir,
-    )
-
-    # Deduplicate by name so we don't build the same kernel twice
-    seen: Dict[str, int] = {}          # name -> index of first occurrence
-    deduped: List[Tuple[int, BQuantKernelConfig]] = []
-    for i, cfg in enumerate(configs):
-        if cfg.name not in seen:
-            seen[cfg.name] = i
-            deduped.append((i, cfg))
-
-    # results[i] = Path or None, aligned with input configs
-    results: List[Optional[Path]] = [None] * len(configs)
-
-    def _build_one(idx: int, cfg: BQuantKernelConfig) -> Tuple[int, Optional[Path]]:
-        hpp = _generate_bquant_kernel(cfg, headers_dir)
-        if hpp is None:
-            return idx, None
-
-        so = so_dir / f"lib{cfg.name}_{arch}.so"
-        if so.exists():
-            log.info("  [cached] %s", so.name)
-            return idx, so
-
-        ok = _compile_bquant_kernel(
-            hpp_path=hpp,
-            so_path=so,
-            gfx_arch=arch,
-            hipcc=hipcc,
-            extra_include_dirs=extra_include_dirs,
+    def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
+        return _compile_bquant_kernel(
+            hpp_path=hpp, so_path=so, gfx_arch=a,
+            hipcc=hipcc, extra_include_dirs=extra_include_dirs,
         )
-        return idx, so if ok else None
 
-    if parallel and len(deduped) > 1:
-        workers = max_workers or min(len(deduped), os.cpu_count() or 4)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-            futures = {ex.submit(_build_one, idx, cfg): (idx, cfg) for idx, cfg in deduped}
-            for fut in concurrent.futures.as_completed(futures):
-                try:
-                    idx, so_path = fut.result()
-                    results[idx] = so_path
-                    if so_path:
-                        log.info("  built %s", so_path.name)
-                    else:
-                        _, cfg = futures[fut]
-                        log.error("  FAILED %s", cfg.name)
-                except Exception as e:
-                    _, cfg = futures[fut]
-                    log.error("  EXCEPTION for %s: %s", cfg.name, e)
-    else:
-        for idx, cfg in deduped:
-            _, so_path = _build_one(idx, cfg)
-            results[idx] = so_path
-
-    # Fill in duplicates
-    for i, cfg in enumerate(configs):
-        if results[i] is None:
-            first_idx = seen.get(cfg.name)
-            if first_idx is not None and first_idx != i:
-                results[i] = results[first_idx]
-
-    built = sum(1 for r in results if r is not None)
-    log.info("Built %d / %d gemm_bquant kernels", built, len(configs))
-    return results
+    return build_dispatchers(
+        configs,
+        arch=arch,
+        tmp_prefix="gemm_bquant_dispatcher_",
+        log_label="gemm_bquant",
+        generate_fn=_generate_bquant_kernel,
+        compile_fn=_compile_fn,
+        output_dir=output_dir,
+        parallel=parallel,
+        max_workers=max_workers,
+    )
 
 
 # =============================================================================
