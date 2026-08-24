@@ -95,9 +95,8 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( hipfft-clients-tests LANGUAGES CXX )
-
-if( NOT HIPFFT_BUILD_SCOPE )
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( hipfft-clients-tests LANGUAGES CXX )
   find_package( hipfft REQUIRED CONFIG PATHS )
 endif()
 
