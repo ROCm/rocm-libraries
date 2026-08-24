@@ -5186,7 +5186,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     _deferLra = (kernel.get("UseSubtileImpl")
                  and kernel["PrefetchGlobalRead"] >= 1
                  and not hasTDM
-                 and self._plsinAlphaSkipEligible(kernel))
+                 and self._plsinFusedFlagEligible(kernel))
     self._deferredPreloopLraModules = None
     _lraModule     = lraTileAssignment(self, kernel)
     _lraSwapModule = localReadDTLInitCommonSwapVgpr(self, kernel)
@@ -5248,11 +5248,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # (globalWriteWorkGroupInit channels=None, baseline behavior), and the FUSED NLL
       # store defines a transient SrdD from the drain-era pool (buildSubtileFusedStore).
 
-    # PostLoopStoreInNll: precompute the "effective alpha == 1" predicate into the
-    # persistent PostLoopFusedStore SGPR BEFORE the main loop, while Alpha / ArgType /
-    # KernArgAddress are live and the fused-store guard sites are still downstream. The
-    # scalar scaleA/scaleB pointers are only materialized in the epilogue (after both
-    # guard sites), so this null-safe check reads them straight from KernArgAddress.
+    # PostLoopStoreInNll: precompute the structural fused-store predicate into the
+    # persistent PostLoopFusedStore SGPR BEFORE the main loop. Alpha is deliberately
+    # excluded: the fused epilogue applies its normal scalar multiply for every value.
     #
     # PLSIN guard-hoist (subtile fused-store path ONLY): when this kernel prefetches
     # global reads (PGR>=1), DEFER the fold into the preloop global-read shadow
@@ -5262,7 +5260,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # path. PGR==0 (no shadow) and non-fused-store-eligible kernels emit here unchanged
     # -- computePostLoopFusedStore returns an empty module for the latter, so the
     # non-subtile / non-eligible code path is byte-identical.
-    _plsinDeferFold = (self._plsinAlphaSkipEligible(kernel)
+    _plsinDeferFold = (self._plsinFusedFlagEligible(kernel)
                        and kernel["PrefetchGlobalRead"] >= 1)
     if not _plsinDeferFold:
       module.add(self.computePostLoopFusedStore(kernel))
@@ -9625,9 +9623,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # PostLoopStoreInNll: persistent "this tile fuses the store" predicate, precomputed
     # per-tile before the main loop (see computePostLoopFusedStore). It ANDs every
-    # fused-store sub-guard (eff-alpha==1, no-tail, numIter>=minIter, beta==0,
-    # full-tile M/N, StreamK owner) into one bit so all three guard sites collapse to a
-    # single flag compare, and still implies eff-alpha==1 for the epilogue alpha-skip.
+    # fused-store structural sub-guard (no-tail, beta==0, full-tile M/N, StreamK
+    # owner) into one bit so all three guard sites collapse to a single flag compare.
+    # Alpha is applied by the fused epilogue and is not part of this predicate.
     # Defined here (before the nonPostLoopSgpr snapshot below) so it survives
     # endSummation and is live at all guard sites. Only defined when the optimization is
     # eligible so non-PLSIN / non-fp32-compute kernels are unaffected.

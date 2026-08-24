@@ -4138,14 +4138,14 @@ class LogicalScheduler:
         # pre-main-loop critical path (KernelWriter defers it here when PGR>=1). The
         # preloop is emitted unscheduled (schedule=False, sequential list order), so a
         # simple list splice just before the first wait_gr lands the fold in the shadow.
-        # Subtile fused-store path only (guarded by _plsinAlphaSkipEligible); PGR==0 and
+        # Subtile fused-store path only (guarded by _plsinFusedFlagEligible); PGR==0 and
         # every other kernel are untouched.
         #
         # Must run before the deepcopy below, which snapshots _preloop_emitted.
         if (self.config.pgr >= 1
                 and not getattr(self, "_foldInjectedIntoPreloop", False)
-                and hasattr(writer, "_plsinAlphaSkipEligible")
-                and writer._plsinAlphaSkipEligible(kernel)
+                and hasattr(writer, "_plsinFusedFlagEligible")
+                and writer._plsinFusedFlagEligible(kernel)
                 and self._preloop_emitted
                 and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
             fold_module = writer.computePostLoopFusedStore(kernel)
