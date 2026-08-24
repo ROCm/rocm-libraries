@@ -179,6 +179,15 @@ The AMDGPU LLVM backend may replace a `load <8 x half>, ptr addrspace(3)` that f
 
 - `ImplicitGemmConvSpec.groups > 1` supported on CDNA. The descriptor adds a group-unmerge to keep each group's GEMM within its `(C/groups, K/groups)` slab.
 
+### Per-group vector-size derivation for grouped convolutions
+
+`default_vector_sizes` and the `is_valid_spec` gate were both called with the
+**total** `C` and `K` values instead of the per-group `cpg = C/groups` and
+`kpg = K/groups`. For grouped convolutions the output tensor `D` (NHWK) is
+indexed within a group's slab — the relevant stride-1 dimension has extent `kpg`,
+not `K`. Using `K` produced an over-wide `vec_c` that did not divide `kpg` and
+wrote out-of-bounds when `K % vec_c == 0` but `kpg % vec_c != 0`.
+
 ### Accumulator epilogue
 
 - `ConvAccumulatorEpilogue` applies optional `bias`, `scale`, `relu`, `clamp_min`/`clamp_max` directly on MFMA f32 fragments before the D-store path.

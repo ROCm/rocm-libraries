@@ -807,6 +807,20 @@ DEF_T(VReadfirstlaneB32Inst, "v_readfirstlane_b32", .format = VOP1, .logical = "
         {S0, src0, vgpr, 32},
     },
 )
+DEF_T(VReadlaneB32Inst, "v_readlane_b32", .format = VOP3_2SRC, .logical = "VReadlaneB32",
+    .operand_fields = {
+        {D0, vdst, sreg, 32},
+        {S0, src0, vgpr, 32},
+        {S1, src1, ssrc, 32},
+    },
+)
+DEF_T(VWritelaneB32Inst, "v_writelane_b32", .format = VOP3_2SRC, .logical = "VWritelaneB32",
+    .operand_fields = {
+        {D0, vdst, vgpr, 32, RW},
+        {S0, src0, ssrc, 32},
+        {S1, src1, ssrc, 32},
+    },
+)
 
 // Vector ALU — VOP1 only (special swap)
 DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
