@@ -191,6 +191,58 @@ Standalone 60-CU numbers from `analyze.py` (vs each catalog's own A/A floor):
 contrast takes best-of-reps per shape, so more reps can only make the 60-CU arm look *better* —
 which means the measured shift is, if anything, conservative.
 
+## Fourth use: the catalog-extension rejection, tightened — and where the headroom actually is
+
+The third rejected hypothesis ("extending the catalog past ~300 solutions is worth only +2.8%
+oracle") was the one never re-tested in the matched regime. It costs no GPU time: five distinct
+libraries were measured at genuine 60 CUs over the same 207 shapes, so the oracle can be
+recomputed directly.
+
+**The control that makes this readable.** An oracle taken *across separate sweeps* picks the
+luckiest measurement per shape, so it is inflated by run-to-run noise **even when every arm is
+the same library** — and the inflation grows with how many arms you minimise over. Measured, by
+taking oracles over k copies of `wgm8`:
+
+| k arms | same-library oracle = pure noise |
+|---|---|
+| 2 | 100.02% |
+| 3 | 100.43% |
+| 4 | 100.71% |
+| 5 | **100.94%** |
+
+Any k-arm oracle must be read against the floor **of matching cardinality**. Comparing a 2-arm
+oracle to a 5-arm floor, or quoting a raw oracle at all, overstates the opportunity.
+
+| oracle set | raw | floor | **real** |
+|---|---|---|---|
+| `wgm8` + `pred298` | 101.49% | 100.02% | **+1.47** |
+| `wgm8` + `wgm6` + `wgm10` | 100.47% | 100.43% | **+0.05** |
+| `wgm8` + `pred298` + `navi32ship` | 101.63% | 100.43% | +1.21 |
+| everything built (9 arms) | 102.65% | 100.94% | **+1.71** |
+
+**Three things fall out.**
+
+1. **The catalog-extension rejection holds, and tightens.** Perfect per-shape selection over
+   *everything* built is worth **+1.71 pt**, below the +2.8% originally quoted — which was a raw
+   oracle at 96 CUs with no noise floor subtracted.
+
+2. **The WGM variants add +0.05 pt.** A third independent confirmation of the WGM null, from a
+   different direction than either previous test: even an oracle that could pick the best WGM
+   per shape gains nothing.
+
+3. **Prediction supplies +1.47 of the +1.71.** Essentially *all* the remaining headroom comes
+   from combining GridBased with Origami's analytical selection — **not from more kernels.**
+   That reframes the improvement path: the opportunity is in the **selector**, not the catalog.
+
+This is consistent with the head-to-head result above — Prediction ties GridBased on large and
+medium shapes and loses only on small ones — and with a finding from an earlier gfx1100
+campaign, that a real hybrid needs **a problem-size row predicate in C++, not a bigger catalog**.
+
+**An oracle is not an achievable number.** It assumes perfect per-shape foreknowledge; a real
+size-gated selector would capture some fraction of +1.47. What it bounds is where the
+opportunity *is*, and it says the catalog is done.
+
+
 ## Reproduce
 
 ```bash
