@@ -165,6 +165,62 @@ void test_manifest_loading() {
     require(lease->provider_id() == "recording-blas-legacy", "manifest selected wrong provider");
 }
 
+void test_manifest_validation() {
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / "rocm-interfaces-strict-manifest-test";
+    std::filesystem::create_directories(directory);
+    const std::filesystem::path provider = directory / "blas-provider.so";
+    std::filesystem::copy_file(BLAS_PROVIDER_PATH, provider,
+                               std::filesystem::copy_options::overwrite_existing);
+    const std::filesystem::path manifest = directory / "providers.json";
+
+    const auto rejected = [&](const std::string& contents, const char* label) {
+        std::ofstream stream(manifest);
+        stream << contents;
+        stream.close();
+        rocm::interfaces::ProviderRegistry registry;
+        bool failed = false;
+        try {
+            registry.load_manifest(manifest);
+        } catch (const std::invalid_argument&) {
+            failed = true;
+        }
+        require(failed, label);
+        bool mutated = false;
+        try {
+            (void)registry.select(ROCM_INTERFACES_DOMAIN_BLAS, 942,
+                                  sizeof(rocm_blas_provider_v1));
+            mutated = true;
+        } catch (const std::runtime_error&) {
+        }
+        require(!mutated, "a rejected manifest partially mutated the registry");
+    };
+
+    rejected(
+        R"({"schema_version":1,"providers":[{"id":"recording-blas-legacy","domain":"blas","module":"blas-provider.so"}],"unknown":true})",
+        "manifest accepted an unknown root key");
+    rejected(
+        R"({"schema_version":1,"providers":[{"id":"recording-blas-legacy","domain":"blas","module":"blas-provider.so","unknown":true}]})",
+        "manifest accepted an unknown provider key");
+    rejected(
+        R"({"schema_version":1,"providers":[{"id":"recording-blas-legacy","domain":"blas","module":"/tmp/provider.so"}]})",
+        "manifest accepted an absolute module path");
+    rejected(
+        R"({"schema_version":1,"providers":[{"id":"recording-blas-legacy","domain":"blas","module":"../provider.so"}]})",
+        "manifest accepted a module path escaping its directory");
+    rejected(
+        R"({"schema_version":1,"providers":[{"id":"recording-blas-legacy","domain":"blas","module":"blas-provider.so","gfx":[-1]}]})",
+        "manifest accepted a negative gfx value");
+    rejected(
+        R"({"schema_version":1,"providers":[{"id":"recording-blas-legacy","domain":"blas","module":"blas-provider.so","gfx":[942,942]}]})",
+        "manifest accepted a duplicate id/domain/gfx entry");
+    rejected(R"({"schema_version":1,"providers":[]})",
+             "manifest accepted an empty provider list");
+    rejected(
+        R"({"schema_version":1,"providers":[{"id":"recording-blas-legacy","domain":"blas","module":"blas-provider.so"},{"id":"broken","domain":"blas","module":"blas-provider.so","unknown":true}]})",
+        "manifest accepted a partially valid document");
+}
+
 void test_host_service_isolation() {
     TraceLog first_log;
     TraceLog second_log;
@@ -221,6 +277,7 @@ int main() {
         test_public_enum_invariants();
         test_end_to_end();
         test_manifest_loading();
+        test_manifest_validation();
         test_host_service_isolation();
         test_combined_blas_provider();
     } catch (const std::exception& error) {

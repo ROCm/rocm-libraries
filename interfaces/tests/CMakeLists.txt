@@ -40,6 +40,144 @@ target_compile_definitions(rocblas_narrow_v2_test PRIVATE
   BLAS_PROVIDER_PATH="$<TARGET_FILE:rocm_blas_narrow_v2_provider_recording>")
 add_test(NAME rocm_interfaces.rocblas_narrow_v2 COMMAND rocblas_narrow_v2_test)
 
+if(ROCM_INTERFACES_BUILD_REAL_ROCBLAS_PROVIDER)
+  find_library(ROCM_INTERFACES_SYSTEM_ROCBLAS_LIBRARY
+    NAMES rocblas
+    HINTS ${CMAKE_PREFIX_PATH}
+    PATH_SUFFIXES lib lib64)
+
+  add_library(rocm_interfaces_incomplete_rocblas_backend SHARED
+    incomplete_rocblas_backend.cpp)
+  target_include_directories(rocm_interfaces_incomplete_rocblas_backend PRIVATE
+    ${ROCM_INTERFACES_STAGED_INCLUDE})
+  target_link_libraries(rocm_interfaces_incomplete_rocblas_backend PRIVATE hip::host)
+  target_compile_definitions(rocm_interfaces_incomplete_rocblas_backend PRIVATE
+    __HIP_PLATFORM_AMD__=1)
+  set_target_properties(rocm_interfaces_incomplete_rocblas_backend PROPERTIES
+    OUTPUT_NAME rocblas-incomplete-backend)
+
+  add_executable(rocblas_real_provider_failure_test
+    rocblas_real_provider_failure_test.cpp)
+  target_include_directories(rocblas_real_provider_failure_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/protocols/include
+    ${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}
+    ${ROCM_INTERFACES_STAGED_INCLUDE})
+  target_link_libraries(rocblas_real_provider_failure_test PRIVATE
+    ${CMAKE_DL_LIBS}
+    hip::host)
+  target_compile_definitions(rocblas_real_provider_failure_test PRIVATE
+    __HIP_PLATFORM_AMD__=1)
+  add_dependencies(rocblas_real_provider_failure_test
+    rocm_rocblas_bridge_provider_system
+    rocm_interfaces_incomplete_rocblas_backend)
+  add_test(NAME rocm_interfaces.real_provider_missing_backend
+    COMMAND rocblas_real_provider_failure_test
+      $<TARGET_FILE:rocm_rocblas_bridge_provider_system>
+      ${CMAKE_CURRENT_BINARY_DIR}/does-not-exist/librocblas.so.5)
+  add_test(NAME rocm_interfaces.real_provider_incomplete_backend
+    COMMAND rocblas_real_provider_failure_test
+      $<TARGET_FILE:rocm_rocblas_bridge_provider_system>
+      $<TARGET_FILE:rocm_interfaces_incomplete_rocblas_backend>)
+
+  add_library(rocm_interfaces_narrow_backend_fixture SHARED
+    rocblas_narrow_backend_fixture.cpp)
+  target_include_directories(rocm_interfaces_narrow_backend_fixture PRIVATE
+    ${ROCM_INTERFACES_STAGED_INCLUDE})
+  target_link_libraries(rocm_interfaces_narrow_backend_fixture PRIVATE hip::host)
+  target_compile_definitions(rocm_interfaces_narrow_backend_fixture PRIVATE
+    __HIP_PLATFORM_AMD__=1)
+  set_target_properties(rocm_interfaces_narrow_backend_fixture PROPERTIES
+    OUTPUT_NAME rocblas-narrow-backend-fixture)
+
+  add_executable(rocblas_narrow_v2_real_test rocblas_narrow_v2_real_test.cpp)
+  target_include_directories(rocblas_narrow_v2_real_test PRIVATE
+    ${ROCM_INTERFACES_STAGED_INCLUDE})
+  target_link_libraries(rocblas_narrow_v2_real_test PRIVATE
+    rocblas_narrow_v2_loader_shadow
+    hip::host)
+  target_compile_definitions(rocblas_narrow_v2_real_test PRIVATE
+    __HIP_PLATFORM_AMD__=1
+    REAL_NARROW_PROVIDER_PATH="$<TARGET_FILE:rocm_blas_narrow_v2_provider_system>"
+    NARROW_BACKEND_PATH="$<TARGET_FILE:rocm_interfaces_narrow_backend_fixture>")
+  add_dependencies(rocblas_narrow_v2_real_test
+    rocm_blas_narrow_v2_provider_system
+    rocm_interfaces_narrow_backend_fixture)
+  add_test(NAME rocm_interfaces.rocblas_narrow_v2_real_vector_transform
+    COMMAND rocblas_narrow_v2_real_test)
+
+  if(ROCM_INTERFACES_SYSTEM_ROCBLAS_LIBRARY)
+    add_executable(rocblas_real_provider_test rocblas_real_provider_test.cpp)
+    target_include_directories(rocblas_real_provider_test PRIVATE
+      ${PROJECT_SOURCE_DIR}/protocols/include
+      ${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}
+      ${ROCM_INTERFACES_STAGED_INCLUDE})
+    target_link_libraries(rocblas_real_provider_test PRIVATE
+      rocblas_loader_shadow
+      ${CMAKE_DL_LIBS}
+      hip::host)
+    target_compile_definitions(rocblas_real_provider_test PRIVATE
+      __HIP_PLATFORM_AMD__=1
+      REAL_PROVIDER_PATH="$<TARGET_FILE:rocm_rocblas_bridge_provider_system>"
+      REAL_NARROW_PROVIDER_PATH="$<TARGET_FILE:rocm_blas_narrow_v2_provider_system>"
+      REAL_ROCBLAS_PATH="${ROCM_INTERFACES_SYSTEM_ROCBLAS_LIBRARY}")
+    add_dependencies(rocblas_real_provider_test
+      rocm_rocblas_bridge_provider_system
+      rocm_blas_narrow_v2_provider_system)
+    add_test(NAME rocm_interfaces.rocblas_real_provider_differential
+      COMMAND rocblas_real_provider_test)
+
+    find_package(Threads REQUIRED)
+    add_executable(rocblas_real_provider_concurrency_test
+      rocblas_real_provider_concurrency_test.cpp)
+    target_include_directories(rocblas_real_provider_concurrency_test PRIVATE
+      ${ROCM_INTERFACES_STAGED_INCLUDE})
+    target_link_libraries(rocblas_real_provider_concurrency_test PRIVATE
+      rocblas_loader_shadow
+      Threads::Threads
+      hip::host)
+    target_compile_definitions(rocblas_real_provider_concurrency_test PRIVATE
+      __HIP_PLATFORM_AMD__=1
+      REAL_PROVIDER_PATH="$<TARGET_FILE:rocm_rocblas_bridge_provider_system>"
+      REAL_ROCBLAS_PATH="${ROCM_INTERFACES_SYSTEM_ROCBLAS_LIBRARY}")
+    add_dependencies(rocblas_real_provider_concurrency_test
+      rocm_rocblas_bridge_provider_system)
+    add_test(NAME rocm_interfaces.rocblas_real_provider_concurrency
+      COMMAND rocblas_real_provider_concurrency_test)
+
+    if(ROCM_INTERFACES_ENABLE_GPU_TESTS)
+      add_executable(rocblas_gpu_differential_test rocblas_gpu_differential_test.cpp)
+      target_include_directories(rocblas_gpu_differential_test PRIVATE
+        ${ROCM_INTERFACES_STAGED_INCLUDE})
+      target_link_libraries(rocblas_gpu_differential_test PRIVATE
+        ${CMAKE_DL_LIBS}
+        hip::host)
+      target_compile_definitions(rocblas_gpu_differential_test PRIVATE
+        __HIP_PLATFORM_AMD__=1
+        REAL_ROCBLAS_PATH="${ROCM_INTERFACES_SYSTEM_ROCBLAS_LIBRARY}"
+        REAL_PROVIDER_PATH="$<TARGET_FILE:rocm_rocblas_bridge_provider_system>"
+        REAL_NARROW_PROVIDER_PATH="$<TARGET_FILE:rocm_blas_narrow_v2_provider_system>"
+        EXHAUSTIVE_LOADER_PATH="$<TARGET_FILE:rocblas_loader_shadow>"
+        NARROW_LOADER_PATH="$<TARGET_FILE:rocblas_narrow_v2_loader_shadow>")
+      add_dependencies(rocblas_gpu_differential_test
+        rocm_rocblas_bridge_provider_system
+        rocm_blas_narrow_v2_provider_system
+        rocblas_loader_shadow
+        rocblas_narrow_v2_loader_shadow)
+      add_test(NAME rocm_interfaces.rocblas_gpu_differential
+        COMMAND rocblas_gpu_differential_test)
+      set_tests_properties(rocm_interfaces.rocblas_gpu_differential PROPERTIES
+        LABELS gpu
+        RUN_SERIAL TRUE
+        SKIP_RETURN_CODE 77
+        TIMEOUT 300)
+    endif()
+  else()
+    message(WARNING
+      "Canonical rocBLAS DSO not found: real-provider differential, installed-manifest "
+      "runtime, and concurrency checks will not be registered")
+  endif()
+endif()
+
 add_executable(rocblas_bridge_link_test
   "${ROCM_INTERFACES_ROCBLAS_GENERATED_DIR}/rocblas_bridge_link_test.cpp")
 add_dependencies(rocblas_bridge_link_test rocm_interfaces_rocblas_bridge_generated)
@@ -73,7 +211,7 @@ add_test(NAME rocm_interfaces.blas_narrow_c_header
   COMMAND rocm_blas_narrow_c_header_test)
 
 if(UNIX AND NOT APPLE)
-  get_property(_exports_providers GLOBAL PROPERTY ROCM_INTERFACES_RECORDING_PROVIDERS)
+  get_property(_exports_providers GLOBAL PROPERTY ROCM_INTERFACES_PROVIDER_TARGETS)
   set(_exports_provider_args)
   set(_exports_provider_n 0)
   foreach(_prov IN LISTS _exports_providers)
@@ -93,19 +231,27 @@ if(UNIX AND NOT APPLE)
       ${_exports_provider_args}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_exports.cmake)
 
-  # Completeness cross-check: the auto-derived provider list (the registration-site
-  # GLOBAL property) must equal an independent buildsystem enumeration of the MODULE
-  # libraries under providers/recording, so a provider added via
-  # add_recording_provider cannot silently escape the exports check.
-  get_directory_property(_prov_targets
-    DIRECTORY ${CMAKE_SOURCE_DIR}/providers/recording BUILDSYSTEM_TARGETS)
-  set(_prov_modules)
-  foreach(_t IN LISTS _prov_targets)
-    get_target_property(_ttype ${_t} TYPE)
-    if(_ttype STREQUAL "MODULE_LIBRARY")
-      list(APPEND _prov_modules ${_t})
-    endif()
-  endforeach()
+  # Completeness cross-check: recursively enumerate every MODULE target under
+  # providers/ and require the independent ground truth to equal the registry
+  # used by the exports check. A provider in a new subdirectory therefore cannot
+  # silently escape inspection.
+  function(_collect_provider_modules directory output)
+    get_directory_property(_local_targets DIRECTORY "${directory}" BUILDSYSTEM_TARGETS)
+    set(_result)
+    foreach(_target IN LISTS _local_targets)
+      get_target_property(_type ${_target} TYPE)
+      if(_type STREQUAL "MODULE_LIBRARY")
+        list(APPEND _result ${_target})
+      endif()
+    endforeach()
+    get_directory_property(_subdirectories DIRECTORY "${directory}" SUBDIRECTORIES)
+    foreach(_subdirectory IN LISTS _subdirectories)
+      _collect_provider_modules("${_subdirectory}" _nested)
+      list(APPEND _result ${_nested})
+    endforeach()
+    set(${output} ${_result} PARENT_SCOPE)
+  endfunction()
+  _collect_provider_modules("${PROJECT_SOURCE_DIR}" _prov_modules)
   list(SORT _prov_modules)
   set(_derived_sorted ${_exports_providers})
   list(SORT _derived_sorted)
