@@ -81,6 +81,11 @@ struct PassFeatureConfig {
         int dsReadDrainLatency = 0;
         int dsReadThrottleLatency = 0;
         int dsReadPerWmma = INT_MAX;
+        /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
+        /// after the scheduler and plant SCC-clobbering handshakes around workgroup
+        /// barriers. Enables the scheduler's cluster-barrier SCC rule and the
+        /// CDNA5ReadyQueue paths that enforce it (see ReadyQueue::clusterBarrierEnabled).
+        bool clusterBarrier = false;
     };
 
     LoopConfig loopConfig;

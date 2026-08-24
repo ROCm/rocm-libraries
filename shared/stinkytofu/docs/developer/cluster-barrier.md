@@ -60,14 +60,14 @@ of the whole kernel.
 
 ---
 
-## Rule 3 -- Cluster handshake before loop loads
+## Rule 3 -- Loop-body cluster handshake
 
-For each `tensor_load_to_lds` whose segment contains a preceding workgroup
-`s_barrier_signal -1`, the pass emits a cluster handshake:
+Rule 3 applies only to **`tensor_load_to_lds` inside a loop**. For each qualifying
+load whose segment contains a preceding workgroup `s_barrier_signal -1` (the
+**trigger**), the pass emits a full handshake independent of Rules 1 and 2:
 
 - **Rule 3(a)** -- WaveIdx-gated `s_barrier_signal -3` at the signal anchor.
-- **Rule 3(b)** -- bare `s_barrier_wait -3` immediately before the workgroup
-  `s_barrier_signal -1`.
+- **Rule 3(b)** -- bare `s_barrier_wait -3` immediately before the trigger.
 
 Multiple loads sharing the same workgroup signal receive one handshake.
 
@@ -80,6 +80,11 @@ Multiple loads sharing the same workgroup signal receive one handshake.
    never overlap.
 
 When cycle estimates are unavailable, the signal co-locates with the wait.
+
+Cross-segment hoisting and loop-carried compensation are gated by the compile-time
+switch `cluster_barrier::kRule3CrossLoop` in
+`InsertClusterBarrierPass.hpp` (default **false**). See
+[`kRule3CrossLoop`](#krule3crossloop) below.
 
 ### SCC restore
 
@@ -117,6 +122,95 @@ label/branch-delimited segments:
 Rule 4(a) is skipped when Rule 3 already targets the same workgroup signal.
 Region-scope invocations never observe the TEXTBLOCK marker, so Rule 4
 self-disables there.
+
+---
+
+## kRule3CrossLoop
+
+Compile-time switch in `cluster_barrier::kRule3CrossLoop`
+(`include/stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp`). Rebuild
+rocisa after changing it. It gates **Rule 3 cross-loop hoisting** and the
+scheduler **live-out SCC lead ceiling** in `StinkyDAGSchedulerPass`.
+
+### Shared behavior (true and false)
+
+With cluster barrier enabled:
+
+- Rules 1, 2, and 4 are unchanged.
+- Rule 3 still inserts signal/wait handshakes for each qualifying load segment.
+- Rule 3 still walks backward from the wait for cycle lead and SCC clearance.
+- `StinkyDAGSchedulerPass::applyClusterBarrierSccRule` still **pins** live-out
+  SCC defs (loop counter compares) **after** every cluster barrier wait in the
+  region — the compare may not issue before the last wait completes.
+
+### `kRule3CrossLoop == false` (default)
+
+**InsertClusterBarrierPass**
+
+- `maxSegmentHops = 0`: the Rule 3 climb cannot leave the wait's segment.
+- Signals stay **in-segment**, paired near their waits.
+- No **loop-wrap** at the latch (`scanTailForRemainder`).
+- No **preheader signal**, **loop-exit drain wait**, or **`skipCBWait`**
+  bypass labels (`emitLoopCarriedCompensation` is never called).
+
+**StinkyDAGSchedulerPass**
+
+- Live-out SCC defs get barrier-pin edges only.
+- `DAGNode::earliestClock` stays `INT_MIN`.
+- Once the pin frees the compare, the scheduler may issue it immediately — often
+  far from the latch branch that reads SCC.
+
+**Typical assembly:** signal and wait remain close in the loop body; loop exit
+has no `drain loop-carried cluster signal` wait.
+
+### `kRule3CrossLoop == true` (opt-in)
+
+**InsertClusterBarrierPass**
+
+- `maxSegmentHops = kMaxSegmentHops` (1): Rule 3 may cross **one** segment
+  boundary per climb.
+- When the head-phase climb reaches the loop head short of the lead target, it
+  may **wrap to the latch** (`scanTailForRemainder`) and plant the signal for
+  the remaining cycles only (Part A: wait→head; Part B: latch→anchor).
+- When `found.hops > 0`, **loop-carried compensation** runs via
+  `emitLoopCarriedCompensation`:
+  - Optional **preheader signal** when the climb crossed the back edge.
+    `findPreLoopSignalAnchor` climbs from the loop head and stops at the nearest
+    `s_barrier_wait -1`, kernel `label_*`, or `tensor_load_to_lds` (pass `skipCB*`
+    labels are skipped). Signal-only after a workgroup wait; workgroup barrier +
+    signal after a label or load.
+  - **Drain wait** at loop exit: `s_barrier_wait -3` with comment
+    `drain loop-carried cluster signal`.
+  - **`label_*_skipCBWait`** on paths that leave the loop with no token in
+    flight (zero-trip guards, exits below a wait, etc.).
+
+**StinkyDAGSchedulerPass**
+
+- In addition to barrier pins, live-out SCC defs get
+  `earliestClock = regionCycles - kLiveOutSccDefLeadCycles` (50 cycles).
+- The compare is held near the latch branch instead of issuing immediately after
+  the last barrier wait.
+
+**Typical assembly:** signals appear earlier in the loop body (hoisted from
+waits); loop latch may compare `counterL==0` before the back-edge branch; loop
+exit has drain wait + skip path.
+
+### Code map
+
+| Location | false | true |
+|----------|-------|------|
+| `maxSegmentHops` in Rule 3 | 0 | 1 |
+| Segment-boundary climb | stops at boundary | may cross one hop |
+| `scanTailForRemainder` | not reached | latch wrap when head climb short |
+| `if (found.hops > 0)` block | skipped | preheader + hoistedLoops |
+| `emitLoopCarriedCompensation` | not called | drain / skipCBWait |
+| Live-out SCC `earliestClock` | not set | ≤50 cycles from region end |
+
+### Tests
+
+- `InsertClusterBarrierPassTest` / `DAGSchedulerPassTest`: cross-loop cases use
+  `IF_RULE3_CROSS_LOOP` (omitted from the binary while `STINKY_KRULE3_CROSS_LOOP` is 0);
+  `CrossLoopOffKeepsSignalsInsideTheirSegments` requires false.
 
 ---
 
