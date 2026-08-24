@@ -1,0 +1,45 @@
+{
+  "shape": {
+    "M": 2,
+    "N": 4096,
+    "K": 4096
+  },
+  "warmup": 20,
+  "timed": 200,
+  "attempts": 5,
+  "dsl_winner": {
+    "tile": {
+      "tile_m": 16,
+      "tile_n": 16,
+      "tile_k": 512,
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 1,
+      "warp_tile_m": 16,
+      "warp_tile_n": 16,
+      "warp_tile_k": 32
+    },
+    "trait": {
+      "pipeline": "mem",
+      "scheduler": "interwave",
+      "epilogue": "cshuffle"
+    },
+    "ms_median": 0.013284000158309937,
+    "ms_best": 0.013275400400161744,
+    "ms_spread_pct": 0.15959183830970175,
+    "tflops_best": 5.055129184591854,
+    "gbs_best": 2530.032917093091,
+    "pct_hbm": 31.62541146366364
+  },
+  "rocblas": {
+    "ms_median": 0.011680439710617066,
+    "ms_best": 0.010199635028839112,
+    "ms_spread_pct": 13.374544039081208,
+    "tflops_best": 6.57953581772799,
+    "gbs_best": 3292.980572837495,
+    "pct_hbm": 41.162257160468684
+  },
+  "dsl_over_rocblas_latency_ratio": 1.3015564147762162,
+  "speedup_vs_step02_winner": 3.638308340546288,
+  "max_abs_diff_dsl_vs_rocblas": 0.5
+}

@@ -411,6 +411,16 @@ public:
 - `global.benchmarking`: Enable benchmarking for kernel selection
 - `global.workspace_size_limit`: Limit workspace memory (when applicable)
 
+#### Implementing `global.benchmarking`
+
+The generic kernel ingestor engine (`hipdnn_plugin_sdk::ingestor`) implements the global benchmarking knob: setting `global.benchmarking=1` makes it build one candidate plan per knob-filtered catalog entry, time each on the device on first `execute()`, and reuse the fastest for the plan's remaining life. Per-field knobs plus `add_engine_sweep()` remain the way to sweep one metadata dimension and reach every kernel a declared field distinguishes; the two mechanisms are complementary. A provider adopting the ingestor needs no benchmarking code of its own: carry one `hipdnn_plugin_sdk::ingestor::IngestorSettings ingestorSettings` member on its `TSettings` type and a handle exposing `hipStream_t getStream() const`, and `GenericPlanBuilder` handles advertisement, knob reading, the `HIPDNN_FORCE_BENCHMARKING` override, and the composite plan.
+
+A handle used with the ingestor **must** expose `hipStream_t getStream() const`: benchmarking's default timer brackets each candidate with HIP events on that stream. Both `GenericPlanBuilder` and `BenchmarkPlan` `static_assert` the requirement, so a handle without it fails to compile with a message naming it rather than failing at plan-build time. The requirement sits on the ingestor templates, not on `validateHandleType()`, so a provider that never instantiates them is unaffected. `BenchmarkPlan` accepts an optional `Timer` in place of that default; it exists so tests can prove candidate selection without a device, and is not part of any stability promise.
+
+`Graph::autotune()` in `EXHAUSTIVE` mode primes every engine advertising the knob: it compiles a *separate* plan carrying `global.benchmarking=1`, executes it once, then discards that plan and compiles and times the plan it keeps from the original knob settings. Discarding is required, because a primed plan re-samples every candidate on each execute and timing it would measure the sampling sweep instead of the kernel. Priming therefore only pays off if its result survives in the provider: MIOpen's search populates a find-db that outlives the throwaway plan. The ingestor keeps its winner only in the plan that measured it, so an `EXHAUSTIVE` run pays `candidates x (warmup + iterations) + 1` extra device executions per spec and then selects by ranked order. `HIPDNN_FORCE_BENCHMARKING=0` suppresses that cost.
+
+A provider implementing `global.benchmarking` by hand rather than through the ingestor must apply `hipdnn_plugin_sdk::benchmarkingOverrideFromEnv()` as the ingestor and MIOpen do: consulted *outside* any config-validity branch and composed as `override.value_or(knobValue)` -- **never** an OR. An OR cannot express force-off, because a `false` override term never clears a `true` knob term, so `HIPDNN_FORCE_BENCHMARKING=0` could not override a knob-enabled run.
+
 #### Deprecating Knobs
 
 When a knob is no longer needed, mark it as deprecated rather than removing it. All knobs have a deprecated flag on them that can be set.
@@ -650,7 +660,7 @@ Unit tests focus on the internal implementation of your plugin components:
 - **Purpose**: Test individual components in isolation (engines, utilities, kernel logic)
 - **Requirements**:
   - Must be fast-running
-  - GPU operations must be marked with `SKIP_IF_NO_DEVICE()` macro
+  - GPU operations must be marked with `SKIP_IF_NO_DEVICES()` macro
   - Use mocking/stubbing for dependencies where appropriate
   - Should work on both Windows and Linux
 

@@ -19,7 +19,6 @@ GlobalParameters:
   # CSVMergeSameProblemID: 1
   PreciseKernelTime: false
   # Device: 0
-  MaxFileName: 256
   #RotatingBufferSize: 1024
   # PrintSolutionRejectionReason: true
 

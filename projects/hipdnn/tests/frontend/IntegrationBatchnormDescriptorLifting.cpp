@@ -230,9 +230,9 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
     EXPECT_EQ(liftedEpsilon->get_dim(), std::vector<int64_t>{1});
     EXPECT_EQ(liftedEpsilon->get_stride(), std::vector<int64_t>{1});
     EXPECT_EQ(liftedEpsilon->get_data_type(), DataType::FLOAT);
-    EXPECT_TRUE(liftedEpsilon->get_pass_by_value());
-    ASSERT_TRUE(liftedEpsilon->get_pass_by_value<float>().has_value());
-    EXPECT_FLOAT_EQ(liftedEpsilon->get_pass_by_value<float>().value(), 1e-5f);
+    EXPECT_TRUE(liftedEpsilon->get_is_pass_by_value());
+    ASSERT_TRUE(liftedEpsilon->get_compile_time_constant<float>().has_value());
+    EXPECT_FLOAT_EQ(liftedEpsilon->get_compile_time_constant<float>().value(), 1e-5f);
 
     // Verify Momentum tensor (scalar): pass-by-value with actual value preserved
     ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_MOMENTUM_UID), 0u);
@@ -242,9 +242,9 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
     EXPECT_EQ(liftedMomentum->get_dim(), std::vector<int64_t>{1});
     EXPECT_EQ(liftedMomentum->get_stride(), std::vector<int64_t>{1});
     EXPECT_EQ(liftedMomentum->get_data_type(), DataType::FLOAT);
-    EXPECT_TRUE(liftedMomentum->get_pass_by_value());
-    ASSERT_TRUE(liftedMomentum->get_pass_by_value<float>().has_value());
-    EXPECT_FLOAT_EQ(liftedMomentum->get_pass_by_value<float>().value(), 0.1f);
+    EXPECT_TRUE(liftedMomentum->get_is_pass_by_value());
+    ASSERT_TRUE(liftedMomentum->get_compile_time_constant<float>().has_value());
+    EXPECT_FLOAT_EQ(liftedMomentum->get_compile_time_constant<float>().value(), 0.1f);
 
     // Verify Mean tensor
     ASSERT_NE(tensorMap.count(K_BATCHNORM_TENSOR_MEAN_UID), 0u);
@@ -634,9 +634,9 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormAutoAssignedUidsPreserved
     // Verify epsilon pass-by-value scalar survived the round trip
     auto epsilonTensor = bnNode->attributes.get_epsilon();
     ASSERT_NE(epsilonTensor, nullptr);
-    EXPECT_TRUE(epsilonTensor->get_pass_by_value());
-    ASSERT_TRUE(epsilonTensor->get_pass_by_value<float>().has_value());
-    EXPECT_FLOAT_EQ(epsilonTensor->get_pass_by_value<float>().value(), 1e-5f);
+    EXPECT_TRUE(epsilonTensor->get_is_pass_by_value());
+    ASSERT_TRUE(epsilonTensor->get_compile_time_constant<float>().has_value());
+    EXPECT_FLOAT_EQ(epsilonTensor->get_compile_time_constant<float>().value(), 1e-5f);
 }
 
 // Builds a batchnorm graph with peer_stats tensors, performs a full round-trip,

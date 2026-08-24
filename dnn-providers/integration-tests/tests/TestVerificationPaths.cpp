@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -12,25 +13,30 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
-#include "harness/golden/BundleDiscovery.hpp"
-#include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
+#include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
-using namespace hipdnn_integration_tests::golden;
+using namespace hipdnn_integration_tests::bundle;
 
 namespace
 {
 
 std::filesystem::path goldenDataRoot()
 {
-    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration_test_bundles";
+    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration-test-bundles";
 }
 
 std::filesystem::path batchNormSmallBundle()
 {
     return goldenDataRoot() / "quick" / "BatchnormFwdInference" / "nchw" / "fp32" / "Small"
            / "Small.json";
+}
+
+std::filesystem::path batchNormSweepRoot()
+{
+    return goldenDataRoot() / "quick" / "BatchnormFwdInference" / "Inference";
 }
 
 void verifyGoldenComparison(
@@ -176,15 +182,12 @@ TEST(TestGpuGoldenVerificationRef, SkipsWhenNoPlanAvailable)
     verifyGoldenComparison(graphAndTensors, goldenOutputs, 1e-5f);
 }
 
-// ---------------------------------------------------------------------------
-// Path 3 — Verification routing: bundles only exist for BatchNorm
+// Path 3 — Verification routing: bundle discovery
 //
-// Proves that discoverBundles() finds ONLY the ops that have bundle data
-// (here: BatchNorm).  Ops without bundles (Conv, LayerNorm) are NOT
-// discovered — they fall through to the existing CPU/GPU reference test
-// infrastructure instead.
+// Proves that discoverBundles() finds graph files and template-sweep cases from
+// the bundle tree.
 // ---------------------------------------------------------------------------
-TEST(TestVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallThrough)
+TEST(TestVerificationRouting, BundleDiscoveryFindsOnlyAuthoredBundleData)
 {
     auto path = std::filesystem::temp_directory_path() / "golden_routing_test";
     std::filesystem::remove_all(path);
@@ -205,6 +208,46 @@ TEST(TestVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallThrough
     }
 
     EXPECT_EQ(bundles.front().suiteName, "BatchnormInference_nchw_fp32_Small");
+}
+
+TEST(TestVerificationRouting, BatchNormSweepSampleIsDiscoverable)
+{
+    const auto sweepRoot = batchNormSweepRoot();
+    if(!std::filesystem::exists(sweepRoot / "sweep.json"))
+    {
+        GTEST_SKIP() << "Sweep sample not available: " << sweepRoot;
+    }
+
+    const auto bundles = discoverBundles(goldenDataRoot());
+    const auto it
+        = std::find_if(bundles.begin(), bundles.end(), [&](const DiscoveredBundle& bundle) {
+              return bundle.isTemplateSweepCase() && bundle.jsonPath == sweepRoot / "sweep.json"
+                     && bundle.sweep->caseId == "small_fp32_nchw";
+          });
+
+    ASSERT_NE(it, bundles.end());
+    EXPECT_EQ(it->suiteName, "quick_BatchnormFwdInference_Inference");
+    EXPECT_EQ(it->testName, "small_fp32_nchw");
+}
+
+TEST(TestVerificationRouting, MigratedBatchNormSmokeSweepCaseIsDiscoverable)
+{
+    const auto sweepRoot = batchNormSweepRoot();
+    if(!std::filesystem::exists(sweepRoot / "sweep.json"))
+    {
+        GTEST_SKIP() << "Sweep sample not available: " << sweepRoot;
+    }
+
+    const auto bundles = discoverBundles(goldenDataRoot());
+    const auto it
+        = std::find_if(bundles.begin(), bundles.end(), [&](const DiscoveredBundle& bundle) {
+              return bundle.isTemplateSweepCase() && bundle.jsonPath == sweepRoot / "sweep.json"
+                     && bundle.sweep->caseId == "nchw_fp32_n1_c3_h14_w14";
+          });
+
+    ASSERT_NE(it, bundles.end());
+    EXPECT_EQ(it->suiteName, "quick_BatchnormFwdInference_Inference");
+    EXPECT_EQ(it->testName, "nchw_fp32_n1_c3_h14_w14");
 }
 
 // NOLINTEND(readability-identifier-naming)

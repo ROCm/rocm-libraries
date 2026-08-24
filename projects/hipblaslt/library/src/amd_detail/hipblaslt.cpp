@@ -224,6 +224,36 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+hipblasStatus_t hipblasLtSetUniformSummationOrder(hipblasLtHandle_t handle,
+                                                  int32_t           uniformSummationOrder)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtSetUniformSummationOrder");
+    auto status = RocBlasLtStatusToHIPStatus(
+        rocblaslt_set_uniform_summation_order((rocblaslt_handle)handle, uniformSummationOrder));
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtGetUniformSummationOrder(hipblasLtHandle_t handle,
+                                                  int32_t*          uniformSummationOrder)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtGetUniformSummationOrder");
+    auto status = RocBlasLtStatusToHIPStatus(
+        rocblaslt_get_uniform_summation_order((rocblaslt_handle)handle, uniformSummationOrder));
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
 hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle, uint32_t* first_nan_call_id)
 try
 {
@@ -262,7 +292,7 @@ try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatrixLayoutDestroy");
     auto status = RocBlasLtStatusToHIPStatus(
-        rocblaslt_matrix_layout_destory((const rocblaslt_matrix_layout)descr));
+        rocblaslt_matrix_layout_destroy((const rocblaslt_matrix_layout)descr));
     rocblaslt::Debug::Instance().markerStop();
     return status;
 }

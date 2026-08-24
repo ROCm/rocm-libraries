@@ -16,12 +16,10 @@ GlobalParameters:
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
   KernelTime: True
-  NewClient: 2
-  PrintIndexAssignments: 1
+  PrintIndexAssignmentInfo: true
   # PrintSolutionRejectionReason: 1
   Device: 0
   PrintWinnersOnly: True
-  MinKForGSU: 1
 
 BenchmarkProblems:
 

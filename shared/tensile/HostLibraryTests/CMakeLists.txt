@@ -60,7 +60,7 @@ if(TENSILE_STATIC_ONLY)
 endif()
 
 if(NOT Tensile_FOUND)
-    find_package(Tensile 4.47.0 EXACT REQUIRED ${TENSILE_COMPONENTS} PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../Tensile")
+    find_package(Tensile 4.48.0 EXACT REQUIRED ${TENSILE_COMPONENTS} PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../Tensile")
 endif()
 
 if(NOT TENSILE_DISABLE_CTEST)
@@ -153,7 +153,8 @@ endif()
 
 if(Client IN_LIST TENSILE_COMPONENTS)
     set(test_sources ${test_sources}
-        client/DataInitialization_test.cpp)
+        client/DataInitialization_test.cpp
+        client/HardwareMonitorType_test.cpp)
 endif()
 
 if(TENSILE_USE_HIP)

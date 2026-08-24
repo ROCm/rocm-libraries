@@ -25,6 +25,8 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include <algorithm>
+
 #include "common.hpp"
 #include "data_types.hpp"
 #include "elementwise/elementwise_cpu_reference.hpp"
@@ -406,7 +408,11 @@ namespace hiptensor
             hiptensorHandle_t handle;
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
 
-            CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(logLevel));
+            CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
+                logLevel
+                & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
+                                                     // PERF_TRACE so the CK backend does not run its
+                                                     // internal cold/hot timed loop
 
             hiptensorTensorDescriptor_t descA = nullptr;
             CHECK_HIPTENSOR_ERROR(
@@ -487,7 +493,8 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(
                 hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /*workspaceSizeEstimate*/));
 
-            float alphaValue{};
+            // 8-byte storage so the R_64F (double) write below cannot overflow the buffer
+            double alphaValue{};
             if(computeDataType == HIPTENSOR_R_16F)
             {
                 *(reinterpret_cast<_Float16*>(&alphaValue)) = static_cast<_Float16>(alpha);
@@ -500,7 +507,7 @@ namespace hiptensor
             {
                 *(reinterpret_cast<double*>(&alphaValue)) = static_cast<double>(alpha);
             }
-            float betaValue{};
+            double betaValue{};
             if(computeDataType == HIPTENSOR_R_16F)
             {
                 *(reinterpret_cast<_Float16*>(&betaValue)) = static_cast<_Float16>(beta);
@@ -513,7 +520,7 @@ namespace hiptensor
             {
                 *(reinterpret_cast<double*>(&betaValue)) = static_cast<double>(beta);
             }
-            float gammaValue{};
+            double gammaValue{};
             if(computeDataType == HIPTENSOR_R_16F)
             {
                 *(reinterpret_cast<_Float16*>(&gammaValue)) = static_cast<_Float16>(gamma);
@@ -527,21 +534,38 @@ namespace hiptensor
                 *(reinterpret_cast<double*>(&gammaValue)) = static_cast<double>(gamma);
             }
 
+            auto& opts     = HiptensorOptions::instance();
+            int   coldRuns = opts->coldRuns();
+            int   hotRuns  = std::max(1, opts->hotRuns()); // guard hot_runs <= 0
+            // untimed warm-up: ramps clocks, primes plan/caches
+            for(int i = 0; i < coldRuns; ++i)
+                CHECK_HIPTENSOR_ERROR(hiptensorElementwiseTrinaryExecute(handle,
+                                                                         plan,
+                                                                         (void*)&alphaValue,
+                                                                         resource->deviceInput1().get(),
+                                                                         (void*)&betaValue,
+                                                                         resource->deviceInput2().get(),
+                                                                         (void*)&gammaValue,
+                                                                         resource->deviceInput3().get(),
+                                                                         resource->deviceOutput().get(),
+                                                                         0));
+
             hipEvent_t startEvent, stopEvent;
             CHECK_HIP_ERROR(hipEventCreate(&startEvent));
             CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
             CHECK_HIP_ERROR(hipEventRecord(startEvent));
 
-            CHECK_HIPTENSOR_ERROR(hiptensorElementwiseTrinaryExecute(handle,
-                                                                     plan,
-                                                                     (void*)&alphaValue,
-                                                                     resource->deviceInput1().get(),
-                                                                     (void*)&betaValue,
-                                                                     resource->deviceInput2().get(),
-                                                                     (void*)&gammaValue,
-                                                                     resource->deviceInput3().get(),
-                                                                     resource->deviceOutput().get(),
-                                                                     0));
+            for(int i = 0; i < hotRuns; ++i) // timed: M clean launches
+                CHECK_HIPTENSOR_ERROR(hiptensorElementwiseTrinaryExecute(handle,
+                                                                         plan,
+                                                                         (void*)&alphaValue,
+                                                                         resource->deviceInput1().get(),
+                                                                         (void*)&betaValue,
+                                                                         resource->deviceInput2().get(),
+                                                                         (void*)&gammaValue,
+                                                                         resource->deviceInput3().get(),
+                                                                         resource->deviceOutput().get(),
+                                                                         0));
 
             CHECK_HIP_ERROR(hipEventRecord(stopEvent));
             CHECK_HIP_ERROR(hipEventSynchronize(stopEvent))
@@ -569,7 +593,7 @@ namespace hiptensor
                                            hiptensorDataTypeSize(dataType),
                                            std::multiplies<size_t>());
 
-            mElapsedTimeMs        = float64_t(timeMs);
+            mElapsedTimeMs        = float64_t(timeMs) / hotRuns;
             mTotalGFlops          = 8.0 * (resource->getCurrentMatrixElement()) * 1e-9;
             mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
 

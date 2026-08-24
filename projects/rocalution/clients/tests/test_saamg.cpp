@@ -31,7 +31,7 @@ typedef std::
     tuple<int, int, int, std::string, std::string, std::string, unsigned int, int, int, int, int>
         saamg_tuple;
 
-std::vector<int>          saamg_size             = {22, 63, 134, 207};
+std::vector<int>          saamg_size             = {22, 48, 134, 207};
 std::vector<int>          saamg_pre_iter         = {2};
 std::vector<int>          saamg_post_iter        = {2};
 std::vector<std::string>  saamg_smoother         = {"FSAI", "SPAI"};

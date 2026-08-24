@@ -1,0 +1,15 @@
+{
+    "format_version": 1,
+    "operation": "SdpaFwdRuntimeScale",
+    "generator": "generate_sdpa_runtime_scale_test_bundle.py",
+    "generator_version": "1.0.0",
+    "generated_at": "2026-07-31T21:51:52Z",
+    "reference_source": "synthesis+cpu_reference",
+    "notes": "Pure-runtime scale bundle: scale (uid=10) has is_runtime_pass_by_value=true with no baked value. The harness supplies the detection value (2.0) via the inputs field; both the CPU reference and the provider read it from the variantPack. A provider that ignores the runtime tensor and falls back to a hardcoded scale produces diverging output.",
+    "inputs": {
+        "10": {
+            "kind": "fixed",
+            "value": 2.0
+        }
+    }
+}

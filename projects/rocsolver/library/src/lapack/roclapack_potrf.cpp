@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_potrf.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -36,6 +37,7 @@ rocblas_status rocsolver_potrf_impl(rocblas_handle handle,
                                     U A,
                                     const I lda,
                                     I* info)
+try
 {
     ROCSOLVER_ENTER_TOP("potrf", "--uplo", uplo, "-n", n, "--lda", lda);
 
@@ -97,6 +99,10 @@ rocblas_status rocsolver_potrf_impl(rocblas_handle handle,
     return rocsolver_potrf_template<false, false, T, I, I, S>(
         handle, uplo, n, A, shiftA, lda, strideA, info, batch_count, (T*)scalars, work1, work2,
         work3, work4, (T*)pivots, (I*)iinfo, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

@@ -21,7 +21,6 @@
 #   - GlobalSplitUAlgorithm: [MultipleBuffer, SingleBuffer] — different _GlobalAccumulation
 #   - GlobalSplitUWorkGroupMappingRoundRobin: [False, True] — lines 354-357
 #   - GlobalSplitUCoalesced: [False, True] — variant flag
-#   - MinKForGSU: 1 — needed so GSU>1 isn't rejected for small K
 #
 # ForkParameters cartesian product:
 #   3 (GSU) x 2 (Algorithm) x 2 (WGMRR) x 2 (Coalesced) = 24 forks -> ~2 unique kernels
@@ -32,7 +31,6 @@ GlobalParameters:
   NumElementsToValidate: 0
   NumWarmups: 0
   NumBenchmarks: 1
-  MinKForGSU: 1
 
 BenchmarkProblems:
   ########################################

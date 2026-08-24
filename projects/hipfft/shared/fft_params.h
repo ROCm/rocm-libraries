@@ -36,6 +36,10 @@
 #include <valarray>
 #include <vector>
 
+#ifdef ROCFFT_MPI_ENABLE
+#include <mpi.h>
+#endif
+
 #include "../shared/arithmetic.h"
 #include "../shared/array_validator.h"
 #include "../shared/client_data_layout_helpers.h"
@@ -491,6 +495,59 @@ public:
 #endif
 
     fft_auto_allocation auto_allocate = fft_auto_allocation_default;
+
+    // JIT callback parameters are specified at plan creation time, so
+    // they need to be known and remembered before create_plan() is
+    // called
+    struct jit_cb_state_t
+    {
+        const char*         symbol = nullptr;
+        std::vector<char>   func;
+        std::vector<gpubuf> data;
+        size_t              shared_mem_bytes = 0;
+        // "convert" data to std::vector<void*> as needed in APIs
+        inline std::vector<void*> get_raw_data_ptrs() const
+        {
+            std::vector<void*> ret;
+            ret.reserve(data.size());
+            for(auto& buf : data)
+                ret.push_back(buf.data());
+            return ret;
+        }
+
+        // throw if this state is not usable (symbol/code/data missing,
+        // etc)
+        void check_valid() const
+        {
+            if(!symbol)
+                throw std::invalid_argument("missing JIT symbol");
+            if(func.empty())
+                throw std::invalid_argument("missing JIT code");
+            // data can be empty if the callback function doesn't need
+            // it, but if nonempty must have one ptr per device
+            if(!data.empty()
+               && data.size() != static_cast<size_t>(rocfft_scoped_device::device_count()))
+                throw std::invalid_argument("invalid number of JIT data ptrs");
+        }
+    };
+    std::shared_ptr<jit_cb_state_t> load_jit_cb_state;
+    std::shared_ptr<jit_cb_state_t> store_jit_cb_state;
+
+    // Check that JIT callback parameters have been specified properly,
+    // if JIT callbacks are required.  Throws an exception if the check
+    // fails.
+    void check_jit_callback_state() const
+    {
+        if(run_callbacks != fft_callback_type_jit)
+            return;
+
+        if(!load_jit_cb_state)
+            throw std::invalid_argument("missing JIT load state");
+        load_jit_cb_state->check_valid();
+        if(!store_jit_cb_state)
+            throw std::invalid_argument("missing JIT store state");
+        store_jit_cb_state->check_valid();
+    }
 
     enum fft_mp_lib
     {
@@ -1075,6 +1132,9 @@ public:
         case fft_callback_type_funcptr:
             ret += "_CB";
             break;
+        case fft_callback_type_jit:
+            ret += "_JITCB";
+            break;
         case fft_callback_type_none:
             break;
         }
@@ -1238,6 +1298,12 @@ public:
         if(pos < vals.size() && vals[pos] == "CB")
         {
             run_callbacks = fft_callback_type_funcptr;
+            ++pos;
+        }
+
+        if(pos < vals.size() && vals[pos] == "JITCB")
+        {
+            run_callbacks = fft_callback_type_jit;
             ++pos;
         }
 
@@ -1821,6 +1887,30 @@ public:
 
         // The parameters are valid.
         return true;
+    }
+
+    // TODO: temporary workaround awaiting robust support for
+    // 64-bit indexing in rocfft kernels.
+    bool may_need_64bit_indexing() const
+    {
+        for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+        {
+            const auto& io_stride     = io == fft_io::fft_io_in ? istride : ostride;
+            const auto& io_dist       = io == fft_io::fft_io_in ? idist : odist;
+            const auto& io_array_type = io == fft_io::fft_io_in ? itype : otype;
+            const auto& io_offset     = io == fft_io::fft_io_in ? ioffset : ooffset;
+            const auto  io_length     = io == fft_io::fft_io_in ? ilength() : olength();
+            const auto  max_offset
+                = io_offset.empty() ? 0 : *std::max_element(io_offset.begin(), io_offset.end());
+            // Hermitian interleaved data may be re-interpreted as real data internally.
+            if((max_offset + compute_ptrdiff(io_length, io_stride, nbatch, io_dist))
+                   * (io_array_type == fft_array_type_hermitian_interleaved ? 2 : 1)
+               > static_cast<size_t>(INT32_MAX) + 1)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     // Fill in any missing parameters.
@@ -2811,6 +2901,28 @@ public:
         // (default values)
         return ret;
     }
+
+    int get_process_rank() const
+    {
+        int process_rank = -1; // invalid initialization
+        if(mp_lib == fft_mp_lib_mpi)
+        {
+#ifdef ROCFFT_MPI_ENABLE
+            if(!mp_comm)
+                throw std::runtime_error("Multi-process communicator is not defined");
+            auto ret = MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &process_rank);
+            if(ret != MPI_SUCCESS || process_rank < 0)
+                throw std::runtime_error("Rank of current process couldn't be set");
+#else
+            throw std::runtime_error("MPI is not enabled");
+#endif
+        }
+        else
+        {
+            process_rank = 0;
+        }
+        return process_rank;
+    }
 };
 
 // Used for CLI11 parsing of multi-process library enum
@@ -2832,6 +2944,8 @@ static bool lexical_cast(const std::string& word, fft_callback_type& cbtype)
         cbtype = fft_callback_type_none;
     else if(word == "funcptr")
         cbtype = fft_callback_type_funcptr;
+    else if(word == "jit")
+        cbtype = fft_callback_type_jit;
     else
         throw std::runtime_error("Invalid callback type specified");
     return true;

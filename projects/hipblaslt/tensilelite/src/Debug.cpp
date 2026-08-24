@@ -110,6 +110,11 @@ namespace TensileLite
         return m_value & 0x20000;
     }
 
+    bool Debug::printStreamKModeSelection() const
+    {
+        return m_value & 0x100000;
+    }
+
     bool Debug::naivePropertySearch() const
     {
         return m_naivePropertySearch;
@@ -128,6 +133,11 @@ namespace TensileLite
     int Debug::streamK5ForceMode() const
     {
         return m_streamK5ForceMode;
+    }
+
+    bool Debug::usePreciseSMTarget() const
+    {
+        return m_usePreciseSMTarget;
     }
 
     int Debug::useExperimentalSelection() const
@@ -216,6 +226,10 @@ namespace TensileLite
                 m_streamK5ForceMode = static_cast<int>(val);
         }
 
+        const char* preciseSMTarget = std::getenv("TENSILE_PRECISE_SM_TARGET");
+        if(preciseSMTarget)
+            m_usePreciseSMTarget = strtol(preciseSMTarget, nullptr, 0) != 0;
+
         const char* exp_select = std::getenv("TENSILE_SOLUTION_SELECTION_METHOD");
         if(exp_select)
             m_experimentSelection = strtol(exp_select, nullptr, 0);
@@ -262,6 +276,25 @@ namespace TensileLite
         const char* tensile_disable_staggerU = std::getenv("TENSILE_DISABLE_STAGGERU");
         if(tensile_disable_staggerU)
             m_disableStaggerU = strtol(tensile_disable_staggerU, nullptr, 0) != 0;
+    }
+
+    void Debug::reloadDebugBitsForTest()
+    {
+        const char* db = std::getenv("TENSILE_DB");
+        m_value        = db ? static_cast<int>(strtol(db, nullptr, 0)) : DEBUG_SM;
+
+        const char* db2 = std::getenv("TENSILE_DB2");
+        m_value2        = db2 ? static_cast<int>(strtol(db2, nullptr, 0)) : DEBUG_SM2;
+
+        const char* sk5Force    = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+        m_streamK5ForceMode     = -1;
+        if(sk5Force)
+        {
+            char*      end = nullptr;
+            const long val = strtol(sk5Force, &end, 0);
+            if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
+                m_streamK5ForceMode = static_cast<int>(val);
+        }
     }
 
 } // namespace TensileLite

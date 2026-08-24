@@ -67,6 +67,13 @@ enum class ABC_dims
 void set_host_side_fill_kernel_state(bool enable);
 bool host_side_fill_kernel();
 
+// When enabled, the hpl and trig_float device initializers emit positive-only
+// values. Used for ULP validation: signed zero-mean inputs make the reference
+// dot products cancel toward zero, where the magnitude-independent accumulation
+// noise floor inflates the per-element ULP error even for a correct kernel.
+void set_ulp_positive_init_state(bool enable);
+bool ulp_positive_init();
+
 void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            hipblaslt_initialization init,
                            bool                     is_nan,

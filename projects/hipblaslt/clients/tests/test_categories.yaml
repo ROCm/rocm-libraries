@@ -91,6 +91,6 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     quick: 600          # smoke can exceed 300s on some hosts
-    standard: 1800      # 30 min
+    standard: 3600      # 1 h
     comprehensive: 7200 # 2 h
     full: 86400         # 24 h

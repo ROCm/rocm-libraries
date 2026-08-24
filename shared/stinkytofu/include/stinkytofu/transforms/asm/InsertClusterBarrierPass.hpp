@@ -29,8 +29,10 @@
 namespace stinkytofu {
 class Pass;
 
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(bool isKernelScope = true,
-                                                                       int pgrValue = 1,
-                                                                       int plrValue = 1);
+/// \p streamKMulticast and \p pgrValue only enable the Rule 3 producer-side
+/// tensor drain for StreamK cluster multicast at PrefetchGlobalRead >= 2; the
+/// barrier placement rules themselves derive everything they need from the IR.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
+    bool streamKMulticast = false, int pgrValue = 1);
 
 }  // namespace stinkytofu

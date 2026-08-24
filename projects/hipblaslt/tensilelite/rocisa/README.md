@@ -14,6 +14,12 @@ invoke rocisa
 This compiles the C++ extension and installs it into your active venv so that
 `import rocisa` works from anywhere — no `PYTHONPATH` required.
 
+> **Linux only.** The `invoke` dev workflow (`invoke rocisa`, `invoke build-client`)
+> is supported on Linux (a ROCm dev container) only: it uses `amdclang`, defaults to
+> `/opt/rocm`, and resolves dependencies via RPATH — none of which apply on Windows.
+> On Windows, rocisa is built by the integrated CMake build (TheRock / CI), which is
+> where its Windows dependent-DLL handling lives.
+
 ## Rebuilding after C++ changes
 
 See [tensilelite/README.md — "Rebuilding rocisa after C++ changes"](../README.md#rebuilding-rocisa-after-c-changes)

@@ -58,7 +58,7 @@ globalParameters["PreciseKernelTime"] = (
 # timing between GSU / non-GSU kernels
 globalParameters["PinClocks"] = False  # T=pin gpu clocks and fan, F=don't
 globalParameters["HardwareMonitor"] = (
-    True  # False: disable benchmarking client monitoring clocks using rocm-smi.
+    True  # False: disable benchmarking client monitoring clocks using amd-smi.
 )
 globalParameters["MinFlopsPerSync"] = (
     1  # Minimum number of flops per sync to increase stability for small problems
@@ -189,6 +189,7 @@ globalParameters["DataInitTypeE"] = 0
 globalParameters["DataInitTypeAlpha"] = 2
 globalParameters["DataInitTypeBeta"] = 2
 globalParameters["DataInitTypeBias"] = 3
+globalParameters["DataInitTypeGate"] = 3
 globalParameters["DataInitTypeScaleA"] = 2
 globalParameters["DataInitTypeScaleB"] = 2
 globalParameters["DataInitTypeScaleC"] = 2
@@ -244,6 +245,7 @@ globalParameters["PrintTensorRef"] = (
     0  # Print reference tensor.  0x1=after init; 0x2=after copy-back; 0x3=both
 )
 globalParameters["PrintTensorBias"] = 0  # Print TensorBias after initialization
+globalParameters["PrintTensorGate"] = 0
 globalParameters["PrintTensorScaleAlphaVec"] = 0  # Print TensorScaleAlphaVec after initialization
 globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
@@ -272,7 +274,7 @@ globalParameters["LibraryUpdateComment"] = (
 )
 
 # internal, i.e., gets set during startup
-globalParameters["ROCmSMIPath"] = None  # /opt/rocm/bin/rocm-smi
+globalParameters["AMDSMIPath"] = None  # /usr/bin/amd-smi
 globalParameters["HipClangVersion"] = "0.0.0"
 
 # default runtime is selected based on operating system, user can override
@@ -393,6 +395,11 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+# Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
+# When set, each kernel's StinkyTofu module writes its cost file here via
+# StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
+globalParameters["StinkyTofuCostOutputDir"] = ""
+
 globalParameters["DisableSTWaitCnt"] = True
 
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
@@ -481,7 +488,7 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleGlobalRead": [1]},
     {"ScheduleLocalWrite": [1]},
     {"ScheduleIterAlg": [3]},
-    {"GlobalReadPerMfma": [1]},
+    {"GlobalReadPerMfma": [1.0]},
     {"LocalWritePerMfma": [-1]},
     {"InterleaveAlpha": [0]},
     {"OptNoLoadLoop": [1]},
@@ -523,8 +530,10 @@ defaultBenchmarkCommonParameters = [
     {"WavefrontSize": [-1]},
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
+    {"LDSSegmentInterleave": [0]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
+    {"NonTemporalGate": [0]},
     {"NonTemporalD": [0]},
     {"NonTemporalC": [0]},
     {"NonTemporalA": [0]},
@@ -559,6 +568,7 @@ defaultBenchmarkCommonParameters = [
     {"NoReject": [False]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
+    {"UseDualFMAC": [False]},
     {"StorePriorityOpt": [False]},
     {"NumElementsPerBatchStore": [0]},
     {"StoreSyncOpt": [0]},
@@ -567,6 +577,7 @@ defaultBenchmarkCommonParameters = [
     {"StreamK": [0]},
     {"StreamKForceDPOnly": [0]},
     {"StreamKAtomic": [0]},
+    {"StreamKWorkStealing": [0]},
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
@@ -577,7 +588,7 @@ defaultBenchmarkCommonParameters = [
     {"WorkGroupReduction": [False]},
     {"ConvertAfterDS": [False]},
     {"ForceDisableShadowInit": [False]},
-    {"InitCIterWmma": [0]},
+    {"InitCIterWmma": [-1]},
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
@@ -594,18 +605,23 @@ defaultBenchmarkCommonParameters = [
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
+    {"TDMPlusLdsBuf": [0]},
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
+    {"TDMLoadWaveSync": [False]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
-    # SwInstructionPrefetch — True: reserve one scratch SGPR so StinkyTofu can insert software
-    # instruction prefetch when the ISA supports it (SwPrefetchInsertionPass).
+    # SwInstructionPrefetch — StinkyTofu software instruction-prefetch mode (single integer):
+    # -1 Auto, 0 Off, 1 Relative (PC-relative), 2 Absolute (label-fixed base). Default 1 (Relative),
+    # preserving the legacy default kernel naming. Set -1 (Auto) to opt into Absolute on gfx1250
+    # non-Stream-K (Relative otherwise), or 2 for explicit Absolute.
     # Purpose: CP prefetch covers only a bounded window; very large kernels can see early kernel
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
-    # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
-    {"SwInstructionPrefetch": [True]},
+    # ahead of execution. Legacy booleans are accepted as a deprecated alias
+    # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
+    {"SwInstructionPrefetch": [1]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
@@ -718,7 +734,7 @@ def printCapabilitiesTable(isaInfoMap: Dict[str, IsaInfo]):
 # e.g. RocProfCounter: 42 to pass silently.
 globalParameterTypeOverrides = {
     "ClientExecutionLockPath": {type(None), str},   # path or unset
-    "ROCmSMIPath":             {type(None), str},   # path, populated at startup
+    "AMDSMIPath":              {type(None), str},   # path, populated at startup
     "CmakeCxxCompiler":        {type(None), str},   # path, populated at startup
     "RocProfCounter":          {type(None), str},   # counter spec or None
 }
@@ -811,17 +827,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
-    # Keys with a sanctioned opt-out from the strict gate. Three categories:
-    #   - Dead (no consumer anywhere; safe to silently drop):
-    "AMDGPUArchPath",          # removed dc2c963c Mar2025; arch detection moved to Toolchain/
-    "DataInitTypeeScaleE",     # never registered/consumed (double-e typo; scale-E init never implemented)
-    "DeviceLDS",               # removed 7770c97e May2025; superseded by archCaps["DeviceLDS"]
-    "MaxFileName",             # removed d170037b Feb2025; superseded by MAX_FILENAME_LENGTH constant
-    "MergeFiles",              # removed 2d2e1496 Jan2025; code always merges now
-    "MinKForGSU",              # removed dc2c963c Mar2025; superseded by MIN_K_FOR_GSU constant in Contractions.py
-    "NewClient",               # removed dc2c963c Mar2025; old "must be 2" guard is meaningless now
-    "ROCmAgentEnumeratorPath", # reverted 4a5aa3cb Mar2026; tool selection now via Toolchain/Validators.py
-    "UseGPUTimer",             # never registered; always a duplicate of KernelTime (the real key)
+    # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict
     #     after assignGlobalParameters, bypassing the globalParameters
@@ -829,17 +835,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig
     "PrintIndexAssignmentInfo",   # DebugConfig.printIndexAssignmentInfo, read by makeDebugConfig
     "PrintSolutionRejectionReason", # DebugConfig.printSolutionRejectionReason, read by makeDebugConfig
-    #   - Dead predecessor of PrintIndexAssignmentInfo (renamed
-    #     dc2c963c Mar2025); kept so the one stale YAML
-    #     (sgemm_xf32_asm.yaml) does not trip the gate. Follow-up:
-    #     rename the YAML key to PrintIndexAssignmentInfo.
-    "PrintIndexAssignments",
-    #   - Misplaced solution parameter: registered in
-    #     defaultBenchmarkCommonParameters (solution-level), not
-    #     globalParameters; YAMLs that put it under GlobalParameters:
-    #     have the value silently dropped. Follow-up: relocate to
-    #     BenchmarkCommonParameters: / ForkParameters: in the YAMLs.
-    "MaxLDS",
 ]
 
 
@@ -888,13 +883,19 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     globalParameters["ROCmBinPath"] = os.path.join(globalParameters["ROCmPath"], "bin")
     try:
-        globalParameters["ROCmSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "rocm-smi")
+        globalParameters["AMDSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "amd-smi")
     except OSError:
-        if os.name == "nt":
-            # rocm-smi is not presently supported on Windows so do not require it.
-            pass
-        else:
-            raise
+        # amd-smi is only needed at runtime to pin clocks/fans during benchmarking
+        # and tuning; it is not required to build libraries or validate logic.
+        # It is also not presently supported on Windows. Treat a missing amd-smi as
+        # non-fatal: leave AMDSMIPath unset (None) so that clock pinning is skipped,
+        # rather than aborting the build in environments that do not ship amd-smi.
+        globalParameters["AMDSMIPath"] = None
+        if os.name != "nt":
+            printWarning(
+                "Could not locate amd-smi; GPU clock/fan pinning will be disabled. "
+                "Install the amdsmi package to enable it."
+            )
 
     if "AsanBuild" in config:
         globalParameters["AsanBuild"] = config["AsanBuild"]
@@ -951,13 +952,18 @@ def setupRestoreClocks():
     import atexit
 
     def restoreClocks():
-        # Clocks will only be pinned if rocm-smi is available, therefore
+        # Clocks will only be pinned if amd-smi is available, therefore
         # we only need to restore if found.
         if globalParameters["PinClocks"]:
-            rsmi = globalParameters["ROCmSMIPath"]
-            if rsmi is not None:
-                subprocess.call([rsmi, "-d", "0", "--resetclocks"])
-                subprocess.call([rsmi, "-d", "0", "--setfan", "50"])
+            asmi = globalParameters["AMDSMIPath"]
+            if asmi is not None:
+                # amd-smi set/reset require elevated privileges.
+                # Reset clocks/overdrive to default and return fans to
+                # automatic (driver) control.
+                cmd = [asmi, "reset", "-g", "0", "--clocks", "--fans"]
+                if hasattr(os, "geteuid") and os.geteuid() != 0:
+                    cmd = ["sudo", "-n"] + cmd
+                subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     atexit.register(restoreClocks)
 

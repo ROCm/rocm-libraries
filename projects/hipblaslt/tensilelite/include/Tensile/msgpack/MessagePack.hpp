@@ -34,9 +34,7 @@
 
 #include <msgpack.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -94,7 +92,7 @@ namespace TensileLite
             static const bool value = true;
         };
 
-        void objectToMap(const msgpack::object&                            object,
+        TENSILELITEHOST_EXPORT void objectToMap(const msgpack::object&                            object,
                          std::unordered_map<std::string, msgpack::object>& map);
 
         struct MessagePackInput
@@ -382,4 +380,3 @@ namespace TensileLite
     }
 }
 
-TENSILE_HIDDEN_END

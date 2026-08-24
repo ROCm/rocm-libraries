@@ -7,6 +7,7 @@ This document describes the environment variables and runtime configuration opti
 - [Environment Variables](#environment-variables)
   - [Plugin Discovery](#plugin-discovery)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
+  - [Benchmarking](#benchmarking)
   - [Logging Variables](#logging-variables)
   - [MIOpen Plugin Logging](#miopen-plugin-logging)
   - [Test Configuration](#test-configuration)
@@ -124,6 +125,37 @@ Engine names that are not among the current candidates are silently skipped. If 
 export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOpenConvolutionFwdEngine,HipBLASLtMatmulEngine"
 ```
 
+### Benchmarking
+
+#### HIPDNN_FORCE_BENCHMARKING
+
+A process-wide override for the `global.benchmarking` knob, independent of any engine's own knob setting. Every provider implementing `global.benchmarking` -- today the generic kernel ingestor engine and the MIOpen provider -- consults it.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | No effect. Benchmarking is whatever the `global.benchmarking` knob says (the default) |
+| `1`, `true`, `on`, `yes`, `enable`, `enabled` | Force benchmarking **on**, regardless of the knob |
+| `0`, `false`, `off`, `no`, `disable`, `disabled` | Force benchmarking **off**, overriding the knob and autotune's EXHAUSTIVE priming |
+
+Values are case-insensitive and tolerant of surrounding whitespace (`ON`, ` On `, `TRUE`, `Off` all resolve). Any value not in the table is ignored and treated as unset, never as on, and logs a warning naming the variable and the value. The empty string is indistinguishable from unset and is silently ignored.
+
+The override needs no autotune call and no knob setting to take effect: setting it to `1` benchmarks a plain `hipdnnExecute()` with no other configuration.
+
+**Example:**
+```bash
+# Force benchmarking on for every provider that implements the knob
+export HIPDNN_FORCE_BENCHMARKING=1
+
+# Force it off, even if a caller's knob or autotune run asked for it
+export HIPDNN_FORCE_BENCHMARKING=0
+```
+
+**Notes:**
+- With benchmarking on, the first `execute()` of a plan samples every knob-filtered candidate kernel before caching the winner for the plan's life, so it is slower than subsequent calls.
+- The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
+- `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
+- Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that.
+
 ### Logging Variables
 
 hipDNN provides the following environment variables to control logging behavior:
@@ -162,7 +194,7 @@ Controls graph structure logging. When set to a non-empty directory path, graphs
 | (unset)    | Graph logging disabled (default)                       |
 | `<path>`   | Write graph structures as JSON files to the given directory |
 
-Graph JSON files are written to the directory specified by `HIPDNN_LOG_GRAPH_DIR`. If the directory does not exist, it is created automatically. Relative paths are resolved against the current working directory. Files are named `graph_<hash>.json` where `<hash>` is derived from the graph content, ensuring identical graphs are not duplicated.
+Graph JSON files are written to the directory specified by `HIPDNN_LOG_GRAPH_DIR`. If the directory does not exist, it is created automatically. Relative paths are resolved against the current working directory. Files are named `graph_<id>.json` after the graph's own ID, so finalizing a graph again, or replaying a serialized one, reuses a single file. A graph rebuilt from scratch is a new graph with a new ID and is written separately; point the variable at a per-process directory if many processes share one output location.
 
 This variable is independent of `HIPDNN_LOG_LEVEL` and `HIPDNN_LOG_FILE`.
 

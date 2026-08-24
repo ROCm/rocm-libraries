@@ -38,6 +38,7 @@
 #include <miopen/env.hpp>
 
 #include <any>
+#include <mutex>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 
@@ -1388,22 +1389,23 @@ private:
 std::shared_ptr<Model> GetModel(const std::string& arch, const std::string& solver)
 {
     static std::map<std::string, std::shared_ptr<Model>> models;
-    auto it = models.find(solver);
+    static std::mutex models_mutex;
 
     auto model_arch = arch;
     if(model_arch == "gfx950")
         model_arch = "gfx942"; // use gfx942 model for gfx950 until we have a gfx950 model
 
+    // Guard the shared cache: this is called concurrently from multiple threads
+    // (e.g. per-thread MIOpen handles running convolutions at once).
+    std::lock_guard<std::mutex> lock(models_mutex);
+    auto it = models.find(solver);
     if(it == models.end())
     {
         std::shared_ptr<Model> model = std::make_shared<Model>(model_arch, solver);
         models[solver]               = model;
         return model;
     }
-    else
-    {
-        return it->second;
-    }
+    return it->second;
 }
 
 /**
@@ -1510,21 +1512,28 @@ bool ModelSetParams(const std::string& arch,
 namespace candidate_selection {
 
 // Helper to load and cache fdeep models
-const fdeep::model& GetFdeepModel(const std::string& path, const std::string& key)
+std::shared_ptr<fdeep::model> GetFdeepModel(const std::string& path, const std::string& key)
 {
-    static std::map<std::string, std::unique_ptr<fdeep::model>> models;
+    static std::map<std::string, std::shared_ptr<fdeep::model>> models;
+    static std::mutex models_mutex;
+
+    // Guard the shared cache. Without this lock, concurrent callers racing on the same
+    // key could both insert and corrupt the map / clobber an in-use entry (use-after-free
+    // inside fdeep predict). Holding the lock across find+insert serializes population.
+    // Return the model by shared_ptr (rather than a reference into the map) so the caller
+    // keeps it alive independently of the cache -- it stays valid even if the entry were
+    // ever replaced or evicted in the future, mirroring GetModel above.
+    std::lock_guard<std::mutex> lock(models_mutex);
     auto it = models.find(key);
     if(it == models.end())
     {
         if(!fs::exists(path))
             MIOPEN_THROW(miopenStatusInternalError, "Unable to load model file: " + path);
         auto model =
-            std::make_unique<fdeep::model>(fdeep::load_model(path, true, fdeep::dev_null_logger));
-        auto& ref   = *model;
-        models[key] = std::move(model);
-        return ref;
+            std::make_shared<fdeep::model>(fdeep::load_model(path, true, fdeep::dev_null_logger));
+        it = models.emplace(key, std::move(model)).first;
     }
-    return *it->second;
+    return it->second;
 }
 
 std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& features,
@@ -1538,7 +1547,7 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
         (GetSystemDbPath() / (arch + "_" + solver + "_input_encoder.tn.model")).string();
 
     MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path);
-    auto tensors = GetFdeepModel(path, key).predict({input_tensor});
+    auto tensors = GetFdeepModel(path, key)->predict({input_tensor});
     if(tensors.empty())
         MIOPEN_THROW(miopenStatusInternalError, "Input encoder returned empty tensor list");
     return tensors[0].to_vector();
@@ -1559,7 +1568,7 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
         (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model")).string();
 
     MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path);
-    const auto& model = GetFdeepModel(path, key);
+    const auto model = GetFdeepModel(path, key);
 
     // By default, use predict_multi (multi-threaded); use single-threaded loop only if env var is
     // set
@@ -1573,7 +1582,7 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
         fdeep::tensor t(fdeep::tensor_shape(candidate.size()), candidate);
         inputs_vec.push_back(fdeep::tensors{t}); // wrap tensor in a vector
     }
-    auto outputs = model.predict_multi(inputs_vec, !use_single); // parallelly = !use_single
+    auto outputs = model->predict_multi(inputs_vec, !use_single); // parallelly = !use_single
     if(outputs.size() != inputs_vec.size())
         MIOPEN_THROW(miopenStatusInternalError, "predict_multi returned wrong number of outputs");
     for(const auto& out : outputs)

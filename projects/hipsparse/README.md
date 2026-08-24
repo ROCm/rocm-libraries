@@ -79,7 +79,7 @@ cmake --preset coverage
 cmake --build build/coverage --target coverage
 ```
 
-### Using CMake variables directly
+### Using CMake variables directly {#using-cmake-variables-directly}
 
 **Full build**
 
@@ -111,7 +111,7 @@ The `install.sh` script builds and installs hipSPARSE on Ubuntu with a single co
 ./install.sh -idc
 ```
 
-## Options
+## Options {#options}
 
 > [!NOTE]
 > When using the install script these variables are either hardcoded or set via its command line options.

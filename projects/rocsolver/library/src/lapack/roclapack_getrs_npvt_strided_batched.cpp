@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_getrs_npvt.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -41,6 +42,7 @@ rocblas_status rocsolver_getrs_npvt_strided_batched_impl(rocblas_handle handle,
                                                          const I ldb,
                                                          const rocblas_stride strideB,
                                                          const I batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("getrs_npvt_strided_batched", "--trans", trans, "-n", n, "--nrhs", nrhs,
                         "--lda", lda, "--strideA", strideA, "--ldb", ldb, "--strideB", strideB,
@@ -91,6 +93,10 @@ rocblas_status rocsolver_getrs_npvt_strided_batched_impl(rocblas_handle handle,
     return rocsolver_getrs_npvt_template<false, true, T>(
         handle, trans, n, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB,
         batch_count, work1, work2, work3, work4, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

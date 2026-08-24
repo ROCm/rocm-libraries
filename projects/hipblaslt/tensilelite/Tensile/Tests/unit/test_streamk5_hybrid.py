@@ -32,7 +32,7 @@ from streamk5_test_helpers import (
 class TestStreamK5ValidParameters:
     def test_streamk_enum_includes_5(self):
         assert 5 in validParameters["StreamK"]
-        assert validParameters["StreamK"] == [0, 1, 2, 3, 4, 5]
+        assert validParameters["StreamK"] == [0, 3, 4, 5]
 
 
 class TestStreamK5Component:

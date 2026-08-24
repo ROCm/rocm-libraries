@@ -3,7 +3,7 @@
 """
 Unit tests for CUOccupancy computation from custom kernel .s files at build time.
 
-Custom kernels bypass checkResources/updateOccupancyFromScan; the fix adds
+Custom kernels bypass checkResources/updateOccupancyFromMaxVgpr; the fix adds
 compute_occupancy_from_asm_source which parses .amdhsa_ directives directly.
 Also tests the print2-gated CUOccupancy<=0 warning in processKernelSource.
 """

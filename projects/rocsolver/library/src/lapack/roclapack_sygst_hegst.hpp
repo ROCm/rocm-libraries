@@ -155,9 +155,7 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
             scalars, work_x_temp, store_wcs_invA, (T**)workArr_temp_arr);
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     S s_one = 1;
     T t_one = 1;
@@ -338,7 +336,6 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
         }
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

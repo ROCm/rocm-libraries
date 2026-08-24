@@ -34,15 +34,13 @@
 #include <atomic>
 #include <mutex>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
     namespace hip
     {
-        class SolutionAdapter : public TensileLite::SolutionAdapter
+        class TENSILELITEHOST_EXPORT SolutionAdapter : public TensileLite::SolutionAdapter
         {
         public:
             SolutionAdapter();
@@ -153,4 +151,3 @@ namespace TensileLite
     } // namespace hip
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

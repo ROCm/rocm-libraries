@@ -51,17 +51,16 @@
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
-#include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
+#include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
-#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
-#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
@@ -73,6 +72,8 @@
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -80,6 +81,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 
 using namespace stinkytofu;
 
@@ -214,21 +216,6 @@ TEST(ApiExport, ToolchainCapsProbe) {
 }
 
 // =============================================================================
-// DAGScheduleJsonCollector + PassOrderSnapshotInstrumentation (stinkytofu-opt)
-// =============================================================================
-
-TEST(ApiExport, DAGScheduleJsonCollector) {
-    auto collector = std::make_shared<DAGScheduleJsonCollector>("", "f");
-    EXPECT_NE(collector, nullptr);
-}
-
-TEST(ApiExport, PassOrderSnapshotInstrumentation) {
-    auto collector = std::make_shared<DAGScheduleJsonCollector>("", "f");
-    auto instr = std::make_shared<PassOrderSnapshotInstrumentation>(std::move(collector));
-    EXPECT_NE(instr, nullptr);
-}
-
-// =============================================================================
 // SignatureBase (rocisa ToStinkyTofuUtils)
 // =============================================================================
 
@@ -255,23 +242,30 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createSetMatrixReusePass(), nullptr);
     EXPECT_NE(createStinkyBuildImplicitDependencyPass(), nullptr);
     EXPECT_NE(createStinkyRemoveWaitCntPass(), nullptr);
+    EXPECT_NE(createRemoveDscntPass(), nullptr);
     EXPECT_NE(createStinkyRemoveNopPass(), nullptr);
     EXPECT_NE(createStinkyWaitCntInsertionPass(), nullptr);
+    EXPECT_NE(createGfx1250HazardPass(), nullptr);
     EXPECT_NE(createBuildUseDefChainPass(true, false), nullptr);
     EXPECT_NE(createCFGBuilderPass(), nullptr);
-    EXPECT_NE(createDumpStinkyFunctionPass({}), nullptr);
+    EXPECT_NE(createDumpStinkyModulePass({}), nullptr);
     EXPECT_NE(createPeepholeOptimizationPass(), nullptr);
     EXPECT_NE(createDeadCodeEliminationPass(), nullptr);
     EXPECT_NE(createRedundantMovEliminationPass(), nullptr);
     EXPECT_NE(createStinkyIRVerifierPass(), nullptr);
     EXPECT_NE(createRemoveDelayAluPass(), nullptr);
+    EXPECT_EQ(createRemoveInstructionPass(), nullptr);
+    EXPECT_NE(createRemoveInstructionPass(std::vector<std::string>{"s_nop", "tensor_load_to_lds"}),
+              nullptr);
+    EXPECT_NE(createRemoveInstructionPass("tensor_load_to_lds,s_nop"), nullptr);
     EXPECT_NE(createInsertDelayAluPass(), nullptr);
     EXPECT_NE(createLoopRegionRemarkPass(), nullptr);
     EXPECT_NE(createMemTokenConsistencyCheckPass(), nullptr);
     EXPECT_NE(createRaiseVgprMsbPass(), nullptr);
     EXPECT_NE(createInsertVgprMsbPass(), nullptr);
     EXPECT_NE(createLongBranchLoweringPass(), nullptr);
-    EXPECT_NE(createInsertClusterBarrierPass(true, 1, 1), nullptr);
+    EXPECT_NE(createInsertClusterBarrierPass(), nullptr);
+    EXPECT_NE(createTDMLoadWaveSyncPass(), nullptr);
     EXPECT_NE(createRemoveWaitAluPass(), nullptr);
     EXPECT_NE(createInsertWaitAluPass(), nullptr);
 }

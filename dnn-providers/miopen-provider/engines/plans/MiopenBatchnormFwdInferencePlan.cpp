@@ -115,20 +115,20 @@ void BatchnormFwdInferencePlan::execute(const HipdnnMiopenHandle& handle,
     auto alpha = static_cast<float>(1);
     auto beta = static_cast<float>(0);
 
-    auto xBuffer = miopen_utils::findDeviceBuffer(
+    auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = miopen_utils::findDeviceBuffer(
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.scale().uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer = miopen_utils::findDeviceBuffer(
+    auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.bias().uid(), deviceBuffers, numDeviceBuffers);
-    auto estMeanBuffer = miopen_utils::findDeviceBuffer(
+    auto estMeanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.estMean().uid(), deviceBuffers, numDeviceBuffers);
-    auto invVarianceBuffer = miopen_utils::findDeviceBuffer(
+    auto invVarianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.invVariance().uid(), deviceBuffers, numDeviceBuffers);
 
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut().has_value())
     {
-        auto activationOutBuffer = miopen_utils::findDeviceBuffer(
+        auto activationOutBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
         THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardInferenceActivationInvVariance(
@@ -152,7 +152,7 @@ void BatchnormFwdInferencePlan::execute(const HipdnnMiopenHandle& handle,
     }
     else
     {
-        auto yBuffer = miopen_utils::findDeviceBuffer(
+        auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _inferenceParams.y().uid(), deviceBuffers, numDeviceBuffers);
         THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardInferenceInvVariance(
             handle.miopenHandle,

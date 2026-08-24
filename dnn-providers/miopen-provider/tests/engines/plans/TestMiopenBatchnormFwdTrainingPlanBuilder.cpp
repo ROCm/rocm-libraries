@@ -47,6 +47,22 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForVali
     EXPECT_TRUE(applicable);
 }
 
+TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
+       IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        /*withMeanVariance=*/true,
+        /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+
+    EXPECT_FALSE(applicable);
+}
+
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForValidTwoNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
@@ -964,7 +980,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForMix
 
     const std::vector<int64_t> stridesNCHW = {588, 196, 14, 1}; // NCHW
     const std::vector<int64_t> dimsNCHW = {1, 3, 14, 14};
-    const std::vector<int64_t> stridesNHWC = {3, 14L * 14L * 3L, 14L * 3L, 3}; // NHWC
+    const std::vector<int64_t> stridesNHWC = {3, int64_t{14} * 14 * 3, int64_t{14} * 3, 3}; // NHWC
     const std::vector<int64_t> dimsNHWC = {1, 3, 14, 14};
     const std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
     const std::vector<int64_t> derivedDims = {1, 3, 1, 1};

@@ -127,7 +127,7 @@ EXECUTION_SPECIFIER ushort float_to_bfloat16(float src_val)
 #endif
 
 #if MIOPEN_USE_FP8 || MIOPEN_USE_BFP8
-// TODO: Convert the Col2Im kernels from OpenCL to HIP and remove the following
+// TODO: Remove the following
 // functions which are rewrites of the f8 header impl functions
 EXECUTION_SPECIFIER float fp8_to_float_impl(uchar x, const int wm, const int we)
 {
@@ -171,7 +171,7 @@ EXECUTION_SPECIFIER float fp8_to_float_impl(uchar x, const int wm, const int we)
     if(exponent == 0)
     {
         // guaranteed mantissa!=0 since cases 0x0 and 0x80 are handled above
-        // TODO: verify __builtin_clz and OpenCL's clz do the same thing
+        // TODO: verify __builtin_clz and clz do the same thing
         int sh = 1 + clz(mantissa) - (32 - wm);
         mantissa <<= sh;
         exponent += 1 - sh;

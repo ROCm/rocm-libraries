@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -8,14 +9,18 @@
 #include <fstream>
 #include <optional>
 #include <variant>
+#include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
-#include "harness/golden/BundleDiscovery.hpp"
-#include "harness/golden/IntegrationTestBundle.hpp"
+#include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
 
-using namespace hipdnn_integration_tests::golden;
+using namespace hipdnn_integration_tests::bundle;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -25,6 +30,19 @@ namespace
 class TestBundleDiscoveryFixture : public ::testing::Test
 {
 protected:
+    struct SweepCaseSpec
+    {
+        std::string id;
+        std::string ioDataType;
+        std::vector<int64_t> xDims;
+        std::vector<int64_t> xStrides;
+        std::vector<int64_t> derivedDims;
+        std::vector<int64_t> derivedStrides;
+        bool includeGolden = true;
+        bool goldenHasPath = true;
+        bool includeMetadata = true;
+    };
+
     std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
     std::filesystem::path _tempDir;
 
@@ -39,7 +57,6 @@ protected:
         _tempDir = _scopedDir->path();
     }
 
-    // Writes a minimal but schema-valid batchnorm-inference graph (nchw, fp32).
     static void createMinimalBundle(const std::filesystem::path& dir, const std::string& name)
     {
         std::filesystem::create_directories(dir);
@@ -63,28 +80,21 @@ protected:
                R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
     }
 
-    // Writes a valid {name}.meta.json companion. Metadata is mandatory for any
-    // bundle expected to load successfully (loadIntegrationTestBundle returns
-    // LoadError::MISSING_METADATA without it).
+    // Writes a valid {name}.meta.json companion. Metadata is mandatory for a
+    // golden bundle (one shipping output .bin blobs) and optional for graph-only
+    // bundle cases.
     static void writeMetadata(const std::filesystem::path& dir, const std::string& name)
     {
         std::ofstream(dir / (name + ".meta.json"))
             << R"({"format_version": 1, "operation": "BatchnormInference"})";
     }
 
-    // Writes a minimal bundle with JSON + .bin tensor data files + metadata so
-    // that loadIntegrationTestBundle can fully load it. Tensor dims/strides match
-    // createMinimalBundle; each .bin is zero-filled to the exact byte count the
-    // loader expects.
     static void createLoadableBundle(const std::filesystem::path& dir, const std::string& name)
     {
         createMinimalBundle(dir, name);
         writeMetadata(dir, name);
         const auto basePath = dir / name;
 
-        // uid 0 (x):    dims [2,3,4,5], strides [60,20,5,1] -> 120 floats = 480 bytes
-        // uid 1-4:      dims [1,3,1,1], strides [3,1,1,1]   ->   3 floats =  12 bytes
-        // uid 5 (y):    dims [2,3,4,5], strides [60,20,5,1] -> 120 floats = 480 bytes
         auto writeBin = [&](int64_t uid, size_t byteCount) {
             std::vector<char> data(byteCount, 0);
             std::ofstream out(basePath.string() + ".tensor" + std::to_string(uid) + ".bin",
@@ -100,7 +110,135 @@ protected:
         writeBin(5, 480);
     }
 
-    // Finds a discovered bundle by its derived test name, or nullptr.
+    static size_t elementSizeBytes(const std::string& dataType)
+    {
+        if(dataType == "float")
+        {
+            return sizeof(float);
+        }
+        if(dataType == "half" || dataType == "bfloat16")
+        {
+            return 2;
+        }
+
+        throw std::runtime_error("Unsupported test data type: " + dataType);
+    }
+
+    static void writeSweepTensorFile(const std::filesystem::path& dir,
+                                     int64_t uid,
+                                     const std::vector<int64_t>& dims,
+                                     const std::string& dataType)
+    {
+        size_t elementCount = 1;
+        for(const auto dim : dims)
+        {
+            elementCount *= static_cast<size_t>(dim);
+        }
+
+        std::vector<char> data(elementCount * elementSizeBytes(dataType), 0);
+        std::ofstream out(dir / ("tensor" + std::to_string(uid) + ".bin"), std::ios::binary);
+        out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+
+    static nlohmann::json makeTemplateTensor(int64_t uid)
+    {
+        return nlohmann::json{{"name", ""},
+                              {"uid", uid},
+                              {"strides", "${case.strides}"},
+                              {"dims", "${case.dims}"},
+                              {"data_type", "${case.data_type}"},
+                              {"virtual", false}};
+    }
+
+    static nlohmann::json makeSweepTensor(int64_t uid,
+                                          const std::string& dataType,
+                                          const std::vector<int64_t>& dims,
+                                          const std::vector<int64_t>& strides)
+    {
+        return nlohmann::json{
+            {"uid", uid}, {"data_type", dataType}, {"dims", dims}, {"strides", strides}};
+    }
+
+    static void createTemplateSweep(const std::filesystem::path& dir,
+                                    const std::vector<SweepCaseSpec>& cases)
+    {
+        std::filesystem::create_directories(dir);
+
+        const nlohmann::json templateJson
+            = {{"nodes",
+                nlohmann::json::array({{{"inputs",
+                                         {{"x_tensor_uid", 0},
+                                          {"mean_tensor_uid", 1},
+                                          {"inv_variance_tensor_uid", 2},
+                                          {"scale_tensor_uid", 3},
+                                          {"bias_tensor_uid", 4}}},
+                                        {"outputs", {{"y_tensor_uid", 5}}},
+                                        {"type", "BatchnormInferenceAttributes"},
+                                        {"compute_data_type", "float"},
+                                        {"name", ""}}})},
+               {"tensors",
+                nlohmann::json::array({makeTemplateTensor(0),
+                                       makeTemplateTensor(1),
+                                       makeTemplateTensor(2),
+                                       makeTemplateTensor(3),
+                                       makeTemplateTensor(4),
+                                       makeTemplateTensor(5)})},
+               {"io_data_type", "${case.io_data_type}"},
+               {"compute_data_type", "float"},
+               {"intermediate_data_type", "float"},
+               {"name", ""}};
+
+        std::ofstream(dir / "graph.template.json") << templateJson.dump(2);
+
+        nlohmann::json sweepJson = {{"version", 1}, {"cases", nlohmann::json::array()}};
+        for(const auto& spec : cases)
+        {
+            nlohmann::json caseJson
+                = {{"id", spec.id},
+                   {"values",
+                    {{"io_data_type", spec.ioDataType},
+                     {"tensors",
+                      nlohmann::json::array(
+                          {makeSweepTensor(0, spec.ioDataType, spec.xDims, spec.xStrides),
+                           makeSweepTensor(1, "float", spec.derivedDims, spec.derivedStrides),
+                           makeSweepTensor(2, "float", spec.derivedDims, spec.derivedStrides),
+                           makeSweepTensor(3, "float", spec.derivedDims, spec.derivedStrides),
+                           makeSweepTensor(4, "float", spec.derivedDims, spec.derivedStrides),
+                           makeSweepTensor(5, spec.ioDataType, spec.xDims, spec.xStrides)})}}}};
+
+            if(spec.includeGolden)
+            {
+                caseJson["golden"]
+                    = spec.goldenHasPath
+                          ? nlohmann::json{{"path", "golden/" + spec.id + "/tensors.dvc"}}
+                          : nlohmann::json::object();
+
+                if(spec.goldenHasPath)
+                {
+                    const auto goldenDir = dir / "golden" / spec.id;
+                    std::filesystem::create_directories(goldenDir);
+                    std::ofstream(goldenDir / "tensors.dvc") << "outs:\n";
+                    writeSweepTensorFile(goldenDir, 0, spec.xDims, spec.ioDataType);
+                    writeSweepTensorFile(goldenDir, 1, spec.derivedDims, "float");
+                    writeSweepTensorFile(goldenDir, 2, spec.derivedDims, "float");
+                    writeSweepTensorFile(goldenDir, 3, spec.derivedDims, "float");
+                    writeSweepTensorFile(goldenDir, 4, spec.derivedDims, "float");
+                    writeSweepTensorFile(goldenDir, 5, spec.xDims, spec.ioDataType);
+                }
+            }
+
+            if(spec.includeMetadata)
+            {
+                caseJson["metadata"] = nlohmann::json{
+                    {"format_version", 1}, {"operation", "BatchnormInference"}, {"seed", 42}};
+            }
+
+            sweepJson["cases"].push_back(std::move(caseJson));
+        }
+
+        std::ofstream(dir / "sweep.json") << sweepJson.dump(2);
+    }
+
     static const DiscoveredBundle* findByTest(const std::vector<DiscoveredBundle>& bundles,
                                               const std::string& testName)
     {
@@ -119,8 +257,6 @@ protected:
 
 TEST_F(TestBundleDiscoveryFixture, FlatCustomerBundleDrop)
 {
-    // Case 2: a standalone customer folder dropped directly under the data root:
-    // suite is the folder name, test is the .json stem. No tier/structure required.
     createMinimalBundle(_tempDir / "case_23421", "graph");
 
     auto result = discoverBundles(_tempDir);
@@ -131,9 +267,6 @@ TEST_F(TestBundleDiscoveryFixture, FlatCustomerBundleDrop)
 
 TEST_F(TestBundleDiscoveryFixture, TieredGoldenDataLayoutIsDiscovered)
 {
-    // Case 1: the structured integration_test_bundles tier layout. Every
-    // directory segment below the root joins into the suite with '_', the file
-    // stem is the test.
     createMinimalBundle(_tempDir / "quick" / "BatchnormFwdInference" / "ncdhw" / "fp32" / "Small",
                         "Small");
 
@@ -143,19 +276,47 @@ TEST_F(TestBundleDiscoveryFixture, TieredGoldenDataLayoutIsDiscovered)
     EXPECT_EQ(result.front().testName, "Small");
 }
 
-TEST_F(TestBundleDiscoveryFixture, JsonAtRootThrows)
+TEST_F(TestBundleDiscoveryFixture, TemplateSweepCasesAreExpandedFromManifest)
 {
-    // A .json directly at the data root has no folder to form a suite -> throw.
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+        {{"small_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}},
+         {"small_fp16_nchw", "half", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 2u);
+
+    const auto* fp32 = findByTest(result, "small_fp32_nchw");
+    ASSERT_NE(fp32, nullptr);
+    EXPECT_TRUE(fp32->isTemplateSweepCase());
+    EXPECT_EQ(fp32->suiteName, "quick_BatchnormFwdInference_Inference");
+    EXPECT_EQ(fp32->jsonPath,
+              _tempDir / "quick" / "BatchnormFwdInference" / "Inference" / "sweep.json");
+    EXPECT_EQ(fp32->sweep->templatePath,
+              _tempDir / "quick" / "BatchnormFwdInference" / "Inference" / "graph.template.json");
+    EXPECT_EQ(fp32->sweep->caseId, "small_fp32_nchw");
+
+    const auto* fp16 = findByTest(result, "small_fp16_nchw");
+    ASSERT_NE(fp16, nullptr);
+    EXPECT_TRUE(fp16->isTemplateSweepCase());
+    EXPECT_EQ(fp16->suiteName, "quick_BatchnormFwdInference_Inference");
+    EXPECT_EQ(fp16->sweep->caseId, "small_fp16_nchw");
+}
+
+TEST_F(TestBundleDiscoveryFixture, JsonAtRootUsesFolderNameAsSuite)
+{
+    // A .json directly at the data root uses the root folder name as suite.
     std::ofstream(_tempDir / "graph.json") << R"({"tensors": []})";
-    EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
+    auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result[0].suiteName, sanitizeForGtest(_tempDir.filename().string()));
+    EXPECT_EQ(result[0].testName, "graph");
 }
 
 TEST_F(TestBundleDiscoveryFixture, EmptyLeafFolderWarnsAndSkips)
 {
-    // An empty leaf folder is warned and skipped; the valid sibling is
-    // still discovered. The binary does not abort.
     createMinimalBundle(_tempDir / "conv" / "good", "good");
-    std::filesystem::create_directories(_tempDir / "conv" / "case_12312"); // empty leaf
+    std::filesystem::create_directories(_tempDir / "conv" / "case_12312");
     auto result = discoverBundles(_tempDir);
     ASSERT_EQ(result.size(), 1u);
     EXPECT_EQ(result.front().testName, "good");
@@ -163,8 +324,6 @@ TEST_F(TestBundleDiscoveryFixture, EmptyLeafFolderWarnsAndSkips)
 
 TEST_F(TestBundleDiscoveryFixture, LeafWithOnlyMetaJsonWarnsAndSkips)
 {
-    // A leaf holding only meta companions (no graph) is still "empty" —
-    // warned and skipped, returns empty.
     auto dir = _tempDir / "conv" / "meta_only";
     std::filesystem::create_directories(dir);
     std::ofstream(dir / "meta.json") << "{}";
@@ -174,16 +333,12 @@ TEST_F(TestBundleDiscoveryFixture, LeafWithOnlyMetaJsonWarnsAndSkips)
 
 TEST_F(TestBundleDiscoveryFixture, EmptyRootReturnsEmpty)
 {
-    // A completely empty data root is itself an empty leaf — warned and
-    // skipped. Returns empty rather than aborting the binary.
     auto result = discoverBundles(_tempDir);
     EXPECT_TRUE(result.empty());
 }
 
 TEST_F(TestBundleDiscoveryFixture, CollisionThrows)
 {
-    // Two bundles whose paths differ only by dash vs underscore both sanitize to
-    // the same suite + test name -> collision.
     createMinimalBundle(_tempDir / "Op-A" / "case", "SameName");
     createMinimalBundle(_tempDir / "Op_A" / "case", "SameName");
     EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
@@ -191,9 +346,6 @@ TEST_F(TestBundleDiscoveryFixture, CollisionThrows)
 
 TEST_F(TestBundleDiscoveryFixture, CustomerDropAndTieredLayoutCoexistUnderOneRoot)
 {
-    // Cases 1 and 2 together: a flat customer drop and a deep tiered bundle live
-    // under the same root and discover independently, each named purely from its
-    // path. Depth is data, not a branch — the same leaf/recurse logic handles both.
     createMinimalBundle(_tempDir / "case_1", "graph");
     createMinimalBundle(_tempDir / "conv" / "nchw" / "fp16" / "resnet50", "resnet50");
 
@@ -211,71 +363,86 @@ TEST_F(TestBundleDiscoveryFixture, CustomerDropAndTieredLayoutCoexistUnderOneRoo
 
 TEST_F(TestBundleDiscoveryFixture, SkipsMetaJson)
 {
-    // Both a bare meta.json and a {Name}.meta.json companion must be ignored.
     auto bundleDir = _tempDir / "conv" / "nchw" / "fp32" / "withmeta";
     createMinimalBundle(bundleDir, "withmeta");
     std::ofstream(bundleDir / "withmeta.meta.json") << "{}";
     std::ofstream(bundleDir / "meta.json") << "{}";
 
     auto result = discoverBundles(_tempDir);
-    // Only the "withmeta" graph; neither meta file adds a bundle.
     ASSERT_EQ(result.size(), 1u);
     EXPECT_EQ(result.front().testName, "withmeta");
 }
 
+TEST_F(TestBundleDiscoveryFixture, SkipsSupportJson)
+{
+    auto bundleDir = _tempDir / "conv" / "nchw" / "fp32" / "withsupport";
+    createMinimalBundle(bundleDir, "withsupport");
+    std::ofstream(bundleDir / "withsupport.support.json") << R"({"version": 1, "claims": {}})";
+
+    auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().testName, "withsupport");
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepSupportJsonIsNotDiscoveredAsGraph)
+{
+    auto sweepDir = _tempDir / "conv" / "sweep";
+    createTemplateSweep(sweepDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    std::ofstream(sweepDir / "support.json") << R"({"version": 1, "claims": {}})";
+
+    auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_TRUE(result.front().isTemplateSweepCase());
+    for(const auto& bundle : result)
+    {
+        EXPECT_NE(bundle.jsonPath.filename(), "support.json");
+    }
+}
+
 TEST_F(TestBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
 {
-    // The generic scanner carries no bundle knowledge: it returns every matching
-    // file (including meta files), recursively, in sorted order.
-    auto root = _tempDir / "scan";
-    std::filesystem::create_directories(root / "sub");
-    std::ofstream(root / "b.json") << "{}";
-    std::ofstream(root / "a.json") << "{}";
-    std::ofstream(root / "sub" / "c.json") << "{}";
-    std::ofstream(root / "sub" / "c.meta.json") << "{}";
-    std::ofstream(root / "note.txt") << "ignore me";
+    std::filesystem::create_directories(_tempDir / "b");
+    std::filesystem::create_directories(_tempDir / "a");
+    std::ofstream(_tempDir / "b" / "z.json") << "{}";
+    std::ofstream(_tempDir / "a" / "m.json") << "{}";
+    std::ofstream(_tempDir / "a" / "ignore.txt") << "x";
 
-    auto json = scanFilesByExtension(root, ".json");
-    ASSERT_EQ(json.size(), 4u); // a, b, sub/c, sub/c.meta — .txt excluded
-    EXPECT_TRUE(std::is_sorted(json.begin(), json.end()));
-    EXPECT_EQ(json.front().filename(), "a.json");
+    auto files = scanFilesByExtension(_tempDir, ".json");
+    ASSERT_EQ(files.size(), 2u);
+    EXPECT_EQ(files[0].filename(), "m.json");
+    EXPECT_EQ(files[1].filename(), "z.json");
 }
 
 TEST(TestGraphFile, AllowlistsGraphsAndExcludesCompanions)
 {
-    // Plain graph .json files are graphs.
     EXPECT_TRUE(isGraphFile("dir/resnet50.json"));
     EXPECT_TRUE(isGraphFile("Small.json"));
 
-    // Known companion kinds are excluded: "{Name}.meta.json" and bare "meta.json".
     EXPECT_FALSE(isGraphFile("dir/resnet50.meta.json"));
     EXPECT_FALSE(isGraphFile("dir/meta.json"));
+    EXPECT_FALSE(isGraphFile("dir/graph.template.json"));
+    EXPECT_FALSE(isGraphFile("dir/sweep.json"));
+    EXPECT_FALSE(isGraphFile("dir/resnet50.support.json"));
+    EXPECT_FALSE(isGraphFile("dir/support.json"));
 
-    // A graph name that merely embeds dots is NOT a companion — only recognized
-    // companion kinds are excluded. These must still be discovered as graphs so
-    // ad-hoc "drop a folder, it runs" bundles are never silently dropped.
     EXPECT_TRUE(isGraphFile("dir/model.fp16.json"));
     EXPECT_TRUE(isGraphFile("dir/resnet50.v2.json"));
-    // "claims" is not a companion kind yet, so {Name}.claims.json is a graph
-    // today; it becomes a companion only once "claims" is added to companionKinds().
     EXPECT_TRUE(isGraphFile("dir/resnet50.claims.json"));
 
-    // Non-.json files are never graphs.
     EXPECT_FALSE(isGraphFile("dir/resnet50.bin"));
     EXPECT_FALSE(isGraphFile("dir/resnet50.tensor0.bin"));
 }
 
 TEST(TestSanitizeForGtest, ReplacesInvalidChars)
 {
-    EXPECT_EQ(sanitizeForGtest("hello world!"), "hello_world_");
-    EXPECT_EQ(sanitizeForGtest("Conv-Fprop.v2"), "Conv_Fprop_v2");
-    EXPECT_EQ(sanitizeForGtest("already_valid_123"), "already_valid_123");
+    EXPECT_EQ(sanitizeForGtest("resnet50-layer3.v2"), "resnet50_layer3_v2");
+    EXPECT_EQ(sanitizeForGtest("name with spaces"), "name_with_spaces");
+    EXPECT_EQ(sanitizeForGtest("already_ok"), "already_ok");
 }
 
 TEST_F(TestBundleDiscoveryFixture, UnparseableJsonIsDiscoveredButLoadThrows)
 {
-    // Discovery only scans paths, not content: a malformed .json is still
-    // discovered (valid path) but throws when the loader tries to parse it.
     auto badDir = _tempDir / "BadOp" / "Malformed";
     std::filesystem::create_directories(badDir);
     std::ofstream(badDir / "Malformed.json") << "{{NOT VALID JSON AT ALL";
@@ -289,10 +456,6 @@ TEST_F(TestBundleDiscoveryFixture, UnparseableJsonIsDiscoveredButLoadThrows)
     EXPECT_THROW(hipdnn_test_sdk::utilities::loadGraphAndTensors(it->jsonPath), std::exception);
 }
 
-// loadIntegrationTestBundle() returns a fully-loaded bundle (the variant's
-// IntegrationTestBundle alternative) when graph + all .bin tensor data +
-// metadata are present: graph buffer captured, every tensor loaded, output UIDs
-// derived, and metadata populated.
 TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesAllFields)
 {
     auto dir = _tempDir / "op" / "loadtest";
@@ -303,24 +466,17 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesAllFields)
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     auto& bundle = std::get<IntegrationTestBundle>(result);
 
-    // Output UIDs are derived from the graph (available regardless of tensor
-    // data): this bundle has one output, uid 5.
     ASSERT_EQ(bundle.outputTensorUids.size(), 1u);
     EXPECT_EQ(bundle.outputTensorUids.front(), 5);
 
-    // tensors present: all 6 tensors (uids 0-5) loaded with their data. Golden
-    // extraction (saving + zeroing outputs) happens in the harness, not here, so
-    // the output tensor still holds its loaded data at this point.
     ASSERT_TRUE(bundle.tensors.has_value());
     EXPECT_EQ(bundle.tensors->size(), 6u);
     EXPECT_NE(bundle.tensors->find(5), bundle.tensors->end());
 
-    // metadata is mandatory and therefore populated.
     ASSERT_TRUE(bundle.metadata.operation.has_value());
     EXPECT_EQ(*bundle.metadata.operation, "BatchnormInference");
 }
 
-// The metadata companion's values are surfaced on the loaded bundle.
 TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesMetadataWhenPresent)
 {
     auto dir = _tempDir / "op" / "withmeta";
@@ -339,27 +495,43 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesMetadataWhenPresent)
     EXPECT_EQ(*bundle.metadata.seed, 42);
 }
 
-// A valid-graph bundle WITHOUT a .meta.json companion is a load error: metadata
-// is mandatory.
-TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingMetadataIsError)
+// A graph-only bundle (no .bin blobs, hence no golden data) without a .meta.json
+// companion loads successfully: metadata validates golden data, and there is
+// none here, so absent metadata is valid and default-constructed.
+TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMissingMetadataLoads)
 {
     auto dir = _tempDir / "op" / "nometa";
-    createMinimalBundle(dir, "nometa"); // graph only, no .meta.json
+    createMinimalBundle(dir, "nometa"); // graph only, no .meta.json, no .bin
     const auto jsonPath = dir / "nometa.json";
+
+    auto result = loadIntegrationTestBundle(jsonPath);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    const auto& bundle = std::get<IntegrationTestBundle>(result);
+
+    EXPECT_FALSE(bundle.tensors.has_value()); // graph-only: no tensor data
+    EXPECT_FALSE(bundle.hasGoldenOutputs);
+    EXPECT_FALSE(bundle.metadata.operation.has_value()); // default-constructed
+}
+
+// A GOLDEN bundle (output .bin blobs present) WITHOUT a .meta.json companion is
+// a load error: metadata is mandatory whenever there is golden data to validate.
+TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleMissingMetadataIsError)
+{
+    auto dir = _tempDir / "op" / "goldennometa";
+    createLoadableBundle(dir, "goldennometa"); // writes .bin (inputs+outputs) + meta
+    std::filesystem::remove(dir / "goldennometa.meta.json"); // drop the metadata
+    const auto jsonPath = dir / "goldennometa.json";
 
     auto result = loadIntegrationTestBundle(jsonPath);
     ASSERT_TRUE(std::holds_alternative<LoadError>(result));
     EXPECT_EQ(std::get<LoadError>(result), LoadError::MISSING_METADATA);
 }
 
-// A graph whose tensors have no .bin blobs (but which has metadata) loads as a
-// graph-only bundle: the tensors optional is absent (harness SKIPs), but it is
-// NOT an error. Output UIDs are still derived from the graph.
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
 {
     auto dir = _tempDir / "op" / "nobin";
     createMinimalBundle(dir, "nobin");
-    writeMetadata(dir, "nobin"); // metadata is mandatory even for graph-only
+    writeMetadata(dir, "nobin"); // metadata present (optional here, but exercised)
     const auto jsonPath = dir / "nobin.json";
 
     auto result = loadIntegrationTestBundle(jsonPath);
@@ -370,14 +542,156 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
     EXPECT_EQ(bundle.outputTensorUids.size(), 1u);
 }
 
-// A .bin that is present but the wrong size is present-but-broken data: the
-// loader catches the underlying throw and classifies it as TENSOR_LOAD_FAILED
-// (FAIL) rather than letting an exception escape or treating it as graph-only.
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCasePopulatesExpandedGraphAndTensorData)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+        {{"small_fp16_nchw", "half", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    ASSERT_TRUE(discovered.front().isTemplateSweepCase());
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    const auto& bundle = std::get<IntegrationTestBundle>(result);
+
+    ASSERT_TRUE(bundle.tensors.has_value());
+    ASSERT_EQ(bundle.outputTensorUids.size(), 1u);
+    EXPECT_EQ(bundle.outputTensorUids.front(), 5);
+    EXPECT_EQ(bundle.tensors->at(0)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
+    EXPECT_EQ(bundle.tensors->at(0)->strides(), (std::vector<int64_t>{60, 20, 5, 1}));
+    EXPECT_EQ(bundle.tensors->at(5)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
+
+    const auto tensorAttrMap = bundle.graphWrapper().getTensorMap();
+    EXPECT_EQ(tensorAttrMap.at(0)->data_type(),
+              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(tensorAttrMap.at(1)->data_type(),
+              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+
+    ASSERT_TRUE(bundle.metadata.operation.has_value());
+    EXPECT_EQ(*bundle.metadata.operation, "BatchnormInference");
+    ASSERT_TRUE(bundle.metadata.seed.has_value());
+    EXPECT_EQ(*bundle.metadata.seed, 42);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithoutGoldenIsGraphOnly)
+{
+    createTemplateSweep(_tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+                        {{"graph_only_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    const auto& bundle = std::get<IntegrationTestBundle>(result);
+    EXPECT_FALSE(bundle.tensors.has_value());
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseMissingGoldenPathIsError)
+{
+    createTemplateSweep(_tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+                        {{"missing_path_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          true,
+                          false}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::INVALID_SWEEP_CASE);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseMissingTensorValueIsError)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"missing_tensor_value_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+
+    auto sweepJson = nlohmann::json::parse(std::ifstream(sweepDir / "sweep.json"));
+    sweepJson["cases"][0]["values"]["tensors"].erase(
+        sweepJson["cases"][0]["values"]["tensors"].begin());
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::INVALID_SWEEP_CASE);
+}
+
+// A tensor_patches "set" that flips is_runtime_pass_by_value to true while the
+// tensor still carries a baked value_type/value is rejected: buildGraphBuffer's
+// validateRuntimePassByValueTensors check runs on the expanded+patched graph, so
+// the contradiction can't slip through the template-sweep path. It throws
+// RuntimePassByValueInvariantError rather than returning INVALID_GRAPH_SCHEMA,
+// so this one contradiction can be routed to a hard failure (see
+// classifyBundle() in BundleRegistration.hpp) instead of the quiet skip every
+// other load failure gets.
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithBakedValueAndRuntimePassByValueIsError)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"baked_runtime_scale_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+
+    auto sweepJson = nlohmann::json::parse(std::ifstream(sweepDir / "sweep.json"));
+    sweepJson["cases"][0]["tensor_patches"] = nlohmann::json::array(
+        {{{"uid", 3},
+          {"set",
+           {{"is_runtime_pass_by_value", true}, {"value_type", "Float32Value"}, {"value", 2.0}}}}});
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    EXPECT_THROW(loadIntegrationTestBundle(discovered.front()),
+                 detail::RuntimePassByValueInvariantError);
+}
+
+// The same invariant must hold for a direct (non-sweep) bundle's graph.json,
+// which never goes through applyTensorPatches. Regression test for the gap
+// where validateRuntimePassByValueTensors lived only in applyTensorPatches and
+// this path loaded a contradictory tensor without complaint.
+TEST_F(TestBundleDiscoveryFixture, LoadDirectBundleWithBakedValueAndRuntimePassByValueIsError)
+{
+    auto dir = _tempDir / "op" / "bakedscale";
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "bakedscale.json")
+        << R"({"tensors": [{"uid": 0, "is_runtime_pass_by_value": true, )"
+           R"("value_type": "Float32Value", "value": 2.0}]})";
+
+    EXPECT_THROW(loadIntegrationTestBundle(dir / "bakedscale.json"),
+                 detail::RuntimePassByValueInvariantError);
+}
+
 TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinIsTensorLoadError)
 {
     auto dir = _tempDir / "op" / "badbin";
-    createLoadableBundle(dir, "badbin"); // writes correct .bin + metadata
-    // Overwrite one blob with the wrong byte count (uid 0 should be 480 bytes).
+    createLoadableBundle(dir, "badbin");
     std::ofstream(dir / "badbin.tensor0.bin", std::ios::binary) << "too short";
     const auto jsonPath = dir / "badbin.json";
 
@@ -386,11 +700,6 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinIsTensorLoadError)
     EXPECT_EQ(std::get<LoadError>(result), LoadError::TENSOR_LOAD_FAILED);
 }
 
-// A "graph-only" bundle is a COMPLETE, valid graph whose tensor .bin blobs are
-// simply not on disk (covered by LoadBundleMissingBinIsGraphOnly). A JSON that
-// merely omits the required top-level graph fields (here, the "tensors" key) is
-// NOT a graph-only bundle — it cannot build a flatbuffer graph and is reported
-// as an InvalidGraphSchema error (FAIL), not a skip.
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingTensorsKeyIsSchemaError)
 {
     auto dir = _tempDir / "op" / "notensorskey";
@@ -402,8 +711,6 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingTensorsKeyIsSchemaError)
     EXPECT_EQ(std::get<LoadError>(result), LoadError::INVALID_GRAPH_SCHEMA);
 }
 
-// Malformed JSON is a load error (the variant's LoadError alternative), which
-// the harness turns into a FAIL.
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMalformedJsonIsError)
 {
     auto dir = _tempDir / "op" / "badjson";
@@ -415,13 +722,252 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMalformedJsonIsError)
     EXPECT_EQ(std::get<LoadError>(result), LoadError::MALFORMED_JSON);
 }
 
-// A nonexistent graph file is reported as a malformed-JSON load error (it cannot
-// be opened or parsed), not a crash.
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingFileIsError)
 {
     auto result = loadIntegrationTestBundle(_tempDir / "does_not_exist.json");
     ASSERT_TRUE(std::holds_alternative<LoadError>(result));
     EXPECT_EQ(std::get<LoadError>(result), LoadError::MALFORMED_JSON);
+}
+
+// A golden sweep case that omits its inline `metadata` block is rejected with
+// MISSING_METADATA: metadata is what validates the golden data.
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseGoldenWithoutMetadataIsError)
+{
+    createTemplateSweep(_tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+                        {{"golden_no_meta_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          true, // includeGolden
+                          true, // goldenHasPath
+                          false}}); // includeMetadata
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::MISSING_METADATA);
+}
+
+// Every sweep case must carry metadata, golden or not: a graph-only case that
+// omits its metadata block is also MISSING_METADATA.
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithoutMetadataIsError)
+{
+    createTemplateSweep(_tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+                        {{"graph_only_no_meta_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          false}}); // includeMetadata
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::MISSING_METADATA);
+}
+
+// A sweep root whose manifest has two cases sharing the same id is rejected
+// wholesale: readSweepCaseIds throws on the duplicate and discoverBundles lets
+// it propagate, so a broken checked-in manifest fails the run instead of
+// silently dropping sibling cases.
+TEST_F(TestBundleDiscoveryFixture, DuplicateSweepCaseIdThrows)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+        {{"dup_case_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}},
+         {"dup_case_nchw", "half", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
+}
+
+// resolvePlaceholder falls back to the case-level `values` map when a
+// placeholder key is absent from the per-tensor entry. A top-level template
+// placeholder (no current tensor uid) resolves straight from the global value.
+TEST_F(TestBundleDiscoveryFixture, ExpandTemplateResolvesPlaceholderFromGlobalCaseValue)
+{
+    const nlohmann::json templateJson
+        = {{"io_data_type", "${case.io_data_type}"},
+           {"tensors", nlohmann::json::array({{{"uid", 0}, {"data_type", "float"}}})}};
+
+    // io_data_type is supplied only at the top level of `values`, not inside any
+    // values.tensors[] entry.
+    const nlohmann::json caseJson = {
+        {"id", "global_fallback"},
+        {"values", {{"io_data_type", "half"}, {"tensors", nlohmann::json::array({{{"uid", 0}}})}}}};
+
+    DiscoveredBundle discovered;
+    discovered.jsonPath = _tempDir / "sweep.json";
+
+    const auto expanded = detail::expandTemplateGraph(templateJson, caseJson, discovered);
+    EXPECT_EQ(expanded.at("io_data_type").get<std::string>(), "half");
+}
+
+// An unused top-level sweep value triggers a warning (warnUnusedSweepValues),
+// not a load error. Assert the bundle still loads to keep the warning path
+// distinct from the INVALID_SWEEP_CASE error path.
+TEST_F(TestBundleDiscoveryFixture, UnusedSweepValueWarnsButLoadSucceeds)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"unused_value_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+
+    // Inject a top-level case value that no ${case.*} placeholder consumes.
+    auto sweepJson = nlohmann::json::parse(std::ifstream(sweepDir / "sweep.json"));
+    sweepJson["cases"][0]["values"]["extra_key"] = 99;
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+}
+
+// classifyBundle() is the testable decision step behind registerBundleTests():
+// it makes the same load-and-classify call that loop makes per discovered
+// bundle, without touching ::testing::RegisterTest (which can only run before
+// RUN_ALL_TESTS(), not from inside a running test body). These tests cover the
+// routing itself — a good bundle becomes a LoadedBundle, a bad one becomes a
+// FailedLoad — since nothing previously exercised that routing directly.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsLoadedBundleForGoodBundle)
+{
+    auto dir = _tempDir / "op" / "goodbundle";
+    createLoadableBundle(dir, "goodbundle");
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
+    auto& loaded = std::get<detail::LoadedBundle>(outcome);
+    EXPECT_EQ(loaded.suiteName, discovered.front().suiteName);
+    EXPECT_EQ(loaded.testName, discovered.front().testName);
+    ASSERT_NE(loaded.bundle, nullptr);
+}
+
+// Reuses the baked-value-plus-runtime-pass-by-value corruption from
+// LoadTemplateSweepCaseWithBakedValueAndRuntimePassByValueIsError: that test
+// confirms loadIntegrationTestBundle() throws RuntimePassByValueInvariantError
+// for this case; this one confirms classifyBundle() catches that specific
+// exception and turns it into a FailedLoad carrying the diagnostic path and
+// reason, which is what lets registerBundleTests() surface it as a failing
+// test instead of a log line.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForRuntimePassByValueInvariant)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"baked_runtime_scale_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+
+    auto sweepJson = nlohmann::json::parse(std::ifstream(sweepDir / "sweep.json"));
+    sweepJson["cases"][0]["tensor_patches"] = nlohmann::json::array(
+        {{{"uid", 3},
+          {"set",
+           {{"is_runtime_pass_by_value", true}, {"value_type", "Float32Value"}, {"value", 2.0}}}}});
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    auto& failed = std::get<detail::FailedLoad>(outcome);
+    EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
+    EXPECT_EQ(failed.testName, discovered.front().testName);
+    EXPECT_NE(failed.message.find(discovered.front().diagnosticPath().string()), std::string::npos);
+    EXPECT_NE(failed.message.find("is_runtime_pass_by_value=true"), std::string::npos);
+}
+
+// Only the RuntimePassByValueInvariantError contradiction gets a FailedLoad.
+// An ordinary invalid-sweep-case failure (here: a case referencing a golden
+// path that was never created) must keep the original behavior — logged and
+// classified as SkippedLoad, no failing test registered — so this fix doesn't
+// widen every pre-existing load failure into a hard suite failure.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsSkippedLoadForOrdinaryInvalidSweepCase)
+{
+    createTemplateSweep(_tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+                        {{"missing_path_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          true,
+                          false}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<detail::SkippedLoad>(outcome));
+    auto& skipped = std::get<detail::SkippedLoad>(outcome);
+    EXPECT_NE(skipped.message.find(discovered.front().diagnosticPath().string()),
+              std::string::npos);
+    EXPECT_NE(skipped.message.find(toString(LoadError::INVALID_SWEEP_CASE)), std::string::npos);
+}
+
+// Direct regression test for the original review repro: corrupting one sweep
+// case must not affect classification of an unrelated, valid bundle
+// discovered alongside it.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleIsolatesFailureAmongMultipleDiscoveredBundles)
+{
+    auto goodDir = _tempDir / "op" / "goodbundle";
+    createLoadableBundle(goodDir, "goodbundle");
+
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"baked_runtime_scale_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+    auto sweepJson = nlohmann::json::parse(std::ifstream(sweepDir / "sweep.json"));
+    sweepJson["cases"][0]["tensor_patches"] = nlohmann::json::array(
+        {{{"uid", 3},
+          {"set",
+           {{"is_runtime_pass_by_value", true}, {"value_type", "Float32Value"}, {"value", 2.0}}}}});
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+
+    const auto* goodBundle = findByTest(discovered, "goodbundle");
+    const auto* badBundle = findByTest(discovered, "baked_runtime_scale_fp32_nchw");
+    ASSERT_NE(goodBundle, nullptr);
+    ASSERT_NE(badBundle, nullptr);
+
+    EXPECT_TRUE(std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(*goodBundle)));
+    EXPECT_TRUE(std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(*badBundle)));
+}
+
+// Closes the loop between "classifyBundle() decided this bundle failed" and
+// "the failing test GTest actually runs really fails": constructs the
+// synthetic test body directly and confirms it records exactly the stored
+// message as a non-fatal failure, the same way GTest would run it once
+// registerFailedBundleLoad() has registered it.
+TEST_F(TestBundleDiscoveryFixture, FailedBundleLoadRecordsFailureWithMessage)
+{
+    detail::FailedBundleLoadTest test("boom");
+    EXPECT_NONFATAL_FAILURE(test.TestBody(), "boom");
 }
 
 // NOLINTEND(readability-identifier-naming)

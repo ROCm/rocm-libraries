@@ -47,11 +47,14 @@ def run_tuning(input_file, args, tuning_info):
 
 def gpu_setup(device):
     os.environ["HIP_FORCE_DEV_KERNARG"] = "1"
-    subprocess.run(["rocm-smi", "--setperfdeterminism", "1900", "-d", str(device)], check=True)
+    # amd-smi set requires elevated privileges; enable performance determinism
+    # with a GFXCLK soft-max of 1900 MHz to stabilize the GPU frequency.
+    subprocess.run(["sudo", "-n", "amd-smi", "set", "-g", str(device), "--perf-determinism", "1900"], check=True)
 
 def gpu_reset(device):
     del os.environ["HIP_FORCE_DEV_KERNARG"]
-    subprocess.run(["rocm-smi", "-r", "-d", str(device)], check=True)
+    # Disable performance determinism (inverse of gpu_setup).
+    subprocess.run(["sudo", "-n", "amd-smi", "reset", "-g", str(device), "--perf-determinism"], check=True)
 
 def main():
     parser = argparse.ArgumentParser(description="Execute Gemm Tuning")

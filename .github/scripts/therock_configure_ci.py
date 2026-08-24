@@ -20,7 +20,7 @@ from ci_utils import get_modified_paths, matches_paths, set_github_output
 # Add TheRock's github_actions to path for shared utilities
 THEROCK_ACTIONS_PATH = Path("TheRock") / "build_tools" / "github_actions"
 sys.path.insert(0, str(THEROCK_ACTIONS_PATH))
-from amdgpu_family_matrix import BUILD_RUNNER_LABELS, select_weighted_label
+from amdgpu_family_matrix import get_build_runner_labels, select_weighted_label
 
 logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -148,6 +148,7 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
 THEROCK_CI_PATTERNS = [
     ".github/workflows/therock*",
     ".github/scripts/therock*",
+    ".github/actions/ci-env/action.yml",
 ]
 
 
@@ -160,19 +161,25 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
 def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
     repo_config_path = Path(SCRIPT_DIR / ".." / "repos-config.json")
     config = load_repo_config(str(repo_config_path))
-    valid_prefixes = get_valid_prefixes(config)
+    # repos-config.json only registers subtrees that sync with a standalone
+    # upstream repo, so in-tree-only projects never appear there. The build
+    # matrix is the authoritative list of what CI knows how to build, so union
+    # the two. Without this, a matrix project missing from repos-config.json is
+    # reachable only through a `test:` label and its file changes run no CI.
+    valid_prefixes = get_valid_prefixes(config) | set(subtree_to_project_map)
     matched_subtrees = find_matched_subtrees(paths, valid_prefixes)
     return matched_subtrees
 
 
 def select_build_runner(platform: str) -> str:
     """Select a build runner label based on platform and build variant."""
-    if platform not in BUILD_RUNNER_LABELS:
+    build_runner_labels = get_build_runner_labels()
+    if platform not in build_runner_labels:
         # Platform not configured for weighted selection, return default
         print(f"  No build runner config for platform {platform}, using default")
         return ""
 
-    platform_config = BUILD_RUNNER_LABELS[platform]
+    platform_config = build_runner_labels[platform]
 
     labels_config = platform_config["default"]
     context_name = f"build-runner ({platform})"
@@ -181,12 +188,23 @@ def select_build_runner(platform: str) -> str:
 
 
 def retrieve_projects(args):
+    # by default, we select standard tests
+    test_type = "standard"
+
+    # Skip CI entirely for draft PRs so repeated work-in-progress pushes don't
+    # burn full Linux/Windows build/test capacity. Checked first (before
+    # diffing modified paths) so this stays cheap. The setup job itself still
+    # runs to completion and succeeds rather than being skipped, so the
+    # existing "{platform}_projects != '[]'" gate on the build/test jobs (and
+    # the required TheRock CI Summary check) don't need any extra
+    # skip-cascade handling.
+    if args.get("is_pull_request") and args.get("is_draft"):
+        logging.info("Pull request is a draft, skipping CI")
+        return [], test_type
+
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
-
-    # by default, we select standard tests
-    test_type = "standard"
 
     # Variables to track if labels override defaults
     label_projects = []
@@ -230,6 +248,10 @@ def retrieve_projects(args):
                 if mapped_project == project:
                     label_subtrees.append(subtree)
                     break  # Only need one representative subtree per project
+        if "test:hipblaslt" in pr_labels:
+            # The generic BLAS representative may be a different subtree.
+            # Preserve the explicit hipBLASLt request for rocjitsu selection.
+            label_subtrees.append("projects/hipblaslt")
 
         # Combine file-based detection with label-based selection
         subtrees = list(set(subtrees + label_subtrees))
@@ -284,6 +306,7 @@ if __name__ == "__main__":
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
     args["is_nightly"] = github_event_name == "schedule"
+    args["is_draft"] = os.environ.get("IS_DRAFT", "false").lower() == "true"
 
     args["pr_labels"] = os.environ.get("PR_LABELS", '{"labels": []}')
 

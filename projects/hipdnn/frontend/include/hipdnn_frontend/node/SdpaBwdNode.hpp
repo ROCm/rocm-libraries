@@ -44,6 +44,10 @@ public:
 
     Error pre_validate_node() const override
     {
+        HIPDNN_RETURN_IF_TRUE(attributes.hasUnsupportedUsage(),
+                              ErrorCode::INVALID_VALUE,
+                              attributes.getUnsupportedReason());
+
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
         const auto v = attributes.get_v();
@@ -339,8 +343,14 @@ public:
                                               "type"));
         }
 
-        // Rule 10: Optional attention scale must be a scalar tensor
+        // Rule 10: attn_scale may be given as a tensor or a baked value, not both
         const auto scale = attributes.get_attn_scale();
+        HIPDNN_RETURN_IF_TRUE(
+            scale && attributes.attn_scale_value.has_value(),
+            ErrorCode::INVALID_VALUE,
+            "SdpaBwdNode: attn_scale tensor and attn_scale_value cannot both be set");
+
+        // Rule 10b: Optional attention scale must be a scalar tensor
         if(scale)
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));

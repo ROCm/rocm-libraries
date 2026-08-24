@@ -2,7 +2,19 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## Since last release ROCm 7.13
+## rocPRIM 4.6.0 for ROCm 10.0.0
+
+### Added
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+* Added a parallel `device_segmented_topk`, which finds the largest/smallest K elements from segmented groups.
+* `device_topk` and `device_segmented_topk` are controlled by cmake flag `ROCPRIM_ENABLE_TOPK`. Passing `-DROCPRIM_ENABLE_TOPK=ON` to enable these features
+
+### Changed
+
+* Combined and simplified separate assertion templates using `std::is_floating_point`, `rocprim::half`, and `rocprim::bfloat16` to use `rocprim::is_floating_point`
+
+## rocPRIM 4.5.0 for ROCm 7.14
 
 ### Added
 
@@ -10,6 +22,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * gfx1250 support
 
 * Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+
+### Optimizations
+
+* Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
 
 ### Changed
 
@@ -30,6 +46,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Reduced build times for unit tests.
 * Memory usage in unit tests.
+
+### Changed
+
+* Changed the `bitonic_sort` algorithm in `warp_sort_shuffle` to use forward-only comparison for better performance. `block_sort_bitonic` is also changed to use forward-only comparison, to align the sorting with `warp_sort`.
 
 ### Resolved issues
 

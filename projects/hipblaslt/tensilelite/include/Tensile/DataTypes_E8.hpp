@@ -26,9 +26,7 @@
 
 #pragma once
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 #define TENSILE_USE_MX_SCALE
 
@@ -168,4 +166,3 @@ namespace std
 
 #endif // TENSILE_USE_MX_SCALE
 
-TENSILE_HIDDEN_END

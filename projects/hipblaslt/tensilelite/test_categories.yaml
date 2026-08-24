@@ -1,0 +1,123 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# TensileLite Test Categories Configuration
+#
+# NOTE: TensileLite is a *pytest*-based component. Unlike gtest/ctest components
+# (which use ctest labels via shared/ctest), these tests are Python/pytest, so
+# this file is consumed by TheRock's pytest_runner.py rather than CMake/ctest.
+# Aligned with Test Filter Standardization (RFC0010).
+#
+# For the selected category, pytest_runner.py runs pytest on `test_paths`,
+# filtered by the marker expression built from `pytest_markers` /
+# `exclude_markers` plus GPU-arch `skip-gfxXXXX` markers (registered in
+# pytest.ini), from the installed share/hipblaslt/tensilelite/ tree.
+#
+# Category mapping is derived from the legacy
+# TheRock/build_tools/github_actions/test_executable_scripts/test_tensilelite.py,
+# which ran two suites unconditionally:
+#   - rocisa_tests/            (rocisa pytest modules)
+#   - Tensile/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
+#
+# comprehensive/full reproduce that legacy set exactly (GPU tests included).
+# quick/standard run the same suites minus GPU-hardware tests (marker `gpu`) so
+# the pre-commit / PR tiers stay fast and host-only.
+#
+# test_paths are relative to the installed component root
+# (share/hipblaslt/tensilelite/), which is the pytest working directory.
+
+test_categories:
+  # The unit categories run a partial slice of the suite (quick/standard exclude
+  # GPU tests), so syrupy would flag the un-exercised snapshots as failures.
+  # `--snapshot-warn-unused` downgrades those to warnings instead of errors.
+  quick:
+    description: "Fast host-only sanity checks (rocisa + TensileLite unit, no GPU)"
+    test_paths:
+      - "rocisa_tests"
+      - "Tensile/Tests/unit"
+    exclude_markers:
+      - "gpu"
+    pytest_args:
+      - "--snapshot-warn-unused"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
+    test_paths:
+      - "rocisa_tests"
+      - "Tensile/Tests/unit"
+    exclude_markers:
+      - "gpu"
+    pytest_args:
+      - "--snapshot-warn-unused"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Nightly comprehensive run (rocisa + TensileLite unit, incl. GPU)"
+    test_paths:
+      - "rocisa_tests"
+      - "Tensile/Tests/unit"
+    pytest_args:
+      - "--snapshot-warn-unused"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete suite (rocisa + TensileLite unit, incl. GPU)"
+    test_paths:
+      - "rocisa_tests"
+      - "Tensile/Tests/unit"
+    pytest_args:
+      - "--snapshot-warn-unused"
+    labels:
+      - "full"
+      - "all"
+
+  # gfx1250 common-GEMM tests (GPU emulation). These are the only tests that
+  # build/run kernels through the client, so they require the TensileLite-specific
+  # conftest options passed via `pytest_args` below. Selected by the `gfx1250`
+  # marker; this category is gfx1250-only and must run on a gfx1250 runner.
+  ffm-quick:
+    description: "gfx1250 common GEMM tests (FFM)"
+    test_paths:
+      - "Tensile/Tests/common"
+    pytest_markers:
+      - "gfx1250"
+    # These GEMM tests build/run independent kernels; run them across xdist
+    # workers (overrides the global execution_settings.parallel_workers).
+    parallel_workers: 16
+    # Extra pytest CLI options appended verbatim for this category only.
+    # `{ROCM_PATH}` is substituted with the install prefix at runtime (same as the
+    # execution_settings.environment block). The `--prebuilt-client`,
+    # `--global-parameters` and `--tensile-options` flags are custom options
+    # registered in tensilelite's conftest.py (Tensile/Tests/conftest.py).
+    pytest_args:
+      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+      - "--global-parameters=LibraryFormat='msgpack'"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,gfx1250"
+    labels:
+      - "ffm-quick"
+
+execution_settings:
+  # TensileLite GPU unit tests assemble/run kernels and the legacy runner ran
+  # them serially; pytest-xdist worker isolation (HIP_VISIBLE_DEVICES) is set up
+  # in conftest.py, so this can be raised once parallel GPU runs are validated.
+  parallel_workers: 1
+  # Per-test timeout in seconds (passed to pytest-timeout as --timeout); a single
+  # test exceeding this is killed. This is NOT a total job budget — the overall
+  # job wall-clock limit is set by timeout_minutes in TheRock's
+  # fetch_test_configurations.py.
+  category_timeouts:
+    quick: 300            # 5 minutes
+    standard: 2700        # 45 minutes
+    comprehensive: 25200  # 7 hours
+    full: 28800           # 8 hours
+    ffm-quick: 2700       # 45 minutes

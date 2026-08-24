@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/modules/default_amdclang.cmake)
 endif()
 
@@ -72,6 +72,23 @@ if (STINKYTOFU_ARCHS_TO_BUILD STREQUAL "all" )
     set(STINKYTOFU_ARCHS_TO_BUILD ${STINKYTOFU_ALL_ARCHS})
 endif()
 
+# An empty arch list yields an empty GfxArchID enum and a library with no architectures at all,
+# and a repeated entry reaches the compiler as a duplicate enumerator; both are quiet failures,
+# so catch them here. An unknown name fails later on its missing per-arch .def/.cpp files.
+if(NOT STINKYTOFU_ARCHS_TO_BUILD)
+    message(FATAL_ERROR
+        "STINKYTOFU_ARCHS_TO_BUILD is empty. Set it to \"all\" or to one or more of: "
+        "${STINKYTOFU_ALL_ARCHS}")
+endif()
+
+list(REMOVE_DUPLICATES STINKYTOFU_ARCHS_TO_BUILD)
+
+# Gfx1250 (v1) and Gfx1250v0 (v0) are two steppings of one ISA triple, {12,5,0}, but distinct
+# GfxArchID identities. They intentionally coexist in one library: downstream selects the per-arch
+# cost table by identity (threaded from the conversion entry as ModuleOptions.ArchName),
+# not by resolving the shared triple. The pipeline stays keyed on the triple and is shared. So the
+# pair is allowed here; the identity, not a first-match triple lookup, keeps their costs apart.
+
 foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
     list(APPEND STINKYTOFU_ARCHS "${arch}")
     set(STINKYTOFU_ENUM_ARCHS "${STINKYTOFU_ENUM_ARCHS}STINKYTOFU_ARCH(${arch})\n")
@@ -84,7 +101,10 @@ endforeach(arch)
 message(STATUS "Using archs: ${STINKYTOFU_ARCHS}")
 
 # AMD comgr for runtime assembler capability probing (must be before configure_file)
-if(DEFINED ENV{ROCM_PATH})
+# Prefer the ROCM_PATH cache variable (-DROCM_PATH=...) over the environment.
+if(ROCM_PATH)
+    list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+elseif(DEFINED ENV{ROCM_PATH})
     list(APPEND CMAKE_PREFIX_PATH "$ENV{ROCM_PATH}")
 endif()
 find_package(amd_comgr CONFIG)
@@ -96,20 +116,6 @@ set(STINKYTOFU_HAS_COMGR 1)
 
 configure_file(hardware/hardware.def.in include/Config/Archs.def @ONLY)
 configure_file(include/stinkytofu/Config.h.in include/stinkytofu/Config/Config.h)
-
-##===----------------------------------------------------------------------===##
-# ROCm ISA to StinkyTofu conversion
-##===----------------------------------------------------------------------===##
-# Include rocisa conversion sources (separate target, not stinkytofu library)
-# Note: Do not add rocisa sources to the stinkytofu library target.
-# They are built as a separate rocisa target defined in rocisa/CMakeLists.txt.
-#
-# This is a temporary solution until:
-# (1) stinkytofu designs a new rocisa IR to replace the original ones, or
-# (2) stinkytofu completely replaces rocisa IR with stinkyAsm IR.
-if(TARGET _rocisa)
-    add_subdirectory(src/conversion/rocisa)
-endif()
 
 ##===----------------------------------------------------------------------===##
 # Warning flags (single source of truth for all stinkytofu targets)
@@ -177,6 +183,31 @@ set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED
 
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
+# Custom RPATH: bake link-dependency dirs (e.g. amd_comgr) into the installed
+# libstinkytofu when those deps are not on the loader's default search path.
+option(STINKYTOFU_INSTALL_RPATH_USE_LINK_PATH
+    "Use link-dependency dirs as the installed libstinkytofu RPATH" OFF)
+
+# Unit tests default ON for standalone StinkyTofu builds and OFF when vendored as
+# a sub-project. This must be defined before stinkytofu_static is conditionally
+# created for shared-library test builds.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(_stinkytofu_build_tests_default ON)
+else()
+    set(_stinkytofu_build_tests_default OFF)
+endif()
+option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
+
+# The test suite names GfxArchID::Gfx1250 in roughly two dozen files, so it needs the v1 stepping
+# to be present. The default build (Gfx1250 + Gfx1250v0) satisfies that, and so does a Gfx1250-only
+# build; only a v0-*only* build lacks the enumerator and would fail in a pile of compile errors.
+if(STINKYTOFU_BUILD_TESTS AND NOT "Gfx1250" IN_LIST STINKYTOFU_ARCHS_TO_BUILD)
+    message(FATAL_ERROR
+        "The test suite is written against GfxArchID::Gfx1250, so it needs Gfx1250 in "
+        "STINKYTOFU_ARCHS_TO_BUILD (the default 'all' includes it). Add Gfx1250, or set "
+        "-DSTINKYTOFU_BUILD_TESTS=OFF for a v0-only build.")
+endif()
+
 # dladdr() used in IntrinsicRegistry.cpp requires -ldl
 # Threads required for std::call_once (separate libpthread on glibc < 2.34)
 find_package(Threads REQUIRED)
@@ -228,10 +259,15 @@ target_include_directories(stinkytofu
 )
 set_target_properties(stinkytofu PROPERTIES
     VERSION "${STINKYTOFU_VERSION_MAJOR}.${STINKYTOFU_VERSION_MINOR}.${STINKYTOFU_VERSION_PATCH}"
-    SOVERSION "${STINKYTOFU_VERSION_MAJOR}")
+    SOVERSION "${STINKYTOFU_VERSION_MAJOR}"
+    INSTALL_RPATH_USE_LINK_PATH ${STINKYTOFU_INSTALL_RPATH_USE_LINK_PATH})
 if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
 endif()
+
+# Namespaced alias so add_subdirectory consumers use the same target name as
+# find_package consumers (the install export uses NAMESPACE stinkytofu::).
+add_library(stinkytofu::stinkytofu ALIAS stinkytofu)
 
 # On Windows, delay-load amd_comgr.dll so it is resolved at first use rather
 # than at process startup.  A delay-load hook in ComgrProbe.cpp uses
@@ -286,13 +322,6 @@ endif()
 ##===----------------------------------------------------------------------===##
 # Unit tests
 ##===----------------------------------------------------------------------===##
-# Option to build unit tests
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    set(_stinkytofu_build_tests_default ON)
-else()
-    set(_stinkytofu_build_tests_default OFF)
-endif()
-option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
 if(STINKYTOFU_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -348,12 +377,26 @@ install(FILES
 )
 
 # --------------------------------------------------------------------------- #
+# Documentation (Doxygen + Sphinx, published to Read the Docs)
+# --------------------------------------------------------------------------- #
+if(ROCmCMakeBuildTools_FOUND)
+    add_subdirectory(docs)
+else()
+    message(STATUS "ROCmCMakeBuildTools not found — skipping docs target.")
+endif()
+
+# --------------------------------------------------------------------------- #
 # clang-tidy
 # --------------------------------------------------------------------------- #
 option(ENABLE_CLANG_TIDY "Enable clang-tidy targets" OFF)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
-include(ClangTidy)
-add_clang_tidy_custom_target()
+# ClangTidy.cmake lives in the superbuild's cmake/modules, outside this
+# subproject. Only reach for it when the feature is actually requested, so a
+# standalone or partial checkout of shared/stinkytofu can still configure.
+if(ENABLE_CLANG_TIDY)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
+    include(ClangTidy)
+    add_clang_tidy_custom_target()
+endif()
 
 # Build-tree export so find_package() works without installing.
 # Write targets to stinkytofu-targets.cmake (not stinkytofuConfig.cmake) to
@@ -365,7 +408,7 @@ export(EXPORT stinkytofu-targets NAMESPACE stinkytofu:: FILE stinkytofu-targets.
 # cmake-lint: disable=E1122
 install(DIRECTORY include/
     DESTINATION include/stinkytofu
-    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp" PATTERN "*.def"
     PATTERN "ir/python" EXCLUDE
 )
 # Install generated header files
@@ -373,9 +416,38 @@ install(FILES
     ${PROJECT_BINARY_DIR}/stinkytofu/ir/logical/LogicalInstructions_generated.hpp
     DESTINATION include/stinkytofu/ir/logical
 )
+# Generated headers included by public headers but produced at build time.
+# Installed at the location each public #include resolves to (root: include/stinkytofu).
+#   hardware/GfxIsa.hpp -> "Config/Archs.def"
+#   *.cpp               -> "stinkytofu/Config/Config.h"
+#   ir/logical/LogicalOpcode.hpp -> "LogicalOpcodes_generated.inc"
+#   ir/asm/StinkyAsmIR.hpp       -> "hardware/gfxIsa.inc"
+#   *.cpp               -> "stinkytofu/Version.h"
+install(FILES
+    ${PROJECT_BINARY_DIR}/include/Config/Archs.def
+    DESTINATION include/stinkytofu/Config
+)
+install(FILES
+    ${PROJECT_BINARY_DIR}/include/stinkytofu/Config/Config.h
+    DESTINATION include/stinkytofu/stinkytofu/Config
+)
+install(FILES
+    ${TABLEGEN_OUTPUT_DIR}/LogicalOpcodes_generated.inc
+    DESTINATION include/stinkytofu
+)
+install(FILES
+    ${TABLEGEN_OUTPUT_DIR}/hardware/gfxIsa.inc
+    DESTINATION include/stinkytofu/hardware
+)
+# Per-arch rocisa conversion mappings, included by the rocisa conversion glue
+# (src/conversion/rocisa/*ArchInfo.hpp) which rocisa compiles into _rocisa.
+install(DIRECTORY ${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/rocisa/
+    DESTINATION include/stinkytofu/stinkytofu/ir/rocisa
+    FILES_MATCHING PATTERN "*.inc"
+)
 install(FILES
     ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h
-    DESTINATION include/stinkytofu
+    DESTINATION include/stinkytofu/stinkytofu
 )
 # Tablegen-generated file needed by the Python module when built standalone
 # against an installed stinkytofu.

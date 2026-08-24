@@ -469,20 +469,21 @@ std::unique_ptr<ParsedBlock> IRParser::parseBlock() {
             break;  // Next block - caller will parse it
         }
 
+        // Try label syntax first: parseInstruction eats `ident:` as a broken destReg and can't
+        // backtrack.
+        if (peek().kind == TokenKind::Identifier && lexer.peekAhead(1).kind == TokenKind::Colon) {
+            auto label = parseLabel();
+            if (label) {
+                block->instructions.push_back(std::move(label));
+                skipNewlines();
+                continue;
+            }
+        }
+
         auto inst = parseInstruction();
         if (inst) {
             block->instructions.push_back(std::move(inst));
         } else {
-            // Try label (flat style) for backward compat
-            if (peek().kind == TokenKind::Identifier &&
-                lexer.peekAhead(1).kind == TokenKind::Colon) {
-                auto label = parseLabel();
-                if (label) {
-                    block->instructions.push_back(std::move(label));
-                    skipNewlines();
-                    continue;
-                }
-            }
             // Error recovery
             while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof &&
                    peek().kind != TokenKind::Newline) {

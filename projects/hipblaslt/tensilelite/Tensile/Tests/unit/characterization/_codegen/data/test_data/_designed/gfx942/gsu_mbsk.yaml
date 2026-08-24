@@ -20,7 +20,6 @@
 #   - GlobalSplitU: [2, 4]  — GSU>1 to activate MBSK workspace
 #   - GlobalSplitUAlgorithm: MultipleBufferSingleKernel
 #   - StoreVectorWidth: [-1]  — auto (avoids too-many-store-at-MBSK reject)
-#   - MinKForGSU: 1 — allow small K
 #
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -28,7 +27,6 @@ GlobalParameters:
   NumElementsToValidate: 0
   NumWarmups: 0
   NumBenchmarks: 1
-  MinKForGSU: 1
 
 BenchmarkProblems:
   ########################################

@@ -40,7 +40,7 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=$ROCM_PATH/bin/amdclang++ ..
 make -j8
 ```
 
-`invoke build-client` accepts `--clean`, `--build-dir`, `--build-type`, `--gpu-targets`, `--rocm-path`, `--export-compile-commands`, `--bundle-python-deps`, `--enable-rocprof`. See `tasks.py`.
+`invoke build-client` accepts `--clean`, `--build-dir`, `--build-type`, `--gpu-targets`, `--rocm-path`, `--export-compile-commands`, `--bundle-python-deps`, `--enable-rocprof`, `--cxx-flags-release`. See `tasks.py`.
 
 ## Linting and Formatting
 

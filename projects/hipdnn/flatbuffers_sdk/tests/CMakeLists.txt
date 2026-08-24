@@ -25,8 +25,11 @@ add_executable(
     flatbuffer_utilities/TestKnobSettingWrapper.cpp
     flatbuffer_utilities/TestSerializedGraphContainer.cpp
     flatbuffer_utilities/TestTensorAttributesWrapper.cpp
+    utilities/TestApplicabilityUtils.cpp
     utilities/TestFlatbufferUtils.cpp
     utilities/TestJson.cpp
+    utilities/TestUuid.cpp
+    utilities/TestMoeGroupedMatmulValidation.cpp
     utilities/TestPointwiseValidation.cpp
 )
 
@@ -72,4 +75,4 @@ if(ENABLE_CLANG_TIDY AND _fb_include_dirs)
     endif()
 endif()
 
-add_unit_test_target(hipdnn_flatbuffers_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_flatbuffers_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})

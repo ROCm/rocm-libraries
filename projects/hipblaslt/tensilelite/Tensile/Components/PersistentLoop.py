@@ -141,7 +141,7 @@ class PersistentLoopOn(PersistentLoop):
         skCloseLoopLabel = Label("SK_CloseLoop", "")
         module.add(skCloseLoopLabel)
         if kernel.get("DebugPersistentKernelLoopForever", False):
-            # StreamK 1/2/3 have no other exit, so this makes the kernel loop infinitely.
+            # StreamK 3 has no other exit, so this makes the kernel loop infinitely.
             with writer.allocTmpSgpr(3, tag="PersistentLoopOn_closePersistentLoop_tmpSgprInfo") as tmpSgprInfo:
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
         elif kernel["StreamK"] == 4:
@@ -174,13 +174,6 @@ class PersistentLoopOn(PersistentLoop):
             with writer.allocTmpSgpr(3) as tmpSgprInfo:
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
             module.add(sk5CloseDoneLabel)
-        elif kernel["StreamK"] == 2:
-            streamk = Component.StreamK.find(writer)
-            sTmp = writer.sgprPool.checkOut(1, "TotalIters")
-            module.add(streamk.computeTotalIters(writer, kernel, sTmp))
-            module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Check if done all StreamK iterations"))
-            writer.sgprPool.checkIn(sTmp)
-            module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
         else:
             module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if done all StreamK iterations"))
             module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))

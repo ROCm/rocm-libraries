@@ -43,8 +43,14 @@
     defined(CK_AMD_GPU_GFX1100) || defined(CK_AMD_GPU_GFX1101) || defined(CK_AMD_GPU_GFX1102) ||   \
     defined(CK_AMD_GPU_GFX1103) || defined(CK_AMD_GPU_GFX1150) || defined(CK_AMD_GPU_GFX1151) ||   \
     defined(CK_AMD_GPU_GFX1152) || defined(CK_AMD_GPU_GFX1153) || defined(CK_AMD_GPU_GFX1200) ||   \
-    defined(CK_AMD_GPU_GFX1201) || defined(CK_AMD_GPU_GFX1250)
+    defined(CK_AMD_GPU_GFX1201)
 #define CK_BUFFER_RESOURCE_3RD_DWORD 0x31014000
+#elif defined(CK_AMD_GPU_GFX1250)
+// gfx1250: word-3 must be 0 (matches CK ck.hpp); otherwise buffer_load treats
+// valid elements as out-of-range and returns 0.
+// TODO: gfx11 (1100-1153) and gfx120 (1200/1201) are set to 0x31014000 (gfx10's
+// value) but CK uses 0x31004000.
+#define CK_BUFFER_RESOURCE_3RD_DWORD 0
 #endif
 
 // FMA instruction

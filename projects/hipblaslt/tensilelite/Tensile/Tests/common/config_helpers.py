@@ -29,6 +29,7 @@ see artifact_helpers.py.
 """
 
 import os
+import re
 
 import pytest
 import yaml
@@ -37,6 +38,9 @@ from Tensile.Common.DataType import DataType
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 
+# Safe either way; bandit's B506 check only recognises the SafeLoader/CSafeLoader spelling,
+# so the call sites using this name carry a bare nosec marker. Never spell that marker out
+# with its leading hash here, or bandit parses this comment too (SEC-00404).
 try:
     DEFAULT_YAML_LOADER = yaml.CSafeLoader
 except AttributeError:
@@ -91,6 +95,8 @@ def configMarks(filepath, rootDir, availableArchs):
      - Root directory name.  This separates tests into pre_checkin, nightly, etc.
      - Expected failures. Include 'xfail' in the name of the YAML file.
      - Anything in yaml["TestParameters"]["marks"]
+     - Architecture from GlobalParameters.Architecture (e.g. gfx1250)
+     - Architecture from filename (e.g. bf16_gfx1250.yaml -> gfx1250)
      - validate / validateAll - whether the test validates (all?) results.
      - Data type(s) used in the YAML
      - Problem type(s) used in the YAML
@@ -112,7 +118,7 @@ def configMarks(filepath, rootDir, availableArchs):
 
     try:
         with open(filepath) as f:
-            doc = yaml.load(f, DEFAULT_YAML_LOADER)
+            doc = yaml.load(f, DEFAULT_YAML_LOADER)  # nosec B506
     except yaml.parser.ParserError:
         marks.append(pytest.mark.syntax_error)
         return marks
@@ -127,6 +133,14 @@ def configMarks(filepath, rootDir, availableArchs):
     if "TestParameters" in doc:
         if "marks" in doc["TestParameters"]:
             marks += [markNamed(m) for m in doc["TestParameters"]["marks"]]
+
+    arch_val = doc.get("GlobalParameters", {}).get("Architecture")
+    if arch_val and markNamed(arch_val) not in marks:
+        marks.append(markNamed(arch_val))
+
+    arch_in_name = re.search(r'(gfx\d+)', components[-1])
+    if arch_in_name and markNamed(arch_in_name.group(1)) not in marks:
+        marks.append(markNamed(arch_in_name.group(1)))
 
     # Architecture specific xfail marks
     for arch in availableArchs:

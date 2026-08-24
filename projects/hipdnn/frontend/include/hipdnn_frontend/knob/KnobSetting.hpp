@@ -16,6 +16,12 @@
 #include <string>
 #include <variant>
 
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <nlohmann/json.hpp>
+
+#include <type_traits>
+#endif
+
 namespace hipdnn_frontend
 {
 
@@ -101,6 +107,17 @@ public:
         _value = value;
     }
 
+    /// Equality: same knob ID and same value
+    bool operator==(const KnobSetting& other) const
+    {
+        return _knobId == other._knobId && _value == other._value;
+    }
+
+    bool operator!=(const KnobSetting& other) const
+    {
+        return !(*this == other);
+    }
+
     /**
      * @brief Get a string representation of this KnobSetting
      * @return Human-readable string describing the setting
@@ -131,5 +148,35 @@ private:
     std::string _knobId; ///< The knob identifier
     KnobValueVariant _value; ///< The knob value
 };
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+/// Serialize a KnobSetting to a JSON object ({knob_id, type, value}). Found via ADL.
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline void to_json(nlohmann::json& j, const KnobSetting& v)
+{
+    j["knob_id"] = v.knobId();
+
+    std::visit(
+        [&j](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr(std::is_same_v<T, int64_t>)
+            {
+                j["type"] = "int";
+                j["value"] = value;
+            }
+            else if constexpr(std::is_same_v<T, double>)
+            {
+                j["type"] = "double";
+                j["value"] = value;
+            }
+            else if constexpr(std::is_same_v<T, std::string>)
+            {
+                j["type"] = "string";
+                j["value"] = value;
+            }
+        },
+        v.value());
+}
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace hipdnn_frontend

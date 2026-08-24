@@ -1,0 +1,21 @@
+---
+Log Level:       [ HIPTENSOR_LOG_LEVEL_ERROR, HIPTENSOR_LOG_LEVEL_PERF_TRACE ]
+Tensor Data Types:
+  - [ HIPTENSOR_R_32F, HIPTENSOR_R_32F, NONE_TYPE, HIPTENSOR_R_32F, HIPTENSOR_R_32F ]
+Algorithm Types:
+  - HIPTENSOR_ALGO_DEFAULT
+Operators:
+  - [HIPTENSOR_OP_SQRT, HIPTENSOR_OP_LOG, HIPTENSOR_OP_SIN]
+Worksize Prefs:
+  - HIPTENSOR_WORKSPACE_DEFAULT
+Alphas:
+  - [1.1, 1.2]
+Betas:
+  - [0]
+Lengths:
+  - [[1, 3, 3, 1, 2, 2, 3, 2, 2, 3, 1, 2], [2, 3, 2, 3, 2, 2, 3, 2, 2, 3, 1, 2], [1, 3, 3, 1, 2, 2, 2, 3, 2, 3, 2, 2]]
+Strides:
+  - []
+Modes:
+  - [[0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17], [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]]
+...

@@ -259,19 +259,6 @@ void assert_eq(ResultIt   result_begin,
 
 // begin assert_near
 template<class T>
-auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
-    -> typename std::enable_if<std::is_floating_point<T>::value>::type
-{
-    ASSERT_EQ(result.size(), expected.size());
-    for(size_t i = 0; i < result.size(); i++)
-    {
-        if(bit_equal(result[i], expected[i])) continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-        auto diff = std::abs(percent * std::max(result[i], expected[i]));
-        ASSERT_NEAR(result[i], expected[i], diff) << "where index = " << i;
-    }
-}
-
-template<class T>
 auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float)
     -> typename std::enable_if<!rocprim::is_floating_point<T>::value>::type
 {
@@ -282,32 +269,24 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
     }
 }
 
-template<class T, std::enable_if_t<std::is_same<T, rocprim::bfloat16>::value ||
-                                        std::is_same<T, rocprim::half>::value, bool> = true>
-void assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
-{
-    ASSERT_EQ(result.size(), expected.size());
-    for(size_t i = 0; i < result.size(); i++)
-    {
-        if(bit_equal(result[i], expected[i])) continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-        auto diff = std::abs(percent * static_cast<float>(expected[i]));
-        ASSERT_NEAR(static_cast<float>(result[i]), static_cast<float>(expected[i]), diff) << "where index = " << i;
-    }
-}
-
 template<class T>
-auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
-                 const std::vector<common::custom_type<T, T, true>>& expected,
-                 const float                                         percent) ->
-    typename std::enable_if<std::is_floating_point<T>::value>::type
+auto assert_near(const std::vector<T>& result,
+                 const std::vector<T>& expected,
+                 const float           percent) ->
+    typename std::enable_if<rocprim::is_floating_point<T>::value>::type
 {
+    // Explicitly convert rocprim::half and rocprim::bfloat16 to float because
+    // std::abs and ASSERT_NEAR do not support these types.
+    using t = typename std::conditional<std::is_floating_point<T>::value, T, float>::type;
+
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        auto diff1 = std::abs(percent * expected[i].x);
-        auto diff2 = std::abs(percent * expected[i].y);
-        if(!bit_equal(result[i].x, expected[i].x)) ASSERT_NEAR(result[i].x, expected[i].x, diff1) << "where index = " << i;
-        if(!bit_equal(result[i].y, expected[i].y)) ASSERT_NEAR(result[i].y, expected[i].y, diff2) << "where index = " << i;
+        if(bit_equal(result[i], expected[i]))
+            continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+        auto diff = std::abs(percent * static_cast<t>(expected[i]));
+        ASSERT_NEAR(static_cast<t>(result[i]), static_cast<t>(expected[i]), diff)
+            << "where index = " << i;
     }
 }
 
@@ -324,35 +303,29 @@ auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
     }
 }
 
-template<class T,
-         std::enable_if_t<std::is_same<T, rocprim::bfloat16>::value
-                              || std::is_same<T, rocprim::half>::value,
-                          bool>
-         = true>
-void assert_near(const std::vector<common::custom_type<T, T, true>>& result,
+template<class T>
+auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
                  const std::vector<common::custom_type<T, T, true>>& expected,
-                 const float                                         percent)
+                 const float                                         percent) ->
+    typename std::enable_if<rocprim::is_floating_point<T>::value>::type
 {
+    // Explicitly convert rocprim::half and rocprim::bfloat16 to float because
+    // std::abs and ASSERT_NEAR do not support these types.
+    using t = typename std::conditional<std::is_floating_point<T>::value, T, float>::type;
+
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        auto diff1 = std::abs(percent * static_cast<float>(expected[i].x));
-        auto diff2 = std::abs(percent * static_cast<float>(expected[i].y));
+        auto diff1 = std::abs(percent * static_cast<t>(expected[i].x));
+        auto diff2 = std::abs(percent * static_cast<t>(expected[i].y));
         // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
         if(!bit_equal(result[i].x, expected[i].x))
-            ASSERT_NEAR(static_cast<float>(result[i].x), static_cast<float>(expected[i].x), diff1) << "where index = " << i;
+            ASSERT_NEAR(static_cast<t>(result[i].x), static_cast<t>(expected[i].x), diff1)
+                << "where index = " << i;
         if(!bit_equal(result[i].y, expected[i].y))
-            ASSERT_NEAR(static_cast<float>(result[i].y), static_cast<float>(expected[i].y), diff2) << "where index = " << i;
+            ASSERT_NEAR(static_cast<t>(result[i].y), static_cast<t>(expected[i].y), diff2)
+                << "where index = " << i;
     }
-}
-
-template<class T>
-auto assert_near(const T& result, const T& expected, const float percent)
-    -> typename std::enable_if<std::is_floating_point<T>::value>::type
-{
-    if(bit_equal(result, expected)) return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-    auto diff = std::abs(percent * expected);
-    ASSERT_NEAR(result, expected, diff);
 }
 
 template<class T>
@@ -362,30 +335,38 @@ auto assert_near(const T& result, const T& expected, const float) ->
     ASSERT_NO_FATAL_FAILURE(protected_assert_eq(result, expected));
 }
 
-template<class T, std::enable_if_t<std::is_same<T, rocprim::bfloat16>::value ||
-                                        std::is_same<T, rocprim::half>::value, bool> = true>
-void assert_near(const T& result, const T& expected, const float percent)
+template<class T>
+auto assert_near(const T& result, const T& expected, const float percent) ->
+    typename std::enable_if<rocprim::is_floating_point<T>::value>::type
 {
+    // Explicitly convert rocprim::half and rocprim::bfloat16 to float because
+    // std::abs and ASSERT_NEAR do not support these types.
+    using t = typename std::conditional<std::is_floating_point<T>::value, T, float>::type;
+
     if(bit_equal(result, expected)) return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-    auto diff = std::abs(percent * static_cast<float>(expected));
-    ASSERT_NEAR(static_cast<float>(result), static_cast<float>(expected), diff);
+    auto diff = std::abs(percent * static_cast<t>(expected));
+    ASSERT_NEAR(static_cast<t>(result), static_cast<t>(expected), diff);
 }
 
 template<class T>
 auto assert_near(const common::custom_type<T, T, true>& result,
                  const common::custom_type<T, T, true>& expected,
                  const float                            percent) ->
-    typename std::enable_if<std::is_floating_point<T>::value>::type
+    typename std::enable_if<rocprim::is_floating_point<T>::value>::type
 {
-    auto diff1 = std::abs(percent * expected.x);
-    auto diff2 = std::abs(percent * expected.y);
+    // Explicitly convert rocprim::half and rocprim::bfloat16 to float because
+    // std::abs and ASSERT_NEAR do not support these types.
+    using t = typename std::conditional<std::is_floating_point<T>::value, T, float>::type;
+
+    auto diff1 = std::abs(percent * static_cast<t>(expected.x));
+    auto diff2 = std::abs(percent * static_cast<t>(expected.y));
     if(!bit_equal(result.x, expected.x))
     {
-        ASSERT_NEAR(result.x, expected.x, diff1);
+        ASSERT_NEAR(static_cast<t>(result.x), static_cast<t>(expected.x), diff1);
     }
     if(!bit_equal(result.y, expected.y))
     {
-        ASSERT_NEAR(result.y, expected.y, diff2);
+        ASSERT_NEAR(static_cast<t>(result.y), static_cast<t>(expected.y), diff2);
     }
 }
 
@@ -400,9 +381,8 @@ auto assert_near(const common::custom_type<T, T, true>& result,
 
 template<class T>
 auto assert_near(const T& result, const T& expected, const float /*percent*/) ->
-    typename std::enable_if<!rocprim::is_integral<T>::value && !std::is_floating_point<T>::value
-                            && !(std::is_same<T, rocprim::bfloat16>::value
-                                 || std::is_same<T, rocprim::half>::value)>::type
+    typename std::enable_if<!rocprim::is_integral<T>::value
+                            && !rocprim::is_floating_point<T>::value>::type
 {
     ASSERT_EQ(result, expected);
 }
