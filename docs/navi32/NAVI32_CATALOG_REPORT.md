@@ -37,11 +37,14 @@ to merge, build and still function against current develop.
 **The control that makes the diagnosis stick**: Origami over navi32's *own* 73 solutions gains
 nothing (98.3% geomean), so **the win is the catalog, not the selector**.
 
-**Fidelity.** Selection is navi32-correct (`--sm_count_target 60`); execution ran on all 96 CUs
-because a real CU mask hangs ~37% of runs. Arm *ratios* are sound (common-mode error) but
-absolute throughput is optimistic. ~73% of kernel time is compute-bound, so the result
-transfers despite the bandwidth difference; only ~7% of kernel time is in the memory-bound
-band this card cannot speak for.
+**Fidelity.** Selection is navi32-correct (`--sm_count_target 60`); the sweeps below executed
+on all 96 CUs, on a hang-rate estimate that was ~18x too high (2.0% measured over 1 242 runs,
+not 37% over 8). **Since checked directly at genuine 60-CU execution: +22.7% wall-clock /
++25.2% geomean, A/A floor 0.11 pt**, against +25.7% on the same shapes at 96 CUs
+([`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md)). Arm *ratios* were sound
+(common-mode error); absolute throughput is optimistic. ~73% of kernel time is compute-bound,
+so the result transfers despite the bandwidth difference; only ~7% of kernel time is in the
+memory-bound band this card cannot speak for.
 
 ---
 
@@ -249,6 +252,14 @@ Measured on the same 8 shapes, same library, back to back:
 |---|---|---|
 | without CU mask | 8 | **0** |
 | with CU mask 60 | 5 | **3 (37%)** |
+
+> **This 8-run estimate was ~18x too high, and it steered the campaign.** Over **1 242 masked
+> runs** the rate is **2.0%** (25 timeouts), all recovered by the harness. The 95% CI on 3/8
+> reaches down to ~8%, and the first masked run after an idle GPU reliably hangs — exactly what
+> a short probe oversamples. On this number the campaign dropped execution fidelity and left
+> its central premise untested; it has since been checked and holds
+> ([`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md)). **Measure a failure rate at the
+> scale you intend to run at** — a rate from 8 runs is a decision about 5 000 made on nothing.
 
 The hang is a teardown race, not a bad shape: the run emits its result row and then never
 exits, and an isolated retry of the same (shape, arm) always passes. It is also
