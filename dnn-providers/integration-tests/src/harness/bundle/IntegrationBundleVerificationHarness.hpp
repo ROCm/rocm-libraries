@@ -72,10 +72,10 @@ std::unordered_map<int64_t, void*> buildVariantPack(
 //   Stage 1 — Route non-golden ops whose initializeBundle() is plain randomize
 //             (conv, matmul, BN-inference, reduction, rmsnorm-fwd, layernorm,
 //             pointwise) through the fill-inputs switch. Zero behavioral change.
-//   Stage 2 — Migrate structured recipes one op at a time: copy the exact
-//             ranges/seeds/derivation from each non-golden subclass override
-//             into the corresponding fill function, using fillComputed/tensorAt
-//             for derived inputs. Delete each override once its fill fn works.
+//   Stage 2 — Migrate remaining ops one at a time: copy the exact
+//             ranges/seeds from each non-golden subclass override
+//             into the corresponding fill function. Delete each override
+//             once its fill fn works.
 //   Stage 3 — Both harnesses share one init pipeline via fillInputs().
 class IntegrationBundleVerificationHarness : public ::testing::Test
 {
@@ -180,6 +180,7 @@ private:
     void runGoldenMode();
     void runExplicitRefMode(ReferenceExecutorType type);
     void runAutoMode();
+    void runGoldenCheckMode();
 
     // ── inputs ──────────────────────────────────────────────────────────
     bool ensureInputsAvailable();
@@ -192,13 +193,7 @@ private:
     //
     // Phase 2 — fill: calls fillInputs(), which registers each op's default
     //   fill recipes into _inputFillRecipes and then fills every leaf input
-    //   as FREE (random values), STRUCTURED (needs specific format), or
-    //   DERIVED (needs another op's output).
-    //
-    // Phase 3 — verify: checks _inputFillRecipes.unfilled() so that every
-    //   leaf input was accounted for and none were refused (STRUCTURED/
-    //   DERIVED). Returns false and SKIPs the test if any leaf was missed
-    //   or refused.
+    //   as FREE (random values) or FIXED (constant value).
     //
     // On success, moves the filled tensors into the bundle so downstream
     // executors (engine, GPU ref, CPU ref) can upload them to the GPU.
@@ -243,25 +238,6 @@ private:
                              float atol,
                              float rtol) const;
 
-    static void
-        appendTensorDiff(std::ostream& os,
-                         int64_t uid,
-                         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                         hipdnn_data_sdk::utilities::ITensor& expected,
-                         hipdnn_data_sdk::utilities::ITensor& actual,
-                         float atol,
-                         float rtol);
-
-    template <typename T>
-    static void appendFpDiff(std::ostream& os,
-                             int64_t uid,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                             hipdnn_data_sdk::utilities::ITensor& expected,
-                             hipdnn_data_sdk::utilities::ITensor& actual,
-                             float atol,
-                             float rtol);
-
     // ── reporting ───────────────────────────────────────────────────────
     // Records the bundle path + reason in the process-wide
     // UnverifiableBundleReport (printed as a summary after all tests),
@@ -274,15 +250,6 @@ private:
 
     static std::string
         labelFor(int64_t uid, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs);
-
-    std::string reportHeader(int64_t uid,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                             hipdnn_data_sdk::utilities::ITensor& expected,
-                             float atol,
-                             float rtol) const;
-
-    static std::string dataTypeName(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 
     // ── tolerances ──────────────────────────────────────────────────────
     // Default derivation (max-across-nodes, per-op/per-dtype lookup) and the
