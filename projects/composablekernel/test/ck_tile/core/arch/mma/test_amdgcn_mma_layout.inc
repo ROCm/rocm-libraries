@@ -309,7 +309,9 @@ struct MmaLayoutTestKernel
 template <typename MmaOp, bool CTranspose, index_t SFactor> // TODO: C++20 concept for MmaOp
 void run_mma_layout_test_single()
 {
-    if constexpr(MmaOp::kCMNumAccess % SFactor == 0)
+    if constexpr(MmaOp::kCMNumAccess % SFactor == 0 &&
+                 (!MmaOp::Is32x16 ||
+                  SFactor == 1)) // No swizzle support for 32x16 specializations on gfx1250
     {
         constexpr uint32_t total_cases = MmaOp::kM * MmaOp::kN * MmaOp::kK;
         ck_tile::DeviceMem d_errors(total_cases * sizeof(uint32_t));
@@ -596,6 +598,7 @@ using Gfx1250Intrinsics = ::testing::Types<
     amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 128u, Target1250, MmaOpFamily::DENSE>,   // wmma_f32_16x16x128_bf8_bf8
     amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u,  Target1250, MmaOpFamily::DENSE>,   // wmma_f32_16x16x32_f16
     amdgcn_mma<F16,  F16,  F16,  16u, 16u, 32u,  Target1250, MmaOpFamily::DENSE>,   // wmma_f16_16x16x32_f16
+    amdgcn_mma<F4,   F4,   F32,  32u, 16u, 128u, Target1250, MmaOpFamily::DENSE>,   // wmma_f32_32x16x128_f4
     // Scale WMMA (32-bit scale)
     amdgcn_mma<F8,   F8,   F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE>,   // wmma_scale_f32_16x16x128_f8f6f4
     amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE>,   // wmma_scale_f32_16x16x128_f8f6f4
@@ -622,6 +625,7 @@ using Gfx1250Intrinsics = ::testing::Types<
     amdgcn_mma<F4,   F6,   F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE>,   // wmma_scale_f32_16x16x128_f8f6f4
     amdgcn_mma<F4,   BF6,  F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE>,   // wmma_scale_f32_16x16x128_f8f6f4
     amdgcn_mma<F4,   F4,   F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE>,   // wmma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F4,   F4,   F32,  32u, 16u, 128u, Target1250, MmaOpFamily::SCALE>,   // wmma_scale_f32_32x16x128_f4
     // Scale16 WMMA (64-bit scale)
     amdgcn_mma<F8,   F8,   F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE16>, // wmma_scale16_f32_16x16x128_f8f6f4
     amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE16>, // wmma_scale16_f32_16x16x128_f8f6f4
@@ -647,7 +651,8 @@ using Gfx1250Intrinsics = ::testing::Types<
     amdgcn_mma<F4,   BF8,  F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE16>, // wmma_scale16_f32_16x16x128_f8f6f4
     amdgcn_mma<F4,   F6,   F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE16>, // wmma_scale16_f32_16x16x128_f8f6f4
     amdgcn_mma<F4,   BF6,  F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE16>, // wmma_scale16_f32_16x16x128_f8f6f4
-    amdgcn_mma<F4,   F4,   F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE16>  // wmma_scale16_f32_16x16x128_f8f6f4
+    amdgcn_mma<F4,   F4,   F32,  16u, 16u, 128u, Target1250, MmaOpFamily::SCALE16>, // wmma_scale16_f32_16x16x128_f8f6f4
+    amdgcn_mma<F4,   F4,   F32,  32u, 16u, 128u, Target1250, MmaOpFamily::SCALE16>  // wmma_scale16_f32_32x16x128_f4
 >;
 // clang-format on
 

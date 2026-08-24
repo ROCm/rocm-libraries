@@ -225,6 +225,8 @@ struct amdgcn_mma_base
     // dimension. We can tell which by checking if we get the right Vector size.
     static constexpr bool CBlockDimInVecDim =
         kCMBlocks * kCNBlocks * kCMPerLane == vector_traits<CVecType>::vector_size;
+
+    static constexpr bool Is32x16 = (FragM == 32 && FragN == 16);
 };
 
 /**
