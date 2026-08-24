@@ -949,6 +949,7 @@ TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
     const std::vector<int64_t> dims{2, 3, 4};
     const std::vector<int64_t> strides{12, 1, 3};
 
+    // NOLINTNEXTLINE(misc-const-correctness) mutated through the iterator; begin() is not const
     hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
 
     // The premise: this is exactly the case the old predicate could not distinguish.
@@ -996,8 +997,12 @@ TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
     const std::vector<int64_t> dims{2, 3, 4};
     const std::vector<int64_t> strides{12, 4, 1};
 
+    // NOLINTNEXTLINE(misc-const-correctness) mutated through the iterator; begin() is not const
     hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
-    EXPECT_TRUE(tensor.isPacked());
+    EXPECT_TRUE(tensor.isPacked())
+        << "these strides are the packed row-major strides, so isPacked() must be true "
+           "here -- if it is not, this test no longer guards the fast path it was "
+           "written for";
 
     float next = 1.0F;
     for(auto valuePtr : tensor)
