@@ -528,6 +528,20 @@ Tests:
       - dot_batched: *single_precision
       - dot_strided_batched: *single_precision
 
+# N above the single-block threshold for f32 (31000) with unit increments and x != y reaches
+# the multi-block rocblas_dot_kernel_inc1, the only sweeping instantiation the group above
+# never exercises: their N stays below the threshold so ONE_BLOCK selects inc1by2 instead.
+# Restricted to strided_batched since a zero stride there broadcasts one vector across all
+# batches, keeping the allocation N sized instead of N * batch_count; dot_batched has no
+# stride argument to exploit that way and would multiply it out to tens of gigabytes.
+  - name: dot_batch_sweep_index_inc1_multiblock
+    category: pre_checkin
+    arguments:
+      - { N: 31001, incx: 1, incy: 1, stride_x: 0, stride_y: 0, batch_count: *c_grid_yz_require_passes }
+    os_flags: [ LINUX ]
+    function:
+      - dot_strided_batched: *single_precision
+
 # Tests for testing rocblas_dot_batched_4_kernel
   - name: dot_batched_kernel_test
     category: nightly
