@@ -37,7 +37,7 @@ def loadCk() {
 
 //launch develop branch daily jobs
 CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 23 * * * % RUN_FULL_QA=true;RUN_CK_TILE_FMHA_TESTS=true;RUN_PERFORMANCE_TESTS=true;FORCE_CI=true
-                                              0 22 * * * % RUN_FULL_QA=true;DISABLE_DL_KERNELS=true;RUN_TILE_ENGINE_BASIC_TESTS=true;RUN_TILE_ENGINE_GEMM_TESTS=true;RUN_DISPATCHER_GEMM_TESTS=true;RUN_DISPATCHER_TESTS=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
+                                              0 22 * * * % RUN_FULL_QA=true;DISABLE_DL_KERNELS=true;RUN_TILE_ENGINE_BASIC_TESTS=true;RUN_TILE_ENGINE_GEMM_TESTS=true;RUN_DISPATCHER_PERF_TESTS=true;RUN_DISPATCHER_CORRECTNESS_TESTS=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
                                               0 21 * * * % RUN_GROUPED_CONV_LARGE_CASES_TESTS=true;hipTensor_test=true;BUILD_GFX101=false;BUILD_GFX908=false;BUILD_GFX942=true;BUILD_GFX950=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true;BUILD_PACKAGES=true
                                               0 19 * * * % BUILD_DOCKER=true;COMPILER_VERSION=develop;BUILD_COMPILER=/llvm-project/build/bin/clang++;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
                                               0 17 * * * % BUILD_DOCKER=true;COMPILER_VERSION=therock;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
@@ -136,13 +136,13 @@ pipeline {
             defaultValue: false,
             description: "Run the tile_engine_gemm tests (default: OFF)")
         booleanParam(
-            name: "RUN_DISPATCHER_GEMM_TESTS",
+            name: "RUN_DISPATCHER_PERF_TESTS",
             defaultValue: false,
-            description: "Run dispatcher gemm tests on gfx942 only (default: OFF)")
+            description: "Benchmark ahead-of-time tile_engine GEMM instances on gfx942: gemm_universal, batched_gemm, batched_contraction (default: OFF)")
         booleanParam(
-            name: "RUN_DISPATCHER_TESTS",
+            name: "RUN_DISPATCHER_CORRECTNESS_TESTS",
             defaultValue: false,
-            description: "Run dispatcher GPU tests: gemm_universal, grouped, multi_d, multi_abd, stream_k, batched_gemm, batched_contraction, plus bquant + mx_gemm on gfx950 (per-arch subset; default: OFF)")
+            description: "Verify JIT-compiled dispatcher kernels on gfx942 + gfx950: gemm_universal, grouped, multi_d, multi_abd, stream_k, batched_gemm, batched_contraction, plus bquant + mx_gemm on gfx950 (per-arch subset; default: OFF)")
         booleanParam(
             name: "BUILD_INSTANCES_ONLY",
             defaultValue: false,
@@ -616,7 +616,7 @@ pipeline {
                 }
             }
         }
-        stage("Run DISPATCHER_GEMM Tests")
+        stage("Run DISPATCHER_PERF Tests")
         {
             when {
                 beforeAgent true
@@ -624,11 +624,11 @@ pipeline {
             }
             parallel
             {
-                stage("Run DISPATCHER_GEMM Tests on gfx942")
+                stage("Run DISPATCHER_PERF Tests on gfx942")
                 {
                     when {
                         beforeAgent true
-                        expression { params.RUN_DISPATCHER_GEMM_TESTS.toBoolean() }
+                        expression { params.RUN_DISPATCHER_PERF_TESTS.toBoolean() }
                     }
                     agent none
                     steps{
@@ -636,7 +636,7 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx942")) {
                                 deleteDir()
-                                ck.runDispatcherGemmTests(params.BUILD_COMPILER)
+                                ck.runDispatcherPerfTests(params.BUILD_COMPILER)
                                 cleanWs()
                             }
                         }
@@ -708,7 +708,7 @@ pipeline {
                 }
             }
         }
-        stage("Run DISPATCHER Tests")
+        stage("Run DISPATCHER_CORRECTNESS Tests")
         {
             when {
                 beforeAgent true
@@ -716,11 +716,11 @@ pipeline {
             }
             parallel
             {
-                stage("Run DISPATCHER Tests on gfx942")
+                stage("Run DISPATCHER_CORRECTNESS Tests on gfx942")
                 {
                     when {
                         beforeAgent true
-                        expression { params.RUN_DISPATCHER_TESTS.toBoolean() }
+                        expression { params.RUN_DISPATCHER_CORRECTNESS_TESTS.toBoolean() }
                     }
                     agent none
                     steps{
@@ -728,17 +728,17 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx942")) {
                                 deleteDir()
-                                ck.runDispatcherTests("gfx942", params.BUILD_COMPILER)
+                                ck.runDispatcherCorrectnessTests("gfx942", params.BUILD_COMPILER)
                                 cleanWs()
                             }
                         }
                     }
                 }
-                stage("Run DISPATCHER Tests on gfx950")
+                stage("Run DISPATCHER_CORRECTNESS Tests on gfx950")
                 {
                     when {
                         beforeAgent true
-                        expression { params.RUN_DISPATCHER_TESTS.toBoolean() }
+                        expression { params.RUN_DISPATCHER_CORRECTNESS_TESTS.toBoolean() }
                     }
                     agent none
                     steps{
@@ -746,7 +746,7 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx950")) {
                                 deleteDir()
-                                ck.runDispatcherTests("gfx950", params.BUILD_COMPILER)
+                                ck.runDispatcherCorrectnessTests("gfx950", params.BUILD_COMPILER)
                                 cleanWs()
                             }
                         }

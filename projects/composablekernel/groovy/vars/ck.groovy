@@ -1501,7 +1501,7 @@ def runTileEngineGemmTests(String arch, String compiler) {
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
 }
 
-def runDispatcherGemmTests(String compiler) {
+def runDispatcherPerfTests(String compiler) {
     def execute_cmd = """
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
             -D BUILD_CK_TILE_ENGINE="ON" \
@@ -1529,7 +1529,7 @@ def runDispatcherGemmTests(String compiler) {
     } finally {
         // finally, not a trailing call: a red lane is exactly when the per-kernel
         // JSON is worth having, and buildAndTest throws on failure. Same path
-        // reasoning as runDispatcherTests: execute_cmd runs from
+        // reasoning as runDispatcherCorrectnessTests: execute_cmd runs from
         // projects/composablekernel/build while archiveArtifacts resolves against
         // the workspace root, so the build-relative path is spelled out in full.
         archiveArtifacts artifacts: "projects/composablekernel/build/gemm_universal_results.json," +
@@ -1580,7 +1580,7 @@ def dispatcherVariantCmd(String arch, String variant) {
                 --json dispatcher_${variant}_results.json"""
 }
 
-def runDispatcherTests(String arch, String compiler) {
+def runDispatcherCorrectnessTests(String arch, String compiler) {
     def execute_cmd = """
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
             -D CMAKE_CXX_COMPILER="${compiler}" \
