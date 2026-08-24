@@ -44,6 +44,50 @@ execution_settings:
     OMP_NUM_THREADS: "4"
 """
 
+# Excludes every test on one arch. The parser cannot express this as a gtest
+# filter, so it must emit the suite DISABLED. See
+# https://github.com/ROCm/rocm-libraries/issues/11163.
+EXCLUDE_GPU_ALL_YAML = """
+test_categories:
+  quick:
+    test_patterns:
+      - "*quick*"
+    exclude:
+      - "*DISABLED*"
+    labels:
+      - quick
+exclude_gpu:
+  exclude_gpu_gfx110X:
+    test_patterns:
+      - "*"
+    labels:
+      - quick
+      - ex_gpu_gfx110X
+execution_settings:
+  category_timeouts:
+    quick: 60
+"""
+
+# Partial exclusion: some tests still run, so the suite must stay enabled.
+EXCLUDE_GPU_PARTIAL_YAML = """
+test_categories:
+  quick:
+    test_patterns:
+      - "*quick*"
+    labels:
+      - quick
+exclude_gpu:
+  exclude_gpu_gfx110X:
+    test_patterns:
+      - "*Integration*"
+    labels:
+      - quick
+      - ex_gpu_gfx110X
+execution_settings:
+  category_timeouts:
+    quick: 60
+"""
+
 
 class TestDevelopHelperFunctions(unittest.TestCase):
     def test_cmake_quote_simple(self):
@@ -377,6 +421,50 @@ class TestCliIntegration(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("invalid --additional-label value", result.stderr)
+
+    def test_cli_exclude_gpu_all_marks_suite_disabled(self):
+        """A `"*"` exclusion means the suite does not run on that arch.
+
+        It cannot be expressed as a gtest filter -- the emitted
+        "<positive>-<excludes>:*" selects nothing, so the binary runs and
+        reports zero tests. The suite must be DISABLED instead.
+        """
+        result, install_contents = self._run_parser(
+            EXCLUDE_GPU_ALL_YAML, install_file="install_CTestTestfile.cmake"
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        gpu_suite = "rocblas-test_quick_gfx110X_suite"
+        self.assertIn(f"NAME {gpu_suite}", result.stdout)
+
+        properties = result.stdout.split(f"set_tests_properties({gpu_suite}")[1]
+        self.assertIn("DISABLED TRUE", properties.split(")")[0])
+
+        # The ex_gpu label must survive: CI selects this suite by arch label,
+        # and a disabled-but-labelled suite is what keeps that selection
+        # non-empty (ctest treats a wholly empty selection as an error).
+        self.assertIn("ex_gpu_gfx110X", properties.split(")")[0])
+
+        # Install tree carries the same property.
+        install_line = next(
+            line
+            for line in install_contents.splitlines()
+            if line.startswith(f"set_tests_properties({gpu_suite}")
+        )
+        self.assertIn("DISABLED TRUE", install_line)
+
+    def test_cli_exclude_gpu_partial_keeps_suite_enabled(self):
+        """A partial exclusion still runs tests, so it must NOT be disabled."""
+        result, install_contents = self._run_parser(
+            EXCLUDE_GPU_PARTIAL_YAML, install_file="install_CTestTestfile.cmake"
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn(
+            "--gtest_filter=*quick*-*Integration*",
+            result.stdout,
+        )
+        self.assertNotIn("DISABLED TRUE", result.stdout)
+        self.assertNotIn("DISABLED TRUE", install_contents)
 
 
 if __name__ == "__main__":

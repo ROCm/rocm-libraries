@@ -786,6 +786,21 @@ def main():
             # Build GPU exclusion pattern string - format: pattern1:pattern2
             gpu_exclude_string = ":".join(unique_patterns)
 
+            # A bare "*" excludes every test, i.e. "this whole suite does not
+            # run on this arch". That intent is NOT expressible as a gtest
+            # filter: the emitted "<positive>-<excludes>:*" has a negative half
+            # matching everything, so the suite still registers, still launches
+            # the binary, and selects 0 tests. That read as a silent pass until
+            # a zero-tests-ran guard turned it into a hard failure
+            # (dnn-providers/integration-tests/src/main.cpp) -- see
+            # https://github.com/ROCm/rocm-libraries/issues/11163.
+            #
+            # Emit the suite DISABLED instead. CTest reports it as
+            # "Not Run (Disabled)", never launches the binary, and still lists
+            # the ex_gpu_<arch> label under `ctest --print-labels`, so runners
+            # that select by arch label keep matching it.
+            suite_disabled = "*" in unique_patterns
+
             # Create one test for each applicable category
             for category_name in all_applicable_categories:
                 cat_data = category_data[category_name]
@@ -847,6 +862,8 @@ def main():
                     print(f'  FIXTURES_REQUIRED "{fixtures_string}"')
                 if resource_group:
                     print(f'  RESOURCE_GROUPS "1,{resource_group}:1"')
+                if suite_disabled:
+                    print("  DISABLED TRUE")
                 print(")")
                 print()
 
@@ -877,8 +894,9 @@ def main():
                         )
                         # FIXTURES_REQUIRED currently applies only to the build tree; no
                         # use case requires it in the install tree yet.
+                        disabled_prop = " DISABLED TRUE" if suite_disabled else ""
                         install_file_handle.write(
-                            f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop})\n\n"
+                            f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop}{disabled_prop})\n\n"
                         )
                         install_file_handle.flush()
                     except OSError as e:

@@ -267,6 +267,30 @@ ctest -L standard -L ex_gpu_gfx950
 ctest -L quick -LE ex_gpu
 ```
 
+**Excluding a suite entirely (`"*"`):**
+
+A lone `"*"` under `test_patterns` means "this suite does not run on this
+arch". A gtest filter cannot express that: `{positive}-{excludes}:*` has a
+negative half matching everything, so the binary still launches and selects
+zero tests. The parser therefore emits the suite with CTest's `DISABLED`
+property instead, so the binary is never launched:
+
+```yaml
+exclude_gpu:
+  exclude_gpu_gfx110X_windows:
+    test_patterns:
+      - "*"          # whole suite skipped on gfx110X Windows
+    labels:
+      - "quick"
+      - "ex_gpu_gfx110X"
+```
+
+CTest reports these as `Not Run (Disabled)` and they do not fail the run. The
+`ex_gpu_<arch>` label is still emitted, so `ctest --print-labels` and
+arch-label selection keep matching the suite. Prefer naming the specific
+broken patterns where you can — `"*"` drops all coverage for that arch, so it
+should carry a comment saying why, and link a tracking issue.
+
 ### **Category-Level Exclusions**
 
 Exclusions are applied using gtest's negative filter syntax (`positive_patterns-negative_patterns`):
