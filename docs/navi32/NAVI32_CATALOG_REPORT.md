@@ -821,8 +821,14 @@ sweeps across two dtypes and two epilogues would not land within 5 pt of each ot
 | AuxB-TN (bf16+aux) | 997 | 2 994 | 118.32% | **118.77%** | 100.19% | **0** |
 | WGM sweep (P3) | 230 | 1 150 | — | — | 99.72% | **0** |
 
-**15 122 measurements, zero failures anywhere.** Every published number recomputed from the
-CSVs rather than quoted from prose, and all match.
+**15 122 measurements in the sweeps tabulated above, zero failures anywhere.** Every published
+number recomputed from the CSVs rather than quoted from prose, and all match.
+
+A further **~7 300 measurements** were taken later under genuine 60-CU execution — the four
+catalog re-validations, the WGM re-test and the Prediction re-test — bringing the campaign
+total to **22 400+**. Those sweeps run masked, so unlike the table above they carry a small
+timeout rate (1.3–2.0%, recovered by the harness); see
+[`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md).
 
 ---
 
