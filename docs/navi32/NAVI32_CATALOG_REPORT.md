@@ -619,6 +619,23 @@ An oracle over what was already built shows the expected value is small:
 would add 2.8% more. `gridcat` is already the best of the four arms on **542 of 996 shapes
 (54.4%)**.
 
+> **Recomputed at 60 CUs with a noise floor: +1.71 pt, and it is not evenly spread.** The
+> figures here are *raw* oracles — an oracle taken across separate sweeps picks the luckiest
+> measurement per shape, so it is inflated by run-to-run noise even when every arm is the same
+> library, and the inflation grows with arm count (measured: +0.02 / +0.43 / +0.71 / +0.94 pt
+> for 2 / 3 / 4 / 5 arms). Subtracting the floor of matching cardinality:
+>
+> | oracle set | raw | floor | **real** |
+> |---|---|---|---|
+> | GridBased + Prediction | 101.49% | 100.02% | **+1.47** |
+> | GridBased + the WGM variants | 100.47% | 100.43% | **+0.05** |
+> | everything built | 102.65% | 100.94% | **+1.71** |
+>
+> So the conclusion below is right that the *pool* is done — but "**neither is selection**"
+> needs qualifying: **+1.47 of the +1.71 comes from pairing GridBased with Prediction.**
+> Selection *within* the pool is exhausted; selection *between the two selectors* is the one
+> lever left. [`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md).
+
 So the pool is no longer the binding constraint, and neither is selection within it. Spending
 hours adding kernels to a pool whose oracle is nearly exhausted is poor value against a 20 h
 budget — better to stop with a measured, shipped +24% than to chase a bounded 2.8%.
