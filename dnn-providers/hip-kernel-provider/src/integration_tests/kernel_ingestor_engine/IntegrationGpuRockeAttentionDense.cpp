@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
@@ -66,6 +67,9 @@ namespace
 /// packs/AttentionDenseNative.cpp and named by attention_dense.ued.json; the two spellings
 /// must agree or the loader drops the set during its symbol pre-flight.
 constexpr const char* ROCKE_ENGINE_NAME = "hipkernel:AttentionDense";
+
+/// The one arch the shipped descriptor is built for, matching its `arch` field.
+constexpr const char* ROCKE_DESCRIPTOR_ARCH = "gfx942";
 
 /// The problem the shipped descriptor's spec is compiled for. A rocKE kernel bakes its
 /// shape in -- these are constants in the code object and appear in its symbol name -- so
@@ -205,6 +209,17 @@ protected:
         if(IsSkipped() || HasFatalFailure())
         {
             return;
+        }
+
+        // The descriptor declares `arch: ["gfx942"]`, and the ingestor drops a pack whose
+        // arch the device does not satisfy (archSupports, KernelIngestorStateManager).
+        // On any other device the engine is therefore never a candidate and every case
+        // below asserts about an engine that cannot appear.
+        const auto arch = hip_kernel_provider_common::getDeviceString(_stream);
+        if(arch != ROCKE_DESCRIPTOR_ARCH)
+        {
+            GTEST_SKIP() << "the rocKE attention_dense descriptor is built for "
+                         << ROCKE_DESCRIPTOR_ARCH << "; this device is " << arch;
         }
 
         // Skipping is right only for "production packaging did not run" -- no hipcc, no
