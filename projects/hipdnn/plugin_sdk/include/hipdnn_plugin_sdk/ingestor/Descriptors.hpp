@@ -158,6 +158,9 @@ struct EngineDescriptor
     /// RFC 0020 §4.2 numerical notes, held as authored; no hipDNN enum exists for them
     /// yet, so nothing consumes the strings.
     std::vector<std::string> numericalNotes;
+    /// Resolved through GraphMatchRegistry; empty means this engine declares no
+    /// graph-topology match.
+    std::string graphMatchNativeSymbol;
 };
 
 /// Which inputs a matcher reads, and so what its failure prunes.
