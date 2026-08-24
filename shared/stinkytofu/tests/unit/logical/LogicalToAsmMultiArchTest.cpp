@@ -1412,13 +1412,14 @@ TEST(LogicalToAsmComprehensive, LaneSelectImmediateLowering) {
             for (IRBase& ir : block) {
                 if (ir.getType() == IRBase::IRType::StinkyTofu) {
                     stinkyInsts++;
-                    actualMnemonic = static_cast<StinkyInstruction*>(&ir)->getHwInstDesc()->mnemonic;
+                    actualMnemonic =
+                        static_cast<StinkyInstruction*>(&ir)->getHwInstDesc()->mnemonic;
                 }
             }
         }
 
-        EXPECT_GT(stinkyInsts, 0)
-            << "gfx1250: " << c.name << " with immediate lane select failed to lower";
+        EXPECT_GT(stinkyInsts, 0) << "gfx1250: " << c.name
+                                  << " with immediate lane select failed to lower";
         if (stinkyInsts > 0) {
             EXPECT_EQ(actualMnemonic, c.expectedMnemonic)
                 << c.name << ": Expected mnemonic '" << c.expectedMnemonic << "', got '"
