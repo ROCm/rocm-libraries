@@ -425,6 +425,23 @@ Data: `results/P3_wgm_final.csv` (1 150 rows, 5 arms, 0 timeouts).
 says otherwise: keep GridBased.** Over an identical 298-solution pool, the dense
 shape->solution table beats Origami's analytical selection by 13 pt geomean / 4 pt wall-clock.
 
+> **About half of that gap was a measurement artefact, and has been re-measured.** Origami was
+> asked to predict for **60 CUs** while GridBased's table came from navi31 tuning at **96 CUs**
+> — and both then ran on **96 CUs**, penalising the arm whose choices targeted a machine it was
+> not run on. Re-run under a real CU mask so the prediction target matches execution:
+>
+> | `pred298` vs `gridcat`, same 206 shapes | geomean | wall-clock |
+> |---|---|---|
+> | 96-CU execution (this section) | 91.31% | 97.11% |
+> | **60-CU execution (matched)** | **96.72%** | **98.73%** |
+> | A/A floor, 60-CU | 99.61% | **99.46%** |
+>
+> Geomean deficit **8.7 -> 3.3 pt**, wall-clock **2.9 -> 1.3 pt** — within 0.7 pt of the A/A
+> control, i.e. **essentially wall-clock parity**. The conclusion (keep GridBased) survives, but
+> the reason narrows sharply: the table wins **on small shapes** (GEMV 87.4%, small 94.6%) and
+> ties everywhere else (large 99.1%, medium 100.2%). Full detail:
+> [`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md).
+
 Where Origami loses is specific — by size, wall-clock:
 
 | | large | medium | small | tiny |
