@@ -435,6 +435,7 @@ class TestMain:
                 mock_parallel_map.assert_called_once()
 
     def test_main_forwards_explicit_argv_and_returns_zero(self):
+        """Ensure `main` forwards caller-supplied argv and returns zero on success."""
         from tensilelite.tensilelite_logic.run import main
 
         argv = ["logic", "--check-all"]
