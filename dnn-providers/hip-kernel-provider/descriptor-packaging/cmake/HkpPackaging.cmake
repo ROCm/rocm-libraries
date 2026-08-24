@@ -550,8 +550,22 @@ endfunction()
 #   Checked at configure time because the failure is otherwise a mid-build
 #   ImportError from inside a dependency, which reads as a packer bug rather
 #   than a missing dependency on the build machine.
+#
+#   Only interpreters that ALREADY EXIST can be probed. The rocKE wheel venv is
+#   an add_custom_command OUTPUT, so on a clean tree it is not created until the
+#   build runs and probing it here would fail every configure with a message
+#   blaming absent dependencies -- advice that cannot be followed, because there
+#   is no interpreter to install them into. That venv installs these same two
+#   packages itself and re-affirms the import after provisioning, so skipping it
+#   here loses no coverage.
 # ---------------------------------------------------------------------------
 function(hkp_require_kpack_runtime interp what)
+    if(NOT EXISTS "${interp}")
+        # Provisioned during the build (the rocKE wheel venv), which validates
+        # its own imports once it exists.
+        return()
+    endif()
+
     execute_process(
         COMMAND "${interp}" -c "import msgpack, zstandard"
         RESULT_VARIABLE _rc
