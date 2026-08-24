@@ -5266,11 +5266,11 @@ public:
      *
      * Applies an element-wise function to three input tensors.
      * Currently only BINARY_SELECT uses this overload:
-     * `out[i] = in0[i] ? in1[i] : in2[i]`
+     * `out[i] = in2[i] ? in0[i] : in1[i]`
      *
-     * @param in0 Condition tensor (selector mask)
-     * @param in1 Value selected where in0 is non-zero
-     * @param in2 Value selected where in0 is zero
+     * @param in0 Value selected where in2 is true
+     * @param in1 Value selected where in2 is false
+     * @param in2 Condition tensor (selector mask)
      * @param attributes Configuration specifying the pointwise mode
      * @return out0: Output tensor
      *
