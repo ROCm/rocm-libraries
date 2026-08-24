@@ -84,20 +84,35 @@ inline IngestorKernelCode
         const std::string label = hipdnn_plugin_sdk::ingestor::describeDescriptor(
             "kernel", kernel.name, kernel.kernelId);
 
-        // A descriptor names an archive shipped beside it, never one elsewhere on the
-        // filesystem. weakly_canonical normalises `..` and absolute paths rather than
-        // rejecting them, so without this a descriptor could name any readable file and
-        // have it loaded as executable code. Compare canonical forms: the lexical check
-        // alone would miss a symlink out of the tree.
-        const std::string relative = resolved.lexically_relative(origin).generic_string();
-        if(resolved != origin && (relative.empty() || relative.rfind("..", 0) == 0))
+        // A descriptor names an archive shipped inside the tree it was loaded from, never
+        // one elsewhere on the filesystem. weakly_canonical normalises `..` and absolute
+        // paths rather than rejecting them, so without this a descriptor could name any
+        // readable file and have it loaded as executable code. Compare canonical forms:
+        // the lexical check alone would miss a symlink out of the tree.
+        //
+        // The boundary is the TREE, not the descriptor's own directory. One archive ships
+        // per arch shard, at the shard root, so a descriptor authored in a child folder --
+        // which is every production layout, since packing preserves the authored subpath --
+        // has to climb out of its own directory to reach it. Anchoring on originDirectory
+        // rejected exactly those, which made every production-packaged kernel unloadable
+        // while flat fixture trees stayed green.
+        //
+        // treeRoot rather than a derived arch-shard root: it is what the loader actually
+        // walked, so it needs no filesystem probing and assumes nothing about how deep a
+        // shard sits under it. A kernel built in memory carries neither path and is not
+        // reachable here -- KPACK requires a file -- but an empty treeRoot would degrade
+        // to the old behaviour rather than open a hole, so fall back to origin.
+        const std::filesystem::path boundary
+            = kernel.treeRoot.empty() ? origin
+                                      : std::filesystem::weakly_canonical(kernel.treeRoot, ignored);
+        const std::string relative = resolved.lexically_relative(boundary).generic_string();
+        if(resolved != boundary && (relative.empty() || relative.rfind("..", 0) == 0))
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
                 "kpack kernel source for " + label + ": library '" + kernel.source.library
                     + "' resolves to '" + resolved.string()
-                    + "', which is outside the descriptor's own directory '" + origin.string()
-                    + "'");
+                    + "', which is outside the descriptor tree '" + boundary.string() + "'");
         }
 
         auto program = kpackLoader.load(resolved,
