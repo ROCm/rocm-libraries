@@ -11,11 +11,13 @@ navi32's TN GEMM catalogs were far thinner than navi31's on the same ProblemType
 selection is nearest-neighbour matching, so on a 471-row table most real shapes resolve to a
 distant neighbour and run a badly-sized tile.
 
-> **Measured: the binding constraint is the solution *pool*, not the table.** Swapping in a
-> different 472-row table over the *identical* 64-solution pool (gfx1153's, which differs in
-> ~940 rows) moves nothing — **99.79% against a 99.70% A/A control** — while widening the pool
-> is worth **+20.5%**. The thin catalog is slow because it contains no well-sized tile for the
-> shape; no re-mapping can conjure one. **Add kernels, do not re-fit the table.**
+> **Measured: the pool is ~4x the lever the table is, and the table only pays once the pool is
+> rich.** Two experiments, both at real 60 CUs:
+> over a *thin* 64-solution pool, swapping in a different 471-row table moves **nothing**
+> (99.79% vs a 99.70% A/A control — there is no well-sized tile to point at). Over the *shipped*
+> 306-solution pool, sparsifying the table 9 692 → 471 rows costs **3.4 pt** (96.62% vs a 100.38%
+> control), while the pool itself is worth **13.8 pt** — an ~80/20 split of the 17.2 pt total.
+> **Widen the pool first; then the table fit is worth doing.**
 > [`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md)
 
 Widening all four affected TN ProblemTypes measured, on 996–997 stratified shapes each:
