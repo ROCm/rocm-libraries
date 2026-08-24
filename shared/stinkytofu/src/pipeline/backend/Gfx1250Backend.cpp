@@ -87,10 +87,11 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
-        // TODO: remove this temporary SIA4/SIA0 split once a dedicated hazard pass
-        // handles xcnt placement.
-        pm.addPass(createStinkyRemoveWaitCntPass(/*removeTensorWaitCnt=*/true,
-                                                 /*removeXcntWaitCnt=*/optLevel == OptLevel::O3));
+        // Only O3 has the hazard pass that re-places xcnt. kmcnt and tensor keep
+        // the defaults; RemoveWaitCntOptions documents why each is exempt.
+        RemoveWaitCntOptions removeOptions;
+        removeOptions.removeXcnt = (optLevel == OptLevel::O3);
+        pm.addPass(createStinkyRemoveWaitCntPass(removeOptions));
         pm.addPass(createStinkyRemoveNopPass());
     }
 

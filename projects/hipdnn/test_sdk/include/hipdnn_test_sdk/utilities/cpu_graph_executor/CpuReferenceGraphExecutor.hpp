@@ -16,6 +16,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormBpropSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MoeGroupedMatmulSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanBuilderRegistry.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
@@ -170,6 +171,8 @@ private:
             return detail::LayernormBpropSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MatmulAttributes:
             return detail::MatmulSignatureKey(node, tensorMap, computeType);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
+            return detail::MoeGroupedMatmulSignatureKey(node, tensorMap, computeType);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes:
             return detail::RMSNormFwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes:
