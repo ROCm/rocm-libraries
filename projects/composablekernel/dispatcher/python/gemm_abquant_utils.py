@@ -62,6 +62,11 @@ if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
 from codegen_common import make_gemm_abquant_kernel_name  # noqa: E402
 
+# Tile-Engine perf flags -- single source of truth (quant_bridge_flags.py).
+if str(Path(__file__).parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent))
+from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
+
 _DEFAULT_HIPCC = "hipcc"
 
 _COERCE_FLAG_SUPPORTED = None
@@ -613,32 +618,18 @@ def _compile_abquant_kernel(
                          "-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT",
                          "-DCK_USE_GFX950"]
 
-    # Tile-Engine performance codegen flags. The Old-TE example/test build
-    # (example/ck_tile/38_block_scale_gemm, develop CMake) compiles every kernel
-    # -- including the gfx950 EightWaves (192x256x128, 8-wave) block-scale fast
-    # path -- with this exact -mllvm flag set. Without them, hipcc -O3 register
-    # allocation for the EightWaves hot loop peaks at 256 VGPRs and spills to
-    # scratch (private_segment_fixed_size > 0), which collapses occupancy and
-    # makes the bridge kernel ~3x slower than the byte-identical Old-TE kernel
-    # (+140..+307% on fp8/bf8 n=128). With these flags the bridge kernel matches
-    # Old-TE's register profile exactly (229 VGPRs, zero scratch) and the gap
-    # collapses to within +/-5%. Kept in lockstep with the develop TE flags so
-    # the ctypes .so is codegen-identical to the Old-TE build (fair parity).
-    perf_flags = [
-        "-fno-offload-uniform-block",
-        "-mllvm", "--lsr-drop-solution=1",
-        "-mllvm", "-enable-post-misched=0",
-        "-mllvm", "-amdgpu-early-inline-all=true",
-        "-mllvm", "-amdgpu-function-calls=false",
-        "-mllvm", "-enable-noalias-to-md-conversion=1",
-        "-mllvm", "-greedy-reverse-local-assignment=1",
-    ]
-    # clang < 22 only: -amdgpu-coerce-illegal-types tightens EightWaves
-    # register allocation, but clang >= 22 (ROCm 7.2) removed it and aborts
-    # the compile. Include it only when the toolchain accepts it (the kernel
-    # is bit-accurate without it).
-    if _coerce_flag_supported(hipcc):
-        perf_flags += ["-mllvm", "-amdgpu-coerce-illegal-types=1"]
+    # Tile-Engine perf flags via the shared single source of truth
+    # (quant_bridge_flags.te_perf_flags = the canonical 5-flag develop TE set +
+    # the toolchain-gated coerce flag). abquant's gfx950 EightWaves fast path
+    # (192x256x128, 8-wave) additionally needs two -mllvm flags on top of the
+    # base -- without them hipcc -O3 spills the EightWaves hot loop to scratch
+    # and the bridge runs ~3x slower than the byte-identical Old-TE kernel. They
+    # are passed via extra= so the base set stays in one place and cannot drift.
+    perf_flags = _te_perf_flags(
+        hipcc,
+        extra=["-mllvm", "-enable-noalias-to-md-conversion=1",
+               "-mllvm", "-greedy-reverse-local-assignment=1"],
+    )
 
     compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",
                    "-DCK_TILE_SINGLE_KERNEL_INCLUDE", "-w",
