@@ -696,6 +696,8 @@ static bool IsApplicableBase(const ExecutionContext& ctx, const ProblemDescripti
     if(!(StartsWith(name, "gfx9") || StartsWith(name, "gfx10") || StartsWith(name, "gfx11") ||
          StartsWith(name, "gfx120")))
         return false;
+    if(StartsWith(name, "gfx90") && !target.xnack.isReported())
+        return false;
     if(problem.IsFp16() &&
        !(name == "gfx906" || name == "gfx908" || name == "gfx90a" || name == "gfx942" ||
          StartsWith(name, "gfx95") || name == "gfx1011" || name == "gfx1012" ||

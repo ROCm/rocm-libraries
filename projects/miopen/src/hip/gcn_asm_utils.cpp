@@ -153,7 +153,7 @@ std::string AmdgcnAssemble(std::string_view source,
     std::ostringstream options;
     options << " -x assembler -target amdgcn--amdhsa";
 #if WORKAROUND_ISSUE_3001
-    if(!target.isXnackEnabled())
+    if(target.xnack.isReported() && !target.isXnackEnabled())
         options << " -mno-xnack";
 #endif
     /// \todo Hacky way to find out which CO version we need to assemble for.
