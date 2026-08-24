@@ -278,6 +278,25 @@ void insertRule3HandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor, AsmIRB
     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
 }
 
+/// Emit `s_wait_tensorcnt 0` immediately before \p anchor (the instruction
+/// right after a cooperative `tensor_load_to_lds` group). Under PGR>=2 the
+/// cooperative load is async and produced by a PEER wave, so the consumer's own
+/// tensor counter cannot order it. Draining right after the load issues makes
+/// the broadcast coherent before the back edge, so the publishing workgroup
+/// barrier at the next loop head orders it for the consuming waves. Matches
+/// PGR1's per-iteration drain.
+void insertProducerTensorDrainBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId) {
+    const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_wait_tensorcnt, archId);
+    assert(waitDesc && "s_wait_tensorcnt opcode is not supported on this architecture");
+    StinkyInstruction* w = irBuilder.create(waitDesc, anchor);
+    w->addSrcReg(StinkyRegister(0));
+    SWaitTensorCntData d;
+    d.tlcnt = 0;
+    w->addModifier<SWaitTensorCntData>(d);
+    w->addModifier<CommentData>(
+        CommentData{"retire cooperative tensor_load_to_lds before back-edge (PGR>=2 coherence)"});
+}
+
 bool isLabelNamed(const StinkyInstruction& inst, const char* name) {
     if (!isLabel(inst)) return false;
     const auto* labelData = inst.getModifier<LabelData>();
@@ -403,7 +422,8 @@ class InsertClusterBarrierPassImpl : public Pass {
    public:
     static char ID;
 
-    InsertClusterBarrierPassImpl() = default;
+    InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue)
+        : streamKMulticast_(streamKMulticast), pgrValue_(pgrValue) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -425,6 +445,10 @@ class InsertClusterBarrierPassImpl : public Pass {
             std::vector<std::tuple<StinkyInstruction*, IRBase*, IRBase*, StinkyInstruction*>>
                 pending;
             std::unordered_set<StinkyInstruction*> seenTriggers;
+            // Anchors (instruction right after each cooperative tensor_load
+            // group) for the producer-side drain; see
+            // insertProducerTensorDrainBefore.
+            std::vector<IRBase*> producerDrainAnchors;
 
             auto segBegin = bb.begin();
             for (auto it = bb.begin(); it != bb.end(); ++it) {
@@ -465,6 +489,27 @@ class InsertClusterBarrierPassImpl : public Pass {
                     sccRestoreCmp = findLiveRestorableSccCmpUpstream(signalAnchorInst);
                 }
                 pending.emplace_back(trigger, signalAnchor, waitAnchor, sccRestoreCmp);
+
+                // Record the instruction right after this cooperative
+                // tensor_load group so a producer-side tensor drain can be
+                // planted there (retire the load before the back edge / next
+                // publishing barrier). Advance past any immediately-following
+                // tensor_load(s) so the drain covers the whole group (e.g. the
+                // A/B operand load plus its MX-scale load) rather than landing
+                // between them.
+                if (streamKMulticast_ && pgrValue_ >= 2) {
+                    auto postIt = std::next(it);
+                    while (postIt != bb.end()) {
+                        auto* pinst = dyn_cast<StinkyInstruction>(postIt.getNodePtr());
+                        if (pinst != nullptr && isTensorLoad(*pinst)) {
+                            ++postIt;
+                            continue;
+                        }
+                        break;
+                    }
+                    producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
+                                                                        : nullptr);
+                }
             }
 
             std::vector<IRBase*> gsu1Anchors;
@@ -525,6 +570,12 @@ class InsertClusterBarrierPassImpl : public Pass {
                                            sccRestoreCmp);
                 (void)trigger;
             }
+            // Producer-side drain right after each cooperative tensor_load
+            // group (retire the async cooperative load before the back-edge so
+            // the next loop-head barrier publishes it coherently).
+            for (IRBase* postAnchor : producerDrainAnchors) {
+                insertProducerTensorDrainBefore(postAnchor, irBuilder, archId);
+            }
             for (IRBase* anchor : gsu1Anchors) {
                 insertRule1ClusterBarrierSignalBefore(anchor, irBuilder, archId);
             }
@@ -547,14 +598,18 @@ class InsertClusterBarrierPassImpl : public Pass {
 
         return PreservedAnalyses::none();
     }
+
+   private:
+    const bool streamKMulticast_ = false;
+    const int pgrValue_ = 1;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
 
 }  // namespace
 
-std::unique_ptr<Pass> createInsertClusterBarrierPass() {
-    return std::make_unique<InsertClusterBarrierPassImpl>();
+std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue) {
+    return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue);
 }
 
 }  // namespace stinkytofu

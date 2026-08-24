@@ -552,13 +552,16 @@ def runOnHealthyNode(String label, Closure body) {
         def attemptNode = null
         try {
             node(exclude(label, excluded)) {
-                attemptNode = env.NODE_NAME
-                echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
-                // Derive GPU requirement from the node label: only "nogpu" stages
-                // skip the driver/device checks. A new non-GPU label would need
-                // adding here (otherwise preflight would wrongly demand a GPU).
-                preflight(!label.contains('nogpu'))
-                runInPlace(body, transientRetries)
+                ws("${env.WORKSPACE}-${env.BUILD_NUMBER}") {
+                    sh 'echo "The updated workspace is: $WORKSPACE"'
+                    attemptNode = env.NODE_NAME
+                    echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
+                    // Derive GPU requirement from the node label: only "nogpu" stages
+                    // skip the driver/device checks. A new non-GPU label would need
+                    // adding here (otherwise preflight would wrongly demand a GPU).
+                    preflight(!label.contains('nogpu'))
+                    runInPlace(body, transientRetries)
+                }
             }
             return
         }
@@ -1059,9 +1062,11 @@ def buildAndTest(Map conf=[:]){
                             }
                             sh """#!/bin/bash
                                 cd projects/hiptensor && mkdir -p build &&
-                                CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install" &&
+                                CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install" -DCMAKE_INSTALL_PREFIX="${env.WORKSPACE}/projects/hiptensor/install" &&
                                 cmake --build build -- -j &&
-                                ctest --test-dir build
+                                cd build &&
+                                make install &&
+                                ctest -R 'quick' --output-on-failure --test-dir "${env.WORKSPACE}/projects/hiptensor/install/bin/hiptensor"
                             """
                         }
                     }

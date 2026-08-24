@@ -362,8 +362,13 @@ namespace rocsparse
                 local_val = static_cast<T>(1);
             }
 
-            // Differentiate upper and lower triangular mode
-            if(fill_mode == rocsparse_fill_mode_upper)
+            // Differentiate upper and lower triangular mode.
+            // For lower fill mode, once we pass the diagonal we must stop iterating
+            // over the row, so we flag it and break out of the for loop after the switch.
+            bool stop_row = false;
+            switch(fill_mode)
+            {
+            case rocsparse_fill_mode_upper:
             {
                 // Processing upper triangular
 
@@ -385,14 +390,16 @@ namespace rocsparse
 
                     continue;
                 }
+                break;
             }
-            else if(fill_mode == rocsparse_fill_mode_lower)
+            case rocsparse_fill_mode_lower:
             {
                 // Processing lower triangular
 
                 // Ignore all entries that are above the diagonal
                 if(local_col > row)
                 {
+                    stop_row = true;
                     break;
                 }
 
@@ -406,8 +413,16 @@ namespace rocsparse
                         diagonal[wid] = static_cast<T>(1) / local_val;
                     }
 
+                    stop_row = true;
                     break;
                 }
+                break;
+            }
+            }
+
+            if(stop_row)
+            {
+                break;
             }
 
             // Spin loop until dependency has been resolved
