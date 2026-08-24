@@ -13,6 +13,11 @@ Documentation for rocFFT is available at
   callback functions are specified during plan creation and allow rocFFT to Just-In-Time (JIT) compile the code into 
   rocFFT's own kernels.
 
+  Also implemented `rocfft_execution_info_set_load_callback_data` and
+  `rocfft_execution_info_set_store_callback_data` APIs to allow
+  specifying the data pointers for these callbacks, which may differ
+  on each execution.
+
 ### Changed
 
   The `rocfft_execution_info_set_load_callback` and `rocfft_execution_info_set_store_callback` APIs are now 
