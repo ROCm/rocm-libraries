@@ -148,7 +148,7 @@ the file and the file's length are then passed to rocFFT:
       if(rocfft_plan_description_create(&desc) != rocfft_status_success)
           return nullptr;
       if(rocfft_plan_description_set_load_callback(desc, "load_callback",
-                                                   code.data(), size, nullptr, 0) != rocfft_status_success)
+                                                   code.data(), size, 0) != rocfft_status_success)
         {
           rocfft_plan_description_destroy(desc);
           return nullptr;
@@ -192,7 +192,7 @@ functions in an array do not behave the same.
    and linker.
 
 SPIR-V callbacks are preferred over legacy function pointer callbacks
-because they allow for rocFFT to properly optimize the the combined
+because they allow for rocFFT to properly optimize the combined
 callback and FFT code.  Legacy callback functions are already
 compiled by the time they are passed to rocFFT, and no further
 optimization can be done.

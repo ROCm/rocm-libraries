@@ -706,7 +706,7 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *  specified is considered to have one brick on the current device
  *  used at plan creation.
  * 
- *  The provided function pointers replace any previously-specified
+ *  The provided data pointers replace any previously-specified
  *  load callback data for this execution info handle.  'cb_data' may
  *  be nullptr along with a count of zero, to indicate that all load
  *  callbacks should receive nullptr for their 'cbdata' parameters.
@@ -781,7 +781,7 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_store_callback(rocfft_exec
  *  specified is considered to have one brick on the current device
  *  used at plan creation.
  *
- *  The provided function pointers replace any previously-specified
+ *  The provided data pointers replace any previously-specified
  *  store callback data for this execution info handle.  'cb_data' may be
  *  nullptr, to indicate that all store callbacks should receive
  *  nullptr for their 'cbdata' parameters.
