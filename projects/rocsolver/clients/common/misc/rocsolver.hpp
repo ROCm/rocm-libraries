@@ -2991,7 +2991,7 @@ inline rocblas_status rocsolver_lahr2(rocblas_handle handle,
                                       rocblas_double_complex* Y,
                                       rocblas_int ldy)
 {
-    return rocsolver_zlahr2(handle, n, k, nb, A, lda, tau, T, ldt, Y, ldy)
+    return rocsolver_zlahr2(handle, n, k, nb, A, lda, tau, T, ldt, Y, ldy);
 }
 
 /******************** SB2ST_HB2ST ********************/
