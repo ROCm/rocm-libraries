@@ -630,6 +630,20 @@ void cpu_gebrd(rocblas_int m,
                rocblas_int size_w);
 
 template <typename T, typename S>
+void cpu_sbev_hbev(rocblas_evect evect,
+                   rocblas_fill uplo,
+                   rocblas_int n,
+                   rocblas_int kd,
+                   T* Aband,
+                   rocblas_int ldab,
+                   S* W,
+                   T* Z,
+                   rocblas_int ldz,
+                   T* work,
+                   S* rwork,
+                   rocblas_int* info);
+
+template <typename T, typename S>
 void cpu_sytrd_hetrd(rocblas_fill uplo,
                      rocblas_int n,
                      T* A,
@@ -651,6 +665,16 @@ void cpu_sy2sb_he2hb(rocblas_fill uplo,
                      T* tau,
                      T* work,
                      rocblas_int size_w);
+
+template <typename T, typename S>
+void cpu_sb2st_hb2st(rocblas_fill uplo,
+                     rocblas_int n,
+                     rocblas_int kd,
+                     T* AB,
+                     rocblas_int ldab,
+                     S* D,
+                     S* E,
+                     T* work);
 
 template <typename T, typename S>
 void cpu_sytd2_hetd2(rocblas_fill uplo, rocblas_int n, T* A, rocblas_int lda, S* D, S* E, T* tau);
