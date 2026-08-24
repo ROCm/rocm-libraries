@@ -192,10 +192,9 @@ void ormtr_unmtr_hb2st_initData(const rocblas_handle handle,
 //    Aband, Atri, Q, R are nq-by-nq; Aband is banded, Atri is real symmetric tridiagonal.
 //
 // 2. Compare multiplying random C by explicitly generated Q1 and by implicit Q2:
-//    || op(Q2) C - op(Q1) C ||_1 / (m || C ||_1)  for side=left  (nq = m), or
-//    || C op(Q2) - C op(Q1) ||_1 / (m || C ||_1)  for side=right (nq = n).
+//    || op(Q2) C - op(Q1) C ||_1 / (nq || C ||_1)  for side=left  (nq = m), or
+//    || C op(Q2) - C op(Q1) ||_1 / (nq || C ||_1)  for side=right (nq = n).
 //    C, R are m-by-n; Q is nq-by-nq.
-//    todo: should it divide by nq instead of m? see LAWN and lapack/magma/slate testing.
 //
 // Allocate R as max( m, nq )-by-max( n, nq ) for use in all 3 tests.
 //
@@ -320,9 +319,9 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
 
     //--------------------
     // Check 2:
-    // || op(Q#) C - op(Q) C ||_1 / (m || C ||_1) for left
-    // || C op(Q#) - C op(Q) ||_1 / (m || C ||_1) for right
-    // todo: normalize with m or n? LAWN 41 sec 7.1.3 has m in all 4 cases.
+    // || op(Q#) C - op(Q) C ||_1 / (nq || C ||_1) for left
+    // || C op(Q#) - C op(Q) ||_1 / (nq || C ||_1) for right
+    // Normalize by nq. LAWN 41 sec 7.1.3 normalizes m in all 4 cases.
     CHECK_HIP_ERROR(hipMemcpy2DAsync(dR[0], ldr * sizeof(T), // R
                                      dC[0], ldc * sizeof(T), // C
                                      m * sizeof(T), n, hipMemcpyDefault, stream));
@@ -350,10 +349,10 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
                                            &one, dR.data(), ldr, stride, 1)); // R
     }
 
-    // norm( R )
+    // norm( R ) / nq
     CHECK_ROCBLAS_ERROR(rocsolver_lange(handle, norm, m, n, dR.data(), ldr, dnorm));
     CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
-    errors[2] = hnorm[0][0] / m;
+    errors[2] = hnorm[0][0] / nq;
 
     // norm( C )
     CHECK_ROCBLAS_ERROR(rocsolver_lange(handle, norm, m, n, dC.data(), ldc, dnorm));
