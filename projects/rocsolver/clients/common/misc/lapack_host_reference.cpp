@@ -1912,6 +1912,55 @@ void zhetrd_he2hb_(char* uplo,
                    int* lwork,
                    int* info);
 
+void ssbtrd_(char* vect,
+             char* uplo,
+             int* n,
+             int* kd,
+             float* AB,
+             int* ldab,
+             float* D,
+             float* E,
+             float* Q,
+             int* ldq,
+             float* work,
+             int* info);
+void dsbtrd_(char* vect,
+             char* uplo,
+             int* n,
+             int* kd,
+             double* AB,
+             int* ldab,
+             double* D,
+             double* E,
+             double* Q,
+             int* ldq,
+             double* work,
+             int* info);
+void chbtrd_(char* vect,
+             char* uplo,
+             int* n,
+             int* kd,
+             rocblas_float_complex* AB,
+             int* ldab,
+             float* D,
+             float* E,
+             rocblas_float_complex* Q,
+             int* ldq,
+             rocblas_float_complex* work,
+             int* info);
+void zhbtrd_(char* vect,
+             char* uplo,
+             int* n,
+             int* kd,
+             rocblas_double_complex* AB,
+             int* ldab,
+             double* D,
+             double* E,
+             rocblas_double_complex* Q,
+             int* ldq,
+             rocblas_double_complex* work,
+             int* info);
+
 void ssytd2_(char* uplo, int* n, float* A, int* lda, float* D, float* E, float* tau, int* info);
 void dsytd2_(char* uplo, int* n, double* A, int* lda, double* D, double* E, double* tau, int* info);
 void chetd2_(char* uplo,
@@ -2076,6 +2125,53 @@ void zgesvdx_(char* jobu,
               double* rwork,
               int* iwork,
               int* info);
+
+void ssbev_(const char* evect,
+            const char* uplo,
+            const int* n,
+            const int* kd,
+            float* Aband,
+            const int* ldab,
+            float* W,
+            float* Z,
+            const int* ldz,
+            float* work,
+            int* info);
+void dsbev_(const char* evect,
+            const char* uplo,
+            const int* n,
+            const int* kd,
+            double* Aband,
+            const int* ldab,
+            double* W,
+            double* Z,
+            const int* ldz,
+            double* work,
+            int* info);
+void chbev_(const char* evect,
+            const char* uplo,
+            const int* n,
+            const int* kd,
+            rocblas_float_complex* Aband,
+            const int* ldab,
+            float* W,
+            rocblas_float_complex* Z,
+            const int* ldz,
+            rocblas_float_complex* work,
+            float* rwork,
+            int* info);
+void zhbev_(const char* evect,
+            const char* uplo,
+            const int* n,
+            const int* kd,
+            rocblas_double_complex* Aband,
+            const int* ldab,
+            double* W,
+            rocblas_double_complex* Z,
+            const int* ldz,
+            rocblas_double_complex* work,
+            double* rwork,
+            int* info);
 
 void ssterf_(int* n, float* D, float* E, int* info);
 void dsterf_(int* n, double* D, double* E, int* info);
@@ -6974,6 +7070,83 @@ void cpu_gebrd<rocblas_double_complex, double>(rocblas_int m,
     zgebrd_(&m, &n, A, &lda, D, E, tauq, taup, work, &size_w, &info);
 }
 
+// sbev & hbev
+template <>
+void cpu_sbev_hbev<float, float>(rocblas_evect evect,
+                                 rocblas_fill uplo,
+                                 rocblas_int n,
+                                 rocblas_int kd,
+                                 float* Aband,
+                                 rocblas_int ldab,
+                                 float* W,
+                                 float* Z,
+                                 rocblas_int ldz,
+                                 float* work,
+                                 float* rwork, // unused
+                                 rocblas_int* info)
+{
+    char evectC = rocblas2char_evect(evect);
+    char uploC = rocblas2char_fill(uplo);
+    ssbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, info);
+}
+
+template <>
+void cpu_sbev_hbev<double, double>(rocblas_evect evect,
+                                   rocblas_fill uplo,
+                                   rocblas_int n,
+                                   rocblas_int kd,
+                                   double* Aband,
+                                   rocblas_int ldab,
+                                   double* W,
+                                   double* Z,
+                                   rocblas_int ldz,
+                                   double* work,
+                                   double* rwork, // unused
+                                   rocblas_int* info)
+{
+    char evectC = rocblas2char_evect(evect);
+    char uploC = rocblas2char_fill(uplo);
+    dsbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, info);
+}
+
+template <>
+void cpu_sbev_hbev<rocblas_float_complex, float>(rocblas_evect evect,
+                                                 rocblas_fill uplo,
+                                                 rocblas_int n,
+                                                 rocblas_int kd,
+                                                 rocblas_float_complex* Aband,
+                                                 rocblas_int ldab,
+                                                 float* W,
+                                                 rocblas_float_complex* Z,
+                                                 rocblas_int ldz,
+                                                 rocblas_float_complex* work,
+                                                 float* rwork,
+                                                 rocblas_int* info)
+{
+    char evectC = rocblas2char_evect(evect);
+    char uploC = rocblas2char_fill(uplo);
+    chbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, rwork, info);
+}
+
+template <>
+void cpu_sbev_hbev<rocblas_double_complex, double>(rocblas_evect evect,
+                                                   rocblas_fill uplo,
+                                                   rocblas_int n,
+                                                   rocblas_int kd,
+                                                   rocblas_double_complex* Aband,
+                                                   rocblas_int ldab,
+                                                   double* W,
+                                                   rocblas_double_complex* Z,
+                                                   rocblas_int ldz,
+                                                   rocblas_double_complex* work,
+                                                   double* rwork,
+                                                   rocblas_int* info)
+{
+    char evectC = rocblas2char_evect(evect);
+    char uploC = rocblas2char_fill(uplo);
+    zhbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, rwork, info);
+}
+
 // sytrd & hetrd
 template <>
 void cpu_sytrd_hetrd<float, float>(rocblas_fill uplo,
@@ -8386,4 +8559,77 @@ void cpu_bdsvdx<double>(rocblas_fill uplo,
     char srangeC = rocblas2char_srange(srange);
     dbdsvdx_(&uploC, &svectC, &srangeC, &n, D, E, &vl, &vu, &il, &iu, nsv, S, Z, &ldz, work, iwork,
              info);
+}
+
+// sb2st & hb2st
+template <>
+void cpu_sb2st_hb2st<float, float>(rocblas_fill uplo,
+                                   rocblas_int n,
+                                   rocblas_int kd,
+                                   float* AB,
+                                   rocblas_int ldab,
+                                   float* D,
+                                   float* E,
+                                   float* work)
+{
+    int info;
+    char vect = 'N';
+    char uploC = rocblas2char_fill(uplo);
+    float dummy;
+    int ldq = 1;
+    ssbtrd_(&vect, &uploC, &n, &kd, AB, &ldab, D, E, &dummy, &ldq, work, &info);
+}
+
+template <>
+void cpu_sb2st_hb2st<double, double>(rocblas_fill uplo,
+                                     rocblas_int n,
+                                     rocblas_int kd,
+                                     double* AB,
+                                     rocblas_int ldab,
+                                     double* D,
+                                     double* E,
+                                     double* work)
+{
+    int info;
+    char vect = 'N';
+    char uploC = rocblas2char_fill(uplo);
+    double dummy;
+    int ldq = 1;
+    dsbtrd_(&vect, &uploC, &n, &kd, AB, &ldab, D, E, &dummy, &ldq, work, &info);
+}
+
+template <>
+void cpu_sb2st_hb2st<rocblas_float_complex, float>(rocblas_fill uplo,
+                                                   rocblas_int n,
+                                                   rocblas_int kd,
+                                                   rocblas_float_complex* AB,
+                                                   rocblas_int ldab,
+                                                   float* D,
+                                                   float* E,
+                                                   rocblas_float_complex* work)
+{
+    int info;
+    char vect = 'N';
+    char uploC = rocblas2char_fill(uplo);
+    rocblas_float_complex dummy;
+    int ldq = 1;
+    chbtrd_(&vect, &uploC, &n, &kd, AB, &ldab, D, E, &dummy, &ldq, work, &info);
+}
+
+template <>
+void cpu_sb2st_hb2st<rocblas_double_complex, double>(rocblas_fill uplo,
+                                                     rocblas_int n,
+                                                     rocblas_int kd,
+                                                     rocblas_double_complex* AB,
+                                                     rocblas_int ldab,
+                                                     double* D,
+                                                     double* E,
+                                                     rocblas_double_complex* work)
+{
+    int info;
+    char vect = 'N';
+    char uploC = rocblas2char_fill(uplo);
+    rocblas_double_complex dummy;
+    int ldq = 1;
+    zhbtrd_(&vect, &uploC, &n, &kd, AB, &ldab, D, E, &dummy, &ldq, work, &info);
 }
