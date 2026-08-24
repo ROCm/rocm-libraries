@@ -58,10 +58,14 @@ but only on small shapes), and extending the catalog past ~300 solutions (**re-m
 with a noise floor subtracted: the real oracle over everything built is +1.71 pt**).
 
 **All three rejections have now been re-tested in the matched 60-CU regime**, because two of the
-three were originally measured in a regime that could not express them. All three survive — but
-the oracle analysis relocates the remaining opportunity: **+1.47 of that +1.71 pt comes from
-pairing GridBased with Origami Prediction, so what headroom is left is in the *selector*, not
-the catalog.** A bigger catalog is done; a size-gated hybrid is the open idea.
+three were originally measured in a regime that could not express them. All three survive. The
+oracle analysis relocated the remaining opportunity to the *selector* — **+1.47 of the +1.71 pt
+comes from pairing GridBased with Origami Prediction** — and that lever has since been measured
+too: a realizable size predicate captures **+0.47 pt out of sample** (a flops *band*; no
+monotone threshold works at all, because Prediction's edge sits in a middle band rather than at
+the top end). **~A quarter of the oracle is reachable; the rest is not separable by problem
+geometry.** Against the C++ work of adding a row predicate to the selector, that is probably not
+worth it — **so there is no known lever left on this catalog.**
 
 **The runbook exists because three separate checks returned a reassuring signal while doing
 nothing** — a CU mask that reported 30 CUs but restricted nothing, a `--logic-filter` build
