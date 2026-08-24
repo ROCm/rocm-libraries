@@ -11,7 +11,7 @@ while _PKG_ROOT in sys.path:
 sys.path.insert(0, _PKG_ROOT)
 
 from hkp_pack.errors import HkpPackError  # noqa: E402
-from hkp_pack.pipeline import run_pipeline  # noqa: E402
+from hkp_pack.pipeline import GROUP_NAME, run_pipeline  # noqa: E402
 
 
 def _split_arches(values):
@@ -77,6 +77,15 @@ def _parse_args(argv):
         "installed rocm_kpack).",
     )
     p.add_argument(
+        "--group",
+        default=GROUP_NAME,
+        help="Archive group name for this root. The shipped archive is "
+        "<arch>/kpack/<group>_<arch>.kpack, so two roots staged into one "
+        "descriptor tree MUST NOT share a group -- otherwise the second "
+        "overwrites the first and its descriptors name an archive that no "
+        "longer holds their kernels. Defaults to the shipped group.",
+    )
+    p.add_argument(
         "--rocke-wheel-stamp",
         default=None,
         help="Path to the rocke wheel content-digest stamp. Its digest is "
@@ -97,6 +106,7 @@ def main(argv=None):
         rocm_kpack_dir=args.kpack_python_dir,
         inter_root=Path(args.inter_root) if args.inter_root else None,
         rocke_wheel_stamp=args.rocke_wheel_stamp,
+        group=args.group,
     )
     return 0
 

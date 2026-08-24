@@ -85,6 +85,11 @@ void findPackagedDirectory(std::string& arch, std::filesystem::path& directory)
 /// inline kernel descriptor; a .ukd.json carries it at the top level. Parsed directly
 /// rather than through DescriptorLoader, whose contract the integration tier covers.
 ///
+/// Found by RECURSIVE search rather than a join on the arch root: the packer preserves
+/// each descriptor's authored subpath, so a descriptor sits wherever its source root put
+/// it. Searching by filename keeps this test indifferent to that depth, which is the
+/// point -- a flat join here is what made the whole suite blind to nesting.
+///
 /// Asserts rather than skips -- the per-arch directory exists by the time this is
 /// called, so anything missing inside it is a broken build. Call through
 /// ASSERT_NO_FATAL_FAILURE.
@@ -92,9 +97,18 @@ void readPackagedKernelSource(const std::filesystem::path& directory,
                               const std::string& descriptorFile,
                               PackagedKernelSource& out)
 {
-    const std::filesystem::path descriptor = directory / descriptorFile;
-    ASSERT_TRUE(std::filesystem::exists(descriptor))
-        << "the packaged descriptor is missing: " << descriptor;
+    std::filesystem::path descriptor;
+    std::error_code walkError;
+    for(const auto& entry : std::filesystem::recursive_directory_iterator(directory, walkError))
+    {
+        if(entry.is_regular_file() && entry.path().filename() == descriptorFile)
+        {
+            descriptor = entry.path();
+            break;
+        }
+    }
+    ASSERT_FALSE(descriptor.empty()) << "the packaged descriptor is missing anywhere under "
+                                     << directory << ": " << descriptorFile;
 
     std::ifstream in(descriptor);
     ASSERT_TRUE(in.good()) << "could not open " << descriptor;
@@ -112,8 +126,10 @@ void readPackagedKernelSource(const std::filesystem::path& directory,
 
     out.tocKey = source["toc_key"].get<std::string>();
     // `library` is relative to the directory holding the descriptor that declared it --
-    // the same anchoring KernelDefinition::originDirectory describes.
-    out.archive = directory / source["library"].get<std::string>();
+    // the same anchoring KernelDefinition::originDirectory describes. That directory is
+    // the descriptor's OWN parent, not the arch root, so a nested descriptor resolves
+    // through the `..` segments the packer wrote.
+    out.archive = descriptor.parent_path() / source["library"].get<std::string>();
     ASSERT_TRUE(std::filesystem::exists(out.archive))
         << descriptor << " names an archive that is not on disk: " << out.archive;
 }

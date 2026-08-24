@@ -4,14 +4,23 @@ The authored `hip`-form source root the build-time packager compiles, prunes and
 `IntegrationGpuKernelIngestorKpack` has a **real** `.kpack` artifact to load, dispatch and
 verify against the CPU reference.
 
-This is a **test fixture, not product surface.** `hkp_wire_demo()` stages the packed tree into
-the build tree's descriptor directory and performs no `install()` of any kind, so nothing here
-reaches a release.
+This is a **test fixture, not product surface.** It is wired through the same
+`hkp_wire_root()` every source root goes through, declared with no `INSTALL_BASE`, so it
+stages into the build tree's descriptor directory and nothing here reaches a release.
+
+It packs under its own archive group (`HKP_GROUP_TESTFIXTURE`), so its
+`<arch>/kpack/<group>_<arch>.kpack` cannot collide with the product root's when both stage
+as siblings into one descriptor tree.
 
 Layout rules the packager imposes (`descriptor-packaging/python/hkp_pack/descriptors.py`):
 
-- The folder is **flat**: every `<name>.<type>.json` plus the HIP sources the UKDs name. The
-  type token is the second-to-last dot-separated segment of the filename, never a field.
+- Descriptors live in a **child folder** (`pointwise/`), not at the root. That is
+  deliberate: the packer preserves each descriptor's authored subpath, so a nested
+  descriptor's `library` climbs back out to the arch root to reach the archive. A flat
+  fixture emits no `..` and cannot exercise that path -- which is precisely how a runtime
+  containment bug reached on-device testing with every suite green.
+- Every `<name>.<type>.json` plus the HIP sources the UKDs name. The type token is the
+  second-to-last dot-separated segment of the filename, never a field.
 - The UKDs are authored in `kind:"hip"` form (`source` / `entry` / `build`); the packager
   rewrites them to `kind:"kpack"` with `library` / `toc_key` / `symbol` / `sha256`.
 - Ids are UUIDs. `requireId()` in `DescriptorLoader.hpp` rejects the packager's own

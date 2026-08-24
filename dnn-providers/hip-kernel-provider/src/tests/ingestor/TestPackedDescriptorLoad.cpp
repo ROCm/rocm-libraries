@@ -261,6 +261,89 @@ TEST(TestPackedDescriptorLoad, LibraryResolvesFromTheDescriptorThatDeclaredIt)
            "exercised.";
 }
 
+/// Every packed kernel passes the runtime's OWN containment guard, and at least one of
+/// them is nested deeply enough to have to climb out of its directory to reach the
+/// archive.
+///
+/// The regression guard for the defect that made every production-packaged kernel
+/// unloadable. The test above replays the resolution JOIN; this one exercises the
+/// CONTAINMENT decision that sits beside it, which is a different rule and was the broken
+/// one. Two behaviours were each individually correct and mutually incompatible:
+///
+///   * the packer writes a nested descriptor's library as `../../kpack/<archive>`,
+///     because one archive ships per arch shard at the shard root;
+///   * the guard rejected anything resolving outside the descriptor's own directory.
+///
+/// Nothing caught it because every tree any test packed was FLAT, so `..` never appeared
+/// and the guard never fired. Hence the second assertion below: a shard with no nested
+/// descriptor cannot exercise this, and silently proving nothing is the failure mode this
+/// whole file exists to end.
+///
+/// buildIngestorKernelCode() cannot be called here -- it needs a device, a compiler and a
+/// real archive open. The containment rule is reproduced instead, reading the same two
+/// loader-populated fields the guard reads, so a change to either field's meaning fails
+/// here rather than only on hardware.
+TEST(TestPackedDescriptorLoad, PackedKernelsSatisfyTheRuntimeContainmentGuard)
+{
+    REQUIRE_PACKED_SHARDS(shards);
+
+    size_t nestedChecked = 0;
+
+    for(const auto& shard : shards)
+    {
+        for(const auto& set : resolveDescriptorSets(loadDescriptorCatalog(shard)))
+        {
+            for(const auto& pack : set.packs)
+            {
+                for(const auto& kernel : pack.kernels)
+                {
+                    if(kernel.source.kind != KernelSourceKind::KPACK)
+                    {
+                        continue;
+                    }
+
+                    ASSERT_FALSE(kernel.treeRoot.empty())
+                        << "kernel '" << kernel.name
+                        << "' carries no treeRoot, so the guard has nothing to anchor "
+                           "containment on and would fall back to its own directory.";
+
+                    std::error_code ec;
+                    const auto origin
+                        = std::filesystem::weakly_canonical(kernel.originDirectory, ec);
+                    const auto boundary = std::filesystem::weakly_canonical(kernel.treeRoot, ec);
+                    const auto resolved
+                        = std::filesystem::weakly_canonical(origin / kernel.source.library, ec);
+
+                    // IngestorKernelCode.hpp, KPACK branch, verbatim.
+                    const std::string relative
+                        = resolved.lexically_relative(boundary).generic_string();
+                    const bool escapes = resolved != boundary
+                                         && (relative.empty() || relative.rfind("..", 0) == 0);
+
+                    EXPECT_FALSE(escapes)
+                        << "kernel '" << kernel.name
+                        << "' would be REFUSED by the runtime containment guard.\n"
+                        << "  originDirectory : " << origin << "\n"
+                        << "  treeRoot        : " << boundary << "\n"
+                        << "  library         : " << kernel.source.library << "\n"
+                        << "  resolves to     : " << resolved;
+
+                    if(origin != boundary)
+                    {
+                        ++nestedChecked;
+                    }
+                }
+            }
+        }
+    }
+
+    EXPECT_GT(nestedChecked, 0U)
+        << "every packed descriptor sat flat at its shard root, so none of them had to "
+           "climb out to reach the archive and the containment rule was never exercised. "
+           "A flat-only fixture is exactly what hid this defect: keep at least one "
+           "descriptor in a child folder.";
+}
+
 /// A packed kernel carries every coordinate the kpack adapter needs to reach a code object.
 ///
 /// `parseKernelSource` requires all four to be PRESENT, but a present empty string
