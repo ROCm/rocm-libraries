@@ -728,6 +728,12 @@ struct RocblasltFusedEpilogueInfo
     // (partial stats) reduction writes it; the consumer (RMSNorm scale-apply / K3) reads it.
     const void* perRowScale          = nullptr;
     bool        rmsStatsPopulated    = false;
+    // MX microscaling requant: device pointer for UE8M0 block-scale output, block size, and type.
+    const void* requantMxScale       = nullptr;
+    int32_t     requantMxBlockSize   = 32;
+    hipDataType requantMxOutputType  = HIP_R_8F_E4M3;
+    // Optional bf16 buffer receiving the pre-quantization H+residual (PartialRMSStoreBf16D).
+    const void* requantMxResidualOut = nullptr;
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Fields of hipblasLtFusedEpilogueDescriptor relevant to the fused all-to-all collective.
     bool                         hasA2APrefix      = false;
