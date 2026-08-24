@@ -49,10 +49,12 @@ the result transfers despite the bandwidth difference — see the report's arith
 section.
 
 **Three hypotheses were tested and rejected.** Do not retry them without new evidence:
-re-forking `WorkGroupMapping` for 60 CUs (null: 6/8/10 within 0.33 pt), switching to an
-Origami `Prediction` library (13 pt worse than GridBased over an identical solution pool),
-and extending the catalog past ~300 solutions (an oracle over every arm built is only +2.8%
-above what shipped).
+re-forking `WorkGroupMapping` for 60 CUs (**null, re-confirmed at real 30 WGPs** — WGM10 99.78%
+/ WGM6 100.35% wall-clock against a 0.07 pt A/A floor; the first test ran at 48 WGPs and could
+not have expressed the hypothesis, see [`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md)),
+switching to an Origami `Prediction` library (13 pt worse than GridBased over an identical
+solution pool), and extending the catalog past ~300 solutions (an oracle over every arm built
+is only +2.8% above what shipped).
 
 **The runbook exists because three separate checks returned a reassuring signal while doing
 nothing** — a CU mask that reported 30 CUs but restricted nothing, a `--logic-filter` build
