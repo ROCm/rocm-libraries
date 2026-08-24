@@ -44,6 +44,8 @@
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/support/OptimizationRemark.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationConstraints.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRules.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationScope.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationVerifier.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
@@ -123,7 +125,7 @@ std::string wavesOf(GfxArchID arch, uint32_t vgprs) {
 std::string shadowReport(const Function& function, const AllocationResult& coloured,
                          const SSALiveIntervals& intervals,
                          const AllocationConstraints& constraints, const AllocationScope& scope,
-                         const char* allocator) {
+                         const AllocationRules& rules, const char* allocator) {
     const AllocationResult producer = createLegacyColoring(function);
     const std::array<int, 3>& isa = function.getGemmTileConfig().arch;
     const GfxArchID arch =
@@ -147,7 +149,42 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
             text += " waves=" + wavesOf(arch, was + 1) + "->" + wavesOf(arch, now + 1);
         text += "]";
     }
+    // Which rules were in force, so a report can be read without knowing the
+    // triple or how capabilities were configured. Silent when there are none,
+    // which keeps every existing report byte-identical.
+    for (const AllocationRule& rule : rules.all()) {
+        text += " rule[" + std::string(rule.name) + "=" + ruleStatusName(rule.status) + "]";
+    }
     return text;
+}
+
+/// The architecture's rules with any forced statuses applied, or a message
+/// naming what was wrong with the request.
+///
+/// One place builds the table, so the pass and the driver cannot disagree about
+/// which rules are in force.
+Expected<AllocationRules> resolveRules(const Function& function,
+                                       const RegisterAllocationOptions& options) {
+    AllocationRules rules =
+        AllocationRulesRegistry::forArch(function.getGemmTileConfig().arch, options.caps);
+
+    // A malformed row is a mistake in the architecture's table, not a property
+    // of the chip, and it silently disables the rule -- so it is refused rather
+    // than dropped quietly.
+    if (!rules.problems().empty()) {
+        std::string message = "@" + function.getName() + ": malformed allocation rule table:";
+        for (const std::string& problem : rules.problems()) message += "\n  " + problem;
+        return Expected<AllocationRules>::Error(message);
+    }
+    if (const std::vector<std::string> unknown = rules.unknownNames(options.rules);
+        !unknown.empty()) {
+        std::string names;
+        for (const std::string& name : unknown) names += (names.empty() ? "" : ", ") + name;
+        return Expected<AllocationRules>::Error("@" + function.getName() +
+                                                ": no such allocation rule: " + names);
+    }
+    rules.force(options.rules);
+    return rules;
 }
 
 }  // namespace
@@ -180,13 +217,28 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
         return Expected<AllocationResult>::Error(*classError);
     }
 
+    // An unregistered triple is an empty table, so every query there answers
+    // "no opinion".
+    Expected<AllocationRules> resolved = resolveRules(function, options);
+    if (resolved.hasError()) return Expected<AllocationResult>::Error(resolved.getError());
+    const AllocationRules rules = std::move(*resolved);
+
     const SSALiveIntervals intervals = computeSSALiveIntervals(function);
     AsmTargetRegisters target = AsmTargetRegisters::forFunction(function);
-    const AllocationConstraints constraints = AllocationConstraints::build(function, target);
+    const AllocationConstraints constraints = AllocationConstraints::build(function, target, rules);
     const std::vector<Loop> loops = detectLoops(function);
 
+    // Two sets of ranges on purpose: the allocator and the verifier want the
+    // early-clobber widening, while the shadow report wants the program's own
+    // pressure floor, which widening would inflate. Identical while no
+    // clobbersEarly rule is Active.
+    const SSALiveIntervals ruleIntervals = applyEarlyClobber(function, intervals, rules);
+
+    // Scope reads the same ranges the allocator will, so "movable" cannot mean
+    // something the allocator then finds it cannot place. Slot numbering is
+    // untouched by widening, so the cut below means the same in either set.
     AllocationScope scope =
-        AllocationScope::wholeFunction(constraints, intervals, options.allocate);
+        AllocationScope::wholeFunction(constraints, ruleIntervals, options.allocate);
     if (!options.regionEnd.empty()) {
         const BasicBlock* endBlock = findBlockByLabel(function, options.regionEnd);
         if (endBlock == nullptr) {
@@ -194,11 +246,27 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
                                                      ": region end block '" + options.regionEnd +
                                                      "' was not found");
         }
-        const SlotIndex cut = intervals.slots().blockEnd(endBlock);
-        scope = AllocationScope::upTo(constraints, intervals, options.allocate, cut);
+        const SlotIndex cut = ruleIntervals.slots().blockEnd(endBlock);
+        scope = AllocationScope::upTo(constraints, ruleIntervals, options.allocate, cut);
     }
 
-    const AllocationContext context{function, intervals, target, constraints, loops, scope};
+    if (!options.pinRegisters.empty()) {
+        // A backwards pair holds nothing, which reads as "holding made no
+        // difference". Hold nothing by passing nothing instead.
+        for (const AllocationScope::HeldRange& range : options.pinRegisters) {
+            if (range.end < range.start) {
+                return Expected<AllocationResult>::Error(
+                    "@" + function.getName() + ": asked to hold " +
+                    regTypeToString(range.regClass) + std::to_string(range.start) + " through " +
+                    regTypeToString(range.regClass) + std::to_string(range.end) +
+                    ", which is empty because the bounds are inclusive and run backwards");
+            }
+        }
+        scope.pinRegisters(constraints, options.pinRegisters);
+    }
+
+    const AllocationContext context{function, ruleIntervals, target, constraints,
+                                    loops,    rules,         scope};
 
     Expected<AllocationResult> allocated = allocator.allocate(context);
     if (allocated.hasError()) return allocated;
@@ -213,8 +281,8 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
 
     // Before destruction, which clears the attached SSA the report reads.
     if (options.report && report != nullptr) {
-        *report =
-            shadowReport(function, *allocated, intervals, constraints, scope, allocator.name());
+        *report = shadowReport(function, *allocated, intervals, constraints, scope, rules,
+                               allocator.name());
     }
 
     if (options.applyToOperands) {
@@ -225,7 +293,22 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
         SymbolSyncOptions syncOptions;
         syncOptions.emitRegisterMap = options.emitRegisterMap;
         syncOptions.emitBreadcrumbs = options.emitSymbolBreadcrumbs;
-        syncRegisterSymbols(function, destroyed.rewritten, syncOptions);
+        SymbolSyncReport syncReport;
+        syncRegisterSymbols(function, destroyed.rewritten, syncOptions, &syncReport);
+
+        // An operand whose name never described where it sat is the shape of a
+        // wrong-register bug: the emitter prints the name, the allocator reasoned
+        // about the index, and nothing else reconciles them. Reported whatever
+        // `report` asks for, because it is a correctness warning rather than a
+        // statistic -- silence here is how a stale name reaches the assembler.
+        if (!syncReport.suspectOperands.empty() && report != nullptr) {
+            if (!report->empty()) *report += "\n";
+            *report += "symbol sync: " + std::to_string(syncReport.suspectOperands.size()) +
+                       " operand(s) whose symbolic name disagrees with their register";
+            for (const std::string& suspect : syncReport.suspectOperands) {
+                *report += "\n  " + suspect;
+            }
+        }
     }
 
     return allocated;
@@ -270,8 +353,15 @@ class RegisterAllocationPassImpl : public Pass {
             }
         }
 
+        // The free driver takes only options, so capabilities reach the rules
+        // through them. Only the pass has a PassContext to read them from.
+        RegisterAllocationOptions options = options_;
+        options.caps = passCtx.getAsmCapsConfig();
+
+        emitRuleAudit(func, passCtx, options);
+
         std::string report;
-        Expected<AllocationResult> result = allocateRegisters(func, *allocator_, options_, &report);
+        Expected<AllocationResult> result = allocateRegisters(func, *allocator_, options, &report);
         if (result.hasError()) {
             PASS_DEBUG(std::cerr << "RegisterAllocation: " << result.getError() << "\n");
             missed(passCtx, result.getError());
@@ -298,6 +388,28 @@ class RegisterAllocationPassImpl : public Pass {
    private:
     static void missed(const PassContext& passCtx, const std::string& message) {
         emitRemark(passCtx, {OptimizationRemark::Kind::Missed, kPassName, "NotAllocated", message});
+    }
+
+    /// Report where the producer's own colouring already breaks a rule.
+    ///
+    /// Lives in the pass rather than in allocateRegisters because emitting a
+    /// remark needs a PassContext, which the free driver does not have. Runs
+    /// against the producer's registers, so a finding is about the *input*: if
+    /// this fires on a corpus the rule is not ready to be made Active, since
+    /// verifyAllocation would then refuse those kernels outright.
+    static void emitRuleAudit(const Function& func, const PassContext& passCtx,
+                              const RegisterAllocationOptions& options) {
+        if (!passCtx.getRemarksEnabled()) return;
+
+        // A bad request is reported by allocateRegisters a moment later, so this
+        // stays quiet rather than duplicating the diagnostic.
+        Expected<AllocationRules> resolved = resolveRules(func, options);
+        if (resolved.hasError() || resolved->empty()) return;
+
+        for (const std::string& finding : auditRules(func, createLegacyColoring(func), *resolved)) {
+            emitRemark(passCtx, {OptimizationRemark::Kind::Analysis, kPassName, "RuleAudit",
+                                 finding + "; producer colouring already violates this rule"});
+        }
     }
 
     RegisterAllocationOptions options_;

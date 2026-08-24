@@ -43,6 +43,7 @@
 #include <map>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
@@ -144,12 +145,32 @@ class SSALiveIntervals {
     /// Deterministic dump: one line per value, then one line per class peak.
     std::string toString() const;
 
+    /// A copy of \p base in which each listed value is live from at least the
+    /// given slot, with peak pressure recomputed to match.
+    ///
+    /// Purely mechanical: it knows nothing about why a caller wants a range to
+    /// start earlier. Register allocation uses it to model early clobber, where
+    /// a destination starting at its instruction's 'u' point rather than its 'd'
+    /// point makes it overlap the sources dying there.
+    ///
+    /// Widening only -- a value already live at or before its override is left
+    /// alone -- so a segment can never be inverted and no range can shrink.
+    static SSALiveIntervals withEarlierStarts(
+        const SSALiveIntervals& base,
+        std::span<const std::pair<SSAValueID, SlotIndex>> earliestStart);
+
    private:
     friend struct SSALiveIntervalsBuilder;
+
+    /// Refill peakByClass_ from the current segments. Keeps the peak from
+    /// drifting away from the ranges it summarises, which is why every mutation
+    /// of byValue_ ends here.
+    void recomputePeakPressure();
 
     SSASlotIndexes slots_;
     std::vector<LiveRange> byValue_;  // indexed by valueId; slot 0 unused
     std::vector<RegType> classByValue_;
+    std::vector<uint16_t> widthByValue_;  // DWORDs per value, for the peak sweep
     std::map<RegType, uint32_t> peakByClass_;
 };
 

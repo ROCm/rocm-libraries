@@ -34,6 +34,11 @@ class Function;
 struct AsmSetSymbolInfo {
     int64_t value = 0;
     unsigned definitionCount = 0;
+    /// False when the right-hand side could not be resolved to a number, in
+    /// which case `value` is 0 and means nothing. Without this a `.set FOO,
+    /// UNDEF` is indistinguishable from `.set FOO, 0`, and a consumer that
+    /// trusts the value silently reads the wrong register.
+    bool resolved = false;
 };
 
 /// Walk all basic blocks in program order and collect `.set` symbol definitions

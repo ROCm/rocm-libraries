@@ -31,8 +31,10 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
+#include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/ssa/AllocationResult.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocator.hpp"
@@ -46,14 +48,20 @@ struct RegisterAllocationOptions {
     std::string allocator = "greedy";
 
     /// Register classes the policy may move; see AllocationScope::classes(). The
-    /// VGPR-only default is a safety statement, not a preference: scalar tuple
-    /// alignment is unmodelled and no ABI range is reserved, so widen it knowingly.
+    /// VGPR-only default is a safety statement, not a preference: no ABI range
+    /// is reserved, so widen it knowingly. An architecture may still forbid
+    /// some bases as a placement rule (see AllocationRules).
     RegClassSet allocate = RegClassSet::only(RegType::V);
 
     /// When non-empty, only values whose live range lies entirely before this
     /// block's end slot may move. The label matches BasicBlock::getLabel(); a
     /// leading '^' is ignored. Empty means the whole function.
     std::string regionEnd;
+
+    /// Registers to leave exactly as found: each keeps the value lifted into it
+    /// and takes no other. Bounds are inclusive, so {{RegType::S, 0, 19}} holds
+    /// s0 through s19. See AllocationScope::pinRegisters.
+    std::vector<AllocationScope::HeldRange> pinRegisters;
 
     bool applyToOperands = false;  // false = shadow
     bool verify = true;
@@ -69,6 +77,17 @@ struct RegisterAllocationOptions {
 
     /// After apply, append per-instruction breadcrumbs when a symbolic name is stripped.
     bool emitSymbolBreadcrumbs = false;
+
+    /// Module capabilities, which parameterize an architecture's allocation
+    /// rules (see AllocationRulesRegistry). Carried here rather than as another
+    /// allocateRegisters parameter because the pass already owns the options and
+    /// can fill this from PassContext; the free driver leaves it defaulted, which
+    /// means "no capability is set".
+    AsmCapsConfig caps;
+
+    /// Force rule statuses regardless of the architecture's own gate. Empty in
+    /// production; see RuleOverrides for why the hatch exists.
+    RuleOverrides rules;
 };
 
 /// allocator == nullptr looks the policy up by name.

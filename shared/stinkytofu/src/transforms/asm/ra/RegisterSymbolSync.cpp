@@ -73,6 +73,11 @@ struct NamedUse {
     /// The index this name claims: `.set` value plus the name's own offset terms.
     /// `sgprSrdD+1` against `.set sgprSrdD, 20` claims 21, not 20.
     std::optional<int64_t> claimedIdx;
+    /// The allocator moved this operand, so its name is only safe to keep if it
+    /// can be shown to still be accurate.
+    bool rewritten = false;
+    /// Rewritten *and* the name agreed with where the operand used to sit, so
+    /// this use can take part in the per-symbol delta classification.
     bool eligible = false;
 
     /// How far the operand sits from what its name claims. Zero means the name
@@ -196,8 +201,13 @@ void syncRegisterSymbols(Function& function, const std::vector<RewrittenOperand>
     std::unordered_map<std::string, AsmSetSymbolInfo> setInfo;
     collectAsmSetSymbolInfo(function, setInfo);
 
+    // Only symbols whose right-hand side actually resolved. An unresolved one
+    // carries value 0, which would otherwise read as a genuine `.set FOO, 0` and
+    // make every name that refers to it look verifiable.
     std::unordered_map<std::string, int64_t> setValues;
-    for (const auto& kv : setInfo) setValues[kv.first] = kv.second.value;
+    for (const auto& kv : setInfo) {
+        if (kv.second.resolved) setValues[kv.first] = kv.second.value;
+    }
 
     std::vector<NamedUse> namedUses;
     collectNamedUses(function, setValues, namedUses);
@@ -222,21 +232,33 @@ void syncRegisterSymbols(Function& function, const std::vector<RewrittenOperand>
             resolveNamedIndex(reg->getSymbolicName(), setValues, reg->reg.num);
         const OperandRef ref{entry.instruction, entry.isDestination, entry.operand};
 
+        // Destruction records every operand it writes back, including ones it
+        // put down exactly where they were. Those did not move, so whatever
+        // their name meant it means still, and sync leaves them alone -- which
+        // is what keeps a placeholder reference intact.
+        const bool moved = entry.beforeIdx != entry.afterIdx || entry.beforeType != entry.afterType;
+
+        const auto useIt = useByRef.find(ref);
+        if (useIt != useByRef.end()) useIt->second->rewritten = moved;
+
         if (!resolved.has_value()) {
             clearNames.emplace(ref, StripReason::UnresolvedSet);
             continue;
         }
 
         if (*resolved != static_cast<int64_t>(entry.beforeIdx)) {
+            // The name never described where this operand sat, so nothing about
+            // where it went can be inferred from it. Only a hazard once it has
+            // actually moved; standing still, it is the producer's own oddity.
             out.suspectOperands.push_back(
                 "@" + function.getName() + " " + (entry.isDestination ? "dst" : "src") +
                 std::to_string(entry.operand) + ": name '" + reg->getSymbolicName() +
                 "' resolves to " + std::to_string(*resolved) + " but idx was " +
                 std::to_string(entry.beforeIdx));
+            if (moved) clearNames.emplace(ref, StripReason::UnresolvedSet);
             continue;
         }
 
-        const auto useIt = useByRef.find(ref);
         if (useIt != useByRef.end()) useIt->second->eligible = true;
     }
 
@@ -257,8 +279,13 @@ void syncRegisterSymbols(Function& function, const std::vector<RewrittenOperand>
         if (!resolvedOnce) {
             ++out.unresolvable;
             origin.note = "unresolvable, names cleared";
+            // Every *rewritten* use, not just the ones whose name could be
+            // verified. Eligibility requires resolution to have succeeded, so
+            // keying on it here made this branch do nothing in exactly the case
+            // it exists for: a symbol redefined or released with `UNDEF`, whose
+            // uses the allocator moved. Untouched operands keep their names.
             for (const NamedUse* use : bySymbol[symbol]) {
-                if (!use->eligible) continue;
+                if (!use->rewritten) continue;
                 clearNames.emplace(use->ref, StripReason::UnresolvedSet);
                 ++out.namesCleared;
                 origin.allocatedIndices.push_back(use->idx);
@@ -329,8 +356,13 @@ void syncRegisterSymbols(Function& function, const std::vector<RewrittenOperand>
             physicalOperandText(before->reg.type, before->reg.idx, before->reg.num);
         clearSymbolicName(ref.instruction, ref.isDestination, ref.operand);
         if (options.emitBreadcrumbs && !oldName.empty()) {
-            breadcrumbNotes.emplace(
-                ref, operandText + " was " + oldName + " (" + stripReasonText(reason) + ")");
+            std::string note = operandText;
+            note += " was ";
+            note += oldName;
+            note += " (";
+            note += stripReasonText(reason);
+            note += ')';
+            breadcrumbNotes.emplace(ref, std::move(note));
         }
     }
 

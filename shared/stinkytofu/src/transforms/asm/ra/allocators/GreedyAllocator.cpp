@@ -254,6 +254,36 @@ class Greedy {
         return true;
     }
 
+    /// What placement rules have to say about \p block, for diagnostics.
+    ///
+    /// Both facts come from one scan because both callers want the same walk:
+    /// checkFeasible needs to know a block can never be placed, and place()
+    /// needs to name a rule that narrowed the search rather than blame pressure.
+    struct BaseRejection {
+        const AllocationRule* first = nullptr;  ///< first rule to forbid any base
+        bool everyBase = false;                 ///< no base survives at all
+    };
+
+    /// Only interesting when a rule is in play, so the common no-rules case does
+    /// not pay for the scan.
+    BaseRejection rejectionFor(const Block& block) const {
+        BaseRejection found;
+        if (context_.rules.empty()) return found;
+
+        const uint32_t indexes = context_.target.indexCount(block.regClass);
+        found.everyBase = true;
+        for (uint32_t base = 0; base + block.width <= indexes; ++base) {
+            const AllocationRule* rule =
+                context_.rules.forbidsBase(block.regClass, base, block.width);
+            if (rule == nullptr) {
+                found.everyBase = false;
+            } else if (found.first == nullptr) {
+                found.first = rule;
+            }
+        }
+        return found;
+    }
+
     /// Two members can legitimately share an offset: overlapping tuple runs force
     /// a value written before a partial overwrite onto the same register as the
     /// value that replaces it. That is only sound while their ranges are disjoint.
@@ -269,6 +299,15 @@ class Greedy {
                      std::to_string(block.width) + " registers, more than the " +
                      std::to_string(indexes) + " " + regTypeToString(block.regClass) +
                      " registers this target can encode";
+            return false;
+        }
+        // A block no base can ever satisfy should name the rule rather than
+        // exhaust every base and report the generic "no register is free".
+        if (const BaseRejection rejected = rejectionFor(block); rejected.everyBase) {
+            const AllocationRule* rule = rejected.first;
+            error_ = "no " + regTypeToString(block.regClass) + " base is legal for " +
+                     valueName(block.leader) + ": rule " + std::string(rule->name) + " (" +
+                     std::string(rule->description) + ")";
             return false;
         }
         for (size_t i = 0; i < block.members.size(); ++i) {
@@ -366,10 +405,25 @@ class Greedy {
     /// refusal can say whether the register is off limits or merely occupied.
     bool reachableAt(const Block& block, uint32_t base) const {
         if (base + block.width > context_.target.indexCount(block.regClass)) return false;
+        // The single funnel every candidate base passes through, so one call
+        // here covers placement, eviction and hint-following at once. Only
+        // Active rules can answer, so there is no status check to get wrong.
+        if (context_.rules.forbidsBase(block.regClass, base, block.width) != nullptr) return false;
         for (const Member& member : block.members) {
-            if (!context_.target.isAllocatable(block.regClass, base + member.offset)) return false;
+            const uint32_t idx = base + member.offset;
+            if (!context_.target.isAllocatable(block.regClass, idx)) return false;
+            if (!mayOccupy(block.regClass, idx, member.value)) return false;
         }
         return true;
+    }
+
+    /// A held register takes no newcomers: only the value lifted from it may sit
+    /// there. Asked from reachableAt so placement, eviction and hint-following
+    /// all inherit it, the same reason forbidsBase lives there.
+    bool mayOccupy(RegType regClass, uint32_t idx, SSAValueID value) const {
+        if (!context_.scope.isPinnedRegister(regClass, idx)) return true;
+        const std::optional<RegKey> hint = context_.constraints.hintFor(value);
+        return hint.has_value() && hint->type == regClass && hint->idx == idx;
     }
 
     bool availableAt(const Block& block, uint32_t base) const {
@@ -462,6 +516,11 @@ class Greedy {
                                                 " register(s) tied to it"
                                           : "") +
                          "; splitting and spilling are not implemented";
+                // A rule narrowing the search is worth naming here: without it
+                // the message blames pressure for a base a rule ruled out.
+                if (const AllocationRule* rule = rejectionFor(block).first; rule != nullptr) {
+                    error_ += " (rule " + std::string(rule->name) + " also forbids some bases)";
+                }
                 return false;
             }
 
@@ -489,37 +548,63 @@ class Greedy {
             bindAt(block, *block.hintBase);
             return true;
         }
-        const uint32_t indexes = context_.target.indexCount(block.regClass);
-        for (uint32_t base = 0; base + block.width <= indexes; ++base) {
-            if (!availableAt(block, base)) continue;
-            bindAt(block, base);
-            return true;
-        }
-        return false;
+        const std::optional<uint32_t> base =
+            pickBase(block, [&](uint32_t candidate) { return availableAt(block, candidate); });
+        if (!base.has_value()) return false;
+        bindAt(block, *base);
+        return true;
     }
 
-    /// Lowest base whose occupants are all lighter than \p block and have not
-    /// already been evicted too often. Weight strictly decreasing is what stops
-    /// two blocks trading the same register forever.
+    /// A base whose occupants are all lighter than \p block and have not already
+    /// been evicted too often. Weight strictly decreasing is what stops two
+    /// blocks trading the same register forever.
     std::optional<uint32_t> findEvictableBase(const Block& block) const {
-        const uint32_t indexes = context_.target.indexCount(block.regClass);
-        for (uint32_t base = 0; base + block.width <= indexes; ++base) {
-            if (!reachableAt(block, base)) continue;
+        return pickBase(block, [&](uint32_t base) { return evictableAt(block, base); });
+    }
 
-            const std::vector<size_t> occupants = occupantsAt(block, base);
-            if (occupants.empty()) continue;  // tryPlace already refused this base
-            bool evictable = true;
-            for (size_t occupant : occupants) {
-                const Block& other = blocks_[occupant];
-                if (other.pinReason == nullptr && other.weight < block.weight &&
-                    other.evictions < kMaxEvictionsPerBlock)
-                    continue;
-                evictable = false;
-                break;
-            }
-            if (evictable) return base;
+    bool evictableAt(const Block& block, uint32_t base) const {
+        if (!reachableAt(block, base)) return false;
+        const std::vector<size_t> occupants = occupantsAt(block, base);
+        if (occupants.empty()) return false;  // tryPlace already refused this base
+        for (size_t occupant : occupants) {
+            const Block& other = blocks_[occupant];
+            if (other.pinReason != nullptr || other.weight >= block.weight ||
+                other.evictions >= kMaxEvictionsPerBlock)
+                return false;
         }
-        return std::nullopt;
+        return true;
+    }
+
+    /// The base to take among those \p acceptable admits.
+    ///
+    /// Placement and eviction share this on purpose. A preference honoured in
+    /// one and ignored in the other is worse than no preference at all: the
+    /// allocator would spend an eviction to reach a base it was told to avoid.
+    ///
+    /// Without an Active preference this is plain ascending first-fit, early
+    /// exit included, so a chip with no preference keeps exactly today's
+    /// colouring. With one it is the cheapest acceptable base, ties going to the
+    /// lower index so the result stays deterministic.
+    template <typename Acceptable>
+    std::optional<uint32_t> pickBase(const Block& block, Acceptable acceptable) const {
+        const uint32_t indexes = context_.target.indexCount(block.regClass);
+        if (!context_.rules.prices()) {
+            for (uint32_t base = 0; base + block.width <= indexes; ++base) {
+                if (acceptable(base)) return base;
+            }
+            return std::nullopt;
+        }
+        std::optional<uint32_t> best;
+        double bestCost = 0.0;
+        for (uint32_t base = 0; base + block.width <= indexes; ++base) {
+            if (!acceptable(base)) continue;
+            const double cost = context_.rules.baseCost(block.regClass, base, block.width);
+            if (!best.has_value() || cost < bestCost) {
+                best = base;
+                bestCost = cost;
+            }
+        }
+        return best;
     }
 
     static constexpr size_t kNoBlock = static_cast<size_t>(-1);

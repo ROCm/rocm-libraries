@@ -40,6 +40,7 @@
 
 namespace stinkytofu {
 
+class AllocationRules;
 class AsmTargetRegisters;
 class Function;
 
@@ -64,9 +65,16 @@ struct AffinitySet {
 
 class AllocationConstraints {
    public:
-    /// Recover constraints from \p function. \p target must outlive this object:
+    /// Recover constraints from \p function, letting \p rules append the offset
+    /// relations the architecture requires. \p target must outlive this object:
     /// isAllocatable() asks it at query time, so a later reserve() is visible.
-    static AllocationConstraints build(const Function& function, const AsmTargetRegisters& target);
+    ///
+    /// The architecture contributes through build() rather than by mutating the
+    /// result, which keeps this object immutable once built and means a
+    /// rule-imposed run reaches OffsetUnion and the verifier through exactly the
+    /// path an IR-derived one takes.
+    static AllocationConstraints build(const Function& function, const AsmTargetRegisters& target,
+                                       const AllocationRules& rules);
 
     /// Register class of \p id, or UNKNOWN when the id is missing.
     RegType classOf(SSAValueID id) const;

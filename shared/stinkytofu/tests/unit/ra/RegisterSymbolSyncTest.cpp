@@ -93,6 +93,16 @@ RegisterAllocationOptions greedyApply() {
     return options;
 }
 
+/// Scalar compaction, which is what the production pipeline actually runs.
+RegisterAllocationOptions scalarCompactApply() {
+    RegisterAllocationOptions options;
+    options.allocator = "greedy-compact";
+    options.allocate = RegClassSet::only(RegType::S);
+    options.applyToOperands = true;
+    options.verify = true;
+    return options;
+}
+
 class RegisterSymbolSyncTest : public ::testing::Test {
    protected:
     void SetUp() override {
@@ -265,6 +275,65 @@ TEST_F(RegisterSymbolSyncTest, RangeOperandNoteNamesTheWholeRange) {
     EXPECT_EQ(comment->comment, "v[20:23] was vgprValuA+0:vgprValuA+3 (unresolved .set)");
 }
 
+TEST_F(RegisterSymbolSyncTest, ASymbolReleasedWithUndefNeverKeepsAStaleName) {
+    // TensileLite releases a register name at the end of its scope with a second
+    // `.set NAME, UNDEF`. That makes the symbol both redefined *and*
+    // unresolvable, and a moved operand must not keep a name that still points
+    // at the old index -- the emitter would print the wrong register.
+    BasicBlock* bb = entry();
+    appendSetDirective(bb, "sgprtdmAGroup0", "20");
+
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    // Defined here, so the value is free to move -- a live-in would be pinned and
+    // keeping its name would be correct.
+    StinkyInstruction* def = builder.create(getMCIDByUOp(GFX::s_mov_b32, kRaTestArch));
+    def->addDestReg(namedReg(RegType::S, 20, 1, "sgprtdmAGroup0"));
+    def->addSrcReg(StinkyRegister(1));
+
+    StinkyInstruction* use = builder.create(getMCIDByUOp(GFX::s_add_u32, kRaTestArch));
+    use->addDestReg(StinkyRegister(RegType::S, 30u, 1u));
+    use->addSrcReg(namedReg(RegType::S, 20, 1, "sgprtdmAGroup0"));
+    use->addSrcReg(StinkyRegister(RegType::S, 21u, 1u));
+
+    appendSetDirective(bb, "sgprtdmAGroup0", "UNDEF");
+
+    ASSERT_TRUE(liftForAllocation(*func));
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, scalarCompactApply());
+    ASSERT_TRUE(result.hasValue()) << result.getError();
+
+    // Compaction moved the operand off s20, so the name must be gone rather than
+    // resolving through the stale `.set` to a register the value no longer uses.
+    const std::string asmText = emitSymbolicAssembly(*func);
+    EXPECT_FALSE(contains(asmText, "sgprtdmAGroup0:")) << asmText;
+    EXPECT_FALSE(contains(asmText, "s[sgprtdmAGroup0]")) << asmText;
+}
+
+TEST_F(RegisterSymbolSyncTest, AnOperandWhoseNameDisagreesWithItsRegisterIsReported) {
+    // The detector exists; for a long time nothing read it. An operand whose
+    // name resolves somewhere other than where it sits is the shape of a
+    // wrong-register bug -- the emitter prints the name, the allocator reasoned
+    // about the index -- so it has to reach a human rather than a discarded
+    // struct.
+    BasicBlock* bb = entry();
+    appendSetDirective(bb, "sgprGSU", "5");
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* add = builder.create(getMCIDByUOp(GFX::s_add_u32, kRaTestArch));
+    add->addDestReg(StinkyRegister(RegType::S, 30u, 1u));
+    add->addSrcReg(placeholderNamedReg("sgprGSU"));  // sits at s0, name says s5
+    add->addSrcReg(StinkyRegister(RegType::S, 31u, 1u));
+
+    ASSERT_TRUE(liftForAllocation(*func));
+    CompactingGreedyAllocator allocator;
+    std::string report;
+    Expected<AllocationResult> result =
+        allocateRegisters(*func, allocator, scalarCompactApply(), &report);
+    ASSERT_TRUE(result.hasValue()) << result.getError();
+
+    EXPECT_TRUE(contains(report, "symbol sync")) << report;
+    EXPECT_TRUE(contains(report, "sgprGSU")) << report;
+}
+
 TEST_F(RegisterSymbolSyncTest, PlaceholderNameOnlyOperandSurvivesCompactingRun) {
     BasicBlock* bb = entry();
     appendSetDirective(bb, "sgprGSU", "5");
@@ -360,7 +429,9 @@ TEST_F(RegisterSymbolSyncTest, ImmediateSetUntouched) {
         for (const IRBase& ir : block) {
             const auto* directive = dyn_cast<AsmDirective>(&ir);
             if (directive == nullptr || directive->kind != AsmDirectiveKind::SET) continue;
-            if (directive->symbol == "MT0") EXPECT_EQ(directive->value, "64");
+            if (directive->symbol == "MT0") {
+                EXPECT_EQ(directive->value, "64");
+            }
         }
     }
 }
@@ -436,7 +507,9 @@ TEST_F(RegisterSymbolSyncTest, MovedTupleShiftsEveryOffsetByTheSameDelta) {
         for (const IRBase& ir : block) {
             const auto* directive = dyn_cast<AsmDirective>(&ir);
             if (directive == nullptr || directive->kind != AsmDirectiveKind::SET) continue;
-            if (directive->symbol == "sgprSrdD") EXPECT_EQ(directive->value, "40");
+            if (directive->symbol == "sgprSrdD") {
+                EXPECT_EQ(directive->value, "40");
+            }
         }
     }
 }

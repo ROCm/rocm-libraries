@@ -485,33 +485,70 @@ SSALiveIntervals SSALiveIntervalsBuilder::build(const Function& function,
 
     for (LiveRange& range : intervals.byValue_) range.finalize();
 
-    // Peak pressure per class, in DWORDs, from the same segments.
-    if (slots.slotCount() > 0) {
-        std::map<RegType, std::vector<int32_t>> deltas;
-        for (size_t id = 1; id <= valueCount; ++id) {
-            const LiveRange& range = intervals.byValue_[id];
-            if (range.empty()) continue;
-            const RegType regClass = defs.regClass[id];
-            std::vector<int32_t>& delta = deltas[regClass];
-            if (delta.empty()) delta.assign(slots.slotCount() + 1, 0);
-            for (const LiveSegment& segment : range.segments()) {
-                delta[segment.start] += defs.width[id];
-                delta[segment.end] -= defs.width[id];
-            }
-        }
-        for (const auto& [regClass, delta] : deltas) {
-            int32_t live = 0;
-            int32_t peak = 0;
-            for (int32_t step : delta) {
-                live += step;
-                peak = std::max(peak, live);
-            }
-            intervals.peakByClass_[regClass] = static_cast<uint32_t>(peak);
+    intervals.widthByValue_ = defs.width;
+    intervals.slots_ = slots;
+    intervals.recomputePeakPressure();
+    return intervals;
+}
+
+void SSALiveIntervals::recomputePeakPressure() {
+    peakByClass_.clear();
+    if (slots_.slotCount() == 0) return;
+
+    // Peak pressure per class, in DWORDs, from the segments themselves, so no
+    // separate pressure analysis exists to disagree with them.
+    std::map<RegType, std::vector<int32_t>> deltas;
+    for (size_t id = 1; id < byValue_.size(); ++id) {
+        const LiveRange& range = byValue_[id];
+        if (range.empty()) continue;
+        const RegType regClass = id < classByValue_.size() ? classByValue_[id] : RegType::UNKNOWN;
+        const int32_t width = id < widthByValue_.size() ? widthByValue_[id] : 1;
+        std::vector<int32_t>& delta = deltas[regClass];
+        if (delta.empty()) delta.assign(slots_.slotCount() + 1, 0);
+        for (const LiveSegment& segment : range.segments()) {
+            delta[segment.start] += width;
+            delta[segment.end] -= width;
         }
     }
+    for (const auto& [regClass, delta] : deltas) {
+        int32_t live = 0;
+        int32_t peak = 0;
+        for (int32_t step : delta) {
+            live += step;
+            peak = std::max(peak, live);
+        }
+        peakByClass_[regClass] = static_cast<uint32_t>(peak);
+    }
+}
 
-    intervals.slots_ = slots;
-    return intervals;
+SSALiveIntervals SSALiveIntervals::withEarlierStarts(
+    const SSALiveIntervals& base, std::span<const std::pair<SSAValueID, SlotIndex>> earliestStart) {
+    SSALiveIntervals adjusted = base;
+    if (earliestStart.empty()) return adjusted;
+
+    bool changed = false;
+    for (const auto& [id, start] : earliestStart) {
+        if (id == kInvalidSSAValueID || id >= adjusted.byValue_.size()) continue;
+        const LiveRange& range = adjusted.byValue_[id];
+        if (range.empty()) continue;
+
+        const std::span<const LiveSegment> segments = range.segments();
+        if (start >= segments.front().start) continue;  // already live by then
+
+        // Segments are immutable once built, so rebuild the range with the
+        // first one reaching further back and the rest carried over.
+        LiveRange widened;
+        widened.addSegment(start, segments.front().end);
+        for (size_t i = 1; i < segments.size(); ++i) {
+            widened.addSegment(segments[i].start, segments[i].end);
+        }
+        widened.finalize();
+        adjusted.byValue_[id] = std::move(widened);
+        changed = true;
+    }
+
+    if (changed) adjusted.recomputePeakPressure();
+    return adjusted;
 }
 
 SSALiveIntervals computeSSALiveIntervals(const Function& function) {

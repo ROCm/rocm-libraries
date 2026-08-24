@@ -35,6 +35,7 @@
 #include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRules.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -105,6 +106,88 @@ void collectLiftedSources(const StinkyInstruction& instruction, const RegClassSe
     }
 }
 
+/// SSA values behind each register operand, by operand position. A register
+/// operand covers as many values as it has lifted DWORDs, so this is positional
+/// rather than one value per operand.
+std::vector<std::vector<SSAValueID>> valueGroups(const StinkyInstruction& instruction,
+                                                 const RegClassSet& classes, bool destinations) {
+    std::vector<std::vector<SSAValueID>> groups;
+    const std::vector<StinkyRegister>& regs =
+        destinations ? instruction.getDestRegs() : instruction.getSrcRegs();
+    const size_t available =
+        destinations ? instruction.getNumSSAResults() : instruction.getNumSSAOperands();
+    size_t cursor = 0;
+    for (const StinkyRegister& reg : regs) {
+        const size_t units = liftedSSAUnits(reg, classes);
+        std::vector<SSAValueID> ids;
+        if (units == 0) {
+            // A source the lift did not cover still consumes an operand slot.
+            if (!destinations && cursor < available) ++cursor;
+            groups.push_back(std::move(ids));
+            continue;
+        }
+        for (size_t unit = 0; unit < units && cursor < available; ++unit) {
+            const StinkySSAValue* value = destinations ? instruction.getSSAResult(cursor)
+                                                       : instruction.getSSAOperandValue(cursor);
+            ++cursor;
+            ids.push_back(value == nullptr ? kInvalidSSAValueID : value->valueId());
+        }
+        groups.push_back(std::move(ids));
+    }
+    return groups;
+}
+
+/// Tie a read-write destination to the source naming the same register.
+///
+/// The hardware reads such a destination on the path where it does not write
+/// it: `s_cmov_b32 d, s` is `if (SCC) d = s`, so on the untaken path d keeps
+/// what it already held. Give d and that source different registers and the
+/// untaken path yields whatever happened to be in d, not the value the IR says
+/// it should. HwInstDesc marks the field, and AsmVerifierPass already requires
+/// the register to appear on both sides; this is what makes the allocator keep
+/// it that way.
+void collectReadWriteTies(const StinkyInstruction& instruction, const RegClassSet& classes,
+                          std::vector<AffinitySet>& sets) {
+    const HwInstDesc* desc = instruction.getHwInstDesc();
+    if (desc == nullptr || desc->operandFields.empty()) return;
+
+    const std::vector<StinkyRegister>& destRegs = instruction.getDestRegs();
+    const std::vector<StinkyRegister>& srcRegs = instruction.getSrcRegs();
+    const std::vector<std::vector<SSAValueID>> destGroups =
+        valueGroups(instruction, classes, /*destinations=*/true);
+    const std::vector<std::vector<SSAValueID>> srcGroups =
+        valueGroups(instruction, classes, /*destinations=*/false);
+
+    // Only the destination side needs walking: the source that pairs with a
+    // read-write destination is the one naming the same register, which is what
+    // AsmVerifierPass requires to be there, so it is found by lookup rather
+    // than by tracking a second cursor.
+    size_t destIdx = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t destSlot = destIdx++;
+        if (!field.isReadWrite) continue;
+        if (destSlot >= destRegs.size() || destSlot >= destGroups.size()) continue;
+
+        const StinkyRegister& reg = destRegs[destSlot];
+        for (size_t source = 0; source < srcRegs.size() && source < srcGroups.size(); ++source) {
+            if (!(srcRegs[source] == reg)) continue;
+            const std::vector<SSAValueID>& written = destGroups[destSlot];
+            const std::vector<SSAValueID>& read = srcGroups[source];
+            for (size_t unit = 0; unit < written.size() && unit < read.size(); ++unit) {
+                if (written[unit] == kInvalidSSAValueID || read[unit] == kInvalidSSAValueID)
+                    continue;
+                if (written[unit] == read[unit]) continue;
+                AffinitySet set;
+                set.members = {written[unit], read[unit]};
+                std::sort(set.members.begin(), set.members.end());
+                sets.push_back(std::move(set));
+            }
+            break;
+        }
+    }
+}
+
 std::string joinIds(const std::vector<SSAValueID>& ids) {
     std::ostringstream out;
     for (size_t i = 0; i < ids.size(); ++i) {
@@ -117,7 +200,8 @@ std::string joinIds(const std::vector<SSAValueID>& ids) {
 }  // namespace
 
 AllocationConstraints AllocationConstraints::build(const Function& function,
-                                                   const AsmTargetRegisters& target) {
+                                                   const AsmTargetRegisters& target,
+                                                   const AllocationRules& rules) {
     AllocationConstraints constraints;
     constraints.target_ = &target;
 
@@ -138,6 +222,7 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
             if (instruction == nullptr || !instruction->hasAttachedSSA()) continue;
             collectLiftedDestinations(*instruction, liftedClasses, constraints.tupleRuns_);
             collectLiftedSources(*instruction, liftedClasses, constraints.tupleRuns_);
+            collectReadWriteTies(*instruction, liftedClasses, constraints.affinitySets_);
         }
 
         for (const SSABlockArgument& arg : block.ssaArguments()) {
@@ -165,6 +250,11 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
             constraints.affinitySets_.push_back(std::move(set));
         }
     }
+
+    // Last, so a rule-imposed relation is appended to the IR-derived ones and
+    // both reach OffsetUnion and the verifier identically. Only Active rules
+    // contribute; the table decides that, not the rule.
+    rules.addRelations(function, constraints.tupleRuns_, constraints.affinitySets_);
 
     return constraints;
 }

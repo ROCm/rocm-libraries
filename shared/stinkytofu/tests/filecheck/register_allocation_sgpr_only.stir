@@ -21,9 +21,8 @@
 # CHECK: ^entry:
 #
 # Scalar tuples whose original registers are in range keep them, so a descriptor
-# is not disturbed just because its class is being allocated. That matters while
-# scalar tuple alignment is unmodelled: nothing here asks a multi-SGPR operand to
-# relocate.
+# is not disturbed just because its class is being allocated. greedy follows
+# hints, so nothing here asks a multi-SGPR operand to relocate.
 # CHECK-NEXT: "st.tensor_load_to_lds"(s[8:11], s[12:19])
 #
 # s200 cannot be encoded, so its hint is unreachable and it is packed down into

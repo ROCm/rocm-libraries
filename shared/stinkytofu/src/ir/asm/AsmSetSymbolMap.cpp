@@ -137,7 +137,10 @@ void collectAsmSetSymbolInfo(const Function& func,
         int64_t v = 0;
         AsmSetSymbolInfo info;
         info.definitionCount = counts[kv.first];
-        if (resolveAsmSetRhs(kv.second, raw, expanding, 0, v)) info.value = v;
+        if (resolveAsmSetRhs(kv.second, raw, expanding, 0, v)) {
+            info.value = v;
+            info.resolved = true;
+        }
         out[kv.first] = info;
     }
 }

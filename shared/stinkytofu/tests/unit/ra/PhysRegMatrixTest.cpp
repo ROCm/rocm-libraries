@@ -80,9 +80,9 @@ TEST(AsmTargetRegistersTest, EveryLimitComesFromTheArchitecture) {
 TEST(AsmTargetRegistersTest, AddressableRangeIsSmallerThanThePhysicalFile) {
     const AsmTargetRegisters target = AsmTargetRegisters::forArch(kArch);
 
-    // gfx1250 encodes v0-v255 directly and reaches the rest of its 1024-register
-    // file through VGPR-MSB, which is not modelled, so allocation stops at the
-    // addressable range.
+    // This target encodes v0-v255 directly and reaches the rest of its
+    // physical file through VGPR-MSB, which is not modelled, so allocation
+    // stops at the addressable range.
     EXPECT_EQ(target.indexCount(RegType::V), 256u);
     EXPECT_EQ(target.totalPerSimd(RegType::V), 1024u);
     EXPECT_LT(target.indexCount(RegType::V), target.totalPerSimd(RegType::V));

@@ -137,6 +137,46 @@ TEST_F(AllocationScopeTest, BackedgeExtendsRangePastTheCut) {
                  "outside the region this run is colouring");
 }
 
+TEST_F(AllocationScopeTest, PinningARegisterKeepsItsOccupant) {
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* held = createVAddInBlock(entry, kRaTestArch, 40, 0, 1);
+    StinkyInstruction* other = createVAddInBlock(entry, kRaTestArch, 41, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationSetup::RegionOptions hold{.pinRegisters = {{RegType::V, 40, 40}}};
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), hold);
+
+    EXPECT_STREQ(setup.scope().immobileReason(idOf(ssaDefinedValue(*held))),
+                 "in a register this run is holding");
+    // Holding one register is not holding the run.
+    EXPECT_EQ(setup.scope().immobileReason(idOf(ssaDefinedValue(*other))), nullptr);
+}
+
+TEST_F(AllocationScopeTest, PinnedRangesCoverExactlyWhatTheyName) {
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, 40, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    // Two runs plus a single register as the degenerate {n, n}.
+    AllocationSetup::RegionOptions hold{
+        .pinRegisters = {{RegType::V, 0, 1}, {RegType::V, 8, 11}, {RegType::V, 20, 20}}};
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), hold);
+    const AllocationScope& scope = setup.scope();
+
+    // Both ends of both runs: an off-by-one here silently holds or frees a
+    // register.
+    EXPECT_TRUE(scope.isPinnedRegister(RegType::V, 1));
+    EXPECT_FALSE(scope.isPinnedRegister(RegType::V, 2));
+    EXPECT_FALSE(scope.isPinnedRegister(RegType::V, 7));
+    EXPECT_TRUE(scope.isPinnedRegister(RegType::V, 8));
+    EXPECT_TRUE(scope.isPinnedRegister(RegType::V, 11));
+    EXPECT_FALSE(scope.isPinnedRegister(RegType::V, 12));
+    EXPECT_TRUE(scope.isPinnedRegister(RegType::V, 20));
+    EXPECT_FALSE(scope.isPinnedRegister(RegType::V, 21));
+    // Class is part of the key, so the same index elsewhere is untouched.
+    EXPECT_FALSE(scope.isPinnedRegister(RegType::S, 8));
+}
+
 TEST_F(AllocationScopeTest, ValidateClassesRejectsUnliftedClasses) {
     BasicBlock* entry = block("entry");
     createVAddInBlock(entry, kRaTestArch, 2, 0, 1);

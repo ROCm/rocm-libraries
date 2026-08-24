@@ -37,6 +37,7 @@
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationConstraints.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRules.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationScope.hpp"
 
 namespace stinkytofu {
@@ -48,6 +49,11 @@ struct AllocationContext {
     const AsmTargetRegisters& target;
     const AllocationConstraints& constraints;
     const std::vector<Loop>& loops;
+
+    /// What this architecture forbids and prefers. A policy queries these and
+    /// never learns which rule or which chip it is honouring, which is what
+    /// keeps every present and future policy subject to whatever it runs on.
+    const AllocationRules& rules;
 
     /// What this run may relocate: register classes and, optionally, a slot
     /// prefix of the function. Values outside the scope keep their lifted

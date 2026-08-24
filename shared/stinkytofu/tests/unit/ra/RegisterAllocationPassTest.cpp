@@ -68,6 +68,16 @@ class RegisterAllocationPassTest : public ::testing::Test {
     std::unique_ptr<Function> func;
 };
 
+/// Every instruction writes early, so any producer self-overwrite is a finding.
+AllocationRules selfOverwriteTable(RuleStatus status) {
+    AllocationRule rule;
+    rule.name = "SelfOverwrite";
+    rule.description = "this instruction must not write a register it reads";
+    rule.status = status;
+    rule.clobbersEarly = [](const StinkyInstruction&) { return true; };
+    return AllocationRules({rule});
+}
+
 class RecolouringAllocator : public RegisterAllocator {
    public:
     const char* name() const override {
@@ -250,6 +260,95 @@ TEST_F(RegisterAllocationPassTest, PassReportsAMissingGraph) {
     EXPECT_EQ(physicalIR(*func), before);
 }
 
+TEST_F(RegisterAllocationPassTest, AuditRemarksOnAProducerViolationAndStillColours) {
+    // Audit is the pre-flight check that keeps a new rule from silently
+    // uncolouring kernels: it reports against the producer's own registers and
+    // changes nothing. Here v2 = v_add(v2, v1) already writes what it reads.
+    const ScopedArchRules rules(selfOverwriteTable(RuleStatus::Audit));
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 2, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    PassContext passCtx;
+    passCtx.setRemarksEnabled(true);
+    AnalysisManager am;
+    registerAllAnalyses(am);
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+    createRegisterAllocationPass(legacyApply())->run(*func, passCtx, am);
+    std::cerr.rdbuf(previous);
+
+    const std::string text = captured.str();
+    EXPECT_TRUE(contains(text, "RuleAudit") || contains(text, "SelfOverwrite")) << text;
+    EXPECT_TRUE(contains(text, "producer colouring already violates")) << text;
+    // Reported, not enforced: the colouring still applied.
+    EXPECT_TRUE(contains(text, "AllocatedRegisters") || contains(text, "coloured")) << text;
+}
+
+TEST_F(RegisterAllocationPassTest, AuditIsSilentWhenRemarksAreOff) {
+    const ScopedArchRules rules(selfOverwriteTable(RuleStatus::Audit));
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 2, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    PassContext passCtx;  // remarks disabled
+    AnalysisManager am;
+    registerAllAnalyses(am);
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+    createRegisterAllocationPass(legacyApply())->run(*func, passCtx, am);
+    std::cerr.rdbuf(previous);
+
+    EXPECT_TRUE(captured.str().empty()) << captured.str();
+}
+
+TEST_F(RegisterAllocationPassTest, AnUnknownForcedRuleNameIsAnError) {
+    // A misspelling must fail. A test that enables nothing still passes, which
+    // is the worst way to discover the name was wrong.
+    const ScopedArchRules rules(selfOverwriteTable(RuleStatus::Off));
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.rules.activate.push_back("SelfOverwrit");
+
+    LegacyIdentityAllocator allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(result.hasError());
+    EXPECT_TRUE(contains(result.getError(), "no such allocation rule")) << result.getError();
+    EXPECT_TRUE(contains(result.getError(), "SelfOverwrit")) << result.getError();
+}
+
+TEST_F(RegisterAllocationPassTest, ForcingARuleActiveIgnoresTheArchGate) {
+    // The testing hatch: a standalone run has no rocisa capabilities, so a
+    // filecheck test has to be able to switch a rule on by name.
+    const ScopedArchRules rules(selfOverwriteTable(RuleStatus::Off));
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 2, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.rules.activate.push_back("SelfOverwrite");
+
+    // The producer overwrites what it reads, and legacy cannot move anything, so
+    // an Active rule has to refuse the colouring.
+    LegacyIdentityAllocator allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+    EXPECT_TRUE(result.hasError()) << "an Active rule the input violates must refuse";
+}
+
+TEST_F(RegisterAllocationPassTest, NoRulesRestoresThePreFrameworkBehaviour) {
+    const ScopedArchRules rules(selfOverwriteTable(RuleStatus::Active));
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 2, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.rules.disableAll = true;
+
+    LegacyIdentityAllocator allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+    EXPECT_TRUE(result.hasValue()) << result.getError();
+}
+
 TEST_F(RegisterAllocationPassTest, PassReportsAnUnknownAllocator) {
     createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
     ASSERT_TRUE(liftForAllocation(*func));
@@ -306,6 +405,53 @@ TEST_F(RegisterAllocationPassTest, RefusesAnUnknownRegionEndBlock) {
     ASSERT_TRUE(result.hasError());
     EXPECT_TRUE(contains(result.getError(), "region end block 'missing' was not found"))
         << result.getError();
+}
+
+namespace {
+
+RegisterAllocationOptions compactApply() {
+    RegisterAllocationOptions options;
+    options.allocator = "greedy-compact";
+    options.applyToOperands = true;
+    return options;
+}
+
+}  // namespace
+
+TEST_F(RegisterAllocationPassTest, HoldsARangeWithoutEvictingWhatIsInIt) {
+    BasicBlock* entry = block("entry");
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    // s0 arrives as a live-in, which is what reserve() would reject.
+    StinkyInstruction* def = builder.create(getMCIDByUOp(GFX::s_mov_b32, kRaTestArch));
+    def->addDestReg(StinkyRegister("s", 40, 1));
+    def->addSrcReg(StinkyRegister("s", 0, 1));
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = compactApply();
+    options.allocate = RegClassSet::only(RegType::S);
+    options.pinRegisters = {{RegType::S, 0, 3}};
+
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+
+    ASSERT_TRUE(result.hasValue()) << (result.hasValue() ? "" : result.getError());
+    const std::string ir = physicalIR(*func);
+    // Neither can pass vacuously: unheld, compaction puts the definition in s0.
+    EXPECT_TRUE(contains(ir, "s4 = \"st.s_mov_b32\"")) << ir;
+    EXPECT_TRUE(contains(ir, "(s0)")) << ir;
+}
+
+TEST_F(RegisterAllocationPassTest, RefusesABackwardsHeldRange) {
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options;
+    options.pinRegisters = {{RegType::V, 20, 19}};
+    GreedyAllocator allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+
+    ASSERT_TRUE(result.hasError());
+    EXPECT_TRUE(contains(result.getError(), "asked to hold v20 through v19")) << result.getError();
 }
 
 TEST_F(RegisterAllocationPassTest, ShadowReportIncludesRegionPeak) {

@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/ra/AllocationVerifier.hpp"
 
+#include <algorithm>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -45,6 +46,37 @@ std::string joinIds(const std::vector<SSAValueID>& ids) {
         out << valueName(ids[i]);
     }
     return out.str();
+}
+
+/// How wide a run each value starts, and which values are interior to one.
+///
+/// A placement rule constrains where a *run* begins, so checking each value's own
+/// index would flag the odd members of a legitimately-placed tuple. Interior
+/// members are therefore skipped and a run's leader is checked at the run's
+/// full width -- the same block the allocator placed.
+struct RunShape {
+    std::vector<uint32_t> widthAt;  ///< run length led by this value, else 0
+    std::vector<bool> interior;     ///< appears at position > 0 in some run
+};
+
+RunShape runShapeOf(const AllocationConstraints& constraints, size_t valueCount) {
+    RunShape shape;
+    shape.widthAt.assign(valueCount + 1, 0);
+    shape.interior.assign(valueCount + 1, false);
+    for (const TupleRun& run : constraints.tupleRuns()) {
+        if (run.units.empty()) continue;
+        const SSAValueID leader = run.units.front();
+        if (leader != kInvalidSSAValueID && leader <= valueCount) {
+            // Overlapping runs share a leader; the widest one is the block.
+            shape.widthAt[leader] =
+                std::max(shape.widthAt[leader], static_cast<uint32_t>(run.units.size()));
+        }
+        for (size_t unit = 1; unit < run.units.size(); ++unit) {
+            const SSAValueID id = run.units[unit];
+            if (id != kInvalidSSAValueID && id <= valueCount) shape.interior[id] = true;
+        }
+    }
+    return shape;
 }
 
 }  // namespace
@@ -94,6 +126,7 @@ AllocationVerificationResult verifyAllocation(const Function& function,
 
     PhysRegMatrix matrix(context.target);
     const AllocationConstraints& constraints = context.constraints;
+    const RunShape runs = runShapeOf(constraints, function.ssaArena().valueCount());
 
     for (StinkySSAValue* value : function.ssaArena().values()) {
         if (value == nullptr) continue;
@@ -129,6 +162,22 @@ AllocationVerificationResult verifyAllocation(const Function& function,
             continue;
         }
 
+        // The enforcement point for a placement rule, not the honouring one: a
+        // policy that ignores one must produce a refused colouring rather than
+        // wrong code, and that is what makes a rule bind every policy.
+        if (!runs.interior[id]) {
+            const uint32_t width = runs.widthAt[id] != 0
+                                       ? runs.widthAt[id]
+                                       : std::max<uint32_t>(1, value->type().dwordWidth);
+            if (const AllocationRule* rule =
+                    context.rules.forbidsBase(physical.type, physical.idx, width);
+                rule != nullptr) {
+                error(where + " is " + regKeyToString(physical) + " but rule " +
+                      std::string(rule->name) + " forbids it: " + std::string(rule->description));
+                continue;
+            }
+        }
+
         // Pin and scope are remit checks, not a reason to skip occupancy. A
         // live-in that kept its hint still occupies the register, and a mobile
         // value assigned the same unit over an overlapping range is illegal.
@@ -147,6 +196,17 @@ AllocationVerificationResult verifyAllocation(const Function& function,
             } else if (physical != *hint) {
                 error(where + " is " + reason + " and must keep " + regKeyToString(*hint) +
                       " but is assigned " + regKeyToString(physical));
+            }
+        }
+
+        // The other half of holding a register: the check above keeps the
+        // occupant, this one turns away a newcomer. Needed separately because
+        // the register is free wherever the occupant is dead.
+        if (context.scope.isPinnedRegister(physical.type, physical.idx)) {
+            const std::optional<RegKey> hint = constraints.hintFor(id);
+            if (!hint.has_value() || !(*hint == physical)) {
+                error(where + " is assigned " + regKeyToString(physical) +
+                      ", which this run is holding for the value lifted from it");
             }
         }
 

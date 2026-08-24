@@ -210,6 +210,26 @@ TEST_F(AllocationVerifierTest, CatchesARelocatedFunctionLiveIn) {
     EXPECT_TRUE(contains(checked.toString(), "is a function live-in")) << checked.toString();
 }
 
+TEST_F(AllocationVerifierTest, CatchesANewcomerInAPinnedRegister) {
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* add = createVAddInBlock(entry, kRaTestArch, 40, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* defined = ssaDefinedValue(*add);
+    ASSERT_NE(defined, nullptr);
+
+    // v41 was lifted from nothing, so there is no occupant check to catch this.
+    AllocationResult moved = legacyOf();
+    moved.assign(defined->valueId(), RegKey{RegType::V, 41, RegHalf::NONE});
+
+    AllocationSetup::RegionOptions hold{.pinRegisters = {{RegType::V, 41, 41}}};
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), hold);
+
+    const AllocationVerificationResult checked = verifyAllocation(*func, moved, setup.context());
+    EXPECT_FALSE(checked.ok());
+    EXPECT_TRUE(contains(checked.toString(), "which this run is holding")) << checked.toString();
+}
+
 TEST_F(AllocationVerifierTest, CatchesARelocatedClassOutsideScope) {
     BasicBlock* entry = block("entry");
     AsmIRBuilder builder(*entry, kRaTestArch);

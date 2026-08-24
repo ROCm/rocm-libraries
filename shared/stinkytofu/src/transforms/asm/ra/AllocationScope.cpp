@@ -22,6 +22,8 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/ra/AllocationScope.hpp"
 
+#include <algorithm>
+
 #include "stinkytofu/core/Function.hpp"
 
 namespace stinkytofu {
@@ -29,6 +31,7 @@ namespace {
 
 constexpr const char kClassReason[] = "in a class this run is not colouring";
 constexpr const char kRegionReason[] = "outside the region this run is colouring";
+constexpr const char kHeldRegisterReason[] = "in a register this run is holding";
 
 std::vector<const char*> emptyReasons(size_t valueCount) {
     return std::vector<const char*>(valueCount + 1, nullptr);
@@ -73,6 +76,31 @@ void AllocationScope::applyRegionScope(const SSALiveIntervals& intervals, SlotIn
             rule == Containment::DefinedIn ? range.start() < cut : range.end() <= cut;
         if (!mobile) reasons[id] = kRegionReason;
     }
+}
+
+void AllocationScope::pinRegisters(const AllocationConstraints& constraints,
+                                   std::span<const HeldRange> ranges) {
+    for (const HeldRange& range : ranges) {
+        if (range.regClass == RegType::UNKNOWN || range.end < range.start) continue;
+        pinnedRanges_.push_back(range);
+    }
+
+    // The range says who may not come in; this loop says the occupant may not
+    // leave. Without both, the register ends up withheld rather than frozen.
+    for (size_t id = 1; id < reasonByValue_.size(); ++id) {
+        if (reasonByValue_[id] != nullptr) continue;
+        const std::optional<RegKey> hint = constraints.hintFor(static_cast<SSAValueID>(id));
+        if (!hint.has_value()) continue;
+        if (isPinnedRegister(hint->type, hint->idx)) reasonByValue_[id] = kHeldRegisterReason;
+    }
+}
+
+bool AllocationScope::isPinnedRegister(RegType regClass, uint32_t idx) const {
+    for (const HeldRange& range : pinnedRanges_) {
+        if (range.regClass != regClass) continue;
+        if (idx >= range.start && idx <= range.end) return true;
+    }
+    return false;
 }
 
 const char* AllocationScope::immobileReason(SSAValueID id) const {

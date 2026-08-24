@@ -92,6 +92,15 @@ class AllocatorConformanceTest : public ::testing::TestWithParam<std::string> {
     std::unique_ptr<RegisterAllocator> allocator_;
 };
 
+bool isTupleInterior(const AllocationSetup& setup, SSAValueID id) {
+    for (const TupleRun& run : setup.constraints().tupleRuns()) {
+        for (size_t unit = 1; unit < run.units.size(); ++unit) {
+            if (run.units[unit] == id) return true;
+        }
+    }
+    return false;
+}
+
 /// gtest requires an identifier-safe suffix, and a registry name need not be one.
 std::string testNameFor(const ::testing::TestParamInfo<std::string>& info) {
     std::string name = info.param;
@@ -193,6 +202,42 @@ TEST_P(AllocatorConformanceTest, RefusesAFunctionWithoutAttachedSSA) {
     Expected<AllocationResult> result = allocateRegisters(function(), *allocator_, options);
 
     EXPECT_TRUE(result.hasError());
+}
+
+TEST_P(AllocatorConformanceTest, NeverProducesAColouringAnActiveRuleForbids) {
+    // The property worth machine-checking: a policy queries the table and never
+    // sees a rule, so every present and future policy is bound by whatever the
+    // chip forbids. A policy that ignored the rule would be caught here as a
+    // refusal, never as wrong code.
+    //
+    // legacy reproduces the producer's numbering and cannot move anything, so it
+    // is expected to *refuse* rather than comply -- either outcome is conformant,
+    // an accepted-but-violating colouring is not.
+    const ScopedArchRules registered(evenVBasesOnly());
+
+    BasicBlock* entry = block("entry");
+    createDsReadB128InBlock(entry, kRaTestArch, 4, 0);
+    createVAddInBlock(entry, kRaTestArch, 3, 4, 5);
+    ASSERT_TRUE(liftForAllocation(function()));
+
+    RegisterAllocationOptions options;
+    options.allocator = GetParam();
+    options.verify = true;
+    Expected<AllocationResult> result = allocateRegisters(function(), *allocator_, options);
+    if (result.hasError()) return;  // refused, which is conformant
+
+    AllocationSetup setup(function(), RegClassSet::only(RegType::V), {}, evenVBasesOnly());
+    for (StinkySSAValue* value : function().ssaArena().values()) {
+        if (value == nullptr || !result->isAssigned(value->valueId())) continue;
+        const RegKey physical = result->assignmentOf(value->valueId());
+        if (physical.type != RegType::V) continue;
+        // Interior tuple members are legitimately odd; only run bases are ruled.
+        if (value->type().dwordWidth <= 1 && !isTupleInterior(setup, value->valueId())) {
+            EXPECT_EQ(physical.idx % 2, 0u)
+                << GetParam() << " accepted %" << value->valueId() << " on "
+                << regKeyToString(physical) << ", which EvenVBase forbids";
+        }
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(RegisteredAllocators, AllocatorConformanceTest,

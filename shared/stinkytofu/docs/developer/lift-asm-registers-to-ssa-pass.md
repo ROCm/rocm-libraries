@@ -5,7 +5,7 @@
 Allocation and destruction both read that attached state; SSA never lives beside the program as a separate graph.
 
 It supports VGPR and SGPR operands and is available through `stinkytofu-opt`.
-It is not wired into the gfx1250 pipeline yet: allocation consumes its output only through `stinkytofu-opt`, and section 12 of [register allocation](register-allocation.md) covers the ordering that has to hold before either pass moves into the backend.
+A backend that runs register allocation uses it too; section 12 of [register allocation](register-allocation.md) covers the ordering that has to hold.
 
 ## 1. Purpose
 
