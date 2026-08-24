@@ -12,6 +12,8 @@
 /dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
 /dnn-providers/hipblaslt-provider/                  @ROCm/dnn-providers-core
 /dnn-providers/hip-kernel-provider/                 @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
+/dnn-providers/hip-kernel-provider/rocke/platform/  @ROCm/rocke-platform @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
+/dnn-providers/hip-kernel-provider/rocke/style/     @ROCm/rocke-platform @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
 /dnn-providers/hip-kernel-provider/rocke/library/   @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
 /dnn-providers/fusilli-provider/                    @ROCm/fusilli-provider-reviewers
 /dnn-providers/integration-tests/                   @ROCm/dnn-providers-core
