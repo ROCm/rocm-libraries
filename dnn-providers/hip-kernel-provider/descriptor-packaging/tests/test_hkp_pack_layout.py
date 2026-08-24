@@ -639,6 +639,39 @@ def _resolve_library_like_runtime(descriptor_path, library):
     return Path(os.path.normpath(Path(descriptor_path).parent / library))
 
 
+def _assert_runtime_would_load(descriptor_path, library, tree_root):
+    """Both halves of what the runtime does with `library`, not just one.
+
+    Resolution and CONTAINMENT are separate rules and only the first was checked
+    here. That gap is exactly how the packer and the guard shipped mutually
+    incompatible behaviour with this suite green: the packer emitted `../..` for
+    a nested descriptor, the guard refused anything leaving the descriptor's own
+    directory, and a test that only asked "does the file exist" saw nothing wrong.
+
+    So assert what the runtime asserts (IngestorKernelCode.hpp, KPACK branch):
+    the join resolves to a real archive, AND it stays inside the descriptor TREE
+    -- which is the boundary, not the descriptor's own folder.
+
+    This is still a reimplementation; the authoritative check is the C++
+    `TestPackedDescriptorLoad.PackedKernelsSatisfyTheRuntimeContainmentGuard`,
+    which reads the loader's own fields. Keeping a Python copy is worth it only
+    because it fails at pack time, where the packer's author is looking.
+    """
+    resolved = _resolve_library_like_runtime(descriptor_path, library)
+    assert resolved.is_file(), (
+        f"{descriptor_path} declares library={library!r}, which resolves to "
+        f"{resolved} -- the runtime would fail to open it"
+    )
+
+    root = Path(os.path.normpath(tree_root))
+    assert root == resolved or root in resolved.parents, (
+        f"{descriptor_path} declares library={library!r}, which resolves to "
+        f"{resolved} -- OUTSIDE the descriptor tree {root}. The runtime's "
+        f"containment guard refuses this and the kernel never loads."
+    )
+    return resolved
+
+
 def test_library_resolves_from_a_nested_descriptor(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
@@ -671,11 +704,7 @@ def test_library_resolves_from_a_nested_descriptor(
             ks = ukd["kernel_source"]
             if ks.get("kind") != "kpack":
                 continue
-            resolved = _resolve_library_like_runtime(kdp, ks["library"])
-            assert resolved.is_file(), (
-                f"{kdp.relative_to(out)} declares library={ks['library']!r}, "
-                f"which resolves to {resolved} -- the runtime would fail to open it"
-            )
+            _assert_runtime_would_load(kdp, ks["library"], out)
             checked += 1
     assert checked, "no kpack UKD was produced, so nothing was actually asserted"
 
@@ -701,7 +730,7 @@ def test_library_resolves_for_a_flat_descriptor(
     kdp = out / "solo.kdp.json"
     ks = _read(kdp)["kernelDescriptors"][0]["kernel_source"]
     assert ks["library"] == f"kpack/hip_kernel_provider_{ARCH}.kpack"
-    assert _resolve_library_like_runtime(kdp, ks["library"]).is_file()
+    _assert_runtime_would_load(kdp, ks["library"], out)
 
 
 @pytest.mark.quick
@@ -868,11 +897,7 @@ def test_library_resolves_for_a_nested_standalone_ukd(
         ks = doc.get("kernel_source", {})
         if ks.get("kind") != "kpack":
             continue
-        resolved = _resolve_library_like_runtime(ukd_file, ks["library"])
-        assert resolved.is_file(), (
-            f"standalone {ukd_file.relative_to(out)} declares "
-            f"library={ks['library']!r} -> {resolved}, which the runtime cannot open"
-        )
+        _assert_runtime_would_load(ukd_file, ks["library"], out)
         checked += 1
     assert checked, "no standalone kpack UKD shipped; the test asserted nothing"
 
@@ -925,11 +950,7 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
 
     ks = _read(shipped)["kernel_source"]
     assert ks["kind"] == "kpack"
-    resolved = _resolve_library_like_runtime(shipped, ks["library"])
-    assert resolved.is_file(), (
-        f"standalone UKD declares library={ks['library']!r} -> {resolved}, "
-        "which the runtime cannot open"
-    )
+    _assert_runtime_would_load(shipped, ks["library"], out)
 
 
 @pytest.mark.quick

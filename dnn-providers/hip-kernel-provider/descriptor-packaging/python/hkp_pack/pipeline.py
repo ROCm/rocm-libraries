@@ -22,6 +22,13 @@ from .descriptors import (
 from .errors import HkpPackError
 from .kpack_resolver import load_kpack
 
+# The archive group every root packs under unless it names its own. One archive ships per
+# (group, arch), and the filename carries both, so two roots staged into one descriptor
+# tree must not share a group -- otherwise they emit the same
+# `<arch>/kpack/<group>_<arch>.kpack` and whichever copy lands second silently overwrites
+# the other, leaving descriptors naming an archive that no longer holds their kernels.
+# That collision is the whole reason the build used to stage one root under a `production/`
+# subdirectory; naming the group per root removes the cause instead of dodging it.
 GROUP_NAME = "hip_kernel_provider"
 
 
@@ -99,23 +106,26 @@ def _sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def _kpack_filename(arch):
-    return f"{GROUP_NAME}_{arch}.kpack"
+def _kpack_filename(arch, group=GROUP_NAME):
+    return f"{group}_{arch}.kpack"
 
 
-def _kpack_rel(arch, rel_dir=Path(".")):
+def _kpack_rel(arch, rel_dir=Path("."), group=GROUP_NAME):
     """`library` for a descriptor living at `rel_dir` within the arch shard.
 
     The runtime resolves this as `originDirectory / library`, where
-    originDirectory is the parent directory of the descriptor FILE
-    (`IngestorKernelCode.hpp:74-80`, and the contract is stated there: "library
-    is authored relative to the descriptor that declared it"). The archive
+    originDirectory is the parent directory of the descriptor FILE. The archive
     itself lives once per arch, at the arch root.
 
     So a nested descriptor has to climb back out to the arch root before
     descending into `kpack/`. A root-relative value happens to be correct only
     when rel_dir is "." -- which is every flat layout, and is why this was not
     caught until descriptors could nest.
+
+    Climbing out of the descriptor's own directory is legal because the runtime
+    anchors containment on the descriptor TREE, not on the individual
+    descriptor's folder (`IngestorKernelCode.hpp`, the KPACK case). The archive
+    is a sibling inside that tree by construction.
     """
     rel_dir = Path(rel_dir)
     prefix = (
@@ -123,7 +133,7 @@ def _kpack_rel(arch, rel_dir=Path(".")):
         if rel_dir in (Path("."), Path(""))
         else "/".join([".."] * len(rel_dir.parts)) + "/"
     )
-    return f"{prefix}{KPACK_DIR_NAME}/{_kpack_filename(arch)}"
+    return f"{prefix}{KPACK_DIR_NAME}/{_kpack_filename(arch, group)}"
 
 
 def _kdp_header(doc):
@@ -405,7 +415,13 @@ def prune(flat, arch):
 
 
 def _rewrite_ukd_kpack(
-    ukd, arch, toc_key, sha256, toolchain_fields=None, rel_dir=Path(".")
+    ukd,
+    arch,
+    toc_key,
+    sha256,
+    toolchain_fields=None,
+    rel_dir=Path("."),
+    group=GROUP_NAME,
 ):
     """Rewrite a compiled UKD into shipped kpack form.
 
@@ -436,7 +452,7 @@ def _rewrite_ukd_kpack(
         "name": ukd.name,
         "kernel_source": {
             "kind": "kpack",
-            "library": _kpack_rel(arch, rel_dir),
+            "library": _kpack_rel(arch, rel_dir, group),
             "toc_key": toc_key,
             "symbol": ukd.symbol,
             "sha256": sha256,
@@ -468,6 +484,7 @@ def pack_arch(
     expected_sha256=None,
     hipcc=None,
     rocke_wheel_stamp=None,
+    group=GROUP_NAME,
 ):
     """Pack a pruned intermediate arch into the shipped kpack release tree.
 
@@ -536,7 +553,7 @@ def pack_arch(
             )
 
     archive = kpack_mod.PackedKernelArchive(
-        group_name=GROUP_NAME,
+        group_name=group,
         gfx_arch_family=arch,
         gfx_arches=[arch],
         compressor=comp.ZstdCompressor(compression_level=3),
@@ -551,7 +568,7 @@ def pack_arch(
         archive.add_kernel(prepared)
     archive.finalize_archive()
 
-    kpack_path = kpack_dir / _kpack_filename(arch)
+    kpack_path = kpack_dir / _kpack_filename(arch, group)
     archive.write(kpack_path)
 
     for kdp in inter.kdps:
@@ -581,6 +598,7 @@ def pack_arch(
                         # runtime anchors its library on the KDP's directory,
                         # not the UKD's own notion of where it came from.
                         rel_dir=kdp.rel_dir,
+                        group=group,
                     )
                 )
         out_doc["kernelDescriptors"] = out_kds
@@ -603,6 +621,7 @@ def pack_arch(
             toolchain_fields=_toolchain_for(ukd, hipcc, rocke_wheel_stamp),
             # A standalone UKD is its own file, so it anchors on its own dir.
             rel_dir=ukd.rel_dir,
+            group=group,
         )
         _write_text_at(
             out_arch_dir,
@@ -633,6 +652,7 @@ def run_pipeline(
     inter_root=None,
     expected_sha256=None,
     rocke_wheel_stamp=None,
+    group=GROUP_NAME,
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
@@ -693,6 +713,7 @@ def run_pipeline(
                 expected_sha256=expected_sha256,
                 hipcc=hipcc,
                 rocke_wheel_stamp=rocke_wheel_stamp,
+                group=group,
             )
             if out_arch_dir.exists():
                 shutil.rmtree(out_arch_dir)
@@ -700,7 +721,7 @@ def run_pipeline(
             results[arch] = replace(
                 result,
                 out_dir=out_arch_dir,
-                kpack_path=out_arch_dir / KPACK_DIR_NAME / _kpack_filename(arch),
+                kpack_path=out_arch_dir / KPACK_DIR_NAME / _kpack_filename(arch, group),
             )
         except HkpPackError as exc:
             # One arch failing must not destroy the other arches' work: a

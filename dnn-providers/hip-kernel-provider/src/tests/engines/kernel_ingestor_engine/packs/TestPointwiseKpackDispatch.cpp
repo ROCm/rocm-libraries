@@ -86,6 +86,10 @@ struct PackagedKernelSource
 {
     std::string library;
     std::string tocKey;
+    /// The descriptor's OWN directory, which `library` is relative to. Not the arch
+    /// root: the packer preserves each descriptor's authored subpath, so the two differ
+    /// for every nested descriptor.
+    std::filesystem::path originDirectory;
 };
 
 /// The bare arch of device 0 and the directory this build packed for it. `directory` is
@@ -118,9 +122,21 @@ void readPackagedKernelSource(const std::filesystem::path& directory,
                               const std::string& descriptorFile,
                               PackagedKernelSource& out)
 {
-    const std::filesystem::path descriptor = directory / descriptorFile;
-    ASSERT_TRUE(std::filesystem::exists(descriptor))
-        << "the packaged descriptor is missing: " << descriptor;
+    // Found by recursive search: the packer preserves the authored subpath, so the
+    // descriptor sits at whatever depth its source root put it. A flat join here is
+    // what kept this suite blind to nesting.
+    std::filesystem::path descriptor;
+    std::error_code walkError;
+    for(const auto& entry : std::filesystem::recursive_directory_iterator(directory, walkError))
+    {
+        if(entry.is_regular_file() && entry.path().filename() == descriptorFile)
+        {
+            descriptor = entry.path();
+            break;
+        }
+    }
+    ASSERT_FALSE(descriptor.empty()) << "the packaged descriptor is missing anywhere under "
+                                     << directory << ": " << descriptorFile;
 
     std::ifstream in(descriptor);
     ASSERT_TRUE(in.good()) << "could not open " << descriptor;
@@ -135,8 +151,10 @@ void readPackagedKernelSource(const std::filesystem::path& directory,
 
     out.tocKey = source["toc_key"].get<std::string>();
     out.library = source["library"].get<std::string>();
-    ASSERT_TRUE(std::filesystem::exists(directory / out.library))
-        << descriptor << " names an archive that is not on disk: " << directory / out.library;
+    out.originDirectory = descriptor.parent_path();
+    ASSERT_TRUE(std::filesystem::exists(out.originDirectory / out.library))
+        << descriptor
+        << " names an archive that is not on disk: " << out.originDirectory / out.library;
 }
 
 DescriptorId id(uint8_t seed)
@@ -149,7 +167,12 @@ DescriptorId id(uint8_t seed)
 /// A KernelDefinition whose code comes from a kpack archive at
 /// `originDirectory / library`. Metadata carries exactly what the pointwise handler
 /// reads, so the only thing that differs from the embedded-source path is the source.
+///
+/// `treeRoot` is the containment boundary the loader would have stamped. Passed
+/// separately from originDirectory because they differ for a nested descriptor, which is
+/// exactly the case whose archive lives at the arch root above it.
 KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
+                                 const std::filesystem::path& treeRoot,
                                  const std::string& library,
                                  const std::string& tocKey,
                                  const std::string& symbol,
@@ -166,6 +189,7 @@ KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
     kernel.source.tocKey = tocKey;
     kernel.source.symbol = symbol;
     kernel.originDirectory = originDirectory;
+    kernel.treeRoot = treeRoot;
     kernel.metadata = {{std::string(BLOCK_SIZE_FIELD), blockSize},
                        {std::string(DTYPE_FIELD), std::string("FLOAT")}};
     return kernel;
@@ -187,10 +211,10 @@ TEST(TestPointwiseKpackDispatch, QueriesWorkspaceForAKpackKernel)
 
     // 256 is the pack's large-block kernel, the one that reports scratch; 64 is not.
     // Not named `small`: Windows' rpcndr.h defines that as a macro.
-    const auto largeBlock
-        = makeKpackKernel("/nonexistent", "pack.kpack", "toc#0", "PointwiseAdd", 256, 0x40);
-    const auto smallBlock
-        = makeKpackKernel("/nonexistent", "pack.kpack", "toc#0", "PointwiseAdd", 64, 0x50);
+    const auto largeBlock = makeKpackKernel(
+        "/nonexistent", "/nonexistent", "pack.kpack", "toc#0", "PointwiseAdd", 256, 0x40);
+    const auto smallBlock = makeKpackKernel(
+        "/nonexistent", "/nonexistent", "pack.kpack", "toc#0", "PointwiseAdd", 64, 0x50);
 
     EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, largeBlock), 1024U);
     EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, smallBlock), 0U);
@@ -446,10 +470,12 @@ TEST(TestPointwiseKpackDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
     const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
     ASSERT_TRUE(bound.has_value());
 
-    const auto first
-        = makeKpackKernel(packaged, packed.library, packed.tocKey, PACKED_SYMBOL, 256, 0x60);
-    const auto second
-        = makeKpackKernel(packaged, packed.library, packed.tocKey, PACKED_SYMBOL, 64, 0x70);
+    // originDirectory is the descriptor's own (nested) folder; the arch root is the
+    // tree, and the archive sits under it -- the real shipped shape.
+    const auto first = makeKpackKernel(
+        packed.originDirectory, packaged, packed.library, packed.tocKey, PACKED_SYMBOL, 256, 0x60);
+    const auto second = makeKpackKernel(
+        packed.originDirectory, packaged, packed.library, packed.tocKey, PACKED_SYMBOL, 64, 0x70);
 
     const auto& handler = dispatchHandler(POINTWISE_ADD);
     const size_t before = pointwiseKpackModuleCache().size();
