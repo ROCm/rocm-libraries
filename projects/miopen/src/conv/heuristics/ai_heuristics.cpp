@@ -377,7 +377,9 @@ public:
         for(const auto& solver_name : metadata.solver_map)
         {
             auto solver_id = solver::Id{solver_name.second};
-            auto solver    = solver_id.GetSolver();
+            if(!solver_id.IsValid())
+                continue;
+            auto solver = solver_id.GetSolver();
             if(solver.IsApplicable(ctx, problem))
             {
                 applicable_solvers++;
@@ -477,7 +479,9 @@ public:
         for(const auto& solver_name : metadata.solver_map)
         {
             auto solver_id = solver::Id{solver_name.second};
-            auto solver    = solver_id.GetSolver();
+            if(!solver_id.IsValid())
+                continue;
+            auto solver = solver_id.GetSolver();
             if(solver.IsApplicable(ctx, problem))
             {
                 applicable_solvers++;
@@ -570,7 +574,9 @@ public:
         for(const auto& solver_name : metadata.solver_map)
         {
             auto solver_id = solver::Id{solver_name.second};
-            auto solver    = solver_id.GetSolver();
+            if(!solver_id.IsValid())
+                continue;
+            auto solver = solver_id.GetSolver();
             if(solver.IsApplicable(ctx, problem))
             {
                 applicable_solvers++;
