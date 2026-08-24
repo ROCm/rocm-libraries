@@ -406,31 +406,6 @@ public:
         return ret;
     }
 
-    // Return the number of expected callback entries for supplied
-    // fields.
-    size_t expected_callback_count(const std::vector<fft_field>& fields) const
-    {
-        // If fields are not specified, we consider the input or
-        // output to have a single brick (and thus expect a single
-        // callback entry)
-        if(fields.empty())
-            return 1;
-
-        const int mpi_rank = get_process_rank();
-
-        // count the number of bricks on this rank
-        size_t expected_callbacks = 0;
-        for(const auto& f : fields)
-        {
-            for(const auto& b : f.bricks)
-            {
-                if(b.rank == mpi_rank)
-                    ++expected_callbacks;
-            }
-        }
-        return expected_callbacks;
-    }
-
     fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,
                                      std::vector<void*>* load_cb_data,
                                      std::vector<void*>* store_cb_func,
