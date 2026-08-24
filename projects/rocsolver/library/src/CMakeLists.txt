@@ -246,7 +246,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_aliases.cpp
   auxiliary/rocauxiliary_lacgv.cpp
   auxiliary/rocauxiliary_laswp.cpp
-  auxiliary/laset.cpp
+  auxiliary/rocauxiliary_laset.cpp
   # householder reflections
   auxiliary/rocauxiliary_larfg.cpp
   auxiliary/rocauxiliary_larf.cpp
