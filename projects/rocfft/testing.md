@@ -99,13 +99,21 @@ GPU model.
 #### Samples
 
 Samples are currently located in a separate repository.  The purpose of the samplese repository is
-to pedogical; as such, it should work with the latest release of rocFFT.  New API features and
+pedogical; as such, it should work with the latest release of rocFFT.  New API features and
 behaviour in the rocFFT library will therefore reside in the rocFFT repository, and will be moved to
 the samples repository after the library changes are made available in a public release.  In order
 to ensure that these samples behave correctly, these should be tested as part of the pre-commit and
 nightly testing.
 
 There is a gap in that these tests are not currently run the TheRock's CI.
+
+#### Feature Flags
+
+Features under development, or for specific use cases may be controlled by feature flags at either
+the cmake or execution stage.  These options need to be tested, and, in some cases, combinations of
+these flags need to be tested.
+
+There is a gap in that combinations of flags are not currently run the TheRock's CI.
 
 #### Accuracy tests
 
