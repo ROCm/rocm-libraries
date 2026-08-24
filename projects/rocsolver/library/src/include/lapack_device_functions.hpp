@@ -3209,14 +3209,13 @@ __global__ static void laset_kernel(const rocblas_fill uplo,
             // ---------------------------------
             // assign to lower triangular matrix
             // ---------------------------------
-
-            for(I j = 0 + j_start; j < n; j += j_inc)
+            for(I j = j_start; j < n; j += j_inc)
             {
                 for(I i = j + i_start; i < m; i += i_inc)
                 {
                     bool const is_diagonal = (i == j);
                     auto const ij = idx2D(i, j, lda);
-                    auto const aij = (is_diagonal) ? diag : offdiag;
+                    auto const aij = is_diagonal ? diag : offdiag;
 
                     A[ij] = aij;
                 }
@@ -3227,14 +3226,13 @@ __global__ static void laset_kernel(const rocblas_fill uplo,
             // ---------------------------------
             // assign to upper triangular matrix
             // ---------------------------------
-
-            for(I j = 0 + j_start; j < n; j += j_inc)
+            for(I j = j_start; j < n; j += j_inc)
             {
-                for(I i = 0 + i_start; i < std::min(m, j + 1); i += i_inc)
+                for(I i = i_start; i < std::min(m, j + 1); i += i_inc)
                 {
                     bool const is_diagonal = (i == j);
                     auto const ij = idx2D(i, j, lda);
-                    auto const aij = (is_diagonal) ? diag : offdiag;
+                    auto const aij = is_diagonal ? diag : offdiag;
 
                     A[ij] = aij;
                 }
@@ -3245,21 +3243,18 @@ __global__ static void laset_kernel(const rocblas_fill uplo,
             // ------------------------
             // assign to entire matrix
             // ------------------------
-
-            for(I j = 0 + j_start; j < n; j += j_inc)
+            for(I j = j_start; j < n; j += j_inc)
             {
-                for(I i = 0 + i_start; i < m; i += i_inc)
+                for(I i = i_start; i < m; i += i_inc)
                 {
                     bool const is_diagonal = (i == j);
                     auto const ij = idx2D(i, j, lda);
-                    auto const aij = (is_diagonal) ? diag : offdiag;
+                    auto const aij = is_diagonal ? diag : offdiag;
 
                     A[ij] = aij;
                 }
             }
         }
-
-        __syncthreads();
     }
 }
 
@@ -3276,6 +3271,10 @@ void rocsolver_laset(rocblas_handle handle,
                      const rocblas_stride strideA,
                      const I batch_count)
 {
+    // quick return
+    if(m == 0 || n == 0 || batch_count == 0)
+        return;
+
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
     dim3 blocks(ceildiv(m, BS2), ceildiv(n, BS2), batch_count);
@@ -3284,7 +3283,6 @@ void rocsolver_laset(rocblas_handle handle,
                             uplo, m, n, offdiag, diag, // opts
                             AA, shiftA, lda, strideA, // A
                             batch_count);
-
 }
 
 /** This local gemm adapts rocblas_gemm to multiply complex*real, and

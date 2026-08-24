@@ -25,11 +25,8 @@ using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::core;
 
 /// Engines the provider exposes: one per compiled-in native engine, plus one per
-/// discovered descriptor set.
-///
-/// The ingestor's contribution is read from the inventory rather than hardcoded. A
-/// literal count goes wrong the moment a second pack ships, and it is the only thing
-/// standing between a dead-stripped pack table and a green run.
+/// discovered descriptor set, read from the inventory rather than hardcoded so a
+/// newly shipped pack is never silently uncounted.
 static uint32_t expectedEngines()
 {
     uint32_t expected = 0;
@@ -37,6 +34,9 @@ static uint32_t expectedEngines()
     ++expected;
 #endif
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
+    ++expected;
+#endif
+#ifdef HIPDNN_ENGINE_HIP_FLASH2
     ++expected;
 #endif
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -91,17 +91,19 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
 {
     using namespace hip_kernel_provider::kernel_ingestor_engine;
 
-    // Names the ids rather than counting them. A count cannot tell a missing ingestor
-    // engine from an extra native one, and it cannot see the failure this is really
-    // guarding: the pack table being dropped from a binary that links the provider as a
-    // static archive, which leaves the engine absent and every other assertion happy.
-    const auto sets = discoverDescriptorSets();
+    // Named rather than just counted: neither a count nor an emptiness check can tell
+    // a missing engine (e.g. a pack table dropped from a static-archive link) from a
+    // renamed one.
+    const auto& sets = discoverDescriptorSets();
 
-    // Reading the expectation from the function under test reintroduces the blindness
-    // this test exists to remove: with an empty result the loop below is vacuous and
-    // every count assertion in this file still passes. Reachable, since a pack that
-    // fails symbol registration is excluded from exactly this list.
-    ASSERT_FALSE(sets.empty()) << "no descriptor sets discovered, so nothing was asserted";
+    std::vector<std::string> names;
+    names.reserve(sets.size());
+    for(const auto& set : sets)
+    {
+        names.push_back(set.engine.name);
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names, (std::vector<std::string>{"hipkernel:ConvFwd", "hipkernel:Pointwise"}));
 
     Container container;
     const auto allEngineIds = container.getEngineManager().getAllEngineIds();

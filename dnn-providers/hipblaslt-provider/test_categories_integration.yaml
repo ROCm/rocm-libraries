@@ -22,10 +22,17 @@ _common_excludes: &common_excludes
 
 test_categories:
   quick:
-    description: "Fast external integration coverage: Smoke GPU cases plus quick CPU golden-reference bundles"
+    description: "Fast external integration coverage: quick-tier bundle sweeps plus always-built C++ tests"
     test_patterns:
+      # "quick_*" matches the bundle suites (integration-test-bundles/quick/...),
+      # which are the CI driver. "Smoke/*" matches the C++ parameterised suites:
+      # most are graph tests that no longer build by default (see
+      # BUILD_CPP_GRAPH_TESTS in
+      # dnn-providers/integration-tests/src/integration-tests/CMakeLists.txt),
+      # but the always-built non-graph ones register under it too, and a
+      # -DBUILD_CPP_GRAPH_TESTS=ON build gets the rest back.
+      - "quick_*"
       - "Smoke/*"
-      - "TestCpu*GoldenReference*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -33,11 +40,11 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Standard external integration coverage: quick coverage plus standard CPU golden-reference bundles"
+    description: "Standard external integration coverage: quick coverage plus standard-tier bundles"
     test_patterns:
+      - "quick_*"
+      - "standard_*"
       - "Smoke/*"
-      - "TestCpu*GoldenReference*"
-      - "TestCpu*GoldenRefStd*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -63,6 +70,16 @@ test_categories:
       - "full"
       - "all"
 
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: currently mirrors the quick tier's coverage, with a 2 hour timeout"
+    test_patterns:
+      - "Smoke/*"
+      - "TestCpu*GoldenReference*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
@@ -71,3 +88,4 @@ execution_settings:
     standard: 2700
     comprehensive: 25200
     full: 28800
+    ffm-quick: 7200  # 2 hours
