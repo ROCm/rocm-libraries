@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "ede8493c-5efc-5359-a9d6-4b3810eff302",
+  "name": "attention_dense selector",
+  "kind": "native",
+  "payload": "hipkernel.attention_dense.score"
+}

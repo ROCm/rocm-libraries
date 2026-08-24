@@ -15,6 +15,7 @@ const std::vector<IngestorPack>& ingestorPacks()
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols},
         {"hipkernel:ConvFwd", &registerConvFwdSymbols},
+        {"hipkernel:AttentionDense", &registerAttentionDenseSymbols},
     };
     return s_packs;
 }

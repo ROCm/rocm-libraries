@@ -441,6 +441,10 @@ __all__ = [
     "attention_dense_signature",
     "gfx942_kernel_name",
     "run_attention_dense_torch",
+    # The descriptor-drivable pair: one composed spec, `(spec, *, arch)`.
+    "Gfx942AttentionDenseSpec",
+    "build_gfx942_attention_dense",
+    "supports_gfx942_attention_dense",
 ]
 
 
@@ -1866,3 +1870,73 @@ def run_attention_dense_torch(
         ),
     )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Descriptor-drivable entry point
+# ---------------------------------------------------------------------------
+#
+# Everything above takes the gfx942 sweep knobs as a SEPARATE ``tuning`` argument, which
+# is the right shape for a Python caller and the wrong shape for a descriptor: an
+# ahead-of-time packager can only construct ONE spec object and call ``(spec, *, arch)``.
+# A builder with a third parameter is refused by the packager rather than packed, because
+# a knob a descriptor cannot supply would be frozen at its default while the artifact
+# still looked correct -- the failure the ``Gfx942DenseTuning`` docstring records as "a
+# real +79% got reported as -17% in this tree".
+#
+# So the two knob groups are composed into one spec here, and this pair is what a
+# descriptor names. Nothing above changes: ``build_attention_dense``/
+# ``supports_attention_dense`` keep their signatures and every existing caller, harness
+# and test keeps working. This is a router, not a fork -- it splits one spec back into the
+# two arguments the real builder already takes, so there is no second code path to drift.
+#
+# gfx950's dense builder is already ``(spec, *, arch)`` and needs no equivalent. When the
+# two arches are reconciled onto one API, this is the shape to converge on, because it is
+# the only one that keeps every gfx942 knob addressable from a descriptor.
+
+
+@dataclass(frozen=True)
+class Gfx942AttentionDenseSpec:
+    """One descriptor-expressible spec: the arch-neutral problem plus gfx942's knobs.
+
+    ``problem`` is the shared :class:`AttentionDenseSpec` (shape, dtype, and the tuning
+    gfx950 also owns). ``tuning`` is the gfx942-private struct, and it DEFAULTS -- so a
+    descriptor that omits it gets exactly the shipped configuration, byte-identical to
+    what dispatch builds today, while a descriptor that sets a field gets that field.
+
+    Both halves are ordinary dataclasses, which is what lets the packager build this from
+    nested JSON:
+
+        "spec": {
+          "problem": {"batch": 1, "seqlen_q": 256, ..., "dtype": "bf16"},
+          "tuning":  {"use_exp2_fast": false}      # optional
+        }
+    """
+
+    problem: AttentionDenseSpec
+    tuning: Gfx942DenseTuning = _DEFAULT_TUNING
+
+
+def build_gfx942_attention_dense(
+    spec: Gfx942AttentionDenseSpec, *, arch: str = "gfx942"
+) -> KernelDef:
+    """Emit the gfx942 dense prefill kernel for a composed spec.
+
+    The descriptor-facing spelling of :func:`build_attention_dense`; it splits ``spec``
+    into the two arguments that function already takes and delegates. Identical IR, and
+    identical kernel name, for a spec whose ``tuning`` is the default.
+    """
+    return build_attention_dense(spec.problem, arch=arch, tuning=spec.tuning)
+
+
+def supports_gfx942_attention_dense(
+    spec: Gfx942AttentionDenseSpec, *, arch: str = "gfx942"
+) -> tuple[bool, str]:
+    """Gate for :func:`build_gfx942_attention_dense`; delegates to the real predicate.
+
+    Named to match the builder so the packager's ``build_X`` -> ``supports_X`` derivation
+    finds it without an alias, which keeps an out-of-envelope spec -- including an illegal
+    ``tuning`` -- refused at pack time with a structured reason instead of failing inside
+    codegen.
+    """
+    return supports_attention_dense(spec.problem, arch=arch, tuning=spec.tuning)

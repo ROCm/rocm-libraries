@@ -43,6 +43,9 @@ void registerPointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& 
 /// @see packs/ConvNative.cpp
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 
+/// @see packs/AttentionDenseNative.cpp
+void registerAttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

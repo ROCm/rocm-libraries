@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "bf8b5b07-66a3-5118-ad8b-81e2d4debd13",
+  "name": "hipkernel:AttentionDense",
+  "graph_match": {
+    "native": "hipkernel.attention_dense.graph_match"
+  },
+  "heuristic": "ede8493c-5efc-5359-a9d6-4b3810eff302",
+  "metadata": "17d0a47f-d758-55cf-a41d-86f57ac61db8",
+  "knobs": [
+    "block_n"
+  ]
+}

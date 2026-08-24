@@ -1,0 +1,48 @@
+{
+  "version": "1.0",
+  "id": "a7e14fc8-2af6-520c-bf64-a1b35c7389ed",
+  "name": "hipkernel:attention_dense",
+  "arch": [
+    "gfx942"
+  ],
+  "matchers": [
+    "9547d409-2b73-5e50-9800-cfe81e4e779b"
+  ],
+  "engine": "bf8b5b07-66a3-5118-ad8b-81e2d4debd13",
+  "dispatch": "ce100a2c-afe3-5e25-aef8-a04941a970ec",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "d7732e2e-d8a2-5962-8ef5-89828a106d0f",
+      "name": "attention_dense.bf16_d128_hq8_kv8_sq256.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_gfx942_attention_dense",
+        "spec": {
+          "problem": {
+            "batch": 1,
+            "seqlen_q": 256,
+            "seqlen_kv": 256,
+            "num_query_heads": 8,
+            "num_kv_heads": 8,
+            "head_size": 128,
+            "causal": true,
+            "dtype": "bf16"
+          }
+        }
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "causal": 1,
+        "block_n": 64
+      },
+      "priority": 0
+    }
+  ]
+}

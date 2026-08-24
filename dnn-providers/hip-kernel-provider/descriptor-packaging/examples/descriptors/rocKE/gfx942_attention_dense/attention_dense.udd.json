@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "ce100a2c-afe3-5e25-aef8-a04941a970ec",
+  "name": "attention_dense dispatch",
+  "dispatch_symbol": "hipkernel.attention_dense.dispatch"
+}
