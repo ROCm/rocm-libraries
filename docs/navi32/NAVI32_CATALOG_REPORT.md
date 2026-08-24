@@ -13,7 +13,7 @@ Written incrementally, one section per phase, so a crash preserves findings.
 > as a *ceiling* for a real 60-CU part. [`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md).
 
 **Shipped: all four of navi32's thin TN catalogs widened, +18.8% to +23.9% wall-clock**, on
-branch `vmijovic/navi32` (18 commits, pushed). All four measured, not inferred.
+branch `vmijovic/navi32`, pushed. All four measured, not inferred.
 
 | catalog | solutions | wall-clock | geomean | A/A |
 |---|---|---|---|---|
@@ -22,15 +22,15 @@ branch `vmijovic/navi32` (18 commits, pushed). All four measured, not inferred.
 | AuxH-TN (fp16+aux) | 73 -> 313 | **+20.4%** | +17.3% | 100.42% |
 | AuxB-TN (bf16+aux) | 64 -> 316 | **+18.8%** | +18.3% | 100.19% |
 
-**15 122 measurements across five sweeps, zero failures.** Quote the wall-clock figure: as the
+**22 400+ measurements, zero failures.** Quote the wall-clock figure: as the
 sample grew from n=219 to n=996 the geomean moved **13 points** while wall-clock moved 0.7.
 
 | what was tried | result |
 |---|---|
 | **Widen the TN catalogs from navi31's** | **SHIPPED — +18.8 to +23.9% wall-clock, all four measured** |
 | Add gfx1101 to Origami (9 sites) | done; navi32 was previously unrecognised entirely |
-| Re-fork `WorkGroupMapping` for 60 CUs | **null** — 6/8/10 within 0.33 pt of each other |
-| Switch to an Origami Prediction library | **rejected** — 13 pt worse than GridBased |
+| Re-fork `WorkGroupMapping` for 60 CUs | **null** — re-confirmed at real 30 WGPs, 0.57 pt spread vs a 0.07 pt floor |
+| Switch to an Origami Prediction library | **rejected** — but only 3.3 pt geomean / 1.3 pt wall at matched 60 CUs |
 | Extend the catalog past ~300 solutions | **rejected** — oracle over all arms is only +2.8% |
 | `ROC_GLOBAL_CU_MASK` to emulate 60 CUs | **cosmetic** — replaced with a per-stream mask |
 
@@ -50,8 +50,6 @@ not 37% over 8). **Since checked directly at genuine 60-CU execution: +22.7% wal
 (common-mode error); absolute throughput is optimistic. ~73% of kernel time is compute-bound,
 so the result transfers despite the bandwidth difference; only ~7% of kernel time is in the
 memory-bound band this card cannot speak for.
-
----
 
 ---
 
