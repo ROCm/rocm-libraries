@@ -34,40 +34,33 @@
 
 /**
  * @file AttentionDenseNative.cpp
- * @brief The attention_dense engine's native half: applicability, selection,
- *        workspace, and dispatch for a rocKE-produced dense SDPA kernel.
- *
- * This is the first engine in the provider whose kernels are produced by rocKE rather
- * than compiled from a `.cpp` in this tree. Nothing in this file knows that: the
- * descriptor names a `kpack` source, `buildIngestorKernelCode()` opens the archive, and
- * a rocKE code object is bytes like any other. That producer-agnosticism is the property
- * the end-to-end test exists to hold in place, and it is why onboarding a rocKE kernel
- * costs exactly one native file -- the same as onboarding a HIP one.
+ * @brief The attention_dense engine's native half: applicability, selection, workspace,
+ *        and dispatch for a rocKE-produced dense SDPA kernel.
  *
  * The kernel is `kernels/gfx942/attention_dense.py:build_gfx942_attention_dense`, a dense
  * flash-attention prefill whose ABI is four pointers plus a scalar:
  *
  *     (q_ptr, k_ptr, v_ptr, o_ptr, scale)
  *
- * which is a direct match for `SdpaAttributes`' four required tensor uids plus
- * `attn_scale_value`. There is no paging, no cu_seqlens and no block table to synthesize.
+ * matching `SdpaAttributes`' four required tensor uids plus `attn_scale_value`. The
+ * descriptor names a `kpack` source, so `buildIngestorKernelCode()` loads an already
+ * compiled code object and nothing in this file compiles.
  *
- * SHAPE IS BAKED, WHICH DECIDES WHERE THE CHECKS GO
- * ------------------------------------------------
- * A rocKE kernel is compiled for one spec. `batch`, `seqlen_q`, `seqlen_kv`,
- * `num_query_heads`, `num_kv_heads`, `head_size`, `causal` and `dtype` are CONSTANTS in
- * the emitted code object, and the emitted symbol name carries them
- * (`rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq256_sk256_causal_lazyrs`). So:
+ * A rocKE kernel is compiled for one spec: `batch`, `seqlen_q`, `seqlen_kv`,
+ * `num_query_heads`, `num_kv_heads`, `head_size`, `causal` and `dtype` are constants in
+ * the code object and appear in its symbol name
+ * (`rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq256_sk256_causal_lazyrs`), which splits
+ * the checks in two:
  *
- *   * topology and the modes the kernel cannot express are refused in `graph_match`,
- *     which runs once per (graph, device) and gates the whole engine;
- *   * the baked geometry is compared per candidate in `kernel_match`, because a kernel
- *     built for one shape launched on another reads past its tile and writes a wrong
- *     answer with no fault. That check is correctness, not preference.
+ *   * `graph_match` refuses topology and the modes the kernel cannot express. It runs
+ *     once per (graph, device) and gates the whole engine.
+ *   * `kernel_match` compares the baked geometry per candidate. A kernel built for one
+ *     shape and launched on another reads past its tile and returns a wrong answer
+ *     without faulting, so this is correctness rather than preference.
  *
- * The descriptor's `metadata` is the only place the baked spec is visible to the
- * runtime, which is why the packer carries it through verbatim and this file compares
- * against it field by field.
+ * The descriptor's `metadata` is the only place the baked spec is visible to the runtime,
+ * so the packer carries it through verbatim and this file compares against it field by
+ * field.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -78,9 +71,8 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace
 {
 
-// The contract with the installed descriptor files, which restate these same strings.
-// Restated rather than shared through a header for the reason the other packs give: a
-// descriptor cannot reference a C++ constant, and the loader pre-flights every symbol a
+// The contract with the installed descriptor files, which restate these same strings. A
+// descriptor cannot reference a C++ constant; the loader pre-flights every symbol a
 // descriptor names, so a mismatch is reported at load rather than as a compile error.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.attention_dense.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.attention_dense.kernel_match";
@@ -109,12 +101,10 @@ constexpr int HEAD_COUNT_AXIS = 1;
 constexpr int SEQUENCE_AXIS = 2;
 constexpr int HEAD_SIZE_AXIS = 3;
 
-/// Query rows per CTA, and the wave width. The kernel derives its thread count as
-/// `(block_m / 32) * 64` = 512 threads at the shipped `_BLOCK_M = 256`, and its grid as
-/// `(ceil(seqlen_q / block_m), num_query_heads, batch)` -- see `attention_dense_grid` /
-/// `attention_dense_block` in the rocKE module. Both are restated here because the
-/// launch geometry is not carried in the descriptor, and both are asserted against the
-/// kernel's own `max_workgroup_size` by the integration test's numeric result.
+/// Launch geometry, restated here because the descriptor does not carry it: the kernel's
+/// thread count is `(block_m / 32) * 64` and its grid is
+/// `(ceil(seqlen_q / block_m), num_query_heads, batch)` -- see `attention_dense_grid` and
+/// `attention_dense_block` in the rocKE module, whose shipped `_BLOCK_M` is 256.
 constexpr int64_t DENSE_BLOCK_M = 256;
 constexpr unsigned int DENSE_BLOCK_THREADS = 512;
 
@@ -151,8 +141,8 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
 }
 
 /// The node this engine's matchers read, or nullptr when the graph is not a single SDPA
-/// node. Shared so the applicability check and the operand read cannot disagree about
-/// which node they are looking at.
+/// node. Shared so applicability and the operand read cannot disagree on which node they
+/// read.
 const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
 {
     if(context.graph.nodeCount() != 1)
@@ -171,15 +161,13 @@ const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
 
 /// Does this rank-4 operand carry the BSHD strides the kernel bakes in?
 ///
-/// The rocKE dense kernel derives its addresses from compile-time constants -- a token
-/// step is `Hq * D` and a head step is `D` -- so the layout is baked into the emitted
-/// code object rather than read from the tensor. An operand laid out any other way is
-/// still indexed as BSHD, which reads the wrong elements and yields wrong numbers
-/// WITHOUT faulting. Declining here is what lets another engine take the graph instead.
+/// The kernel derives its addresses from compile-time constants -- a token step is
+/// `Hq * D`, a head step is `D` -- so an operand in any other memory order is still
+/// indexed as BSHD, reads the wrong elements, and yields wrong values without faulting.
 ///
-/// Dims are `[B, H, S, D]` (hipDNN's canonical SDPA order) while the memory order is
-/// BSHD, so the expected strides interleave heads within a token: batch `S*H*D`,
-/// head `D`, token `H*D`, element 1.
+/// Dims are `[B, H, S, D]`, hipDNN's canonical SDPA order, while memory order is BSHD, so
+/// the expected strides interleave heads within a token: batch `S*H*D`, head `D`, token
+/// `H*D`, element 1.
 bool hasBshdStrides(const data_objects::TensorAttributes* tensor)
 {
     const auto* dims = tensor->dims();
@@ -194,9 +182,8 @@ bool hasBshdStrides(const data_objects::TensorAttributes* tensor)
            && strides->Get(SEQUENCE_AXIS) == heads * headSize && strides->Get(HEAD_SIZE_AXIS) == 1;
 }
 
-/// Rank-4, positive extents, real memory. Runs on an unvalidated graph, so it must be
-/// total: a caller can present a tensor the frontend would have rejected, and this must
-/// decline rather than dereference past it.
+/// Rank-4, positive extents, real memory. Runs on an unvalidated graph, so must be total:
+/// a caller can present a tensor the frontend would have rejected.
 bool isSupportedOperand(const data_objects::TensorAttributes* tensor)
 {
     if(tensor == nullptr)
@@ -225,11 +212,9 @@ bool isSupportedOperand(const data_objects::TensorAttributes* tensor)
 
 /// Reads the problem geometry, or nullopt when this is not a graph the engine reads.
 ///
-/// `o` is deliberately NOT required to carry populated dims: it is inferred by the
-/// frontend and its shape is not necessarily populated when matching runs. Requiring it
-/// is a defect this provider has already shipped once -- an SDPA matcher that validated
-/// `o` alongside `q`/`k`/`v` enumerated perfectly on a device where the packs arch-pruned
-/// and then failed every case on the device that actually ran it.
+/// `o` is not required to carry populated dims: its shape is inferred by the frontend and
+/// is not reliably populated while matching runs. Its layout is checked in `prepare()`
+/// instead.
 std::optional<AttentionDenseProblem> attentionProblem(const MatchContext& context)
 {
     const auto* attributes = sdpaNode(context);
@@ -246,8 +231,7 @@ std::optional<AttentionDenseProblem> attentionProblem(const MatchContext& contex
         return std::nullopt;
     }
 
-    // Layout. Safe to read only now that rank and extents are known good above; the
-    // kernel bakes BSHD addressing, so any other layout computes wrong answers silently.
+    // Layout. Safe to read only now that rank and extents are known good above.
     if(!hasBshdStrides(query) || !hasBshdStrides(key) || !hasBshdStrides(value))
     {
         return std::nullopt;
@@ -301,18 +285,16 @@ std::optional<AttentionDenseProblem> attentionProblem(const MatchContext& contex
 }
 
 /**
- * @brief Engine-level applicability: is this a single dense SDPA node this engine can
+ * @brief Engine-level applicability: is this a single dense SDPA node the engine can
  *        launch at all?
  *
- * Everything refused here is refused for the WHOLE engine, every pack -- `buildCatalog`
- * runs this once and returns an empty catalog on `nullopt`. That is the correct scope
- * for these checks: they are all properties of the operation, not of any one kernel.
+ * `buildCatalog` runs this once and returns an empty catalog on `nullopt`, so everything
+ * refused here is refused for every pack in the engine. Each check is a property of the
+ * operation rather than of any one kernel.
  *
- * The refusal list is long on purpose. `SdpaAttributes` carries two dozen optional
- * operands and every one of them defaults to absent, so a matcher that checks only what
- * it understands will accept a graph asking for dropout and return attention without it.
- * A refusal costs a fallback to another engine; a wrong accept costs a silently wrong
- * result.
+ * `SdpaAttributes` carries two dozen optional operands that all default to absent, so
+ * every mode the kernel does not implement is refused explicitly: an unchecked mode is
+ * accepted and then silently not performed.
  */
 std::optional<BoundTokens> attentionDenseGraphMatches(const MatchContext& context)
 {
@@ -336,14 +318,14 @@ std::optional<BoundTokens> attentionDenseGraphMatches(const MatchContext& contex
     {
         return std::nullopt;
     }
-    // Paged KV: this is the DENSE arm; a page table means the tiled family, not this one.
+    // Paged KV belongs to the tiled family, not the dense arm.
     if(attributes->page_table_k_tensor_uid().has_value()
        || attributes->page_table_v_tensor_uid().has_value())
     {
         return std::nullopt;
     }
-    // Variable-length batches. `supports_attention_dense` rejects varlen and ragged, so
-    // per-sequence lengths have no kernel behind them here.
+    // Variable-length batches: `supports_attention_dense` rejects varlen and ragged, so
+    // per-sequence lengths have no kernel behind them.
     if(attributes->seq_len_q_tensor_uid().has_value()
        || attributes->seq_len_kv_tensor_uid().has_value())
     {
@@ -380,9 +362,8 @@ std::optional<BoundTokens> attentionDenseGraphMatches(const MatchContext& contex
         return std::nullopt;
     }
 
-    // The scale reaches the kernel as a launch scalar, so it must be a value this
-    // dispatch can read on the host now. A scale living in device memory would have to
-    // be read on the device, which this kernel's ABI has no argument for.
+    // The scale reaches the kernel as a launch scalar, so it must be a host value. The
+    // kernel's ABI has no argument for a scale living in device memory.
     if(!attributes->attn_scale_value().has_value() || attributes->scale_tensor_uid().has_value())
     {
         return std::nullopt;
@@ -417,12 +398,11 @@ std::optional<std::string> descriptorDtypeFor(data_objects::DataType dataType)
 }
 
 /**
- * @brief Kernel-scoped applicability: does THIS kernel's baked spec fit this problem?
+ * @brief Kernel-scoped applicability: does this kernel's baked spec fit the problem?
  *
- * Correctness, not preference. Every field compared here is a compile-time constant in
- * the rocKE code object, so a candidate that disagrees would index the wrong extents and
- * produce a wrong answer without faulting. `graph_match` cannot make this call because
- * it runs before any candidate is in hand.
+ * Every field compared here is a compile-time constant in the rocKE code object, so a
+ * candidate that disagrees indexes the wrong extents and produces a wrong answer without
+ * faulting. `graph_match` cannot make this call: it runs before any candidate is in hand.
  */
 bool attentionDenseKernelMatches(const MatchContext& context,
                                  const BoundTokens& /*bound*/,
@@ -457,11 +437,9 @@ bool attentionDenseKernelMatches(const MatchContext& context,
            && kernel.getIntMetadata(std::string(CAUSAL_FIELD)) == causal;
 }
 
-/// Ranks the survivors. Geometry is part of the match rather than the score, so every
-/// candidate reaching here fits exactly and the only axis left is the KV tile: a larger
-/// `block_n` amortises the per-tile loop over more keys. A stand-in for a cost model,
-/// like the other packs' scores -- and the knob the UED exposes, so an autotuner has
-/// something to turn.
+/// Ranks the survivors. Geometry is part of the match, so every candidate reaching here
+/// fits exactly and the only axis left is the KV tile: a larger `block_n` amortises the
+/// per-tile loop over more keys. `block_n` is also the knob the UED exposes.
 double attentionDenseScore(const MatchContext& /*context*/,
                            const BoundTokens& /*bound*/,
                            const KernelDefinition& kernel)
@@ -538,15 +516,13 @@ private:
 /// A 1x1x1x1 NCHW-ordered tensor, existing only to satisfy KernelCompileOptions.
 ///
 /// That constructor unconditionally classifies its tensor's layout as NCHW or NHWC and
-/// throws on anything else, but the KPACK branch of buildIngestorKernelCode never reads
-/// the options it produces -- the code object is already compiled. Handing it the real
-/// query tensor therefore asked a compile-time question about a kernel that needs no
-/// compile, and this engine's operands are BSHD (stride order 0,2,1,3), which is neither
-/// NCHW (0,1,2,3) nor NHWC (0,3,1,2), so it threw. nullptr is not an alternative: the
-/// constructor dereferences it.
+/// throws on anything else, and it dereferences the pointer, so nullptr is not an
+/// alternative. This engine's operands are BSHD (stride order 0,2,1,3), which is neither.
+/// The KPACK branch of buildIngestorKernelCode never reads the options it produces -- the
+/// code object is already compiled -- so a stand-in is sufficient.
 ///
-/// If this pack ever gains an embedded_source kernel, this stand-in becomes wrong and the
-/// real tensor must be passed -- with a layout the classifier accepts.
+/// An embedded_source kernel in this pack would need the real tensor instead, in a layout
+/// the classifier accepts.
 const data_objects::TensorAttributes& layoutNeutralTensor()
 {
     static const std::vector<int64_t> s_dims{1, 1, 1, 1};
@@ -619,12 +595,10 @@ public:
                 "attention_dense dispatch prepared for a graph carrying no scale value");
         }
 
-        // O's layout is checked HERE rather than in the matcher. Its shape is inferred by
-        // the frontend and is not reliably populated while matching runs, so requiring it
-        // there makes the engine decline graphs it can serve -- a defect this provider has
-        // shipped once already (see attentionProblem). By dispatch time the frontend has
-        // filled it in, and the kernel writes O with the same baked BSHD addressing it
-        // reads its inputs with, so a mismatch here would silently corrupt the output.
+        // O's layout is checked here rather than in the matcher: its shape is inferred by
+        // the frontend and is not reliably populated while matching runs. By dispatch time
+        // it is populated, and the kernel writes O with the same baked BSHD addressing it
+        // reads its inputs with, so a mismatch would silently corrupt the output.
         const auto* output = findTensor(context, attributes->o_tensor_uid());
         if(output == nullptr || !isSupportedOperand(output) || !hasBshdStrides(output))
         {
@@ -634,17 +608,8 @@ public:
                 "element), and this graph's output tensor declares a different layout");
         }
 
-        // Built from a MINIMAL tensor stand-in, not the real query tensor.
-        // buildIngestorKernelCode's KPACK branch never reads these options -- the code
-        // object is already compiled, so there is nothing left to define -- but
-        // KernelCompileOptions' constructor unconditionally runs
-        // addDataTypeAndLayoutOptions, whose isChannelLastLayout classifies a 4D tensor
-        // as NCHW or NHWC and THROWS on anything else. This kernel's operands are BSHD,
-        // which is neither, so passing the real tensor made a conv-shaped classifier
-        // reject a valid attention layout: the plan failed with "Unsupported tensor
-        // layout for 4D tensor", a compile-time question asked about a kernel that
-        // needs no compile. Passing nullptr is not an option either -- the constructor
-        // dereferences it.
+        // Built from a stand-in tensor rather than the real query tensor; see
+        // layoutNeutralTensor().
         const compilation::KernelCompileOptions options(&layoutNeutralTensor(),
                                                         context.deviceProperties.gcnArchName);
 
@@ -652,10 +617,9 @@ public:
             = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
 
         // Launch geometry, mirroring `attention_dense_grid` / `attention_dense_block`:
-        // one CTA per (query block, query head, batch), each of `block_m/32` wave64s.
-        // Derived from the GRAPH's extents, which `kernel_match` has already proven equal
-        // to the kernel's baked ones -- so this cannot size a grid the binary disagrees
-        // with.
+        // one CTA per (query block, query head, batch), each of `block_m / 32` wave64s.
+        // The extents come from the graph, which `kernel_match` has already proven equal
+        // to the kernel's baked ones.
         const int64_t queryBlocks = (problem->seqLenQ + DENSE_BLOCK_M - 1) / DENSE_BLOCK_M;
 
         code.kernel->setBlockSize(DENSE_BLOCK_THREADS, 1, 1);
@@ -698,11 +662,10 @@ private:
     const compilation::KpackKernelLoader& _kpackLoader;
 };
 
-/// This pack's kpack module cache, process-lifetime. Unlike the pointwise pack's, this
-/// one keeps internal linkage: that one is exposed so a test can observe two dispatches
-/// over the same (archive, toc_key, arch) sharing a single hipModule_t, and nothing
-/// observes this pack's cache yet. Widen it only when something outside this file needs
-/// it.
+/// This pack's kpack module cache, process-lifetime. Internal linkage, unlike the
+/// pointwise pack's, which is exposed so a test can observe two dispatches over one
+/// (archive, toc_key, arch) sharing a single hipModule_t. Widen it when something outside
+/// this file needs it.
 compilation::KpackModuleCache& attentionDenseKpackModuleCache()
 {
     static compilation::KpackModuleCache s_moduleCache;
