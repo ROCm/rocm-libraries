@@ -406,7 +406,7 @@ ROCFFT_EXPORT rocfft_status
  *  Store callbacks have the following signature:
  *
  *  @code
- *  Tdata store_cb(Tdata* data, size_t offset, void* cbdata, void* sharedMem);
+ *  void store_cb(Tdata* data, size_t offset, Tdata element, void* cbdata, void* sharedMem);
  *  @endcode
  *
  *  'Tdata' is the type of a single element of the output buffer.  It is
