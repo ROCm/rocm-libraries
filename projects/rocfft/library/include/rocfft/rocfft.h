@@ -33,6 +33,16 @@
 #define ROCFFT_EXPORT
 #endif
 
+#if defined(__cplusplus) && __cplusplus >= 201402L
+#define ROCFFT_DEPRECATED_MSG(msg) [[deprecated(msg)]]
+#elif defined(__GNUC__)
+#define ROCFFT_DEPRECATED_MSG(msg) __attribute__((deprecated(msg)))
+#elif defined(_MSC_VER)
+#define ROCFFT_DEPRECATED_MSG(msg) __declspec(deprecated(msg))
+#else // no-op
+#define ROCFFT_DEPRECATED_MSG(msg)
+#endif
+
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -690,6 +700,8 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  @param[in] cb_data callback function data, passed to the function pointer when it is called
  *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use 
  * */
+
+ROCFFT_DEPRECATED_MSG("Use rocfft_plan_description_set_load_callback instead.")
 ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execution_info info,
                                                                     void** cb_functions,
                                                                     void** cb_data,
@@ -765,6 +777,7 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback_data(rocfft_
  *  @param[in] cb_data callback function data, passed to the function pointer when it is called
  *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use
  *  */
+ROCFFT_DEPRECATED_MSG("Use rocfft_plan_description_set_store_callback instead.")
 ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_store_callback(rocfft_execution_info info,
                                                                      void** cb_functions,
                                                                      void** cb_data,
