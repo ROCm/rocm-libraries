@@ -282,6 +282,45 @@ of measuring was to find that out before writing it.
 This closes all three rejected hypotheses *and* the one lever the oracle analysis left open.
 
 
+## Fifth use: is the win the solution POOL or the shape TABLE?
+
+Every measurement in this campaign changed **both** at once — 73 -> 298 solutions *and*
+471 -> ~9 700 table rows — so the phrase used throughout ("a 471-row table serves most shapes
+from a distant neighbour") was never actually tested against the alternative that the *pool*
+simply lacks the right kernel.
+
+**gfx1153 separates them for free.** It ships the **identical 64-solution BBS pool** as
+navi33/navi32 with a **different 472-row table**. Retargeted to gfx1100, the two logic files
+differ in exactly **472 lines of 12 927** — the table rows, nothing else; solution names are
+identical.
+
+| arm | geomean | wall-clock |
+|---|---|---|
+| A/A control | 99.85% | **99.70%** |
+| `tab1153` — different table, **same pool** | 100.04% | **99.79%** |
+| `wide` — navi31's 306-solution pool | 116.50% | **120.46%** |
+
+**The table contributes nothing: 0.09 pt above the A/A control, against a 0.30 pt floor.** The
+pool contributes the entire +20.5%. Flat at every jackknife depth and in every size band
+(large 99.9%, medium 99.4%, small 100.1%, tiny 100.3%).
+
+**This corrects the mental model, not the conclusion.** "The win is the catalog" stands — but
+the mechanism is *coverage*, not *mapping quality*. The thin catalog is slow because the pool
+does not contain a well-sized tile for the shape, and no re-mapping can conjure one. Someone
+tuning these architectures should **add kernels, not re-run the shape-table fit** — which is
+also why gfx1153's mapping pass (a real one: ~940 of its 472 rows differ) bought nothing
+measurable.
+
+**Caveat, stated because it cuts both ways.** gfx1153's table was fitted for gfx1153, not for
+this configuration, so this is not a test of an *optimally* fitted table. But note the result is
+symmetric: a table fitted for a *different* architecture does not **hurt** either (99.79 vs a
+99.70 control). At 471 rows the mapping is insensitive in **both** directions, which is a
+stronger statement than either arm alone.
+
+Consistency check: the `wide` arm reads 120.46% here against 121.36% in the earlier BBS 60-CU
+sweep — 0.9 pt apart on independently built libraries and separate runs.
+
+
 ## Reproduce
 
 ```bash
