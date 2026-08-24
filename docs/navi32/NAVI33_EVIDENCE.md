@@ -16,9 +16,35 @@ stronger than that:
 | shape-table rows | 9 680 | **471** |
 
 Built both navi32's *shipped* catalog and navi33's for gfx1100 and compared the code objects:
-**60 kernel symbols each, identical sets, 0 unique to either side**, and 73 solutions each. The
-two architectures ship **literally the same catalog**, which is why five RDNA3 parts share this
-defect — it was copied, not independently under-tuned.
+**60 kernel symbols each, identical sets, 0 unique to either side**, and 73 solutions each.
+
+**Confirmed at the source level, and it is five architectures, not two.** Comparing the logic
+files directly (`navi32` taken from `origin/develop`, i.e. before this branch widened it):
+
+| | HHS | BBS | AuxH | AuxB |
+|---|---|---|---|---|
+| **navi32 (pre-fix), navi33, gfx1103, gfx1150, gfx1152** | 14 674 | 12 991 | 14 674 | 12 991 |
+| navi31 | 114 299 | 117 127 | 118 846 | 119 653 |
+| gfx1151 *(the one arch with a real tuning campaign)* | 131 721 | 131 460 | 129 297 | 129 297 |
+| gfx1153 *(its own variant)* | 20 865 | 12 991 | 14 674 | 12 991 |
+
+Those five files are **identical**, for **all four** thin ProblemTypes. A raw `diff` of any pair
+is **152 lines out of 14 674, containing only 7 distinct contents**, every one an identifier:
+
+```
+- [Device 73f0]   vs  - [Device 150e]     # PCI device ID
+- navi33          vs  - gfx1150           # arch name, element [1]
+  ISA: [11, 0, 2] vs    ISA: [11, 5, 0]   # x73, one per solution
+```
+
+Nothing else differs — not one solution parameter, not one of the 471 table rows. The string
+`gfx1102` occurs exactly **once** in navi33's file (the arch-name line), so kernel names are not
+arch-tagged and this is not an artefact of over-normalising.
+
+**So the defect is one artefact copied five times, not five architectures independently
+under-tuned.** gfx1151 is the counter-example that proves the point: it is the only RDNA3 part
+that got its own tuning campaign, and it is the only one with a full-size catalog. This branch
+fixes one of the five.
 
 ## 2. At navi33's 32 CUs, widening is worth ~+15% wall-clock
 
