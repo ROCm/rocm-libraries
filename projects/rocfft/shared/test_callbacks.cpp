@@ -1008,13 +1008,13 @@ std::shared_ptr<fft_params::jit_cb_state_t> get_rank_jit_state(const fft_params&
     {
         // user-specified decomposition - copy func+data for each brick
         // on this rank
-        for(size_t i = 0; i < params.ifields.front().bricks.size(); ++i)
+        for(size_t i = 0; i < fields.front().bricks.size(); ++i)
         {
-            if(params.ifields.front().bricks[i].rank != mpi_rank)
+            if(fields.front().bricks[i].rank != mpi_rank)
                 continue;
 
             // cb data for this brick's device
-            rocfft_scoped_device dev(params.ifields.front().bricks[i].device);
+            rocfft_scoped_device dev(fields.front().bricks[i].device);
             add_cb_data();
         }
     }
