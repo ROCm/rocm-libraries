@@ -29,9 +29,11 @@ Candidates (fp16 dgrad)
 * ``cdna_hiperf_gfx950``  — 64x64x64, mfma32x32x16, mem (gfx950 only;
   gfx942 lacks the 32x32x16 f16 atom).
 * ``rdna_wmma_32x32``     — 32x32x16, wmma16x16x16,  mem (RDNA wave32).
+* ``gfx1250_wmma_32x32``  — 32x32x32, wmma16x16x32,  mem (gfx1250 wave32; its
+  only fp16/bf16 WMMA atom).
 
 ``auto`` ranks: gfx950_hiperf (priority 10) → cdna_hiperf (20) →
-cdna_mem (30) → rdna_wmma (10 on RDNA).
+cdna_mem (30) → rdna_wmma (10 on RDNA) → gfx1250_wmma (10 on gfx1250).
 """
 
 from __future__ import annotations
@@ -205,6 +207,9 @@ def _selector_matches(
 _CDNA_GFX950_ONLY = ("gfx950",)
 _CDNA_ALL = ("gfx90a", "gfx942", "gfx950")
 _RDNA_WMMA = ("gfx1151", "gfx1201")
+# gfx1250 is family=cdna but wave32 / matrix_path=wmma; its only fp16/bf16 atom
+# is 16x16x32 (no 16x16x16), so it needs a dedicated WMMA candidate.
+_GFX1250 = ("gfx1250",)
 
 # ---- per-candidate spec factories ----------------------------------------
 
@@ -308,6 +313,27 @@ def _spec_rdna_wmma(req: ConvDgradRequest, name: str) -> DgradConvSpec:
         warp_tile_m=16,
         warp_tile_n=16,
         warp_tile_k=16,
+        wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+        pipeline="mem",
+        epilogue="default",
+    )
+
+
+def _spec_gfx1250(req: ConvDgradRequest, name: str) -> DgradConvSpec:
+    """32x32x32, wmma16x16x32 — gfx1250 (wave32; its only fp16/bf16 WMMA atom)."""
+    dtype = _dgrad_dtype(req.dtype)
+    return DgradConvSpec(
+        problem=_problem(req),
+        name=name,
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
         pipeline="mem",
         epilogue="default",
@@ -443,6 +469,15 @@ CONV_DGRAD_REGISTRY.extend(
             spec_fn=_spec_rdna_wmma,
             arch_family="rdna",
             arches=_RDNA_WMMA,
+            dtype_filter=("fp16", "bf16"),
+        ),
+        _make_candidate(
+            name="conv_dgrad_igemm_gfx1250_wmma",
+            spec_id="gfx1250_wmma_32x32",
+            priority=10,
+            spec_fn=_spec_gfx1250,
+            arch_family="cdna",
+            arches=_GFX1250,
             dtype_filter=("fp16", "bf16"),
         ),
     )

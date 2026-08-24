@@ -1415,6 +1415,24 @@ def cases():
             tile_k=16,
         ),
     )
+    # gfx1250 WMMA grouped (wave32, 16x16x32 -- its only fp16/bf16 atom).
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx1250/n1h8c64k64r3_g4",
+        "gfx1250",
+        build_dgrad(
+            "irhash_dgrad_1250_g4_s1",
+            "gfx1250",
+            dgrad_g4,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+        ),
+    )
 
     # MoE: sorting phases and fused-MoE streaming phases.
     for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):

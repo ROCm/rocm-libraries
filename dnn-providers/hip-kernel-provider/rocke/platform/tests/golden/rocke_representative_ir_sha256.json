@@ -434,6 +434,14 @@
           "sha256": "3fd4384b102bb8ddc3e1d06779395ac06ed2fd64376f781bf4380726537a4b94",
           "status": "ok"
         },
+        "conv_dgrad/gfx1250/n1h8c64k64r3_g4": {
+          "arch": "gfx1250",
+          "bytes": 55458,
+          "family": "conv_dgrad",
+          "kernel_name": "irhash_dgrad_1250_g4_s1_N1H8W8C64_K64Y3X3G4_t32x32x32_w2x1_a16x16x32_mem_default",
+          "sha256": "9492aa33d920cf22205ca1eb198c9b0e6e14bdd5a1ee5ff2654fd40daeacb4e5",
+          "status": "ok"
+        },
         "conv_dgrad/gfx90a/n1h8c16k32r3_s1": {
           "arch": "gfx90a",
           "bytes": 65575,
@@ -841,7 +849,7 @@
           "gfx11-generic": 1,
           "gfx1151": 10,
           "gfx1201": 7,
-          "gfx1250": 2,
+          "gfx1250": 3,
           "gfx90a": 5,
           "gfx942": 18,
           "gfx950": 61
@@ -852,13 +860,13 @@
           "attention_d256": 2,
           "attention_dense": 27,
           "conv": 9,
-          "conv_dgrad": 10,
+          "conv_dgrad": 11,
           "conv_wgrad": 11,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 104
+        "ok_cases": 105
       }
     },
     "llvm22": {
@@ -1295,6 +1303,14 @@
           "sha256": "3fa5da6a188238723d517476150886c1bcc474aae016202a31e7218e4daa0ee2",
           "status": "ok"
         },
+        "conv_dgrad/gfx1250/n1h8c64k64r3_g4": {
+          "arch": "gfx1250",
+          "bytes": 55597,
+          "family": "conv_dgrad",
+          "kernel_name": "irhash_dgrad_1250_g4_s1_N1H8W8C64_K64Y3X3G4_t32x32x32_w2x1_a16x16x32_mem_default",
+          "sha256": "ba6306fa4c5420cc5d4937e649f52d32ee0648cfea286b29a3e7ccc87a897066",
+          "status": "ok"
+        },
         "conv_dgrad/gfx90a/n1h8c16k32r3_s1": {
           "arch": "gfx90a",
           "bytes": 65714,
@@ -1702,7 +1718,7 @@
           "gfx11-generic": 1,
           "gfx1151": 10,
           "gfx1201": 7,
-          "gfx1250": 2,
+          "gfx1250": 3,
           "gfx90a": 5,
           "gfx942": 18,
           "gfx950": 61
@@ -1713,13 +1729,13 @@
           "attention_d256": 2,
           "attention_dense": 27,
           "conv": 9,
-          "conv_dgrad": 10,
+          "conv_dgrad": 11,
           "conv_wgrad": 11,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 104
+        "ok_cases": 105
       }
     },
     "llvm23": {
@@ -2156,6 +2172,14 @@
           "sha256": "52bd4906019dd7bee8ab4a2c3cd6b6663a417b6eb1db532ea6638eaf0c23932e",
           "status": "ok"
         },
+        "conv_dgrad/gfx1250/n1h8c64k64r3_g4": {
+          "arch": "gfx1250",
+          "bytes": 55601,
+          "family": "conv_dgrad",
+          "kernel_name": "irhash_dgrad_1250_g4_s1_N1H8W8C64_K64Y3X3G4_t32x32x32_w2x1_a16x16x32_mem_default",
+          "sha256": "66af14840c9e86ff4fcd4600b9ec91ea36305ea57e23daba5beb6ffa9ec09d24",
+          "status": "ok"
+        },
         "conv_dgrad/gfx90a/n1h8c16k32r3_s1": {
           "arch": "gfx90a",
           "bytes": 65718,
@@ -2563,7 +2587,7 @@
           "gfx11-generic": 1,
           "gfx1151": 10,
           "gfx1201": 7,
-          "gfx1250": 2,
+          "gfx1250": 3,
           "gfx90a": 5,
           "gfx942": 18,
           "gfx950": 61
@@ -2574,13 +2598,13 @@
           "attention_d256": 2,
           "attention_dense": 27,
           "conv": 9,
-          "conv_dgrad": 10,
+          "conv_dgrad": 11,
           "conv_wgrad": 11,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 104
+        "ok_cases": 105
       }
     }
   },
