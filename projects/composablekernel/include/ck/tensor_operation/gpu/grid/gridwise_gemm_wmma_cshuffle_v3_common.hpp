@@ -81,7 +81,8 @@ template <typename ALayout,
           bool PermuteB,
           bool IsBPreShuffled          = false,
           bool ForceThreadTileTransfer = false, // only needed for convolution (limitation)
-          bool IsFusedKernel           = false>
+          bool IsFusedKernel           = false,
+          bool UseLdsTranspose         = false>
 struct GridwiseGemm_wmma_cshuffle_v3_base
 {
 
@@ -215,6 +216,16 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
     static constexpr bool UseDirectStore            = false;
 #endif
 
+#if defined(__gfx1250__)
+    static constexpr bool UseLdsTransposeA =
+        UseLdsTranspose && !is_same_v<ALayout, tensor_layout::gemm::RowMajor>;
+    static constexpr bool UseLdsTransposeB =
+        UseLdsTranspose && !is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>;
+#else
+    static constexpr bool UseLdsTransposeA = false;
+    static constexpr bool UseLdsTransposeB = false;
+#endif
+
     static constexpr bool UseBlockPaddingA =
         ABlockLdsExtraM || BlkGemmPipelineVer == BlockGemmPipelineVersion::v4;
     using ATransfer = typename std::conditional<
@@ -239,7 +250,8 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                               ABlockTransferSrcVectorDim,
                               ABlockTransferSrcScalarPerVector,
                               ABlockTransferDstScalarPerVector_AK1,
-                              AThreadTransferSrcResetCoordinateAfterRun>>::type;
+                              AThreadTransferSrcResetCoordinateAfterRun,
+                              UseLdsTransposeA>>::type;
 
     static constexpr bool UseBlockPaddingB =
         BBlockLdsExtraN || BlkGemmPipelineVer == BlockGemmPipelineVersion::v4;
@@ -291,7 +303,8 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                                   BBlockTransferSrcVectorDim,
                                   BBlockTransferSrcScalarPerVector,
                                   BBlockTransferDstScalarPerVector_BK1,
-                                  BThreadTransferSrcResetCoordinateAfterRun>>::type>::type;
+                                  BThreadTransferSrcResetCoordinateAfterRun,
+                                  UseLdsTransposeB>>::type>::type;
 
     static_assert(!(is_same_v<remove_cvref_t<LDSTypeB>, pk_i4_t> &&
                     GemmSpec != tensor_operation::device::GemmSpecialization::Default),
@@ -690,8 +703,10 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                                                            NRepeat,
                                                            KPack,
                                                            KInner,
-                                                           false,
-                                                           IsBPreShuffled>())>;
+                                                           false, // TransposeC
+                                                           IsBPreShuffled,
+                                                           UseLdsTransposeA,
+                                                           UseLdsTransposeB>())>;
 
     struct Traits
     {
