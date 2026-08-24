@@ -364,6 +364,7 @@ add_subdirectory(03_reduction)
 # category parser from test_categories.yaml.
 
 set(_HIPTENSOR_HOST_TESTS
+  batched_contraction_test
   contraction_mode_test
   elementwise_cpu_test
   elementwise_op_test

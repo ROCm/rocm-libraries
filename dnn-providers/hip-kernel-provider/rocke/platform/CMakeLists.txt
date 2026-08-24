@@ -290,7 +290,9 @@ if(ROCKE_INSTALL_TESTS)
 
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
-    # the differential harness (needs compiler + source), and run_all.py (dev runner).
+    # the differential harness (needs compiler + source), the WaveScope sidecar
+    # tests (load tools from the adjacent dsl_docs source tree), and run_all.py
+    # (dev runner).
     # cmake-lint: disable=E1122
     block()
       install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
@@ -300,6 +302,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "*.c" EXCLUDE
               PATTERN "*.cpp" EXCLUDE
               PATTERN "differential" EXCLUDE
+              PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
 
     endblock()

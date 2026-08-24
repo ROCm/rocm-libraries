@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -20,10 +21,23 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Implementations of these three must be thread-safe.
-using GraphMatcherFn = bool (*)(const MatchContext&, BoundTokens& bound);
-using KernelMatcherFn = bool (*)(const MatchContext&, const KernelDefinition&);
-using ScoreFn = double (*)(const KernelDefinition&, const MatchContext&);
+/// The four descriptor-driven stages, in pipeline order. Each takes the same operands
+/// in the same order, widening as later state exists: the device and graph
+/// (`MatchContext`), what the engine's graph match bound (`BoundTokens`), and the
+/// kernel under consideration (`KernelDefinition`). A stage takes an operand only when
+/// it exists at that point -- there is no kernel yet at graph scope, and the graph
+/// match is what produces the bindings -- so the prefix each one takes is the whole of
+/// what is knowable there.
+///
+/// This ordering is the contract a future declarative form mirrors as `$device`,
+/// `$graph`, `$<token>`, and `$kernel`: the same access, spelled two ways. Widen every
+/// stage together, or the two spellings drift.
+///
+/// Implementations of these four must be thread-safe.
+using GraphMatchFn = std::optional<BoundTokens> (*)(const MatchContext&);
+using GraphCriterionFn = bool (*)(const MatchContext&, const BoundTokens&);
+using KernelMatcherFn = bool (*)(const MatchContext&, const BoundTokens&, const KernelDefinition&);
+using ScoreFn = double (*)(const MatchContext&, const BoundTokens&, const KernelDefinition&);
 
 /// The provider's registry of native implementations, keyed by symbol name. One
 /// instance per registered type per loaded image: requires `CXX_VISIBILITY_PRESET
@@ -117,7 +131,8 @@ private:
     std::unordered_map<std::string, T> _symbols;
 };
 
-using GraphMatcherRegistry = NativeRegistry<GraphMatcherFn>;
+using GraphMatchRegistry = NativeRegistry<GraphMatchFn>;
+using GraphCriterionRegistry = NativeRegistry<GraphCriterionFn>;
 using KernelMatcherRegistry = NativeRegistry<KernelMatcherFn>;
 using ScoreRegistry = NativeRegistry<ScoreFn>;
 

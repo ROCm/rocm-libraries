@@ -389,6 +389,44 @@ GraphResult buildSdpaFwdBwdFusedGraph()
     return r;
 }
 
+// ── MoE grouped matmul (single node, NONE mode) ─────────────────────────────
+// Leaf inputs: token(1), weight(2), first_token_offset(3). Output: output(4).
+// first_token_offset is declared INT32 to match the real graph; the fill runs
+// through ITensor, so the host buffer type makeTensors() picks is immaterial.
+
+GraphResult buildMoeGroupedMatmulGraph()
+{
+    GraphResult r;
+    auto& b = r.builder;
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 1, "token", DataType::FLOAT, &kStrides, &kDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "weight", DataType::FLOAT, &kStrides, &kDims));
+    tensors.push_back(CreateTensorAttributesDirect(
+        b, 3, "first_token_offset", DataType::INT32, &kStrides, &kDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 4, "output", DataType::FLOAT, &kStrides, &kDims));
+
+    auto moe = CreateMoeGroupedMatmulAttributes(
+        b, 1, 2, 3, flatbuffers::nullopt, flatbuffers::nullopt, 4);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(b,
+                                     "moe_grouped_matmul",
+                                     DataType::FLOAT,
+                                     NodeAttributes::MoeGroupedMatmulAttributes,
+                                     moe.Union()));
+
+    auto graph = CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    b.Finish(graph);
+
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
 FillResult runFill(const GraphResult& gr, const std::set<int64_t>& outputUids)
 {
     const auto leafUids = gr.leafInputUids(outputUids);
@@ -477,6 +515,22 @@ TEST(TestFillInputs, SdpaFwdBwdFusedSucceeds)
 {
     const auto gr = buildSdpaFwdBwdFusedGraph();
     const auto result = runFill(gr, {7, 8, 9});
+
+    EXPECT_TRUE(result.filled) << result.reason;
+}
+
+// An op missing from applyDefaultFills() makes fillInputs() refuse the whole
+// graph, which the harness turns into a GTEST_SKIP. runFill() cannot catch
+// that: it discards fillInputs()'s own return value and only inspects the
+// recipe table afterward, so this checks fillInputs()'s result directly.
+TEST(TestFillInputs, MoeGroupedMatmulFillsAllInputs)
+{
+    const auto gr = buildMoeGroupedMatmulGraph();
+    const auto leafUids = gr.leafInputUids({4});
+    auto inputs = makeTensors(leafUids);
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes);
 
     EXPECT_TRUE(result.filled) << result.reason;
 }
