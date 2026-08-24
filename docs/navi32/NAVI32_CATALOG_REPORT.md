@@ -297,6 +297,31 @@ count (and hence WGM) as *the* tuning-relevant difference between navi31 and nav
 WGM8 genuinely is ragged on 30 WGPs (3.75) — but re-forking it to 6 or 10, both clean factors
 of 60 CUs, changes nothing measurable. A plausible mechanical story is not a result.
 
+> **This test could not have expressed its own hypothesis — and has been redone.** The
+> argument is about raggedness at **30 WGPs**, but this sweep ran at **48 WGPs**, where
+> 48/8 = 6.00 divides perfectly. WGM is a host-side runtime argument affecting workgroup
+> scheduling at *execution*, which `--sm_count_target` does not touch, so 60-CU *selection*
+> gave no purchase on it. Re-run under a real CU mask at 30 WGPs, 205 shapes, 4 arms:
+>
+> | arm | geomean | wall-clock |
+> |---|---|---|
+> | WGM10 | 100.18% | 99.78% |
+> | WGM6 | 100.24% | 100.35% |
+> | A/A control | 100.13% | **99.93%** |
+>
+> **The null holds** — a 0.57 pt spread against a 0.07 pt A/A floor, flat at every jackknife
+> depth. So the original conclusion was right, on a test that could not have shown otherwise.
+> The substantive finding is that **the divisibility intuition is simply wrong here**: WGM
+> reorders workgroup *indices* for L2 reuse, and raggedness touches only the final supergroup,
+> not the whole launch. Verified the three libraries genuinely differ (WGM 6/8/10 across all
+> 298 solutions, parsed from the library msgpack) — an identical-libraries bug would have
+> produced this same null.
+>
+> One sub-threshold lead, recorded not claimed: on **skinny** shapes both alternatives beat
+> WGM8 by ~1.5 pt (101.90 / 101.91 vs a 100.44 local A/A, n=62). Two independent arms agreeing
+> makes it more interesting than a single stratum usually is. Worth a targeted look; not
+> enough to act on.
+
 **What does matter is catalog depth**: navi31's 298 solutions beat navi32's 73 by **+41%
 geomean / +24% wall-clock**.
 

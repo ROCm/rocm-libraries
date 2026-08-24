@@ -75,6 +75,42 @@ oversamples.
 3 hours, not the impossible budget assumed. Future campaigns on this card should use it rather
 than fall back to selection fidelity.
 
+## Second use: re-testing the WGM null on hardware that can express it
+
+The campaign rejected re-forking `WorkGroupMapping` as a null. But the hypothesis is about
+raggedness at **30 WGPs** (30/8 = 3.75), and that sweep ran at **48 WGPs**, where 48/8 = 6.00
+divides perfectly. WGM is a host-side runtime argument affecting workgroup scheduling at
+*execution*; `--sm_count_target` does not reach it. **The test could not have expressed its own
+hypothesis.**
+
+Redone at real 60 CUs — 205 shapes, 4 arms, 2 reps, 1 656 runs, 1.3% hang:
+
+| arm | geomean | wall-clock |
+|---|---|---|
+| WGM10 | 100.18% | 99.78% |
+| WGM6 | 100.24% | 100.35% |
+| A/A control | 100.13% | **99.93%** |
+
+**The null holds** — 0.57 pt spread against a 0.07 pt floor, flat at every jackknife depth
+(0/5/10/25/50 dropped). The original conclusion was right; the original test was not capable of
+establishing it.
+
+The real finding is that **the divisibility intuition is wrong for this parameter**. WGM
+reorders workgroup *indices* into column-major supergroups for L2 reuse; raggedness affects
+only the final supergroup, not how the machine is tiled. A clean factor of the CU count buys
+nothing.
+
+**Control run first, because a broken variant generator produces exactly this null.** The three
+libraries have *identical* compiled symbol lists (238 kernels, same names) — WGM is not baked
+into the kernel. Parsing the library msgpack confirms they genuinely carry **WGM 6 / 8 / 10
+across all 298 solutions**. Two regex probes of the same binary had first suggested the
+libraries were identical, matching `WorkGroupMapping` as a prefix of `WorkGroupMappingRR` and
+then a capability *flag* named `wgm` rather than its value. **Parse the format; do not grep it.**
+
+One sub-threshold lead, recorded not claimed: on **skinny** shapes both alternatives beat WGM8
+by ~1.5 pt (101.90 / 101.91 against a 100.44 local A/A, n=62). Two independent arms agreeing
+is more than a single stratum usually offers. Not enough to act on.
+
 ## Reproduce
 
 ```bash
