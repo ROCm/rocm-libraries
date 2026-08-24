@@ -416,6 +416,12 @@ struct hipblasLtFusedEpilogueDescriptor
     void*                              requant_amax         = nullptr;
     hipblasLtRequantScaleComputeMode_t requant_compute_mode = HIPBLASLT_REQUANT_SCALE_STATIC;
     hipblasLtRequantScaleGranularity_t requant_granularity  = HIPBLASLT_REQUANT_SCALE_PER_TENSOR;
+    // MX microscaling requant attributes.
+    void*       requant_mx_scale       = nullptr;
+    int32_t     requant_mx_block_size  = 32;
+    hipDataType requant_mx_output_type = HIP_R_8F_E4M3;
+    // Optional bf16 dual-store output (PartialRMSStoreBf16D). Null unless set by caller.
+    void*       requant_mx_residual_out = nullptr;
 };
 
 namespace
@@ -483,7 +489,8 @@ namespace
     bool requant_granularity_valid(hipblasLtRequantScaleGranularity_t granularity)
     {
         return granularity == HIPBLASLT_REQUANT_SCALE_PER_TENSOR
-               || granularity == HIPBLASLT_REQUANT_SCALE_PER_ROW;
+               || granularity == HIPBLASLT_REQUANT_SCALE_PER_ROW
+               || granularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX;
     }
 }
 
@@ -514,6 +521,10 @@ extern "C++" bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueD
     out.requantAmax        = desc->requant_amax;
     out.requantComputeMode = desc->requant_compute_mode;
     out.requantGranularity = desc->requant_granularity;
+    out.requantMxScale       = desc->requant_mx_scale;
+    out.requantMxBlockSize   = desc->requant_mx_block_size;
+    out.requantMxOutputType  = desc->requant_mx_output_type;
+    out.requantMxResidualOut = desc->requant_mx_residual_out;
     if(desc->rmsnorm_stats != nullptr)
     {
         out.perRowScale       = desc->rmsnorm_stats->per_row_scale;
@@ -536,6 +547,16 @@ extern "C++" HIPBLASLT_EXPORT bool rocblaslt_rmsnorm_handoff_set_scale_for_testi
     desc->populated     = (per_row_scale != nullptr);
     desc->owns_scale    = false;
     return true;
+}
+
+// Test-only: read back the device rstd buffer that the library auto-allocates for a producer.
+// Not part of the public API.
+extern "C++" HIPBLASLT_EXPORT void* rocblaslt_rmsnorm_handoff_get_scale_for_testing(
+    hipblasLtFusedEpilogueRMSNormDescriptor* desc)
+{
+    if(desc == nullptr)
+        return nullptr;
+    return desc->per_row_scale;
 }
 
 hipblasStatus_t hipblasLtFusedEpilogueCreate(hipblasLtFusedEpilogueDescriptor_t* desc)
@@ -666,6 +687,34 @@ try
         if(!requant_granularity_valid(desc->requant_granularity))
             return HIPBLAS_STATUS_INVALID_VALUE;
         break;
+    case HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_SCALE_POINTER:
+        if(sizeInBytes < sizeof(void*))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->requant_mx_scale, value, sizeof(void*));
+        if(desc->requant_mx_scale == nullptr)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_BLOCK_SIZE:
+        if(sizeInBytes < sizeof(int32_t))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->requant_mx_block_size, value, sizeof(int32_t));
+        if(desc->requant_mx_block_size <= 0)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_OUTPUT_TYPE:
+        if(sizeInBytes < sizeof(hipDataType))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->requant_mx_output_type, value, sizeof(hipDataType));
+        if(desc->requant_mx_output_type != HIP_R_8F_E4M3)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_RESIDUAL_OUT_POINTER:
+        if(sizeInBytes < sizeof(void*))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->requant_mx_residual_out, value, sizeof(void*));
+        if(desc->requant_mx_residual_out == nullptr)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        break;
     default:
         return HIPBLAS_STATUS_INVALID_VALUE;
     }
@@ -767,19 +816,37 @@ try
         }
         if(fused != nullptr && fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT))
         {
-            if(fused->requant_scale == nullptr
-               || !requant_compute_mode_valid(fused->requant_compute_mode)
-               || !requant_granularity_valid(fused->requant_granularity))
+            const bool mxBlock = fused->requant_granularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX;
+            if(mxBlock)
             {
-                rocblaslt::Debug::Instance().markerStop();
-                return HIPBLAS_STATUS_INVALID_VALUE;
+                // MX requant: needs mxScale pointer, positive block size, and e4m3 output.
+                if(fused->requant_mx_scale == nullptr
+                   || fused->requant_mx_block_size <= 0
+                   || fused->requant_mx_output_type != HIP_R_8F_E4M3)
+                {
+                    rocblaslt::Debug::Instance().markerStop();
+                    return HIPBLAS_STATUS_INVALID_VALUE;
+                }
             }
-            if(fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS)
-               && (fused->requant_compute_mode != HIPBLASLT_REQUANT_SCALE_DYNAMIC_FROM_AMAX
-                   || fused->requant_granularity != HIPBLASLT_REQUANT_SCALE_PER_ROW))
+            else
             {
-                rocblaslt::Debug::Instance().markerStop();
-                return HIPBLAS_STATUS_INVALID_VALUE;
+                // Non-MX requant: needs an f32 scale pointer and valid mode/granularity.
+                if(fused->requant_scale == nullptr
+                   || !requant_compute_mode_valid(fused->requant_compute_mode)
+                   || !requant_granularity_valid(fused->requant_granularity))
+                {
+                    rocblaslt::Debug::Instance().markerStop();
+                    return HIPBLAS_STATUS_INVALID_VALUE;
+                }
+                // Decomposed producer requires dynamic per-row scale (non-MX only).
+                if(fused_epilogue_has_stage(fused,
+                                            HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS)
+                   && (fused->requant_compute_mode != HIPBLASLT_REQUANT_SCALE_DYNAMIC_FROM_AMAX
+                       || fused->requant_granularity != HIPBLASLT_REQUANT_SCALE_PER_ROW))
+                {
+                    rocblaslt::Debug::Instance().markerStop();
+                    return HIPBLAS_STATUS_INVALID_VALUE;
+                }
             }
         }
     }
@@ -974,17 +1041,35 @@ try
                 = fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS);
             const bool requant
                 = fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT);
-            if(!fullRmsNorm && !scaleApply && !partialStats)
+            const bool mxRequant
+                = requant
+                  && (fused->requant_granularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX);
+            if(!fullRmsNorm && !scaleApply && !partialStats && !mxRequant)
             {
                 rocblaslt::Debug::Instance().markerStop();
                 return HIPBLAS_STATUS_NOT_SUPPORTED;
             }
+            // Chained RMSNorm+requant (MX or per-row) supports bf16 A/B, or fp8-e4m3
+            // A/B carrying MX block-scale inputs (the MXFP8-input PartialRMS path).
             if(fullRmsNorm && requant)
             {
                 const auto* aLayout = (rocblaslt_matrix_layout)matA;
                 const auto* bLayout = (rocblaslt_matrix_layout)matB;
-                if(aLayout == nullptr || bLayout == nullptr || aLayout->type != HIP_R_16BF
-                   || bLayout->type != HIP_R_16BF)
+                if(aLayout == nullptr || bLayout == nullptr)
+                {
+                    rocblaslt::Debug::Instance().markerStop();
+                    return HIPBLAS_STATUS_NOT_SUPPORTED;
+                }
+                using ScalingFormat = RocblasltContractionProblem::ScalingFormat;
+                const bool aMxScale = desc->scaleAType == ScalingFormat::Block_32_UE8M0
+                                      || desc->scaleAType == ScalingFormat::Block_32_UE8M0_32_8_EXT;
+                const bool bMxScale = desc->scaleBType == ScalingFormat::Block_32_UE8M0
+                                      || desc->scaleBType == ScalingFormat::Block_32_UE8M0_32_8_EXT;
+                const bool bothBf16
+                    = aLayout->type == HIP_R_16BF && bLayout->type == HIP_R_16BF;
+                const bool bothFp8Mx = aLayout->type == HIP_R_8F_E4M3
+                                       && bLayout->type == HIP_R_8F_E4M3 && aMxScale && bMxScale;
+                if(!bothBf16 && !bothFp8Mx)
                 {
                     rocblaslt::Debug::Instance().markerStop();
                     return HIPBLAS_STATUS_NOT_SUPPORTED;
@@ -998,24 +1083,24 @@ try
                 return HIPBLAS_STATUS_INVALID_VALUE;
             }
             // Decomposed producer: the library owns the per-row rstd handoff buffer. Allocate it
-            // (FP32 [rows*batch], rows rounded up so the consumer's padded rstd read stays in
-            // bounds) on the first producer call if the caller has not provided one; the producer's
-            // row_rstd reduction fills it and the consumer GEMM2 reads it. Freed on descriptor
-            // destroy.
+            // tight (FP32 [rows*batch], no padding) on the first producer call if the caller has
+            // not provided one. The producer's row_rstd reduction writes exactly one float per row
+            // (grid = tokensM workgroups) and the consumer GEMM2 reads it through a ScaleAlphaVec
+            // SRD bounded to SizeI/SizeJ = M rows, so neither side accesses past rows. Freed on
+            // descriptor destroy.
             if(partialStats && fused->rmsnorm_stats != nullptr
                && fused->rmsnorm_stats->per_row_scale == nullptr)
             {
                 auto*          dlay       = (rocblaslt_matrix_layout)matD;
-                const uint64_t rows       = dlay ? dlay->m : 0;
-                const int32_t  batch      = dlay ? dlay->batch_count : 1;
-                const uint64_t paddedRows = ((rows + 255) / 256) * 256;
-                void*          scale      = nullptr;
-                if(dlay == nullptr || paddedRows == 0 || batch <= 0)
+                const uint64_t rows  = dlay ? dlay->m : 0;
+                const int32_t  batch = dlay ? dlay->batch_count : 1;
+                void*          scale = nullptr;
+                if(dlay == nullptr || rows == 0 || batch <= 0)
                 {
                     rocblaslt::Debug::Instance().markerStop();
                     return HIPBLAS_STATUS_INVALID_VALUE;
                 }
-                if(hipMalloc(&scale, paddedRows * static_cast<size_t>(batch) * sizeof(float))
+                if(hipMalloc(&scale, rows * static_cast<size_t>(batch) * sizeof(float))
                    == hipSuccess)
                 {
                     fused->rmsnorm_stats->per_row_scale = scale;

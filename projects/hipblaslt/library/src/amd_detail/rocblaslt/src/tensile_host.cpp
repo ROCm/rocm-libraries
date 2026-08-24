@@ -1899,10 +1899,15 @@ namespace
         t.row_stride_d = 1; t.col_stride_d = p.n;
         if(partialRMSFullRequant(p))
         {
+            RocblasltFusedEpilogueInfo fInfo;
+            rocblaslt_resolve_fused_epilogue(p.fused_epilogue, fInfo);
+            // MXfp8 fully-fused K1 writes FP8 output directly; preserve the user's c/d types.
+            if(fInfo.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX)
+                return t;
             if(p.a_type != HIP_R_16BF || p.b_type != HIP_R_16BF)
                 return t;
-            // K1 PartialRMS solutions are BF16. The user-visible D remains FP8; launch-time
-            // inputs redirect K1 C/D to a BF16 workspace scratch and row_div_quant writes final D.
+            // Non-MX requant uses a BF16 scratch: K1 writes BF16 intermediate, and
+            // row_div_quant (K2) applies the scale and writes the final FP8 D.
             t.c_type = HIP_R_16BF;
             t.d_type = HIP_R_16BF;
         }
@@ -1944,6 +1949,17 @@ namespace
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
         auto k = prob.k && alpha ? prob.k : 0;
+
+        // MXFP8 DQuant solutions are compiled with UseBeta=False (BetaZero=True).
+        // The BetaZero predicate requires m_beta==0.0 in the Tensile problem.
+        // Heuristic paths default to beta=1.0, so override here for correct selection.
+        {
+            RocblasltFusedEpilogueInfo mxInfo;
+            if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, mxInfo)
+               && mxInfo.hasRequant
+               && mxInfo.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX)
+                beta = 0.0;
+        }
 
         // fallback to f32 for f16 compute type after alpha/beta assignment
         if(prob.compute_type == rocblaslt_compute_f16)
@@ -2199,7 +2215,8 @@ namespace
 
         // Fused RMSNorm epilogue: translate the attached composable fused-epilogue chain into
         // the TensileLite selector flags. Full RMSNorm and the decomposed producer use the K1
-        // PartialRMS path; the decomposed consumer selects the K3 RstdScale path.
+        // PartialRMS path. The decomposed consumer (RMSNorm scale-apply) applies the per-row
+        // rstd through the ScaleAlphaVec path.
         RocblasltFusedEpilogueInfo fusedInfo;
         if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo))
         {
@@ -2209,10 +2226,31 @@ namespace
                 tensileProblem.setUsePartialRMS(true);
                 tensileProblem.setPartialRMSResidualAdd(fusedInfo.hasResidualAdd);
             }
-            // Decomposed consumer (Kernel 3 RstdScale): applies a per-row rstd to GEMM2's
-            // output. Normal orientation (per-M-row scale, no reduction) -> no transpose.
+            // Decomposed consumer (Kernel 3 RstdScale): apply the per-row rstd to GEMM2's
+            // output via ScaleAlphaVec. Normal orientation (per-M-row scale, no reduction),
+            // so no transpose. Re-issue setScaleAlphaVec after enabling the flag because the
+            // earlier setScaleAlphaVec call ran while useScaleAlphaVec was still false.
             if(fusedInfo.hasRMSNormScaleApply)
-                tensileProblem.setUseRstdScale(true);
+            {
+                tensileProblem.setUseScaleAlphaVec(1);
+                tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
+            }
+            // MX block-scale dequant: wire DQuantType::MXFP8 and the scale tensor dimensions.
+            // q0=32 blocks along free0 (N_hidden); q1=1 per free1 element (M_tokens).
+            // Scale grid: rows=M_tokens (freeTiles, padded×32), cols=N_hidden/32 (kBlockTiles, padded×8).
+            if(fusedInfo.hasRequant
+               && fusedInfo.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX)
+            {
+                const int32_t q0          = fusedInfo.requantMxBlockSize;  // 32
+                const int32_t q1          = 1;
+                const int64_t kBlockTiles = (static_cast<int64_t>(prob.m) + q0 - 1) / q0;
+                const int64_t freeTiles   = (static_cast<int64_t>(prob.n) + q1 - 1) / q1;
+                tensileProblem.setDquantType(TensileLite::DQuantType::MXFP8);
+                tensileProblem.setDquantSize0(q0);
+                tensileProblem.setDquantSize1(q1);
+                tensileProblem.setMxScale(freeTiles, kBlockTiles);
+                tensileProblem.setPartialRMSStoreBf16D(fusedInfo.requantMxResidualOut != nullptr);
+            }
         }
 
         // set AmaxD
@@ -2331,6 +2369,17 @@ namespace
 
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
+
+        // MXFP8 DQuant solutions are compiled with UseBeta=False (BetaZero=True).
+        // The BetaZero predicate requires m_beta==0.0 in the Tensile problem.
+        // Heuristic paths default to beta=1.0, so override here for correct selection.
+        {
+            RocblasltFusedEpilogueInfo mxInfo;
+            if(rocblaslt_resolve_fused_epilogue(probIn.fused_epilogue, mxInfo)
+               && mxInfo.hasRequant
+               && mxInfo.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX)
+                beta = 0.0;
+        }
 
         // fallback to f32 for f16 compute type after alpha/beta assignment
         if(prob.compute_type == rocblaslt_compute_f16)
@@ -2493,8 +2542,30 @@ namespace
                     tensileProblem.setUsePartialRMS(true);
                     tensileProblem.setPartialRMSResidualAdd(fusedInfo.hasResidualAdd);
                 }
+                // Decomposed consumer (Kernel 3 RstdScale): enable ScaleAlphaVec so selection
+                // routes to a per-row-scaling solution. Re-issue setScaleAlphaVec after enabling
+                // the flag (see the companion block in ConstructTensileProblem).
                 if(fusedInfo.hasRMSNormScaleApply)
-                    tensileProblem.setUseRstdScale(true);
+                {
+                    tensileProblem.setUseScaleAlphaVec(1);
+                    tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
+                }
+                // MX block-scale dequant: refresh dimensions each call (same logic as
+                // ConstructTensileProblem) so selection sees the correct scale-tensor shape.
+                // q0=32 along free0 (N_hidden), q1=1 per free1 element (M_tokens).
+                if(fusedInfo.hasRequant
+                   && fusedInfo.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX)
+                {
+                    const int32_t q0          = fusedInfo.requantMxBlockSize;  // 32
+                    const int32_t q1          = 1;
+                    const int64_t kBlockTiles = (static_cast<int64_t>(prob.m) + q0 - 1) / q0;
+                    const int64_t freeTiles   = (static_cast<int64_t>(prob.n) + q1 - 1) / q1;
+                    tensileProblem.setDquantType(TensileLite::DQuantType::MXFP8);
+                    tensileProblem.setDquantSize0(q0);
+                    tensileProblem.setDquantSize1(q1);
+                    tensileProblem.setMxScale(freeTiles, kBlockTiles);
+                    tensileProblem.setPartialRMSStoreBf16D(fusedInfo.requantMxResidualOut != nullptr);
+                }
             }
         }
 
@@ -2633,9 +2704,14 @@ namespace
         {
             inputs.rmsGamma = fusedInputs.rmsnormGamma;
             inputs.residual = fusedInputs.residual;
-            // Decomposed consumer (Kernel 3 RstdScale): per-row rstd from the handoff descriptor.
-            if(fusedInputs.hasRMSNormScaleApply)
-                inputs.rstdBuf = fusedInputs.perRowScale;
+            // MX block-scale output pointer; null when not using MX requant.
+            if(fusedInputs.hasRequant
+               && fusedInputs.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX)
+            {
+                inputs.mxScale     = const_cast<void*>(fusedInputs.requantMxScale);
+                // Dual-store bf16 pre-quant output (PartialRMSStoreBf16D). Null unless requested.
+                inputs.residualOut = const_cast<void*>(fusedInputs.requantMxResidualOut);
+            }
         }
 
         // set bias vector
@@ -2681,6 +2757,10 @@ namespace
         inputs.scaleC        = reinterpret_cast<const void*>(prob.scaleC);
         inputs.scaleD        = reinterpret_cast<const void*>(prob.scaleD);
         inputs.scaleAlphaVec = reinterpret_cast<const void*>(prob.scaleAlphaVec);
+        // Decomposed consumer (Kernel 3 RstdScale): the per-row rstd scale arrives through the
+        // fused-epilogue descriptor, not the standard scaleAlphaVec argument.
+        if(fusedInputs.hasRMSNormScaleApply && fusedInputs.perRowScale != nullptr)
+            inputs.scaleAlphaVec = fusedInputs.perRowScale;
         inputs.amaxD         = reinterpret_cast<void*>(prob.amaxD);
 
         static const std::map<rocisa::DataType, TensileLite::ConstantVariant> argument_vals = {
@@ -3882,6 +3962,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             bool     partialRmsProducer = false;   // decomposed producer: write rstd, don't apply
             void*    partialRmsRstdOut  = nullptr; // handoff per_row_scale (producer write target)
             bool     partialRmsQuant    = false;   // full flow: row_div_quant writes FP8 D
+            bool     mxRequant         = false;   // MX block quant handled fully inside K1.
             void*    partialRmsQuantBf16 = nullptr;
             float    partialRmsQuantScale = 1.0f;
             if(solution->sizeMapping.partialRMS)
@@ -3909,7 +3990,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                     partialRmsEps      = fInfo.rmsnormEps;
                     partialRmsProducer = fInfo.hasPartialRMSStats;
                     partialRmsRstdOut  = const_cast<void*>(fInfo.perRowScale);
-                    partialRmsQuant    = fInfo.hasRMSNorm && fInfo.hasRequant;
+                    // MX requant is handled entirely inside the K1 kernel; skip Kernel 2.
+                    partialRmsQuant    = fInfo.hasRMSNorm && fInfo.hasRequant
+                                        && fInfo.requantGranularity
+                                               != HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX;
+                    mxRequant = fInfo.hasRequant
+                                && fInfo.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX;
                     if(partialRmsQuant)
                     {
                         if(prob.a_type != HIP_R_16BF || prob.b_type != HIP_R_16BF)
@@ -4000,8 +4086,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // stream (ordered). Full flow -> row_div reduces and applies rstd to D in place.
             // Decomposed producer (partial stats) -> row_rstd reduces and writes the per-row rstd
             // into the handoff buffer for the later GEMM2 RstdScale consumer (Kernel 3).
+            // For the decomposed MX producer (partialRmsProducer && mxRequant): run row_rstd so
+            // the handoff is filled; the single-call MX full flow still skips Kernel 2.
             if(status == rocblaslt_status_success && solution->sizeMapping.partialRMS
-               && partialRmsBuf != nullptr)
+               && partialRmsBuf != nullptr && (partialRmsProducer || !mxRequant))
             {
                 if(partialRmsProducer)
                 {

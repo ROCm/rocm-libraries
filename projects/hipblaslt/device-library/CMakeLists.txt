@@ -45,7 +45,5 @@ if(HIPBLASLT_ENABLE_MATRIX_TRANSFORM)
     add_subdirectory(matrix-transform)
 endif()
 # Fused-RMSNorm reduce-and-apply (Kernel 2) companion to the TensileLite PartialRMS GEMM.
-# row-div is the row-major (free0 = N_hidden) Kernel 2 used by the current PartialRMS
-# emitter; partial-rms is the legacy col-major companion kept for reference.
-add_subdirectory(partial-rms)
+# row-div is the row-major (free0 = N_hidden) Kernel 2 used by the current PartialRMS emitter.
 add_subdirectory(row-div)
