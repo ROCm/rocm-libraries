@@ -1059,6 +1059,52 @@ TEST_F(InsertClusterBarrierPassTest, Rule3BoundaryForcedAnchorSinksOutOfLiveSccR
         << blockListing(*bb);
 }
 
+// The one shape the downward correction has no answer for: the live range runs past the wait
+// itself, so no spot between the lead point and the wait is safe and neither is the wait's own
+// spot, which is where the search otherwise gives up.
+//
+//     label_TestLoop:
+//     v_wmma ...                   <- long enough to blow past maxLeadCycles
+//     s_barrier_signal -1          <- the wait, and SCC is live in front of it
+//     s_barrier_wait -1 / tensor_load_to_lds
+//     s_cselect_b32                <- the only reader, and it is below the wait
+//
+// The pass may not quietly settle for the wait here: the handshake it plants opens with
+// `s_cmp_eq_u32`, which would clobber the value that s_cselect_b32 still wants. Nor is there
+// anywhere else to go. So this is a bug report about the caller rather than a case to recover
+// from, and a real block never gets here -- a range that reaches the wait is closed by
+// something the caller already looked at. The abort is what keeps a future caller from
+// discovering that the hard way.
+TEST_F(InsertClusterBarrierPassTest, Rule3SignalAnchorAbortsWhenSccIsLiveAtItsWait) {
+    appendGsu1Preheader();
+    openLoop();
+    // The climb has to get past maxLeadCycles while still standing in the range: that is what
+    // sends it back down looking for a spot below, which is the search that comes up empty.
+    for (int i = 0; i < 200; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    // Below the wait with no def between the two, so SCC reads live everywhere above it.
+    createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    closeLoop();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    ASSERT_NE(cycleMap.find(trigger), cycleMap.end())
+        << "trigger must be present in the estimated cycle map:" << blockListing(*bb);
+    const BasicBlock::iterator segBegin = segBeginAfter(loopHead);
+
+    EXPECT_DEATH(
+        {
+            (void)cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+                trigger, segBegin, trigger, cycleMap, /*leadCycles=*/500, /*maxLeadCycles=*/900,
+                /*priorWaitAnchors=*/{}, /*maxHops=*/0, loopHead);
+        },
+        "SCC live at the wait");
+}
+
 // A climb can cross edges and still come back empty-handed. Here the opening segment's signal
 // follows the latch across the back edge, lands in the tail segment, and finds SCC live from
 // the moment it arrives until the latch that reads it -- the whole segment is one live range,
