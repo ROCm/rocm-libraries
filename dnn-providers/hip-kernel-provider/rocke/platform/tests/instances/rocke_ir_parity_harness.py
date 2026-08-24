@@ -208,6 +208,51 @@ def build_conv_wgrad(
     return _build
 
 
+def build_dgrad(
+    name,
+    arch,
+    problem_args,
+    *,
+    wave_size,
+    wtm,
+    wtn,
+    wtk,
+    tile_m,
+    tile_n,
+    tile_k,
+    split_k=1,
+):
+    def _build():
+        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            build_implicit_gemm_conv_dgrad,
+        )
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+
+        p = ConvProblem(*problem_args)
+        spec = DgradConvSpec(
+            problem=p,
+            name=name,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp16"),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=2,
+            warp_n=1 if wave_size == 32 else 2,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
+            warp_tile_k=wtk,
+            wave_size=wave_size,
+            split_k=split_k,
+        )
+        return build_implicit_gemm_conv_dgrad(spec, arch=arch)
+
+    return _build
+
+
 def build_moe_sort(phase, tokens, topk, experts, block, arch):
     def _build():
         from rocke.instances.common.moe_sorting import (
@@ -1106,6 +1151,118 @@ def cases():
         ),
     )
 
+    # Dgrad: backward-data implicit-GEMM.  Problem args match the forward conv
+    # set; atoms chosen to be valid on each arch.  Stride=2 exercises the tiled
+    # (multi-sub-GEMM) path; stride=1 exercises the direct-store epilogue.
+    #
+    # ConvProblem positional args: (N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW)
+    dgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)  # stride=1
+    dgrad2 = (2, 16, 16, 32, 32, 3, 3, 2, 2, 1, 1, 1, 1)  # stride=2, 4 sub-GEMMs
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx942/n1h8c16k32r3_s1",
+        "gfx942",
+        build_dgrad(
+            "irhash_dgrad_942_s1",
+            "gfx942",
+            dgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=8,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx942/n2h16c32k32r3_s2",
+        "gfx942",
+        build_dgrad(
+            "irhash_dgrad_942_s2",
+            "gfx942",
+            dgrad2,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n1h8c16k32r3_s1",
+        "gfx950",
+        build_dgrad(
+            "irhash_dgrad_950_s1",
+            "gfx950",
+            dgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n2h16c32k32r3_s2",
+        "gfx950",
+        build_dgrad(
+            "irhash_dgrad_950_s2",
+            "gfx950",
+            dgrad2,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    # gfx1151 WMMA (wave32) -- stride=1 only; WMMA dgrad supports only 16x16x16.
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx1151/n1h8c16k32r3_s1",
+        "gfx1151",
+        build_dgrad(
+            "irhash_dgrad_1151_s1",
+            "gfx1151",
+            dgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    # gfx90a mirrors gfx942 (wave64 MFMA).
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx90a/n1h8c16k32r3_s1",
+        "gfx90a",
+        build_dgrad(
+            "irhash_dgrad_90a_s1",
+            "gfx90a",
+            dgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=8,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+
     # MoE: sorting phases and fused-MoE streaming phases.
     for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
         add(
@@ -1584,6 +1741,48 @@ def cases():
                 "block_size": 16,
                 "num_kv_blocks": 32,
                 "sliding_window": 256,
+            },
+        ),
+        # --- Sinks ---
+        # Full-sink (use_sinks=True, no sliding window): D64 and D128, default + persistent
+        ("sinks_d64_sq512", {"use_sinks": True, "head_size": 64}),
+        ("sinks_d128_sq512", {"use_sinks": True}),
+        (
+            "persist_sinks_d64_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
+                "head_size": 64,
+            },
+        ),
+        (
+            "persist_sinks_d128_sq512",
+            {"persistent": True, "num_persistent": 256, "use_sinks": True},
+        ),
+        # SWA-sink (use_sinks=True + sliding_window>0): D64 and D128, default + persistent
+        (
+            "swa_sinks_d64_sq512",
+            {"use_sinks": True, "sliding_window": 128, "head_size": 64},
+        ),
+        ("swa_sinks_d128_sq512", {"use_sinks": True, "sliding_window": 128}),
+        (
+            "persist_swa_sinks_d64_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
+                "sliding_window": 128,
+                "head_size": 64,
+            },
+        ),
+        (
+            "persist_swa_sinks_d128_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
+                "sliding_window": 128,
             },
         ),
     ):

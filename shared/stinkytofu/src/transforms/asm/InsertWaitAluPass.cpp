@@ -191,8 +191,7 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
     if (isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst)) return EV_VGPR_FLAT_READ;
     // VMEM family. Stinkytofu does not yet flag scratch / image / sample / BVH
     // instructions; on archs that emit them they belong in this same bucket.
-    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isGLOBALOrAtomic(inst))
-        return EV_VGPR_VMEM_READ;
+    if (isVMem(inst)) return EV_VGPR_VMEM_READ;
     return std::nullopt;
 }
 
