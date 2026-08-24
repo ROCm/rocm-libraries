@@ -18,7 +18,7 @@ Documentation for rocFFT is available at
   specifying the data pointers for these callbacks, which may differ
   on each execution.
 
-### Changed
+### Deprecations
 
 * The `rocfft_execution_info_set_load_callback` and `rocfft_execution_info_set_store_callback` APIs are now
   deprecated and will be removed in a future release.  They allow for specifying callbacks as device function
