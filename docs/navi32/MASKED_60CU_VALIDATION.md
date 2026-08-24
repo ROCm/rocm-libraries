@@ -243,6 +243,45 @@ size-gated selector would capture some fraction of +1.47. What it bounds is wher
 opportunity *is*, and it says the catalog is done.
 
 
+## Closing the hybrid question: a realizable gate captures ~a quarter of the oracle
+
+The oracle above says pairing GridBased with Prediction is worth **+1.47 pt**. An oracle
+assumes perfect per-shape foreknowledge; what would ship is a predicate on problem size. So:
+does a realizable gate capture it?
+
+Fitted and scored **out of sample** (threshold chosen on one half of the shapes, scored on the
+other; fitting and scoring on the same shapes manufactures a result):
+
+| gate shape | feature | in-sample | **out-of-sample** |
+|---|---|---|---|
+| threshold (`pred` above) | flops | 99.41% | **99.08%** |
+| threshold | output `M*N` | 99.63% | 99.14% |
+| threshold | `min(M,N)` | 99.54% | 99.21% |
+| **band** (`pred` inside) | **flops** | 100.48% | **100.47%** |
+| band | `M*N` | 100.28% | 99.43% |
+| band | `min(M,N)` | 100.15% | 99.24% |
+
+100.00% = GridBased alone; `always-pred298` = 98.73%.
+
+**No monotone threshold works at all** — every one lands *below* GridBased alone. That is
+because Prediction's edge is not at the top end: by size it scores large 99.1%, **medium
+100.2%**, small 94.6%, tiny 96.1%. The advantage sits in a *middle band*, which a
+`>= threshold` predicate cannot express, so the best threshold degenerates to "never use
+Prediction".
+
+**A flops band does work, and is worth +0.47 pt out of sample.** In-sample and out-of-sample
+agree to 0.01 pt (100.48 / 100.47), which is the signature of a stable rule rather than an
+overfit one — the two features that *do* overfit (`M*N`, `min(M,N)`) give themselves away by
+going negative out of sample.
+
+**Verdict: real but small.** A shippable gate captures roughly **a quarter** of the +1.47–2.0 pt
+oracle; the rest is not separable by problem geometry at all. Against the C++ work of adding a
+problem-size row predicate to the selector, +0.47 pt is unlikely to be worth it — and the point
+of measuring was to find that out before writing it.
+
+This closes all three rejected hypotheses *and* the one lever the oracle analysis left open.
+
+
 ## Reproduce
 
 ```bash
