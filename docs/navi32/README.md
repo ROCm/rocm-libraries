@@ -41,6 +41,8 @@ recognise the architecture at all before (`arch_name_to_enum("gfx1101")` returne
 | `regime_all.py` / `aa_floors.py` | 96-CU vs 60-CU comparison on matched shapes, and per-run A/A floors |
 | `oracle60.py` | oracle over every library built, **with a cardinality-matched noise floor** |
 | `hybrid_gate.py` | out-of-sample test of a size-gated GridBased/Prediction selector |
+| `compare_masked.py` | the catalog win at 96-CU vs 60-CU execution on matched shapes |
+| `pred_regime.py` | the Prediction-vs-GridBased gap in both execution regimes |
 | `navi33_occupancy.py` / `occ_lib.py` | RDNA3 occupancy from a `.co`, honouring **both** the VGPR and LDS limits |
 
 ## Three things worth knowing before extending this
