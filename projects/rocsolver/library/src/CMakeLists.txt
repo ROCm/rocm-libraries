@@ -293,6 +293,9 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_lasyf.cpp
   # triangular matrices
   auxiliary/rocauxiliary_lauum.cpp
+  # band matrices
+  auxiliary/rocauxiliary_sb2st_hb2st.cpp
+  auxiliary/rocauxiliary_sy2sb_he2hb.cpp
 )
 
 set(rocsolver_refact_source
@@ -526,6 +529,9 @@ endif()
 if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
   target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
+if(ROCSOLVER_ENABLE_EIG_2STAGE)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
+endif()
 
 target_compile_definitions(rocsolver PRIVATE
   ROCM_USE_FLOAT16
@@ -581,4 +587,3 @@ rocm_export_targets(
     ${static_depends}
   NAMESPACE roc::
 )
-

@@ -26,8 +26,9 @@ Sizes:
 # ============================================================
 
 # StreamK: True            # True=StreamK (default), False=DataParallel
-# GA: True                 # True=Ductile/GA tuning, False=exhaustive
-# MACROTILE_OPT: False     # Origami MT tuning (GA only)
+# backend: ductile         # "ductile" or "tensile" (default: ductile; CLI --backend overrides)
+# search_space:            # "heuristic" or "generic" (default: auto from backend)
+# MACROTILE_OPT: False     # Origami MT tuning (Ductile only)
 # MT_DU: None              # Fixed [MT0, MT1, DU] for MACROTILE_OPT
 # USE_HEURISTICS: False    # Refined heuristic param lists per size
 # SIZE_OPTION: 0           # 0=size list, 1=grid
@@ -37,6 +38,6 @@ Sizes:
 # MI_FILTER: 2             # MI filtering aggressiveness (0=none, 1=moderate, 2=aggressive)
 # EPILOGUES: True          # Include epilogues in tuning
 # CLUSTER: 0               # 0=all-in-one, 1=cluster by top MI
-# MAX_NUM_KERNELS_PER_CONFIG: 180000000  # Kernel cap per config (non-GA only; ignored in GA mode)
+# MAX_NUM_KERNELS_PER_CONFIG: 180000000  # Kernel cap per config (heuristic only; ignored for generic search space)
 
 # GRID_DENSITY: 4          # Grid density 1-5 (only for SIZE_OPTION=1)
