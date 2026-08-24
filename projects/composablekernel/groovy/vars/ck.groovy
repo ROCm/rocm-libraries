@@ -1501,24 +1501,45 @@ def runTileEngineGemmTests(String arch, String compiler) {
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
 }
 
-def runDispatcherPerfTests(String compiler) {
+// Benchmark ahead-of-time tile_engine instances. Two coverage tiers:
+//
+//   "smoke" -- one dtype, one layout, one problem size, and a 500-instance AOT
+//              budget. Sized to catch codegen/build/launch breakage on demand
+//              without booking a GPU node for the length of a full sweep.
+//   "daily" -- the full 4x4 dtype x layout matrix across three problem sizes at
+//              TILE_ENGINE_SAMPLING_TIER=daily, which maps to an 8000-instance
+//              budget in tile_engine/ops/gemm/CMakeLists.txt.
+//
+// The tier is woven into every result filename. Both lanes write into
+// projects/composablekernel/build, so without it a build with both enabled
+// would have the second stage's archiveArtifacts overwrite the first's.
+def runDispatcherPerfTests(String compiler, String tier) {
+    def daily          = (tier == "daily")
+    def samplingTier   = daily ? "daily" : "500"
+    def gemmDatatype   = daily ? "fp8;fp16;bf8;bf16" : "fp16"
+    def gemmLayout     = daily ? "rcr;rrr;crr;ccr" : "rcr"
+    // nargs="+" on both drivers, so extra sizes are extra positional args.
+    def problemSizes   = daily ? '"1024,1024,1024" "2048,2048,2048" "4096,4096,4096"'
+                               : '"1024,1024,1024"'
+    def problemConfigs = daily ? '"g=2;m=1024;n=1024;k=1024" "g=4;m=2048;n=2048;k=2048"'
+                               : '"g=2;m=1024;n=1024;k=1024"'
     def execute_cmd = """
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
             -D BUILD_CK_TILE_ENGINE="ON" \
             -D CMAKE_CXX_COMPILER="${compiler}" \
             -D CMAKE_BUILD_TYPE=Release \
             -D GPU_TARGETS="gfx942" \
-            -D GEMM_UNIVERSAL_DATATYPE="fp8;fp16;bf8;bf16" \
-            -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
+            -D GEMM_UNIVERSAL_DATATYPE="${gemmDatatype}" \
+            -D GEMM_UNIVERSAL_LAYOUT="${gemmLayout}" \
             -D BATCHED_GEMM_DATATYPE="fp16" \
             -D BATCHED_GEMM_LAYOUT="rcr" \
             -D BATCHED_CONTRACTION_DATATYPE="fp16" \
             -D BATCHED_CONTRACTION_LAYOUT="rcr" \
-            -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
+            -D TILE_ENGINE_SAMPLING_TIER=${samplingTier} .. && \
         ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_batched_gemm_all benchmark_batched_contraction_all && \
-        python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-        python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json batched_gemm_results.json && \
-        python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs "g=2;m=1024;n=1024;k=1024" --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json"""
+        python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_universal_results_${tier}.json && \
+        python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json batched_gemm_results_${tier}.json && \
+        python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs ${problemConfigs} --warmup 5 --repeat 5 --verbose --json batched_contraction_results_${tier}.json"""
     try {
         buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
     } finally {
@@ -1527,9 +1548,7 @@ def runDispatcherPerfTests(String compiler) {
         // reasoning as runDispatcherCorrectnessTests: execute_cmd runs from
         // projects/composablekernel/build while archiveArtifacts resolves against
         // the workspace root, so the build-relative path is spelled out in full.
-        archiveArtifacts artifacts: "projects/composablekernel/build/gemm_universal_results.json," +
-                                    "projects/composablekernel/build/batched_gemm_results.json," +
-                                    "projects/composablekernel/build/batched_contraction_results.json",
+        archiveArtifacts artifacts: "projects/composablekernel/build/*_results_${tier}.json",
                          allowEmptyArchive: true
     }
 }
@@ -1564,7 +1583,7 @@ def dispatcherGemmVariantsFor(String arch) {
 // runner's default --elementwise-op PassThrough. The budget is well under the
 // standard lane's 500 because each variant JIT-compiles its own .so set and
 // these run in addition to, not instead of, the standard sweep.
-def dispatcherVariantCmd(String arch, String variant) {
+def dispatcherVariantCmd(String arch, String variant, String tier) {
     return """python3 ../dispatcher/tests/test_gemm_search_space.py \
                 --variant ${variant} \
                 --arch ${arch} \
@@ -1572,10 +1591,24 @@ def dispatcherVariantCmd(String arch, String variant) {
                 --warmup 5 \
                 --repeat 5 \
                 --size 1024 \
-                --json dispatcher_${variant}_results.json"""
+                --json dispatcher_${variant}_results_${tier}.json"""
 }
 
-def runDispatcherCorrectnessTests(String arch, String compiler) {
+// Verify JIT-compiled dispatcher kernels against a host reference. Two tiers:
+//
+//   "smoke" -- the standard sweep at --budget 64 plus the three fixed-config
+//              tests (parity, batched_gemm, batched_contraction). The dtype and
+//              layout lists stay at the full 4x4 on purpose: the sweep samples
+//              per stratum, so 64 spreads ~4 configs across all 16 dtype x
+//              layout combinations rather than testing one combination deeply.
+//   "daily" -- the same, at --budget 500, plus every non-standard GEMM variant
+//              this arch can run and the arch-specific extras below.
+//
+// As in runDispatcherPerfTests, result filenames carry the tier so a build with
+// both lanes enabled does not have one stage's artifacts clobber the other's.
+def runDispatcherCorrectnessTests(String arch, String compiler, String tier) {
+    def daily  = (tier == "daily")
+    def budget = daily ? 500 : 64
     def execute_cmd = """
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
             -D CMAKE_CXX_COMPILER="${compiler}" \
@@ -1589,35 +1622,44 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
             --arch ${arch} \
             --dtypes fp16,bf16,fp8,bf8 \
             --layouts rcr,rrr,crr,ccr \
-            --budget 500 \
+            --budget ${budget} \
             --warmup 5 \
             --repeat 5 \
             --size 1024 \
-            --json dispatcher_gemm_results.json && \
+            --json dispatcher_gemm_results_${tier}.json && \
         python3 ../dispatcher/tests/test_gemm_parity.py && \
         python3 ../dispatcher/tests/test_batched_gemm_gpu_correctness.py --gfx ${arch} && \
         python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx ${arch}"""
-    dispatcherGemmVariantsFor(arch).each { variant ->
-        execute_cmd += " && \\\n        " + dispatcherVariantCmd(arch, variant)
-    }
-    // Stream-K has its own registry-level driver test; its defaults are the
-    // full 4x4 matrix (48 driver compiles / 96 GPU runs), so CI pins one
-    // dtype/layout. Note it takes --arch, not --gfx.
-    if (arch == "gfx942") {
-        execute_cmd += """ && \
+    // Everything below is daily-only: each variant JIT-compiles its own .so set,
+    // which is the bulk of this lane's wall clock and the opposite of a smoke run.
+    if (daily) {
+        dispatcherGemmVariantsFor(arch).each { variant ->
+            execute_cmd += " && \\\n        " + dispatcherVariantCmd(arch, variant, tier)
+        }
+        // Stream-K has its own registry-level driver test; its defaults are the
+        // full 4x4 matrix (48 driver compiles / 96 GPU runs), so CI pins one
+        // dtype/layout. Note it takes --arch, not --gfx.
+        if (arch == "gfx942") {
+            execute_cmd += """ && \
         python3 ../dispatcher/tests/test_streamk_registry.py --arch ${arch} --datatypes fp16 --layouts rcr"""
-    }
-    // mx_gemm has no expand_sweep -- mx_gemm_utils exposes only
-    // default_fp8_config()/default_fp4_config() -- so it cannot join the
-    // --variant sweep above and instead runs the two-config smoke test merged
-    // in #10132. That test is unittest-based and self-gates to gfx950, so it
-    // takes no --gfx (unlike test_bquant, which does).
-    if (arch == "gfx950") {
-        execute_cmd += """ && \
+        }
+        // mx_gemm has no expand_sweep -- mx_gemm_utils exposes only
+        // default_fp8_config()/default_fp4_config() -- so it cannot join the
+        // --variant sweep above and instead runs the two-config smoke test merged
+        // in #10132. That test is unittest-based and self-gates to gfx950, so it
+        // takes no --gfx (unlike test_bquant, which does).
+        //
+        // rowcolquant and tensorquant are deliberately absent: the tile_engine
+        // side of both ops exists, but dispatcher/tests carries no
+        // test_rowcolquant_gpu_correctness.py / test_tensorquant_gpu_correctness.py
+        // yet, so invoking them here would fail the lane on "can't open file"
+        // before reaching a GPU. Add the calls back in the same change that adds
+        // the tests.
+        if (arch == "gfx950") {
+            execute_cmd += """ && \
         python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \
-        python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py && \
-        python3 ../dispatcher/tests/test_rowcolquant_gpu_correctness.py --gfx ${arch} && \
-        python3 ../dispatcher/tests/test_tensorquant_gpu_correctness.py --gfx ${arch}"""
+        python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py"""
+        }
     }
     try {
         buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
@@ -1630,7 +1672,7 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
         // against the workspace root. A bare "dispatcher_*_results.json" matches
         // nothing there, and allowEmptyArchive hides that it matched nothing.
         // Glob, not one name: each variant writes its own dispatcher_<v>_*.json.
-        archiveArtifacts artifacts: "projects/composablekernel/build/dispatcher_*_results.json",
+        archiveArtifacts artifacts: "projects/composablekernel/build/dispatcher_*_results_${tier}.json",
                          allowEmptyArchive: true
     }
 }
