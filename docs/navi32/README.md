@@ -54,8 +54,14 @@ re-forking `WorkGroupMapping` for 60 CUs (**null, re-confirmed at real 30 WGPs**
 not have expressed the hypothesis, see [`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md)),
 switching to an Origami `Prediction` library (**re-measured at matched 60 CUs: the 13 pt
 gap is ~3.3 pt geomean / 1.3 pt wall-clock, near parity on wall-clock** — GridBased still wins,
-but only on small shapes), and extending the catalog past ~300 solutions (an oracle over every arm built
-is only +2.8% above what shipped).
+but only on small shapes), and extending the catalog past ~300 solutions (**re-measured at 60 CUs
+with a noise floor subtracted: the real oracle over everything built is +1.71 pt**).
+
+**All three rejections have now been re-tested in the matched 60-CU regime**, because two of the
+three were originally measured in a regime that could not express them. All three survive — but
+the oracle analysis relocates the remaining opportunity: **+1.47 of that +1.71 pt comes from
+pairing GridBased with Origami Prediction, so what headroom is left is in the *selector*, not
+the catalog.** A bigger catalog is done; a size-gated hybrid is the open idea.
 
 **The runbook exists because three separate checks returned a reassuring signal while doing
 nothing** — a CU mask that reported 30 CUs but restricted nothing, a `--logic-filter` build
