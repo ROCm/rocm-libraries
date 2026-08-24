@@ -189,3 +189,66 @@ TEST(TestGraphWrapper, BytesIsEmptyWhenVerificationFails)
     EXPECT_EQ(bytes.data, nullptr);
     EXPECT_EQ(bytes.size, 0U);
 }
+
+/// Every `IGraph` implementation in this codebase overrides `bytes()` (`GraphWrapper` here,
+/// plus the test doubles under plugin_sdk/tests/ingestor), so without this test the
+/// base-class default body never runs. It stands in for an implementation -- in-tree or
+/// out-of-tree -- that predates `bytes()` or simply forgets to override it.
+class GraphWithNoBytesOverride : public IGraph
+{
+public:
+    const hipdnn_flatbuffers_sdk::data_objects::Graph& getGraph() const override
+    {
+        throw std::logic_error("GraphWithNoBytesOverride carries no graph");
+    }
+    bool isValid() const override
+    {
+        return false;
+    }
+    uint32_t nodeCount() const override
+    {
+        return 0;
+    }
+    bool hasOnlySupportedAttributes(
+        std::set<hipdnn_flatbuffers_sdk::data_objects::NodeAttributes> /*supportedAttributes*/)
+        const override
+    {
+        return true;
+    }
+    const hipdnn_flatbuffers_sdk::data_objects::Node& getNode(uint32_t /*index*/) const override
+    {
+        throw std::logic_error("GraphWithNoBytesOverride carries no nodes");
+    }
+    const INodeWrapper& getNodeWrapper(uint32_t /*index*/) const override
+    {
+        throw std::logic_error("GraphWithNoBytesOverride carries no nodes");
+    }
+    const std::vector<std::unique_ptr<INodeWrapper>>& nodeWrappers() const override
+    {
+        throw std::logic_error("GraphWithNoBytesOverride carries no nodes");
+    }
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        getTensorMap() const override
+    {
+        return _tensors;
+    }
+
+    // Deliberately does not override bytes(): this class exists to exercise IGraph's default.
+
+private:
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
+        _tensors;
+};
+
+/// An implementation that does not supply bytes() must report empty rather than garbage,
+/// so `GraphContentKey` declines to cache or match under it instead of treating it as an
+/// empty graph that matches every other unkeyable one.
+TEST(TestGraphWrapper, ImplementationWithNoBytesOverrideReportsEmpty)
+{
+    const GraphWithNoBytesOverride graph;
+
+    const auto bytes = graph.bytes();
+    EXPECT_EQ(bytes.data, nullptr);
+    EXPECT_EQ(bytes.size, 0U);
+}
