@@ -8446,10 +8446,10 @@ class KernelWriterAssembly(KernelWriter):
       #     loaded + consumed the store kernargs inside the FUSED NLL
       #     (loadFusedEpilogueStoreSgprs) and its post-loop store body is skipped by
       #     the dedup guard, so re-loading them here is dead work. Gated on
-      #     _plsinAlphaSkipEligible because PostLoopFusedStore is only defined for
+      #     _plsinFusedFlagEligible because PostLoopFusedStore is only defined for
       #     fp32-compute PLSIN kernels (see KernelWriter.defineSgpr).
       emitGsuSkip = noSkipLoad and kernel["GlobalSplitU"] != 0
-      emitPlsinSkip = self._plsinAlphaSkipEligible(kernel)
+      emitPlsinSkip = self._plsinFusedFlagEligible(kernel)
       skipStoreLoadLabel = None
       if emitGsuSkip or emitPlsinSkip:
         skipStoreLoadLabel = Label(label=self.labels.getNameInc("SkipStoreSgprLoad"), comment="")
@@ -14816,24 +14816,13 @@ class KernelWriterAssembly(KernelWriter):
     # paired D store. globalWriteElements does the scalar-ScaleAB->Alpha fold internally
     # and, for StreamK, saves/restores the original Alpha around this call, so the later
     # PLAIN post-loop store re-folds from the correct original Alpha (no double scaling).
-    # With applyAlpha=False the per-element alpha multiply is dropped, which is only
-    # correct when the effective alpha is exactly 1.0 -- so this fast path is gated on
-    # the front guard having already proven that (PostLoopFusedStore, checked in
-    # emitFusedStoreGuard). The internal scalar-ScaleAB->Alpha fold still runs but is a
-    # no-op there (Alpha*1*1), so skipping the ~per-element muls is the whole win. When
-    # not eligible we keep applyAlpha=True (always correct). beta==0 and full-tile are
-    # guaranteed by the front guard, so no C-read/edge path is added.
-    # PLSIN: by default SKIP the in-store alpha multiply on the fp32 fast path -- the
-    # front guard (computePostLoopFusedStore) gates on eff-alpha==1, so only WGs whose
-    # effective alpha is 1 (and scale pointers null) reach this store and the per-element
-    # multiply is dropped from the store's critical path. Set TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_APPLY_ALPHA=1"
-    # to instead apply alpha IN the fused store (weave per-element _applyAlpha, VALU woven
-    # under the terminal MFMAs), letting alpha!=1 / scalar scaleA*scaleB WGs fuse too.
-    skipAlpha = self._plsinAlphaSkipEligible(kernel) and not self._plsinApplyAlphaInFused(kernel)
+    # Arbitrary-alpha fused path: retain the normal per-element alpha multiply.
+    # beta==0 and full-tile are still guaranteed by the front guard, so no C-read or
+    # edge path is added.
     storeModule, _ = self.globalWriteElements(
       kernel, tPA, tPB,
       [fullVws[0]], [fullVws_1[0]], [elements[0]], [elements_1[0]],
-      noGSUBranch=True, applyAlpha=(not skipAlpha), betas=[False], edge=False)
+      noGSUBranch=True, applyAlpha=True, betas=[False], edge=False)
     self.states.subtileFusedWeave = savedWeave
     module.add(storeModule)
     self.cleanupGlobalWrite(kernel)
@@ -15990,7 +15979,7 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
-  # PostLoopStoreInNll: effective-alpha==1 fast-path support
+  # PostLoopStoreInNll: fused-store runtime flag support
   ##############################################################################
   def _plsinMinIter(self, kernel):
     """Minimum numIter (= SizesSum/DepthU) that still takes the FUSED store. Default
@@ -16007,12 +15996,9 @@ class KernelWriterAssembly(KernelWriter):
       v = 1
     return max(1, min(v, pgr))
 
-  def _plsinAlphaSkipEligible(self, kernel):
-    """The fused store may skip its epilogue alpha multiply only when this returns
-    True: PostLoopStoreInNll is active and the compute type is fp32 (the scalar-scale
-    fold the epilogue applies asserts a single-register alpha). Everything else keeps
-    the always-correct applyAlpha=True path."""
-    return bool(kernel["PostLoopStoreInNll"]) and kernel["ProblemType"]["ComputeDataType"].isSingle()
+  def _plsinFusedFlagEligible(self, kernel):
+    """Whether this kernel uses the hoisted PostLoopFusedStore runtime flag."""
+    return bool(self.states.postLoopStoreInNll) and kernel["ProblemType"]["ComputeDataType"].isSingle()
 
   def _plsinCanBypassEndSummation(self, kernel):
     """PostLoopStoreInNll Phase 3: may a fused full-tile owner branch its NLL exit
@@ -16035,8 +16021,8 @@ class KernelWriterAssembly(KernelWriter):
         the GSU-sync path after the store.
     When any is present, keep fusedExitLabel = SkipToEnd (endSummation runs and the
     dedup guard then skips only the redundant store body). Also requires
-    _plsinAlphaSkipEligible (the whole fused-flag machinery)."""
-    if not self._plsinAlphaSkipEligible(kernel):
+    _plsinFusedFlagEligible (the whole fused-flag machinery)."""
+    if not self._plsinFusedFlagEligible(kernel):
       return False
     pt = kernel["ProblemType"]
     if pt["Gradient"] and pt["UseBias"] and (pt["BiasSrc"] == "A" or pt["BiasSrc"] == "B"):
@@ -16046,22 +16032,6 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1:
       return False
     return plsinDebugEnv("TENSILE_PLSIN_BYPASS_ENDSUM", "1") != "0"
-
-  def _plsinApplyAlphaInFused(self, kernel):
-    """PostLoopStoreInNll: apply the effective alpha (and folded scalar scaleA*scaleB)
-    INSIDE the fused NLL store via the weave per-element _applyAlpha, instead of
-    requiring effective-alpha==1 and routing alpha!=1 / scalar-scaled WGs to the PLAIN
-    store. The multiply is VALU (v_mul_f32 / v_pk_mul_f32) woven under the terminal
-    MFMAs, so it overlaps matrix compute (the same _weaveReadBeforeEpilogue machinery
-    the bias / ScaleAlphaVec epilogue already rides). Only meaningful on the fp32 fast
-    path (_plsinAlphaSkipEligible); the non-fp32 fused store already keeps
-    applyAlpha=True. Default OFF: the fp32 fast path skips the in-store alpha multiply
-    and gates on eff-alpha==1 (applyAlpha=False + the Alpha==1 front-guard fold), which
-    shortens the store critical path and is the measured-faster default. Set
-    TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_APPLY_ALPHA=1" to apply the effective alpha inside the fused store
-    instead, so alpha!=1 / scalar-scaled WGs fuse too rather than routing to PLAIN."""
-    return self._plsinAlphaSkipEligible(kernel) and \
-           plsinDebugEnv("TENSILE_PLSIN_APPLY_ALPHA", "0") != "0"
 
   def _plsinFusedNoGuards(self):
     """True inside the FULL-TILE fused NLL store, where every per-store bounds check
@@ -16093,67 +16063,37 @@ class KernelWriterAssembly(KernelWriter):
     guard sites (NGLL front, NLL front, post-loop dedup) collapse to a single flag
     compare instead of recomputing the chain each time (and the SALU overlaps the
     prefetch/MFMA shadow instead of the NLL prologue critical path):
-        flag = (eff-alpha==1) && (no tail) && (numIter>=minIter)
-               && (beta==0) && (full-tile in M) && (full-tile in N)
+        flag = (no tail) && (beta==0)
+               && (full-tile in M) && (full-tile in N)
                && (StreamK full-tile owner)
-    flag==1 still implies eff-alpha==1, so the applyAlpha=False fast path (gated by
-    _plsinAlphaSkipEligible + this flag) is unaffected; any failing sub-guard forces
-    flag=0 => PLAIN NLL. NOTE: only defined/computed for fp32-compute PLSIN kernels
-    (_plsinAlphaSkipEligible); non-fp32 PLSIN keeps the inline emitFusedStoreGuard chain.
-
-    The eff-alpha==1 term (below) uses a strictly CONSERVATIVE, fault-free test:
-        (Alpha == 1.0) && (AddressScaleA == null) && (AddressScaleB == null)
-
-    effective alpha = Alpha * scaleA * scaleB, where scaleA/scaleB default to 1.0 and
-    are only overridden when the caller passes a non-null AddressScaleA/B pointer (the
-    epilogue dereferences them, see the ScaleAValid/ScaleBValid asm). We use a strictly
-    CONSERVATIVE, fault-free test:
-        flag = (Alpha == 1.0) && (AddressScaleA == null) && (AddressScaleB == null)
-    A null scalar-scale pointer guarantees that scale is exactly 1.0, so flag==1 =>
-    effective alpha is bit-exactly 1.0. We deliberately do NOT dereference the pointers
-    here (a mis-derived offset could then fault the GPU); the only cost of the
-    conservative choice is that a caller passing an explicit pointer-to-1.0 falls back
-    to the (correct) PLAIN NLL store. The default is 0 (=> PLAIN NLL), so any config we
-    do not handle stays correct.
+    Alpha and scalar-scale pointers are intentionally not guard terms: the fused store
+    keeps applyAlpha=True and performs the normal epilogue multiply. Any failing
+    structural sub-guard forces flag=0 => PLAIN NLL. The flag is only defined/computed
+    for fp32-compute PLSIN kernels (_plsinFusedFlagEligible); non-fp32 PLSIN keeps the
+    inline emitFusedStoreGuard chain.
 
     IMPLEMENTATION: every sub-guard except the full-tile pair is an exact-zero or
     bitwise-equality test, so they are OR-reduced into a single 'bad' accumulator and
-    resolved by one compare, rather than a cmp+cselect pair each. The scale-pointer
-    s_load is issued first and its s_waitcnt kmcnt(0) sunk below the rest of the guard,
-    so the wait is covered by the accumulator work instead of stalling on its own
-    loads."""
+    resolved by one compare, rather than a cmp+cselect pair each."""
     module = Module("computePostLoopFusedStore")
-    # Pre-loop scheduling (Change B): reset the hoisted scale-pointer-load stash. When
-    # hoisting is active the isScalarScale block below sets this to the load sub-module so
-    # the LogicalScheduler can splice it BEFORE the first preloop global_read; reset here
-    # so a non-hoisting / non-scalar-scale call never re-uses a stale module.
+    # Arbitrary-alpha fusion no longer hoists scalar scale-pointer loads. Reset the
+    # legacy stash so the scheduler cannot reuse content from an earlier emission.
     self._plsinDeferredScalePtrLoads = None
-    if not self._plsinAlphaSkipEligible(kernel):
+    if not self._plsinFusedFlagEligible(kernel):
       return module
     flag = "PostLoopFusedStore"
-    applyAlphaInFused = self._plsinApplyAlphaInFused(kernel)
-    if applyAlphaInFused:
-      # Alpha (and folded scalar scaleA*scaleB) is applied INSIDE the fused NLL store
-      # (weave per-element _applyAlpha), so effective-alpha==1 is no longer a fusion
-      # precondition -- do NOT fold the Alpha==1 / null-scale checks into the flag. The
-      # remaining loop-invariant sub-guards (no-tail / numIter / beta / full-tile /
-      # StreamK-owner) are still folded below.
-      module.addComment1("PLSIN: alpha applied in fused store -> eff-alpha==1 NOT gated; fold remaining sub-guards -> PostLoopFusedStore")
-    else:
-      module.addComment1("PLSIN: precompute effective-alpha==1 (Alpha & null scaleA/B) -> PostLoopFusedStore")
+    module.addComment1("PLSIN: precompute fused full-tile eligibility -> PostLoopFusedStore")
 
     depthU        = kernel["DepthU"]
     depthUPow2    = (depthU & (depthU - 1)) == 0
     unrollIdx     = self.states.unrollIdx
     pgr           = kernel["PrefetchGlobalRead"]
     minIter       = self._plsinMinIter(kernel)
-    isScalarScale = (not applyAlphaInFused) and (kernel["ProblemType"]["UseScaleAB"] == "Scalar")
-    supportUA     = kernel["ProblemType"]["SupportUserArgs"]
     useStreamK    = (kernel["StreamK"] > 0 and not kernel["StreamKAtomic"]
                      and not kernel["StreamKForceDPOnly"])
 
-    # Every sub-guard below except the full-tile pair, Alpha and numIter is a "this word
-    # must be zero" test (tail, Beta, the scale pointers, StreamKLocalStart,
+    # Every sub-guard below except the full-tile pair is a "this word
+    # must be zero" test (tail, Beta, StreamKLocalStart,
     # StreamKLocalEnd^ItersPerTile), so OR them all into ONE accumulator and spend a
     # single compare at the end:
     #     bad == 0  <=>  every folded sub-guard passed
@@ -16162,24 +16102,20 @@ class KernelWriterAssembly(KernelWriter):
     # cselects that genuinely need it. Semantics are unchanged: each replaced compare was
     # already an exact-zero / bitwise-equality test.
     #
-    # SGPR budget: this is deliberately held to the same temp footprint as the pre-fold
-    # code (one 4-aligned quad + two singles). MT64x448 / MT448x64 overflow MaxSgpr at
-    # +1, so nothing here may hold an extra live temp: 'bad' and 'off' are the only
-    # persistent ones, the pointer quad is released as soon as it is folded in, and the
-    # StreamK scratch is acquired only after that release. 'off' carries the SMEM soffset
-    # until the load is waited for and is reused as divide scratch strictly afterwards.
+    # SGPR budget: 'bad' and 'off' are the only persistent temps. MT64x448 /
+    # MT448x64 are at the SGPR limit, so the StreamK scratch is acquired only after
+    # these are established and 'off' is reused as full-tile divide scratch.
     with self.allocTmpSgpr(2, tag="plsinFused_acc") as accTmp:
       bad = accTmp.idx      # OR-accumulated ineligibility word (0 => all folded guards ok)
-      off = accTmp.idx + 1  # scale-ptr kernarg byte offset (SMEM soffset), then scratch
+      off = accTmp.idx + 1  # full-tile divide scratch
 
       def emitAccSeed():
-        """The accumulator terms that need no scratch register, so they can sit between
-        the scale-pointer load issue and its wait and act as cover for it."""
+        """Build accumulator terms that need no additional scratch register."""
         m = Module("plsinFusedAccSeed")
         # no-tail. Loop-invariant, and its only input (SizesSum) is live here, so
         # computing it BEFORE the main loop lets the scalar work overlap the
         # prefetch/MFMA shadow instead of sitting on the NLL prologue critical path.
-        # emitFusedStoreGuard drops its transient no-tail/numIter/alpha checks on this
+        # emitFusedStoreGuard drops its transient no-tail/numIter checks on this
         # path and reads only the flag.
         if depthUPow2:
           m.addComment1("PLSIN guard-hoist: fold no-tail into PostLoopFusedStore (pre-loop shadow)")
@@ -16194,79 +16130,13 @@ class KernelWriterAssembly(KernelWriter):
           for i in range(max(1, self.states.bpeCinternal // self.states.bpr)):
             m.add(SOrB32(dst=sgpr(bad), src0=sgpr("Beta+%u" % i), src1=sgpr(bad),
                          comment="bad |= Beta[%u] (beta != 0 -> not fused)" % i))
-        # StreamK: this WG started the tile (LocalStart == 0). The matching "finished"
-        # half needs a scratch register, so it lands after the pointer quad is freed.
+        # StreamK: this WG started the tile (LocalStart == 0).
         if useStreamK:
           m.add(SOrB32(dst=sgpr(bad), src0=sgpr("StreamKLocalStart"), src1=sgpr(bad),
                        comment="bad |= StreamKLocalStart (not start -> split contributor, not fused)"))
         return m
 
-      if isScalarScale:
-        # ---- issue the scale-pointer load FIRST, wait for it LAST -----------------
-        # The scalar scale POINTERS are not loaded until the epilogue (after both guard
-        # sites), so read them straight from KernArgAddress using the same ArgType-aware
-        # byte offsets the epilogue loader uses (packed: argLoader offset; UserArgs
-        # external struct: externalArgLoader offset). These mirror
-        # loadFusedEpilogueStoreSgprs; both are compile-time constants and the loaders
-        # are in their post-prologue state here.
-        #
-        # The wait used to sit immediately after the loads with zero cover, and it waits
-        # on ALL outstanding scalar loads. emitAccSeed() now runs in between.
-        packedOff = self.argLoader.getOffset()
-        extOff    = self.externalArgLoader.getOffset() if supportUA else None
-        ptrBytes  = self.states.rpga * self.states.bpr  # scaleA/scaleB are contiguous pointers
-        with self.allocTmpSgpr(4, alignment=4, tag="plsinFused_scalePtr") as ptrTmp:
-          ptr = ptrTmp.idx
-          # Pre-loop scheduling (Change B): build the scale-pointer load (kernarg byte
-          # offset compute + the two SLoad* into the ptr quad) as a SEPARATE module. When
-          # hoisting is enabled, stash it on self so the LogicalScheduler splices it BEFORE
-          # the first preloop global_read: the s_waitcnt kmcnt(0) (kept below in the guard
-          # body) is then covered by the whole prefetch buffer_load window instead of the
-          # ~3-instruction emitAccSeed cover, erasing the ~92-cycle lgkmcnt stall. ptr is
-          # taken from the free pool (live SRDs / persistent state excluded) and nothing in
-          # the prefetch window writes an sgpr temp, so the quad is not clobbered across the
-          # hoist. Keeping ptr(4)+off(1) live across the shadow lifts the SGPR peak, so this
-          # is opt-outable via TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_HOIST_SCALEPTR=0" for the tight-budget shapes
-          # (MT64x448 / MT448x64) that overflow MaxSgpr at +1.
-          hoistScalePtr = (kernel["PrefetchGlobalRead"] >= 1
-                           and plsinDebugEnv("TENSILE_PLSIN_HOIST_SCALEPTR", "1") != "0")
-          loadMod = Module("plsinFusedScalePtrLoad")
-          loadMod.addComment1("PLSIN guard-hoist: issue scaleA/scaleB pointer load (consumed after the accumulator seed)")
-          loadMod.add(SMovB32(dst=sgpr(off), src=packedOff, comment="scaleA ptr kernarg byte offset (packed)"))
-          if supportUA:
-            loadMod.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 (UserArgs external struct) ?"))
-            loadMod.add(SCMovB32(dst=sgpr(off), src=extOff, comment="use external-struct scale offset"))
-          # One dwordx4 covers both adjacent pointers when the kernarg offset is 16B
-          # aligned; otherwise two b64 loads, the second reaching scaleB through the SMEM
-          # immediate offset field rather than a separate s_add_u32.
-          if (packedOff % 16) == 0 and (extOff is None or (extOff % 16) == 0):
-            loadMod.add(SLoadB128(dst=sgpr(ptr, 4), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
-                                 comment="load AddressScaleA+AddressScaleB pointers"))
-          else:
-            loadMod.add(SLoadB64(dst=sgpr(ptr, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
-                                comment="load AddressScaleA pointer"))
-            loadMod.add(SLoadB64(dst=sgpr(ptr + 2, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
-                                smem=SMEMModifiers(offset=ptrBytes),
-                                comment="load AddressScaleB pointer"))
-          if hoistScalePtr:
-            # Emitted before the first global_read by the scheduler (see emitMainAndExitLoops).
-            self._plsinDeferredScalePtrLoads = loadMod
-          else:
-            module.add(loadMod)
-          module.add(emitAccSeed())
-          # A null scalar-scale pointer guarantees that scale is exactly 1.0, so
-          # "AddressScaleA == null && AddressScaleB == null" is simply "all four pointer
-          # dwords are zero" and folds straight into the accumulator. We deliberately do
-          # NOT dereference the pointers here (a mis-derived offset could then fault the
-          # GPU); the only cost of the conservative choice is that a caller passing an
-          # explicit pointer-to-1.0 falls back to the (correct) PLAIN NLL store.
-          module.add(SWaitCnt(kmcnt=0, comment="wait for scale pointer loads"))
-          for i in range(4):
-            module.add(SOrB32(dst=sgpr(bad), src0=sgpr(ptr + i), src1=sgpr(bad),
-                              comment="bad |= AddressScale%s[%u] (non-null scale -> not fused)"
-                                      % ("A" if i < 2 else "B", i % 2)))
-      else:
-        module.add(emitAccSeed())
+      module.add(emitAccSeed())
 
       # ---- StreamK: this WG finished the tile (LocalEnd == ItersPerTile) ----------
       # sIpt must stay read-only. acquireStreamKConstSgpr only hands back a scratch
@@ -16287,17 +16157,9 @@ class KernelWriterAssembly(KernelWriter):
         self.releaseStreamKConstSgpr(sIpt)
 
       # ---- materialise the flag from the accumulator ------------------------------
-      # flag stays "==1 => fully fuse-eligible", and (when applyAlphaInFused is False)
-      # flag==1 still implies eff-alpha==1, so the compile-time applyAlpha=False fast
-      # path (gated by _plsinAlphaSkipEligible + this runtime flag) remains correct.
+      # flag stays "==1 => fully fuse-eligible"; alpha is applied in the fused epilogue.
       module.add(SCmpEQU32(src0=sgpr(bad), src1=0, comment="every folded sub-guard passed ?"))
       module.add(SCSelectB32(dst=sgpr(flag), src0=1, src1=0, comment="tentatively fuse-eligible"))
-
-      # ---- the remaining sub-guards are not zero-tests, so they keep a cselect ----
-      # Alpha == 1.0 completes the eff-alpha==1 term begun by the null-pointer fold.
-      if not applyAlphaInFused:
-        module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
-        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="Alpha != 1 -> not fused"))
 
       # Degenerate short-K guard: require numIter >= minIter so the NLL pipeline has a
       # real iteration to drain.
@@ -16374,21 +16236,20 @@ class KernelWriterAssembly(KernelWriter):
     depthU = kernel["DepthU"]
     assert (depthU & (depthU - 1)) == 0, \
       "PostLoopStoreInNll assumes DepthU is a power of two"
-    # PLSIN guard-hoist: when the pre-loop scalar-eligibility flag exists (fp32 path,
-    # computePostLoopFusedStore) it already folds (no-tail) && (numIter>=PGR) &&
-    # (effective alpha==1) -- all loop-invariant, computed BEFORE the main loop so the
+    # PLSIN guard-hoist: when the pre-loop eligibility flag exists (fp32 path,
+    # computePostLoopFusedStore) it already folds every runtime guard term. They are
+    # loop-invariant and computed BEFORE the main loop so the
     # scalar work overlaps the prefetch/MFMA shadow instead of sitting on this NLL
-    # prologue critical path. Collapse those three sub-guards to one flag compare+branch.
-    # Otherwise (non-fp32 PLSIN: no alpha-skip flag) emit the transient no-tail + numIter
-    # checks inline as before. The alpha check that used to live here is folded into the
-    # flag, so no separate alpha branch is emitted on the eligible path.
-    if self._plsinAlphaSkipEligible(kernel):
-      # FULL fold: PostLoopFusedStore now encodes EVERY sub-guard (no-tail && numIter &&
-      # eff-alpha==1 && beta==0 && full-tile(M,N) && StreamK-owner) -- see
+    # prologue critical path. numIter<PGR remains valid: buildSubtileFusedStore
+    # recomputes the store coordinates when the NGLL hoist was skipped.
+    # Collapse the hoisted guards to one flag compare+branch.
+    if self._plsinFusedFlagEligible(kernel):
+      # FULL fold: PostLoopFusedStore now encodes EVERY sub-guard (no-tail &&
+      # beta==0 && full-tile(M,N) && StreamK-owner) -- see
       # computePostLoopFusedStore. So this site collapses to a single flag compare+branch
       # and emits NOTHING else (the inline beta/edge/owner blocks below are for the
       # non-fp32 fallback path only).
-      module.addComment1("Fused-store guard: FULL eligibility hoisted (no-tail && numIter && eff-alpha==1 && beta==0 && full-tile(M,N) && SK-owner) -> PostLoopFusedStore, else -> %s" % targetLabel.getLabelName())
+      module.addComment1("Fused-store guard: FULL eligibility hoisted (no-tail && beta==0 && full-tile(M,N) && SK-owner) -> PostLoopFusedStore, else -> %s" % targetLabel.getLabelName())
       module.add(SCmpEQU32(src0=sgpr("PostLoopFusedStore"), src1=1,
                            comment="fused guard: hoisted full eligibility == 1?"))
       if longBranch:
@@ -16438,8 +16299,8 @@ class KernelWriterAssembly(KernelWriter):
           else:
             module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
                                     comment="too few K-iters -> not fused"))
-    # (effective alpha == 1 is folded into PostLoopFusedStore along with no-tail /
-    # numIter>=PGR on the eligible fp32 path above -- no separate alpha branch here.)
+    # Alpha is not a fused-store guard: buildSubtileFusedStore applies the normal
+    # scalar multiply for every alpha value.
     # beta==0 (checkIsBetaZero emits nothing when UseBeta is False -> stays eligible).
     # A long branch needs 3 scratch SGPRs, so widen the temp alloc in that mode.
     with self.allocTmpSgpr(3 if longBranch else 1, tag="fusedStoreGuard_beta") as tmpSgprInfo:
