@@ -792,8 +792,7 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
 
     input.generate(GenConvData<Tin, Twei>{conv_config.GetXTensorDescriptor().GetLengths(),
                                           conv_desc.GetGroupCount()});
-    output.generate(GenConvData<Tout, Twei>{conv_config.GetXTensorDescriptor().GetLengths(),
-                                            conv_desc.GetGroupCount()});
+    output.generate(GenConvData<Tout, Twei>{output.desc.GetLengths(), conv_desc.GetGroupCount()});
     std::fill(weights.begin(), weights.end(), Twei());
 
     auto&& handle = get_handle();
