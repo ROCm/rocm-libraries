@@ -11,15 +11,15 @@ coverage:
 The flow is useful when validating the composable fused-epilogue RMSNorm path:
 full RMSNorm, residual-add plus RMSNorm, the decomposed producer
 (`PARTIAL_RMSNORM_STATS`), and the decomposed consumer (`RMSNORM_SCALE_APPLY`,
-Kernel 3 / RstdScale).
+Kernel 3 / RstdScale via ScaleAlphaVec).
 
 ## Prerequisites
 
 Use a ROCm SDK that contains `amdclang++`, HIP, amd-smi, hipBLAS common, and the
-gfx950 runtime libraries. In TheRock-style environments, set:
+gfx950 runtime libraries. Set:
 
 ```bash
-export ROCM_PATH=/home/ossci/therock-tarball/install
+export ROCM_PATH=/opt/rocm
 export ROCM_HOME="$ROCM_PATH"
 export PATH="$ROCM_PATH/bin:$ROCM_PATH/lib/llvm/bin:$PATH"
 export LD_LIBRARY_PATH="$ROCM_PATH/lib:$ROCM_PATH/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
@@ -83,9 +83,9 @@ for arg in "$@"; do
   prev="$arg"
 done
 if [ "$has_assembler" = 1 ]; then
-  exec /home/ossci/therock-tarball/install/bin/amdclang++ -Wno-gcc-install-dir-libstdcxx "$@"
+  exec /opt/rocm/bin/amdclang++ -Wno-gcc-install-dir-libstdcxx "$@"
 fi
-exec ccache /home/ossci/therock-tarball/install/bin/amdclang++ \
+exec ccache /opt/rocm/bin/amdclang++ \
   -Wno-gcc-install-dir-libstdcxx \
   --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 "$@"
 SH
@@ -212,8 +212,7 @@ build/python-venv/bin/python tensilelite/Tensile/bin/Tensile \
   /tmp/hipblaslt_partialrms_out \
   --cxx-compiler "$PWD/build/toolchain/amdclang++" \
   --gpu-targets gfx950 \
-  --prebuilt-client "$PWD/$BUILD_DIR/tensilelite/client/tensilelite-client" \
-  --global-parameters LibraryFormat='"msgpack"'
+  --prebuilt-client "$PWD/$BUILD_DIR/tensilelite/client/tensilelite-client"
 ```
 
 This should produce:
@@ -224,7 +223,10 @@ This should produce:
   partialrms_k1_Cijk_Alik_Bljk_BBS_BH_PRMS_RA_UserArgs.yaml
 ```
 
-The decomposed consumer E2E test also needs Kernel 3 RstdScale logic:
+The decomposed consumer E2E test also needs Kernel 3 RstdScale logic. K3 is
+implemented via TensileLite's ScaleAlphaVec feature: `gemm_rstdscale_k3.yaml`
+configures `UseScaleAlphaVec: 1` so the selected solution applies a per-row rstd
+scale to the GEMM output:
 
 ```bash
 rm -rf /tmp/hipblaslt_rstdscale_out
@@ -235,8 +237,7 @@ build/python-venv/bin/python tensilelite/Tensile/bin/Tensile \
   /tmp/hipblaslt_rstdscale_out \
   --cxx-compiler "$PWD/build/toolchain/amdclang++" \
   --gpu-targets gfx950 \
-  --prebuilt-client "$PWD/$BUILD_DIR/tensilelite/client/tensilelite-client" \
-  --global-parameters LibraryFormat='"msgpack"'
+  --prebuilt-client "$PWD/$BUILD_DIR/tensilelite/client/tensilelite-client"
 ```
 
 This should produce:
@@ -245,6 +246,13 @@ This should produce:
 /tmp/hipblaslt_rstdscale_out/3_LibraryLogic/
   rstdscale_k3_Cijk_Alik_Bljk_BBS_BH_Rstd_UserArgs.yaml
 ```
+
+> **Note:** Do not pass `--global-parameters LibraryFormat='"msgpack"'` to the
+> benchmark phase unless the prebuilt client was built with
+> `HIPBLASLT_ENABLE_YAML=OFF`. A YAML-enabled client cannot load the msgpack
+> `.dat.zlib` that the generator produces and will abort. The intermediate
+> benchmark library format does not affect the final `3_LibraryLogic` YAML output
+> or the device-library build.
 
 Merge the generated logic files into one directory for the device-library build:
 
@@ -305,8 +313,8 @@ cmake --build "$BUILD_DIR" --target row_div-library-gfx950 row_rstd-library-gfx9
 `row_rstd_gfx950.co` is the decomposed producer reduce-and-return Kernel 2 that
 writes the per-row rstd handoff consumed by Kernel 3.
 
-Kernel 1 (PartialRMS) and Kernel 3 (RstdScale) are not separate `row_*` code
-objects. They are TensileLite GEMM solutions generated from
+Kernel 1 (PartialRMS) and Kernel 3 (RstdScale via ScaleAlphaVec) are not
+separate `row_*` code objects. They are TensileLite GEMM solutions generated from
 `gemm_partial_rms_k1_rowmajor.yaml` and `gemm_rstdscale_k3.yaml`, then packaged
 into the generated `TensileLibrary_*_gfx950.co` /
 `TensileLibrary_lazy_gfx950.dat.zlib` library artifacts by the
@@ -337,8 +345,8 @@ LD_LIBRARY_PATH="$PWD/tensilelite:$PWD/clients/common:$PWD/library:$ROCM_PATH/li
 Expected result:
 
 ```text
-[==========] 46 tests from 4 test suites ran.
-[  PASSED  ] 46 tests.
+[==========] 51 tests from 4 test suites ran.
+[  PASSED  ] 51 tests.
 ```
 
 ## Troubleshooting
@@ -357,7 +365,7 @@ Expected result:
   `PRMS`/`PRMS_RA` logic. Regenerate `3_LibraryLogic` and rebuild
   `tensilelite-device-libraries` with `HIPBLASLT_LIBLOGIC_PATH` pointing to it.
 - **`no RstdScale (K3) solution selected`**: the gfx950 library is missing the
-  `RstdScale` logic from `gemm_rstdscale_k3.yaml`. Regenerate the K3 logic,
+  ScaleAlphaVec logic from `gemm_rstdscale_k3.yaml`. Regenerate the K3 logic,
   merge it with the PartialRMS logic, and rebuild `tensilelite-device-libraries`.
 - **`getKernel failed: row_div`**: build `row_div-library-gfx950` and make sure
   `row_div_gfx950.co` is present under `$BUILD_DIR/Tensile/library/gfx950`.
@@ -366,5 +374,8 @@ Expected result:
 - **Residual and non-residual tests interfere with each other**: ensure
   `ContractionProblemGemm` comparison and hashing include the PartialRMS
   discriminator fields (`usePartialRMS`, `partialRMSResidualAdd`,
-  `partialRMSMT0`, `partialRMSMT1`, and `useRstdScale`) so solution-cache keys
-  do not alias.
+  `partialRMSMT0`, `partialRMSMT1`) so solution-cache keys do not alias.
+- **Benchmark aborts with `Failed to load solution library`**: the prebuilt
+  TensileLite client cannot load msgpack libraries if it was compiled with
+  `HIPBLASLT_ENABLE_YAML=ON`. Drop `--global-parameters LibraryFormat='"msgpack"'`
+  from the Tensile invocation or rebuild the client with `HIPBLASLT_ENABLE_YAML=OFF`.
