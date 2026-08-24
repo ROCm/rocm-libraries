@@ -64,8 +64,12 @@ int dispatcher_run_abquant_gemm(const void* A,
 
     // check_arch=false: unlike the other bridges, the arch check must run *after*
     // the fp4-preshuffle reject below so that case still returns -3, not -1.
-    if(!check_entry_args(kFn, g_initialized, {A, B, AQ, BQ, C}, {M, N, K, QK_A, QK_B, QN_B},
-                         /*allow_gfx90a=*/false, /*check_arch=*/false))
+    if(!check_entry_args(kFn,
+                         g_initialized,
+                         {A, B, AQ, BQ, C},
+                         {M, N, K, QK_A, QK_B, QN_B},
+                         /*allow_gfx90a=*/false,
+                         /*check_arch=*/false))
         return -1;
 
     // ABQuant never needs permute_i4_inplace on B, unlike gemm_bquant which
@@ -74,7 +78,7 @@ int dispatcher_run_abquant_gemm(const void* A,
     // the on-device layout is flat fp4x2 pairs, not the i4x4 interleaved tiles
     // that require permute_i4_inplace. No host-side permute is needed.
     static_assert(!std::is_same_v<BDataType, ck_tile::pk_int4_t>,
-        "ABQuant does not support pk_int4_t B -- update B-prep if adding i4 support");
+                  "ABQuant does not support pk_int4_t B -- update B-prep if adding i4 support");
 
     // Graceful reject: PreshuffleB is not supported for fp4 (BDataType==pk_fp4_t),
     // exactly as Old-TE THROWS in run_gemm_quant_example.inc:994-1001. The fp4

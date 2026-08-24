@@ -55,7 +55,10 @@ int dispatcher_run_bquant_gemm(const void* A,
     using namespace quant_bridge;
     const char* kFn = "dispatcher_run_bquant_gemm";
 
-    if(!check_entry_args(kFn, g_initialized, {A, B, BQ, C}, {M, N, K, QK_B, QN_B},
+    if(!check_entry_args(kFn,
+                         g_initialized,
+                         {A, B, BQ, C},
+                         {M, N, K, QK_B, QN_B},
                          /*allow_gfx90a=*/true))
         return -1;
 

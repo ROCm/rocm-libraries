@@ -58,27 +58,25 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     // ([1,N]), so the scale buffers are M and N elements. Everything else --
     // guards, packed-stride contract, device buffers, args fill, launch,
     // copy-back -- is the shared scalar-quant body, identical to tensor_quant's.
-    return quant_bridge::run_scalar_quant_gemm<SelectedKernel,
-                                               ADataType,
-                                               BDataType,
-                                               CDataType,
-                                               QDataType>("dispatcher_run_rowcolquant_gemm",
-                                                          g_initialized,
-                                                          A,
-                                                          B,
-                                                          AQ,
-                                                          BQ,
-                                                          C,
-                                                          M,
-                                                          N,
-                                                          K,
-                                                          stride_A,
-                                                          stride_B,
-                                                          stride_C,
-                                                          /*aq_elems=*/M,
-                                                          /*bq_elems=*/N,
-                                                          k_batch,
-                                                          time_ms);
+    return quant_bridge::
+        run_scalar_quant_gemm<SelectedKernel, ADataType, BDataType, CDataType, QDataType>(
+            "dispatcher_run_rowcolquant_gemm",
+            g_initialized,
+            A,
+            B,
+            AQ,
+            BQ,
+            C,
+            M,
+            N,
+            K,
+            stride_A,
+            stride_B,
+            stride_C,
+            /*aq_elems=*/M,
+            /*bq_elems=*/N,
+            k_batch,
+            time_ms);
 }
 
 } // extern "C"

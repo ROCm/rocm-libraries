@@ -321,14 +321,12 @@ inline int run_scalar_quant_gemm(const char* fn,
     BRIDGE_HIP_CHECK(fn, BQ_dev.allocate(elements_to_bytes<QT>(bq_elems)));
     BRIDGE_HIP_CHECK(fn, C_dev.allocate(elements_to_bytes<CT>(M * N)));
 
+    BRIDGE_HIP_CHECK(fn, hipMemcpy(A_dev, A, elements_to_bytes<AT>(M * K), hipMemcpyHostToDevice));
+    BRIDGE_HIP_CHECK(fn, hipMemcpy(B_dev, B, elements_to_bytes<BT>(K * N), hipMemcpyHostToDevice));
     BRIDGE_HIP_CHECK(fn,
-                     hipMemcpy(A_dev, A, elements_to_bytes<AT>(M * K), hipMemcpyHostToDevice));
+                     hipMemcpy(AQ_dev, AQ, elements_to_bytes<QT>(aq_elems), hipMemcpyHostToDevice));
     BRIDGE_HIP_CHECK(fn,
-                     hipMemcpy(B_dev, B, elements_to_bytes<BT>(K * N), hipMemcpyHostToDevice));
-    BRIDGE_HIP_CHECK(
-        fn, hipMemcpy(AQ_dev, AQ, elements_to_bytes<QT>(aq_elems), hipMemcpyHostToDevice));
-    BRIDGE_HIP_CHECK(
-        fn, hipMemcpy(BQ_dev, BQ, elements_to_bytes<QT>(bq_elems), hipMemcpyHostToDevice));
+                     hipMemcpy(BQ_dev, BQ, elements_to_bytes<QT>(bq_elems), hipMemcpyHostToDevice));
     BRIDGE_HIP_CHECK(fn, hipMemset(C_dev, 0, elements_to_bytes<CT>(M * N)));
 
     ck_tile::QuantGemmHostArgs args;

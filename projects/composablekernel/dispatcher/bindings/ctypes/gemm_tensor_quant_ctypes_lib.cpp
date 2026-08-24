@@ -59,27 +59,25 @@ int dispatcher_run_tensor_quant_gemm(const void* A,
     // buffer holds exactly one element. Everything else -- guards, packed-stride
     // contract, device buffers, args fill, launch, copy-back -- is the shared
     // scalar-quant body, identical to rowcolquant's.
-    return quant_bridge::run_scalar_quant_gemm<SelectedKernel,
-                                               ADataType,
-                                               BDataType,
-                                               CDataType,
-                                               QDataType>("dispatcher_run_tensor_quant_gemm",
-                                                          g_initialized,
-                                                          A,
-                                                          B,
-                                                          AQ,
-                                                          BQ,
-                                                          C,
-                                                          M,
-                                                          N,
-                                                          K,
-                                                          stride_A,
-                                                          stride_B,
-                                                          stride_C,
-                                                          /*aq_elems=*/1,
-                                                          /*bq_elems=*/1,
-                                                          k_batch,
-                                                          time_ms);
+    return quant_bridge::
+        run_scalar_quant_gemm<SelectedKernel, ADataType, BDataType, CDataType, QDataType>(
+            "dispatcher_run_tensor_quant_gemm",
+            g_initialized,
+            A,
+            B,
+            AQ,
+            BQ,
+            C,
+            M,
+            N,
+            K,
+            stride_A,
+            stride_B,
+            stride_C,
+            /*aq_elems=*/1,
+            /*bq_elems=*/1,
+            k_batch,
+            time_ms);
 }
 
 } // extern "C"
