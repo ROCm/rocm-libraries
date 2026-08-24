@@ -64,7 +64,7 @@ The hipDNN test executables and samples are not in the plain distribution tarbal
 mkdir rocm-artifacts
 
 # Replace <platform>, <group>, and <version> to match the build under test.
-curl -O https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-<platform>-<group>-tests-<version>.tar.gz
+curl -O https://nightly.repo.amd.com/rocm/core/tarball/therock-dist-<platform>-<group>-tests-<version>.tar.gz
 
 tar -C rocm-artifacts -zxf therock-dist-<platform>-<group>-tests-<version>.tar.gz
 ```
