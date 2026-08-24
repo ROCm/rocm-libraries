@@ -91,6 +91,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_sddmm_coo_aos.cpp
     test_sddmm_csc.cpp
     test_sddmm_csr.cpp
+    test_sddmm_batched_csr.cpp
     test_sddmm_csr_reuse_descr.cpp
     test_sparse_to_dense_coo.cpp
     test_sparse_to_dense_csc.cpp
@@ -208,6 +209,7 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_sddmm_coo_aos.yaml
     rocm/test_sddmm_csc.yaml
     rocm/test_sddmm_csr.yaml
+    rocm/test_sddmm_batched_csr.yaml
     rocm/test_sddmm_csr_reuse_descr.yaml
     rocm/test_sparse_to_dense_coo.yaml
     rocm/test_sparse_to_dense_csc.yaml

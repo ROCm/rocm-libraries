@@ -40,6 +40,27 @@
 #include "hiptensor_options.hpp"
 #include "plancache_autotune.hpp"
 
+// A mode shared between both contraction inputs and the output is a batch
+// mode, which has no M/N/K slot in the normalized layout and would be silently
+// summed, giving a wrong result. Reject such cases. See ROCm#6559.
+static bool hasSharedBatchMode(std::vector<int32_t> const& modeA,
+                               std::vector<int32_t> const& modeB,
+                               std::vector<int32_t> const& modeOut,
+                               int32_t&                    sharedMode)
+{
+    std::set<int32_t> setB(modeB.cbegin(), modeB.cend());
+    std::set<int32_t> setOut(modeOut.cbegin(), modeOut.cend());
+    for(int32_t m : modeA)
+    {
+        if(setB.count(m) && setOut.count(m))
+        {
+            sharedMode = m;
+            return true;
+        }
+    }
+    return false;
+}
+
 // Convert between vectors of void ptrs stored in opaque API objects
 // to vectors of ContractionSolution ptrs with simple cast.
 inline auto toContractionSolutionVec(std::vector<void*> const& v)
@@ -187,8 +208,6 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
         return HIPTENSOR_STATUS_ARCH_MISMATCH;
     }
 
-    *desc = new hiptensorOperationDescriptor();
-
     int                  nModeA = descA->mLengths.size();
     std::vector<int32_t> modeAV(modeA, modeA + nModeA);
     int                  nModeB = descB->mLengths.size();
@@ -199,6 +218,18 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
                                       : std::vector<int32_t>(modeC, modeC + nModeC);
     int                  nModeD = descD->mLengths.size();
     std::vector<int32_t> modeDV(modeD, modeD + nModeD);
+
+    if(int32_t sharedMode; hasSharedBatchMode(modeAV, modeBV, modeDV, sharedMode))
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Batched contraction (mode '%c' shared by A, B and D) is not supported",
+                 sharedMode);
+        logger->logError("hiptensorCreateContraction", msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    *desc = new hiptensorOperationDescriptor();
 
     bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY)
                       || (opC != HIPTENSOR_OP_IDENTITY);
@@ -938,8 +969,6 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
         return HIPTENSOR_STATUS_ARCH_MISMATCH;
     }
 
-    *desc = new hiptensorOperationDescriptor();
-
     int                  nModeA = descA->mLengths.size();
     std::vector<int32_t> modeAV(modeA, modeA + nModeA);
     int                  nModeB = descB->mLengths.size();
@@ -952,6 +981,19 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
                                       : std::vector<int32_t>(modeD, modeD + nModeD);
     int                  nModeE = descE->mLengths.size();
     std::vector<int32_t> modeEV(modeE, modeE + nModeE);
+
+    if(int32_t sharedMode; hasSharedBatchMode(modeAV, modeBV, modeEV, sharedMode))
+    {
+        char msg[256];
+        snprintf(msg,
+                 sizeof(msg),
+                 "Batched contraction (mode '%c' shared by A, B and E) is not supported",
+                 sharedMode);
+        logger->logError("hiptensorCreateContractionTrinary", msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    *desc = new hiptensorOperationDescriptor();
 
     bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY)
                     ||(opC != HIPTENSOR_OP_IDENTITY) || (opD != HIPTENSOR_OP_IDENTITY);
