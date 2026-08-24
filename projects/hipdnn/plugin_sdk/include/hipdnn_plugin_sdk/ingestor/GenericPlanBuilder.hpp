@@ -15,8 +15,10 @@
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
@@ -26,18 +28,33 @@ namespace hipdnn_plugin_sdk::ingestor
 {
 
 /// A caller's requested value for each knob it explicitly set, keyed by KMD field
-/// name. `TSettings` used with GenericPlanBuilder must carry one of these named
-/// `ingestorKnobFilter`.
+/// name.
 using KnobFilter = std::map<std::string, int64_t>;
+
+/// What a `TSettings` used with GenericPlanBuilder must carry, grouped so a second
+/// provider embeds one member rather than replicating loose fields by name.
+struct IngestorSettings
+{
+    KnobFilter knobFilter;
+    bool benchmarkingEnabled = false;
+};
 
 /// The one plan builder a descriptor-backed engine has: a catalog entry is a
 /// candidate, and this builds a plan for whichever one selection chose.
-/// @tparam TSettings Must carry a `KnobFilter ingestorKnobFilter` member.
+/// @tparam THandle Must expose `hipStream_t getStream() const`, the stream benchmarking
+///         times kernels on. Required of ingestor users only -- validateHandleType()
+///         does not ask for it.
+/// @tparam TSettings Must carry an `IngestorSettings ingestorSettings` member.
 /// @tparam TContext Must expose `const TSettings& executionSettings() const`, holding
 ///         the settings initializeExecutionSettings() populated.
 template <typename THandle, typename TSettings, typename TContext>
 class GenericPlanBuilder : public IPlanBuilder<THandle, TSettings, TContext>
 {
+    static_assert(HasGetStream<THandle>::value,
+                  "A handle used with the kernel ingestor must have a "
+                  "'hipStream_t getStream() const' method: benchmarking times candidate "
+                  "kernels with HIP events on that stream");
+
 public:
     using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
@@ -104,10 +121,10 @@ public:
         }
 
         const auto filtered
-            = applyKnobFilter(catalog.entries, executionSettings.ingestorKnobFilter);
+            = applyKnobFilter(catalog.entries, executionSettings.ingestorSettings.knobFilter);
         if(filtered.empty())
         {
-            throwUnsatisfiableKnobFilter(executionSettings.ingestorKnobFilter,
+            throwUnsatisfiableKnobFilter(executionSettings.ingestorSettings.knobFilter,
                                          catalog.entries.size());
         }
 
@@ -121,12 +138,18 @@ public:
         return maxBytes;
     }
 
+    /// The override is consulted unconditionally: it must change the outcome even when
+    /// engineConfig is invalid or carries no knob, which is what makes a plain
+    /// hipdnnExecute benchmark. readBenchmarkingEnabled() always runs so the knob's own
+    /// answer is available to value_or().
     void initializeExecutionSettings(const THandle& /*handle*/,
                                      const IGraph& /*opGraph*/,
                                      const IEngineConfig& engineConfig,
                                      TSettings& executionSettings) const override
     {
-        executionSettings.ingestorKnobFilter = readKnobFilter(engineConfig);
+        executionSettings.ingestorSettings.knobFilter = readKnobFilter(engineConfig);
+        executionSettings.ingestorSettings.benchmarkingEnabled
+            = benchmarkingOverrideFromEnv().value_or(readBenchmarkingEnabled(engineConfig));
     }
 
     void buildPlan(const THandle& handle,
@@ -143,23 +166,56 @@ public:
 
         // The settings this context already carries, not a second parse of engineConfig:
         // initializeExecutionSettings() ran against this same config immediately before
-        // and the engine stored the result. Re-reading is both wasted work and a second
-        // place for the two paths to disagree.
-        const auto& filter = executionContext.executionSettings().ingestorKnobFilter;
-        const auto filtered = applyKnobFilter(catalog.entries, filter);
+        // and the engine stored the result.
+        const auto& settings = executionContext.executionSettings().ingestorSettings;
+        const auto filtered = applyKnobFilter(catalog.entries, settings.knobFilter);
         if(filtered.empty())
         {
-            throwUnsatisfiableKnobFilter(filter, catalog.entries.size());
+            throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
         }
 
-        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' selected kernel "
-                                                    << toString(filtered.front().kernelId)
-                                                    << " from " << filtered.size()
-                                                    << " candidate(s) (" << catalog.entries.size()
-                                                    << " before knob filtering)");
+        if(!settings.benchmarkingEnabled)
+        {
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                   << _engine.name << "' selected kernel "
+                                   << toString(filtered.front().kernelId) << " from "
+                                   << filtered.size() << " candidate(s) (" << catalog.entries.size()
+                                   << " before knob filtering)");
 
-        executionContext.setPlan(std::make_unique<GenericPlan<THandle>>(
-            _stateManager.getDispatchDetails(filtered.front()), context, catalog.bound));
+            executionContext.setPlan(std::make_unique<GenericPlan<THandle>>(
+                _stateManager.getDispatchDetails(filtered.front()), context, catalog.bound));
+            return;
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' will benchmark "
+                                                    << filtered.size() << " candidate(s) ("
+                                                    << catalog.entries.size()
+                                                    << " before knob filtering), ranked front "
+                                                    << toString(filtered.front().kernelId));
+
+        std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates;
+        candidates.reserve(filtered.size());
+        for(const auto& kernel : filtered)
+        {
+            try
+            {
+                candidates.push_back(
+                    {kernel.kernelId,
+                     std::make_unique<GenericPlan<THandle>>(
+                         _stateManager.getDispatchDetails(kernel), context, catalog.bound)});
+            }
+            catch(const std::exception& error)
+            {
+                HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                       << _engine.name << "' dropped benchmarking candidate '"
+                                       << toString(kernel.kernelId) << "': " << error.what());
+            }
+        }
+
+        // An empty vector here (every candidate's GenericPlan threw) throws
+        // INTERNAL_ERROR out of BenchmarkPlan's constructor, propagating unhandled.
+        executionContext.setPlan(
+            std::make_unique<BenchmarkPlan<THandle>>(std::move(candidates), handle));
     }
 
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
@@ -249,6 +305,29 @@ private:
             filter[knobName] = setting.valueAs<IntValue>().value();
         }
         return filter;
+    }
+
+    /// Separate from readKnobFilter(): this knob is a plain on/off, never a metadata
+    /// filter entry. Absent knob or invalid config both read as false; a non-int setting
+    /// throws, matching every other knob's type contract.
+    bool readBenchmarkingEnabled(const IEngineConfig& engineConfig) const
+    {
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+        if(!engineConfig.isValid() || !engineConfig.hasKnobSetting(BENCHMARKING_KNOB_NAME))
+        {
+            return false;
+        }
+
+        const auto& setting = engineConfig.getKnobSettingByName(BENCHMARKING_KNOB_NAME);
+        if(setting.valueType() != KnobValue::IntValue)
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                        "engine '" + _engine.name + "' knob '"
+                                            + BENCHMARKING_KNOB_NAME
+                                            + "' must be set to an integer value");
+        }
+        return setting.valueAs<IntValue>().value() != 0;
     }
 
     std::vector<KernelDefinition> applyKnobFilter(const std::vector<KernelDefinition>& catalog,

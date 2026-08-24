@@ -1467,7 +1467,18 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             ctx->acc_inits[i] = ctx->acc_init;
         }
 
-    /* Load plan -- wgrad always uses vec=1 */
+    /* Load plan.  See the Python comment in conv_implicit_gemm_wgrad.py: A (dY,
+     * NHWK) and B (X, NHWC) have their GEMM reduction axis K_wg = N*Ho*Wo, which
+     * is NOT the stride-1 tensor axis.  The stride-1 axis is the free axis
+     * (k_out = M for dY, inner C of N_wg for X), so vectorise the global load
+     * along that axis and transpose-on-store into the (M/N, K) LDS tile
+     * (vector_axis="row").  The transpose-on-store fills the SAME row-major LDS
+     * the scalar path produced, so the MMA consumer (MFMA or WMMA) reads it
+     * unchanged.  Enabled for every sync path (MFMA and WMMA); only the async
+     * path is excluded (it writes lane-contiguous LDS and cannot host a
+     * transpose-on-store).  vec_a | K and vec_b | C keep the free-axis vector
+     * within one stride-1 run; choose_vec_axis enforces even tile distribution;
+     * width 1 falls back to the scalar vector_axis="col" path (byte-identical). */
     ctx->threads = spec->warp_m * spec->warp_n * spec->wave_size;
     ctx->load_vec = 1;
 
@@ -1489,15 +1500,80 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     }
     else
     {
-        rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
-            ctx->block_m, ctx->block_k, ctx->threads, /*max_vec=*/1, true, &ctx->a_sync_loader);
-        rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
-            ctx->block_n, ctx->block_k, ctx->threads, /*max_vec=*/1, true, &ctx->b_sync_loader);
-        if(sa != ROCKE_OK || sb != ROCKE_OK)
+        int va = 1;
+        int vb = 1;
+        bool axis_a = false;
+        bool axis_b = false;
+        /* Every sync path (MFMA and WMMA); the async branch is handled above. */
         {
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: coalesced tile loader init failed");
-            return false;
+            /* free-axis width: widest of {8,4,2,1} ({4,2,1} for fp32) dividing
+             * the channel count -- Python _free_axis_vec(kpg/cpg, dtype). */
+            int kpg = rocke_conv_problem_kpg(&spec->problem);
+            int cpg = rocke_conv_problem_cpg(&spec->problem);
+            bool a_fp32 = (spec->dtype_a != NULL && strcmp(spec->dtype_a, "fp32") == 0);
+            bool b_fp32 = (spec->dtype_b != NULL && strcmp(spec->dtype_b, "fp32") == 0);
+            int cap_a = 1;
+            int cap_b = 1;
+            int wa, wb;
+            for(wa = a_fp32 ? 4 : 8; wa >= 1; wa /= 2)
+                if(kpg % wa == 0)
+                {
+                    cap_a = wa;
+                    break;
+                }
+            for(wb = b_fp32 ? 4 : 8; wb >= 1; wb /= 2)
+                if(cpg % wb == 0)
+                {
+                    cap_b = wb;
+                    break;
+                }
+            /* Mirror the Python choose_vec, which RAISES ValueError when the tile
+             * geometry admits no usable width (not even 1): fail fast here too so
+             * a bad geometry surfaces as a clear error instead of silently
+             * degrading to the scalar path and diverging from the Python engine. */
+            rocke_status_t sva = rocke_coalesced_tile_loader_choose_vec_axis(
+                ctx->block_m, ctx->block_k, ctx->threads, cap_a, /*row=*/true, &va);
+            rocke_status_t svb = rocke_coalesced_tile_loader_choose_vec_axis(
+                ctx->block_n, ctx->block_k, ctx->threads, cap_b, /*row=*/true, &vb);
+            if(sva != ROCKE_OK || svb != ROCKE_OK)
+            {
+                rocke_i_set_err(
+                    b, ROCKE_ERR_VALUE, "wgrad: no usable free-axis load_vec for tile geometry");
+                return false;
+            }
+            if(va > 1)
+                axis_a = true;
+            else
+                va = 1;
+            if(vb > 1)
+                axis_b = true;
+            else
+                vb = 1;
         }
+
+        /* Direct struct construction mirrors the Python CoalescedTileLoader(...)
+         * call (not from_tile): explicit load_vec + vector_axis, use_buffer_rsrc
+         * default True, oob_sentinel default (1 << 31) - 1. */
+        ctx->a_sync_loader.tile_rows = ctx->block_m;
+        ctx->a_sync_loader.tile_cols = ctx->block_k;
+        ctx->a_sync_loader.block_size = ctx->threads;
+        ctx->a_sync_loader.load_vec = va;
+        ctx->a_sync_loader.use_buffer_rsrc = true;
+        ctx->a_sync_loader.oob_sentinel = 2147483647;
+        ctx->a_sync_loader.vector_axis_row = axis_a;
+        ctx->a_sync_loader.has_inner_dim = false;
+        ctx->a_sync_loader.inner_dim = 0;
+
+        ctx->b_sync_loader.tile_rows = ctx->block_n;
+        ctx->b_sync_loader.tile_cols = ctx->block_k;
+        ctx->b_sync_loader.block_size = ctx->threads;
+        ctx->b_sync_loader.load_vec = vb;
+        ctx->b_sync_loader.use_buffer_rsrc = true;
+        ctx->b_sync_loader.oob_sentinel = 2147483647;
+        ctx->b_sync_loader.vector_axis_row = axis_b;
+        ctx->b_sync_loader.has_inner_dim = false;
+        ctx->b_sync_loader.inner_dim = 0;
+
         ctx->have_sync_loaders = true;
         ctx->have_async_loaders = false;
     }
