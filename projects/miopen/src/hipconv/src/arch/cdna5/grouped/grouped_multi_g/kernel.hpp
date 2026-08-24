@@ -568,6 +568,8 @@ __device__ void conv2d_grouped_multi_g_nhwc_cdna5_impl(const ::ToType<DT>* __res
 #pragma unroll
         for(int i = lane; i < SLOT_VECS; i += WAVE_SIZE)
             slot_u4[i] = uint4{0, 0, 0, 0};
+        // s_wait_tensorcnt does not order these against a TDM into the same slot.
+        llvm_amdgcn_s_wait_dscnt(0);
     };
 
     // Hoisted input TDM descriptor: static fields set once, only
@@ -610,10 +612,7 @@ __device__ void conv2d_grouped_multi_g_nhwc_cdna5_impl(const ::ToType<DT>* __res
     // Per-col LDS stride is PER_COL_PADDED_BYTES (40B) due to TDM padding; the
     // clamp shift uses the padded stride, not raw G*sizeof.
     const unsigned row_lds_clamp_off = (unsigned)row_clamp_lo * PER_COL_PADDED_BYTES;
-
     auto load_input_row = [&]<bool CheckBounds>(int y, unsigned slot) {
-        zero_slot(slot);
-
         if constexpr(CheckBounds)
         {
             if(!wave_active || y < 0 || y >= hi || row_tile_w <= 0)
@@ -851,6 +850,9 @@ __device__ void conv2d_grouped_multi_g_nhwc_cdna5_impl(const ::ToType<DT>* __res
             acc[P_FLUSH] = {};
     };
 
+    // The TDM never writes the halo columns and their range is y-invariant.
+    static_for<PF>([&]<int S>() { zero_slot((unsigned)S); });
+
     // ================ Streaming KH-row prefetch loop =======================
     if constexpr(DILATION > 1)
     {
@@ -969,8 +971,7 @@ __device__ void conv2d_grouped_multi_g_nhwc_cdna5_impl(const ::ToType<DT>* __res
         // Steady main loop: while a full KH-block plus the (PF-2) in-flight rows
         // stay in-bounds, the edge branches are provably not taken, so drop the
         // guard/wait branching and issue the refill unconditionally (mirrors the
-        // G=32 split-loop steady phase). zero_slot clears the reused ring slot
-        // before the unchecked load so stale halo/pad columns can't leak in.
+        // G=32 split-loop steady phase).
         if(!wave_active || row_tile_w <= 0)
         {
             for(; (y_base + KH + PF - 2) < hi; y_base += KH)
@@ -1206,6 +1207,8 @@ __device__ void conv2d_grouped_g32_nhwc_cdna5_impl(const ::ToType<DT>* __restric
 #pragma unroll
         for(int i = lane; i < SLOT_VECS; i += WAVE_SIZE)
             slot_u4[i] = uint4{0, 0, 0, 0};
+        // s_wait_tensorcnt does not order these against a TDM into the same slot.
+        llvm_amdgcn_s_wait_dscnt(0);
     };
 
     TdmDesc in_tdm;
@@ -1230,10 +1233,7 @@ __device__ void conv2d_grouped_g32_nhwc_cdna5_impl(const ::ToType<DT>* __restric
     const unsigned long long row_stride_bytes =
         (unsigned long long)wi * (unsigned long long)C_total * sizeof(ElemT);
     const unsigned row_lds_clamp_off = (unsigned)row_clamp_lo * PER_COL_PADDED_BYTES;
-
     auto load_input_row = [&]<bool CheckBounds>(int y, unsigned slot) {
-        zero_slot(slot);
-
         if constexpr(CheckBounds)
         {
             if(!wave_active || y < 0 || y >= hi || row_tile_w <= 0)
@@ -1434,6 +1434,9 @@ __device__ void conv2d_grouped_g32_nhwc_cdna5_impl(const ::ToType<DT>* __restric
             }
         }
     };
+
+    // The TDM never writes the halo columns and their range is y-invariant.
+    static_for<PF>([&]<int S>() { zero_slot((unsigned)S); });
 
     if constexpr(DILATION > 1)
     {
