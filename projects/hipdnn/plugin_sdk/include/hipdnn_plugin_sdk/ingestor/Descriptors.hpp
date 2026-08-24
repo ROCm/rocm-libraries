@@ -155,6 +155,12 @@ struct EngineDescriptor
     /// Graph schema version this engine understands; a graph below this floor is
     /// declined rather than matched with an ignored field. Baseline by default.
     hipdnn_data_sdk::utilities::Version sdkVersion{K_ENGINE_PLUGIN_API_VERSION_BASELINE};
+    /// RFC 0020 §4.2 numerical notes, held as authored; no hipDNN enum exists for them
+    /// yet, so nothing consumes the strings.
+    std::vector<std::string> numericalNotes;
+    /// Resolved through GraphMatchRegistry; empty means this engine declares no
+    /// graph-topology match.
+    std::string graphMatchNativeSymbol;
 };
 
 /// Which inputs a matcher reads, and so what its failure prunes.
@@ -185,7 +191,7 @@ struct DispatchDescriptor
 enum class KernelSourceKind
 {
     EMBEDDED_SOURCE, ///< Source file plus entry point, compiled at plan-build time.
-    KPACK_SYMBOL, ///< Prebuilt kpack library plus symbol. No adapter yet.
+    KPACK, ///< Prebuilt kpack archive plus toc key and symbol. No adapter yet.
     HSACO_FILE, ///< Standalone `.hsaco` code-object file. No adapter yet.
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
 };
@@ -207,6 +213,17 @@ struct KernelDescriptor
     /// Omitted fields take the KMD default; completed tuple is the catalog key.
     MetadataValues metadata;
     int64_t priority = 0; ///< Tie-break when the heuristic is not decisive.
+    /// GFX base targets this kernel runs on; empty inherits the pack's list. A kernel may
+    /// narrow to part of what its pack claims, never reach outside it, and the resolved
+    /// list reaches dispatch as KernelDefinition::arch. Authored on either form: inline in
+    /// a KDP, or in a standalone `.ukd.json`.
+    ///
+    /// For a standalone kernel it is also half the catalog key. A per-arch shard ships the
+    /// same kernel id in every shard, differing only in which code object it names, so the
+    /// id alone cannot say which copy a pack means. An inline kernel is not keyed at all --
+    /// it lives inside a pack document that the pack's own (id, arch) key already separates
+    /// per shard -- so there the field is applicability only.
+    std::vector<std::string> arch;
 };
 
 /// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over
@@ -218,10 +235,21 @@ struct KernelDescriptorPack
     std::vector<DescriptorId> matcherIds;
     DescriptorId engineId;
     DescriptorId dispatchId;
-    /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent.
-    /// Matches the base target id exactly, so `gfx942` never accepts `gfx950`.
+    /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent, matched
+    /// exactly against the device's base target id. Part of the pack's catalog identity
+    /// -- packs are keyed by (id, arch), so per-arch shards may ship one pack id many
+    /// times -- as well as a match-time filter. The filter itself is enforced at catalog
+    /// build, not load time, so an excluded pack still builds and simply declines per
+    /// call -- an expected decline like a matcher returning false, not a malformed load,
+    /// so it must not be reported as one.
     std::vector<std::string> arch;
+    /// Every kernel this pack binds, whether authored inline or referenced by id.
     std::vector<KernelDescriptor> kernels;
+    /// Kernels named by id rather than spelled inline; each is a standalone `.ukd.json`.
+    /// resolveDescriptorSets() looks them up and appends them to `kernels`, which is the
+    /// resolved truth every consumer reads -- this stays as the authored record. Packs
+    /// built in memory leave it empty and fill `kernels` directly.
+    std::vector<DescriptorId> kernelIds;
 };
 
 /// One engine and every descriptor it references by id; self-contained.

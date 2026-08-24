@@ -171,7 +171,7 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     bool hasKmcnt = (waitData->kmcnt != -1);
 
     // Combine dlcnt and dscnt into a single dscnt for gfx1250
-    int8_t combinedDscnt = -1;
+    int combinedDscnt = -1;
     if (hasDlcnt && hasDscnt) {
         combinedDscnt = std::min(waitData->dlcnt, waitData->dscnt);
     } else if (hasDlcnt) {
@@ -186,22 +186,22 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     StinkyInstruction* lastInst = nullptr;
 
     // Helper to create single wait instruction before inst
-    auto createSingleWait = [&](GFX opcode, int8_t count) -> StinkyInstruction* {
+    auto createSingleWait = [&](GFX opcode, int count) -> StinkyInstruction* {
         const HwInstDesc* desc = getMCIDByUOp(opcode, archId);
         StinkyInstruction* waitInst = irBuilder.create(desc, inst);
-        waitInst->addSrcReg(StinkyRegister(static_cast<int>(count)));
+        waitInst->addSrcReg(StinkyRegister(clampToWaitCntField(count)));
         if (!comment.empty()) {
             waitInst->addModifier<CommentData>(CommentData{comment});
         }
         return waitInst;
     };
 
-    // Helper to create combined wait instruction before inst
-    auto createCombinedWait = [&](GFX opcode, int8_t count1, int8_t count2) -> StinkyInstruction* {
+    // Helper to create combined wait instruction before inst. memCount is the
+    // loadcnt or storecnt half, dsCount the dscnt half.
+    auto createCombinedWait = [&](GFX opcode, int memCount, int dsCount) -> StinkyInstruction* {
         const HwInstDesc* desc = getMCIDByUOp(opcode, archId);
         StinkyInstruction* waitInst = irBuilder.create(desc, inst);
-        uint16_t combinedCount = ((count1 & 0xFF) << 8) | (count2 & 0xFF);
-        waitInst->addSrcReg(StinkyRegister(static_cast<int>(combinedCount)));
+        waitInst->addSrcReg(StinkyRegister(packMemDsWaitCnt(memCount, dsCount)));
         if (!comment.empty()) {
             waitInst->addModifier<CommentData>(CommentData{comment});
         }
