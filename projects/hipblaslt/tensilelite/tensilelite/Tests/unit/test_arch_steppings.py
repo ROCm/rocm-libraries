@@ -54,7 +54,7 @@ from tensilelite.Common.Architectures import (
 )
 from tensilelite import GpuArch
 from tensilelite.CustomYamlLoader import archMatch
-from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.Types import IsaInfo, IsaVersion
 from tensilelite.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
@@ -1368,7 +1368,7 @@ def _detectionReturning(monkeypatch, stdout, returncode=0):
     so a machine that happens to set one would otherwise change what these tests
     are measuring. Tests about the pins set them back.
     """
-    import tensilelite.Common.Architectures as Arch
+    import Tensile.Common.Architectures as Arch
 
     class _Proc:
         pass
@@ -3844,3 +3844,123 @@ def test_gfx1250v0_assembles_and_compiles_for_gfx1250_with_strict_features(monke
     assert "--offload-arch=gfx1250" in v0Cc and _features(v0Cc, "-Xclang") == expected
     assert "--offload-arch=gfx1250-strict" in strictCc and not _features(strictCc, "-Xclang")
     assert not any(GFX1250V0 in a for a in v0Asm + v0Cc)
+
+
+# ``Architecture:`` beside a detected name. The enumerator reads the hardware,
+# and gfx1250 and gfx1250:xnack- are one chip under two driver configurations,
+# so it reports the bare name for both -- the config is the only place the mode
+# can be said. It may qualify what was detected, and nothing else.
+
+
+def _fromConfig(configArchitecture, isaList, archNames):
+    from tensilelite.Tensile import archNamesFromConfig
+
+    return archNamesFromConfig(configArchitecture, isaList, list(archNames))
+
+
+@pytest.mark.parametrize(
+    "detected,configured",
+    [
+        (GFX1250, f"{GFX1250}:xnack-"),
+        (GFX1250, f"{GFX1250}:xnack+"),
+        (GFX1250_STRICT, f"{GFX1250_STRICT}:xnack-"),
+        ("gfx942", "gfx942:xnack-"),
+    ],
+)
+def test_config_may_qualify_the_detected_architecture(detected, configured):
+    """Without this the qualifier is unsayable: detection cannot report it, and
+    the only other way to be heard is ``ISA:``, which skips detection entirely
+    and with it the guard against tuning one stepping on the other's hardware."""
+    assert _fromConfig(configured, [gfxToIsa(detected)], [detected]) == [configured]
+
+
+@pytest.mark.parametrize(
+    "detected,configured",
+    [
+        (GFX1250, GFX1250_STRICT),          # a stepping of the detected ISA
+        (GFX1250_STRICT, GFX1250),          # ... and the other way round
+        (GFX1250, f"{GFX1250_STRICT}:xnack-"),
+        (GFX1250, "gfx942:xnack-"),         # a different architecture entirely
+    ],
+)
+def test_config_cannot_replace_the_detected_architecture(detected, configured):
+    """Only a qualifier on the detected name is taken. Anything else is passed
+    over, so the config cannot tune one stepping on the other's hardware."""
+    assert _fromConfig(configured, [gfxToIsa(detected)], [detected]) == [detected]
+
+
+def test_config_qualifier_is_taken_from_the_entry_that_matches():
+    """``Architecture:`` is a list, and only the entry naming what was detected
+    has anything to say about it."""
+    configured = f"gfx942:xnack-;{GFX1250}:xnack-;{GFX1250_STRICT}"
+    assert _fromConfig(configured, [ISA_GFX1250], [GFX1250]) == [f"{GFX1250}:xnack-"]
+
+
+def test_config_architecture_is_still_validated_beside_a_detected_name():
+    """Passed over is not unread: a typo is reported rather than ignored."""
+    with pytest.raises(ValueError, match="Unrecognized Architecture in config"):
+        _fromConfig("gfx1250v1", [ISA_GFX1250], [GFX1250])
+
+
+def test_config_architecture_without_detection_is_unchanged():
+    """The ``ISA:`` path hands in no name, so entries are appended as before."""
+    assert _fromConfig(f"{GFX1250}:xnack-", [ISA_GFX1250], []) == [f"{GFX1250}:xnack-"]
+    assert _fromConfig(GFX1250_STRICT, [ISA_GFX1250], []) == [GFX1250_STRICT]
+
+
+# The xnack- entries are keyed on the qualified name, a second override layer on
+# top of whatever the bare name declares. Nothing above reaches that layer, so
+# these pin it directly: revert applyArchCapOverrides to a base-name-only lookup
+# and every drain comes back with the rest of the suite still green.
+
+CAP_XNACK_REPLAY = "EnableXnackReplay"
+
+
+def _iim_with_replay_on():
+    """An ISA map as probed for gfx1250: replay on, the stepping caps absent."""
+    return {ISA_GFX1250: IsaInfo({"SupportedISA": True}, {CAP_XNACK_REPLAY: True}, {}, {})}
+
+
+@pytest.mark.parametrize("spec", ["gfx1250:xnack-", "gfx1250-strict:xnack-", "gfx1250v0:xnack-"])
+def test_xnack_minus_clears_replay(spec):
+    iim = _iim_with_replay_on()
+    applyArchCapOverrides(iim, [spec])
+    assert iim[ISA_GFX1250].archCaps[CAP_XNACK_REPLAY] is False
+
+
+def test_xnack_minus_layers_on_top_of_the_stepping_deltas():
+    """Both layers land: the stepping's own caps and the xnack mode."""
+    iim = _iim_with_replay_on()
+    applyArchCapOverrides(iim, ["gfx1250v0:xnack-"])
+    caps = iim[ISA_GFX1250]
+    assert caps.archCaps[CAP_XNACK_REPLAY] is False
+    assert caps.archCaps[CAP_MULTICAST] is False
+    assert caps.asmCaps[CAP_FP4_32X16] is False
+
+
+def test_predicate_does_not_hide_the_qualified_override():
+    """A predicate selects hardware, not capabilities, so it cannot change which
+    override applies -- the lookup drops it before matching."""
+    iim = _iim_with_replay_on()
+    applyArchCapOverrides(iim, ["gfx1250:xnack-[cu=64]"])
+    assert iim[ISA_GFX1250].archCaps[CAP_XNACK_REPLAY] is False
+
+
+def test_bare_and_xnack_minus_together_are_refused():
+    """One ISA entry cannot describe both xnack modes, so the qualified spec
+    would silently disarm the bare one. Refuse the pairing instead."""
+    with pytest.raises(ValueError, match="different"):
+        applyArchCapOverrides(_iim_with_replay_on(), [GFX1250, "gfx1250:xnack-"])
+
+
+@pytest.mark.parametrize(
+    "specs",
+    [
+        [GFX1250],
+        ["gfx1250:xnack-"],
+        [GFX1250, "gfx1250[cu=64]"],          # same caps, predicate only
+        ["gfx942:xnack+", "gfx942:xnack-"],   # no overrides on either side
+    ],
+)
+def test_combinations_with_one_capability_set_are_allowed(specs):
+    applyArchCapOverrides(_iim_with_replay_on(), specs)
