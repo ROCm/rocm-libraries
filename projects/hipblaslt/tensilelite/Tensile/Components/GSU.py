@@ -200,7 +200,7 @@ class GSU(Component):
         pass
 
     @abc.abstractmethod
-    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, multipleBufferChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+    def routeToGeneralBatchedOrStridedBatched(self, writer, stridedBatchedGemmLoad, multipleBufferChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
         pass
 
 class GSUOff(GSU):
@@ -313,7 +313,7 @@ class GSUOff(GSU):
         module = Module("GSU Off initializeSrd")
         return module
 
-    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, multipleBufferChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+    def routeToGeneralBatchedOrStridedBatched(self, writer, stridedBatchedGemmLoad, multipleBufferChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
         module = Module("GSU Off routeToGeneralBatchedOrStridedBatched")
         return module
         
@@ -344,7 +344,7 @@ class GSUOn(GSU):
             extReadEpilogueLabeltmp    = Label(label=writer.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
             module.addComment0("Check if custom structure pointer is null")
             if kernel["ProblemType"]["SupportUserArgs"]:
-                module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 ?"))
+                writer.cmpNamedArgTypeEq(module, 2, "ArgType == 2 ?")
                 module.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
 
             with writer.allocTmpSgpr(2,2, tag="GSU On graWorkGroup_tmpSgprD") as tmpSgprD:
@@ -752,7 +752,7 @@ class GSUOn(GSU):
             extReadEpilogueLabeltmp    = Label(label=writer.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
             module.addComment0("Check if custom structure pointer is null")
             if kernel["ProblemType"]["SupportUserArgs"]:
-                module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 ?"))
+                writer.cmpNamedArgTypeEq(module, 2, "ArgType == 2 ?")
                 module.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
             module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprAccumTiles), src1="MTOffset", comment="accumNumTiles*(MT0*MT1*bpeC)"))
             module.add(SAddU32(dst=sgpr("AddressTD"), src0=sgpr("AddressTD"), src1=sgpr(tmpSgpr0)))
@@ -1146,7 +1146,8 @@ class GSUOn(GSU):
                 if writer.states.archCaps["DefaultScopeIsCULocal"] else None
             innerSpinLabel = Label(writer.labels.getNameInc("last_gsu_wg_busy_waiting_inner"), "")
             module.add(innerSpinLabel)
-            if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
+            if writer.states.archCaps["RequiresXCntForVolatileVMEM"] or \
+                    writer.states.archCaps["EnableXnackReplay"]:
                 module.add(SWaitXCnt(xcnt=0, comment="drain in-flight VMEM before flat atomic"))
             module.add(FlatAtomicDecU32(dst=vgpr(dstVgpr), addr=vgpr(addrVgpr, 2), data=vgpr(dataVgpr), \
                                         modifier=atomicFlat, \
@@ -1542,9 +1543,11 @@ class GSUOn(GSU):
             # Save EXEC and set only lane 0 active
             module.add(SMovExec(dst=sgpr(tmpSgpr, numSgpr), src=EXEC(), comment="save EXEC"))
             module.add(SMovExec(dst=EXEC(), src=1, comment="only lane 0 active"))
-            # Arches that mark RequiresXCntForVolatileVMEM (e.g. gfx1250) need
-            # an explicit XNACK-replay drain before a volatile/atomic VMEM op.
-            if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
+            # Arches that mark RequiresXCntForVolatileVMEM or EnableXnackReplay
+            # (e.g. gfx1250) need an explicit XNACK-replay drain before a
+            # volatile/atomic VMEM op.
+            if writer.states.archCaps["RequiresXCntForVolatileVMEM"] or \
+                    writer.states.archCaps["EnableXnackReplay"]:
                 module.add(SWaitXCnt(xcnt=0, comment="drain in-flight VMEM before flat atomic"))
             atomicFlat = FLATModifiers(scope=CacheScope.SCOPE_DEV) \
                 if writer.states.archCaps["DefaultScopeIsCULocal"] else None
@@ -2210,7 +2213,7 @@ class GSUOn(GSU):
     # GSU > 1, then AddressA/B will be pointer to device memory holding pointer array to batch matrices but AddressC/D will further depend on the following:
     # a) MultiBuffer case: AddressC/D will be pointer to workspace and will be handled similar to Strided Batched case.
     # b) MultiBufferSingleKernel case: AddressC will be pointer to device memory holding pointer array to batch matrices while AddressD will be pointer to workspace.
-    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, argTypeChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+    def routeToGeneralBatchedOrStridedBatched(self, writer, stridedBatchedGemmLoad, argTypeChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
         module = Module("routeToGeneralBatchedOrStridedBatched")
         module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
         if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
@@ -2218,13 +2221,13 @@ class GSUOn(GSU):
         else:
             module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
         if kernel["ProblemType"]["SupportUserArgs"]:
-            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+            writer.cmpNamedArgTypeEq(module, 3, "ArgType == 3 for General Batched GEMM")
             module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName())) 
         if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
             module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
             module.add(argTypeChecks)
             if kernel["ProblemType"]["SupportUserArgs"]:
-                module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))   
+                writer.cmpNamedArgTypeEq(module, 3, "ArgType == 3 for General Batched GEMM")
                 module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))
                 module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))  
         return module
