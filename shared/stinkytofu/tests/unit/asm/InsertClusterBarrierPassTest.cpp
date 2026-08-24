@@ -1932,6 +1932,85 @@ IF_RULE3_CROSS_LOOP(TEST_F(InsertClusterBarrierPassTest,
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
 })
 
+// maxLeadCycles bounds the answer, and after a wrap the answer's distance from the wait is
+// not a distance in the listing: the anchor sits textually *below* its wait, and what
+// separates them is the way the loop actually runs -- wait back to the loop head, then latch
+// back to the anchor. That sum is what has to stay under the ceiling.
+//
+//     label_TestLoop:
+//     v_wmma x3                        <- wait to loop head: the first half of the distance
+//     s_barrier_signal -1 / wait -1 / tensor_load_to_lds   <- the wait
+//     s_cmp / s_cbranch label_TestLoopEnd
+//     v_wmma x200                      <- far longer than the ceiling on its own
+//     s_cmp / s_cbranch_scc0 label_TestLoop   <- the latch, where the wrap arrives
+//
+// The tail is deliberately long enough that the segment start is out of reach: an answer that
+// took the whole segment because a boundary said stop would be over the ceiling, so this also
+// says the ceiling is not something only the upward climb consults.
+// Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
+IF_RULE3_CROSS_LOOP(TEST_F(InsertClusterBarrierPassTest,
+                           WrapAroundAnchorStaysWithinMaxLeadCyclesOfItsWait) {
+    const int kLead = 500;
+    const int kMaxLead = 900;
+
+    appendGsu1Preheader();
+    openLoop();
+    for (int i = 0; i < 3; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/90, "label_TestLoopEnd");
+    for (int i = 0; i < 200; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* latch =
+        createGuardedBranch(GFX::s_cbranch_scc0, /*sgpr=*/92, "label_TestLoop");
+    createLabel("label_TestLoopEnd");
+    createWMMA(8, 0, 8);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    StinkyInstruction* segBeginInst = firstRealInstAfter(loopHead);
+    ASSERT_NE(segBeginInst, nullptr);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    const auto cyclesAt = [&](const StinkyInstruction* inst) -> int64_t {
+        auto it = cycleMap.find(inst);
+        return (it == cycleMap.end()) ? -1 : static_cast<int64_t>(it->second);
+    };
+    ASSERT_GE(cyclesAt(trigger), 0);
+    ASSERT_GE(cyclesAt(segBeginInst), 0);
+    ASSERT_GE(cyclesAt(latch), 0);
+
+    const auto found = cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+        trigger, segBeginAfter(loopHead), trigger, cycleMap, kLead, kMaxLead,
+        /*priorWaitAnchors=*/{}, /*maxHops=*/1, loopHead);
+
+    ASSERT_TRUE(found.crossedLoopHead)
+        << "this test only says anything while the climb wraps:" << blockListing(*bb);
+    auto* anchorInst = dyn_cast<StinkyInstruction>(found.anchor);
+    ASSERT_NE(anchorInst, nullptr) << blockListing(*bb);
+    ASSERT_GE(cyclesAt(anchorInst), 0) << blockListing(*bb);
+
+    // wait -> loop head, then latch -> anchor: the run-time distance, not the listing one.
+    const int64_t toLoopHead = cyclesAt(trigger) - cyclesAt(segBeginInst);
+    const int64_t fromLatch = cyclesAt(latch) - cyclesAt(anchorInst);
+    const int64_t wrapDistance = toLoopHead + fromLatch;
+
+    // Without this the test would still pass on a tail too short to reach the ceiling, and
+    // would then be asserting nothing.
+    const int64_t toSegmentStart = toLoopHead + (cyclesAt(latch) - cyclesAt(segBeginInst));
+    ASSERT_GT(toSegmentStart, kMaxLead)
+        << "the tail has to be long enough that taking all of it would break the ceiling, or "
+           "this test cannot tell the ceiling is being applied:"
+        << blockListing(*bb);
+
+    EXPECT_LE(wrapDistance, kMaxLead)
+        << "wait->loop head plus latch->anchor is what the ceiling bounds, and this anchor is "
+           "beyond it:"
+        << blockListing(*bb);
+    EXPECT_GE(wrapDistance, kLead)
+        << "the anchor gave up lead it was entitled to:" << blockListing(*bb);
+})
+
 // kRule3CrossLoop off: lead met while SCC stays live below the trigger; the climb must not
 // cross the loop head into the preheader. It scans down from the lead point toward the wait
 // instead, leaving the signal in the body segment.

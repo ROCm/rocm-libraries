@@ -659,6 +659,16 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return resolveSccDeadBelow(anchorInst, sccLimit(anchorInst));
     };
 
+    // maxLeadCycles is a ceiling on the answer, not just on the climb, so every way out of
+    // the scan comes through here: a spot that far ahead of the wait has cleared a range too
+    // long to be worth it, however the scan came to pick it. A boundary or a hard stop is a
+    // reason not to climb further, which is not the same as a reason to accept whatever the
+    // climb is standing on.
+    //
+    // The way back is the same one an overlong upward climb takes: down from the lead point,
+    // which is the last spot known to be within the ceiling, to the first SCC-dead spot below
+    // it. That lands nearer the wait than the lead asked for and, since the lead point is
+    // always below the stop that sent us here, it cannot climb back over that stop.
     auto settle = [&](IRBase* climbed, int64_t totalAccum) -> IRBase* {
         if (leadPoint == nullptr || climbed == leadPoint) return climbed;
         if (totalAccum <= maxLeadCycles) return climbed;
@@ -742,7 +752,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         // boundaries as read would walk straight into the range it has to stay out of.
         sccLive = readsScc(*inst) || (sccLive && !writesScc(*inst));
 
-        if (IRBase* stop = hardStopAnchor(inst)) return report(clearSccNote(stop));
+        if (IRBase* stop = hardStopAnchor(inst)) return report(clearSccNote(settle(stop, accum)));
         if (isSegmentBoundary(*inst)) {
             // A climb holding its lead comes to rest below the boundary rather than spending
             // a hop on more of it: at the segment start, or -- when a live range covers that
@@ -754,14 +764,15 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
             const bool mustStop = hops >= maxHops || isCall(*inst) || isUnconditionalBranch(*inst);
             if (targetMet && (atLoopHead || mustStop)) {
                 if (curSegBeginSccLive()) return downwardFromLeadMet();
-                return report(clearSccNote(curSegBegin.getNodePtr()));
+                return report(clearSccNote(settle(curSegBegin.getNodePtr(), accum)));
             }
-            if (mustStop) return report(clearSccNote(curSegBegin.getNodePtr()));
+            if (mustStop) return report(clearSccNote(settle(curSegBegin.getNodePtr(), accum)));
             if (isLabel(*inst)) {
                 // Leaving a loop head textually would land in the preheader, which runs
                 // once; follow the latch so the signal lands on the path that repeats.
                 StinkyInstruction* latch = findLatchBranchFor(inst);
-                if (latch == nullptr) return report(clearSccNote(curSegBegin.getNodePtr()));
+                if (latch == nullptr)
+                    return report(clearSccNote(settle(curSegBegin.getNodePtr(), accum)));
                 it = BasicBlock::iterator(latch);
                 // The latch is landed on rather than stepped over, so its own read of the
                 // loop condition has to be folded in by hand.
