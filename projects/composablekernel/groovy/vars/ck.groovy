@@ -552,16 +552,13 @@ def runOnHealthyNode(String label, Closure body) {
         def attemptNode = null
         try {
             node(exclude(label, excluded)) {
-                ws("${env.WORKSPACE}-${env.BUILD_NUMBER}") {
-                    sh 'echo "The updated workspace is: $WORKSPACE"'
-                    attemptNode = env.NODE_NAME
-                    echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
-                    // Derive GPU requirement from the node label: only "nogpu" stages
-                    // skip the driver/device checks. A new non-GPU label would need
-                    // adding here (otherwise preflight would wrongly demand a GPU).
-                    preflight(!label.contains('nogpu'))
-                    runInPlace(body, transientRetries)
-                }
+                attemptNode = env.NODE_NAME
+                echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
+                // Derive GPU requirement from the node label: only "nogpu" stages
+                // skip the driver/device checks. A new non-GPU label would need
+                // adding here (otherwise preflight would wrongly demand a GPU).
+                preflight(!label.contains('nogpu'))
+                runInPlace(body, transientRetries)
             }
             return
         }
