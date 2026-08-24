@@ -928,22 +928,10 @@ TYPED_TEST(TensorSentinel, StridedTensorFilled)
 
 /// A stride PERMUTATION must be iterated in index order, not linearly.
 ///
-/// This is the regression guard for visitsInIndexOrder. The iterator used to pick its
-/// LinearIndex fast path on isPacked() alone, and isPacked() is
-/// (elementCount == elementSpace) -- true for ANY permutation of the strides, since a
-/// permutation spans exactly the same memory. So a [B,H,S,D] tensor declared with
-/// BSHD strides iterated linearly while every READ path (getIndexImpl) honoured the
-/// declared strides: writes and reads disagreed about which coordinate owns which byte,
-/// with no error anywhere.
-///
-/// That is not hypothetical. It made a rocKE SDPA kernel, which consumes BSHD, produce
-/// wrong numbers against a stride-aware CPU reference while the two "agreed" on every
-/// address -- and it was invisible at a single head, because with one head the two
-/// orderings are the same buffer.
-///
-/// The tensor below is deliberately a permutation: dims {2,3,4} with strides
-/// {12, 1, 3}, i.e. axis 1 is the fastest-varying in memory. elementCount == 24 ==
-/// elementSpace, so isPacked() is TRUE and the old code took the linear path.
+/// Regression guard for visitsInIndexOrder. dims {2,3,4} with strides {12,1,3} makes
+/// axis 1 the fastest-varying in memory, and elementCount == elementSpace == 24, so
+/// isPacked() is true and the old gate took the linear path. Writes then landed on
+/// coordinates the stride-aware reads did not fetch them by, with no error anywhere.
 TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
 {
     const std::vector<int64_t> dims{2, 3, 4};
@@ -952,12 +940,11 @@ TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
     // NOLINTNEXTLINE(misc-const-correctness) mutated through the iterator; begin() is not const
     hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
 
-    // The premise: this is exactly the case the old predicate could not distinguish.
     EXPECT_TRUE(tensor.isPacked())
         << "a permutation spans the same memory, so isPacked() must still be true here "
            "-- if it is not, this test no longer covers the case it was written for";
 
-    // Write a distinct value per POSITION IN ITERATION ORDER, the way a random fill does.
+    // Write a distinct value per position in iteration order, the way a random fill does.
     float next = 1.0F;
     for(auto valuePtr : tensor)
     {
@@ -965,8 +952,7 @@ TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
         next += 1.0F;
     }
 
-    // Read back BY COORDINATE. Iteration visits (b,h,s) with the last axis fastest, so
-    // the n-th value written must land on the n-th coordinate in that same order.
+    // Read back by coordinate: the n-th value written must land on the n-th coordinate.
     float expected = 1.0F;
     for(int64_t i0 = 0; i0 < dims[0]; ++i0)
     {
@@ -984,14 +970,11 @@ TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
     }
 }
 
-/// The linear fast path must survive for genuinely row-major tensors.
+/// Row-major tensors must keep the linear fast path.
 ///
-/// The fix above is only correct if it does not quietly demote every packed tensor to
-/// the slower stride-aware walk. Row-major strides are the overwhelmingly common case
-/// and must still take LinearIndex; this asserts the observable half of that -- that
-/// iteration order and coordinate order agree, which is trivially true on the fast path
-/// and would also hold on the slow one, so it is a correctness guard rather than a
-/// performance one.
+/// The gate is only correct if it does not demote every packed tensor to the slower
+/// walk. This asserts the observable half, that iteration order and coordinate order
+/// agree; both paths satisfy that, so it guards correctness rather than the choice.
 TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
 {
     const std::vector<int64_t> dims{2, 3, 4};
@@ -1027,16 +1010,11 @@ TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
 
 /// An axis of extent 1 must not disqualify the fast path.
 ///
-/// NHWC activations with 1x1 spatial extent are the everyday case: dims {N,C,1,1}
-/// carry strides {C,1,C,C}, because the H and W strides are computed from the layout
-/// rather than from the (unit) extents. Those two strides are never used -- index 0 on
-/// an axis of extent 1 contributes 0 to the offset no matter what the stride says --
-/// so such a tensor visits memory in index order and belongs on LinearIndex. A
-/// predicate that demanded the canonical value on every axis would demote it.
-///
-/// This asserts the observable half, that iteration order and coordinate order agree.
-/// Both paths satisfy that, so the test guards correctness if the exemption is ever
-/// removed and guards the shape's presence on the fast path by construction.
+/// NHWC activations with 1x1 spatial extent carry dims {N,C,1,1} with strides
+/// {C,1,C,C}, because the H and W strides come from the layout rather than from the
+/// unit extents. Index 0 on such an axis contributes 0 whatever the stride says, so
+/// the tensor still visits memory in index order. This asserts that observable half;
+/// both paths satisfy it, so the test guards correctness if the exemption is removed.
 TEST(TestTensor, IteratesAUnitExtentTensorInIndexOrder)
 {
     const std::vector<int64_t> dims{2, 3, 1, 1};
