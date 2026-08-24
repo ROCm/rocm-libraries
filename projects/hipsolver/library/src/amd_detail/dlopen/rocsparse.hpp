@@ -91,6 +91,10 @@ typedef rocsparse_status (*fp_rocsparse_destroy_handle)(rocsparse_handle handle)
 extern fp_rocsparse_destroy_handle g_rocsparse_destroy_handle;
 #define rocsparse_destroy_handle ::hipsolver::g_rocsparse_destroy_handle
 
+typedef rocsparse_status (*fp_rocsparse_set_stream)(rocsparse_handle handle, hipStream_t stream);
+extern fp_rocsparse_set_stream g_rocsparse_set_stream;
+#define rocsparse_set_stream ::hipsolver::g_rocsparse_set_stream
+
 typedef rocsparse_status (*fp_rocsparse_create_mat_descr)(rocsparse_mat_descr* descr);
 extern fp_rocsparse_create_mat_descr g_rocsparse_create_mat_descr;
 #define rocsparse_create_mat_descr ::hipsolver::g_rocsparse_create_mat_descr

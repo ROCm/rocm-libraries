@@ -83,7 +83,7 @@ TEST(TestPointwisePacks, EveryKernelNamesItsPacksEmbeddedSource)
     }
 }
 
-/// The point of three packs under one engine: everything but the operation matcher and
+/// The point of three packs under one engine: everything but the operation criterion and
 /// the kernels is one descriptor referenced three times, not three copies.
 TEST(TestPointwisePacks, EveryPackSharesTheEngineDispatchAndAllButOneMatcher)
 {
@@ -101,12 +101,13 @@ TEST(TestPointwisePacks, EveryPackSharesTheEngineDispatchAndAllButOneMatcher)
     EXPECT_EQ(add.dispatchId, sub.dispatchId);
     ASSERT_EQ(set.dispatches.size(), 1U);
 
-    // Three matchers each: the shared applicability check, the shared kernel-scoped dtype
-    // check, and one operation check of their own. Two shared ids is what makes the
-    // expensive graph work run once per graph instead of once per pack.
-    ASSERT_EQ(add.matcherIds.size(), 3U);
-    ASSERT_EQ(mul.matcherIds.size(), 3U);
-    ASSERT_EQ(sub.matcherIds.size(), 3U);
+    // Two criteria each: one operation check of their own, plus the shared kernel-scoped
+    // dtype check. The expensive graph work is the engine's graph_match, which runs once
+    // per graph for every pack rather than being listed by any of them.
+    EXPECT_FALSE(set.engine.graphMatchNativeSymbol.empty());
+    ASSERT_EQ(add.matcherIds.size(), 2U);
+    ASSERT_EQ(mul.matcherIds.size(), 2U);
+    ASSERT_EQ(sub.matcherIds.size(), 2U);
 
     // Counted rather than set_intersection'd: matcher ids are in the order the pack
     // authored them, not sorted, and a sorted-range algorithm would quietly under-count.
@@ -120,7 +121,7 @@ TEST(TestPointwisePacks, EveryPackSharesTheEngineDispatchAndAllButOneMatcher)
                                                != other->end();
                                     });
                             }),
-              2);
+              1);
 }
 
 TEST(TestPointwisePacks, ExposesBlockSizeAsAKnobAndDtypeAsInternal)
@@ -136,15 +137,15 @@ TEST(TestPointwisePacks, MatchersCoverBothScopes)
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
 
-    // Four graph-scoped: one shared applicability check every pack lists, plus one
-    // operation check each. One kernel-scoped, shared, pruning per candidate.
+    // Three graph-scoped: one operation check per pack. Applicability is the engine's
+    // graph_match, not a UMD. One kernel-scoped, shared, pruning per candidate.
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
                             [](const auto& matcher) {
                                 return matcher.scope
                                        == hipdnn_plugin_sdk::ingestor::MatchScope::GRAPH;
                             }),
-              4);
+              3);
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
                             [](const auto& matcher) {
@@ -163,12 +164,12 @@ TEST(TestPointwisePacks, SubtractsInTheRightDirection)
     const GraphFixture fixture(
         buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB));
 
-    hipdnn_plugin_sdk::ingestor::BoundTokens bound;
-    ASSERT_TRUE(matchesGraph(POINTWISE_SUB, fixture.context(), bound));
+    const auto bound = matchesGraph(POINTWISE_SUB, fixture.context());
+    ASSERT_TRUE(bound.has_value());
 
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputAToken),
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_SUB.inputAToken),
               INPUT_A_UID);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputBToken),
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_SUB.inputBToken),
               INPUT_B_UID);
 }
 
