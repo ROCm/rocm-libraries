@@ -98,6 +98,32 @@ jackknife I would have reported "the metric has no power".
 
 0 assembler errors, 0 `overflowedResources`, solution counts matching exactly what was emitted.
 
+## Post-ship verification
+
+The per-catalog gates above prove each logic file *compiles* in isolation. Three further checks
+prove the shipped tree is actually sound:
+
+| check | gfx1101 | gfx1102 |
+|---|---|---|
+| full-tree device-library build (all 38 logic files + `Equality/`) | 1 364 kernels | 1 183 kernels |
+| assembler errors / `overflowedResources` | 0 / 0 | 0 / 0 |
+| code objects produced | 54 | 46 |
+| lean catalogs present in the built libraries | ✅ | ✅ |
+
+Solution counts reconcile: gfx1101 shows HHS=109 / BBS=113 because `navi32/Equality/` contributes
+9 and 12 solutions to the same ProblemType libraries; gfx1102's `Equality/` has no TN files, so it
+shows the lean counts exactly (100/101/102/103).
+
+**Numerical correctness: 40/40 PASS, 0 FAIL** (`hipblaslt-bench -v`, 40 shapes spanning every
+stratum, lean catalog built for gfx1100). Lean only reroutes to kernels that already existed, so
+correctness ought to be inherited — but a reroute can send a shape to a kernel it was never
+exercised on, which is worth checking rather than assuming. The benchmark arm-sets measured
+speed, not answers.
+
+**Not verified, and not claimable here: gfx1101 and gfx1102 binaries were never executed.** This
+machine has only a gfx1100 card. Their correctness rests on running the *identical catalog
+content* on gfx1100 plus a clean build for the real targets.
+
 ## Two deviations from the published method, both forced by measurement
 
 **1. Representatives must be chosen by measurement on the target, not the source SKU's row
