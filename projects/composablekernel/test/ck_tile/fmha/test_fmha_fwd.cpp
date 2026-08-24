@@ -45,7 +45,7 @@ struct TestConfigs
     static constexpr auto ModeValues        = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues = std::array{true};
     static constexpr auto qscale_str        = "n";
-    static constexpr auto QscaleValues      = std::array{qscale_str};
+    static constexpr auto QScaleValues      = std::array{qscale_str};
     static constexpr bool def_lse           = true;
     static constexpr bool def_is_v_rowmajor = true;
     static constexpr auto init_method       = "uf";
@@ -68,7 +68,7 @@ struct TestConfigs<FmhaFwdFp8Bf16>
     static constexpr auto qscale_str         = "pt";
     // General/SplitKV also sweep BLOCKSCALE: split-K has a separate o_acc/v_descale
     // accumulation path, and general correctness never exercised "bs" otherwise.
-    static constexpr auto QscaleValues       = std::array{"pt", "bs"};
+    static constexpr auto QScaleValues       = std::array{"pt", "bs"};
     static constexpr bool def_lse            = false;
     static constexpr bool def_is_v_rowmajor  = true;
     static constexpr auto init_method        = "3";
@@ -90,7 +90,7 @@ struct TestConfigs<FmhaFwdMxFp8>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{false};
     static constexpr auto qscale_str         = "mx";
-    static constexpr auto QscaleValues       = std::array{qscale_str};
+    static constexpr auto QScaleValues       = std::array{qscale_str};
     static constexpr bool def_lse            = true;
     static constexpr bool def_is_v_rowmajor  = false;
     static constexpr auto init_method        = "3";
@@ -110,7 +110,7 @@ struct TestConfigs<FmhaFwdMxFp4>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{false};
     static constexpr auto qscale_str         = "mx";
-    static constexpr auto QscaleValues       = std::array{qscale_str};
+    static constexpr auto QScaleValues       = std::array{qscale_str};
     static constexpr bool def_lse            = true;
     static constexpr bool def_is_v_rowmajor  = false;
     static constexpr auto init_method        = "3";
@@ -141,7 +141,7 @@ struct TestConfigs<FmhaFwdFp32>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{true};
     static constexpr auto qscale_str         = "n";
-    static constexpr auto QscaleValues       = std::array{qscale_str};
+    static constexpr auto QScaleValues       = std::array{qscale_str};
     static constexpr bool def_lse            = true;
     static constexpr bool def_is_v_rowmajor  = true;
     static constexpr auto init_method        = "uf";
@@ -154,7 +154,7 @@ static auto SplitKVHDimValues    = ValuesIn(TestConfigs<DataTypeConfig>::SplitKV
 static auto AppendKVHDimValues   = ValuesIn(TestConfigs<DataTypeConfig>::AppendKVHDimValues);
 static auto ModeValues           = ValuesIn(TestConfigs<DataTypeConfig>::ModeValues);
 static auto IsVRowmajorValues    = ValuesIn(TestConfigs<DataTypeConfig>::IsVRowmajorValues);
-static auto QscaleValues         = ValuesIn(TestConfigs<DataTypeConfig>::QscaleValues);
+static auto QScaleValues         = ValuesIn(TestConfigs<DataTypeConfig>::QScaleValues);
 constexpr static auto qscale_str = TestConfigs<DataTypeConfig>::qscale_str;
 constexpr bool def_lse           = TestConfigs<DataTypeConfig>::def_lse;
 constexpr bool def_is_v_rowmajor = TestConfigs<DataTypeConfig>::def_is_v_rowmajor;
@@ -306,7 +306,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                         std::tuple{2, 1, -1, 3, 99, -1, "2"},
                                         std::tuple{1, 2, 1, 33, 0, -1, "2"},
                                         std::tuple{1, 2, 1, 1, 10, 32, "2"}),
-                                 QscaleValues));
+                                 QScaleValues));
 
 TEST_P(General, DataTypeConfig)
 {
@@ -837,7 +837,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                         std::tuple{2, 2, -1, 512, 2000, "0"},
                                         std::tuple{2, 8, 2, 1, 1024, "0"},
                                         std::tuple{3, 2, -1, 230, 899, "t:128,128"}),
-                                 QscaleValues));
+                                 QScaleValues));
 
 TEST_P(SplitKV, DataTypeConfig)
 {
@@ -1440,22 +1440,27 @@ TEST_P(SinkWindowMask, DataTypeConfig)
 // Only meaningful for fp8bf16, the only config with a working BLOCKSCALE path.
 // ============================================================================
 
-// hdim, mask_str, qscale
-using SinkQuantParam = std::tuple<int, std::string, std::string>;
+// hdim, mask_str, qscale, nhead_k (-1 -> nhead_k=nhead, plain MHA)
+using SinkQuantParam = std::tuple<int, std::string, std::string, int>;
 
 static const std::vector<SinkQuantParam> kSinkQuantParams = {
-    {64, "1", "pt"},
-    {64, "1", "bs"},
-    {128, "1", "pt"},
-    {128, "1", "bs"},
-    {256, "1", "pt"},
-    {256, "1", "bs"},
-    {64, "2", "pt"},
-    {64, "2", "bs"},
-    {128, "2", "pt"},
-    {128, "2", "bs"},
-    {256, "2", "pt"},
-    {256, "2", "bs"},
+    {64, "1", "pt", -1},
+    {64, "1", "bs", -1},
+    {128, "1", "pt", -1},
+    {128, "1", "bs", -1},
+    {256, "1", "pt", -1},
+    {256, "1", "bs", -1},
+    {64, "2", "pt", -1},
+    {64, "2", "bs", -1},
+    {128, "2", "pt", -1},
+    {128, "2", "bs", -1},
+    {256, "2", "pt", -1},
+    {256, "2", "bs", -1},
+    // GQA (nhead_ratio=4): sink+blockscale must compose with shared-KV head mapping.
+    {128, "1", "pt", 2},
+    {128, "1", "bs", 2},
+    {128, "2", "pt", 2},
+    {128, "2", "bs", 2},
 };
 
 class SinkQuantMode : public TestWithParam<std::tuple<bool, mode_enum, SinkQuantParam>>
@@ -1473,13 +1478,13 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(SinkQuantMode, DataTypeConfig)
 {
-    auto [_, mode, sink_param]     = GetParam();
-    auto [hdim, mask_str, qscale] = sink_param;
+    auto [_, mode, sink_param]              = GetParam();
+    auto [hdim, mask_str, qscale, nhead_k]  = sink_param;
 
     auto result = fmha_fwd_run<DataTypeConfig>(mode,
-                                               2,  // batch
-                                               8,  // nhead
-                                               -1, // nhead_k
+                                               2,       // batch
+                                               8,       // nhead
+                                               nhead_k, // nhead_k
                                                {adjust_seqlen(1024)},
                                                {adjust_seqlen(1024)},
                                                adjust_hdim(hdim),
@@ -1507,7 +1512,7 @@ TEST_P(SinkQuantMode, DataTypeConfig)
                                                qscale,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
-                                               "3",  // init_method: uniform, not the sink-swamping default
+                                               init_method, // uniform, not the sink-swamping default
                                                static_cast<uint32_t>(
                                                    ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
                                                1, // do_validation
