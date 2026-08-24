@@ -31,6 +31,7 @@
 #pragma once
 #include "../../../../shared/arithmetic.h"
 #include "generator.h"
+#include "rtc_kernel.h"
 
 #include <cmath>
 #include <map>
@@ -244,10 +245,10 @@ struct FFTComputeOffsets
 
     std::shared_ptr<Context> context;
 
-    Variable transform{"transform", "size_t"};
-    Variable remaining{"remaining", "size_t"};
-    Variable index_along_d{"index_along_d", "size_t"};
-    Variable d{"d", "int"};
+    Variable transform{"transform", rtc_index_type(IndexType::U32)};
+    Variable remaining{"remaining", rtc_index_type(IndexType::U32)};
+    Variable index_along_d{"index_along_d", rtc_index_type(IndexType::U32)};
+    Variable d{"d", rtc_index_type(IndexType::U32)};
 
     FFTComputeOffsets() = delete;
     FFTComputeOffsets(unsigned int             length0,
@@ -1059,18 +1060,20 @@ struct StockhamTransform
     std::shared_ptr<Context> context;
 
     FFTBuffer R{"R", Literal{0}, Literal{1}, 0};
-    FFTBuffer lds{"lds", Variable{"offset_lds", "int"}, Variable{"stride_lds", "int"}};
-    FFTBuffer X{"X", Variable{"offset_lds", "size_t"}, Literal{1}};
+    FFTBuffer lds{"lds",
+                  Variable{"offset_lds", rtc_index_type(IndexType::U32)},
+                  Variable{"stride_lds", rtc_index_type(IndexType::U32)}};
+    FFTBuffer X{"X", Variable{"offset_lds", rtc_index_type(IndexType::U32)}, Literal{1}};
 
-    Variable dim{"dim", "unsigned int"};
-    Variable nbatch{"nbatch", "size_t"};
-    Variable lengths{"lengths", "unsigned int", true, true};
+    Variable dim{"dim", rtc_index_type(IndexType::U32)};
+    Variable nbatch{"nbatch", rtc_index_type(IndexType::U32)};
+    Variable lengths{"lengths", rtc_index_type(IndexType::U32), true, true};
     Variable stride{"stride", "index_type", true, true};
-    Variable offset{"offset", "size_t"};
+    Variable offset{"offset", "index_type"};
 
     Variable write{"write", "bool"};
-    Variable thread{"thread", "size_t"};
-    Variable batch{"batch", "size_t"};
+    Variable thread{"thread", rtc_index_type(IndexType::U32)};
+    Variable batch{"batch", rtc_index_type(IndexType::U32)};
 
     Variable twiddles{"twiddles", "const scalar_type", true, true};
     Variable load_cb_fn{"load_cb_fn", "void*"};
@@ -1152,23 +1155,25 @@ struct BluesteinTransform
     // FFT registers
     FFTBuffer R{"R", Literal{0}, Literal{1}, 0};
     // LDS buffer
-    FFTBuffer A{"A", Variable{"offset_lds", "int"}, Variable{"stride_lds", "int"}};
+    FFTBuffer A{"A",
+                Variable{"offset_lds", rtc_index_type(IndexType::U32)},
+                Variable{"stride_lds", rtc_index_type(IndexType::U32)}};
     // FFTed chirp signal (second half of chirp buffer)
     FFTBuffer B{"B", Literal{0}, Literal{1}};
     // chirp signal (first half of chirp buffer)
     FFTBuffer a{"a", Literal{0}, Literal{1}};
     // user data
-    FFTBuffer X{"X", Variable{"offset", "size_t"}, Variable{"stride0", "size_t"}};
+    FFTBuffer X{"X", Variable{"offset", "index_type"}, Variable{"stride0", "index_type"}};
 
-    Variable dim{"dim", "unsigned int"};
-    Variable nbatch{"nbatch", "size_t"};
-    Variable lengths{"lengths", "unsigned int", true, true};
+    Variable dim{"dim", rtc_index_type(IndexType::U32)};
+    Variable nbatch{"nbatch", rtc_index_type(IndexType::U32)};
+    Variable lengths{"lengths", rtc_index_type(IndexType::U32), true, true};
     Variable stride{"stride", "index_type", true, true};
-    Variable offset{"offset", "size_t"};
+    Variable offset{"offset", "index_type"};
 
     Variable write{"write", "bool"};
-    Variable thread{"thread", "size_t"};
-    Variable batch{"batch", "size_t"};
+    Variable thread{"thread", rtc_index_type(IndexType::U32)};
+    Variable batch{"batch", rtc_index_type(IndexType::U32)};
     Variable val{"val", "scalar_type"};
 
     Variable buf_temp{"buf_temp", "scalar_type", true, true};

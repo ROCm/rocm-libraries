@@ -96,7 +96,7 @@ RTCKernelArgs RTCKernelBluesteinSingle::get_launch_args(DeviceCallIn& data)
     {
         kargs.append_ptr(data.node->devKernArg.stride_out());
     }
-    kargs.append_size_t(data.node->batch);
+    kargs.append_index(data.node->batch);
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
