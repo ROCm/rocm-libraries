@@ -2046,7 +2046,7 @@ TEST_F(InsertClusterBarrierPassTest,
         << "signal anchor must stay inside the wait segment:" << blockListing(*bb);
     EXPECT_EQ(found.anchor, static_cast<IRBase*>(trigger))
         << "downward SCC scan should fall back to co-locating with the wait:" << blockListing(*bb);
-    EXPECT_EQ(found.preClampOutOfSegmentAnchor, nullptr)
+    EXPECT_EQ(found.outOfSegmentNomination, nullptr)
         << "must not nominate a preheader anchor once loop-head continue is removed:"
         << blockListing(*bb);
     (void)preheaderSccDef;

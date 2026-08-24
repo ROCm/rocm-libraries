@@ -38,9 +38,11 @@ struct Rule3SignalAnchorResult {
     IRBase* anchor = nullptr;
     int hops = 0;
     bool crossedLoopHead = false;
-    /// Set when the climb would have returned an out-of-segment anchor at hops==0
-    /// before report() clamping (unit tests only).
-    IRBase* preClampOutOfSegmentAnchor = nullptr;
+    /// Set when the climb nominated a spot outside the wait's segment with no hop counted,
+    /// as it stood before the SCC correction moved it (unit tests only). Reporting such an
+    /// anchor is a hard error, so this is the only way a test can see one that was corrected
+    /// back into the segment before it got there.
+    IRBase* outOfSegmentNomination = nullptr;
 };
 
 /// Unit-test entry point for the Rule 3 cycle-lead anchor search (linked from the pass TU).

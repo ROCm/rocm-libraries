@@ -556,8 +556,9 @@ struct Rule3SignalAnchor {
     /// True when one of those edges was the back edge. The signal then feeds the *next*
     /// trip's wait, which leaves the first trip with nobody to feed it.
     bool crossedLoopHead = false;
-    /// Filled only for unit-test entry: out-of-segment nomination at hops==0 before clamping.
-    IRBase* preClampOutOfSegmentAnchor = nullptr;
+    /// Filled only for unit-test entry: a spot the climb nominated outside the wait's segment
+    /// with no hop counted, as it stood before the SCC correction moved it.
+    IRBase* outOfSegmentNomination = nullptr;
 };
 
 /// Walk backward from the wait for cycle lead. \p maxHops 0 = in-segment only
@@ -573,21 +574,24 @@ bool rule3AnchorInWaitSegment(IRBase* anchor, IRBase* defaultAnchor, BasicBlock:
 }
 
 Rule3SignalAnchor rule3ReportAnchor(IRBase* anchor, IRBase* defaultAnchor, int hops,
-                                    bool crossedLoopHead, IRBase* preClampOutOfSegmentAnchor,
+                                    bool crossedLoopHead, IRBase* outOfSegmentNomination,
                                     BasicBlock::iterator segBegin,
-                                    StinkyInstruction* referenceAnchor,
-                                    IRBase* clampedDefaultAnchor) {
+                                    StinkyInstruction* referenceAnchor) {
     Rule3SignalAnchor result;
     if (anchor == defaultAnchor) {
         result = {defaultAnchor, 0, false};
     } else if (rule3AnchorInWaitSegment(anchor, defaultAnchor, segBegin, referenceAnchor)) {
         result = {anchor, 0, false};
     } else if (hops <= 0) {
-        result = {clampedDefaultAnchor, 0, false};
+        // Leaving the wait's segment is what a hop is, so an anchor outside it with none
+        // counted is the climb disagreeing with itself rather than a shape to fall back from.
+        // Every crossing goes through the one boundary arm that increments, so this says that
+        // arm is still the only way out.
+        STINKY_UNREACHABLE("Rule 3 signal anchor: out of segment with no hop counted");
     } else {
         result = {anchor, hops, crossedLoopHead};
     }
-    result.preClampOutOfSegmentAnchor = preClampOutOfSegmentAnchor;
+    result.outOfSegmentNomination = outOfSegmentNomination;
     return result;
 }
 
@@ -640,7 +644,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     bool sccLive = isSccLiveBefore(referenceAnchor);
     bool targetMet = false;
     StinkyInstruction* leadPoint = nullptr;
-    IRBase* preClampOutOfSegmentAnchor = nullptr;
+    IRBase* outOfSegmentNomination = nullptr;
 
     // SCC queries about the anchor scan forward towards the wait, so the wait bounds them --
     // an anchor may not be corrected past the very spot it is leading. Only the back edge
@@ -702,9 +706,13 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return false;
     };
 
+    // The nomination the assert in rule3ReportAnchor cannot see: it reads the anchor that
+    // comes back, and clearScc may already have walked one that was out of segment back into
+    // it. Recorded for the unit-test entry, so a climb that nominates out of segment with no
+    // hop counted is caught even when the correction hides it.
     auto clearSccNote = [&](IRBase* anchor) -> IRBase* {
         if (anchor != defaultAnchor && !inWaitSegment(anchor) && hops <= 0)
-            preClampOutOfSegmentAnchor = anchor;
+            outOfSegmentNomination = anchor;
         return clearScc(anchor);
     };
 
@@ -713,14 +721,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // edge and then dropped back below it crossed nothing in the end and must not be billed
     // for it -- neither when it gave up at the caller's default, which is the wait's own
     // spot, nor when it settled anywhere else the wait can reach without a branch.
-    //
     auto report = [&](IRBase* anchor) -> Rule3SignalAnchor {
-        IRBase* clamped = (hops <= 0 && !rule3AnchorInWaitSegment(anchor, defaultAnchor, segBegin,
-                                                                  referenceAnchor))
-                              ? clearSccNote(defaultAnchor)
-                              : anchor;
         return rule3ReportAnchor(anchor, defaultAnchor, hops, crossedLoopHead,
-                                 preClampOutOfSegmentAnchor, segBegin, referenceAnchor, clamped);
+                                 outOfSegmentNomination, segBegin, referenceAnchor);
     };
 
     // Lead met but SCC still live on the climb path: scan down from the first lead point
@@ -829,7 +832,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         // also covers a reader the climb never walked past.
         if (targetMet && !sccLive) {
             if (inst != defaultAnchor && !inWaitSegment(inst) && hops <= 0)
-                preClampOutOfSegmentAnchor = inst;
+                outOfSegmentNomination = inst;
             return report(clearSccNote(settle(inst, accum)));
         }
     }
@@ -1450,7 +1453,7 @@ Rule3SignalAnchorResult findRule3SignalAnchorByCycleLeadForUnitTest(
     const Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
         referenceAnchor, segBegin, defaultAnchor, cycleMap, leadCycles, maxLeadCycles,
         priorWaitAnchors, maxHops, loopHead);
-    return {found.anchor, found.hops, found.crossedLoopHead, found.preClampOutOfSegmentAnchor};
+    return {found.anchor, found.hops, found.crossedLoopHead, found.outOfSegmentNomination};
 }
 
 }  // namespace test
