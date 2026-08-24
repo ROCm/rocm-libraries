@@ -304,7 +304,7 @@ TEST_F(IntegrationGpuRockeAttentionDense, DeclinesAGraphWhoseLayoutItCannotServe
             .set_dim({BATCH, heads, sequence, HEAD_SIZE})
             .set_stride({heads * sequence * HEAD_SIZE, sequence * HEAD_SIZE, HEAD_SIZE, 1})
             .set_data_type(DataType::BFLOAT16);
-        return graph->tensor(tensor);
+        return tensor;
     };
 
     auto q = bhsd(1, "Q", NUM_QUERY_HEADS, SEQLEN_Q);
