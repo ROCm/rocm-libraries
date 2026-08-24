@@ -11,6 +11,7 @@
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -944,6 +945,10 @@ TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
         << "a permutation spans the same memory, so isPacked() must still be true here "
            "-- if it is not, this test no longer covers the case it was written for";
 
+    EXPECT_NO_THROW(std::ignore
+                    = std::get<ITensorIterator<false>::CompositeIndex>(tensor.begin().index()))
+        << "a stride permutation must be demoted to the stride-aware walk";
+
     // Write a distinct value per position in iteration order, the way a random fill does.
     float next = 1.0F;
     for(auto valuePtr : tensor)
@@ -973,8 +978,7 @@ TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
 /// Row-major tensors must keep the linear fast path.
 ///
 /// The gate is only correct if it does not demote every packed tensor to the slower
-/// walk. This asserts the observable half, that iteration order and coordinate order
-/// agree; both paths satisfy that, so it guards correctness rather than the choice.
+/// walk. Both strategies produce the right values, so assert the chosen one too.
 TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
 {
     const std::vector<int64_t> dims{2, 3, 4};
@@ -986,6 +990,10 @@ TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
         << "these strides are the packed row-major strides, so isPacked() must be true "
            "here -- if it is not, this test no longer guards the fast path it was "
            "written for";
+
+    EXPECT_NO_THROW(std::ignore
+                    = std::get<ITensorIterator<false>::LinearIndex>(tensor.begin().index()))
+        << "packed row-major strides must keep the linear fast path";
 
     float next = 1.0F;
     for(auto valuePtr : tensor)
@@ -1013,8 +1021,9 @@ TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
 /// NHWC activations with 1x1 spatial extent carry dims {N,C,1,1} with strides
 /// {C,1,C,C}, because the H and W strides come from the layout rather than from the
 /// unit extents. Index 0 on such an axis contributes 0 whatever the stride says, so
-/// the tensor still visits memory in index order. This asserts that observable half;
-/// both paths satisfy it, so the test guards correctness if the exemption is removed.
+/// the tensor still visits memory in index order. Both index strategies satisfy that,
+/// so the value check alone cannot tell whether the exemption survives; assert the
+/// chosen strategy as well, the way TestTensorIterator does.
 TEST(TestTensor, IteratesAUnitExtentTensorInIndexOrder)
 {
     const std::vector<int64_t> dims{2, 3, 1, 1};
@@ -1026,6 +1035,10 @@ TEST(TestTensor, IteratesAUnitExtentTensorInIndexOrder)
         << "the unused unit-axis strides do not extend the span, so isPacked() must be "
            "true here -- if it is not, this test no longer covers the case it was "
            "written for";
+
+    EXPECT_NO_THROW(std::ignore
+                    = std::get<ITensorIterator<false>::LinearIndex>(tensor.begin().index()))
+        << "unit-extent axes must not push a row-major tensor onto the strided walk";
 
     float next = 1.0F;
     for(auto valuePtr : tensor)
