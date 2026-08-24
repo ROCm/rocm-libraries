@@ -63,8 +63,13 @@ artifact. Authoring it would let the descriptor disagree with the kernel.
 **`arch` filters which shard a descriptor ships in.** It does not select a
 builder: naming `gfx942` does not make a gfx950 builder produce gfx942 code.
 
-**`library` is arch-root-relative.** One `kpack/` per arch root; descriptor
-nesting does not move it.
+**`library` is relative to the descriptor that declared it**, and the archive is
+one per arch at the arch root — so a descriptor in a child folder climbs back out
+to reach it (`../../kpack/...`). Both halves matter: the runtime joins `library`
+onto the descriptor's own directory, but it bounds the result by the descriptor
+TREE, not by that directory. Writing the value arch-root-relative instead is
+correct only for a descriptor sitting flat at the arch root, and silently wrong
+for every nested one.
 
 ## Why this rocKE builder
 
