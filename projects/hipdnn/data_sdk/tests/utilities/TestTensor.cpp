@@ -925,3 +925,97 @@ TYPED_TEST(TensorSentinel, StridedTensorFilled)
         }
     }
 }
+
+/// A stride PERMUTATION must be iterated in index order, not linearly.
+///
+/// This is the regression guard for visitsInIndexOrder. The iterator used to pick its
+/// LinearIndex fast path on isPacked() alone, and isPacked() is
+/// (elementCount == elementSpace) -- true for ANY permutation of the strides, since a
+/// permutation spans exactly the same memory. So a [B,H,S,D] tensor declared with
+/// BSHD strides iterated linearly while every READ path (getIndexImpl) honoured the
+/// declared strides: writes and reads disagreed about which coordinate owns which byte,
+/// with no error anywhere.
+///
+/// That is not hypothetical. It made a rocKE SDPA kernel, which consumes BSHD, produce
+/// wrong numbers against a stride-aware CPU reference while the two "agreed" on every
+/// address -- and it was invisible at a single head, because with one head the two
+/// orderings are the same buffer.
+///
+/// The tensor below is deliberately a permutation: dims {2,3,4} with strides
+/// {12, 1, 3}, i.e. axis 1 is the fastest-varying in memory. elementCount == 24 ==
+/// elementSpace, so isPacked() is TRUE and the old code took the linear path.
+TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
+{
+    const std::vector<int64_t> dims{2, 3, 4};
+    const std::vector<int64_t> strides{12, 1, 3};
+
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
+
+    // The premise: this is exactly the case the old predicate could not distinguish.
+    EXPECT_TRUE(tensor.isPacked())
+        << "a permutation spans the same memory, so isPacked() must still be true here "
+           "-- if it is not, this test no longer covers the case it was written for";
+
+    // Write a distinct value per POSITION IN ITERATION ORDER, the way a random fill does.
+    float next = 1.0F;
+    for(auto valuePtr : tensor)
+    {
+        *static_cast<float*>(valuePtr) = next;
+        next += 1.0F;
+    }
+
+    // Read back BY COORDINATE. Iteration visits (b,h,s) with the last axis fastest, so
+    // the n-th value written must land on the n-th coordinate in that same order.
+    float expected = 1.0F;
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            for(int64_t i2 = 0; i2 < dims[2]; ++i2)
+            {
+                EXPECT_EQ(tensor.getHostValue(i0, i1, i2), expected)
+                    << "value at (" << i0 << "," << i1 << "," << i2
+                    << ") does not match its position in iteration order. The iterator "
+                       "wrote linearly while the read honoured the declared strides.";
+                expected += 1.0F;
+            }
+        }
+    }
+}
+
+/// The linear fast path must survive for genuinely row-major tensors.
+///
+/// The fix above is only correct if it does not quietly demote every packed tensor to
+/// the slower stride-aware walk. Row-major strides are the overwhelmingly common case
+/// and must still take LinearIndex; this asserts the observable half of that -- that
+/// iteration order and coordinate order agree, which is trivially true on the fast path
+/// and would also hold on the slow one, so it is a correctness guard rather than a
+/// performance one.
+TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
+{
+    const std::vector<int64_t> dims{2, 3, 4};
+    const std::vector<int64_t> strides{12, 4, 1};
+
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
+    EXPECT_TRUE(tensor.isPacked());
+
+    float next = 1.0F;
+    for(auto valuePtr : tensor)
+    {
+        *static_cast<float*>(valuePtr) = next;
+        next += 1.0F;
+    }
+
+    float expected = 1.0F;
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            for(int64_t i2 = 0; i2 < dims[2]; ++i2)
+            {
+                EXPECT_EQ(tensor.getHostValue(i0, i1, i2), expected);
+                expected += 1.0F;
+            }
+        }
+    }
+}

@@ -439,9 +439,31 @@ private:
         }
     }
 
+    /// True iff the strides are exactly the packed ROW-MAJOR strides for these dims,
+    /// i.e. walking memory linearly visits the logical elements in index order.
+    ///
+    /// isPacked() is NOT that question, and using it to gate the linear fast path was a
+    /// bug: it asks whether elementCount == elementSpace, which any PERMUTATION of the
+    /// strides also satisfies. A [B,H,S,D] tensor declared with BSHD strides spans
+    /// exactly the same memory as one declared BHSD, so isPacked() is true for both
+    /// while their index orders differ. Iterating such a tensor linearly then writes
+    /// values that do not correspond to the coordinates a later stride-aware read
+    /// (getIndexImpl) will fetch them by -- reads and writes silently disagree.
+    ///
+    /// RFC 0014 §7.2 records the same conflation from the ragged-tensor side and
+    /// proposes splitting the predicate; this is the iteration half of that split,
+    /// scoped to the one caller whose correctness depends on ORDER rather than extent.
+    ///
+    /// Defined out-of-line below: ITensor is only forward-declared at this point.
+    static bool visitsInIndexOrder(const ITensor& tensor);
+
     IndexType makeIndex(TensorType tensor, bool isEnd)
     {
-        if(tensor.get().isPacked())
+        // isPacked() gates the FAST PATH; visitsInIndexOrder gates its CORRECTNESS.
+        // Both are required: a ragged tensor reports isPacked() false despite regular
+        // -looking strides (RFC 0014 §4.5.7), and a stride permutation reports true
+        // while iterating out of index order.
+        if(tensor.get().isPacked() && visitsInIndexOrder(tensor.get()))
         {
             return LinearIndex(tensor, isEnd);
         }
@@ -575,6 +597,28 @@ protected:
 /// or use the same HIP stream as the migratable memory object backing the tensor.
 template <typename T>
 using ValueGenerator = std::function<void(T* data, size_t count)>;
+
+template <bool IsConst>
+bool ITensorIterator<IsConst>::visitsInIndexOrder(const ITensor& tensor)
+{
+    const auto& dims = tensor.dims();
+    const auto& strides = tensor.strides();
+    if(dims.size() != strides.size())
+    {
+        return false;
+    }
+
+    int64_t expected = 1;
+    for(size_t axis = dims.size(); axis-- > 0;)
+    {
+        if(strides[axis] != expected)
+        {
+            return false;
+        }
+        expected *= dims[axis];
+    }
+    return true;
+}
 
 template <typename T>
 class TensorBase : public ITensor
