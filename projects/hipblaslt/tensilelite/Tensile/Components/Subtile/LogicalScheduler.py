@@ -4262,49 +4262,6 @@ class LogicalScheduler:
         # its branch form depends on whether the tail-only initC lands inline or out of
         # line, which is only known after the cover splice runs below.
 
-        # ── Pre-loop cover / Change A: defer LDS read-address setup ──
-        # kernelBodySubtile stashed the A/B + scale LR-offset modules (lraTileAssignment,
-        # its DTL swap-vgpr init, lraTileAssignmentScaleSwizzled) on the writer instead of
-        # emitting them in the prologue. Splice them into the preloop right before the
-        # first wait_gr, so this ~750-cycle loop-invariant VALU runs while the prefetch
-        # buffer_loads are in flight (their only consumers -- the post-barrier ds_reads and
-        # main-loop LR swaps -- come after this point). Inserted BEFORE the guard fold so
-        # the address math is front-loaded into the shadow. The preloop is emitted
-        # unscheduled (schedule=False), so the sequential list splice lands them in order.
-        # TENSILE_PRELOOP_COVER_INTERLEAVE widens this from PLSIN1-only (Change A) to
-        # every subtile PGR>=1 kernel; see _preloopCoverInterleaveEligible. On PGR>=1:
-        #   level 1: GR(A) -> initC[0] -> GR(B) -> initC[1] -> cover -> GR(SA,SB)
-        #   level 2: initC dealt out per individual buffer_load across all of A/B,
-        #            then cover -> GR(SA,SB)
-        # so initC joins the LRA math inside the A/B prefetch shadow.
-        from Tensile.Common.Utilities import (preloopCoverInterleaveEnabled,
-                                              preloopCoverInterleaveLevel)
-        _coverFlag = preloopCoverInterleaveEnabled()
-        _pipelinedCover = _coverFlag and self.config.pgr >= 1
-        # Per-load dealing hides initC inside a single merged module, which would
-        # starve the PAP next-tile replay (make_subtile_pap_module stops at the first
-        # non-gr module), so keep it to non-PAP kernels.
-        _perLoadCover = (_pipelinedCover
-                         and preloopCoverInterleaveLevel() >= 2
-                         and not kernel.get("PrefetchAcrossPersistent"))
-        _lraDeferred = getattr(writer, "_deferredPreloopLraModules", None)
-        _coverDeferred = getattr(writer, "_deferredPreloopCoverModules", None)
-        _coverModules = None
-        if _coverFlag and _coverDeferred:
-            _coverModules = _coverDeferred
-        elif _lraDeferred:
-            _coverModules = _lraDeferred
-        if (self.config.pgr >= 1
-                and _coverModules
-                and not getattr(self, "_coverDeferredIntoPreloop", False)
-                and self._preloop_emitted
-                and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
-            em_list = self._preloop_emitted[0][0]
-            if self._splicePreloopCoverModules(em_list, _coverModules,
-                                               pipelined=_pipelinedCover,
-                                               perLoad=_perLoadCover):
-                self._coverDeferredIntoPreloop = True
-                self._lraDeferredIntoPreloop = True
 
         # ── PLSIN guard-hoist: fold into the preloop global-read shadow ──
         # computePostLoopFusedStore is pure loop-invariant SALU/VALU that writes the
