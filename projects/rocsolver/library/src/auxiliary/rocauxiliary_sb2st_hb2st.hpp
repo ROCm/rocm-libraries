@@ -324,7 +324,7 @@ __device__ void hb2st_helarf(const I xid, const I yid, I n, T* v, T tau, T* C, I
         if(xid == 0)
         {
             // todo: what about multiplying tau here?
-            s_work[yid] = value;
+            s_work[j] = value;
         }
     }
     __syncthreads();
@@ -366,7 +366,7 @@ __device__ void hb2st_helarf(const I xid, const I yid, I n, T* v, T tau, T* C, I
     {
         for(I i = xid; i < n; i += DIMX)
         {
-            C[i + j * ldc] -= tau * v[i] * conj(s_work[yid]) + conj(tau) * s_work[yid] * conj(v[i]);
+            C[i + j * ldc] -= tau * v[i] * conj(s_work[j]) + conj(tau) * s_work[i] * conj(v[j]);
         }
     }
 }
@@ -388,7 +388,8 @@ __device__ void hb2st_helarf(const I xid, const I yid, I n, T* v, T tau, T* C, I
 //  V           Array of Householder vectors.
 //  tau         Householder tau values.
 //  s_housev    Shared memory workspace for Householder vectors of size = kd.
-//  s_work      Shared memory workspace of size = block y dimension.
+//  s_work      Shared memory workspace of size = kd for use_hemv = true
+//              or block y dimension (DIMY) for use_hemv = false.
 //
 template <typename T, typename I, typename S>
 __device__ void hb2st_task(const I xid,
@@ -795,8 +796,9 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
 
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 
+    // reduct could be size DIMY if use_hemv = false.
     size_t s_mem_size_housev = sizeof(T) * kd;
-    size_t s_mem_size_reduct = sizeof(T) * DIMY;
+    size_t s_mem_size_reduct = sizeof(T) * std::max(kd, (I)DIMY);
     size_t s_mem_size = s_mem_size_housev + s_mem_size_reduct;
 
     if(s_mem_size > props->sharedMemPerBlock)
