@@ -36,7 +36,9 @@ template <index_t BlockSize,
           index_t NRepeat,
           index_t KPack,
           index_t KInner,
-          bool TransposeC = false>
+          bool TransposeC       = false,
+          bool UseLdsTransposeA = false,
+          bool UseLdsTransposeB = false>
 struct BlockwiseGemmWmmaops_pipeline_base
 {
     static constexpr auto I0 = Number<0>{};
@@ -70,8 +72,12 @@ struct BlockwiseGemmWmmaops_pipeline_base
                                                TransposeC>{};
 
     static constexpr index_t KPerThread = wmma_gemm.wmma_instr.k_per_blk * KInner;
-    static constexpr index_t A_K1       = ck::math::min(AWmmaTileDesc{}.GetLength(I6), KPerThread);
-    static constexpr index_t B_K1       = ck::math::min(BWmmaTileDesc{}.GetLength(I6), KPerThread);
+    static constexpr index_t A_K1       = UseLdsTransposeA
+                                              ? ck::math::min(AWmmaTileDesc{}.GetLength(I5), KPerThread)
+                                              : ck::math::min(AWmmaTileDesc{}.GetLength(I6), KPerThread);
+    static constexpr index_t B_K1       = UseLdsTransposeB
+                                              ? ck::math::min(BWmmaTileDesc{}.GetLength(I5), KPerThread)
+                                              : ck::math::min(BWmmaTileDesc{}.GetLength(I6), KPerThread);
 
     static_assert(KPack % (A_K1 * A_KRow) == 0, "wrong!");
     static_assert(KPack % (B_K1 * B_KRow) == 0, "wrong!");
@@ -282,8 +288,14 @@ struct BlockwiseGemmWmmaops_pipeline_base
 #else
         const auto wmma_krow = 0;
 #endif
-
-        return make_tuple(0, 0, 0, waveId_m, wmma_krow, wmma_a_idx, 0);
+        if constexpr(UseLdsTransposeA)
+        {
+            return make_tuple(0, 0, 0, waveId_m, wmma_krow, wmma_a_idx % 8, (wmma_a_idx / 8) * 8);
+        }
+        else
+        {
+            return make_tuple(0, 0, 0, waveId_m, wmma_krow, wmma_a_idx, 0);
+        }
     }
 
     __device__ static auto CalculateBThreadOriginDataIndex()
@@ -300,7 +312,14 @@ struct BlockwiseGemmWmmaops_pipeline_base
         const auto wmma_krow = 0;
 #endif
 
-        return make_tuple(0, 0, 0, waveId_n, wmma_krow, wmma_b_idx, 0);
+        if constexpr(UseLdsTransposeB)
+        {
+            return make_tuple(0, 0, 0, waveId_n, wmma_krow, wmma_b_idx % 8, (wmma_b_idx / 8) * 8);
+        }
+        else
+        {
+            return make_tuple(0, 0, 0, waveId_n, wmma_krow, wmma_b_idx, 0);
+        }
     }
 
     template <index_t m0, index_t n0>
@@ -472,7 +491,8 @@ struct BlockwiseGemmWmmaops_pipeline_base
                                          Sequence<0, 1, 2, 3, 4, 5, 6>,
                                          6,
                                          A_K1,
-                                         A_K1>;
+                                         A_K1,
+                                         UseLdsTransposeA>;
 
     using BThreadCopy =
         ThreadwiseTensorSliceTransfer_v4<BDataType,
@@ -483,7 +503,8 @@ struct BlockwiseGemmWmmaops_pipeline_base
                                          Sequence<0, 1, 2, 3, 4, 5, 6>,
                                          6,
                                          B_K1,
-                                         B_K1>;
+                                         B_K1,
+                                         UseLdsTransposeB>;
 
     AThreadCopy a_thread_copy_;
     BThreadCopy b_thread_copy_;
