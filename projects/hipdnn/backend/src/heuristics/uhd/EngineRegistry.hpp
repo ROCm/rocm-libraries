@@ -57,6 +57,7 @@ struct UhdConfig
     std::string modelHash; // checksum of model artifact for integrity validation
     std::vector<std::string> staticOrderFields = {"priority", "id"}; // for static_order
     std::string customLibrarySymbol; // for custom_library: symbol name in .so
+    std::string nativeSymbol; // for native: symbol registered with NativeScorerRegistry
 };
 
 /// @brief Engine registration entry (mock for UED).

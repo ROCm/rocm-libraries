@@ -151,6 +151,7 @@ std::optional<UhdConfig>
         case UhdAdapter::TABLE: return "table";
         case UhdAdapter::ONNX: return "onnx";
         case UhdAdapter::CUSTOM_LIBRARY: return "custom_library";
+        case UhdAdapter::NATIVE: return "native";
         default: return "unknown";
         }
     }(uhd->adapter());
@@ -192,6 +193,12 @@ std::optional<UhdConfig>
         config.customLibrarySymbol = uhd->custom_library_symbol()->str();
     }
 
+    // Native scorer symbol
+    if(uhd->native_symbol() != nullptr)
+    {
+        config.nativeSymbol = uhd->native_symbol()->str();
+    }
+
     // Validate adapter-specific requirements
     if(config.adapterType == "tree_data" || config.adapterType == "onnx" ||
        config.adapterType == "custom_library")
@@ -215,6 +222,24 @@ std::optional<UhdConfig>
     {
         HIPDNN_SDK_LOG_ERROR("UHD custom_library adapter requires custom_library_symbol");
         return std::nullopt;
+    }
+
+    if(config.adapterType == "native")
+    {
+        if(config.nativeSymbol.empty())
+        {
+            HIPDNN_SDK_LOG_ERROR("UHD native adapter requires native_symbol");
+            return std::nullopt;
+        }
+
+        // The scorer is compiled in, so an artifact path signals a descriptor
+        // that meant custom_library.
+        if(!config.modelArtifactPath.empty())
+        {
+            HIPDNN_SDK_LOG_ERROR("UHD native adapter must not carry model_artifact_path; "
+                                 << "use custom_library for a scorer shipped as a .so");
+            return std::nullopt;
+        }
     }
 
     return config;

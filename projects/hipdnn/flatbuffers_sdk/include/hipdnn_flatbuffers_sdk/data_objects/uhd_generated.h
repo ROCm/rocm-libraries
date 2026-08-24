@@ -49,35 +49,42 @@ enum class UhdAdapter : int8_t {
   ONNX = 3,
   /// Custom compiled scorer loaded via dlopen. Engine supplies .so artifact.
   CUSTOM_LIBRARY = 4,
+  /// Scorer compiled into the engine, resolved by symbol from the engine's
+  /// registered scorers. No model artifact. RFC 0019 §7.1: the escape hatch
+  /// for heuristics no model expresses, and the baseline TREE_DATA overhead
+  /// is measured against.
+  NATIVE = 5,
   MIN = STATIC_ORDER,
-  MAX = CUSTOM_LIBRARY
+  MAX = NATIVE
 };
 
-inline const UhdAdapter (&EnumValuesUhdAdapter())[5] {
+inline const UhdAdapter (&EnumValuesUhdAdapter())[6] {
   static const UhdAdapter values[] = {
     UhdAdapter::STATIC_ORDER,
     UhdAdapter::TREE_DATA,
     UhdAdapter::TABLE,
     UhdAdapter::ONNX,
-    UhdAdapter::CUSTOM_LIBRARY
+    UhdAdapter::CUSTOM_LIBRARY,
+    UhdAdapter::NATIVE
   };
   return values;
 }
 
 inline const char * const *EnumNamesUhdAdapter() {
-  static const char * const names[6] = {
+  static const char * const names[7] = {
     "STATIC_ORDER",
     "TREE_DATA",
     "TABLE",
     "ONNX",
     "CUSTOM_LIBRARY",
+    "NATIVE",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameUhdAdapter(UhdAdapter e) {
-  if (::flatbuffers::IsOutRange(e, UhdAdapter::STATIC_ORDER, UhdAdapter::CUSTOM_LIBRARY)) return "";
+  if (::flatbuffers::IsOutRange(e, UhdAdapter::STATIC_ORDER, UhdAdapter::NATIVE)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesUhdAdapter()[index];
 }
@@ -294,6 +301,7 @@ struct UHDT : public ::flatbuffers::NativeTable {
   std::string model_hash{};
   std::vector<std::string> static_order_fields{};
   std::string custom_library_symbol{};
+  std::string native_symbol{};
   UHDT() = default;
   UHDT(const UHDT &o);
   UHDT(UHDT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -327,7 +335,8 @@ struct UHD FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_MODEL_ARTIFACT_PATH = 20,
     VT_MODEL_HASH = 22,
     VT_STATIC_ORDER_FIELDS = 24,
-    VT_CUSTOM_LIBRARY_SYMBOL = 26
+    VT_CUSTOM_LIBRARY_SYMBOL = 26,
+    VT_NATIVE_SYMBOL = 28
   };
   /// Unique identifier (UUID/GUID).
   const ::flatbuffers::String *id() const {
@@ -420,6 +429,14 @@ struct UHD FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::String *mutable_custom_library_symbol() {
     return GetPointer<::flatbuffers::String *>(VT_CUSTOM_LIBRARY_SYMBOL);
   }
+  /// For NATIVE adapter: symbol name the engine registered its compiled
+  /// scorer under. Resolved in-process; no artifact is loaded.
+  const ::flatbuffers::String *native_symbol() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_NATIVE_SYMBOL);
+  }
+  ::flatbuffers::String *mutable_native_symbol() {
+    return GetPointer<::flatbuffers::String *>(VT_NATIVE_SYMBOL);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffsetRequired(verifier, VT_ID) &&
@@ -448,6 +465,8 @@ struct UHD FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVectorOfStrings(static_order_fields()) &&
            VerifyOffset(verifier, VT_CUSTOM_LIBRARY_SYMBOL) &&
            verifier.VerifyString(custom_library_symbol()) &&
+           VerifyOffset(verifier, VT_NATIVE_SYMBOL) &&
+           verifier.VerifyString(native_symbol()) &&
            verifier.EndTable();
   }
   UHDT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -495,6 +514,9 @@ struct UHDBuilder {
   void add_custom_library_symbol(::flatbuffers::Offset<::flatbuffers::String> custom_library_symbol) {
     fbb_.AddOffset(UHD::VT_CUSTOM_LIBRARY_SYMBOL, custom_library_symbol);
   }
+  void add_native_symbol(::flatbuffers::Offset<::flatbuffers::String> native_symbol) {
+    fbb_.AddOffset(UHD::VT_NATIVE_SYMBOL, native_symbol);
+  }
   explicit UHDBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -520,8 +542,10 @@ inline ::flatbuffers::Offset<UHD> CreateUHD(
     ::flatbuffers::Offset<::flatbuffers::String> model_artifact_path = 0,
     ::flatbuffers::Offset<::flatbuffers::String> model_hash = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> static_order_fields = 0,
-    ::flatbuffers::Offset<::flatbuffers::String> custom_library_symbol = 0) {
+    ::flatbuffers::Offset<::flatbuffers::String> custom_library_symbol = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> native_symbol = 0) {
   UHDBuilder builder_(_fbb);
+  builder_.add_native_symbol(native_symbol);
   builder_.add_custom_library_symbol(custom_library_symbol);
   builder_.add_static_order_fields(static_order_fields);
   builder_.add_model_hash(model_hash);
@@ -550,7 +574,8 @@ inline ::flatbuffers::Offset<UHD> CreateUHDDirect(
     const char *model_artifact_path = nullptr,
     const char *model_hash = nullptr,
     const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *static_order_fields = nullptr,
-    const char *custom_library_symbol = nullptr) {
+    const char *custom_library_symbol = nullptr,
+    const char *native_symbol = nullptr) {
   auto id__ = id ? _fbb.CreateString(id) : 0;
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto derived__ = derived ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntry>>(*derived) : 0;
@@ -561,6 +586,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHDDirect(
   auto model_hash__ = model_hash ? _fbb.CreateString(model_hash) : 0;
   auto static_order_fields__ = static_order_fields ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*static_order_fields) : 0;
   auto custom_library_symbol__ = custom_library_symbol ? _fbb.CreateString(custom_library_symbol) : 0;
+  auto native_symbol__ = native_symbol ? _fbb.CreateString(native_symbol) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateUHD(
       _fbb,
       id__,
@@ -574,7 +600,8 @@ inline ::flatbuffers::Offset<UHD> CreateUHDDirect(
       model_artifact_path__,
       model_hash__,
       static_order_fields__,
-      custom_library_symbol__);
+      custom_library_symbol__,
+      native_symbol__);
 }
 
 ::flatbuffers::Offset<UHD> CreateUHD(::flatbuffers::FlatBufferBuilder &_fbb, const UHDT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -679,7 +706,8 @@ inline bool operator==(const UHDT &lhs, const UHDT &rhs) {
       (lhs.model_artifact_path == rhs.model_artifact_path) &&
       (lhs.model_hash == rhs.model_hash) &&
       (lhs.static_order_fields == rhs.static_order_fields) &&
-      (lhs.custom_library_symbol == rhs.custom_library_symbol);
+      (lhs.custom_library_symbol == rhs.custom_library_symbol) &&
+      (lhs.native_symbol == rhs.native_symbol);
 }
 
 inline bool operator!=(const UHDT &lhs, const UHDT &rhs) {
@@ -698,7 +726,8 @@ inline UHDT::UHDT(const UHDT &o)
         model_artifact_path(o.model_artifact_path),
         model_hash(o.model_hash),
         static_order_fields(o.static_order_fields),
-        custom_library_symbol(o.custom_library_symbol) {
+        custom_library_symbol(o.custom_library_symbol),
+        native_symbol(o.native_symbol) {
   derived.reserve(o.derived.size());
   for (const auto &derived_ : o.derived) { derived.emplace_back((derived_) ? new hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntryT(*derived_) : nullptr); }
 }
@@ -716,6 +745,7 @@ inline UHDT &UHDT::operator=(UHDT o) FLATBUFFERS_NOEXCEPT {
   std::swap(model_hash, o.model_hash);
   std::swap(static_order_fields, o.static_order_fields);
   std::swap(custom_library_symbol, o.custom_library_symbol);
+  std::swap(native_symbol, o.native_symbol);
   return *this;
 }
 
@@ -740,6 +770,7 @@ inline void UHD::UnPackTo(UHDT *_o, const ::flatbuffers::resolver_function_t *_r
   { auto _e = model_hash(); if (_e) _o->model_hash = _e->str(); }
   { auto _e = static_order_fields(); if (_e) { _o->static_order_fields.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->static_order_fields[_i] = _e->Get(_i)->str(); } } else { _o->static_order_fields.resize(0); } }
   { auto _e = custom_library_symbol(); if (_e) _o->custom_library_symbol = _e->str(); }
+  { auto _e = native_symbol(); if (_e) _o->native_symbol = _e->str(); }
 }
 
 inline ::flatbuffers::Offset<UHD> UHD::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UHDT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -762,6 +793,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHD(::flatbuffers::FlatBufferBuilder &_f
   auto _model_hash = _o->model_hash.empty() ? 0 : _fbb.CreateString(_o->model_hash);
   auto _static_order_fields = _o->static_order_fields.size() ? _fbb.CreateVectorOfStrings(_o->static_order_fields) : 0;
   auto _custom_library_symbol = _o->custom_library_symbol.empty() ? 0 : _fbb.CreateString(_o->custom_library_symbol);
+  auto _native_symbol = _o->native_symbol.empty() ? 0 : _fbb.CreateString(_o->native_symbol);
   return hipdnn_flatbuffers_sdk::data_objects::CreateUHD(
       _fbb,
       _id,
@@ -775,7 +807,8 @@ inline ::flatbuffers::Offset<UHD> CreateUHD(::flatbuffers::FlatBufferBuilder &_f
       _model_artifact_path,
       _model_hash,
       _static_order_fields,
-      _custom_library_symbol);
+      _custom_library_symbol,
+      _native_symbol);
 }
 
 inline const hipdnn_flatbuffers_sdk::data_objects::UHD *GetUHD(const void *buf) {

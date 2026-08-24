@@ -74,6 +74,7 @@ add_library(
     heuristics/uhd/adapters/TableAdapter.cpp
     heuristics/uhd/adapters/OnnxAdapter.cpp
     heuristics/uhd/adapters/CustomLibraryAdapter.cpp
+    heuristics/uhd/adapters/NativeAdapter.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
     plugin/HeuristicPlugin.cpp

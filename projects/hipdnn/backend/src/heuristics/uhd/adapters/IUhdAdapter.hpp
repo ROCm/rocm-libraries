@@ -21,6 +21,7 @@ enum class UhdAdapterType
     TABLE = 2,
     ONNX = 3,
     CUSTOM_LIBRARY = 4,
+    NATIVE = 5,
 };
 
 /// @brief Abstract interface for UHD model adapters.

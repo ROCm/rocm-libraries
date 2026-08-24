@@ -130,6 +130,7 @@ add_executable(
     heuristics/TestFeatureExtractor.cpp
     heuristics/TestDerivedValues.cpp
     heuristics/TestTreeDataAdapter.cpp
+    heuristics/TestNativeAdapter.cpp
     heuristics/TestTableAdapter.cpp
     heuristics/TestOnnxAdapter.cpp
     heuristics/TestCustomLibraryAdapter.cpp

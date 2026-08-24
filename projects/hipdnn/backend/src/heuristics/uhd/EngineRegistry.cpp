@@ -9,6 +9,7 @@
 #include "adapters/TableAdapter.hpp"
 #include "adapters/OnnxAdapter.hpp"
 #include "adapters/CustomLibraryAdapter.hpp"
+#include "adapters/NativeAdapter.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
@@ -324,6 +325,17 @@ std::shared_ptr<IUhdAdapter>
                                                   cfg.featuresHash);
         }
     }
+    else if(cfg.adapterType == "native")
+    {
+        // NativeAdapter resolves a scorer the engine registered in-process;
+        // nothing is loaded from disk (RFC 0019 §7.1).
+        if(!cfg.nativeSymbol.empty())
+        {
+            adapter = NativeAdapter::resolve(cfg.nativeSymbol,
+                                             cfg.featuresSignature.size(),
+                                             cfg.featuresHash);
+        }
+    }
 
     // Cache and return
     entry->cachedAdapters[cacheKey] = adapter;
@@ -380,6 +392,17 @@ std::shared_ptr<IUhdAdapter>
                                                   cfg.customLibrarySymbol,
                                                   cfg.featuresSignature.size(),
                                                   cfg.featuresHash);
+        }
+    }
+    else if(cfg.adapterType == "native")
+    {
+        // NativeAdapter resolves a scorer the engine registered in-process;
+        // nothing is loaded from disk (RFC 0019 §7.1).
+        if(!cfg.nativeSymbol.empty())
+        {
+            adapter = NativeAdapter::resolve(cfg.nativeSymbol,
+                                             cfg.featuresSignature.size(),
+                                             cfg.featuresHash);
         }
     }
 
