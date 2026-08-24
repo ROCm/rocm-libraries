@@ -34,6 +34,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPassTestSupport.hpp"
 
@@ -645,6 +646,18 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         return segmentEndAfter(BasicBlock::iterator(anchorInst), parent->end());
     };
 
+    // findSccDeadPointBelow stops before \p limit, so when the wait itself is the first
+    // dead spot the walk returns null even though co-locating with the wait is valid.
+    // UNREACHABLE only when SCC is still live in front of the wait.
+    auto resolveSccDeadBelow = [&](StinkyInstruction* from, const IRBase* limit) -> IRBase* {
+        StinkyInstruction* below = findSccDeadPointBelow(from, limit);
+        if (below != nullptr) return static_cast<IRBase*>(below);
+        if (limit == static_cast<const IRBase*>(referenceAnchor) &&
+            !isSccLiveBefore(referenceAnchor))
+            return defaultAnchor;
+        STINKY_UNREACHABLE("Rule 3 signal anchor: SCC live from scan start to wait");
+    };
+
     // A climb that ends up further than maxLeadCycles from the wait has cleared a range too
     // long to be worth it. Fall the other way instead: down from the lead point to the first
     // spot below the range, which is nearer the wait than the lead asked for.
@@ -657,15 +670,13 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         if (anchor == defaultAnchor) return anchor;
         auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
         if (anchorInst == nullptr || !isSccLiveBefore(anchorInst)) return anchor;
-        StinkyInstruction* below = findSccDeadPointBelow(anchorInst, sccLimit(anchorInst));
-        return (below != nullptr) ? static_cast<IRBase*>(below) : defaultAnchor;
+        return resolveSccDeadBelow(anchorInst, sccLimit(anchorInst));
     };
 
     auto settle = [&](IRBase* climbed, int64_t totalAccum) -> IRBase* {
         if (leadPoint == nullptr || climbed == leadPoint) return climbed;
         if (totalAccum <= maxLeadCycles) return climbed;
-        StinkyInstruction* below = findSccDeadPointBelow(leadPoint, sccLimit(leadPoint));
-        return (below != nullptr) ? static_cast<IRBase*>(below) : defaultAnchor;
+        return resolveSccDeadBelow(leadPoint, sccLimit(leadPoint));
     };
 
     // Whether the anchor came to rest in the wait's own segment after all. Both corrections
@@ -703,9 +714,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // toward the wait instead of crossing into the preheader.
     auto downwardFromLeadMet = [&]() -> Rule3SignalAnchor {
         if (leadPoint == nullptr) return report(clearSccNote(defaultAnchor));
-        StinkyInstruction* dead = findSccDeadPointBelow(leadPoint, referenceAnchor);
-        if (dead == nullptr) return report(clearSccNote(defaultAnchor));
-        return report(clearSccNote(static_cast<IRBase*>(dead)));
+        return report(clearSccNote(resolveSccDeadBelow(leadPoint, referenceAnchor)));
     };
 
     // kRule3CrossLoop true only: wait→head; part B latch→anchor for the remainder.

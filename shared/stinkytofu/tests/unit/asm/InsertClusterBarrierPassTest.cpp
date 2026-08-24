@@ -1787,8 +1787,10 @@ TEST_F(InsertClusterBarrierPassTest,
     StinkyInstruction* preheaderSccDef = createSSubWritingSgprAndScc(/*sgpr=*/90);
     openLoop();
     for (int i = 0; i < 70; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
-    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    // Above the trigger: backward climb steps over this reader, but forward SCC scans from
+    // the wait do not, so downwardFromLeadMet can still find a dead point before the wait.
     createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
     for (int i = 0; i < 50; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
     appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
     closeLoop();
@@ -1808,8 +1810,7 @@ TEST_F(InsertClusterBarrierPassTest,
     EXPECT_TRUE(anchorInWaitSegment(found.anchor, segBegin, trigger))
         << "signal anchor must stay inside the wait segment:" << blockListing(*bb);
     EXPECT_EQ(found.anchor, static_cast<IRBase*>(trigger))
-        << "with SCC live down to the wait the anchor falls back to the trigger:"
-        << blockListing(*bb);
+        << "downward SCC scan should fall back to co-locating with the wait:" << blockListing(*bb);
     EXPECT_EQ(found.preClampOutOfSegmentAnchor, nullptr)
         << "must not nominate a preheader anchor once loop-head continue is removed:"
         << blockListing(*bb);
