@@ -375,52 +375,40 @@ rocblas_status rocsolver_zgemm_strided_batched(rocblas_handle handle,
                                                rocblas_int batch_count);
 
 rocblas_status rocsolver_slaset(rocblas_handle handle,
-                                char const uplo,
-                                rocblas_int const m,
-                                rocblas_int const n,
-                                float const alpha,
-                                float const beta,
+                                rocblas_fill uplo,
+                                rocblas_int m,
+                                rocblas_int n,
+                                float offdiag,
+                                float diag,
                                 float* A,
-                                rocblas_stride const shiftA,
-                                rocblas_int const lda,
-                                rocblas_stride const strideA,
-                                rocblas_int const batch_count);
+                                rocblas_int lda);
 
 rocblas_status rocsolver_dlaset(rocblas_handle handle,
-                                char const uplo,
-                                rocblas_int const m,
-                                rocblas_int const n,
-                                double const alpha,
-                                double const beta,
+                                rocblas_fill uplo,
+                                rocblas_int m,
+                                rocblas_int n,
+                                double offdiag,
+                                double diag,
                                 double* A,
-                                rocblas_stride const shiftA,
-                                rocblas_int const lda,
-                                rocblas_stride const strideA,
-                                rocblas_int const batch_count);
+                                rocblas_int lda);
 
 rocblas_status rocsolver_claset(rocblas_handle handle,
-                                char const uplo,
-                                rocblas_int const m,
-                                rocblas_int const n,
-                                rocblas_float_complex const alpha,
-                                rocblas_float_complex const beta,
+                                rocblas_fill uplo,
+                                rocblas_int m,
+                                rocblas_int n,
+                                rocblas_float_complex offdiag,
+                                rocblas_float_complex diag,
                                 rocblas_float_complex* A,
-                                rocblas_stride const shiftA,
-                                rocblas_int const lda,
-                                rocblas_stride const strideA,
-                                rocblas_int const batch_count);
+                                rocblas_int lda);
 
 rocblas_status rocsolver_zlaset(rocblas_handle handle,
-                                char const uplo,
-                                rocblas_int const m,
-                                rocblas_int const n,
-                                rocblas_double_complex const alpha,
-                                rocblas_double_complex const beta,
+                                rocblas_fill uplo,
+                                rocblas_int m,
+                                rocblas_int n,
+                                rocblas_double_complex offdiag,
+                                rocblas_double_complex diag,
                                 rocblas_double_complex* A,
-                                rocblas_stride const shiftA,
-                                rocblas_int const lda,
-                                rocblas_stride const strideA,
-                                rocblas_int const batch_count);
+                                rocblas_int lda);
 
 /******************** sb2st/hb2st ********************/
 rocblas_status rocsolver_ssb2st(rocblas_handle handle,
@@ -1644,63 +1632,51 @@ rocblas_status rocsolver_zsytrs2_batched_64(rocblas_handle handle,
 
 /******************** laset ********************/
 inline rocblas_status rocsolver_laset(rocblas_handle handle,
-                                      char uplo,
+                                      rocblas_fill uplo,
                                       rocblas_int m,
                                       rocblas_int n,
-                                      float alpha,
-                                      float beta,
+                                      float offdiag,
+                                      float diag,
                                       float* A,
-                                      rocblas_stride shiftA,
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      rocblas_int batch_count)
+                                      rocblas_int lda)
 {
-    return rocsolver_slaset(handle, uplo, m, n, alpha, beta, A, shiftA, lda, strideA, batch_count);
+    return rocsolver_slaset(handle, uplo, m, n, offdiag, diag, A, lda);
 }
 
 inline rocblas_status rocsolver_laset(rocblas_handle handle,
-                                      char uplo,
+                                      rocblas_fill uplo,
                                       rocblas_int m,
                                       rocblas_int n,
-                                      double alpha,
-                                      double beta,
+                                      double offdiag,
+                                      double diag,
                                       double* A,
-                                      rocblas_stride shiftA,
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      rocblas_int batch_count)
+                                      rocblas_int lda)
 {
-    return rocsolver_dlaset(handle, uplo, m, n, alpha, beta, A, shiftA, lda, strideA, batch_count);
+    return rocsolver_dlaset(handle, uplo, m, n, offdiag, diag, A, lda);
 }
 
 inline rocblas_status rocsolver_laset(rocblas_handle handle,
-                                      char uplo,
+                                      rocblas_fill uplo,
                                       rocblas_int m,
                                       rocblas_int n,
-                                      rocblas_float_complex alpha,
-                                      rocblas_float_complex beta,
+                                      rocblas_float_complex offdiag,
+                                      rocblas_float_complex diag,
                                       rocblas_float_complex* A,
-                                      rocblas_stride shiftA,
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      rocblas_int batch_count)
+                                      rocblas_int lda)
 {
-    return rocsolver_claset(handle, uplo, m, n, alpha, beta, A, shiftA, lda, strideA, batch_count);
+    return rocsolver_claset(handle, uplo, m, n, offdiag, diag, A, lda);
 }
 
 inline rocblas_status rocsolver_laset(rocblas_handle handle,
-                                      char uplo,
+                                      rocblas_fill uplo,
                                       rocblas_int m,
                                       rocblas_int n,
-                                      rocblas_double_complex alpha,
-                                      rocblas_double_complex beta,
+                                      rocblas_double_complex offdiag,
+                                      rocblas_double_complex diag,
                                       rocblas_double_complex* A,
-                                      rocblas_stride shiftA,
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      rocblas_int batch_count)
+                                      rocblas_int lda)
 {
-    return rocsolver_zlaset(handle, uplo, m, n, alpha, beta, A, shiftA, lda, strideA, batch_count);
+    return rocsolver_zlaset(handle, uplo, m, n, offdiag, diag, A, lda);
 }
 
 /******************** GEMM ********************/
