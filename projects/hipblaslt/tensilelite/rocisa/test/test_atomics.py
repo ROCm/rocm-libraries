@@ -25,11 +25,10 @@ from rocisa.instruction import (
     SAtomicUmaxX2,
 )
 
-_ISA = (9, 5, 0)
 
-
-@pytest.fixture(scope="module", autouse=True)
-def _isa_context():
+@pytest.fixture(scope="module", autouse=True, params=[(9, 4, 2), (9, 5, 0)], ids=rocisa.isaToGfx)
+def _isa_context(request):
+    isa = request.param
     rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
     search_path = os.pathsep.join(
         [
@@ -38,8 +37,8 @@ def _isa_context():
         ]
     )
     assembler = shutil.which("amdclang++", path=search_path) or "amdclang++"
-    rocisa.rocIsa.getInstance().init(_ISA, assembler, False)
-    rocisa.rocIsa.getInstance().setKernel(_ISA, 64)
+    rocisa.rocIsa.getInstance().init(isa, assembler, False)
+    rocisa.rocIsa.getInstance().setKernel(isa, 64)
 
 
 def test_global_atomic_add_u32_glc_emits_sc0():
