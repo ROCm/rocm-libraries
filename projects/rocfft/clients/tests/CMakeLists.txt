@@ -27,10 +27,10 @@ cmake_minimum_required( VERSION 3.16 )
 if( WIN32 )
   set( CMAKE_INSTALL_PREFIX "${PROJECT_BINARY_DIR}/package" CACHE PATH
     "Install path prefix, prepended onto install directories" )
-else( )
+else()
   set( CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH
     "Install path prefix, prepended onto install directories" )
-endif( )
+endif()
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
@@ -40,8 +40,10 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( rocfft-clients-tests LANGUAGES CXX )
-
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( rocfft-clients-tests LANGUAGES CXX C )
+endif()
+  
 set(CMAKE_CXX_STANDARD 20)
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )

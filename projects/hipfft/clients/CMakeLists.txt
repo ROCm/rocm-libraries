@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -51,11 +51,16 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-set( HIPFFT_CLIENTS_BUILD_SCOPE ON )
-
-# This project may compile dependencies for clients
-project( hipfft-clients LANGUAGES CXX )
-
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  # Declare a project only if we are building from the current directory
+  # This project may compile dependencies for clients
+  project( hipfft-clients LANGUAGES CXX )
+  set( BUILD_CLIENTS_SAMPLES ON)
+  set( BUILD_CLIENTS_TESTS ON)
+  set( BUILD_CLIENTS_BENCH ON)
+  find_package( hipfft REQUIRED CONFIG PATHS )
+endif()
+  
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
 include( build-options )
