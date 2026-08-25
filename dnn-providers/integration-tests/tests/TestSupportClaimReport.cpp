@@ -30,6 +30,13 @@ SupportResult makeResult(SupportVerdict v)
                          {}};
 }
 
+SupportResult
+    makeResultFor(SupportVerdict v, const std::string& bundlePath, const std::string& engine)
+{
+    return SupportResult{
+        v, bundlePath, engine, "gfx942", "linux", "detail", hipdnn_frontend::ErrorCode::OK, {}};
+}
+
 class TestSupportClaimReport : public ::testing::Test
 {
 protected:
@@ -370,6 +377,75 @@ TEST_F(TestSupportClaimReport, MultiEngineQueriedCountIsPerGraph)
     const auto output = oss.str();
 
     EXPECT_NE(output.find("1 queried (2 verdicts)"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// printMatrix: op-family × engine table
+// ---------------------------------------------------------------------------
+
+TEST_F(TestSupportClaimReport, PrintMatrixIsNoOpWhenEmpty)
+{
+    std::ostringstream oss;
+    SupportClaimReport::get().printMatrix({}, oss);
+    EXPECT_TRUE(oss.str().empty());
+}
+
+TEST_F(TestSupportClaimReport, PrintMatrixShowsOpFamilyRows)
+{
+    SupportClaimReport::get().record(
+        makeResultFor(SupportVerdict::SATISFIED, "quick/Batchnorm/Default/Small.json", "ENGINE_A"));
+    SupportClaimReport::get().record(
+        makeResultFor(SupportVerdict::SATISFIED, "quick/SdpaFwd/Default/Base.json", "ENGINE_A"));
+
+    std::ostringstream oss;
+    SupportClaimReport::get().printMatrix({"ENGINE_A"}, oss);
+    const auto output = oss.str();
+
+    EXPECT_NE(output.find("SUPPORT MATRIX"), std::string::npos);
+    EXPECT_NE(output.find("Batchnorm"), std::string::npos);
+    EXPECT_NE(output.find("SdpaFwd"), std::string::npos);
+}
+
+TEST_F(TestSupportClaimReport, PrintMatrixShowsFailureFraction)
+{
+    SupportClaimReport::get().record(
+        makeResultFor(SupportVerdict::SATISFIED, "quick/Conv/A/1.json", "ENGINE_A"));
+    SupportClaimReport::get().record(
+        makeResultFor(SupportVerdict::CLAIM_BROKEN, "quick/Conv/A/2.json", "ENGINE_A"));
+
+    std::ostringstream oss;
+    SupportClaimReport::get().printMatrix({"ENGINE_A"}, oss);
+    const auto output = oss.str();
+
+    EXPECT_NE(output.find("1/2"), std::string::npos);
+}
+
+TEST_F(TestSupportClaimReport, PrintMatrixShowsDashForMissingEngine)
+{
+    SupportClaimReport::get().record(
+        makeResultFor(SupportVerdict::SATISFIED, "quick/Conv/A/1.json", "ENGINE_A"));
+
+    std::ostringstream oss;
+    SupportClaimReport::get().printMatrix({"ENGINE_A", "ENGINE_B"}, oss);
+    const auto output = oss.str();
+
+    EXPECT_NE(output.find("-"), std::string::npos);
+}
+
+TEST_F(TestSupportClaimReport, PrintMatrixHandlesSweepHashSuffix)
+{
+    SupportClaimReport::get().record(
+        makeResultFor(SupportVerdict::SATISFIED, "quick/Pool/sweep.json#case0", "ENGINE_A"));
+    SupportClaimReport::get().record(
+        makeResultFor(SupportVerdict::SATISFIED, "quick/Pool/sweep.json#case1", "ENGINE_A"));
+
+    std::ostringstream oss;
+    SupportClaimReport::get().printMatrix({"ENGINE_A"}, oss);
+    const auto output = oss.str();
+
+    EXPECT_NE(output.find("Pool"), std::string::npos);
+    // Both sweep cases should aggregate under Pool, count = 2
+    EXPECT_NE(output.find("2"), std::string::npos);
 }
 
 // NOLINTEND(readability-identifier-naming)

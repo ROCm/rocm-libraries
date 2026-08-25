@@ -187,14 +187,11 @@ std::string formatVerdictMessage(const SupportResult& result)
     return os.str();
 }
 
-namespace
-{
-
-std::vector<SupportResult> evaluateAllEngines(hipdnn_frontend::ErrorCode errorCode,
-                                              const std::vector<int64_t>& rankedIds,
-                                              const SupportClaimLocator& locator,
-                                              const std::vector<LoadedEngine>& loadedEngines,
-                                              std::string_view queryMessage)
+std::vector<SupportResult> observeAllSupport(hipdnn_frontend::ErrorCode errorCode,
+                                             const std::vector<int64_t>& rankedIds,
+                                             const SupportClaimLocator& locator,
+                                             const std::vector<LoadedEngine>& loadedEngines,
+                                             std::string_view queryMessage)
 {
     if(locator.sidecarPath.empty() || !std::filesystem::exists(locator.sidecarPath))
     {
@@ -257,17 +254,6 @@ std::vector<SupportResult> evaluateAllEngines(hipdnn_frontend::ErrorCode errorCo
     }
 
     return results;
-}
-
-} // namespace
-
-std::vector<SupportResult> observeAllSupport(hipdnn_frontend::ErrorCode errorCode,
-                                             const std::vector<int64_t>& rankedIds,
-                                             const SupportClaimLocator& locator,
-                                             const std::vector<LoadedEngine>& loadedEngines,
-                                             std::string_view queryMessage)
-{
-    return evaluateAllEngines(errorCode, rankedIds, locator, loadedEngines, queryMessage);
 }
 
 } // namespace hipdnn_integration_tests::bundle
