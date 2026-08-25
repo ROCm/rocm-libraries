@@ -352,7 +352,15 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
         }
     }();
 
-    dim3 grids = FmhaBwdDQDKDVKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_k);
+    // The kv tile count must be derived from the same seqlen the kernel bounds
+    // itself with, or the grid and the in-kernel tile index disagree. Batch mode
+    // has a single seqlen_k and every in-kernel bound uses kargs.seqlen_k, while
+    // max_seqlen_k is the maximum over the batch -- when the two differ the extra
+    // workgroups run past seqlen_k (batch mode has no `seqlen_k <= i_n0` guard;
+    // that early-out is group mode only).
+    const auto grid_seqlen_k =
+        FmhaBwdDQDKDVKernel::kIsGroupMode ? args.max_seqlen_k : args.seqlen_k;
+    dim3 grids = FmhaBwdDQDKDVKernel::GridSize(args.batch, args.nhead_q, grid_seqlen_k);
     return ck_tile::make_tuple(kargs, grids);
 }
 

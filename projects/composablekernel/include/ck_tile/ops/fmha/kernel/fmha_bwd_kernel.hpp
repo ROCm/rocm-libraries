@@ -443,6 +443,7 @@ template <typename FmhaPipeline_,
           typename KGradEpiloguePipeline_,
           typename VGradEpiloguePipeline_,
           typename QGradEpiloguePipeline_ = void>
+
 struct FmhaBwdDQDKDVKernel
 {
     using FmhaPipeline                            = ck_tile::remove_cvref_t<FmhaPipeline_>;
@@ -493,6 +494,23 @@ struct FmhaBwdDQDKDVKernel
 #endif
     static constexpr bool kUsePersistent = kIsDeterministic && !kUseQrQtrDorPipeline;
     using WorkspaceManager = FmhaBwdWorkspaceManager<AccDataType, kIsGroupMode, kIsDeterministic>;
+
+    // Under a causal mask the cost of a kv tile falls off linearly with its
+    // index, so a one-tile-per-workgroup grid is badly load imbalanced. Halve
+    // the grid and give each workgroup the mirror pair {x, n-1-x} -- one
+    // expensive tile and one cheap one. This is what aiter does
+    // (mha_bwd.cu: `if(mt == 1 || mt == 2) gdx = (gdx + 1) / 2;` plus a 2-trip
+    // loop in the kernel), and unlike the persistent path's tile_n_interleave
+    // it does not depend on the job count exceeding 2x the CU count.
+    //
+    // Batch mode only: group mode has a per-batch tile count, so n is not a
+    // launch-time constant.
+    static constexpr bool kMaskTilePairing =
+#if CK_TILE_FMHA_BWD_MASK_TILE_PAIRING
+        kHasMask && !kUsePersistent && !kUseQrQtrDorPipeline && !kIsGroupMode;
+#else
+        false;
+#endif
 
     // clang-format off
     template <typename T> struct t2s;
@@ -1218,6 +1236,8 @@ struct FmhaBwdDQDKDVKernel
             kUseQrQtrDorPipeline ? 1 : integer_divide_ceil(seqlen_k_, FmhaPipeline::kN0);
         if constexpr(kUsePersistent)
             return dim3(get_num_cus(), 1, 1);
+        else if constexpr(kMaskTilePairing)
+            return dim3(integer_divide_ceil(jobs_per_head, 2), nhead_, batch_size_);
         else
             return dim3(jobs_per_head, nhead_, batch_size_);
     }
@@ -1245,11 +1265,34 @@ struct FmhaBwdDQDKDVKernel
     {
         if constexpr(kIsAvailable)
         {
+#if CK_TILE_EXPERIMENTAL_FMHA_BWD_WAVE_SCHED_MODE
+            ck_tile::set_gfx125_wave_sched_mode_dep_mode_2();
+#endif
             if constexpr(!kUsePersistent)
             {
                 if constexpr(kUseQrQtrDorPipeline || kIsGroupMode)
                 {
                     run_(std::move(kargs), blockIdx, blockIdx.x, 0);
+                }
+                else if constexpr(kMaskTilePairing)
+                {
+                    static_assert(!kIsDeterministic,
+                                  "Deterministic Batch Mode should use persistent kernel");
+                    // Grid was halved; cover tiles {x, n-1-x}. i_split/n_splits
+                    // are dead on the non-deterministic path (see the dq_acc
+                    // offset), so the trailing arguments are placeholders.
+                    const index_t n_tiles =
+                        integer_divide_ceil(kargs.seqlen_k, FmhaPipeline::kN0);
+                    const index_t x      = blockIdx.x;
+                    const index_t mirror = n_tiles - 1 - x;
+                    // archA's two-inlined-body form. Faster, but miscompiled
+                    // under expert scheduling mode when dropout is on.
+                    run_(kargs, dim3(x, blockIdx.y, blockIdx.z), 0, 1);
+                    if(mirror != x)
+                    {
+                        s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
+                        run_(kargs, dim3(mirror, blockIdx.y, blockIdx.z), 0, 1);
+                    }
                 }
                 else
                 {
