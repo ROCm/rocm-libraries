@@ -1,5 +1,10 @@
 # Kernel Optimization Notes And Tools
 
+Routing for agents is the wiki at the optimization root
+([`../SKILL.md`](../SKILL.md), [`../wiki/families/overview.md`](../wiki/families/overview.md)).
+This folder is the **probe and capture** tree those pages cite — not the
+primary playbook.
+
 The files are copied here so CK DSL optimization guidance remains available with
 the `rocke` docs. They are reference material, not part of the runtime package.
 

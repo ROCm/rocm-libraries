@@ -1,5 +1,9 @@
 # CK DSL Optimization Runbook — Per-Architecture References
 
+> Agent routing for gfx facts is now
+> [`../wiki/hardware/`](../wiki/hardware/) (`hw-gfx942`, `hw-gfx950`, …).
+> These files remain the long-form CDNA appendix.
+
 > Specializes the [CK DSL Optimization Runbook](../optimization_runbook.md).
 
 The [optimization runbook](../optimization_runbook.md) is

@@ -1,0 +1,104 @@
+## Required fields per page type. Consumed by scripts/validate.py.
+
+wiki-process:
+  required: [id, title, type, tags, related, sources]
+  optional: [symptoms]
+  constraints:
+    type: process
+    id_prefix: process-
+
+wiki-family:
+  required:
+    - id
+    - title
+    - type
+    - operator_families
+    - architecture_families
+    - tags
+    - related
+    - sources
+  constraints:
+    type: family
+    id_prefix: family-
+
+wiki-pattern:
+  required: [id, title, type, tags, symptoms, candidate_techniques, related, sources]
+  optional: [architectures, architecture_families, operator_families, confidence]
+  constraints:
+    type: pattern
+    id_prefix: pattern-
+
+wiki-technique:
+  required:
+    - id
+    - title
+    - type
+    - tags
+    - confidence
+    - reproducibility
+    - related
+    - sources
+  optional:
+    - architectures
+    - architecture_families
+    - operator_families
+    - arch_specific
+    - rocke_primitive
+    - prerequisites
+    - aliases
+    - symptoms
+  constraints:
+    type: technique
+    id_prefix: technique-
+
+wiki-hardware:
+  required: [id, title, type, architectures, tags, confidence, related, sources]
+  optional: [architecture_families, hardware_features, aliases]
+  constraints:
+    type: hardware
+    id_prefix: hw-
+
+wiki-kernel:
+  required:
+    - id
+    - title
+    - type
+    - architectures
+    - tags
+    - confidence
+    - reproducibility
+    - kernel_types
+    - languages
+    - related
+    - sources
+  optional: [operator_families, architecture_families, rocke_primitive]
+  constraints:
+    type: kernel
+    id_prefix: kernel-
+
+wiki-migration:
+  required:
+    - id
+    - title
+    - type
+    - from_arch
+    - to_arch
+    - tags
+    - related
+    - sources
+    - confidence
+  optional:
+    - architectures
+    - architecture_families
+    - reproducibility
+    - aliases
+  constraints:
+    type: migration
+    id_prefix: migration-
+
+source-project:
+  required: [id, title, type, repo, tree, tags, related]
+  optional: [operator_families, architecture_families, architectures, kernel_types, description]
+  constraints:
+    type: project
+    id_prefix: project-

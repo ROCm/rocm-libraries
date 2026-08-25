@@ -9,9 +9,12 @@ author's head, and that the command that proves it is the same for everyone.
 This is a **process + policy** doc. It does not restate *how* to author or
 optimize a kernel — that lives in the field manual
 ([authoring_model.md](platform/dsl_docs/architecture/authoring_model.md))
-and the optimization runbook
-([optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md)),
-which this doc routes to. The hard *invariants* it depends on (byte-identity,
+and the optimization wiki
+([SKILL.md](platform/dsl_docs/optimization/SKILL.md);
+[family-overview](platform/dsl_docs/optimization/wiki/families/overview.md)),
+which this doc routes to. The long-form
+[optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md)
+is the appendix, not the agent entry. The hard *invariants* it depends on (byte-identity,
 one-way dependency, relative-paths, no-`ruff --fix`, torch-optional, default arch)
 are owned by [platform/AGENTS.md](platform/AGENTS.md) — that file wins on any
 conflict. This doc adds the *process* around them (the DoD, the check command,
@@ -144,7 +147,9 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 - [ ] Spec field added, **default-OFF and golden-safe**; `__post_init__` rejects
       illegal combinations.
 - [ ] Emission implemented and **mirrored in the C engine**.
-- [ ] Knob documented in the knob reference and added to the runbook Knob Catalog.
+- [ ] Knob documented in the knob reference and added to the matching wiki
+      family / technique page (`dsl_docs/optimization/wiki/`), then
+      `scripts/generate-indices.py`.
 - [ ] **Step 0 first:** before any algorithm/structure change, an exhaustive
       lever sweep proves the existing config can't already hit the target.
 - [ ] Golden re-blessed **iff** output is intended to change; otherwise gate
@@ -166,9 +171,11 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 ### D. Perf optimization (no new feature)
 
 - [ ] **Step 0 exhaustive lever sweep** before concluding a gap is structural.
+- [ ] If the catalog cannot move the limiter: [escape hatch](platform/dsl_docs/optimization/wiki/process/escape-hatch.md) — new mapping, not another tile.
 - [ ] Same-session A/B ratios (median of ≥3) at production-representative scale;
       absolute µs treated as illustrative.
-- [ ] Replayable case study + runbook/measured-results update.
+- [ ] Replayable case study next to the example/builder; if the lesson is
+      general, a wiki page update (not a TFLOPS table in git).
 - [ ] Honest losses recorded, not just wins.
 
 ## Local testing matrix (platforms)
@@ -200,8 +207,8 @@ keeping parity green and re-blessing goldens, and promoting a common optimizatio
 down to [platform/](platform/). It distills the conventions already encoded in
 [library/builders/gfx950/attention/README.md](library/builders/gfx950/attention/README.md),
 [library/builders/common/README.md](library/builders/common/README.md),
-[platform/AGENTS.md](platform/AGENTS.md), and the optimization runbook
-([platform/dsl_docs/optimization/optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md)).
+[platform/AGENTS.md](platform/AGENTS.md), and the optimization wiki
+([SKILL.md](platform/dsl_docs/optimization/SKILL.md)).
 
 
 ### The library layer at a glance
@@ -250,7 +257,7 @@ scoped to library.
    (GPU), and a benchmark under [library/benchmarks/](library/benchmarks/).
 7. **Bless the golden** ([Process F](#f-parity-and-golden-re-bless)) and
    run the gate GREEN at **both** LLVM flavors.
-8. **Document** ([Process D](#d-update-the-docs-runbook-readmes-case-study)):
+8. **Document** ([Process D](#d-update-the-docs-wiki-readmes-case-study)):
    an `ALGORITHM.md` if the math is new, plus a `README.md` harness/results doc.
 
 > A family is not "done" until it is wired into registry + tests + parity/golden
@@ -286,8 +293,10 @@ documented in [library/builders/common/README.md](library/builders/common/README
    ([Process F](#f-parity-and-golden-re-bless)). A default-OFF,
    unwired knob should be golden-neutral — verify the gate stays GREEN with **no**
    re-bless as the proof it is inert by default.
-7. **Add it to the runbook Knob Catalog** so Step 0 sweeps discover it
-   ([optimization_runbook.md §12.1](platform/dsl_docs/optimization/optimization_runbook.md)).
+7. **Add it to the wiki** so Step 0 and `query.py` discover it — the
+   matching `wiki/families/` table and, if it is a new lever class, a
+   `wiki/techniques/` page; regenerate `queries/` with
+   `scripts/generate-indices.py`.
 
 ### C. Sweep an optimization across all shapes
 
@@ -296,7 +305,8 @@ can't already hit the target with a different config before touching the
 algorithm.
 
 1. **Enumerate every applicable lever** for the target shape — walk the spec
-   dataclass *and* the runbook Knob Catalog, including default-OFF flags
+   dataclass *and* the wiki family page for that operator (`wiki/families/`),
+   including default-OFF flags
    (those are exactly what a heuristic may be mis-picking). The gfx950 README's
    "Exhaustive microlever sweep" lists a concrete axis set to copy
    ([library/builders/gfx950/attention/README.md](library/builders/gfx950/attention/README.md)).
@@ -320,11 +330,11 @@ algorithm.
    — report `baseline_us / ck_us` from the same process/stream, median of ≥3
    runs; treat absolute `us` as illustrative (see the README "Measurement
    conditions").
-6. **Record the sweep** as a case study ([Process D](#d-update-the-docs-runbook-readmes-case-study)),
+6. **Record the sweep** as a case study ([Process D](#d-update-the-docs-wiki-readmes-case-study)),
    including the honest losses (the gfx950 README's Triton residual is the model
    for reporting a gap you could not close).
 
-### D. Update the docs (runbook, READMEs, case study)
+### D. Update the docs (wiki, READMEs, case study)
 
 Every optimization leaves three doc artifacts (per [AGENTS.md](platform/AGENTS.md)):
 
@@ -336,16 +346,13 @@ Every optimization leaves three doc artifacts (per [AGENTS.md](platform/AGENTS.m
    [library/builders/gfx950/attention/README.md](library/builders/gfx950/attention/README.md).
 2. **Results/harness README update** — add the new scenario rows, the geomean,
    the measurement conditions, and the file-map entry for any new script.
-3. **Runbook promotion** — a *general* lesson (a new lever, tactic, or bottleneck
+3. **Wiki promotion** — a *general* lesson (a new lever, tactic, or bottleneck
    signature) is promoted into
-   [platform/dsl_docs/optimization/](platform/dsl_docs/optimization/): a new
-   knob into [optimization_runbook.md §12.1](platform/dsl_docs/optimization/optimization_runbook.md),
-   a reusable tactic into the relevant skill doc, and the
-   concept→code mapping into
-   [runbook_compliance.md](platform/dsl_docs/optimization/runbook_compliance.md)
-   / [runbook_mapping.md](platform/dsl_docs/optimization/runbook_mapping.md).
-   Record the final numbers in
-   [measured_results.md](platform/dsl_docs/optimization/measured_results.md).
+   [platform/dsl_docs/optimization/](platform/dsl_docs/optimization/): promote a
+   general lesson into a `wiki/` page (family table, technique, or pattern) and
+   regenerate `queries/` with `scripts/generate-indices.py`. The long-form
+   [optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md)
+   is the appendix; do not grow it as the primary index.
 
 Doc conventions (project rules): every `.md` with 3+ sections gets a Table of
 Contents; every code reference is a clickable relative hyperlink; keep case
@@ -438,10 +445,11 @@ Promotion steps:
 3. **Add platform gate coverage** — a case in the platform parity harness
    ([rocke_ir_parity_harness.py](platform/tests/instances/rocke_ir_parity_harness.py))
    and its golden, run GREEN at both LLVM flavors.
-4. **Promote the lesson to the runbook** — a new general lever goes in
-   [optimization_runbook.md §12.1](platform/dsl_docs/optimization/optimization_runbook.md);
-   a reusable tactic becomes/extends a skill doc under
-   [platform/dsl_docs/optimization/](platform/dsl_docs/optimization/).
+4. **Promote the lesson to the wiki** — a new general lever is a
+   `wiki/techniques/` page plus a family-table cell; a reusable tactic
+   may also extend a skill under
+   [platform/dsl_docs/optimization/utilities/skills/](platform/dsl_docs/optimization/utilities/skills/).
+   Regenerate `queries/` with `scripts/generate-indices.py`.
 5. **Verify platform still installs standalone** — it must not gain any import of
    `kernels` / `builders` / `dispatch`.
 
@@ -469,8 +477,8 @@ path.
 - **How to author a kernel** (contract → spec → grid → descriptors → compute →
   epilogue, + the authoring checklist):
   [platform/dsl_docs/architecture/authoring_model.md](platform/dsl_docs/architecture/authoring_model.md).
-- **How to optimize a kernel** (Step 0 exhaustive lever sweep + The Loop):
-  [platform/dsl_docs/optimization/optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md).
+- **How to optimize a kernel** (query operator × architecture, then Step 0):
+  [platform/dsl_docs/optimization/SKILL.md](platform/dsl_docs/optimization/SKILL.md).
 - **Canonical agent rules / invariants:** [platform/AGENTS.md](platform/AGENTS.md).
 - **Build & test:** [BUILDING.md](BUILDING.md), [TESTING.md](TESTING.md).
 - **Style:** [style/PYTHON_STYLE.md](style/PYTHON_STYLE.md),
