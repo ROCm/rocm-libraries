@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <miopen/db_path.hpp>
+#include <miopen/db.hpp>
 #include <miopen/binary_cache.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/filesystem_checker.hpp>
@@ -30,6 +31,8 @@ namespace fs = miopen::fs;
 MIOPEN_LIB_ENV_VAR(MIOPEN_USER_DB_PATH)
 MIOPEN_LIB_ENV_VAR(MIOPEN_CUSTOM_CACHE_DIR)
 MIOPEN_LIB_ENV_VAR(MIOPEN_SYSTEM_DB_PATH)
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_DISABLE_SYSTEM_DB)
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_DISABLE_USER_DB)
 
 // Helper function to build expected version string
 std::string GetExpectedVersionString()
@@ -413,3 +416,142 @@ TEST_F(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_FollowsMIOpenModule)
 #endif
 }
 #endif
+
+// ============================================================================
+// Tests for IsSystemDbDisabled()
+// ============================================================================
+
+TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_UnsetEnvVar)
+{
+    ScopedEnvironment<bool> unset_sysdb(MIOPEN_DEBUG_DISABLE_SYSTEM_DB);
+
+    // The system databases are on by default, unless the build disables them outright.
+    EXPECT_EQ(miopen::IsSystemDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_SYSDB));
+}
+
+TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_EnvVarSet)
+{
+    ScopedEnvironment<bool> disable_sysdb(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
+
+    EXPECT_TRUE(miopen::IsSystemDbDisabled());
+}
+
+TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_EnvVarCleared)
+{
+    ScopedEnvironment<bool> enable_sysdb(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, false);
+
+    EXPECT_EQ(miopen::IsSystemDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_SYSDB));
+}
+
+TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_DoesNotAffectUserDbOrSystemDbPath)
+{
+    EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
+
+    const auto sys_db_path_before = miopen::GetSystemDbPath();
+
+    ScopedEnvironment<bool> disable_sysdb(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
+
+    // GetSystemDbPath() is also the home of the AI heuristic models, so it must keep
+    // resolving. Only the find-db and perf-db lookups are gated on IsSystemDbDisabled().
+    EXPECT_EQ(miopen::GetSystemDbPath(), sys_db_path_before);
+
+    miopen::testing::ResetUserDbPath();
+    const auto& user_db_path = miopen::GetUserDbPath();
+
+    if(user_db_path.empty())
+    {
+        GTEST_SKIP() << "User DB is disabled (MIOPEN_DISABLE_USERDB)";
+    }
+
+    EXPECT_TRUE(PathContains(user_db_path, "miopen"))
+        << "User DB path '" << user_db_path.string()
+        << "' should be unaffected by MIOPEN_DEBUG_DISABLE_SYSTEM_DB";
+}
+
+// ============================================================================
+// Tests for IsUserDbDisabled()
+// ============================================================================
+
+TEST_F(CPU_DbPaths_NONE, UserDbDisabled_UnsetEnvVar)
+{
+    ScopedEnvironment<bool> unset_userdb(MIOPEN_DEBUG_DISABLE_USER_DB);
+
+    // The user databases are on by default, unless the build disables them outright.
+    EXPECT_EQ(miopen::IsUserDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_USERDB));
+}
+
+TEST_F(CPU_DbPaths_NONE, UserDbDisabled_EnvVarSet)
+{
+    ScopedEnvironment<bool> disable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, true);
+
+    EXPECT_TRUE(miopen::IsUserDbDisabled());
+}
+
+TEST_F(CPU_DbPaths_NONE, UserDbDisabled_EnvVarCleared)
+{
+    ScopedEnvironment<bool> enable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, false);
+
+    EXPECT_EQ(miopen::IsUserDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_USERDB));
+}
+
+TEST_F(CPU_DbPaths_NONE, UserAndSystemDbSwitches_AreIndependent)
+{
+    {
+        ScopedEnvironment<bool> disable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, true);
+        ScopedEnvironment<bool> enable_sysdb(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, false);
+
+        EXPECT_TRUE(miopen::IsUserDbDisabled());
+        EXPECT_EQ(miopen::IsSystemDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_SYSDB));
+    }
+    {
+        ScopedEnvironment<bool> enable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, false);
+        ScopedEnvironment<bool> disable_sysdb(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
+
+        EXPECT_EQ(miopen::IsUserDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_USERDB));
+        EXPECT_TRUE(miopen::IsSystemDbDisabled());
+    }
+}
+
+TEST_F(CPU_DbPaths_NONE, UserDbDisabled_SuppressesWrites)
+{
+    ScopedEnvironment<bool> disable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, true);
+
+    // With user-db I/O off, a store must report success without creating the file, and a
+    // subsequent lookup must miss -- that is what keeps repeated runs reproducible.
+    const auto db_file = fs::temp_directory_path() / "miopen_disable_user_db_test.db.txt";
+    fs::remove(db_file);
+
+    miopen::PlainTextDb db{miopen::DbKinds::PerfDb, db_file};
+    const miopen::DbRecord record{miopen::DbKinds::PerfDb, std::string{"key"}};
+
+    EXPECT_TRUE(db.StoreRecord(record)) << "StoreRecord should report success when I/O is off";
+    EXPECT_FALSE(fs::exists(db_file)) << "No user db file should have been created at " << db_file;
+    EXPECT_FALSE(db.FindRecord(std::string{"key"}).has_value())
+        << "Lookup should miss when user db I/O is disabled";
+}
+
+TEST_F(CPU_DbPaths_NONE, UserDbDisabled_LatchedAtConstruction)
+{
+    if(static_cast<bool>(MIOPEN_DISABLE_USERDB))
+        GTEST_SKIP() << "User db file I/O is disabled at build time";
+
+    // Flipping the switch must never take effect part-way through a live database object: the
+    // answer is fixed when the object is constructed, so the constructor and every later operation
+    // agree. An instance built while the switch was off keeps writing.
+    const auto db_file = fs::temp_directory_path() / "miopen_user_db_latch_test.db.txt";
+    fs::remove(db_file);
+
+    miopen::PlainTextDb db{miopen::DbKinds::PerfDb, db_file};
+    const miopen::DbRecord record{miopen::DbKinds::PerfDb, std::string{"key"}};
+
+    {
+        ScopedEnvironment<bool> disable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, true);
+
+        EXPECT_TRUE(miopen::IsUserDbDisabled());
+        EXPECT_TRUE(db.StoreRecord(record));
+        EXPECT_TRUE(fs::exists(db_file))
+            << "An already constructed db must keep the file I/O it was built with";
+    }
+
+    fs::remove(db_file);
+}
