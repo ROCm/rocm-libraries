@@ -209,3 +209,23 @@ jobs:
       therock_ref: ${{ inputs.therock_ref }}
       build_runs_on: ${{ inputs.build_runs_on }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
+
+  # GPU-free MIOpen dbsync (StaticFDBSync) via the rocjitsu KMD interposer: validates this family's
+  # MIOpen SystemDBs against the PR's own source-CK build, on a CPU runner (no GPU). `needs:
+  # therock-build-linux` so it starts right after the build produces the artifact -- no polling, no
+  # timeout burned waiting on a queued/slow build (the reason it moved here from a top-level job in
+  # therock-ci.yml). Runs only for the rocjitsu-supported families (gfx94X-dcgpu -> gfx942,
+  # gfx950-dcgpu -> gfx950; other families have no rocjitsu KMD config) when this bundle tests
+  # miopen. Blocking gate: a failure fails this therock-ci-linux leg, which therock-ci.yml's
+  # therock_ci_summary depends on. `contains(..., 'miopen')` also matches `miopenprovider`, but
+  # that's harmless -- worst case it re-validates unchanged DBs, and the two are co-bundled anyway.
+  # Mechanism lives in the MIOpen-owned component-ci-miopen-dbsync.yml (also driven standalone by
+  # therock-dbsync-rocjitsu.yml for manual/diagnostic runs against a pinned artifact_run_id).
+  dbsync-rocjitsu-linux:
+    name: MIOpen dbsync rocjitsu (${{ inputs.amdgpu_families }})
+    needs: [therock-build-linux]
+    if: ${{ inputs.build_runs_on != '' && (inputs.amdgpu_families == 'gfx94X-dcgpu' || inputs.amdgpu_families == 'gfx950-dcgpu') && contains(inputs.projects_to_test, 'miopen') }}
+    uses: ./.github/workflows/component-ci-miopen-dbsync.yml
+    with:
+      therock_ref: ${{ inputs.therock_ref }}
+      family: ${{ inputs.amdgpu_families }}

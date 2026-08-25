@@ -1,0 +1,210 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# GPU-free MIOpen dbsync (StaticFDBSync) via the rocjitsu KMD interposer. Called once per family by
+# two callers:
+#   - therock-ci-linux.yml's `dbsync-rocjitsu-linux` job (the automatic per-PR gate) -- it
+#     `needs: therock-build-linux`, so the build (and its S3 artifact upload) is already complete
+#     when this runs, and it self-references this same GHA run via github.run_id.
+#   - therock-dbsync-rocjitsu.yml's standalone workflow_dispatch companion -- targets an explicit,
+#     already-completed artifact_run_id (e.g. for bisecting an older run or a ROCm/TheRock
+#     multi_arch_ci.yml dispatch).
+# In BOTH cases the target build is already finished, so the fetch is a single attempt with a small
+# bounded retry for transient S3/network lag -- NOT a build-aware poll loop (that machinery was only
+# needed by the old top-level design that started before the build).
+#
+# dbsync is CPU-only (SKIP_KDB_TESTING=1, no kernel launch) EXCEPT that CK grouped-conv IsApplicable
+# makes a HIP device call -- so the rocjitsu config must EMULATE THE MATCHING ARCH; a mismatch
+# (e.g. cdna3 config with gfx950 code objects) aborts with "invalid device function". The arch,
+# rocjitsu KMD config, and real CU count are all derived from `family` in the "Resolve ..." step
+# below, so both callers pass only `family` (single source of truth for the mapping).
+#
+# Supported set = arches TheRock builds AND rocjitsu has a KMD config for: gfx94X-dcgpu (gfx942,
+# cdna3) and gfx950-dcgpu (gfx950, cdna4). Adding more (gfx90a=cdna2, gfx125X=RDNA, ...) requires a
+# rocjitsu arch config in ROCm/rocm-systems first, plus a new case in the resolve step.
+#
+# Investigation history worth knowing before touching either committed SystemDB again -- this
+# job's grouped-wrw "invalid perf config" findings went through several rounds of "is this a
+# rocjitsu bug or a genuine stale entry" before landing on the real answer (see ALMIOPEN-1779):
+# what looked at various points like a rocjitsu config bug, an occupancy-emulation gap, or
+# CK-version drift turned out to be TOOLCHAIN VERSION -- match the compiler, not just the CK source
+# commit or "ran on real hardware", before trusting either side as ground truth on a "rocjitsu vs
+# real HW" mismatch. The CU-correction (below) fixes a genuine rocjitsu-config occupancy artifact.
+name: "Component CI: MIOpen dbsync (rocjitsu)"
+
+on:
+  workflow_call:
+    inputs:
+      therock_ref:
+        description: "ROCm/TheRock ref providing build_tools"
+        type: string
+        required: true
+      family:
+        description: "TheRock artifact-group family (gfx94X-dcgpu | gfx950-dcgpu). arch/rj_config/cu are derived from this."
+        type: string
+        required: true
+      artifact_run_id:
+        description: "Run id that produced the MIOpen artifacts. Empty (default) self-references this run's own build (github.run_id); set explicitly to target a different, already-completed run (e.g. for bisecting)."
+        type: string
+        default: ""
+      artifact_repo:
+        description: "Repo hosting artifact_run_id. Empty (default) uses this repo (github.repository); override when artifact_run_id is on a different repo (e.g. ROCm/TheRock's own multi_arch_ci.yml runs)."
+        type: string
+        default: ""
+      fetch_artifact_args:
+        description: "MIOpen component fetch_artifact_args (from TheRock fetch_test_configurations.py). Empty (default) uses the standard set."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  dbsync-rocjitsu:
+    name: "Run StaticFDBSync"
+    runs-on: azure-linux-scale-rocm
+    # The target build is already complete when this runs (caller `needs:` it, or the standalone
+    # dispatcher targets a finished run), so this is just: fetch (~1-2 min) + rocjitsu KMD build
+    # (~2 min) + StaticFDBSync (15-200s). No build-queue wait to absorb -- 30 min is ample.
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host --user 0
+    defaults:
+      run:
+        shell: bash
+    env:
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
+      OUTPUT_ARTIFACTS_DIR: "./build"
+      THEROCK_BIN_DIR: "./build/bin"
+      AMDGPU_FAMILIES: ${{ inputs.family }}
+      VENV_DIR: ${{ github.workspace }}/.venv
+    steps:
+      # Single source of truth for the family -> (arch, rocjitsu KMD config, real CU count) mapping,
+      # so both callers pass only `family`. cu = the arch's real CU count (= the StaticFDBSync
+      # param); it feeds the CU-correction below.
+      - name: Resolve arch / rocjitsu config / CU from family
+        id: rj
+        run: |
+          set -euxo pipefail
+          case "${{ inputs.family }}" in
+            gfx94X-dcgpu) arch=gfx942; rj=amdgpu_cdna3_kmd.json; cu=304 ;;
+            gfx950-dcgpu) arch=gfx950; rj=amdgpu_cdna4_kmd.json; cu=256 ;;
+            *) echo "::error::unsupported family '${{ inputs.family }}' -- no rocjitsu KMD config"; exit 1 ;;
+          esac
+          { echo "arch=${arch}"; echo "rj_config=${rj}"; echo "cu=${cu}"; } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout ROCm/TheRock (build_tools)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ inputs.therock_ref }}
+
+      - name: Checkout rocm-libraries (scripts)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: rocm-libraries
+
+      - name: Checkout rocjitsu
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          ref: 481982dfe23e181a302006747c561e7cf43e35ba # 2026-06-04
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+
+      # rocjitsu's stock cdna config declares a minimal (~4 CU) device, which makes CK's grouped-wrw
+      # occupancy-based auto-split-k mis-compute and false-flag valid small perf configs. Rewrite the
+      # device-block CU count to the arch's real value so multiProcessorCount matches real hardware
+      # (topology untouched -> no emulation-cost change). See the helper for the full rationale.
+      - name: CU-correct rocjitsu config
+        run: |
+          set -euxo pipefail
+          python3 rocm-libraries/.github/scripts/therock_dbsync_cu_correct_config.py \
+            "rocm-systems/emulation/rocjitsu/configs/${{ steps.rj.outputs.rj_config }}" \
+            "${{ steps.rj.outputs.cu }}" \
+            /tmp/rj_config.json
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install UV
+        run: pip install uv
+
+      - name: Create Python venv
+        run: python build_tools/setup_venv.py "${VENV_DIR}" --activate-in-future-github-actions-steps --use-uv
+
+      - name: Install test requirements
+        run: |
+          uv pip install -r requirements-test.txt
+          uv pip freeze
+
+      # install_rocm_from_artifacts.py called directly (not via the setup_test_environment composite
+      # action, which has no --run-github-repo input). The target build is already complete (the
+      # automatic caller `needs: therock-build-linux`; the standalone dispatcher targets a finished
+      # run), so this is a single fetch with a small bounded retry to ride out transient S3/network
+      # lag -- it does NOT poll/wait for an in-progress build. Success is keyed on the arch-specific
+      # CK grouped-conv plugin (libMIOpenCKGroupedConv_<arch>.so), NOT on miopen_gtest -- miopen_gtest
+      # ships in the arch-INDEPENDENT miopen_test_generic artifact, which can land before the
+      # arch-specific miopen_lib_<arch> artifact that actually carries the CK plugin + this arch's
+      # SystemDBs (the things dbsync needs); and install_rocm_from_artifacts.py exits 0 as soon as ANY
+      # artifact exists at the run's S3 prefix, so its exit code alone is not a readiness signal.
+      - name: Fetch artifact (source-CK build for ${{ inputs.family }})
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ inputs.artifact_repo || github.repository }}
+          DEVICE_ARCH: ${{ steps.rj.outputs.arch }}
+          FETCH_ARTIFACT_ARGS: ${{ inputs.fetch_artifact_args || '--blas --miopen --rand --tests' }}
+        run: |
+          set -uo pipefail
+          attempts=5
+          for i in $(seq 1 "${attempts}"); do
+            if python ./build_tools/install_rocm_from_artifacts.py \
+                --run-id="${ARTIFACT_RUN_ID}" \
+                --run-github-repo="${GH_REPO}" \
+                --artifact-group="${AMDGPU_FAMILIES}" \
+                --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
+                ${FETCH_ARTIFACT_ARGS} \
+                && find "${OUTPUT_ARTIFACTS_DIR}" -name "libMIOpenCKGroupedConv_${DEVICE_ARCH}.so" | grep -q .; then
+              echo "Fetched artifact (libMIOpenCKGroupedConv_${DEVICE_ARCH}.so present) on attempt ${i}/${attempts}"
+              exit 0
+            fi
+            echo "${DEVICE_ARCH} artifact not present yet (attempt ${i}/${attempts}) -- retrying in 30s"
+            sleep 30
+          done
+          echo "::error::${DEVICE_ARCH} CK plugin never appeared after ${attempts} attempts (run ${ARTIFACT_RUN_ID}, repo ${GH_REPO})"
+          exit 1
+
+      - name: Inspect artifact (key check — CK plugin + DBs must be present)
+        env:
+          DEVICE_ARCH: ${{ steps.rj.outputs.arch }}
+        run: |
+          set -euxo pipefail
+          test -f ./build/bin/miopen_gtest
+          echo "== CK grouped-conv plugins in the dist =="
+          find ./build -name 'libMIOpenCKGroupedConv_*.so' -print
+          echo "== ${DEVICE_ARCH} system DBs in the dist =="
+          ls -la ./build/share/miopen/db/${DEVICE_ARCH}*.HIP.fdb.txt \
+                 ./build/share/miopen/db/${DEVICE_ARCH}*.db.txt
+
+      - name: Build rocjitsu KMD
+        run: |
+          set -euxo pipefail
+          apt-get update && apt-get install -y --no-install-recommends cmake build-essential libdrm-dev
+          cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build -DCMAKE_BUILD_TYPE=Release
+          cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j"$(nproc)"
+
+      - name: Run StaticFDBSync (rocjitsu, ${{ steps.rj.outputs.arch }})
+        env:
+          DEVICE_ARCH: ${{ steps.rj.outputs.arch }}
+        run: |
+          set -euxo pipefail
+          export ROCM_PATH="$(realpath ./build)"
+          export LD_LIBRARY_PATH="$(realpath ./build/lib):${LD_LIBRARY_PATH:-}"
+          export RJ_CONFIG="$(realpath /tmp/rj_config.json)" # CU-corrected, see above
+          export MIOPEN_DEVICE_ARCH="${DEVICE_ARCH}"
+          LD_PRELOAD="$(realpath rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so)" \
+            ./build/bin/miopen_gtest --gtest_filter='*StaticFDBSync*' --gtest_color=no

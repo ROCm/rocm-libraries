@@ -196,6 +196,14 @@ jobs:
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.windows_build_runs_on }}
 
+  # NOTE: the GPU-free MIOpen dbsync (StaticFDBSync) rocjitsu gate is NOT a top-level job here.
+  # It lives inside therock-ci-linux.yml as `dbsync-rocjitsu-linux` (needs: therock-build-linux),
+  # so it starts right after the per-family MIOpen build completes -- no polling for the artifact,
+  # no timeout burned waiting on a slow/queued build. A dbsync failure fails that family's
+  # therock-ci-linux leg, which therock_ci_summary already depends on (below), so it stays a
+  # blocking gate. The mechanism is the MIOpen-owned component-ci-miopen-dbsync.yml reusable
+  # workflow (also driven standalone by therock-dbsync-rocjitsu.yml for manual/diagnostic runs).
+
   therock_ci_summary:
     name: TheRock CI Summary
     if: always()

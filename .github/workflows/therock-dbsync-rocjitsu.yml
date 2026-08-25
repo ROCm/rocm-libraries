@@ -1,0 +1,71 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# ALMIOPEN-1779: GPU-free MIOpen dbsync via artifact-reuse + rocjitsu.
+#
+# Manually-dispatchable diagnostic companion to the automatic per-PR `dbsync-rocjitsu` job in
+# therock-ci.yml. Same mechanism (both call component-ci-miopen-dbsync.yml), but takes an explicit
+# `artifact_run_id` so it can be pointed at an arbitrary build -- e.g. a run on ROCm/TheRock itself
+# (a multi_arch_ci.yml dispatch pinned to a specific commit), or an older run for bisecting. The
+# automatic gate self-references its own run's artifact and needs no inputs; this one exists for
+# the cases that gate can't cover.
+#
+# Supported set = arches TheRock builds AND rocjitsu has a KMD config for. Today that is
+# gfx942 (cdna3) and gfx950 (cdna4). Adding more (gfx90a=cdna2, gfx125X=RDNA, ...) requires
+# a rocjitsu arch config in ROCm/rocm-systems first (and, for gfx90a, a TheRock build too).
+#
+# `artifact_run_id` may be a run on ROCm/rocm-libraries (a PR's own TheRock CI, the common
+# case) OR on ROCm/TheRock directly (e.g. from a `multiarch-ci-sweep`/multi_arch_ci.yml
+# dispatch, e.g. to pin to a specific commit) -- set `artifact_repo` accordingly. MIOpen's
+# `fetch_artifact_args` comes from TheRock's `fetch_test_configurations.py`.
+#
+# Investigation history worth knowing before touching either committed SystemDB again -- this
+# job's grouped-wrw "invalid perf config" findings went through several rounds of "is this a
+# rocjitsu bug or a genuine stale entry" before landing on the real answer (see
+# component-ci-miopen-dbsync.yml's header and ALMIOPEN-1779 for the full trail): what looked at
+# various points like a rocjitsu config bug, an occupancy-emulation gap, or CK-version drift
+# turned out to be TOOLCHAIN VERSION -- match the compiler, not just the CK source commit or "ran
+# on real hardware", before trusting either side as ground truth on a "rocjitsu vs real HW"
+# mismatch.
+name: "TheRock dbsync (rocjitsu, manual)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: "Run id that produced the MIOpen artifacts (all families)"
+        type: string
+        required: true
+      artifact_repo:
+        description: "Repo hosting artifact_run_id -- ROCm/rocm-libraries (a PR's TheRock CI run) or ROCm/TheRock (a direct multi_arch_ci.yml dispatch)"
+        type: string
+        default: "ROCm/rocm-libraries"
+      fetch_artifact_args:
+        description: "MIOpen component fetch_artifact_args (from TheRock fetch_test_configurations.py)"
+        type: string
+        default: "--blas --miopen --rand --tests"
+      therock_ref:
+        description: "ROCm/TheRock ref providing build_tools"
+        type: string
+        default: "main"
+
+permissions:
+  contents: read
+
+jobs:
+  dbsync-rocjitsu:
+    name: "MIOpen dbsync rocjitsu (${{ matrix.family }})"
+    strategy:
+      fail-fast: false
+      # Supported + validated set: TheRock builds it AND rocjitsu has a matching KMD config. The
+      # per-family arch / rocjitsu config / CU mapping lives in component-ci-miopen-dbsync.yml's
+      # "Resolve ..." step (single source of truth), so we pass only the family here.
+      matrix:
+        family: [gfx94X-dcgpu, gfx950-dcgpu]
+    uses: ./.github/workflows/component-ci-miopen-dbsync.yml
+    with:
+      therock_ref: ${{ inputs.therock_ref }}
+      family: ${{ matrix.family }}
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_repo: ${{ inputs.artifact_repo }}
+      fetch_artifact_args: ${{ inputs.fetch_artifact_args }}
