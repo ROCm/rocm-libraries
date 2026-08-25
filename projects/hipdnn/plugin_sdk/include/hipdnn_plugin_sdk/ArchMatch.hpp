@@ -55,8 +55,9 @@ inline bool archMatches(std::string_view deviceArch, std::string_view candidate,
 /// LLVM generic target "gfx9-4-generic") is returned unchanged; an empty
 /// input returns empty.
 ///
-/// The result never contains ':' -- callers use it as a cache-directory path
-/// component, and ':' is illegal in Windows filenames.
+/// The result never contains ':', which is illegal in Windows filenames. It is NOT
+/// otherwise safe as a path component: the input comes from the driver, and every
+/// other character survives. A caller building a path must still sanitize the result.
 inline std::string_view stripArchFeatures(std::string_view gcnArchName)
 {
     return gcnArchName.substr(0, gcnArchName.find(':'));
