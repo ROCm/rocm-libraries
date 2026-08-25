@@ -101,6 +101,7 @@ typedef void (*hipfftCallbackStoreD)(
    * @param[in] cbtype Type of callback being set.
    * @param[in] callbackData Array of callback function data pointers
    */
+HIPFFT_DEPRECATED_MSG("Use hipfftXtSetJITCallback instead.")
 HIPFFT_EXPORT hipfftResult hipfftXtSetCallback(hipfftHandle         plan,
                                                void**               callbacks,
                                                hipfftXtCallbackType cbtype,
@@ -113,6 +114,7 @@ HIPFFT_EXPORT hipfftResult hipfftXtSetCallback(hipfftHandle         plan,
    * @param[in] plan The FFT plan.
    * @param[in] cbtype Type of callback being removed.
    */
+HIPFFT_DEPRECATED_MSG("Use hipfftXtSetJITCallback instead.")
 HIPFFT_EXPORT hipfftResult hipfftXtClearCallback(hipfftHandle plan, hipfftXtCallbackType cbtype);
 
 /*! @brief Set shared memory size for callback.
