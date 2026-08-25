@@ -177,6 +177,7 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
     verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "success");
+#endif
 }
 
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
