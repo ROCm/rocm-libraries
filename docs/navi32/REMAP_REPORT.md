@@ -4,7 +4,8 @@ Follow-on to the lean-Grid campaign. The grid shipped on navi32/navi33 was tuned
 **96 CU**; these parts run at 60 and 32. This asked whether re-pointing `element[7]` at
 measured-better kernels — no new kernels, no pool change — recovers the gap.
 
-**Answer: partly, and it must be gated.** Ungated it regresses tiny shapes by up to 35%.
+**Answer: partly, and it must be gated.** Ungated it regresses tiny shapes by up to 35%. Gated,
+it clears the bar — see the correction below, which reverses an earlier conclusion in this file.
 
 ---
 
@@ -107,18 +108,37 @@ Skipping tiny/gemv rows, 105 treated queries, cold @ 60 CU:
 The gate removes the tiny regression entirely (64.80% -> 99.93%, i.e. parity) at no cost to the
 aggregate — +1.96% wall-clock against a 100.13% floor.
 
-**gemv remains ~1.1 pt below its own A/A, and the gate cannot fix it as built.** Strata are a
-property of the QUERY, but the gate is applied to the ROW. A gemv query can snap to a row
-classified `med` or `skinny_N`, which is re-mapped. At n=10, with the A/A itself 0.8 pt off
-100, this is marginal rather than clearly real — but it is unresolved, and a row-side gate is
-structurally incapable of resolving it. A query-side guard would have to live in the selector,
-not the catalog.
+### CORRECTION — the gemv reading was noise, and my explanation for it was wrong
+
+An earlier revision of this report claimed gemv stayed ~1.1 pt soft and that a row-side gate was
+*structurally* incapable of fixing it, because strata are a property of the QUERY while the gate
+applies to the ROW. **Both halves of that were wrong**, and checking rather than asserting is
+what showed it:
+
+* **The mechanism is not real at this scale.** Only **3 of 23** gemv queries (13%) are served by
+  a different-stratum row. 87% are served by gemv rows — which the gate excluded.
+* **The observation is not real either.** Of the 10 gemv queries in the gated benchmark, only
+  **2** were served by a re-mapped row. The other **8 ran an identical catalog** and still showed
+  a median `lean/gated` ratio of **0.975**, with their own A/A column spanning 0.939–1.048.
+  That is the per-stratum noise floor at n=10, not a regression.
+* The 2 genuinely re-mapped gemv queries went 0.942 and **1.242** — net positive.
+
+**So the gated re-map shows no demonstrated stratum regression.** It meets the pre-registered
+bar. The honest residual caveat is different and more mundane: **per-stratum resolution at n≈10
+is roughly ±2.5%**, so every small-stratum number in this report — in either direction — is
+weaker evidence than the aggregate.
 
 ## Status and recommendation
 
-**Not shipped.** The gated variant clears the aggregate bar (+1.96% vs a 100.13% floor, tiny
-restored to parity) but gemv is still soft and the cause is a structural limit of row-side
-gating, not a tuning knob. Shipping a known-soft stratum on n=10 is not worth +2%.
+**Not shipped — but the bar IS met, and the decision is now a judgment call rather than a
+blocker.** The gated variant clears the pre-registered criterion: +1.96% wall-clock against a
+100.13% A/A floor, tiny restored to parity, and no stratum regressing once the gemv reading is
+correctly attributed to noise.
+
+I am leaving it unshipped for a reason that is about evidence rather than results: the gain is
+~+2% while per-stratum resolution is ±2.5%, so the aggregate is solid but the tail is not
+independently confirmed. A second run of the gated arm, or more shapes per stratum, would settle
+it cheaply. That is a smaller ask than the campaign that produced it.
 
 Even gated, the realized gain is ~+2% wall-clock on treated queries — real, attributable, above
 the floor, but modest against the ~1% that lean cost. **The larger lever is coverage:** only
