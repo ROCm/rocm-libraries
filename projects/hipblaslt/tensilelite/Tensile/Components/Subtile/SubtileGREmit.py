@@ -538,6 +538,30 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
 
   module = Module(f"GR Ptr Update ({tc})")
   inc = int(ti.depthUBytes)
+  # TLU=1 (NT / free-dim contiguous): the free dim is unit-stride and the K
+  # (unroll) dim is strided, so one DepthU K-window advances the base by
+  # DepthU * strideK * bpe bytes, not DepthU * bpe.  depthUBytes already folds
+  # in DepthU * bpe (sub-byte-safe), so scale it by the runtime K stride.
+  if isinstance(tag, GRTag_TLU1):
+    unrollIdx = kernel["ProblemType"]["IndexUnroll"]
+    strideK = writer.strideRef(tc, unrollIdx)
+    if writer.isConstUnitStride(strideK):
+      # K is unit-stride (no NT transpose on this operand): plain DepthU*bpe.
+      module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
+                 comment=f"{tc}: advance SRD by {inc} bytes"))
+      module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+                 comment=f"{tc}: carry"))
+      return module
+    with writer.allocTmpSgpr(1) as tmpSgprRes:
+      incSgpr = tmpSgprRes.idx
+      module.add(SMulI32(dst=sgpr(incSgpr), src0=inc, src1=strideK,
+                 comment=f"{tc}: DepthU*bpe({inc}) * strideK (NT K-window bytes)"))
+      module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=sgpr(incSgpr),
+                 comment=f"{tc}: advance SRD by DepthU K-window"))
+      module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+                 comment=f"{tc}: carry"))
+    return module
+
   module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
              comment=f"{tc}: advance SRD by {inc} bytes"))
   module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
