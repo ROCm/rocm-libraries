@@ -345,6 +345,21 @@ set_tests_properties(dispatcher_test_bquant_gpu_correctness PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# ABQuant grouped GEMM: fp8 / bf8 scales on BOTH operands, compv3 + the
+# gfx950-native eightwaves pipeline (gfx950).
+add_test(
+    NAME dispatcher_test_abquant_gpu_correctness
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_abquant_gpu_correctness.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_abquant_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 600
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Stress Test Script
 add_test(
     NAME dispatcher_stress_test
