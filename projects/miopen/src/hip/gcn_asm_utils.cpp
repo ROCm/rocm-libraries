@@ -156,7 +156,7 @@ std::string AmdgcnAssemble(std::string_view source,
     // Only add -mno-xnack when the device's ISA actually has an xnack on/off
     // mode (target.xnack.isReported()). Some devices (e.g. gfx90c) have no
     // xnack mode at all, so they never report it. Adding -mno-xnack for them
-    // would build a kernel that explicitly requires xnack off, which their loader 
+    // would build a kernel that explicitly requires xnack off, which their loader
     // rejects because it only accepts kernels built without any xnack setting.
     if(target.xnack.isReported() && !target.isXnackEnabled())
         options << " -mno-xnack";
