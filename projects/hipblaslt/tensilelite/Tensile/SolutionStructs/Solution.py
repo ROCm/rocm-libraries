@@ -1094,8 +1094,14 @@ class Solution(collections.abc.Mapping):
       # DepthU must be a multiple of numSubIterK * MIK * LSU, where numSubIterK is the
       # number of K-subtiles per depth-U iteration: 1 for fp8 (AB_B8, subtileShape K=1),
       # 2 for fp4/bf16 (AB_B4/AB_B16, subtileShape K=2).
+      # TLU=1 (column-major / free-dim contiguous) geometries load one MFMA-K per
+      # DU iteration (subtileShape K=1), so their DU unit is a single MatrixInstK.
       dtype_a = state["ProblemType"]["DataTypeA"]
-      numSubIterK = 1 if dtype_a.is8bitFloat() else 2
+      tluA = state["ProblemType"].get("TLUA", False)
+      if dtype_a.is8bitFloat() or tluA:
+        numSubIterK = 1
+      else:
+        numSubIterK = 2
       duUnit = numSubIterK * state["MatrixInstK"] * state["LocalSplitU"]
       if state["DepthU"] == -1:
         state["DepthU"] = duUnit
@@ -1108,6 +1114,8 @@ class Solution(collections.abc.Mapping):
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
             state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
+          elif dtype.is6bitFloat() or dtype.isFloat4():
+            state[f"_ABTilePair{tc}"] = "AB_B4_TLU1"
           else:
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
@@ -2769,15 +2777,6 @@ class Solution(collections.abc.Mapping):
     if tdmInst not in (0, 3):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
       return
-
-    if state["enableTDMMetadata"] and state["ProblemType"]["MetadataLayout"]:
-      # reject if NumWaves > metadata k-major dimension (DepthU * 0.25 // 2)
-      metadataKMajorDimension = (state["DepthU"] * 0.25) // 2
-      if state["NumWaves"] > 1 and metadataKMajorDimension < state["NumWaves"]:
-        reject(state, printRejectionReason,
-               "Metadata Layout 1 can not support NumWaves > metadata k-major dimension (DepthU * 0.25 // 2)"
-               "(DepthU=%d * 0.25 // 2)=%d < NumWaves=%d)" % (state["DepthU"], metadataKMajorDimension, state["NumWaves"]))
-        return
 
     if state.get("PrefetchAcrossPersistent", 0) and (state["enableTDMA"] or state["enableTDMB"]):
       if not (state["enableTDMA"] and state["enableTDMB"]):
@@ -5497,12 +5496,15 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "reject to reduce number of kernels")
 
     # GuaranteeNoPartial
-    if state["ProblemType"]["TLUA"]:
+    # UseSubtileImpl drives its own global-read addressing and edge masking
+    # (see Components/Subtile), so the classic partial-load guarantees do not
+    # apply; treat loads as non-partial to skip the classic graShift path.
+    if state["ProblemType"]["TLUA"] and not state["UseSubtileImpl"]:
       state["GuaranteeNoPartialA"] = state["AssertFree0ElementMultiple"]%state["GlobalReadVectorWidthA"]==0
     else:
       state["GuaranteeNoPartialA"] = True
 
-    if state["ProblemType"]["TLUB"]:
+    if state["ProblemType"]["TLUB"] and not state["UseSubtileImpl"]:
       state["GuaranteeNoPartialB"] = state["AssertFree1ElementMultiple"]%state["GlobalReadVectorWidthB"]==0
     else:
       state["GuaranteeNoPartialB"] = True

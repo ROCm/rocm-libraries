@@ -321,6 +321,13 @@ AB_B16_TLU1_16x1 = ABTilePair(
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=16, k=1), loadWidth=32),                            # 256-bit LR: 16 bf16 along M
 )
 
+# Column-major FP4 (TLU=1, NT): 128-bit GR carries 32 fp4 along M = 2 MFMA-M
+# tiles; the MFMA-K layout is recovered on the LDS read via ds_read_b64_tr_b4.
+AB_B4_TLU1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(2, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 128-bit GR: 32 fp4 along M
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(2, 1), loadShape=LoadShape(m=32, k=1)),                                   # 128-bit LR: 32 fp4 along M
+)
+
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
 _MXS_B8 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp8', 'bf8'))
@@ -357,6 +364,7 @@ AB_GEOMETRY_MAP = {
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
   "AB_B16_W32":  AB_B16_W32,
+  "AB_B4_TLU1":  AB_B4_TLU1,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:

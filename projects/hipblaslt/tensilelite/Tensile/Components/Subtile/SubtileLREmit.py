@@ -20,6 +20,7 @@ from rocisa.container import DSModifiers, EXEC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     DSLoadB128,
+    DSLoadB64TrB4,
     SMovB32, SMovB64,
     VAddU32, VAndB32, VMovB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
@@ -64,10 +65,6 @@ def _emitLRLDSBufferSwap(tag, tile, ti, writer, kernel):
 _stub = lambda tag, tile, ti, writer, kernel: None
 _emitLocalReadOffset.register(LRTag_TLU1)(_stub)
 _emitLocalRead.register(LRTag_TLU1)(_stub)
-_allocLROffsetRegisters.register(LRTag_TLU1)(_stub)
-_deallocLROffsetRegisters.register(LRTag_TLU1)(_stub)
-_emitLRDTLInit.register(LRTag_TLU1)(_stub)
-_emitLRLDSBufferSwap.register(LRTag_TLU1)(_stub)
 
 
 ################################################################################
@@ -261,6 +258,7 @@ def _emitLROffset_TLU0(tag, tile, ti, writer, kernel):
 
 @_allocLROffsetRegisters.register(LRTag_1x1)
 @_allocLROffsetRegisters.register(LRTag_1x2)
+@_allocLROffsetRegisters.register(LRTag_TLU1)
 def _allocLROffsetRegs_1x2(tag, tile, ti, writer, kernel):
   """Allocate LR offset registers for row-major (TLU=0) 1x2 subtile shape.
 
@@ -283,6 +281,7 @@ def _allocLROffsetRegs_1x2(tag, tile, ti, writer, kernel):
 
 @_deallocLROffsetRegisters.register(LRTag_1x1)
 @_deallocLROffsetRegisters.register(LRTag_1x2)
+@_deallocLROffsetRegisters.register(LRTag_TLU1)
 def _deallocLROffsetRegs_1x2(tag, tile, ti, writer, kernel):
   """Deallocate LR offset registers."""
   if isinstance(tile.sharedVgprLROffset, list):
@@ -349,6 +348,7 @@ def _emitLR_1x2(tag, tile, ti, writer, kernel):
 
 @_emitLRDTLInit.register(LRTag_1x1)
 @_emitLRDTLInit.register(LRTag_1x2)
+@_emitLRDTLInit.register(LRTag_TLU1)
 def _emitLRDTLInit_1x2(tag, tile, ti, writer, kernel):
   return Module(f"LR DTL Init ({ti.tc})")  # STUB
   """Compute swap VGPRs for LR double-buffering.
@@ -378,6 +378,7 @@ def _emitLRDTLInit_1x2(tag, tile, ti, writer, kernel):
 
 @_emitLRLDSBufferSwap.register(LRTag_1x1)
 @_emitLRLDSBufferSwap.register(LRTag_1x2)
+@_emitLRLDSBufferSwap.register(LRTag_TLU1)
 def _emitLRLDSSwap_1x2(tag, tile, ti, writer, kernel):
   """Toggle LR read offsets between double-buffer halves.
 
@@ -583,11 +584,81 @@ def _lraTileAssignment_fp8_legacy(writer, kernel, module):
   return module
 
 
+def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
+  """LR per-lane LDS base offset for TLU=1 (NT) transpose reads.
+
+  GR wrote this operand into LDS free-dim (M/N) contiguous, K-major: one K row
+  is ``mStripBytes = subtileM * bpe`` bytes wide (the whole free-dim strip), and
+  consecutive K rows are that many bytes apart.
+
+  ds_read_b64_tr_b4 reads a transposed 16(K) x 16(free) block. For the K-major
+  LDS image our GR write produces (nibble(M,K) = K*subtileM + M), the per-lane
+  base address of the first read (M-tile 0, instr 0) is
+
+      kGroup = lane // instM          (0..numGroups-1)
+      frow   = lane %  instM          (free-dim row within the 16-row block)
+      base(lane) = (kGroup * groupKStride + frow) * mStripBytes
+
+  where groupKStride = instK // numGroups is the K-row distance between adjacent
+  lane groups (32 for fp4 16x16x128 with 4 groups).  The second transpose read
+  within a tile (+K/2 of a group) and the M-tile selection are constant ds
+  offsets applied by emitSingleDsRead.
+
+  This map is verified on gfx950 hardware (benchmark-tools tr4_nt_readmap,
+  formula `fmd`): reading LDS filled in the K-major layout above with these
+  per-lane bases reconstructs A[M=lane%16, K=32*(lane//16)+rd*16+slot] exactly
+  (2048/2048 slots).  The shipping non-subtile s+m+k formula is co-designed with
+  a *padded* layout and does NOT match this unpadded K-major image.
+  """
+  tc = tileInfo.tc
+  wavesize = kernel["WavefrontSize"]
+  instM = int(tileInfo.mmaTileShape[0])
+  instK = int(tileInfo.mmaTileShape[1])
+  bpe = tileInfo.bpe
+  subtileM = int(tileInfo.subtileShape[0] * instM)
+  mStripBytes = int(subtileM * bpe)          # LDS bytes per K row (free-dim strip width)
+  numGroups = wavesize // instM
+  groupKStride = instK // numGroups          # K rows between adjacent lane groups
+
+  tmp = writer.vgprPool.checkOut(2, tag="_lraTileAssignment_tlu_tmp")
+  kGroup = tmp
+  frow   = tmp + 1
+  base   = tileInfo.sharedVgprLROffset[0]
+
+  module.addComment0("%s: TLU=1 LR transpose-read base offset" % tc)
+  module.add(VAndB32(dst=vgpr(frow), src0=vgpr("Serial"), src1=hex(instM - 1),
+             comment="%s: frow = lane %% %u" % (tc, instM)))
+  module.add(VAndB32(dst=vgpr(kGroup), src0=vgpr("Serial"), src1=hex(wavesize - 1),
+             comment="%s: laneId" % tc))
+  module.add(VLShiftRightB32(dst=vgpr(kGroup), shiftHex=hex(instM.bit_length() - 1),
+             src=vgpr(kGroup), comment="%s: kGroup = lane // %u" % (tc, instM)))
+  module.add(VLShiftLeftB32(dst=vgpr(kGroup), shiftHex=hex(groupKStride.bit_length() - 1),
+             src=vgpr(kGroup), comment="%s: kGroup * %u (groupKStride)" % (tc, groupKStride)))
+  module.add(VAddU32(dst=vgpr(base), src0=vgpr(kGroup), src1=vgpr(frow),
+             comment="%s: kGroup*%u + frow" % (tc, groupKStride)))
+  module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=hex(mStripBytes.bit_length() - 1),
+             src=vgpr(base), comment="%s: * %u (mStripBytes)" % (tc, mStripBytes)))
+  ldsStartOffset = getattr(writer, "ldsStartOffset%s" % tc, 0)
+  if ldsStartOffset:
+    module.add(VAddU32(dst=vgpr(base), src0=hex(ldsStartOffset), src1=vgpr(base),
+               comment="%s: + LDS start offset" % tc))
+  writer.vgprPool.checkIn(tmp)
+  return module
+
+
 def _lraTileAssignment_legacy(writer, kernel):
   module = Module()
   module.addComment0("LR Offset Calculation for Subtile Based Tiling")
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
+  # TLU=1 (NT): LDS holds each operand free-dim contiguous (K-major, one K row
+  # every mmaTileShape[1]*bpe bytes). The MFMA K-layout is recovered on the read
+  # with ds_read_b64_tr_b4, whose per-lane address is a pure (K-group, M-row)
+  # ramp -- see _lraTileAssignment_tlu.
+  if tileInfoA.lr and isinstance(tileInfoA.lr.config.tag, LRTag_TLU1):
+    _lraTileAssignment_tlu(writer, kernel, module, tileInfoA)
+    _lraTileAssignment_tlu(writer, kernel, module, tileInfoB)
+    return module
   if tileInfoA.bpe == 1:  # FP8: block-swap swizzle, no VPermlane16Swap
     return _lraTileAssignment_fp8_legacy(writer, kernel, module)
   subIterKBytes = tileInfoA.subIterKBytes
@@ -662,6 +733,34 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
 
   # du maps to mfmaC, mfmaR is always 0 (subtileShape[0]=1)
   mfmaId = tileInfo.getSubtileShapeLinearId(subIterK, 0)
+
+  # TLU=1 (NT): transpose read. LDS is K-major (free-dim contiguous), so recover
+  # the MFMA K-layout with ds_read_b64_tr_b4. Each transpose read returns 2 VGPRs
+  # (a lane holds 16 fp4 K); two reads fill the 4-VGPR fp4 operand. Offsets follow
+  # the verified thread map (format.md): the second read covers the next 16 K
+  # cols (stride 16 * mStripBytes), and sId0 selects the instM-row M-tile block
+  # (stride instM * bpe within the strip).
+  if tileInfo.lr and isinstance(tileInfo.lr.config.tag, LRTag_TLU1):
+    instM = int(tileInfo.mmaTileShape[0])
+    bpe = tileInfo.bpe
+    subtileM = int(tileInfo.subtileShape[0] * instM)
+    mStripBytes = int(subtileM * bpe)     # LDS bytes per K row (free-dim strip width)
+    mTileBytes = int(instM * bpe)         # sId0 M-tile block stride within the strip
+    kReadStrideBytes = int(16 * mStripBytes)  # second read steps 16 K cols
+    addrVgpr = tileInfo.sharedVgprLROffset[0]
+    dstVgpr = dstTile.regList.indices[0]
+    numRegs = len(dstTile.regList.indices)
+    REGS_PER_TR = 2                       # ds_read_b64_tr_b4 returns 2 dwords
+    numReads = numRegs // REGS_PER_TR
+    module = Module()
+    for readIdx in range(numReads):
+      offset = sId0 * mTileBytes + readIdx * kReadStrideBytes
+      module.add(DSLoadB64TrB4(
+          dst=vgpr(dstVgpr + readIdx * REGS_PER_TR, REGS_PER_TR),
+          src=vgpr(addrVgpr),
+          ds=DSModifiers(offset=offset),
+          comment="TrSubtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
+    return module
 
   if swizzled:
     # Swizzled: GR writes individual subtile K-groups into LDS.

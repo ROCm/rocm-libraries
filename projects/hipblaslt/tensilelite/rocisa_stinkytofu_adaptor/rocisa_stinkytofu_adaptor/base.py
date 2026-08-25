@@ -336,19 +336,13 @@ def setKernel(arch: Any, wavefrontSize: int) -> None:
 def setKernelInfo(info: KernelInfo) -> None:
     """Replace the live ``KernelInfo`` directly. No C++ equivalent.
 
-    Used by callers that need to restore a previously captured ``KernelInfo`` --
-    in particular the initial ``KernelInfo()`` state where ``info.isa is None``,
-    which ``setKernel`` cannot represent (it requires a concrete ISA tuple).
-
-    Also resets ``_current_isa`` to match, so capability lookups
-    (``getAsmCaps`` / ``getAsmBugs`` / ...) go back to raising rather than
-    silently continuing to answer for whatever ISA was pinned before this call
-    -- otherwise ``getKernel()`` would report the restored (unpinned) state
-    while capability queries stayed pinned to the old ISA.
+    Used by test harnesses that need to restore a previously captured
+    ``KernelInfo`` -- in particular the initial ``KernelInfo()`` state
+    where ``info.isa is None``, which ``setKernel`` cannot represent
+    (it requires a concrete ISA tuple).
     """
-    global _kernel_info, _current_isa
+    global _kernel_info
     _kernel_info = info
-    _current_isa = info.isa
 
 
 def getKernel() -> KernelInfo:
