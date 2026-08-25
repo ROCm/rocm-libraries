@@ -453,13 +453,13 @@ Before considering a new builder done:
 - contract documented in a spec dataclass with a stable `kernel_name()`;
 - one `build_<family>(spec)` per family — no shape-class-specific builder module and no in-body
   `seqlen` / `M`-`N`-`K` branch (route in dispatch or use a spec flag);
-- names state operation + algorithm, not workload; `kernel_name()` carries codegen knobs
-  (dtype / head_size / block_n / tile-warp / ragged / persistent) but never workload sizes
-  (batch / seqlen / M-N-K / model);
+- names state the operation and algorithm; `kernel_name()` carries codegen knobs
+  (dtype / head_size / block_n / tile-warp / ragged / persistent), while workload sizes
+  (batch / seqlen / M-N-K / model) stay in runtime `b.param` args and out of every name;
 - `is_valid_spec(spec)` rejects unsupported layouts / dtypes / tile shapes / resources;
-- validation is functional-only: reject only emit-impossible / undefined configs, not
-  perf / policy / coverage / routing opinions, and name the hardware/algorithm invariant in
-  `reason`;
+- validation is functional-only: it rejects emit-impossible / undefined configs and leaves
+  perf / policy / coverage / routing opinions to dispatch, naming the hardware/algorithm
+  invariant in `reason`;
 - every runtime predicate is expressed with `scf_if` or `select`, never a Python `if value:`;
 - padding / tail behavior has an OOB-safe load/store path (buffer-rsrc + sentinel);
 - LDS layout and async constraints are explicit (`LdsLayout`);

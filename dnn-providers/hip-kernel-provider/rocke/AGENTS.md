@@ -99,7 +99,9 @@ single doc for the Definition of Done, the process map, and commit/branch
 conventions. Build and test references: [`BUILDING.md`](BUILDING.md),
 [`TESTING.md`](TESTING.md). Language style:
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
-[`style/CPP_STYLE.md`](style/CPP_STYLE.md).
+[`style/CPP_STYLE.md`](style/CPP_STYLE.md). The review companion — what a reviewer checks
+that the DoD actually caught — is
+[`platform/dsl_docs/development/review_guidelines.md`](platform/dsl_docs/development/review_guidelines.md).
 
 ## Optimization doc routing — READ the matching doc BEFORE optimizing a kernel
 
@@ -136,4 +138,5 @@ the relevant `examples/<arch>/<workload>/` folder.
 - Deep agent onboarding (build/test/GPU, compliance, helpers, env flags): [`platform/AGENTS.md`](platform/AGENTS.md)
 - The field manual (IR, lowering, primitives, instances, runtime): [`platform/dsl_docs/README.md`](platform/dsl_docs/README.md)
 - New kernel authoring: [`platform/dsl_docs/architecture/authoring_model.md`](platform/dsl_docs/architecture/authoring_model.md)
+- Reviewing a change (what to catch): [`platform/dsl_docs/development/review_guidelines.md`](platform/dsl_docs/development/review_guidelines.md)
 - Optimization compliance: [`platform/dsl_docs/optimization/runbook_compliance.md`](platform/dsl_docs/optimization/runbook_compliance.md)

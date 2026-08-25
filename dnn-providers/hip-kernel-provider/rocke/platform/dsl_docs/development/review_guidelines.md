@@ -2,10 +2,11 @@
 
 The **engineering-judgment** layer for reviewing (and self-reviewing) a rocKE change:
 the substantive mistakes that recur in rocKE PRs and need cross-file, cross-engine, or
-cross-stage reasoning a generic or automated review won't catch.
+cross-stage reasoning a generic or purely mechanical review won't catch (see
+[Automated use](#automated-use) for how an LLM reviewer with repo context applies them).
 
 This is the **review ("what to catch")** companion to
-[`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md), the **authoring ("what to do")** process +
+[`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md), the **authoring ("what to do")** process +
 Definition of Done. An author works that DoD; a reviewer confirms it was met and then applies
 the judgment below. The two docs are meant to be read together and cross-reference each other.
 
@@ -16,28 +17,43 @@ precondition, not an alternative, to what follows.
 
 | Concern | Authoritative doc |
 |---|---|
-| Authoring process & **Definition of Done** (per change type: new kernel / knob / feature / perf), the local check runner, and the per-arch test matrix | [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md) |
-| Canonical agent-rules index / compliance / hard-invariant entry point (routes to `platform/AGENTS.md`) | [`AGENTS.md`](AGENTS.md) |
-| Compliance, export control, hard invariants (and internal-tracker nomenclature) | [`platform/AGENTS.md`](platform/AGENTS.md) |
-| The two-engine contract: byte-identity, operand/eval order, the golden snapshot, the differential gate as *definition of done*, the `ruff --fix`/F841 emitter hazard | [`platform/dsl_docs/development/invariants.md`](platform/dsl_docs/development/invariants.md), [`platform/dsl_docs/development/engine_contributing.md`](platform/dsl_docs/development/engine_contributing.md) |
-| C++ / Python style & formatting | [`style/CPP_STYLE.md`](style/CPP_STYLE.md), [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md) |
-| Merge policy: branch name, title, test-in-diff, forbidden files, `pre-commit` | [`../../../docs/LIBRARIES_PR_BOT_FAQ.md`](../../../docs/LIBRARIES_PR_BOT_FAQ.md), [`../../../CONTRIBUTING.md`](../../../CONTRIBUTING.md) |
-| Start-here routing for the rocKE tree | [`README.md`](README.md) |
+| Authoring process & **Definition of Done** (per change type: new kernel / knob / feature / perf), the local check runner, and the per-arch test matrix | [`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md) |
+| Canonical agent-rules index / compliance / hard-invariant entry point (routes to `platform/AGENTS.md`) | [`AGENTS.md`](../../../AGENTS.md) |
+| Compliance, export control, hard invariants (and internal-tracker nomenclature) | [`platform/AGENTS.md`](../../AGENTS.md) |
+| The two-engine contract: byte-identity, operand/eval order, the golden snapshot, the differential gate as *definition of done*, the `ruff --fix`/F841 emitter hazard | [`platform/dsl_docs/development/invariants.md`](invariants.md), [`platform/dsl_docs/development/engine_contributing.md`](engine_contributing.md) |
+| C++ / Python style & formatting | [`style/CPP_STYLE.md`](../../../style/CPP_STYLE.md), [`style/PYTHON_STYLE.md`](../../../style/PYTHON_STYLE.md) |
+| Merge policy: branch name, title, test-in-diff, forbidden files, `pre-commit` | [`../../../docs/LIBRARIES_PR_BOT_FAQ.md`](../../../../../../docs/LIBRARIES_PR_BOT_FAQ.md), [`../../../CONTRIBUTING.md`](../../../../../../CONTRIBUTING.md) |
+| Start-here routing for the rocKE tree | [`README.md`](../../../README.md) |
 
-From that DoD ([`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md)), the steps a diff-only read misses —
+### Which sections apply — route by changed path
+
+Applying all five sections to every diff is wasteful and invites speculative findings in
+sections with no changed code. Route by what the diff actually touches; compliance applies to
+every diff regardless.
+
+| Changed path | Apply |
+|---|---|
+| `platform/cpp/**`, `core/**`, `helpers/**` | the byte-identity notes below + §3 |
+| `**/dispatch/**`, `*selector*` | §2 |
+| `library/kernels/**`, `platform/python/rocke/instances/**` | §1 + §3 + docs-discoverability |
+| `**/tests/**`, `**/parity_*.py`, `**/*verify*.py` | §4 |
+| `**/*.md` | compliance + docs-discoverability |
+| *any diff* | compliance ([`platform/AGENTS.md`](../../AGENTS.md)) |
+
+From that DoD ([`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md)), the steps a diff-only read misses —
 check each explicitly: **on-GPU numeric** test (not spec-only geometry), **dispatcher
 registration**, **end-user visibility** (the support matrix), **docs discoverability**
-([`instances/index.md`](platform/dsl_docs/instances/index.md)), **algorithm docs for a new
+([`instances/index.md`](../instances/index.md)), **algorithm docs for a new
 pipeline** (the note below), and promote-to-`platform` for reusable optimizations. Run the local
 check runner green on each affected arch — a separate run
 per device, as the numeric lane only covers the visible GPU (see the *Local testing matrix* in
-[`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md)).
+[`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md)).
 
 **Docs discoverability means the algorithm, not just the catalog row.** A *new pipeline* — a
 distinct schedule or data-movement strategy, not merely a knob — must be documented in its arch's
 builder docs (`library/builders/<arch>/<op>/ALGORITHM.md` for what it computes and *why it is
 shaped that way*, plus the `README.md`), per Process D in
-[`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md). This is easiest to miss exactly when the pipeline
+[`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md). This is easiest to miss exactly when the pipeline
 lands *inside an existing kernel module* — a second self-contained builder/lowering body in the
 same `.py` reads like a variant of an already-documented family, so the diff looks doc-complete
 while a reader who did not write it cannot find what the new schedule does or when it is selected.
@@ -47,7 +63,7 @@ The smell: a diff that adds a self-contained builder or lowering body but touche
 Four review-time notes that sit *on top of* the byte-identity contract and are easy to get wrong:
 
 - **A green representative-golden is not cross-engine proof.** The golden is a Python-drift
-  snapshot; cross-engine agreement is the separate differential gate ([`check_byte_identity.py`](platform/tools/check_byte_identity.py)),
+  snapshot; cross-engine agreement is the separate differential gate ([`check_byte_identity.py`](../../tools/check_byte_identity.py)),
   which builds the C++ engine. Adding a golden entry never proves the two engines agree.
 - **Green fast-CI does not prove the C++ engine compiles or matches** — it is frequently not
   built in the default job. Review the C++ side by hand, and run the differential gate when a
@@ -98,9 +114,9 @@ and the gap is invisible until someone profiles production.
   performance heuristics ("prefer d128"), benchmark-coverage gaps, policy ("prod only enables
   GQA-8"), and re-checking routing the dispatcher already does all belong in dispatch/selectors,
   not the validator. State the hardware/algorithm invariant in `reason`, not the workload.
-  (Detail + the reject / don't-reject lists: [`authoring_model.md`](platform/dsl_docs/architecture/authoring_model.md) §2.)
+  (Detail + the reject / don't-reject lists: [`authoring_model.md`](../architecture/authoring_model.md) §2.)
 
-*(Authoring side: the Core DoD in [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md) requires an
+*(Authoring side: the Core DoD in [`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md) requires an
 on-GPU **numeric** test — "not spec-only geometry, that passes green and lets a regression
 ship." This section is what a reviewer checks that requirement actually caught.)*
 
@@ -164,7 +180,7 @@ hard-to-catch rocKE bugs.
   explicit override layer on top of the heuristics.
 
 *(Authoring side: dispatcher registration is required by
-[`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md) §A "Dispatcher wiring" and §C "Dispatcher feature
+[`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md) §A "Dispatcher wiring" and §C "Dispatcher feature
 list"; new knobs go through its Process B. Its Process B lets an unwired knob stay env/flag-gated
 "until a sweep proves a win" — treat that as a **temporary diagnostic override**, not a shipping
 knob, per the spec-field rule above.)*
@@ -182,11 +198,11 @@ knob, per the spec-field rule above.)*
   `if spec.seqlen_q == 8192: return build_other(...)` inside a body — is the smell. Shape-specific
   behavior belongs in spec flags or dispatch/heuristics; a harness may hardcode shapes but must
   call the same public `build_*` / `run_*_torch` the dispatcher uses, never a forked IR path.
-  (Detail: [`authoring_model.md`](platform/dsl_docs/architecture/authoring_model.md) §1.)
+  (Detail: [`authoring_model.md`](../architecture/authoring_model.md) §1.)
 - **Name by operation + algorithm, not workload — and hoist a hard-coded shape to a classified
   constant.** A builder/module/spec-class name states the *operation + tiling*
   (`build_unified_attention_2d_tiled`), never runtime geometry (`build_attention_d128_sq4096`,
-  `prefill_qwen3_80b`, `_build_..._d256_lean`). `kernel_name()` **may** carry codegen knobs that
+  `prefill_modelA_sq4096`, `_build_..._d256_lean`). `kernel_name()` **may** carry codegen knobs that
   change emitted IR (`dtype`, `head_size`, `block_n`, tile/warp, `ragged`, `persistent`) but
   **not** workload identity (`batch`, `seqlen`, `M/N/K`, model codenames) — those are `b.param`
   runtime args. When a body still pins one shape (e.g. `head_size == 256`), lift it to a named
@@ -195,7 +211,7 @@ knob, per the spec-field rule above.)*
   dim) per §1 — and derive extents from `spec` where the schedule allows. Reviewer cue: a
   workload dimension in a *name* (vs a codegen knob in `kernel_name()`) is the tell; check the
   name and the guard tell the same story. (Detail:
-  [`authoring_model.md`](platform/dsl_docs/architecture/authoring_model.md).)
+  [`authoring_model.md`](../architecture/authoring_model.md).)
 - **Arch-independent logic belongs in `common/`,** not forked across `gfx942/` and `gfx950/`.
   Forked copies drift; fix one, miss the other. Conversely, when logic *is* arch-specific, cover
   every arch you enabled — don't fix on the arch you happen to be sitting on and assume the
@@ -218,7 +234,7 @@ knob, per the spec-field rule above.)*
   from the Python↔C++ layer twinning the invariants doc governs.)
 
 *(Authoring side: the one-way `library → platform` rule is invariant #2 in
-[`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md); promoting a reusable optimization down to
+[`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md); promoting a reusable optimization down to
 `platform/` is its Process G.)*
 
 ---
@@ -230,7 +246,7 @@ prove a *kernel* is numerically correct.
 
 - **Parity is not correctness.** Both engines can emit the *same wrong* output and pass every
   parity gate. Numeric correctness needs an independent oracle — an fp32 reference on real
-  silicon (see hardware-test requirements in `AGENTS.md`), not a rocKE-vs-rocKE comparison. When
+  silicon (see [`platform/AGENTS.md` §"Hardware requirements for numeric tests"](../../AGENTS.md)), not a rocKE-vs-rocKE comparison. When
   the incumbent has no kernel for the case, write the fp32 reference in torch; do not settle for
   "two rocKE configurations agree."
 - **A skip is not a pass.** A harness that *skips* when a dependency isn't built (a missing
@@ -248,8 +264,16 @@ prove a *kernel* is numerically correct.
 - **Lock performance provenance.** Label the device (SKUs of one arch differ in CU count, so
   absolute microseconds are device-specific), make the *ratio* the headline, and measure on the
   path that actually ships — not a re-transcribed wrapper.
+- **Absolute numbers are internal; a relative factor is publishable.** Raw measured figures
+  (TFLOP/s, GB/s, tokens/s, latency in ms, absolute throughput) are never public — they live
+  only in the internal, access-controlled perf-data store. A **relative** factor that carries
+  no absolute figure — `1.2x` lift, `0.9x` regression, "~15% faster" — **may** appear in the PR
+  description or commit message, and is the *preferred* way to convey impact in public
+  artifacts. So a reviewer asks the author for the relative delta, never a raw number; flagging
+  a bare `1.2x` as a compliance breach is wrong. (Policy: the Public Data Policy, "Performance
+  numbers: raw vs. relative"; `platform/AGENTS.md` §Compliance.)
 
-*(Authoring side: [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md) provides the single check runner,
+*(Authoring side: [`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md) provides the single check runner,
 `tools/run_checks.py`. When a change leans on it being green, confirm the **on-GPU numeric lane
 actually ran** — a device-less run reports `ALL PASSED` with the numeric lane skipped, and a
 skip is not a pass.)*
@@ -270,21 +294,58 @@ These apply well beyond the case that surfaced them.
 - **Coverage = union(curated, generated); the rest is a blind spot.** Anything in neither the
   curated menu nor the generator's output is unmeasured and unknown — closed upstream by
   hypothesis (hardware reasoning, profiling a bottleneck), not by re-running the same bench.
-- **Separate "what ships" from "what's achievable."** Keep both numbers per shape; their delta
-  tells a kernel team whether the next win is a faster kernel or better routing.
+- **Separate "what ships" from "what's achievable."** Keep both per-shape figures — in the
+  internal perf-data store — so their delta tells a kernel team whether the next win is a
+  faster kernel or better routing; the public artifact carries only the relative delta, not
+  the raw pair.
 - **A baked heuristic is a snapshot that drifts.** Offline-tuned winners frozen into static
   selector tables go stale as hardware, shapes, and the compiler change. Be explicit about
   whether you shipped a snapshot or a live search, and keep a reproducible path to regenerate
   the snapshot rather than hand-patching it forever.
 
 *(Authoring side: the mandatory **Step 0 exhaustive lever sweep** — "measure the space" as a
-required authoring step — is Process C/D in [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md).)*
+required authoring step — is Process C/D in [`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md).)*
+
+## Automated use
+
+This doc is dual-audience: a human reviewer, and an LLM reviewer prompted with it. The rules are
+the same for both — what differs is *how much* each can check. When this file backs an automated
+reviewer, that reviewer follows the tiering, severity ladder, and output contract below.
+
+### What is checkable, and by whom
+
+| Tier | Examples | Who can check |
+|---|---|---|
+| From the diff alone | test-in-diff, an `os.environ` knob, a workload size in a name, a model/customer name (compliance) | an agent, from the patch |
+| With repo context | duplicated predicate/cohort, missing C++ twin, preflight-vs-constructor gate mismatch, an arch fork of `common/` logic | an agent, with a grep/read across files |
+| Human or CI only | on-GPU numeric parity, whether the C++ engine builds and matches, bottleneck class, occupancy/LDS budgets | a person, a built C++ engine, real silicon, a profiler |
+
+An automated pass owns tiers 1–2 and must **defer, not guess,** on tier 3 — flag "needs on-GPU /
+built-C++ / profiler verification," never assert a tier-3 result from static text.
+
+### Severity ladder
+
+| Severity | Triggers |
+|---|---|
+| Critical | a compliance breach (a raw/absolute perf number — TFLOP/s, GB/s, latency, absolute throughput — or a customer/model name in-repo, PR, or commit; a **relative** factor like `1.2x`/`0.9x` is allowed), silent coverage narrowing, a cache key that lies about the built artifact |
+| High | a missing on-GPU numeric test, a knob in `os.environ` instead of on the spec, a *live* cross-engine divergence on a served path |
+| Medium | a duplicated predicate/cohort, inflated blast radius, a preflight/constructor gate mismatch |
+| Minor | naming (a workload token in a name), a stale reference to deleted code, a docs-discoverability gap |
+
+### Output contract
+
+- **Cap the findings.** Report only the few that survive verification; an unbounded list reliably
+  buries the two real findings under a dozen speculative ones.
+- **One finding per comment, anchored on a changed line.**
+- **Every finding is `problem → evidence (file:line) → fix`.** No evidence, no finding.
+- **Post nothing if nothing survives verification.** Silence is a valid — and common — result.
 
 ---
 
 *Scope: this is judgment guidance, deliberately not a mechanical checklist. The authoring
 **Definition of Done** and the local check runner live in
-[`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md); the mechanical gates (branch/title/test-in-diff/
+[`KERNEL_AUTHORING.md`](../../../KERNEL_AUTHORING.md); the mechanical gates (branch/title/test-in-diff/
 forbidden files/formatting) and the hard invariants are enforced by the PR bot, `pre-commit`,
 and the docs linked at the top. When a recurring mistake here becomes mechanically checkable,
-move it into a lint/hook rather than leaving it to review.*
+move it into a lint/hook — and keep it listed here as context the automated reviewer still
+reads (see [Automated use](#automated-use)).*
