@@ -275,7 +275,6 @@ class SignatureDefault(Signature):
             signature.addArg("AddressScaleAlphaVec", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             if kernel["ProblemType"]["UseScaleAlphaVec"] == 3:
                 userArgumentsInfo.factorDimSize =4
-
         userArgumentsInfo.scaleAlphaVecSize += 8
 
         if writer.states.useBias != DataDirection.NONE:

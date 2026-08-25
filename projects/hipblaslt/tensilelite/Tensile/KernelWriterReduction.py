@@ -45,7 +45,7 @@ class KernelWriterReduction(KernelWriterBase):
         self.language = "HIP"
         self.kernelName = self.getKernelName()
         self.datatype = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
-        if self.state["ProblemType"]["DataType"].isInt8() and self.state["ProblemType"]["ComputeDataType"].isSingle() and self.state["ProblemType"]["HighPrecisionAccumulate"]:
+        if self.state["ProblemType"]["MacDataTypeA"].isInt8() and self.state["ProblemType"]["ComputeDataType"].isSingle() and self.state["ProblemType"]["HighPrecisionAccumulate"]:
             self.datatype = DataType('int32').toDevice(self.language)
 
     # Currently dummy

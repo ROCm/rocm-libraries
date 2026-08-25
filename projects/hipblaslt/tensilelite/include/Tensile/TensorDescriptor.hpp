@@ -520,6 +520,8 @@ namespace TensileLite
                 stream << ")" << std::endl << "[" << std::endl;
             }
 
+            constexpr size_t packing = TypeInfo<std::remove_cv_t<T>>::Packing;
+
             for(coord[1] = 0; coord[1] < sizes[1]; coord[1]++)
             {
                 coord[0] = 0;

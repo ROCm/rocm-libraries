@@ -574,6 +574,18 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXBlockACheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXBlockACheck, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXBlockBCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXBlockBCheck, IO>
+        {
+        };
+
+        template <typename IO>
         struct MappingTraits<Predicates::Contraction::SupportDeviceUserArguments, IO>
             : public AutoMappingTraits<Predicates::Contraction::SupportDeviceUserArguments, IO>
         {

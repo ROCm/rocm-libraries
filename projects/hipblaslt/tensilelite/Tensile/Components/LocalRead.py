@@ -127,24 +127,24 @@ class LocalReadVALU(LocalRead):
                             # localReadCode.addInst( "s_waitcnt_vscnt", -2, "0", "")
                             localReadCode.add(SWaitCnt(vlcnt=0, vscnt=0))
 
-                        if kernel["ProblemType"]["DataType"].isHalf():
+                        if kernel["ProblemType"]["MacDataTypeA"].isHalf():
                             localReadCode.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(0x3c003c00), comment="CheckValue1: FP16")) # packed 1s
                             localReadCode.add(writer.assert_eq( dbgVgpr, sgpr(tmpSgpr)))
 
-                        elif kernel["ProblemType"]["DataType"].isBFloat16():
+                        elif kernel["ProblemType"]["MacDataTypeA"].isBFloat16():
                             localReadCode.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(0x3f803f80), comment="CheckValue1: BF16")) # packed 1s
                             localReadCode.add(writer.assert_eq( dbgVgpr, sgpr(tmpSgpr)))
 
                         # TODO - Check if this works
-                        if kernel["ProblemType"]["DataType"].isInt8():
+                        if kernel["ProblemType"]["MacDataTypeA"].isInt8():
                             localReadCode.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(0x01010101), comment="CheckValue1: INT8")) # packed 1s
                             localReadCode.add(writer.assert_eq( dbgVgpr, sgpr(tmpSgpr)))
 
                         # TODO - Check if this works
-                        elif kernel["ProblemType"]["DataType"].isInt8x4():
+                        elif kernel["ProblemType"]["MacDataTypeA"].isInt8x4():
                             localReadCode.add(writer.assert_eq( dbgVgpr, 1))
 
-                        elif kernel["ProblemType"]["DataType"].isSingle():
+                        elif kernel["ProblemType"]["MacDataTypeA"].isSingle():
                             localReadCode.add(writer.assert_eq( dbgVgpr, 1.0) )
 
         return imod, pack, Module()
@@ -1064,7 +1064,7 @@ class LocalReadMFMA(LocalRead):
                         subIterLoadCount += 1
         # Without enableLDSTr
         else:
-            totalLoads = numVectorsPerTile * numReadsPerVector * numReadsPerUnroll
+            totalLoads = numVectorsPerTile * numReadsPerVector * numReadsPerUnroll * miInputGroup
             swapBlockSizeSub = (totalLoads * blockWidth)
             if not writer.states.inTailLoop:
                 # divided by numSubTiles for non TailLoop case

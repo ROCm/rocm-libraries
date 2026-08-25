@@ -58,7 +58,7 @@ class KernelWriterConversion(KernelWriterBase):
     self.isaInfoMap = isaInfoMap
     self.datatype = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
     self.int32Str = DataType('int32').toDevice(self.language)
-    if self.state["ProblemType"]["DataType"].isInt8() and self.state["ProblemType"]["ComputeDataType"].isSingle() and self.state["ProblemType"]["HighPrecisionAccumulate"]:
+    if self.state["ProblemType"]["MacDataTypeA"].isInt8() and self.state["ProblemType"]["ComputeDataType"].isSingle() and self.state["ProblemType"]["HighPrecisionAccumulate"]:
       self.datatype = self.int32Str
 
     # determine chars for fast access
@@ -331,7 +331,7 @@ class KernelWriterConversion(KernelWriterBase):
     self.num_dword_store = int(self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4)
     if self.num_dword_store == 0:
       self.num_dword_store = self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4
-    if self.state["ProblemType"]["DataType"].numBytes() > 4:
+    if self.state["ProblemType"]["MacDataTypeA"].numBytes() > 4:
       self.num_dword_load  = self.num_elements_load
     if self.state["ProblemType"]["DestDataType"].numBytes() > 4:
       self.num_dword_store = self.num_elements_load
@@ -532,7 +532,7 @@ class KernelWriterConversion(KernelWriterBase):
     ########################################
     # multi buffers GSU: Accumulate all GSU buffer
     intermediateDataType = self.datatype
-    if self.state["ProblemType"]["DataType"].isInt8() and self.state["ProblemType"]["ComputeDataType"].isSingle() and self.state["ProblemType"]["HighPrecisionAccumulate"]:
+    if self.state["ProblemType"]["MacDataTypeA"].isInt8() and self.state["ProblemType"]["ComputeDataType"].isSingle() and self.state["ProblemType"]["HighPrecisionAccumulate"]:
       intermediateDataType = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
 
     destTypeStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
@@ -564,9 +564,9 @@ class KernelWriterConversion(KernelWriterBase):
     if self.state["ProblemType"]["UseBias"] and self.state["ProblemType"]["Gradient"] and self.state["ProblemType"]["BiasSrc"] == "D":
       kStr += "  auto idxW_ori = idxW;%s"%self.endLine
 
-    typeStr = "int" if self.state["ProblemType"]["DataType"].isInt8() or self.state["ProblemType"]["DataType"].isInt32() else ("double" if self.state["ProblemType"]["DataType"].isDouble() else "float")
+    typeStr = "int" if self.state["ProblemType"]["MacDataTypeA"].isInt8() or self.state["ProblemType"]["MacDataTypeA"].isInt32() else ("double" if self.state["ProblemType"]["MacDataTypeA"].isDouble() else "float")
     typeStr2 = "int16_t" if self.state["ProblemType"]["DestDataType"].isInt8() else ("tensile_half" if self.state["ProblemType"]["DestDataType"].isAnyFloat8() else "tensile_bfloat16")
-    if self.state["ProblemType"]["DataType"].isComplex():
+    if self.state["ProblemType"]["MacDataTypeA"].isComplex():
       loadTypeStr = "%s%s" % (self.datatype, "" if self.num_dword_load == 1 else self.num_dword_load)
       storeTypeStr = "%s%s" % (self.datatype, "" if self.num_dword_store == 1 else self.num_dword_store)
     else:
@@ -929,8 +929,8 @@ class KernelWriterConversion(KernelWriterBase):
     name += "_"
 
     # add input datatype into kernel name (the datatype of workspace)
-    inputTypeStr = DataType("I").toChar() if state["ProblemType"]["DataType"].isInt8() or state["ProblemType"]["DataType"].isInt32() else \
-                                  (DataType("D").toChar() if state["ProblemType"]["DataType"].isDouble() else DataType("S").toChar())
+    inputTypeStr = DataType("I").toChar() if state["ProblemType"]["MacDataTypeA"].isInt8() or state["ProblemType"]["MacDataTypeA"].isInt32() else \
+                                  (DataType("D").toChar() if state["ProblemType"]["MacDataTypeA"].isDouble() else DataType("S").toChar())
 
     name += (inputTypeStr + state["ProblemType"]["DestDataType"].toChar())
 

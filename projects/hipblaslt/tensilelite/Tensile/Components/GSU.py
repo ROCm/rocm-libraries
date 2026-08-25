@@ -174,6 +174,10 @@ class GSU(Component):
         module.addComment1("global read addresses: increments b")
         for i in reversed(range(kernel["ProblemType"]["NumIndicesSummation"])):
             module.add(writer.graIncrements(kernel, i, tensorParametersB))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.addComment1("global read addresses: increments mxsb")
+          for i in reversed(range(kernel["ProblemType"]["NumIndicesSummation"])):
+              module.add(writer.graIncrements(kernel, i, tensorParametersB["MX"]))
 
         return module
 
@@ -413,7 +417,7 @@ class GSUOn(GSU):
             elif tP["isM"]:
                 divider = 8
             if divider != 1:
-                depthUDiv = depthU // divider
+                _DepthU = depthU // divider
                 gsuOffsetStr = "gsuOffset = DepthU/%s*bpeGR*GSUSumIdx"%(divider)
 
         gsucLabel    = Label(label=writer.labels.getNameInc(f"GSUC_{tc}"), comment="")
@@ -421,7 +425,7 @@ class GSUOn(GSU):
         module.add(SAndB32(dst=sgpr(stmp), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
         module.add(SCBranchSCC1(labelName=gsucLabel.getLabelName(), comment="branch if GSUC == 1"))
         gsuOffsetStr = "gsuOffset = DepthU*GSUSumIdx"
-        module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), depthUDiv, sgpr("GSUSumIdx"), comment=gsuOffsetStr))
+        module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), _DepthU, sgpr("GSUSumIdx"), comment=gsuOffsetStr))
         module.add(SBranch(gsucLabelEnd.getLabelName()))
         module.add(gsucLabel)
         gsuOffsetStr = "gsuOffset = DepthU*accumulatedNumOfLoopCounterL"
@@ -430,7 +434,7 @@ class GSUOn(GSU):
                                     comment="s[%s] = s[sgprSizesSum] / %s"%(loopCounterName, depthU)))
         tmpSgprInfo = ContinuousRegister(idx=stmp, size=2)
         module.add(writer.calculateLoopNumIterOffsetGsu(kernel, loopCounterName, tmpSgprInfo))
-        module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), depthUDiv, comment=gsuOffsetStr))
+        module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), _DepthU, comment=gsuOffsetStr))
         module.add(gsucLabelEnd)
 
         unrollSummation = [ i for i in tP["ia"] if i in kernel["ProblemType"]["IndicesSummation"] ]
@@ -973,7 +977,7 @@ class GSUOn(GSU):
                 numElementsPerBatch = ss.cfg.numElementsPerBatchLimitedBySgprs
 
             # TODO: Which of DataType or DestDataType is in a better sense? 0114: Check Using DestDataType + HSS
-            if (kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16()):
+            if (kernel["ProblemType"]["MacDataTypeA"].isHalf() or kernel["ProblemType"]["MacDataTypeA"].isBFloat16()):
                 # only do an even number of halves - since these share hi/lo pieces of some registers?
                 if numElementsPerBatch > 1:
                     numElementsPerBatch = int(numElementsPerBatch/2)*2
@@ -1756,7 +1760,7 @@ class GSUOn(GSU):
                 for i in range(0, GSUP1):
                     vlcnt = vlcnt - 1 if vlcnt > 0 else 0
                     module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                    if kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
                                     comment="buffer add"))
@@ -1835,7 +1839,7 @@ class GSUOn(GSU):
                     for i in range(0, k):
                         vlcnt = vlcnt - 1 if vlcnt > 0 else 0
                         module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                        if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                        if kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
                                         comment="buffer add"))
@@ -1961,7 +1965,7 @@ class GSUOn(GSU):
                 vlcnt       = vlcnt - 2 if vlcnt > 0 else 0
 
                 module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                if kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].isInt32():
                     for j in range(0, int(gwvw)):
                         module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
                                 comment="buffer add"))
@@ -2003,7 +2007,7 @@ class GSUOn(GSU):
                     vlcnt       = vlcnt - 1 if vlcnt > 0 else 0
 
                     module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                    if kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
                                     comment="buffer add"))
@@ -2048,7 +2052,7 @@ class GSUOn(GSU):
                     data  = tmpVAdd[-1][elementIdx]
 
                     module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                    if kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
                                     comment="buffer add"))
@@ -2069,7 +2073,7 @@ class GSUOn(GSU):
                         data  = tmpVAdd[i-1][elementIdx]
 
                         module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                        if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                        if kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
                                         comment="buffer add"))
@@ -2128,7 +2132,7 @@ class GSUOn(GSU):
 
                 GSUP1 = 1 # do 1 element at a time
                 for i in range(0, GSUP1):
-                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                    if kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
                                     comment="buffer add"))
@@ -2164,7 +2168,7 @@ class GSUOn(GSU):
 
                     GSUP1 = 1 # do 1 element at a time
                     for i in range(0, GSUP1):
-                        if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                        if kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
                                         comment="buffer add"))

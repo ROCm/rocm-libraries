@@ -3824,7 +3824,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleA != hipblaslt_scaling_format::none)
             {
                 hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
-                void* scaleA_addr = (void*)(dScaleA[i].as<char>() + b * size_scaleAVec[i]);
+                size_t scaleA_block_size = isBlockScaling(arg.scaleA)
+                    ? size_scaleAVec[i] * num_batches[i]
+                    : size_scaleAVec[i];
+                void* scaleA_addr = (void*)(dScaleA[i].as<char>() + b * scaleA_block_size);
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[b][i], attr, &scaleA_addr, sizeof(void*)));
             }
@@ -3832,7 +3835,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleB != hipblaslt_scaling_format::none)
             {
                 hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
-                void* scaleB_addr = (void*)(dScaleB[i].as<char>() + b * size_scaleBVec[i]);
+                size_t scaleB_block_size = isBlockScaling(arg.scaleB)
+                    ? size_scaleBVec[i] * num_batches[i]
+                    : size_scaleBVec[i];
+                void* scaleB_addr = (void*)(dScaleB[i].as<char>() + b * scaleB_block_size);
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[b][i], attr, &scaleB_addr, sizeof(void*)));
             }

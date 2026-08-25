@@ -113,7 +113,9 @@ namespace TensileLite
 
         using BitWidth        = uint8_t;
         using Size            = uint64_t;
-        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size>;
+        // Cache key includes tensor index (size_t) to prevent A and B from
+        // sharing cached permuted data when they have the same shape.
+        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size, size_t>;
         using SwizzleCacheVal = ::Tensor::Manipulation::Tensor;
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
@@ -142,6 +144,8 @@ namespace TensileLite
             case rocisa::DataType::E8:
             case rocisa::DataType::E5M3:
                 return 8;
+            case rocisa::DataType::Float4:
+                return 4;
             default:
                 throw std::runtime_error("unsupported datatype");
             }
@@ -388,6 +392,10 @@ namespace TensileLite
             case rocisa::DataType::E5M3:
                 MiK  = 32;
                 MiKv = 8;
+                break;
+            case rocisa::DataType::Float4:
+                MiK  = 16;
+                MiKv = 16;
                 break;
             default:
                 throw std::runtime_error("unsupported datatype for swizzling");
@@ -2770,14 +2778,19 @@ namespace TensileLite
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                     calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                    auto                          unrolledSize = desc.sizes()[0];
-                    auto                          tiledSize    = desc.sizes()[1];
+                    auto const& dtInfo       = DataTypeInfo::Get(desc.dataType());
+                    // sizes[0] is in logical elements. Convert to storage units
+                    // (the number of packed elements, each dtInfo.elementSize bytes).
+                    // For most types packing=1 (no change). For sub-byte types
+                    // like FP4 (packing=2), this halves the count.
+                    auto        unrolledSize = desc.sizes()[0] / dtInfo.packing;
+                    auto        tiledSize    = desc.sizes()[1];
                     ::Tensor::Manipulation::Shape paddedShape{
                         ((tiledSize / MiM_N) + !!(tiledSize % MiM_N)) * MiM_N,
                         (unrolledSize / (MiK * PackK) + !!(unrolledSize % (MiK * PackK))) * MiK
                             * PackK};
                     auto swizzleKey
-                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
+                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize, i);
 
                     if(g_swizzleCache.count(swizzleKey))
                     {
@@ -2797,11 +2810,10 @@ namespace TensileLite
                     }
                     else
                     {
-                        auto tmpTensor = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
+                        auto tmpTensor = Tensor({tiledSize, unrolledSize}, dtInfo.elementSize);
 
                         memcpy(
                             tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
-                        //Temporary hack
                         uint64_t padVal{};
                         auto     paddedTensor = ::Tensor::Manipulation::pad(
                             tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
@@ -3135,19 +3147,40 @@ namespace TensileLite
             return result;
         }
 
+        // Swizzled (pre-shuffled) tensors are padded to tile boundaries,
+        // so their allocation size differs from the unswizzled descriptor.
+        // This must match the size used when allocating rotating buffer copies
+        // (see the swizzleTensor branch in the pristine allocation loop),
+        // otherwise getRotatingSize underestimates and the budget check fails.
+        size_t getSwizzledTensorAllocatedBytes(const TensorDescriptor& desc)
+        {
+            size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
+            calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
+            auto numElements = getSwizzledTensorNumAllocatedElements(desc, MiM_N, MiK, PackK);
+            return multiplyElementSize(numElements, rocisa::GetElementSize(desc.dataType()));
+        }
+
         size_t getRotatingSize(ContractionProblemGemm const& problem,
                                ContractionInputs const&      inputs)
         {
             size_t rotatingSize = 0;
             if(inputs.a != nullptr)
             {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::A].totalAllocatedBytes();
+                if(problem.swizzleTensorA())
+                    rotatingSize += getSwizzledTensorAllocatedBytes(
+                        problem.tensors()[ContractionProblemGemm::TENSOR::A]);
+                else
+                    rotatingSize
+                        += problem.tensors()[ContractionProblemGemm::TENSOR::A].totalAllocatedBytes();
             }
             if(inputs.b != nullptr)
             {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::B].totalAllocatedBytes();
+                if(problem.swizzleTensorB())
+                    rotatingSize += getSwizzledTensorAllocatedBytes(
+                        problem.tensors()[ContractionProblemGemm::TENSOR::B]);
+                else
+                    rotatingSize
+                        += problem.tensors()[ContractionProblemGemm::TENSOR::B].totalAllocatedBytes();
             }
             if(inputs.c != nullptr && problem.beta())
             {

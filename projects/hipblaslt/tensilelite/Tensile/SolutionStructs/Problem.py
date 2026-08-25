@@ -413,6 +413,8 @@ _defaultProblemType = {
     # =TensorContraction  requires specifying
     "OperationType": "GEMM",  # GEMM, TensorContraction, ConvolutionForward, ConvolutionBackwardData, ConvolutionBackwardWeights
     "DataType": 0,  # data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
+    "MacDataTypeA": 0, # A data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
+    "MacDataTypeB": 0, # B data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeA": 0,  # A data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeB": 0,  # B data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "MacDataTypeA": 0, # A data type which is used for mac/mfma/wmma computation.
@@ -434,6 +436,8 @@ _defaultProblemType = {
     "UseScaleAlphaVec": 0,  # =1 support alpha vector on M direction, =2 support bias vector on N direction, =3 support alpha vector on both M,N direction
     "HighPrecisionAccumulate": False,  # f32 += f16*f16
     "SilentHighPrecisionAccumulate": False,  # Keep kernel names the same for HPA mode.  Useful for testing.
+    "MXBlockA": 0,  # MX block size for A (0=disabled, 32=MX32)
+    "MXBlockB": 0,  # MX block size for B (0=disabled, 32=MX32)
     "Sparse": 0,  # 4:2 Structured Sparse A Matrix, 0=Non Sparse, 1=Sparse Matrix A, 2=Sparse Matrix B
     "ComplexConjugateA": False,  # complex data should be conjugated for "C" transpose case
     "ComplexConjugateB": False,
@@ -853,6 +857,8 @@ class ProblemType(Mapping):
     # adjusting all data types
     if "DataType" in config:
       self["DataType"]  = DataType(config["DataType"])
+      self["MacDataTypeA"] = self["DataType"]
+      self["MacDataTypeB"] = self["DataType"]
       self["DataTypeA"] = self["DataType"]
       self["DataTypeB"] = self["DataType"]
       self["MacDataTypeA"] = self["DataType"]
@@ -860,10 +866,20 @@ class ProblemType(Mapping):
     else:
       raise Exception("NO data type specified")
       self["DataType"]  = DataType(0)
+      self["MacDataTypeA"] = DataType(0)
+      self["MacDataTypeB"] = DataType(0)
       self["DataTypeA"] = DataType(0)
       self["DataTypeB"] = DataType(0)
       self["MacDataTypeA"] = DataType(0)
       self["MacDataTypeB"] = DataType(0)
+
+    if "MacDataTypeA" in config:
+      self["MacDataTypeA"] = DataType(config["MacDataTypeA"])
+    self["MacDataTypeA"] = getRealDataTypeA(self["MacDataTypeA"])
+
+    if "MacDataTypeB" in config:
+      self["MacDataTypeB"] = DataType(config["MacDataTypeB"])
+    self["MacDataTypeB"] = getRealDataTypeB(self["MacDataTypeB"])
 
     if "MacDataTypeA" in config:
       self["MacDataTypeA"] = DataType(config["MacDataTypeA"])
@@ -935,17 +951,17 @@ class ProblemType(Mapping):
         self["F32XdlMathOp"] = DataType(DataTypeEnum.Float)
 
     # Modifying ComputeDataType for HHH+HPA: if (HHH+HPA), convert it to HHS_BH by setting ComputeDataType to S.
-    if self["ComputeDataType"].isHalf() and self["DataType"].isHalf() and self["HighPrecisionAccumulate"]:
+    if self["ComputeDataType"].isHalf() and self["MacDataTypeA"].isHalf() and self["HighPrecisionAccumulate"]:
       printWarning("Inconsistent DataTypes: DataType == f16, DestType == f16, ComputeDataType == f16, but HPA == True (HHH+HPA, no such a type); Converting HHH+HPA to HHS_BH by setting compute data type to f32.")
       self["ComputeDataType"] = DataType('s')
 
     # Modifying ComputeDataType for BBB+HPA: if (BBB+HPA), convert it to BBS_BH by setting ComputeDataType to S.
-    if self["ComputeDataType"].isBFloat16() and self["DataType"].isBFloat16() and self["HighPrecisionAccumulate"]:
+    if self["ComputeDataType"].isBFloat16() and self["MacDataTypeA"].isBFloat16() and self["HighPrecisionAccumulate"]:
       printWarning("Inconsistent DataTypes: DataType == bf16, DestType == bf16, ComputeDataType == bf16, but HPA == True (BBB+HPA, no such a type); Converting BBB+HPA to BBS_BH by setting compute data type to f32.")
       self["ComputeDataType"] = DataType('s')
 
     # Modifying ComputeDataType for I8I8I_BH: if (I8I8I8+HPA), convert it to I8I8I_BH by setting ComputeDataType to i.
-    if self["ComputeDataType"].isInt8() and DataType(config["DataType"]).isInt8() and self["HighPrecisionAccumulate"]:
+    if self["ComputeDataType"].isInt8() and DataType(config["MacDataTypeA"]).isInt8() and self["HighPrecisionAccumulate"]:
       print2("DataType == i8 and HPA == True; setting compute data type to int32")
       self["ComputeDataType"] = DataType('i')
 
@@ -1015,7 +1031,7 @@ class ProblemType(Mapping):
                                                                                                 self["DestDataType"]))
         self["ActivationComputeDataType"] = self["ComputeDataType"]
       if (self["ActivationComputeDataType"].numRegisters() != self["ComputeDataType"].numRegisters()) and \
-        (self["DataType"].numRegisters() < self["DestDataType"].numRegisters()):
+        (self["MacDataTypeA"].numRegisters() < self["DestDataType"].numRegisters()):
         printWarning("TensileLite only supports ActivationComputeDataType = ComputeDataType if DestDataType > DataType. \
                       ActivationComputeDataType will be set to ComputeDataType automatically.")
         self["ActivationComputeDataType"] = self["ComputeDataType"]
@@ -1110,6 +1126,11 @@ class ProblemType(Mapping):
       self["NumIndicesC"] = 3
     else:
       self["NumIndicesC"] = 2
+
+    if self["MXBlockA"]:
+      self["IndexAssignmentsMXSA"] = deepcopy(self["IndexAssignmentsA"])
+    if self["MXBlockB"]:
+      self["IndexAssignmentsMXSB"] = deepcopy(self["IndexAssignmentsB"])
 
     self["NumIndicesLD"] = 4
     self["IndexAssignmentsLD"][0] = self["NumIndicesC"] + 1
@@ -1300,9 +1321,11 @@ class ProblemType(Mapping):
     gemmType = (self["MacDataTypeA"].toChar(), self["MacDataTypeB"].toChar(),
                 self["DestDataType"].toChar(), self["ComputeDataType"].toChar())
     if gemmType in _HPATypes:
-      name[-1] += "".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()])
+      dataTypeStr += self["DestDataType"].toChar()
+      dataTypeStr += self["ComputeDataType"].toChar()
+    name.append(dataTypeStr)
 
-    if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
+    if not self["F32XdlMathOp"].isSingle() and self["MacDataTypeA"].isSingle():
       name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
 
     if self["MXBlockA"]:
@@ -1316,6 +1339,12 @@ class ProblemType(Mapping):
 
     if self["SwizzleTensorB"]:
       name.append("STB")
+
+    if self["MXBlockA"]:
+      name.append(f'MXA{self["MXBlockA"]}')
+
+    if self["MXBlockB"]:
+      name.append(f'MXB{self["MXBlockB"]}')
 
     # Other
     other = ""

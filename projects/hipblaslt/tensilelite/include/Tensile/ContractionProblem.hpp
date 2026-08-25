@@ -1305,6 +1305,14 @@ namespace TensileLite
         {
             return m_tensors[ContractionProblemGemm::TENSOR::AMAXD];
         }
+        TensorDescriptor const& mxsa() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::MXSA];
+        }
+        TensorDescriptor const& mxsb() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::MXSB];
+        }
         TensorOps const& aOps() const
         {
             return m_aOps;

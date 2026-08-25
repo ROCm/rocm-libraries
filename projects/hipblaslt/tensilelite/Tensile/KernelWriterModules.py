@@ -202,6 +202,8 @@ def accToArchMapper(kernel):
                   dst = vw0 + VectorWidth0 * (tIdx + OutputsPerMFMA1B * (bIdx0 + matrixInstBM * (wgIdx0 + outerTT0 * (vw1 + VectorWidth1 * (bIdx1 + matrixInstBN * (wgIdx1))))))
                 acc2arch[src] = dst
                 arch2acc[dst] = src
+  #print(acc2arch, arch2acc)
+  #exit(1)
   return acc2arch, arch2acc
 
 ##############################################################################
@@ -238,7 +240,7 @@ def accVgprImagNumOffset(kernel):
 def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, spilledVgprBase=None):
   acc2arch, _ = accToArchMapper(kernel)
 
-  complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
+  complexMultiplier = 2 if kernel["ProblemType"]["MacDataTypeA"].isComplex() else 1
   itemList = [None] * kernel["MIRegPerOut"] * complexMultiplier * len(acc2arch)
   accImOffset = accVgprImagNumOffset(kernel)
   for i in range(len(acc2arch)):

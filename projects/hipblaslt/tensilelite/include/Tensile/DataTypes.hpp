@@ -495,6 +495,8 @@ namespace TensileLite
 
     TENSILELITEHOST_EXPORT size_t multiplyElementSize(size_t element, float elementSize);
 
+    size_t multiplyElementSize(size_t element, float elementSize);
+
     /**
  * @}
  */

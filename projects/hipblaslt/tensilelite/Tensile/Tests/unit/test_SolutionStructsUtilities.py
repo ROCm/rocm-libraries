@@ -37,7 +37,7 @@ def _build_kernel(*, enable_f32_xdl_math_op=False, use_f32x_emulation=False,
         "EnableF32XdlMathOp": enable_f32_xdl_math_op,
         "UseF32XEmulation": use_f32x_emulation,
         "ProblemType": {
-            "DataType": data_type or DataType(DataTypeEnum.Float),
+            "MacDataTypeA": data_type or DataType(DataTypeEnum.Float),
             "F32XdlMathOp": f32_xdl_math_op or DataType(DataTypeEnum.XFloat32),
         },
     }

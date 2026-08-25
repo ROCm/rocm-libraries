@@ -1462,9 +1462,9 @@ class StreamK(Component):
         # TODO: Minimum elems for StoreRemap
         # TODO: Which of DataType or DestDataType is in a better sense? 0114: Check Using DestDataType + HSS
         minElements = 1
-        if kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16():
+        if kernel["ProblemType"]["MacDataTypeA"].isHalf() or kernel["ProblemType"]["MacDataTypeA"].isBFloat16():
             minElements = 2
-        elif kernel["ProblemType"]["DataType"].is8bitFloat():
+        elif kernel["ProblemType"]["MacDataTypeA"].is8bitFloat():
             # TODO STREAM-K check if needed
             minElements = 4
         minNeeded = minElements * ss.numVgprsPerElement
@@ -1541,7 +1541,7 @@ class StreamK(Component):
             numElementsPerBatch = ss.cfg.numElementsPerBatchLimitedBySgprs
 
         # TODO: Which of DataType or DestDataType is in a better sense? 0114: Check Using DestDataType + HSS
-        if (kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16()):
+        if (kernel["ProblemType"]["MacDataTypeA"].isHalf() or kernel["ProblemType"]["MacDataTypeA"].isBFloat16()):
             # only do an even number of halves - since these share hi/lo pieces of some registers?
             if numElementsPerBatch > 1:
                 numElementsPerBatch = int(numElementsPerBatch/2)*2
@@ -2035,9 +2035,9 @@ class StreamK(Component):
             # TODO: Minimum elems for StoreRemap
             # TODO: Which of DataType or DestDataType is in a better sense? 0114: Check Using DestDataType + HSS
             minElements = 1
-            if kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16():
+            if kernel["ProblemType"]["MacDataTypeA"].isHalf() or kernel["ProblemType"]["MacDataTypeA"].isBFloat16():
                 minElements = 2
-            elif kernel["ProblemType"]["DataType"].is8bitFloat():
+            elif kernel["ProblemType"]["MacDataTypeA"].is8bitFloat():
                 minElements = 4
             minNeeded = minElements * ss.numVgprsPerElement
 
@@ -2100,7 +2100,7 @@ class StreamK(Component):
                 numElementsPerBatch = ss.cfg.numElementsPerBatchLimitedBySgprs
 
             # TODO: Which of DataType or DestDataType is in a better sense? 0114: Check Using DestDataType + HSS
-            if (kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16()):
+            if (kernel["ProblemType"]["MacDataTypeA"].isHalf() or kernel["ProblemType"]["MacDataTypeA"].isBFloat16()):
                 # only do an even number of halves - since these share hi/lo pieces of some registers?
                 if numElementsPerBatch > 1:
                     numElementsPerBatch = int(numElementsPerBatch/2)*2
@@ -2472,7 +2472,7 @@ class StreamK(Component):
                         module.add(VAddF32(dst=vgpr("ValuC+%u"%sumIdxV), src0=vgpr("ValuC+%u"%sumIdxV), src1=vgpr(tmpVgpr), comment="accum partials"))
 
                 elif kernel["ProblemType"]["ComputeDataType"].isSingle():
-                    if kernel["ProblemType"]["DataType"].isInt8():
+                    if kernel["ProblemType"]["MacDataTypeA"].isInt8():
                         newSumIdxV = sumIdxV - writer.states.c.startVgprValu
                         module.add(VAddU32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(dataV+0), src1=vgpr("ValuC+%u"%newSumIdxV), comment="accum partials"))
                     else:

@@ -49,6 +49,16 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
     # the include path, and the C++20 floor all the way through.
     target_link_libraries(hipblaslt-clients-common PUBLIC hipblaslt::mxdatagen)
 endif()
+target_compile_features(hipblaslt-clients-common PRIVATE cxx_std_20)
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_compile_definitions(hipblaslt-clients-common PUBLIC HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_link_libraries(hipblaslt-clients-common PRIVATE roc::mxDataGenerator)
+endif()
+
+if(HIPBLASLT_ENABLE_ROCROLLER)
+    target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
+endif()
+
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
     target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
