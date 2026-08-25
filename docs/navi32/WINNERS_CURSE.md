@@ -1,28 +1,29 @@
-# Why the coverage extension was reverted: single-shot argmax selects noise
+# Why the coverage extension was reverted: `--algo_method all` ranks kernels differently than they run
 
 The catalog from commit `5b1cf1bc21a` was benchmarked and **regresses**. It has been reverted.
-This is the measurement and the mechanism, because the mechanism generalises well beyond this
-catalog.
+The mechanism generalises well beyond this catalog, so it is written up in full — including the
+diagnosis I published first, which was wrong.
+
+*(Filename kept because earlier commits reference it. The winner's curse is what I initially
+blamed; tests 1-3 below refute it.)*
 
 ## The measurement
 
-4 arms x 600 shapes, cold, 60 CU, time-derived iterations. Numbers below are run 1 at 429/600
-shapes; treated/control split is by the kernel each arm **actually dispatched**, so the control
-ran a byte-identical catalog.
+600 shapes x 4 arms x 2 complete runs, cold, 60 CU, time-derived iterations, **0 timeouts**. The
+treated/control split is by the kernel each arm **actually dispatched**, so the control ran a
+byte-identical catalog.
 
 | group | n | A/A floor | extship (the pushed catalog) | nogate | geomean |
 |---|---|---|---|---|---|
-| ALL | 397 | 100.48% | 99.90% | 99.22% | 98.59% |
-| **treated** | 85 | 100.46% | **98.70%** | 98.53% | **94.49%** |
-| control | 312 | 100.49% | 100.21% | 99.39% | 99.73% |
+| ALL | 597 | 100.37% | 100.00% | 99.04% | 98.38% |
+| **treated** | 126 | 100.31% | **99.18%** | 99.01% | **93.75%** |
+| control | 471 | 100.39% | 100.25% | 99.06% | 99.66% |
 
-The control does not move, so the regression is attributable to the re-mapped rows. `nogate`
-is no better, so the tiny/gemv gate is not the cause.
+The control does not move, so the loss is attributable to the re-mapped rows. `nogate` is no
+better, so the tiny/gemv gate is not the cause. **63% of treated shapes got slower, median -2.6%,
+worst -43%.**
 
 ## Confirmed across two complete independent runs
-
-600 shapes x 4 arms x 2 runs, **0 timeouts**. The aggregate is not the evidence; per-shape
-reproducibility is.
 
 | treated | run 1 | run 2 | spread |
 |---|---|---|---|
@@ -34,62 +35,65 @@ reproducibility is.
 |---|---|
 | per-shape delta correlation run 1 vs run 2 | **r = +0.986** |
 | same sign in both runs | **93%** |
-| same statistic on the A/A arm (noise reference) | **r = +0.414** |
+| A/A arm, same statistic (noise reference) | **r = +0.414** |
 | slower in **both** runs | **75/126** treated shapes |
 
-Per stratum, both runs agree to within ~0.5 pt — `med` 100.94/100.89, `skinny_M` 96.60/96.98,
-`skinny_N` 93.93/94.41, `gemv` 73.03/74.04 (n=3, not claimable). Worst repeat offenders:
-`skinny_N −43%`, `skinny_M −35%`, `skinny_M −31%`, `gemv −29%`.
+Per stratum both runs agree to within ~0.5 pt: `med` 100.94/100.89, `skinny_M` 96.60/96.98,
+`skinny_N` 93.93/94.41, `gemv` 73.03/74.04 (n=3, not claimable).
 
-The regression reproduces to two decimal places on wall-clock. This is the same test that
-certified the original re-map as a genuine **+2.1%** (r=0.961, 90% sign agreement, A/A reference
-0.551); applied here it certifies the opposite with a tighter correlation: **the same shapes lose
-every time, so the loss is structural.**
+The regression reproduces to two decimal places. This is the same test that certified the original
+re-map as a genuine **+2.1%** (r=0.961, A/A reference 0.551); applied here it certifies the
+opposite, with a tighter correlation.
 
-This is the same test that certified the original re-map as a genuine **+2.1%** (r=0.961, 90% sign
-agreement, against an A/A reference of 0.551). Applied here it certifies the opposite with a
-tighter correlation: **the same shapes lose every time, so the loss is structural.**
+## The mechanism, established by three tests
 
-## The mechanism: the winner's curse
+### Test 1 — is it the winner's curse? NO.
 
-For each treated query, compare what the matrix **predicted** at the grid row against what the
-benchmark **measured** at the query:
+If argmax over 298 single-shot samples were selecting noise, an independent repeat would collapse
+the apparent gain. 127 rows were re-measured from scratch:
+
+| predictor | median predicted | corr vs actual |
+|---|---|---|
+| single shot (what shipped) | +25.7% | -0.406 |
+| **an independent 2nd shot** | **+22.7%** | **-0.415** |
+| mean of the two | +24.1% | -0.411 |
+| *(actual measured)* | **-2.6%** | |
+
+The repeat reproduces the same +22.7%, and the run-1 winner is still the winner **68%** of the
+time. **The gain is reproducible; it is not noise.** "Repeat and take the median" — the fix this
+document originally recommended — would have changed nothing.
+
+### Test 2 — is it row->query transfer? NO.
+
+Measure the same two kernels at the QUERY shape instead of the row key, removing transfer entirely:
+
+| same two kernels, measured at | median | corr vs benchmark |
+|---|---|---|
+| the ROW key, `--algo_method all` | +25.7% | -0.406 |
+| the QUERY shape, `--algo_method all` | +17.6% | -0.368 |
+| the QUERY shape, the benchmark | **-2.6%** | 1.000 |
+
+Identical shape, identical kernels, and the two methods still disagree — 41% sign agreement.
+
+### Test 3 — it is INSTRUMENT BIAS, and it is kernel-dependent.
+
+Absolute throughput for the same kernel on the same shape, matrix vs benchmark:
 
 ```
-matrix-predicted gain at the ROW : median  +22.8%
-benchmark gain at the QUERY      : median   -2.5%
-correlation                      : r = -0.441      <- NEGATIVE
-predictions with the right sign  : 40%             <- worse than a coin flip
+shipped's kernel : matrix reports 1.33x the benchmark's GFlop/s   (p10 0.75, p90 2.13)
+extship's kernel : matrix reports 2.11x                            (p10 1.11, p90 2.51)
+ratio of biases  : 1.16x
 ```
 
-Worst cases: predicted **+546.6% -> actual -31.0%**, predicted +352.8% -> actual -35.4%.
-A predicted 5x speedup is not a kernel, it is a near-zero denominator: the incumbent happened to
-measure absurdly slow **once**.
+**`--algo_method all` systematically overstates throughput, and overstates KERNEL-DEPENDENTLY.**
+A uniform bias would cancel in a ratio and the ranking would survive; at 1.16x it does not.
+Running 298 kernels back-to-back in one process does not reproduce the conditions of a single
+dispatch — despite `--flush --rotating 512`. So **argmax over that enumeration selects whichever
+kernel best exploits the measurement artifact**: the chosen kernel is inflated 2.11x while the
+incumbent is inflated only 1.33x, which is exactly how a reproducible "+23% gain" becomes a
+reproducible -2.6% loss.
 
-`--algo_method all` measures 298 kernels in **one shot** per shape. Taking the argmax over 298
-noisy samples selects whichever kernel drew the most favourable noise. The expected value of a
-maximum over noisy draws is biased upward, and the bias grows with the number of candidates. So
-the apparent gain is largely the noise itself, and re-pointing away from a sane incumbent loses.
-
-**No magnitude band escapes it:**
-
-| predicted gain | n | median actual | helped |
-|---|---|---|---|
-| 2-5% | 8 | -0.7% | 38% |
-| 5-10% | 17 | -0.5% | 47% |
-| 10-25% | 22 | -3.8% | 45% |
-| 25-60% | 27 | -1.9% | 41% |
-| 60-150% | 11 | -3.3% | 36% |
-| >150% | 7 | -28.4% | 0% |
-
-Capping implausible predictions does not rescue it either (cap at +5%: still -0.7% median).
-**The `--min-gain 0.02` gate is useless against this**, because the noise is far larger than 2%
-on the affected rows.
-
-## No stratum rescues it either — including `med`
-
-Complete run 1, 597 shapes / 126 treated. **63% of treated shapes got slower, median -2.6%,
-worst -43%.** Per stratum the damage is uneven, and `med` looks superficially fine:
+## No stratum rescues it — including `med`
 
 | stratum | n | predicted | actual | corr r | helped |
 |---|---|---|---|---|---|
@@ -98,47 +102,49 @@ worst -43%.** Per stratum the damage is uneven, and `med` looks superficially fi
 | skinny_M | 43 | +33.3% | -4.3% | -0.419 | 28% |
 | skinny_N | 31 | +29.7% | -4.0% | -0.411 | 29% |
 
-**Do not read `med` as a working case.** 53% helped is a coin flip, and its correlation is still
-*negative*. `med` is noise centred slightly positive, not signal. A "re-map `med` only" variant
-would be selecting on the same broken predictor over a subset where it happens to do less harm —
-which is how you get a result that survives one benchmark and fails the next.
+**Do not read `med` as a working case.** 53% helped is a coin flip and its correlation is still
+negative. A "re-map `med` only" variant would select on the same broken predictor over a subset
+where it does less harm — which is how you get a result that survives one benchmark and fails the
+next.
 
-Skinny strata are hit hardest, which fits: their throughput is more variable shape-to-shape, so a
-single-shot measurement has a wider noise distribution, so the maximum over 298 draws is biased
-further upward.
+## Why every offline analysis looked so good
 
-## Why the offline analyses all looked so good
+Every encouraging number in `COVERAGE_REPORT.md` was computed **from the same biased matrix**, so
+it inherited the bias instead of testing it:
 
-Every encouraging number in `COVERAGE_REPORT.md` was computed **from the same single-shot matrix**
-that contains the bias — so they inherited it rather than testing it:
+* "15.2% median reachable headroom, 89% clear the gate" — the instrument bias measured against
+  itself.
+* "0.0% headroom on rows shipped already used" — near-zero by construction, since `shipped` IS the
+  argmax of those rows. Circular, and I presented it as a clean calibration.
+* The inverted-U in problem size, the 98% transfer tax, the catchment-selection test — all from the
+  same matrix, none able to detect the problem.
 
-* "15.2% median reachable headroom, 89% clear the gate" — that is the winner's-curse bias,
-  measured against itself.
-* "0.0% headroom on rows shipped already used" — near-zero by construction, since `shipped` IS
-  the argmax of those rows. Circular, and I read it as a clean calibration.
-* The inverted-U in problem size, the 98% transfer tax, the catchment-selection test: all derived
-  from the same matrix, all uncheckable against it.
-
-**An offline oracle built from single-shot measurements cannot detect its own selection bias.
-Only a fresh, independent measurement can** — which is exactly what the benchmark was, and it
-took ~1 h to run against ~14 h of sweeping.
+**An offline oracle cannot detect a bias in the instrument that built it. Only measurement the way
+the kernel will actually run can** — that benchmark took ~1 h against ~14 h of sweeping.
 
 ## What would actually fix it
 
-1. **Repeat the measurement.** Sweep each row 2-3x and select on the median, or require the
-   winner to win in a majority of repeats. This is the direct fix and it is the reason the
-   original re-map (which validated at +2.1%) is not affected in the same way.
-2. **Shrink toward the incumbent.** Only re-point when the challenger beats the incumbent by more
-   than the *measured per-row spread*, not a fixed 2%.
-3. **Select on a neighbourhood, not a point** — though note this was tested offline and was a
-   wash (98.34% vs 98.28%); it may fare better once the underlying measurements are de-noised.
-4. **Validate on a fresh sample before shipping, always.** The pushed commit was correctly marked
-   `[UNVALIDATED]`; that label is what kept this recoverable.
+1. **Rank kernels the way they will run.** Selection must come from single-dispatch measurement
+   (`--algo_method heuristic --requested_solution 1`, or `--solution_index` one kernel per process),
+   not from a 298-kernel enumeration. This is slower and it is the only fix the evidence supports.
+2. **Calibrate before trusting any enumeration.** For a sample of (kernel, shape) pairs, measure
+   both ways and check the bias ratio is ~1.0. Here it is 1.16x, and that alone predicts failure.
+3. **Repeating the sweep does NOT help** — refuted in test 1. Neither does capping implausible
+   gains, nor `--min-gain`, nor stratum gating.
+4. **Validate on a fresh independent measurement before shipping, always.** The pushed commit was
+   marked `[UNVALIDATED]`; that label is what kept this recoverable.
+
+## Scope
+
+This affects **ranking** decisions built on `--algo_method all`. It does not automatically
+invalidate the lean-Grid *reduction*, which was validated by an independent A/B (99.54%
+wall-clock) and passed. But any conclusion resting on the matrix's ordering should be treated as
+unverified until re-measured single-dispatch.
 
 ## Status
 
 * Catalog reverted to the previously validated shipped re-map.
-* Tooling, shape lists, eval set and `cold_matrix_summary.json` retained — they are all still
-  useful, provided the matrix is rebuilt with repeats.
+* Tooling, shape lists, eval set and `cold_matrix_summary.json` retained — still useful, but the
+  matrix must not be used for ranking without the calibration in fix 2.
 * `PREDICTIONS.md` predicted **+1 to +3%** and listed "any stratum regressing beyond the A/A floor"
-  as a falsification condition. The prediction was wrong in sign and the condition fired.
+  as falsification. The prediction was wrong in sign and the condition fired.
