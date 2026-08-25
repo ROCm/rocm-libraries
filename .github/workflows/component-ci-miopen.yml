@@ -114,9 +114,11 @@ jobs:
             projects/miopen
             shared/ctest
 
-      # The public/private split keeps four files in lockstep by hand: the
-      # public header, the private _impl declarations, the compile-time rename
-      # and the forwarding stubs. This cross-checks them from source alone, so
+      # The public/private split keeps five files in lockstep by hand: the
+      # public header, the private _impl declarations, the compile-time rename,
+      # the forwarding stubs, and the hipDNN provider's mirror of the rename.
+      # The provider is outside this job's sparse checkout, so the check reads
+      # that one file from HEAD. This cross-checks them from source alone, so
       # unlike the ABI gate below it needs no build and runs in seconds -- hence
       # its placement before the configure step, where it fails fast. It is the
       # only check that can see signature drift; the symbol-set gate cannot,

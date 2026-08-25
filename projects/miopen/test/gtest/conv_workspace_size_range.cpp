@@ -19,22 +19,14 @@
 
 #include <hip/hip_runtime_api.h>
 
-// With the public/private split enabled (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON) these
-// three entry points are exported from libMIOpen_private.so under _impl names.
-// Rename the local prototypes and call sites to match, mirroring
-// src/private/miopen_private_rename.h. With the split OFF they keep their public
-// names and resolve from libMIOpen.so exactly as before.
-#ifdef MIOPEN_ENABLE_HIPDNN_WRAPPER
-#define miopenConvolutionForwardGetWorkSpaceSizeRange \
-    miopenConvolutionForwardGetWorkSpaceSizeRange_impl
-#define miopenConvolutionBackwardDataGetWorkSpaceSizeRange \
-    miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl
-#define miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange \
-    miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl
-#endif
-
-// These functions are exported from libMIOpen but intentionally not declared
-// in the public miopen.h header. Declare the prototypes locally.
+// These functions are exported from the MIOpen implementation library but
+// intentionally not declared in the public miopen.h header. Declare the
+// prototypes locally.
+//
+// They keep their original names in both build configurations: because they are
+// not part of the miopen.h contract, the public/private split does not rename
+// them, and with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON they stay exported un-suffixed
+// from libMIOpen_private.so (see test/public_abi/wrapper_excluded_symbols.txt).
 extern "C" {
 miopenStatus_t miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t,
                                                              const miopenTensorDescriptor_t,

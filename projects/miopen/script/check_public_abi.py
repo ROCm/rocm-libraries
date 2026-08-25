@@ -37,7 +37,7 @@ MIGraphX shims) stay on libMIOpen_private.so under their original names.
      library (``--private-lib``), so the carve-out cannot delete a symbol from
      the whole installed surface.
 
-``check-headers`` -- a source-only cross-check of the four hand-maintained
+``check-headers`` -- a source-only cross-check of the five hand-maintained
 artifacts of the split. It needs no build, no GPU and no flag-on configuration,
 so unlike the two gates above it can run in a lint lane on every PR:
 
@@ -45,11 +45,19 @@ so unlike the two gates above it can run in a lint lane on every PR:
   2. src/private/miopen_impl.h      -- the matching _impl declarations
   3. src/private/miopen_private_rename.h -- the compile-time rename
   4. src/private/wrapper.cpp        -- the forwarding stubs
+  5. the hipDNN provider's MiopenApiPrivateRename.hpp -- the provider's mirror
+     of (3), force-included when it links the private library
 
-Every public entry point must appear in all four, the wrapper stub's signature
+Every public entry point must appear in all five, the wrapper stub's signature
 must match miopen.h, the _impl declaration's signature must match it too (modulo
 the suffix), and each stub must forward to its own _impl symbol and nothing
 else. No artifact may carry an entry the public header does not.
+
+The provider mirror lives in a sibling project that a MIOpen-only checkout does
+not ship, so it is the one artifact that can be skipped. It is skipped only once
+git confirms the commit under test does not track it -- being absent from a
+sparse working tree is not enough, or CI, which checks out only the subtrees a
+PR touches, would report a green gate on unchecked drift.
 
 This is the only check in this script that can see *signature* drift. It matters
 because the _impl entry points have C linkage: the wrapper's stub definitions are
@@ -79,6 +87,7 @@ import argparse
 import hashlib
 import re
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -291,14 +300,20 @@ the baseline just to turn this gate green.""".rstrip()
 
 
 HEADERS_REMEDY = """
-Every public entry point must be spelled identically in all four places:
+Every public entry point must be spelled identically in all five places:
   include/miopen/miopen.h              MIOPEN_EXPORT <ret> miopenFoo(<params>);
   src/private/miopen_impl.h            extern "C" <ret> miopenFoo_impl(<params>);
   src/private/miopen_private_rename.h  #define miopenFoo miopenFoo_impl
   src/private/wrapper.cpp              extern "C" <ret> miopenFoo(<params>)
                                        { return miopenFoo_impl(<args>); }
-Update the three private files to match the public header. Do not edit
-miopen.h to match them -- that changes the public C API.""".rstrip()
+  <repo>/dnn-providers/miopen-provider/MiopenApiPrivateRename.hpp
+                                       #define miopenFoo miopenFoo_impl
+Update the private files and the provider's mirror to match the public header.
+Do not edit miopen.h to match them -- that changes the public C API.""".rstrip()
+
+# The hipDNN provider's mirror of the rename header, relative to the repository
+# root (the MIOpen source root's grandparent in the monorepo layout).
+PROVIDER_RENAME_RELPATH = "dnn-providers/miopen-provider/MiopenApiPrivateRename.hpp"
 
 
 # --------------------------------------------------------------------------
@@ -474,15 +489,49 @@ def parse_wrapper(path: Path) -> tuple[dict[str, tuple[str, ...]], dict[str, set
     return protos, forwards
 
 
-def parse_renames(path: Path) -> dict[str, str]:
+def parse_renames(path: Path, what: str = "rename header") -> dict[str, str]:
     """Collect the rename header's #defines, folding backslash continuations."""
-    text = strip_comments(read_source(path, "rename header").replace("\\\n", " "))
+    return parse_renames_text(read_source(path, what), what)
+
+
+def parse_renames_text(source: str, what: str) -> dict[str, str]:
+    text = strip_comments(source.replace("\\\n", " "))
     out: dict[str, str] = {}
     for name, target in RENAME_RE.findall(text):
         if name in out:
-            raise AbiError(f"duplicate #define of {name} in rename header")
+            raise AbiError(f"duplicate #define of {name} in {what}")
         out[name] = target
     return out
+
+
+def read_sibling_source(path: Path, repo_root: Path) -> str | None:
+    """Read a file that a sparse checkout may not have materialized.
+
+    CI checks out only the subtrees a PR touches, so a file from a sibling
+    project can be missing from the working tree while still being part of the
+    commit under test. Skipping on "not on disk" alone would let this gate go
+    green on precisely the drift it exists to catch, so a missing file is only
+    treated as genuinely absent once git confirms the commit does not track it.
+    Returns None in that case, and the caller skips the check.
+    """
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
+    try:
+        rel = path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return None
+    try:
+        blob = subprocess.run(
+            ["git", "-C", str(repo_root), "cat-file", "-p", f"HEAD:{rel}"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:  # no git available: a source tarball, not a checkout
+        return None
+    if blob.returncode != 0:
+        return None
+    print(f"NOTE: {rel} is not checked out; reading it from HEAD")
+    return blob.stdout.decode("utf-8")
 
 
 def read_source(path: Path, what: str) -> str:
@@ -638,6 +687,28 @@ def check_rename_targets(renames: dict[str, str]) -> bool:
     return False
 
 
+def check_provider_rename_mirror(lib: dict[str, str], provider: dict[str, str]) -> bool:
+    """The provider's force-included rename header must mirror the library's.
+
+    The hipDNN miopen-provider links libMIOpen_private.so and force-includes its
+    own copy of the rename set so its public-name calls bind the _impl entry
+    points. If the two copies diverge, a flag-on provider build fails to link --
+    an undefined _impl symbol, or a public name that no longer resolves.
+    """
+    if lib == provider:
+        print(f"PASS: provider rename header mirrors the {len(lib)} library renames")
+        return True
+    print("FAIL: the provider rename header has drifted from the library's")
+    for name in sorted(set(lib) - set(provider)):
+        print(f"  - in the library, missing from the provider: {name}")
+    for name in sorted(set(provider) - set(lib)):
+        print(f"  + in the provider, missing from the library: {name}")
+    for name in sorted(set(lib) & set(provider)):
+        if lib[name] != provider[name]:
+            print(f"  ~ {name}: library -> {lib[name]}, provider -> {provider[name]}")
+    return False
+
+
 def check_wrapper_forwards(forwards: dict[str, set[str]]) -> bool:
     bad = {n: c for n, c in sorted(forwards.items()) if c != {f"{n}_impl"}}
     if not bad:
@@ -752,6 +823,17 @@ def cmd_check_headers(args) -> int:
         args.rename_header or root / "src/private/miopen_private_rename.h"
     )
     wrapper_path = Path(args.wrapper or root / "src/private/wrapper.cpp")
+    # The provider's mirror lives in a sibling project, which a MIOpen-only
+    # checkout does not ship at all. An explicitly requested path must exist;
+    # the default one is resolved through git so that a sparse checkout, where
+    # the file is part of the commit but not on disk, still gets checked.
+    repo_root = root.parent.parent
+    if args.provider_rename:
+        provider_rename_path = Path(args.provider_rename)
+        provider_source = read_source(provider_rename_path, "provider rename header")
+    else:
+        provider_rename_path = repo_root / PROVIDER_RENAME_RELPATH
+        provider_source = read_sibling_source(provider_rename_path, repo_root)
 
     public = parse_declarations(public_path, EXPORT_ANCHOR_RE, "miopen.h")
     if not public:
@@ -778,6 +860,13 @@ def cmd_check_headers(args) -> int:
     ok &= check_entry_point_set(set(public), set(wrapper), "wrapper.cpp")
     ok &= check_prototypes(public, wrapper, "wrapper.cpp")
     ok &= check_wrapper_forwards(forwards)
+    if provider_source is None:
+        print(
+            f"SKIP: provider rename header is not part of this tree ({PROVIDER_RENAME_RELPATH})"
+        )
+    else:
+        provider_renames = parse_renames_text(provider_source, "provider rename header")
+        ok &= check_provider_rename_mirror(renames, provider_renames)
 
     if not ok:
         print(HEADERS_REMEDY)
@@ -847,6 +936,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--rename-header", help="override path to src/private/miopen_private_rename.h"
     )
     p.add_argument("--wrapper", help="override path to src/private/wrapper.cpp")
+    p.add_argument(
+        "--provider-rename",
+        help="override path to the hipDNN provider's MiopenApiPrivateRename.hpp, "
+        "which must then exist; by default it is located relative to the "
+        "repository root, read from HEAD when the checkout is sparse, and "
+        "skipped only when git confirms the commit does not track it",
+    )
     p.set_defaults(func=cmd_check_headers)
 
     p = sub.add_parser("check-wrapper", help="gate a flag-on wrapper build")
