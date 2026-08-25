@@ -100,6 +100,8 @@ from tensilelite import LibraryIO
 from ..resources import copy_static_headers
 
 
+from .ParseArguments import parseArguments
+
 def libraryRoot(outputPath: Union[str, Path]) -> Path:
     """The library/ root directory under outputPath.
 
