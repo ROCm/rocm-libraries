@@ -185,6 +185,34 @@ def test_build_subtile_fused_store_applies_alpha_for_any_value():
     assert isinstance(betas.elts[0], ast.Constant) and betas.elts[0].value is False
 
 
+def test_build_subtile_fused_store_replays_srd_init_for_short_k():
+    # Store-init ALU is normally woven into the FUSED loop. numIter<PGR skips that
+    # loop at runtime, so the store body must contain a second, uniquely-labelled
+    # complete init rather than using an uninitialized / un-offset SrdD.
+    source = open(KWA_PATH).read()
+    func = _function_node(source, "buildSubtileFusedStore")
+    calls = [
+        node for node in ast.walk(func)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "buildSubtileStoreInitModule"
+    ]
+    assert len(calls) >= 2
+    suffixes = [
+        keyword.value
+        for call in calls
+        for keyword in call.keywords
+        if keyword.arg == "labelSuffix"
+    ]
+    assert any(
+        isinstance(value, ast.BinOp)
+        and isinstance(value.op, ast.Add)
+        and isinstance(value.right, ast.Constant)
+        and value.right.value == "Short"
+        for value in suffixes
+    ), "short-K SrdD replay must use distinct assembly labels"
+
+
 def test_fused_store_predicate_excludes_alpha():
     # The hoisted predicate must fold only the structural sub-guards; alpha (and
     # scale pointers) must never be ANDed into PostLoopFusedStore.

@@ -14690,8 +14690,39 @@ class KernelWriterAssembly(KernelWriter):
         _hoistUnits, _remainder = self._splitHoistableStoreInit(list(srdInitMod.flatitems()))
       if _hoistUnits:
         self.states.subtileHoistedStoreInit = _hoistUnits
+        # For numIter<PGR the preloop branches directly to NLL and skips the FUSED
+        # loop body. The store-init units woven into that body's MFMA gaps therefore
+        # did not execute. Coordinates already have an equivalent short-K refill
+        # below; SrdD needs the same treatment, otherwise its WG1 / WorkGroup2 batch
+        # offsets are missing (batch 0 happens to work, batch >0 writes the wrong D).
+        #
+        # Keep the normal path unchanged: numIter>=PGR uses the woven leading units
+        # plus the original serial remainder. The short path executes a complete,
+        # uniquely-labelled SrdD init and skips that remainder. This preserves K=256
+        # fusion while paying the serial address setup only when there are no loop
+        # MFMA gaps in which it could have executed.
+        pgr = kernel["PrefetchGlobalRead"]
+        shortInit = Label(label=self.labels.getNameInc("PLSIN_SrdDShortInit"), comment="")
+        srdInitDone = Label(label=self.labels.getNameInc("PLSIN_SrdDInitDone"), comment="")
+        module.addComment1("PLSIN numIter<PGR: replay skipped hoisted SrdD init serially")
+        with self.allocTmpSgpr(1, tag="plsinSrdDInit_numIter") as nTmp:
+          module.add(SLShiftRightB32(dst=sgpr(nTmp.idx),
+                                     src=sgpr("SizesSum+%u" % self.states.unrollIdx),
+                                     shiftHex=hex(log2(kernel["DepthU"])),
+                                     comment="numIter = SizesSum / DepthU"))
+          module.add(SCmpGeU32(src0=sgpr(nTmp.idx), src1=pgr,
+                               comment="numIter >= PGR? (woven SrdD init executed)"))
+          module.add(SCBranchSCC0(labelName=shortInit.getLabelName(),
+                                  comment="short K skipped FUSED loop -> run full SrdD init"))
         for _it in _remainder:
           module.add(_it)
+        module.add(SBranch(labelName=srdInitDone.getLabelName(),
+                           comment="woven SrdD init complete"))
+        module.add(shortInit)
+        module.add(self.buildSubtileStoreInitModule(
+          kernel, skipUndefine=True, channels=["D"],
+          labelSuffix=fusedSuffix+"Short", noMultipleBuffer=True))
+        module.add(srdInitDone)
       else:
         module.add(srdInitMod)
 
