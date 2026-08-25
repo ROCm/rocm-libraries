@@ -45,7 +45,9 @@ void autotuneBindings(nb::module_& m)
         .value("WRITTEN", AutotuneCacheWriteOutcome::WRITTEN)
         .value("DECLINED_DISABLED", AutotuneCacheWriteOutcome::DECLINED_DISABLED)
         .value("DECLINED_UNKEYABLE", AutotuneCacheWriteOutcome::DECLINED_UNKEYABLE)
-        .value("UNCHANGED", AutotuneCacheWriteOutcome::UNCHANGED);
+        .value("UNCHANGED", AutotuneCacheWriteOutcome::UNCHANGED)
+        .value("NOT_ATTEMPTED_PARTIAL_SWEEP",
+               AutotuneCacheWriteOutcome::NOT_ATTEMPTED_PARTIAL_SWEEP);
 
     // Bind the concrete knob constraints. The C++ ConstraintKind discriminator exists
     // so -fno-rtti callers can downcast; Python gets the concrete type instead and
@@ -177,6 +179,11 @@ void autotuneBindings(nb::module_& m)
         .def_ro("converged", &AutotuneResult::converged)
         .def_ro("rank", &AutotuneResult::rank)
         .def_ro("succeeded", &AutotuneResult::succeeded)
+        // The two axes that decide whether a sweep is persistable. Exposed so a caller
+        // that got NOT_ATTEMPTED_PARTIAL_SWEEP can find which engine caused it: it is the
+        // one with excluded_by_caller set.
+        .def_ro("benchmarked", &AutotuneResult::benchmarked)
+        .def_ro("excluded_by_caller", &AutotuneResult::excludedByCaller)
         .def_ro("error_message", &AutotuneResult::errorMessage)
         .def_ro("workspace_size", &AutotuneResult::workspaceSize)
         .def_ro("estimated_workspace_size", &AutotuneResult::estimatedWorkspaceSize)

@@ -289,6 +289,15 @@ different commit therefore reads and writes a different subdirectory: a field-de
 never be misread by a newer build, but a developer who rebuilds every few minutes will rarely see
 a hit at all, since every rebuild starts that commit's subtree empty.
 
+**What populates it.** `Graph::autotuneExhaustiveSweep()` (Python:
+`autotune_exhaustive_sweep()`). A record is keyed on the graph and device *only* -- not on
+knobs, engine filters, or the workspace budget -- and every later run of that graph consults
+it however that run is configured. A ranking is written only when the sweep covered every
+engine a later run could see: one candidate per engine with no knob variants, no
+`engineIdFilter` or deselect filter, and a workspace at least as large as
+`get_autotune_workspace_size()` reports. A sweep that does not meet this still runs and still
+returns its results, but declines the write and reports `NOT_ATTEMPTED_PARTIAL_SWEEP`.
+
 **A re-tune refreshes the record.** Writing a ranking identical to what a shard already holds
 for that key is a no-op. Writing a ranking that measured the same
 engines in a different order appends a new line -- lookups resolve multiple lines for one key
@@ -297,6 +306,12 @@ last-line-wins, so the newest measurement is what a later process sees. The one 
 already has recorded (e.g. a run scoped with an engine filter) is declined outright, so a
 narrower sweep can never regress a full-coverage record to one that then fails every later
 lookup.
+
+**A lookup never creates anything.** Reads open the shard without `O_CREAT`, so a key with no
+shard is an ordinary miss leaving behind no file and no open descriptor; only the write path
+creates the versioned subtree and its shards. The read path runs for every graph on the
+default heuristic policy list over an unbounded key space, so a creating read would cost one
+empty file and one process-lifetime descriptor per distinct graph ever looked up.
 
 **Decline modes visible in `HIPDNN_LOG_LEVEL=info` logging**, each with its own distinguishable
 `[BuiltInConfig] policyFinalize:` log fragment:
@@ -309,6 +324,7 @@ lookup.
 | `exact-match cache miss`                | The (graph, device) key has no shard record                        |
 | `exact-match cache unavailable` (warn)  | The shard could not be opened, locked, or read, or its version line did not match this build |
 | `rejected -- unsampled`                 | A live candidate engine was never sampled by the stored ranking     |
+| `declined -- malformed record` (warn)   | The stored order holds an engine id more than once, so it cannot be applied to the candidate set. Re-run the exhaustive sweep to replace it |
 | `declined -- fewer than 2 candidates`   | Fewer than two ids remain after filtering the stored order to live candidates |
 | `hit (exact)`                           | Every stored id is a live candidate; the stored order applies unchanged |
 | `hit (partial)`                         | The stored order applies after dropping sampled-but-now-absent ids  |

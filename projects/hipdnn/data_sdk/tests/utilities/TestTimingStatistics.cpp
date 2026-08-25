@@ -25,7 +25,7 @@ TEST_F(TestTimingStatistics, MeanAveragesSamples)
 TEST_F(TestTimingStatistics, MeanStaysWithinObservedRange)
 {
     // The documented invariant callers depend on: rounding must never push the mean
-    // outside [min, max]. Near-identical samples are where that used to break.
+    // outside [min, max]. Near-identical samples are the case that stresses it.
     const std::vector<float> nearIdentical(7, 0.1f);
     const auto result = stats::mean(nearIdentical);
     EXPECT_GE(result, 0.1f);

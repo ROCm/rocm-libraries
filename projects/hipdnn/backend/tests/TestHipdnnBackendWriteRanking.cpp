@@ -245,8 +245,7 @@ TEST_F(TestGpuHipdnnBackendWriteRanking, EnabledCacheReportsWritten)
 /// reporting WRITTEN having written nothing defeats the only reason the parameter is there.
 ///
 /// Falsifying mutation: assign HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN unconditionally in
-/// hipdnnBackendWriteEngineRankingResults_ext instead of mapping the store's status, i.e.
-/// the behaviour before this change.
+/// hipdnnBackendWriteEngineRankingResults_ext instead of mapping the store's status.
 TEST_F(TestGpuHipdnnBackendWriteRanking, RewritingAnIdenticalRankingReportsUnchanged)
 {
     auto graph = makeFinalizedGraph();
