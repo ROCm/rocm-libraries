@@ -19,6 +19,25 @@ ran a byte-identical catalog.
 The control does not move, so the regression is attributable to the re-mapped rows. `nogate`
 is no better, so the tiny/gemv gate is not the cause.
 
+## Confirmed across two independent runs
+
+The aggregate is not the evidence; per-shape reproducibility is. Treated shapes present in both
+runs (n=55 at the time of writing, run 2 still filling):
+
+| | |
+|---|---|
+| per-shape delta correlation run 1 vs run 2 | **r = +0.983** |
+| same sign in both runs | **91%** |
+| same statistic on the A/A arm (noise reference) | **r = +0.351** |
+| slower in **both** runs | 30/55 (55%) |
+| median | run 1 −1.5%, run 2 −2.0% |
+
+Worst repeat offenders: `skinny_N −43%`, `skinny_M −35%`, `skinny_M −31%`, `gemv −29%`.
+
+This is the same test that certified the original re-map as a genuine **+2.1%** (r=0.961, 90% sign
+agreement, against an A/A reference of 0.551). Applied here it certifies the opposite with a
+tighter correlation: **the same shapes lose every time, so the loss is structural.**
+
 ## The mechanism: the winner's curse
 
 For each treated query, compare what the matrix **predicted** at the grid row against what the
@@ -54,6 +73,27 @@ the apparent gain is largely the noise itself, and re-pointing away from a sane 
 Capping implausible predictions does not rescue it either (cap at +5%: still -0.7% median).
 **The `--min-gain 0.02` gate is useless against this**, because the noise is far larger than 2%
 on the affected rows.
+
+## No stratum rescues it either — including `med`
+
+Complete run 1, 597 shapes / 126 treated. **63% of treated shapes got slower, median -2.6%,
+worst -43%.** Per stratum the damage is uneven, and `med` looks superficially fine:
+
+| stratum | n | predicted | actual | corr r | helped |
+|---|---|---|---|---|---|
+| ALL | 126 | +25.7% | -2.6% | -0.406 | 37% |
+| **med** | 49 | +21.2% | **+1.2%** | **-0.142** | **53%** |
+| skinny_M | 43 | +33.3% | -4.3% | -0.419 | 28% |
+| skinny_N | 31 | +29.7% | -4.0% | -0.411 | 29% |
+
+**Do not read `med` as a working case.** 53% helped is a coin flip, and its correlation is still
+*negative*. `med` is noise centred slightly positive, not signal. A "re-map `med` only" variant
+would be selecting on the same broken predictor over a subset where it happens to do less harm —
+which is how you get a result that survives one benchmark and fails the next.
+
+Skinny strata are hit hardest, which fits: their throughput is more variable shape-to-shape, so a
+single-shot measurement has a wider noise distribution, so the maximum over 298 draws is biased
+further upward.
 
 ## Why the offline analyses all looked so good
 
