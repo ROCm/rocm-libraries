@@ -8,6 +8,16 @@ Documentation for rocFFT is available at
 ### Added
 
 * Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+* Added support for very large FFTs on gfx1250.
+
+### Resolved issues
+
+* Addressed a cache-reuse issue with RCCL communicators by giving each communicator its own set of streams.
+
+### Known issues
+
+* Function pointer callbacks specified via `rocfft_execution_info_set_load_callback` or 
+  `rocfft_execution_info_set_store_callback` are not functional on gfx1250 and `rocfft_execute` will fail in this case.
 
 ### Resolved issues
 

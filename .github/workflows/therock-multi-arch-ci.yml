@@ -75,6 +75,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-env:
+    name: Load CI Environment
+    runs-on: ubuntu-24.04
+    outputs:
+      baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
+    steps:
+      - name: Checkout ci-env action
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/ci-env
+          sparse-checkout-cone-mode: true
+
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
   configure:
     name: Configure Changed Projects
     runs-on: ubuntu-24.04
@@ -93,7 +109,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: main
+          ref: eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -140,8 +156,8 @@ jobs:
         run: python .github/scripts/resolve_therock_ref.py
 
   setup:
-    needs: [configure, resolve_therock_ref]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    needs: [ci-env, configure, resolve_therock_ref]
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
@@ -149,16 +165,21 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # Manual override for prebuilt stages (empty = use automatic stage reuse)
-      prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
-      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      # Copy all stages except math-libs and ml-libs from TheRock baseline
+      # rocm-libraries only affects math-libs and ml-libs source sets
+      # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
+      # When baseline-run-id is empty, clear prebuilt_stages to force full rebuild
+      prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg') || '' }}
+      # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
+      baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
       # Concrete SHA resolved once by resolve_therock_ref; setup re-exports the
       # checked-out commit as needs.setup.outputs.ref for downstream jobs.
-      ref: ${{ needs.resolve_therock_ref.outputs.therock_ref }}
+      # TODO: After multi-arch CI is fully migrated to TheRock, remove the explicit ref here
+      ref: eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5  # 08/21/2026
       # Pass external repo info for stage-impact analysis
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
@@ -171,12 +192,14 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
+      rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
@@ -197,7 +220,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}

@@ -102,7 +102,7 @@ struct RTCKernelModuleLoadFailure : public RTCKernel
         };
 
         std::string kernel_name;
-        return runtime_compile(generator, "gfx90a", kernel_name);
+        return runtime_compile(generator, "gfx90a", kernel_name, std::nullopt, std::nullopt);
     }
 };
 
@@ -132,7 +132,7 @@ struct RTCKernelCompileFailure : public RTCKernel
         RTCGenerator generator;
         generator.generate_name = []() { return std::string(KERNEL_NAME); };
         generator.generate_src  = [](const std::string&) -> std::string {
-            throw hiprtc_runtime_error("simulated compile failure");
+            throw hiprtc_runtime_error("simulated compile failure", HIPRTC_ERROR_COMPILATION);
         };
         generator.construct_rtckernel = [](const std::string&,
                                            std::shared_future<hipModule_wrapper_t>& module,
@@ -142,7 +142,12 @@ struct RTCKernelCompileFailure : public RTCKernel
         };
 
         std::string kernel_name;
-        return runtime_compile(generator, "gfx90a", kernel_name);
+        return runtime_compile(generator, "gfx90a", kernel_name, std::nullopt, std::nullopt);
+    }
+
+    RTCKernelArgs get_launch_args(DeviceCallIn& data)
+    {
+        return {};
     }
 };
 

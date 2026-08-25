@@ -29,6 +29,7 @@
 #include "logging.h"
 #include "rtc_bluestein_kernel.h"
 #include "rtc_cache.h"
+#include "rtc_compile.h"
 #include "rtc_realcomplex_kernel.h"
 #include "rtc_stockham_kernel.h"
 #include "rtc_transpose_kernel.h"
@@ -139,29 +140,28 @@ std::shared_future<std::unique_ptr<RTCKernel>>
     RTCKernel::runtime_compile(const LeafNode&    node,
                                const std::string& gpu_arch,
                                std::string&       kernel_name,
-                               bool               enable_callbacks)
+                               CallbackType       cbtype)
 {
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
     RTCGenerator generator;
     // try each type of generator until one is valid
-    generator = RTCKernelStockham::generate_from_node(node, gpu_arch, enable_callbacks);
+    generator = RTCKernelStockham::generate_from_node(node, gpu_arch, cbtype);
     if(!generator.valid())
-        generator = RTCKernelTranspose::generate_from_node(node, gpu_arch, enable_callbacks);
+        generator = RTCKernelTranspose::generate_from_node(node, gpu_arch, cbtype);
     if(!generator.valid())
-        generator = RTCKernelRealComplex::generate_from_node(node, gpu_arch, enable_callbacks);
+        generator = RTCKernelRealComplex::generate_from_node(node, gpu_arch, cbtype);
     if(!generator.valid())
-        generator = RTCKernelRealComplexEven::generate_from_node(node, gpu_arch, enable_callbacks);
+        generator = RTCKernelRealComplexEven::generate_from_node(node, gpu_arch, cbtype);
     if(!generator.valid())
-        generator = RTCKernelRealComplexEvenTranspose::generate_from_node(
-            node, gpu_arch, enable_callbacks);
+        generator = RTCKernelRealComplexEvenTranspose::generate_from_node(node, gpu_arch, cbtype);
     if(!generator.valid())
-        generator = RTCKernelBluesteinSingle::generate_from_node(node, gpu_arch, enable_callbacks);
+        generator = RTCKernelBluesteinSingle::generate_from_node(node, gpu_arch, cbtype);
     if(!generator.valid())
-        generator = RTCKernelBluesteinMulti::generate_from_node(node, gpu_arch, enable_callbacks);
+        generator = RTCKernelBluesteinMulti::generate_from_node(node, gpu_arch, cbtype);
 
     if(generator.valid())
     {
-        return runtime_compile(generator, gpu_arch, kernel_name);
+        return runtime_compile(generator, gpu_arch, kernel_name, node.loadOps, node.storeOps);
     }
     // a pre-compiled rtc-stockham-kernel goes here
     else if(generator.is_pre_compiled())
@@ -177,8 +177,12 @@ std::shared_future<std::unique_ptr<RTCKernel>>
 }
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
-std::shared_future<std::unique_ptr<RTCKernel>> RTCKernel::runtime_compile(
-    const RTCKernel::RTCGenerator& generator, const std::string& gpu_arch, std::string& kernel_name)
+std::shared_future<std::unique_ptr<RTCKernel>>
+    RTCKernel::runtime_compile(const RTCKernel::RTCGenerator& generator,
+                               const std::string&             gpu_arch,
+                               std::string&                   kernel_name,
+                               const std::optional<LoadOps>&  loadOps,
+                               const std::optional<StoreOps>& storeOps)
 {
     int deviceId = get_current_hip_device();
 
@@ -209,44 +213,78 @@ std::shared_future<std::unique_ptr<RTCKernel>> RTCKernel::runtime_compile(
     std::promise<std::unique_ptr<RTCKernel>>       kernel_promise;
     std::shared_future<std::unique_ptr<RTCKernel>> kernel_future = kernel_promise.get_future();
 
-    auto make_kernel = [deviceId, generator, kernel_name, gpu_arch, need_compile](
-                           std::promise<hipModule_wrapper_t>        module_promise,
-                           std::shared_future<hipModule_wrapper_t>  module_future,
-                           std::promise<std::unique_ptr<RTCKernel>> kernel_promise) {
-        auto module_promise_fulfilled = !need_compile;
-        try
-        {
-            rocfft_scoped_device rd(deviceId);
-            if(need_compile)
-            {
-                std::vector<char> code = RTCCache::cached_compile(
-                    kernel_name, gpu_arch, generator.generate_src, generator_sum());
-                hipModule_wrapper_t module;
-                module.alloc(code.data());
-                module_promise.set_value(std::move(module));
-                module_promise_fulfilled = true;
-            }
-            kernel_promise.set_value(generator.construct_rtckernel(
-                kernel_name, module_future, generator.gridDim, generator.blockDim));
-        }
-        catch(const std::exception& e)
-        {
-            if(LOG_RTC_ENABLED())
-                (*LogSingleton::GetInstance().GetRTCOS()) << e.what() << std::endl;
-            if(!module_promise_fulfilled)
-                module_promise.set_exception(std::current_exception());
-            kernel_promise.set_exception(std::current_exception());
-        }
-        catch(...)
-        {
-            if(LOG_RTC_ENABLED())
-                (*LogSingleton::GetInstance().GetRTCOS())
-                    << "Unknown exception in make_kernel" << std::endl;
-            if(!module_promise_fulfilled)
-                module_promise.set_exception(std::current_exception());
-            kernel_promise.set_exception(std::current_exception());
-        }
-    };
+    auto make_kernel
+        = [deviceId, generator, kernel_name, gpu_arch, need_compile, loadOps, storeOps](
+              std::promise<hipModule_wrapper_t>        module_promise,
+              std::shared_future<hipModule_wrapper_t>  module_future,
+              std::promise<std::unique_ptr<RTCKernel>> kernel_promise) {
+              auto module_promise_fulfilled = !need_compile;
+              try
+              {
+                  rocfft_scoped_device rd(deviceId);
+                  if(need_compile)
+                  {
+                      bool has_spirv = (loadOps && loadOps->has_spirv())
+                                       || (storeOps && storeOps->has_spirv());
+
+                      std::vector<char> code
+                          = RTCCache::cached_compile(kernel_name,
+                                                     has_spirv ? ARCH_SPIRV : gpu_arch,
+                                                     generator.generate_src,
+                                                     generator_sum());
+
+                      // If this is SPIR-V, link it together with the
+                      // user-specified callbacks to produce a launchable
+                      // code object
+                      if(has_spirv)
+                      {
+                          hipLink_wrapper_t linker;
+                          if(loadOps && loadOps->has_spirv())
+                              linker.link(const_cast<void*>(loadOps->spirv_cb.bitcode_data),
+                                          loadOps->spirv_cb.bitcode_len_bytes,
+                                          "loadcb.spv");
+                          if(storeOps && storeOps->has_spirv())
+                              linker.link(const_cast<void*>(storeOps->spirv_cb.bitcode_data),
+                                          storeOps->spirv_cb.bitcode_len_bytes,
+                                          "storecb.spv");
+                          linker.link(code.data(), code.size(), (kernel_name + ".spv").c_str());
+                          code = linker.complete();
+
+                          // TODO: store linked code in cache
+                          //
+                          // We're already caching the SPIR-V, but not the linked code.
+                          // Linking would need to be repeated in subsequent processes
+                          // that want the same kernel+callbacks, but at least the module
+                          // cache would ensure that concurrent uses of same
+                          // kernel+callbacks in one process will only use one module.
+                      }
+
+                      hipModule_wrapper_t module;
+                      module.alloc(code.data());
+                      module_promise.set_value(std::move(module));
+                      module_promise_fulfilled = true;
+                  }
+                  kernel_promise.set_value(generator.construct_rtckernel(
+                      kernel_name, module_future, generator.gridDim, generator.blockDim));
+              }
+              catch(const std::exception& e)
+              {
+                  if(LOG_RTC_ENABLED())
+                      (*LogSingleton::GetInstance().GetRTCOS()) << e.what() << std::endl;
+                  if(!module_promise_fulfilled)
+                      module_promise.set_exception(std::current_exception());
+                  kernel_promise.set_exception(std::current_exception());
+              }
+              catch(...)
+              {
+                  if(LOG_RTC_ENABLED())
+                      (*LogSingleton::GetInstance().GetRTCOS())
+                          << "Unknown exception in make_kernel" << std::endl;
+                  if(!module_promise_fulfilled)
+                      module_promise.set_exception(std::current_exception());
+                  kernel_promise.set_exception(std::current_exception());
+              }
+          };
 
     std::thread compile_thread(make_kernel,
                                std::move(module_promise),

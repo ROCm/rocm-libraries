@@ -115,15 +115,38 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
     /* k_val = b_.add(k_off_capture[0], col) */
     rocke_value_t* k_val = rocke_b_add(b, ctx->k_off_capture, col);
 
+    /* Pointwise fast path: flat offset = m * C + c, valid = (m < M) & (c < C) */
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
+        rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->ir_c_C_pw), k_val);
+        rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, ctx->ir_c_M_pw);
+        rocke_value_t* c_ok = rocke_b_cmp_lt(b, k_val, ctx->ir_c_C_pw);
+        *out_valid = rocke_b_land(b, m_ok, c_ok);
+        return off;
+    }
+
     if(ov != NULL && ov->a_mhw_index_fn != NULL)
     {
         /* Decomposed A descriptor: feed (n, ho, wo) straight in, skipping the
-         * m-flatten -> magic-unmerge round-trip (see make_a_descriptor). */
+         * m-flatten -> magic-unmerge round-trip (see make_a_descriptor).
+         * Grouped conv threads the group index as A's ``group`` upper coord. */
         rocke_value_t* n_v = NULL;
         rocke_value_t* ho_v = NULL;
         rocke_value_t* wo_v = NULL;
         ov->a_mhw_index_fn(b, row, &ctx->grid, &n_v, &ho_v, &wo_v, ov->user);
 
+        if(ctx->group_idx != NULL)
+        {
+            /* A_desc.offset(b_, n=n_v, ho=ho_v, wo=wo_v, k=k_val, group=group_idx) */
+            const char* names[5] = {"n", "ho", "wo", "k", "group"};
+            rocke_value_t* vals[5] = {n_v, ho_v, wo_v, k_val, ctx->group_idx};
+            rocke_value_t* off = NULL;
+            rocke_value_t* valid = NULL;
+            rocke_transforms_descriptor_offset(b, ctx->A_desc, names, vals, 5, &off, &valid);
+            *out_valid = valid;
+            return off;
+        }
         /* A_desc.offset(b_, n=n_v, ho=ho_v, wo=wo_v, k=k_val) */
         const char* names[4] = {"n", "ho", "wo", "k"};
         rocke_value_t* vals[4] = {n_v, ho_v, wo_v, k_val};
@@ -141,6 +164,18 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
     else
         m_val = rocke_b_add(b, ctx->block_m_off_v, row);
 
+    if(ctx->group_idx != NULL)
+    {
+        /* A_desc.offset(b_, m=m_val, k=k_val, group=group_idx) */
+        const char* names[3] = {"m", "k", "group"};
+        rocke_value_t* vals[3] = {m_val, k_val, ctx->group_idx};
+        rocke_value_t* off = NULL;
+        rocke_value_t* valid = NULL;
+        rocke_transforms_descriptor_offset(b, ctx->A_desc, names, vals, 3, &off, &valid);
+        *out_valid = valid;
+        return off;
+    }
+
     /* A_desc.offset(b_, m=m_val, k=k_val) */
     {
         const char* names[2] = {"m", "k"};
@@ -156,9 +191,10 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
 /* ===================================================================== *
  *  b_descriptor -- the B global-address closure.
  *
- *  Python span: conv_implicit_gemm.py lines 976-979:
+ *  Python span: conv_implicit_gemm.py lines 976-982:
  *      def b_descriptor(b_, row, col):
  *          k_out = b_.add(block_n_off_v, row)
+ *          if grouped: k_out = b_.add(k_out_group_base, k_out)
  *          kg = b_.add(k_off_capture[0], col)
  *          return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
  * ===================================================================== */
@@ -171,7 +207,20 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
     rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)ctx_user;
 
     rocke_value_t* k_out = rocke_b_add(b, ctx->block_n_off_v, row);
+    /* Grouped conv: fold in the absolute output-filter group base. */
+    if(ctx->k_out_group_base != NULL)
+        k_out = rocke_b_add(b, ctx->k_out_group_base, k_out);
     rocke_value_t* kg = rocke_b_add(b, ctx->k_off_capture, col);
+
+    /* Pointwise fast path: flat offset = k_out * C + c, valid = (k_out < K) & (c < C) */
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, k_out, ctx->ir_c_C_pw), kg);
+        rocke_value_t* k_ok = rocke_b_cmp_lt(b, k_out, ctx->ir_c_K_pw);
+        rocke_value_t* c_ok = rocke_b_cmp_lt(b, kg, ctx->ir_c_C_pw);
+        *out_valid = rocke_b_land(b, k_ok, c_ok);
+        return off;
+    }
 
     const char* names[2] = {"k_out", "k_gemm"};
     rocke_value_t* vals[2] = {k_out, kg};
@@ -224,16 +273,14 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
                                            0x7FFFFFFF, /* oob_sentinel default = (1 << 31) - 1 */
                                            ROCKE_CACHE_STREAM);
 
-        rocke_async_tile_loader_slot_t b_slot;
-        rocke_async_tile_loader_bind(b, &ctx->b_loader, B_dst, ctx->warp_id, &b_slot);
-        rocke_async_tile_loader_slot_issue(b,
-                                           &b_slot,
-                                           ctx->tid,
-                                           ctx->b_rsrc,
-                                           rocke_conv_b_descriptor,
-                                           ctx,
-                                           0x7FFFFFFF,
-                                           ROCKE_CACHE_STREAM);
+        {
+            rocke_loads_descriptor_fn b_fn
+                = (ctx->b_descriptor_fn != NULL) ? ctx->b_descriptor_fn : rocke_conv_b_descriptor;
+            rocke_async_tile_loader_slot_t b_slot;
+            rocke_async_tile_loader_bind(b, &ctx->b_loader, B_dst, ctx->warp_id, &b_slot);
+            rocke_async_tile_loader_slot_issue(
+                b, &b_slot, ctx->tid, ctx->b_rsrc, b_fn, ctx, 0x7FFFFFFF, ROCKE_CACHE_STREAM);
+        }
         return;
     }
 
@@ -257,8 +304,12 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
                                          ctx->a_rsrc,
                                          NULL); /* use_buffer_rsrc => ptr unused */
     }
-    rocke_coalesced_tile_loader_load(
-        b, &ctx->b_sync_loader, ctx->tid, B_dst, rocke_conv_b_descriptor, ctx, ctx->b_rsrc, NULL);
+    {
+        rocke_loads_descriptor_fn b_fn
+            = (ctx->b_descriptor_fn != NULL) ? ctx->b_descriptor_fn : rocke_conv_b_descriptor;
+        rocke_coalesced_tile_loader_load(
+            b, &ctx->b_sync_loader, ctx->tid, B_dst, b_fn, ctx, ctx->b_rsrc, NULL);
+    }
 }
 
 /* ===================================================================== *

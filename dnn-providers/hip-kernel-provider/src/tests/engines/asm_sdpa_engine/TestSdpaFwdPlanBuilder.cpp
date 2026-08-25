@@ -49,15 +49,19 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
 
 auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
                         const std::vector<int64_t>& vDims = {4, 8, 256, 128},
-                        hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+                        hipdnn_flatbuffers_sdk::data_objects::DataType inputType
                         = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                        hipdnn_flatbuffers_sdk::data_objects::DataType computeType
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                         bool withAttnMask = false,
                         bool withScale = false,
                         bool withStats = false,
                         bool alibiMask = false,
                         bool paddingMask = false,
                         bool causalMask = false,
-                        bool overrideShapeEnabled = false)
+                        bool overrideShapeEnabled = false,
+                        hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
 {
     if(qDims.size() != 4 || vDims.size() != 4)
     {
@@ -75,14 +79,16 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
         hipdnn_data_sdk::utilities::generateStrides(vDims),
         oDims,
         hipdnn_data_sdk::utilities::generateStrides(oDims),
-        dataType,
+        inputType,
+        computeType,
         withAttnMask,
         withScale,
         withStats,
         alibiMask,
         paddingMask,
         causalMask,
-        overrideShapeEnabled);
+        overrideShapeEnabled,
+        mmaCoreMode);
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
@@ -90,6 +96,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGr
     auto builder = createSdpaFwdGraph({4, 8, 256, 128},
                                       {4, 8, 256, 128},
                                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                       false,
                                       false,
                                       false,
@@ -138,21 +145,33 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, {4, 8, 256, 128}, DataType::HALF),
                    "Half precision tensor data type"},
          false},
-        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128}, {4, 8, 256, 128}, DataType::BFLOAT16, true),
-                   "attn_mask = true"},
-         false},
-        {GraphTest{createSdpaFwdGraph(
-                       {4, 8, 256, 128}, {4, 8, 256, 128}, DataType::BFLOAT16, false, true),
-                   "scale = true"},
-         true},
         {GraphTest{
              createSdpaFwdGraph(
-                 {4, 8, 256, 128}, {4, 8, 256, 128}, DataType::BFLOAT16, false, true, false, true),
-             "alibi_mask = true"},
+                 {4, 8, 256, 128}, {4, 8, 256, 128}, DataType::BFLOAT16, DataType::FLOAT, true),
+             "attn_mask = true"},
          false},
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
                                       {4, 8, 256, 128},
                                       DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      true),
+                   "scale = true"},
+         true},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      true,
+                                      false,
+                                      true),
+                   "alibi_mask = true"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
                                       false,
                                       true,
                                       false,
@@ -163,6 +182,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
                                       {4, 8, 256, 128},
                                       DataType::BFLOAT16,
+                                      DataType::FLOAT,
                                       false,
                                       true,
                                       false,
@@ -170,6 +190,42 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       false,
                                       true),
                    "causal_mask = true"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::BFLOAT16,
+                                      false,
+                                      true),
+                   "compute_data_type != FLOAT"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      DataType::HALF),
+                   "mma_core_mode = HALF"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      DataType::FLOAT),
+                   "mma_core_mode = FLOAT"},
          false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
@@ -359,6 +415,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
     auto builder = createSdpaFwdGraph({4, 8, 256, 128},
                                       {4, 8, 256, 128},
                                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                       /*withAttnMask=*/false,
                                       /*withScale=*/true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
@@ -473,13 +530,13 @@ flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithMask(
                                rightBound,
                                flatbuffers::nullopt, // max_seq_len_kv
                                diagAlignment,
-                               DataType::FLOAT, // mma_core_mode
+                               DataType::UNSET, // mma_core_mode
                                AttentionImplementation::AUTO);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_fwd",
-                                     DataType::BFLOAT16,
+                                     DataType::FLOAT,
                                      NodeAttributes::SdpaAttributes,
                                      sdpaAttributes.Union()));
 
@@ -738,10 +795,11 @@ auto createSdpaFwdGraphWithStrides(const std::vector<int64_t>& dims,
         vStrides,
         oDims,
         oStrides,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsOversizedByteStrides)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOversizedByteStrides)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -756,28 +814,29 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsOversizedByteStrides)
     // bytes (stride * sizeof(bf16)).  The engine must decline via isApplicable.
     constexpr int64_t K_OVERFLOW_STRIDE = static_cast<int64_t>(UINT32_MAX) / 2 + 1;
     const std::vector<int64_t> dims = {4, 8, 256, 128};
-    const std::vector<int64_t> overflowStrides = {K_OVERFLOW_STRIDE, 256 * 128, 128, 1};
+    const std::vector<int64_t> overflowStrides
+        = {K_OVERFLOW_STRIDE, static_cast<int64_t>(256 * 128), 128, 1};
     const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
 
     // Q has overflow stride
     auto builderQ = createSdpaFwdGraphWithStrides(
         dims, overflowStrides, normalStrides, normalStrides, normalStrides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwQ(builderQ.GetBufferPointer(),
-                                                                   builderQ.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwQ(
+        builderQ.GetBufferPointer(), builderQ.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwQ));
 
     // K has overflow stride
     auto builderK = createSdpaFwdGraphWithStrides(
         dims, normalStrides, overflowStrides, normalStrides, normalStrides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwK(builderK.GetBufferPointer(),
-                                                                   builderK.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwK(
+        builderK.GetBufferPointer(), builderK.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwK));
 
     // Normal strides pass
     auto builderOk = createSdpaFwdGraphWithStrides(
         dims, normalStrides, normalStrides, normalStrides, normalStrides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwOk(builderOk.GetBufferPointer(),
-                                                                    builderOk.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwOk(
+        builderOk.GetBufferPointer(), builderOk.GetSize());
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwOk));
 }
 
@@ -805,7 +864,7 @@ TEST_F(TestSdpaFwdPlanBuilder, BuildPlanThrowsForUnsupportedDtype)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, BuildPlan_ThrowsOnEmptyKernelKey)
+TEST_F(TestSdpaFwdPlanBuilder, BuildPlanThrowsOnEmptyKernelKey)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -820,11 +879,11 @@ TEST_F(TestSdpaFwdPlanBuilder, BuildPlan_ThrowsOnEmptyKernelKey)
     // an empty key.  isApplicable would reject this, but buildPlan must also
     // throw rather than crashing via cfg_fmha_fwd.at("").
     auto builder = createSdpaFwdGraph({4, 8, 256, 100});
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
-                                                                  builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
+                                                                        builder.GetSize());
 
     // Forward ignores engineConfig — a null-buffer wrapper suffices.
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
     Context context;
     EXPECT_THROW(_planBuilder.buildPlan(_handle, gw, dummyCfg, context),
                  hipdnn_plugin_sdk::HipdnnPluginException);
@@ -834,13 +893,13 @@ TEST_F(TestSdpaFwdPlanBuilder, BuildPlan_ThrowsOnEmptyKernelKey)
 // initializeExecutionSettings
 // =============================================================================
 
-TEST_F(TestSdpaFwdPlanBuilder, InitializeExecutionSettings_IsNoOp)
+TEST_F(TestSdpaFwdPlanBuilder, InitializeExecutionSettingsIsNoOp)
 {
     auto builder = createSdpaFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
-                                                                  builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
+                                                                        builder.GetSize());
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
     Settings settings;
     // Must not throw or log an error — forward has no knobs.
     EXPECT_NO_THROW(_planBuilder.initializeExecutionSettings(_handle, gw, dummyCfg, settings));

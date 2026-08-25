@@ -54,13 +54,15 @@ protected:
                          << " but current device architecture is " << deviceString;
         }
 
-        auto validationResult = testCase.graph->validate();
+        auto graph = buildSdpaFwdGraph(testCase);
+
+        auto validationResult = graph->validate();
         ASSERT_TRUE(validationResult.is_good())
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
 
         // Register output tensor validator
-        testCase.graph->visit([&](const hipdnn_frontend::graph::INode& node) {
+        graph->visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
                 if(!tensorAttr->get_is_virtual())
@@ -70,7 +72,7 @@ protected:
             }
         });
 
-        this->verifyGraph(*testCase.graph, 0);
+        this->verifyGraph(*graph, 0);
     }
 
     float _minVal = -1.0;
