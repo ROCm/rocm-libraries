@@ -20,6 +20,10 @@
 
 namespace ck_tile {
 
+// Route (b): store dS in an M-contiguous LDS box and transpose on the read, so
+// the 128 sub-dword ds_store_b16 collapse to ds_store_b128.  See
+// ken_claude/HANDOFF_B_dS_store_b128.md.
+
 struct BlockFmhaBwdPipelineDefaultPolicy
 {
     template <index_t ndim>
@@ -2107,6 +2111,35 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         template <index_t GemmStage>
         CK_TILE_DEVICE static constexpr void GemmStagedScheduler()
         {
+        }
+
+        // Rewritten <0> for the TDM architecture.
+        //
+        // The original GemmStagedScheduler<0> asks for
+        //   Q_VMEM_READ + OGrad_VMEM_READ + LSE_VMEM_READ + D_VMEM_READ = 18
+        // VMEM-read slots.  Q and OGrad no longer arrive by VMEM read at all --
+        // they are DMA'd straight into LDS by TDM (load_tile_tdm), which emits
+        // no buffer_load.  Measured in the built kernel: the whole hot loop has
+        // 8 buffer_load, and those are LSE/D.  So 16 of the 18 groups can never
+        // be filled.
+        //
+        // This version asks only for what exists: the two scalar loads up
+        // front, then an even MFMA / DS-read interleave over Gemm0's 32 wmma.
+        CK_TILE_DEVICE static constexpr void GemmStagedScheduler0Tdm()
+        {
+            constexpr index_t VMEM_READ_INST = LSE_VMEM_READ + D_VMEM_READ;
+            constexpr index_t LDS_READ_INST  = OGradT_LDS_READ;
+            constexpr index_t MFMA_INST      = Gemm0MFMA;
+
+            constexpr index_t LDS_READ_PER_MFMA =
+                LDS_READ_INST / MFMA_INST > 0 ? LDS_READ_INST / MFMA_INST : 1;
+
+            __builtin_amdgcn_sched_group_barrier(0x020, VMEM_READ_INST, 0); // VMEM read
+            static_for<0, MFMA_INST, 1>{}([&](auto i) {
+                ignore = i;
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                 // MFMA/WMMA
+                __builtin_amdgcn_sched_group_barrier(0x100, LDS_READ_PER_MFMA, 0); // DS read
+            });
         }
 
         template <>
