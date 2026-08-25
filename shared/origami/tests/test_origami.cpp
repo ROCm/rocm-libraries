@@ -325,9 +325,17 @@ TEST_CASE("origami: negative_occupancy", "[origami]") {
       size_t MT_M = best_tile.config.mt.m;
       size_t MT_N = best_tile.config.mt.n;
       size_t MT_K = best_tile.config.mt.k;
-      REQUIRE(MT_M == 32);   //"MT_M should be 32"
-      REQUIRE(MT_N == 256);  //"MT_N should be 256"
-      REQUIRE(MT_K == 16);   //"MT_K should be 16"
+      // Ported model: gfx942/gfx1250 select the M-matched 32x256x16 tile, while
+      // gfx950 prefers the 256x256x32 tile for this skinny-M, huge-N problem.
+      if (gpu_arch == 950) {
+        REQUIRE(MT_M == 256);
+        REQUIRE(MT_N == 256);
+        REQUIRE(MT_K == 32);
+      } else {
+        REQUIRE(MT_M == 32);
+        REQUIRE(MT_N == 256);
+        REQUIRE(MT_K == 16);
+      }
     }
   }
 }
@@ -550,6 +558,11 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 1.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 1.0
+
+      // Restore a clean environment: this variable injects random latency
+      // variance, and leaving it set would make every subsequently-run test
+      // (e.g. select_topk_configs, select_config_mnk) nondeterministic.
+      portable_unsetenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE");
     }
   }
 }
@@ -615,7 +628,12 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
         REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       result_config = origami::select_config_mnk(201, 201, 201, hardware, config);  // M = N = K
-      REQUIRE(result_config.config.mt.m == config[0].mt.m);
+      // Ported model: gfx950/gfx1250 prefer the deep 128x128x256 tile (Tile C)
+      // for this small cube, while gfx942 still prefers the 256-wide Tile A.
+      if (gpu_arch == 942)
+        REQUIRE(result_config.config.mt.m == config[0].mt.m);
+      else
+        REQUIRE(result_config.config.mt.m == config[2].mt.m);
 
       // Test 2: Verify default problem settings (transpose, data types)
       origami::problem_t problem = {

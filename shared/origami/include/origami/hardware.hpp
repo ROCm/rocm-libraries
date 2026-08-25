@@ -144,6 +144,9 @@ class ORIGAMI_EXPORT hardware_t {
    */
   static constexpr double NO_MALL_AVAILABLE = 1.21875121875121875122 * 1000;
 
+  /// Number of SIMD units per Compute Unit (fixed across all supported architectures).
+  static constexpr size_t SIMDS_PER_CU = 4;
+
   /**
    * @brief gfx950-only architecture constants from optional PCI chip id.
    *
@@ -166,7 +169,7 @@ class ORIGAMI_EXPORT hardware_t {
             1.21875121875121875122 * 7,
             6,
             4,
-            std::make_tuple(-0.000013, 0.007070, 0.027355),
+            std::make_tuple(-0.0000194, 0.008772, 0.007898),
             1.5};
   }
 
@@ -617,6 +620,7 @@ class ORIGAMI_EXPORT hardware_t {
   double mem2_perf_ratio;
   double mem3_perf_ratio;
   size_t L2_capacity;        ///< Capacity of L2 cache in bytes
+  size_t l1_capacity;        ///< Capacity of L1 cache per SIMD in bytes (arch-dependent)
   size_t CU_per_L2;          ///< Number of compute units per L2 cache domain
   double compute_clock_ghz;  ///< Compute clock frequency in GHz
   size_t parallel_mi_cu;     ///< Number of parallel matrix instructions per compute unit
@@ -817,6 +821,23 @@ class ORIGAMI_EXPORT hardware_t {
    * @return L2 cache-line size in bytes
    */
   static size_t get_default_cache_line_bytes(architecture_t arch);
+
+  /**
+   * @brief Return the L1 cache capacity per SIMD for a given architecture.
+   *
+   * CDNA (gfx90a/942/950): 32 KiB per SIMD.
+   * RDNA3/4 and all others: 128 KiB per SIMD.
+   */
+  static constexpr size_t get_l1_capacity(architecture_t arch) noexcept {
+    switch (arch) {
+      case architecture_t::gfx90a:
+      case architecture_t::gfx942:
+      case architecture_t::gfx950:
+        return 32 * 1024;
+      default:
+        return 128 * 1024;
+    }
+  }
 
   /**
    * @brief Check if the hardware described by properties is supported.

@@ -353,9 +353,9 @@ NB_MODULE(origami, m) {
   m.def("calculate_output_utilization",
         &origami::gemm::calculate_output_utilization,
         "Calculate the output utilization ratio");
-  m.def("round_elements_to_128B",
-        &origami::gemm::round_elements_to_128B,
-        "Round elements to 128B alignment");
+  m.def("round_elements_to_NB",
+        &origami::gemm::round_elements_to_NB,
+        "Round elements up to a multiple of transaction_bytes");
   m.def("predict_workgroup_mapping",
         &origami::gemm::predict_workgroup_mapping,
         "Fast WGM prediction based on last-XCD L2 cost minimization");
