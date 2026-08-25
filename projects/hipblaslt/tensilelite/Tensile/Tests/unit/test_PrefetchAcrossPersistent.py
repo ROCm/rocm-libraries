@@ -77,9 +77,11 @@ class _ClassicPapWriter:
         self.states = SimpleNamespace(
             a=SimpleNamespace(numVgprGlobalReadOffsets=2),
             b=SimpleNamespace(numVgprGlobalReadOffsets=2),
+            kernel={"TDMPlusLdsBuf": 0},
             ldsTensorTokenIdx=0,
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
+            numLDSBlk=2,
             staggerUCode=False,
             unrollIdx=0,
             use64bShadowLimit=use64b_shadow,
@@ -151,6 +153,7 @@ class _ClassicPapWriter:
 
 
 _ClassicPapWriter.setupPrefetchAcrossPersistentLoads = KernelWriter.setupPrefetchAcrossPersistentLoads
+_ClassicPapWriter._nextLdsToken = KernelWriter._nextLdsToken
 
 
 class _SetupNewTilePapTdmWriter:
@@ -162,14 +165,16 @@ class _SetupNewTilePapTdmWriter:
             ldsTensorTokenIdx=0,
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
+            numLDSBlk=2,
             staggerUCode=False,
             unrollIdx=0,
             # Capability/kernel state consumed by ClusterLoadTDM.find()'s
             # PartialMatch (asmCaps HasTDM + kernel TDMInst==3), mirroring the
             # real writer.states on a gfx1250 TDM path so the component matches.
             asmCaps={"HasTDM": True},
-            kernel={"TDMInst": 3},
+            kernel={"TDMInst": 3, "TDMPlusLdsBuf": 0},
             waveIdxReleasedAfterStagger=False,
+            tdmParityPackedInArgType=False,
         )
         self.do = {"executeToInitEnd": False}
         self.dontAppendCode = False
@@ -229,6 +234,12 @@ class _SetupNewTilePapTdmWriter:
     def releaseWaveIdxAfterStagger(self, kernel):
         return kwa_module.KernelWriterAssembly.releaseWaveIdxAfterStagger(self, kernel)
 
+    def hoistWaveParityWrapUSel(self, kernel, tpa, tpb):
+        return self._module("hoistWaveParityWrapUSel")
+
+    def packTdmParityIntoArgType(self, kernel):
+        return self._module("packTdmParityIntoArgType")
+
     def declareStaggerParms(self, kernel):
         return self._module("declareStaggerParms")
 
@@ -246,6 +257,9 @@ class _SetupNewTilePapTdmWriter:
 
     def isPrefetchAcrossPersistentEnabled(self, kernel):
         return KernelWriter.isPrefetchAcrossPersistentEnabled(self, kernel)
+
+    def _nextLdsToken(self, idx):
+        return KernelWriter._nextLdsToken(self, idx)
 
     def papTdmRestoreLdsBank(self, kernel, tpa, tpb):
         return self._module("papTdmRestoreLdsBank")
@@ -577,10 +591,10 @@ def _pap_solution_config(**overrides):
     return config
 
 
-def _pap_solution(**overrides):
+def _pap_solution(*, rocm_version=SemanticVersion(6, 4, 0), **overrides):
     assembler = SimpleNamespace(
         code_object_version="default",
-        rocm_version=SemanticVersion(6, 4, 0),
+        rocm_version=rocm_version,
     )
     return Solution(
         _pap_solution_config(**overrides),
@@ -708,7 +722,24 @@ def test_pap_is_valid_solution_parameter():
 def test_solution_validation_accepts_minimal_pap_tdm_contract():
     assert _pap_solution()["Valid"] is True
 
+@pytest.mark.parametrize(
+    "rocm_version, expected_preload",
+    [
+        pytest.param(SemanticVersion(6, 0, 32649), False, id="rocm_6_before_floor"),
+        pytest.param(SemanticVersion(6, 0, 32650), True, id="rocm_6_at_floor"),
+        pytest.param(SemanticVersion(7, 1, 25424), True, id="rocm_7_low_build"),
+    ],
+)
+def test_solution_applies_preload_gate_from_assembler_version(
+    rocm_version, expected_preload
+):
+    solution = _pap_solution(
+        rocm_version=rocm_version,
+        PreloadKernArgs=True,
+    )
 
+    assert solution["Valid"] is True
+    assert solution["PreloadKernArgs"] is expected_preload
 @pytest.mark.parametrize(
     "overrides, reason",
     [
@@ -818,11 +849,19 @@ def test_setup_new_tile_releases_waveidx_after_stagger_for_wave_separated_tdm(mo
         assert "calculateStagger_A" in module_names
         assert "calculateStagger_B" in module_names
         # The release is not the plain undefineSgpr emitted on the non-stagger path;
-        # it goes through releaseWaveIdxAfterStagger, which also latches the state
-        # that flips every later parity site to the Serial recompute.
+        # it goes through releaseWaveIdxAfterStagger after packing parity into
+        # ArgType bit 8. Later sites use that packed bit, not a live WaveIdx.
         assert "undefineSgpr_WaveIdx" not in module_names
         assert "ReleaseWaveIdxAfterStagger" in module_names
+        assert "hoistWaveParityWrapUSel" in module_names
+        assert "packTdmParityIntoArgType" in module_names
         assert module_names.index("calculateStagger_B") < module_names.index(
+            "hoistWaveParityWrapUSel"
+        )
+        assert module_names.index("hoistWaveParityWrapUSel") < module_names.index(
+            "packTdmParityIntoArgType"
+        )
+        assert module_names.index("packTdmParityIntoArgType") < module_names.index(
             "ReleaseWaveIdxAfterStagger"
         )
         assert writer.states.waveIdxReleasedAfterStagger is True

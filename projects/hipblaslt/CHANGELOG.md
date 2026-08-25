@@ -13,6 +13,12 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   `HIPBLASLT_CHECK_NUMERICS`, each covered call pays a stream sync and a
   device-to-host copy, so this is single-threaded debugging use only, not
   for concurrent-stream workloads.
+* `HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT`,
+  `hipblaslt_ext::GemmPreference::setUniformSummationOrder`, and
+  `hipblasLtSetUniformSummationOrder` / `hipblasLtGetUniformSummationOrder`
+  opt into a uniform summation order across `M` (not run-to-run determinism).
+  See `hipblaslt.h`. `hipblaslt-bench --uniform_summation_order` forwards
+  the descriptor attribute.
 
 ## hipBLASLt 1.4.0
 

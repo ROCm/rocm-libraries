@@ -62,7 +62,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadB: [-1]
         - LdsPadMetadata: [0]
         - TDMInst: [3]
-        - TDMIterateMode: [-1, 0, 3]
+        - TDMIterateMode: [-1, 0, 1, 2, 3]
         - LDSTrInst: [False]
         - StaggerU: [0, 4, 16]
         - StaggerUMapping: [0, 1]
