@@ -167,3 +167,26 @@ Even gated, the realized gain is ~+2% wall-clock on treated queries — real, at
 the floor, but modest against the ~1% that lean cost. **The larger lever is coverage:** only
 2 139 of 9 680 grid rows were measured, so 78% of the grid still carries its 96-CU mapping.
 Extending the sweep would scale the gain at ~4x the measurement cost.
+
+## Post-ship verification
+
+The gate above proves the re-mapped catalog compiles in isolation. The shipped tree was then
+built as a whole, with the re-map coexisting with all 38 logic files and the `Equality/` path:
+
+| | gfx1101 | gfx1102 |
+|---|---|---|
+| full-tree device-library build | 1 364 kernels | 1 183 kernels |
+| assembler errors / `overflowedResources` | 0 / 0 | 0 / 0 |
+| code objects | 54 | 46 |
+
+**Numerical correctness: 47 PASS, 0 FAIL** (`hipblaslt-bench -v`, shapes spanning every stratum,
+re-mapped catalog built for gfx1100). A re-map only changes *which* pre-existing kernel a row
+names, so correctness ought to be inherited — but it sends shapes to kernels they were never
+exercised on, which is worth checking rather than assuming.
+
+*Harness note: 48 shapes were generated and 47 tested. `while read` drops a final line with no
+trailing newline. So this is 47/47 passed with one never tested, not 47/48.*
+
+**Not verified, and not claimable here:** gfx1101/gfx1102 binaries were never executed — this
+machine has only a gfx1100 card. Their correctness rests on running the identical catalog content
+on gfx1100 plus a clean build for the real targets.
