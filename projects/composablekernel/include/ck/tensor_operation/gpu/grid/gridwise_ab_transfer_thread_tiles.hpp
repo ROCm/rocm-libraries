@@ -414,13 +414,13 @@ struct ABTransferThreadTiles
                         BlockDesc{},
                         make_tuple(
                             make_unmerge_transform(make_tuple(Number<ABK0 / (KPack / ABK1)>{},
-                                                              Number<KPack / KRow / ABK1>{},
-                                                              KRow)),
+                                                              KRow,
+                                                              Number<KPack / KRow / ABK1>{})),
                             make_unmerge_transform(make_tuple(
                                 Number<MNRepeat>{}, Number<MNWaves>{}, Number<MNPerWmma>{})),
                             make_pass_through_transform(Number<ABK1>{})),
                         make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
-                        make_tuple(Sequence<2, 0, 4>{}, Sequence<1, 3, 6>{}, Sequence<5>{}));
+                        make_tuple(Sequence<2, 4, 0>{}, Sequence<1, 3, 6>{}, Sequence<5>{}));
                 }
                 else
                 {
