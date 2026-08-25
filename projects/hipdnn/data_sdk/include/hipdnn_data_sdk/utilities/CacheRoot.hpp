@@ -97,7 +97,10 @@ inline std::filesystem::path cacheRoot()
 
     std::error_code failed;
     std::filesystem::create_directories(resolved, failed);
-    if(failed || !std::filesystem::is_directory(resolved))
+    // The error_code overload of is_directory(): the throwing one would break this
+    // function's never-throws contract if the path became unreadable after creation.
+    std::error_code queryFailed;
+    if(failed || !std::filesystem::is_directory(resolved, queryFailed))
     {
         // Creation failed, or the path already existed as something other than a
         // directory -- either way, no on-disk cache is available.

@@ -60,7 +60,11 @@ inline std::string_view winnerCacheVersion()
 }
 
 /// Where @p engineName's shard for @p gcnArchName lives:
-/// `cacheRoot()/ingestor-winners/<version>/<sanitized-engine>/<arch-base>/winners.jsonl`.
+/// `cacheRoot()/ingestor-winners/<version>/<sanitized-engine>/<sanitized-arch>/winners.jsonl`.
+///
+/// Both variable components are sanitized. `gcnArchName` comes from the driver and is
+/// only feature-stripped by `stripArchFeatures()`, so a string carrying a separator would
+/// otherwise place the shard outside the cache tree.
 ///
 /// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory;
 ///     callers must fall back to in-memory-only behavior. Never throws.
@@ -75,7 +79,8 @@ inline std::filesystem::path winnerCacheShardPath(std::string_view engineName,
 
     return root / "ingestor-winners" / std::string(winnerCacheVersion())
            / hipdnn_data_sdk::utilities::sanitizeForPath(engineName)
-           / std::string(stripArchFeatures(gcnArchName)) / "winners.jsonl";
+           / hipdnn_data_sdk::utilities::sanitizeForPath(stripArchFeatures(gcnArchName))
+           / "winners.jsonl";
 }
 
 /// Opens (creating if absent) the shard for @p engineName / @p gcnArchName, creating its
@@ -134,6 +139,10 @@ inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerReco
 /// Decodes one line written by `encodeWinnerRecordLine()`. A missing/mistyped field, a
 /// graph payload `GraphContentKey::fromJson()` declines, or an unparsable `DescriptorId`
 /// all return std::nullopt (never throw), matching LineStore's skip-malformed-line contract.
+///
+/// The catch is unrestricted because this is `noexcept`: a shard line has no size bound,
+/// so parsing one can throw `std::bad_alloc` as readily as a JSON error or `parseUuid()`'s
+/// `std::invalid_argument`, and any of them escaping calls `std::terminate`.
 inline std::optional<std::pair<WinnerKey, WinnerRecord>>
     decodeWinnerRecordLine(std::string_view line) noexcept
 {
@@ -194,13 +203,8 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
         return std::make_pair(WinnerKey{std::move(*graph), DeviceKey{std::move(properties)}},
                               std::move(record));
     }
-    catch(const nlohmann::json::exception&)
+    catch(...)
     {
-        return std::nullopt;
-    }
-    catch(const std::invalid_argument&)
-    {
-        // parseUuid()'s failure mode for a malformed id.
         return std::nullopt;
     }
 }
