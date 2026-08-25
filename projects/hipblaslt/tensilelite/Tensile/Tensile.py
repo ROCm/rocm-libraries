@@ -58,6 +58,7 @@ from Tensile import ClientWriter
 from Tensile import LibraryIO
 from Tensile.backends.config import parse_backend_config
 from Tensile import LibraryLogic
+from Tensile.Gfx1250RunGuard import guard_gfx1250_v1_run_on_v0
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 TENSILE_CLIENT_PATH = Path('build_tmp') / 'tensilelite' / 'client' / 'tensilelite-client'
@@ -111,6 +112,18 @@ def executeStepsInConfig(
     """
 
     buildTmpPath = outputPath / "build_tmp"
+
+    # Execute path only: --build-only / --cpu-only still cross-compile. Abort
+    # a gfx1250 StreamK YAML with skip-gfx1250v0 or RevisionID 1 on rev0
+    # hardware. Default RevisionID is 0. Non-gfx1250 compiles are not checked.
+    guard_gfx1250_v1_run_on_v0(
+        build_only=buildOnly,
+        cpu_only=bool(globalParameters.get("CpuOnly")),
+        arch_names=archNames,
+        isa_info_map=isaInfoMap,
+        device_id=deviceId,
+        config=config,
+    )
 
     ##############################################################################
     # Benchmark Problems

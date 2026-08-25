@@ -29,7 +29,6 @@ see artifact_helpers.py.
 """
 
 import os
-import re
 
 import pytest
 import yaml
@@ -95,8 +94,10 @@ def configMarks(filepath, rootDir, availableArchs):
      - Root directory name.  This separates tests into pre_checkin, nightly, etc.
      - Expected failures. Include 'xfail' in the name of the YAML file.
      - Anything in yaml["TestParameters"]["marks"]
+     - TestParameters.RevisionID (gfx1250 only: 1 -> skip-gfx1250v0)
      - Architecture from GlobalParameters.Architecture (e.g. gfx1250)
-     - Architecture from filename (e.g. bf16_gfx1250.yaml -> gfx1250)
+     - Architecture from filename (e.g. bf16_gfx1250.yaml -> gfx1250;
+       gfx1250v0 wins over gfx\\d+)
      - validate / validateAll - whether the test validates (all?) results.
      - Data type(s) used in the YAML
      - Problem type(s) used in the YAML
@@ -134,13 +135,23 @@ def configMarks(filepath, rootDir, availableArchs):
         if "marks" in doc["TestParameters"]:
             marks += [markNamed(m) for m in doc["TestParameters"]["marks"]]
 
+    # gfx1250 RevisionID 1 (default 0) is the same skip as skip-gfx1250v0.
+    # StreamK tests that set either are skipped on gfx1250 rev0 only.
+    from Tensile.Gfx1250RunGuard import requires_gfx1250_rev1
+    if requires_gfx1250_rev1(doc, filepath):
+        skip_v0 = markNamed("skip-gfx1250v0")
+        if skip_v0 not in marks:
+            marks.append(skip_v0)
+
     arch_val = doc.get("GlobalParameters", {}).get("Architecture")
     if arch_val and markNamed(arch_val) not in marks:
         marks.append(markNamed(arch_val))
 
-    arch_in_name = re.search(r'(gfx\d+)', components[-1])
-    if arch_in_name and markNamed(arch_in_name.group(1)) not in marks:
-        marks.append(markNamed(arch_in_name.group(1)))
+    from Tensile.Tests.gpu_detection import filename_arch_token
+
+    arch_in_name = filename_arch_token(components[-1])
+    if arch_in_name and markNamed(arch_in_name) not in marks:
+        marks.append(markNamed(arch_in_name))
 
     # Architecture specific xfail marks
     for arch in availableArchs:
@@ -215,15 +226,18 @@ def findAvailableArchs(gpu_targets=None):
     return get_available_archs()
 
 
-def findConfigs(rootDir=None, availableArchs=None):
+def findConfigs(rootDir=None, availableArchs=None, skipArchs=None):
     """
     Walks rootDir (defaults to trying to find Tensile/Tests) and returns a
     list of test parameters, one for each YAML file.
 
     Args:
         rootDir: Directory to walk for YAML configs. Defaults to Tensile/Tests.
-        availableArchs: Pre-resolved list of GPU architectures.
-            When None, calls findAvailableArchs() to auto-detect.
+        availableArchs: Pre-resolved compile/build GPU architectures
+            (PyTestBuildArchNames). When None, calls findAvailableArchs().
+        skipArchs: Architectures used for skip-*/xfail-* matching. Compile
+            targets are not the skip identity; when None, derived from
+            availableArchs plus hardware revision probing.
     """
     if rootDir is None:
         rootDir = _TESTS_ROOT_DIR
@@ -235,6 +249,10 @@ def findConfigs(rootDir=None, availableArchs=None):
         availableArchs = findAvailableArchs()
     globalParamArchsStr = ';'.join(availableArchs)
     os.environ["PyTestBuildArchNames"] = globalParamArchsStr
+
+    if skipArchs is None:
+        from Tensile.Tests.gpu_detection import resolve_skip_archs
+        skipArchs = resolve_skip_archs(availableArchs)
 
     rocm_version = get_rocm_version_or_none()
 
@@ -253,7 +271,7 @@ def findConfigs(rootDir=None, availableArchs=None):
             elif filename.endswith('.yaml') and "logic_yaml" not in dirpath:
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:
-                    marks = configMarks(filepath, rootDir, availableArchs)
+                    marks = configMarks(filepath, rootDir, skipArchs)
                     if marks is None:
                         # Not a Tensile config (e.g. a library logic YAML); skip.
                         continue

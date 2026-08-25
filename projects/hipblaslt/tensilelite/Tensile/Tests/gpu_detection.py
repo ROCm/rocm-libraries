@@ -27,6 +27,7 @@ GPU architecture detection for TensileLite unit and common tests.
 """
 
 import os
+import re
 import subprocess
 
 
@@ -62,3 +63,45 @@ def get_available_archs() -> list[str]:
 def has_arch(target: str) -> bool:
     """Check if a specific GPU architecture is available."""
     return any(target in arch for arch in get_available_archs())
+
+
+# Filename arch tokens: match gfx1250v0 before gfx\\d+ so *gfx1250v0.yaml is
+# not captured as gfx1250.
+_ARCH_IN_FILENAME = re.compile(r"(gfx1250v0|gfx\d+)")
+
+
+def filename_arch_token(filename: str):
+    """Architecture token encoded in a YAML filename, or None."""
+    if not filename:
+        return None
+    match = _ARCH_IN_FILENAME.search(filename)
+    return match.group(1) if match else None
+
+
+def resolve_skip_archs(compile_archs, enumerated_archs=None, revision_target=None):
+    """Pytest skip/xfail matching set. Compile targets are not skip identity.
+
+    gfx1250v0 expands (gfx1250v0 -> {gfx1250, gfx1250v0}) so
+    skip-gfx1250 still matches; --gpu-targets gfx1250v0 must never *replace*
+    gfx1250 in this set. When a real gfx1250 GPU is present, asicRevision is
+    always probed even if --gpu-targets says gfx1250. GpuRevisionTarget is
+    applied only when the enumerator listed gfx1250. Probe failure is
+    fail-open (skip set stays {gfx1250} so skip-gfx1250v0 does not fire).
+
+    enumerated_archs / revision_target are injectable for tests.
+    """
+    from Tensile import GpuRevisionTarget as gpu_rev
+
+    skip = set()
+    for arch in compile_archs or ():
+        skip |= gpu_rev.expand_revision_skip_archs(arch)
+
+    if enumerated_archs is None:
+        enumerated_archs = get_available_archs()
+
+    if gpu_rev.enumerator_reports_gfx1250(enumerated_archs):
+        if revision_target is None:
+            revision_target = gpu_rev.detect_gpu_revision_target()
+        skip |= gpu_rev.skip_archs_for_gfx1250_revision_target(revision_target)
+
+    return sorted(skip)

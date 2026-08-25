@@ -9,9 +9,10 @@
 //
 // gfx1250 ships as two silicon revisions that share the same ISA/arch name, so
 // gcnArchName alone cannot tell them apart. hipDeviceProp_t::asicRevision is the
-// only in-process signal that distinguishes them (empirically v0 -> 0, v1 -> 1).
-// This mirrors the exact read in rocblaslt's handle.cpp (asic_rev =
-// properties.asicRevision, guarded by HIP_VERSION >= 307).
+// only in-process signal that distinguishes them (empirically v0 -> 0, v1 -> 1;
+// FFM reports 2, which this probe coerces to 1 with a stderr warning).
+// This mirrors rocblaslt's handle.cpp (asic_rev via
+// rocblaslt_normalize_gfx1250_asic_revision, guarded by HIP_VERSION >= 307).
 //
 // Build (done on demand by tasks.py):  hipcc -O0 gpu_revision_probe.cpp -o <out>
 // Usage:                               <out> [deviceId]   (deviceId defaults to 0)
@@ -26,6 +27,7 @@
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 int main(int argc, char** argv)
 {
@@ -62,6 +64,22 @@ int main(int argc, char** argv)
 #else
     int asicRevision = -1;
 #endif
+
+    // FFM reports asicRevision 2 for gfx1250; that is not a shipping stepping.
+    // Treat it as v1 (1) so library/target selection matches rev1. Real rev0
+    // (asicRevision 0) is left alone. Match the family token only, so feature
+    // suffixes on gcnArchName still coerce.
+    {
+        const char*  arch  = properties.gcnArchName;
+        const char*  colon = std::strchr(arch, ':');
+        const size_t n     = colon ? static_cast<size_t>(colon - arch) : std::strlen(arch);
+        if(n == 7 && std::strncmp(arch, "gfx1250", 7) == 0 && asicRevision == 2)
+        {
+            std::fprintf(stderr,
+                         "warning: gfx1250 asicRevision 2 treated as 1 (FFM workaround)\n");
+            asicRevision = 1;
+        }
+    }
 
     // gcnArchName first, asicRevision second; one value per line so the caller
     // can parse without splitting on characters that may appear in arch names.

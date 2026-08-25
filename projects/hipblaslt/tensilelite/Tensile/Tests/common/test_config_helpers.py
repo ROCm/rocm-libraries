@@ -26,6 +26,9 @@ _FFM_FAIL_CONFIG = os.path.join(_COMMON_DIR, "gemm", "gfx12", "tdm_multicast_gfx
 _PLAIN_GFX1250_CONFIG = os.path.join(
     _COMMON_DIR, "streamk", "gfx1250", "core", "sk_mxf4_force_dp_only.yaml"
 )
+_REV1_GFX1250_SK = os.path.join(
+    _COMMON_DIR, "streamk", "gfx1250", "sk_mxf4gemm_tdm_ext.yaml"
+)
 
 _FFM_MEMFILE = "/dev/shm/hsakmt_model_root_test"
 
@@ -61,3 +64,27 @@ def test_unmarked_config_never_xfails_under_ffm(monkeypatch):
     monkeypatch.setenv("HSA_MODEL_MEMFILE", _FFM_MEMFILE)
     marks = configMarks(_PLAIN_GFX1250_CONFIG, _TESTS_ROOT, ["gfx1250"])
     assert pytest.mark.xfail not in marks
+
+
+def test_revision_id_1_skips_on_gfx1250v0():
+    """RevisionID 1 or skip-gfx1250v0 skips when gfx1250v0 is in the skip set."""
+    marks = configMarks(_REV1_GFX1250_SK, _TESTS_ROOT, ["gfx1250", "gfx1250v0"])
+    assert pytest.mark.skip in marks
+
+
+def test_revision_id_1_does_not_skip_on_gfx1250_rev1():
+    """On gfx1250 rev1 the skip set has no gfx1250v0, so RevisionID 1 still runs."""
+    marks = configMarks(_REV1_GFX1250_SK, _TESTS_ROOT, ["gfx1250"])
+    assert pytest.mark.skip not in marks
+
+
+def test_revision_id_1_does_not_skip_on_other_arch():
+    """Revision skips are gfx1250-only; gfx950 skip set must not skip this YAML."""
+    marks = configMarks(_REV1_GFX1250_SK, _TESTS_ROOT, ["gfx950"])
+    assert pytest.mark.skip not in marks
+
+
+def test_default_revision_id_0_does_not_skip_on_gfx1250v0():
+    """SK tests without skip-gfx1250v0 or RevisionID 1 still run on rev0."""
+    marks = configMarks(_PLAIN_GFX1250_CONFIG, _TESTS_ROOT, ["gfx1250", "gfx1250v0"])
+    assert pytest.mark.skip not in marks
