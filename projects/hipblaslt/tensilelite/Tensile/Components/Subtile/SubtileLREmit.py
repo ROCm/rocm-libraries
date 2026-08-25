@@ -639,35 +639,36 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
              comment="%s: kGroup*%u + frow" % (tc, groupKStride)))
   module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=hex(mStripBytes.bit_length() - 1),
              src=vgpr(base), comment="%s: * %u (mStripBytes)" % (tc, mStripBytes)))
-  # Bank-conflict swizzle: apply the same chunk XOR + load-block pad the GR
-  # write used, so the transpose read addresses the permuted physical chunk.
-  # fswz is an involution; chunk bits >= log2(groupKStride) live in kGroup, so
-  # the flip and the pad both derive from kGroup (frow only touches low bits).
-  # See SubtileTLUSwizzle and format.md.
+  # Bank-conflict swizzle: apply the same chunk XOR + load-block pad the GR write
+  # used, so the transpose read addresses the permuted physical chunk.  fswz is
+  # an involution, so GR and LR apply the identical flip and A round-trips.
+  #
+  # ``base`` here holds the chunk's LDS byte address, and a b128 chunk is always
+  # 16 bytes, so chunk bit b lives at byte bit b + 4 (log2 16), independent of
+  # the strip width mStripBytes.  The swizzle bits are pure per-lane for every
+  # wired stack (2x1: chunk[6]^=chunk[5]; 4x1: chunk[7]^=chunk[4]), but they do
+  # not all live in the kGroup sub-field (4x1's chunk[4] comes from frow), so the
+  # source bit is read straight from ``base`` rather than from kGroup -- this is
+  # field-agnostic and stays correct as the stack grows.  See SubtileTLUSwizzle.
   swz = selectTLUSwizzle(tileInfo)
   if swz:
-    gksBits = groupKStride.bit_length() - 1
-    assert swz.xorFromBit >= gksBits and swz.xorToBit >= gksBits, \
-        "TLU swizzle bits must lie in the kGroup (K-row) field"
+    CHUNK_BYTE_BITS = 4  # log2(16 bytes per b128 chunk)
+    byteFromBit = swz.xorFromBit + CHUNK_BYTE_BITS
+    byteToBit   = swz.xorToBit + CHUNK_BYTE_BITS
     swzTmp = writer.vgprPool.checkOut(1, tag="_lraTileAssignment_tlu_swz")
-    # base currently holds chunk*mStripBytes; flip chunk bit xorToBit ->
-    # byte bit (xorToBit + log2(mStripBytes)).
-    byteFlipBit = swz.xorToBit + (mStripBytes.bit_length() - 1)
-    module.add(VLShiftRightB32(dst=vgpr(swzTmp), shiftHex=hex(swz.xorFromBit - gksBits),
-               src=vgpr(kGroup), comment="%s: kGroup bit for chunk[%u]" % (tc, swz.xorFromBit)))
-    # kGroup still holds kGroup<<gksBits (scaled); shift already accounts for it.
-    module.add(VAndB32(dst=vgpr(swzTmp), src0=vgpr(swzTmp), src1=hex(1 << gksBits),
+    # swzTmp = (base >> byteFromBit) & 1  -> the chunk[xorFromBit] bit
+    module.add(VLShiftRightB32(dst=vgpr(swzTmp), shiftHex=hex(byteFromBit),
+               src=vgpr(base), comment="%s: base bit for chunk[%u]" % (tc, swz.xorFromBit)))
+    module.add(VAndB32(dst=vgpr(swzTmp), src0=vgpr(swzTmp), src1=hex(1),
                comment="%s: isolate chunk[%u]" % (tc, swz.xorFromBit)))
-    module.add(VLShiftLeftB32(dst=vgpr(swzTmp),
-               shiftHex=hex(byteFlipBit - gksBits), src=vgpr(swzTmp),
-               comment="%s: -> LDS byte bit %u" % (tc, byteFlipBit)))
+    module.add(VLShiftLeftB32(dst=vgpr(swzTmp), shiftHex=hex(byteToBit),
+               src=vgpr(swzTmp), comment="%s: -> LDS byte bit %u" % (tc, byteToBit)))
     module.add(VXorB32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(swzTmp),
                comment="%s: swizzle chunk[%u]^=chunk[%u]" % (tc, swz.xorToBit, swz.xorFromBit)))
-    # Pad: add padBytes once per load-block above the swizzled chunk bit.
-    # For the 2x1 fp4 layout the block boundary coincides with the flipped bit,
-    # so the padded block index is (chunk >> blockChunkBits) post-swizzle.
+    # Pad: add padBytes once per 64-chunk load-block, using the post-swizzle
+    # physical chunk index (byte bit blockChunkBits + log2(16)).
     module.add(VLShiftRightB32(dst=vgpr(swzTmp),
-               shiftHex=hex(swz.blockChunkBits + (mStripBytes.bit_length() - 1)),
+               shiftHex=hex(swz.blockChunkBits + CHUNK_BYTE_BITS),
                src=vgpr(base), comment="%s: load-block index" % tc))
     module.add(VMulLOU32(dst=vgpr(swzTmp), src0=hex(swz.padBytes), src1=vgpr(swzTmp),
                comment="%s: * padBytes" % tc))
