@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# pyproject-mutmut.sh — back up / rewrite / restore / gate the
+# pyproject-mutmut.sh — safely back up, rewrite, restore, and check the
 # [tool.mutmut] slice config in projects/hipblaslt/tensilelite/pyproject.toml.
 #
 # pyproject.toml is a TRACKED file. Each slice rewrites `only_mutate` and
@@ -90,7 +90,7 @@ done
 # ------------------------------------------------------------- resolve root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
-[[ -n "$ROOT" ]] || ROOT="$(cd "$SCRIPT_DIR/../../../../../../.." && pwd)"
+[[ -n "$ROOT" ]] || ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 cd "$ROOT" || die "cannot cd to repo root: $ROOT"
 
 [[ -d "$SRC" ]] || die "source directory not found: $SRC"

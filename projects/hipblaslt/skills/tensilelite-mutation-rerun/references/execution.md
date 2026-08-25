@@ -1,17 +1,40 @@
-# TensileLite mutation-testing core
+# TensileLite mutation-analysis execution reference
 
-These scripts provide the safety-critical foundation for a serial mutmut run:
+## Contents
+
+- [Purpose and scope](#purpose-and-scope)
+- [Platform support](#platform-support)
+- [Record preflight state](#1-record-preflight-state)
+- [Configure a mutation slice safely](#2-configure-a-mutation-slice-safely)
+- [Run mutmut](#3-run-mutmut)
+- [Restore the mutation configuration](#4-restore-the-mutation-configuration)
+- [Verify survivor-killing tests](#5-verify-survivor-killing-tests)
+- [Run the safety-core self-tests](#6-run-the-safety-core-self-tests)
+
+## Purpose and scope
+
+In this project, mutation testing is an opt-in, offline technique used only to
+find behavioral coverage and assertion gaps in the characterization tests. A
+surviving mutant is a diagnostic lead, not a product failure. When a survivor
+exposes an observable gap, the lasting change is a focused characterization
+test in the normal pytest suite—not a mutation score, report, or source change
+made only to improve that score. Mutation results are not CI or release gates.
+
+The scripts and Dockerfile in this skill are executable documentation for
+maintainers and coding agents. They are not required to build TensileLite or
+run its ordinary tests, and no normal CI workflow invokes them. These optional
+helpers make a manual, serial mutmut investigation reproducible and protect the
+checkout while it runs:
 
 - `slice-preflight.sh` records the source/container environment and refuses to
   proceed when tracked source is dirty.
 - `pyproject-mutmut.sh` backs up, rewrites, restores, and verifies the
   `[tool.mutmut]` configuration in `pyproject.toml`.
-- `mutmut-verify.sh` proves individual kills by running one pytest node against
-  clean and mutated source, then restoring every detected mutation change.
+- `mutmut-verify.sh` checks a proposed characterization test against clean and
+  mutated source, then restores every detected mutation change.
 
-Mutmut itself runs without these wrappers. The wrappers add the following
-TensileLite-specific reproducibility and safety guarantees across repeated
-runs:
+Mutmut itself runs without these wrappers. The helpers add the following
+TensileLite-specific reproducibility and safety guarantees across repeated runs:
 
 - record the exact source, container image, and mutmut version used;
 - change per-slice pyproject selections without leaving tracked changes;
@@ -31,9 +54,9 @@ signals. The documented workflow normally runs in Docker.
 Docker is not required for ordinary TensileLite tests, and mutmut itself can run
 in any compatible Linux environment with rocisa installed. The
 `mutation-unit` tox environment is opt-in and is not part of tox's default
-environment list. Of the helpers in this directory, `pyproject-mutmut.sh` runs
-on the host, while the current `slice-preflight.sh` and `mutmut-verify.sh`
-implementations require a named Docker container.
+environment list or the project's CI workflows. Of the bundled helpers,
+`pyproject-mutmut.sh` runs on the host, while the current `slice-preflight.sh`
+and `mutmut-verify.sh` implementations require a named Docker container.
 
 Run all examples from the `rocm-libraries` repository root. The repository does
 not publish a prebuilt image. Build the dedicated mutation image, mount the
@@ -42,9 +65,9 @@ environment and rocisa from that mounted revision:
 
 ```bash
 docker build \
-  -f projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/Dockerfile \
+  -f projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/Dockerfile \
   -t hipblaslt-mutation \
-  projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation
+  projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts
 
 docker run -d --name tl-mut \
   --mount type=bind,source="$(pwd -P)",target=/work \
@@ -72,7 +95,7 @@ The preflight command is read-only with respect to source; it writes only its
 Docker container. Untracked mutation output does not fail the check.
 
 ```bash
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/slice-preflight.sh \
+bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/slice-preflight.sh \
   --slice 1 \
   --module Tensile/Common/Utilities.py \
   --container tl-mut \
@@ -98,7 +121,7 @@ Start a transaction by backing up the complete project file before changing the
 mutmut selection:
 
 ```bash
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
+bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/pyproject-mutmut.sh \
   backup --src projects/hipblaslt/tensilelite
 ```
 
@@ -119,7 +142,7 @@ result.
 Set one or more source modules and pytest selections:
 
 ```bash
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
+bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/pyproject-mutmut.sh \
   set \
   --src projects/hipblaslt/tensilelite \
   --only-mutate Tensile/Common/Utilities.py \
@@ -183,6 +206,16 @@ Representative output (mutant names and statuses vary):
     Tensile.Common.Utilities.x__mutmut_3: timeout
 ```
 
+Inspect a survivor's exact source change before deciding whether it exposes a
+characterization gap:
+
+```bash
+docker exec \
+  -w /work/projects/hipblaslt/tensilelite \
+  tl-mut \
+  mutmut show Tensile.Common.Utilities.x__mutmut_1
+```
+
 Rerun one mutant after adding a focused test with:
 
 ```bash
@@ -201,10 +234,10 @@ path, Git `HEAD`, recorded hashes, and file mode first; it refuses to overwrite
 unrelated edits or use a stale backup:
 
 ```bash
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
+bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/pyproject-mutmut.sh \
   restore --src projects/hipblaslt/tensilelite
 
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/pyproject-mutmut.sh \
+bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/pyproject-mutmut.sh \
   assert-clean --src projects/hipblaslt/tensilelite
 ```
 
@@ -228,6 +261,11 @@ artifacts and the contents of existing untracked files are outside that
 baseline. A stale target declaration or an unexpected multi-file change fails
 the row instead of leaving detected source changes behind.
 
+A newly added, still-untracked characterization test is compatible with this
+clean-tracked-worktree requirement. If verification requires editing an existing
+tracked test, make a deliberate local commit or use a separate clean worktree;
+do not hide, stash, or discard unrelated edits automatically.
+
 Create a tab-separated manifest. The header and column order are required:
 
 ```text
@@ -244,7 +282,7 @@ duplicate manifest before it changes source.
 Then run the verifier:
 
 ```bash
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/mutmut-verify.sh \
+bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/mutmut-verify.sh \
   --container tl-mut \
   --manifest work/mutation/manifest.tsv \
   --out work/mutation/verify \
@@ -293,5 +331,5 @@ interruption cleanup, changed-path restoration, and configuration transaction
 recovery without contacting a Docker daemon or running a mutation campaign:
 
 ```bash
-bash projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/tests/run-selftests.sh
+bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/tests/run-selftests.sh
 ```

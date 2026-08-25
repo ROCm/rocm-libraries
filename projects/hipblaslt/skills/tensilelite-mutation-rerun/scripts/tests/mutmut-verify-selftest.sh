@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Hermetic integration tests for mutmut-verify.sh. These tests use temporary Git
+# Hermetic self-tests for mutmut-verify.sh. These tests use temporary Git
 # repositories and a fake docker executable; they require neither Docker nor
 # mutmut, pytest, ROCm, or a GPU.
 

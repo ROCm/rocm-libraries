@@ -1,6 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# Optional environment for manual TensileLite mutation analysis.
+
 FROM rocm/dev-ubuntu-22.04:latest
 
 RUN apt-get update \

@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# mutmut-verify.sh — manifest-driven, strictly serial survivor kill proof.
+# mutmut-verify.sh — optional, manifest-driven survivor verification.
 #
 # Each row is handled as two fail-closed transactions: run its test against clean
 # source, then apply exactly one reviewed mutation and run the same test again.

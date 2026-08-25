@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# slice-preflight.sh — per-slice environment / base-pin verification.
+# slice-preflight.sh — optional per-slice environment/base-pin verification.
 #
 # Records the reproducibility state required BEFORE a mutation slice starts and
 # refuses to proceed if that state is unsafe. It captures, into a per-slice
@@ -97,7 +97,7 @@ data = {
     "container_image_id": val("PF_IMAGE_ID"),
     "container_image_digest": val("PF_IMAGE_DIGEST"),
     "mutmut_version": val("PF_MUTMUT_VERSION"),
-    "generator": "projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/slice-preflight.sh",
+    "generator": "projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/slice-preflight.sh",
 }
 
 out = os.environ["PF_OUT_FILE"]
@@ -152,7 +152,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
 if [[ -z "$ROOT" ]]; then
-  ROOT="$(cd "$SCRIPT_DIR/../../../../../../.." && pwd)"
+  ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 fi
 ROOT="$(readlink -f -- "$ROOT")" || die "cannot canonicalize repository root"
 cd "$ROOT" || die "cannot cd to repo root: $ROOT"

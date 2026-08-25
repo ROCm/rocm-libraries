@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Hermetic integration tests for slice-preflight.sh. These tests use a temporary
+# Hermetic self-tests for slice-preflight.sh. These tests use a temporary
 # Git repository and a fake Docker client; they never contact a Docker daemon.
 
 set -u
@@ -41,7 +41,7 @@ expect_failure() {
 }
 
 REPO="$TMP/repo"
-SCRIPT_REL="projects/hipblaslt/tensilelite/Tensile/Tests/unit/mutation/slice-preflight.sh"
+SCRIPT_REL="projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/slice-preflight.sh"
 SRC_REL="projects/hipblaslt/tensilelite"
 mkdir -p "$REPO/$(dirname "$SCRIPT_REL")" "$REPO/$SRC_REL/Tensile"
 cp "$SUT" "$REPO/$SCRIPT_REL"

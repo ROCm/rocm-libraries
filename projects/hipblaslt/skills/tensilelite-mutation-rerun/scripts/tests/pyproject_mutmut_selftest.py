@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Hermetic transaction tests for ``pyproject-mutmut.sh``."""
+"""Hermetic transaction self-tests for ``pyproject-mutmut.sh``."""
 
 import hashlib
 import json
@@ -11,8 +11,6 @@ import subprocess
 
 import pytest
 
-
-pytestmark = pytest.mark.unit
 
 SCRIPT = Path(__file__).resolve().parents[1] / "pyproject-mutmut.sh"
 ORIGINAL = (
