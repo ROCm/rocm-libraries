@@ -37,6 +37,17 @@ public:
                                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         getTensorMap() const
         = 0;
+
+    /// The verified buffer this graph is a view over; the caller does not own it and
+    /// may copy it to outlive the caller's storage.
+    ///
+    /// Empty when invalid or unsupplied by an implementation. Callers must treat empty
+    /// as "cannot identify this graph" -- `GraphContentKey` declines to cache or match
+    /// under one, never as an empty graph matching others.
+    virtual SerializedBlobView bytes() const
+    {
+        return {};
+    }
 };
 
 class GraphWrapper : public IGraph
@@ -51,6 +62,9 @@ public:
             {
                 _shallowGraph
                     = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(buffer);
+                // Retained only once the verifier has accepted it, so bytes() can
+                // never hand out a buffer getGraph() would refuse to read.
+                _bytes = SerializedBlobView{static_cast<const uint8_t*>(buffer), size};
             }
         }
     }
@@ -66,6 +80,11 @@ public:
     {
         const auto view = extractGraphBlob(buffer, size);
         return GraphWrapper(view.data, view.size);
+    }
+
+    SerializedBlobView bytes() const override
+    {
+        return _bytes;
     }
 
     const hipdnn_flatbuffers_sdk::data_objects::Graph& getGraph() const override
@@ -197,6 +216,9 @@ private:
     // Pointer to the flatbuffer representation of the graph. We do not own this memory
     // as were just reading from the buffer passed during construction.
     const hipdnn_flatbuffers_sdk::data_objects::Graph* _shallowGraph = nullptr;
+
+    // Non-owned view backing bytes(); see IGraph::bytes() for the contract.
+    SerializedBlobView _bytes;
 
     //lazy init state;
     mutable std::unordered_map<int64_t,
