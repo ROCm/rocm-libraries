@@ -137,9 +137,41 @@ the kernel will actually run can** — that benchmark took ~1 h against ~14 h of
 
    Cost: one process per (kernel, shape). A full 9 680 x 298 sweep this way is infeasible, so a
    two-stage scheme — shortlist with `--algo_method all`, then rank the shortlist single-dispatch —
-   is the obvious candidate. **UNTESTED, and it has a specific failure mode worth checking first:
-   the biased enumeration may not even contain the true winner in its top-K.** Verify that before
-   relying on it.
+   was the obvious candidate. **It is now TESTED and REFUTED.**
+
+## The two-stage rescue does not work, and here is the whole picture
+
+All 298 kernels were measured **one process at a time** on four shapes, one per stratum, and
+compared against the enumeration's ordering:
+
+| shape | stratum | true winner's rank in the enumeration | enum's pick delivers |
+|---|---|---|---|
+| 204x713x606 | med | **38**/298 | 90.0% of achievable |
+| 23x344x893 | skinny_M | **57**/298 | 94.7% |
+| 542x90x414 | skinny_N | **153**/298 | 97.1% |
+| 627x5x2074 | gemv | **5**/298 | 97.0% |
+
+Ranks of 5, 38, 57 and **153** mean a shortlist would need K≈153 — over half the pool — to be
+safe, which saves nothing. **Two-stage is dead.**
+
+The more useful number is what each choice actually delivers:
+
+| shape | incumbent (navi31 pick) | enum's pick | true best | |
+|---|---|---|---|---|
+| 204x713x606 med | 81.9% | 90.0% | 100% | switching helps |
+| 23x344x893 skinny_M | 95.0% | 94.7% | 100% | **switching loses** |
+| 542x90x414 skinny_N | 93.7% | 97.1% | 100% | switching helps |
+| 627x5x2074 gemv | 97.1% | 97.0% | 100% | **switching loses** |
+
+**This is the complete explanation.** The incumbent is already at 82-97% of achievable. The
+enumeration's argmax lands at 90-97% — statistically indistinguishable from it. So re-pointing a
+row onto the enumeration's pick is a **coin flip**, which is exactly the 37-53% "helped" rate the
+benchmark measured. Meanwhile the true best sits 3-18% above both, so **the headroom is real and
+the enumeration simply cannot locate it.**
+
+That also explains why every offline number looked so good: the matrix reported the enum pick as
+beating the incumbent by +23%, when in single-dispatch reality the two are within a couple of
+points of each other.
 2. **Calibrate before trusting any enumeration.** For a sample of (kernel, shape) pairs, measure
    both ways and check the bias ratio is ~1.0. Here it is 1.16x, and that alone predicts failure.
 3. **Repeating the sweep does NOT help** — refuted in test 1. Neither does capping implausible
