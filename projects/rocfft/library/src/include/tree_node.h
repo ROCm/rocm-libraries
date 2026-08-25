@@ -1081,8 +1081,6 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    IndexType GetKernelIndexType() const override;
-
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.
     bool PaddingBenefitsOutput() override

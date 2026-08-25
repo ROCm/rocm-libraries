@@ -2050,21 +2050,6 @@ void Real3DPPNode::AssignParams_internal()
     }
 }
 
-// RealTransDataCopy: strides passed as individual unsigned int.
-IndexType RealTransDataCopyNode::GetKernelIndexType() const
-{
-    auto idx_limit = GetU32KernelIndexLimit();
-
-    // No complex-to-real reinterpretation: each I/O side indexes by its own
-    // scalar_type (real or complex), with strides already in matching units.
-    if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
-       || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit)
-    {
-        return IndexType::U64;
-    }
-    return IndexType::U32;
-}
-
 /*****************************************************
  * CS_KERNEL_R_TO_CMPLX
  * CS_KERNEL_R_TO_CMPLX_TRANSPOSE
