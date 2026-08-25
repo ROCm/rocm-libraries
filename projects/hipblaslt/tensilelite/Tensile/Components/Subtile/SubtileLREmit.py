@@ -674,6 +674,31 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
     module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(swzTmp),
                comment="%s: + load-block pad" % tc))
     writer.vgprPool.checkIn(swzTmp)
+  # Multi-wave: LDS holds the full macro tile; each axis-wave reads the strips
+  # it owns, at axisId * localSub0 * stripStride bytes.  Mirrors the per-wave GR
+  # write base in _globalReadDTLInitCommonSgpr_tlu.
+  axisWaves = kernel["MIWaveGroup"][0] if tc == 'A' else kernel["MIWaveGroup"][1]
+  if axisWaves > 1:
+    mWaves = kernel["MIWaveGroup"][0]
+    localSub0 = int(tileInfo.localSubtileGrid[0])
+    perWaveBytes = int(localSub0 * stripStrideBytes(tileInfo))
+    wv = writer.vgprPool.checkOut(1, tag="_lraTileAssignment_tlu_wave")
+    module.add(VLShiftRightB32(dst=vgpr(wv), shiftHex=hex(wavesize.bit_length() - 1),
+               src=vgpr("Serial"), comment="%s: waveId" % tc))
+    if tc == 'A':
+      module.add(VAndB32(dst=vgpr(wv), src0=vgpr(wv), src1=hex(mWaves - 1),
+                 comment="%s: waveIdM = waveId %% %d" % (tc, mWaves)))
+    else:
+      module.add(VLShiftRightB32(dst=vgpr(wv), shiftHex=hex(mWaves.bit_length() - 1),
+                 src=vgpr(wv), comment="%s: waveIdN = waveId / %d" % (tc, mWaves)))
+    tmpS = writer.sgprPool.checkOut(1, tag="_lraTileAssignment_tlu_wave_s", preventOverflow=False)
+    module.add(SMovB32(dst=sgpr(tmpS), src=hex(perWaveBytes), comment="%s: LDS wave stride" % tc))
+    module.add(VMulLOU32(dst=vgpr(wv), src0=sgpr(tmpS), src1=vgpr(wv),
+               comment="%s: wave LDS strip base = axisId*%d" % (tc, perWaveBytes)))
+    writer.sgprPool.checkIn(tmpS)
+    module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(wv),
+               comment="%s: + per-wave LDS strip offset" % tc))
+    writer.vgprPool.checkIn(wv)
   ldsStartOffset = getattr(writer, "ldsStartOffset%s" % tc, 0)
   if ldsStartOffset:
     module.add(VAddU32(dst=vgpr(base), src0=hex(ldsStartOffset), src1=vgpr(base),
