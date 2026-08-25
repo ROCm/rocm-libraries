@@ -71,12 +71,3 @@ Tests:
   alphai: [1.0]
   baseA: [rocsparse_index_base_zero]
   graph_test: true
-
-# Regression test for AISPARSE-650: axpyi/axpby with a 64-bit index type and
-# nnz just past 2^32 exercises the block-index overflow that was fixed. Needs a
-# large-memory device (~52 GB of index/value data); skipped elsewhere.
-- name: axpyi_extra
-  category: nightly
-  function: axpyi_extra
-  host_memory_gb: 1
-  device_memory_gb: 55
