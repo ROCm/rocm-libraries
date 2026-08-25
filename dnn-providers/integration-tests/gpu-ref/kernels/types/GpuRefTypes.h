@@ -12,6 +12,7 @@
 #include "GpuRefCommonArgs.h"
 #include "GpuRefConvArgs.h"
 #include "GpuRefLayernormArgs.h"
+#include "GpuRefMatmulArgs.h"
 #include "GpuRefPointwiseArgs.h"
 #include "GpuRefRMSNormArgs.h"
 #include "GpuRefReductionArgs.h"
