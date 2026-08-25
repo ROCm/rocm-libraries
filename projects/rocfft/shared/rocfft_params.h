@@ -276,25 +276,33 @@ public:
             if(run_callbacks == fft_callback_type_jit)
             {
                 check_jit_callback_state();
-                fft_status = rocfft.plan_description_set_load_callback(
-                    desc,
-                    load_jit_cb_state->symbol,
-                    load_jit_cb_state->func.data(),
-                    load_jit_cb_state->func.size(),
-                    load_jit_cb_state->shared_mem_bytes);
-                if(fft_status != rocfft_status_success)
+                if(load_jit_cb_state)
                 {
-                    throw std::runtime_error("rocfft_plan_description_set_load_callback failed");
+                    fft_status = rocfft.plan_description_set_load_callback(
+                        desc,
+                        load_jit_cb_state->symbol,
+                        load_jit_cb_state->func.data(),
+                        load_jit_cb_state->func.size(),
+                        load_jit_cb_state->shared_mem_bytes);
+                    if(fft_status != rocfft_status_success)
+                    {
+                        throw std::runtime_error(
+                            "rocfft_plan_description_set_load_callback failed");
+                    }
                 }
-                fft_status = rocfft.plan_description_set_store_callback(
-                    desc,
-                    store_jit_cb_state->symbol,
-                    store_jit_cb_state->func.data(),
-                    store_jit_cb_state->func.size(),
-                    store_jit_cb_state->shared_mem_bytes);
-                if(fft_status != rocfft_status_success)
+                if(store_jit_cb_state)
                 {
-                    throw std::runtime_error("rocfft_plan_description_set_store_callback failed");
+                    fft_status = rocfft.plan_description_set_store_callback(
+                        desc,
+                        store_jit_cb_state->symbol,
+                        store_jit_cb_state->func.data(),
+                        store_jit_cb_state->func.size(),
+                        store_jit_cb_state->shared_mem_bytes);
+                    if(fft_status != rocfft_status_success)
+                    {
+                        throw std::runtime_error(
+                            "rocfft_plan_description_set_store_callback failed");
+                    }
                 }
             }
         }
@@ -341,22 +349,29 @@ public:
         // Set JIT callback data if necessary
         if(run_callbacks == fft_callback_type_jit)
         {
-            fft_status = rocfft.execution_info_set_load_callback_data(
-                info,
-                load_jit_cb_state->get_raw_data_ptrs().data(),
-                load_jit_cb_state->get_raw_data_ptrs().size());
-            if(fft_status != rocfft_status_success)
+            if(load_jit_cb_state)
             {
-                throw std::runtime_error("rocfft_execution_info_set_load_callback_data failed");
+                fft_status = rocfft.execution_info_set_load_callback_data(
+                    info,
+                    load_jit_cb_state->get_raw_data_ptrs().data(),
+                    load_jit_cb_state->get_raw_data_ptrs().size());
+                if(fft_status != rocfft_status_success)
+                {
+                    throw std::runtime_error("rocfft_execution_info_set_load_callback_data failed");
+                }
             }
 
-            fft_status = rocfft.execution_info_set_store_callback_data(
-                info,
-                store_jit_cb_state->get_raw_data_ptrs().data(),
-                store_jit_cb_state->get_raw_data_ptrs().size());
-            if(fft_status != rocfft_status_success)
+            if(store_jit_cb_state)
             {
-                throw std::runtime_error("rocfft_execution_info_set_store_callback_data failed");
+                fft_status = rocfft.execution_info_set_store_callback_data(
+                    info,
+                    store_jit_cb_state->get_raw_data_ptrs().data(),
+                    store_jit_cb_state->get_raw_data_ptrs().size());
+                if(fft_status != rocfft_status_success)
+                {
+                    throw std::runtime_error(
+                        "rocfft_execution_info_set_store_callback_data failed");
+                }
             }
         }
 

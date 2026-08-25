@@ -540,12 +540,15 @@ public:
         if(run_callbacks != fft_callback_type_jit)
             return;
 
-        if(!load_jit_cb_state)
-            throw std::invalid_argument("missing JIT load state");
-        load_jit_cb_state->check_valid(expected_callback_count(ifields));
-        if(!store_jit_cb_state)
-            throw std::invalid_argument("missing JIT store state");
-        store_jit_cb_state->check_valid(expected_callback_count(ofields));
+        // At least one of load or store callback must be provided.
+        // It's legal to only have one and not the other.
+
+        if(!load_jit_cb_state && !store_jit_cb_state)
+            throw std::invalid_argument("missing JIT state");
+        if(load_jit_cb_state)
+            load_jit_cb_state->check_valid(expected_callback_count(ifields));
+        if(store_jit_cb_state)
+            store_jit_cb_state->check_valid(expected_callback_count(ofields));
     }
 
     enum fft_mp_lib
