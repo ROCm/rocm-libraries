@@ -39,9 +39,8 @@ import importlib
 import inspect
 import pkgutil
 
-import pytest
-
 import kernels
+import pytest
 
 ALLOWED_PARAMS = {"spec", "arch"}
 
@@ -124,7 +123,7 @@ def test_spec_is_the_first_parameter() -> None:
     wrong = [
         f"  {q}{s}"
         for q, s in sorted(builders.items())
-        if list(s.parameters) and list(s.parameters)[0] != "spec"
+        if s.parameters and next(iter(s.parameters)) != "spec"
     ]
     assert not wrong, "builder(s) whose first parameter is not 'spec':\n" + "\n".join(
         wrong
