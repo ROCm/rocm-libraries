@@ -327,6 +327,20 @@ AB_B4_TLU1 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(2, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 128-bit GR: 32 fp4 along M
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(2, 1), loadShape=LoadShape(m=32, k=1)),                                   # 128-bit LR: 32 fp4 along M
 )
+# Taller NT fp4 stacks: keep the 128-bit (b128) GR/LR width, but pack more MFMA-M
+# tiles per contiguous LDS strip.  A stack of S MFMA-M tiles makes each K-row
+# S*16 elements (= S/2 b128 chunks) wide; the GR load loop tiles both M and K
+# across its b128 loads (see _graTileAssignment_tlu).  The stack is chosen per
+# operand from the macro tile in SolutionStructs/Solution.py (the TLU fp4 branch
+# of assignProblemIndependentDerivedParameters).
+AB_B4_TLU1_4x1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(4, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 128-bit GR: 64 fp4 along M = 4 MFMA-M tiles
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(4, 1), loadShape=LoadShape(m=32, k=1)),
+)
+AB_B4_TLU1_8x1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(8, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 128-bit GR: 128 fp4 along M = 8 MFMA-M tiles
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(8, 1), loadShape=LoadShape(m=32, k=1)),
+)
 
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
@@ -365,6 +379,8 @@ AB_GEOMETRY_MAP = {
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
   "AB_B16_W32":  AB_B16_W32,
   "AB_B4_TLU1":  AB_B4_TLU1,
+  "AB_B4_TLU1_4x1": AB_B4_TLU1_4x1,
+  "AB_B4_TLU1_8x1": AB_B4_TLU1_8x1,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:

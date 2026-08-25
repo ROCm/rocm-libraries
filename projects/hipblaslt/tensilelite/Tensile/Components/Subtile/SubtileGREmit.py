@@ -930,6 +930,23 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
   tmpVgpr = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_tmpVgpr")
   swzTmp = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_swzTmp") if swz else None
 
+  # M-tiling across b128 loads (fp4 taller stacks).  Each lane's b128 covers
+  # elemsPerChunk (16/bpe) contiguous free-dim (M/N) elements at one K row.  A
+  # strip is mStripBytes wide, i.e. chunksPerK = mStripBytes/16 b128 chunks per
+  # K row.  For the baseline 2x1 fp4 stack chunksPerK==1 (one b128 == one full
+  # K row) and the per-lane offset is a pure K ramp; for taller fp4 stacks (4x1,
+  # 8x1) a single b128 covers only part of a K row, so physical chunk
+  # P = i*wavesize + laneId splits into K row (P // chunksPerK) plus an intra-row
+  # M block (P % chunksPerK) of elemsPerChunk elements.  See the LDS image in
+  # SubtileLREmit emitSingleDsRead.  Scoped to fp4 (bpe 0.5); other TLU dtypes
+  # (e.g. bf16 AB_B16_TLU1) keep the original single-chunk-per-K-row ramp.
+  instM = int(tileInfo.mmaTileShape[0])
+  mStripBytes = int(tileInfo.subtileShape[0] * instM * tileInfo.bpe)
+  isFp4 = float(tileInfo.bpe) == 0.5
+  chunksPerK = max(1, mStripBytes // 16) if isFp4 else 1
+  elemsPerChunk = int(16 / tileInfo.bpe)
+  mTileTmp = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_mTileTmp") if chunksPerK > 1 else None
+
   # Multi-wave: waves split the free dim (M for A via MIWaveGroup[0], N for B
   # via MIWaveGroup[1]).  Each axis-wave owns localSubtileGrid[0] strips, so its
   # global read starts subtileM*localSub0 free-dim elements later.  The free dim
@@ -938,9 +955,9 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
 
   for i in range(tileInfo.numGRPerSubtile):
     out = tile.sharedVgprGROffset[i]
-    # K row handled by this lane in load i: laneId + i*wavesize
+    # Physical chunk P handled by this lane in load i: laneId + i*wavesize
     module.add(VAddU32(dst=vgpr(tmpVgpr), src0=hex(i * wavesize), src1=vgpr(laneId),
-               comment="%s: K row = laneId + %u" % (tc, i * wavesize)))
+               comment="%s: chunk P = laneId + %u" % (tc, i * wavesize)))
     # Bank-conflict swizzle (NT LDS layout): permute which global K-row this
     # lane loads so physical LDS chunk P holds logical K = fswz(P).  fswz is an
     # involution, so the LR read applies the same flip and A round-trips.  See
@@ -954,9 +971,26 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
                  src=vgpr(swzTmp), comment="%s: -> bit %u" % (tc, swz.xorToBit)))
       module.add(VXorB32(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr), src1=vgpr(swzTmp),
                  comment="%s: chunk[%u] ^= chunk[%u]" % (tc, swz.xorToBit, swz.xorFromBit)))
-    # * strideK (elements)
-    module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=strideK,
-               src1=vgpr(tmpVgpr), comment="%s: * strideK" % tc))
+    if chunksPerK > 1:
+      # Split chunk P into K row (P // chunksPerK) and intra-row M block
+      # (P % chunksPerK) of elemsPerChunk elements.  chunksPerK is a power of 2.
+      cpkBits = chunksPerK.bit_length() - 1
+      module.add(VAndB32(dst=vgpr(mTileTmp), src0=vgpr(tmpVgpr), src1=hex(chunksPerK - 1),
+                 comment="%s: M block = P %% %u" % (tc, chunksPerK)))
+      module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(cpkBits), src=vgpr(tmpVgpr),
+                 comment="%s: K row = P // %u" % (tc, chunksPerK)))
+      # K row * strideK (elements)
+      module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=strideK,
+                 src1=vgpr(tmpVgpr), comment="%s: K row * strideK" % tc))
+      # + M block * elemsPerChunk (free dim is unit stride)
+      module.add(VLShiftLeftB32(dst=vgpr(mTileTmp), shiftHex=hex(elemsPerChunk.bit_length() - 1),
+                 src=vgpr(mTileTmp), comment="%s: M block * %u" % (tc, elemsPerChunk)))
+      module.add(VAddU32(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr), src1=vgpr(mTileTmp),
+                 comment="%s: K*strideK + M block" % tc))
+    else:
+      # * strideK (elements)
+      module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=strideK,
+                 src1=vgpr(tmpVgpr), comment="%s: * strideK" % tc))
     # * bpe (sub-byte safe: <<(bpeBits.bit_length()-1) then >>3)
     module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpeBits.bit_length() - 1),
                src=vgpr(tmpVgpr), comment="%s: K*stride*bpe" % tc))
@@ -967,6 +1001,8 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
                  comment="%s: + per-wave free-dim (M/N) global offset" % tc))
   if swzTmp is not None:
     writer.vgprPool.checkIn(swzTmp)
+  if mTileTmp is not None:
+    writer.vgprPool.checkIn(mTileTmp)
   if waveAxisOffVgpr is not None:
     writer.vgprPool.checkIn(waveAxisOffVgpr)
   writer.vgprPool.checkIn(tmpVgpr)

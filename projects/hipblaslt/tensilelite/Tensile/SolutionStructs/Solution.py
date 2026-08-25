@@ -1115,7 +1115,23 @@ class Solution(collections.abc.Mapping):
           if dtype.isBFloat16() or dtype.isHalf():
             state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
           elif dtype.is6bitFloat() or dtype.isFloat4():
-            state[f"_ABTilePair{tc}"] = "AB_B4_TLU1"
+            # Pick the largest power-of-2 MFMA-M stack (2,4,8) that tiles this
+            # operand's per-wave M extent, so bigger macro tiles use one taller
+            # contiguous LDS strip instead of many 2x1 strips.  Each stack keeps
+            # the 128-bit GR/LR width; the GR loop tiles M across its b128 loads.
+            mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+            waveGroup = state["MIWaveGroup"][0] if tc == 'A' else state["MIWaveGroup"][1]
+            perWaveMTiles = mtFree // (state["MatrixInstM"] * waveGroup)
+            stack = 2
+            for cand in (8, 4):
+              if perWaveMTiles % cand == 0:
+                stack = cand
+                break
+            state[f"_ABTilePair{tc}"] = {
+              2: "AB_B4_TLU1",
+              4: "AB_B4_TLU1_4x1",
+              8: "AB_B4_TLU1_8x1",
+            }[stack]
           else:
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
