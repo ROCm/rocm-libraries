@@ -22,6 +22,7 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
@@ -60,13 +61,17 @@ public:
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
     /// References (@p engine, @p deviceResolver) are owned by the engine, which
-    /// outlives its builder.
+    /// outlives its builder. @p timer overrides BenchmarkPlan's default HIP-event
+    /// timer; tests inject a deterministic one so the real write-back factory below is
+    /// exercised without a device.
     GenericPlanBuilder(const EngineDescriptor& engine,
                        const KernelIngestorStateManager<THandle>& stateManager,
-                       const IDeviceResolver<THandle>& deviceResolver)
+                       const IDeviceResolver<THandle>& deviceResolver,
+                       typename BenchmarkPlan<THandle>::Timer timer = {})
         : _engine(engine)
         , _stateManager(stateManager)
         , _deviceResolver(deviceResolver)
+        , _timer(std::move(timer))
     {
     }
 
@@ -174,6 +179,64 @@ public:
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
         }
 
+        // Coverage and orderability are checked against the knob-filtered candidates
+        // here, independent of the same check against the full catalog in
+        // sortedCatalog(): one can fail while the other passes.
+        const WinnerKey winnerKey{GraphContentKey{opGraph}, DeviceKey{context.deviceProperties}};
+        if(const auto record = _stateManager.winnerFor(winnerKey); record.has_value())
+        {
+            if(const auto ranked = orderIfFullyCovered(*record, filtered); ranked.has_value())
+            {
+                // Walks the ranked list instead of committing to its front: constructing
+                // a GenericPlan runs prepare()/workspaceBytes() and throws on a null
+                // prepare (GenericPlan.hpp:33-41), and a cache hit must not be stricter
+                // than an empty cache.
+                for(size_t rank = 0; rank < ranked->size(); ++rank)
+                {
+                    try
+                    {
+                        auto plan = std::make_unique<GenericPlan<THandle>>(
+                            _stateManager.getDispatchDetails((*ranked)[rank]),
+                            context,
+                            catalog.bound);
+
+                        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                               << _engine.name << "' served kernel "
+                                               << toString((*ranked)[rank].kernelId) << " at rank "
+                                               << rank << " from a benchmarked record of "
+                                               << record->size() << " entry(s) for "
+                                               << filtered.size() << " candidate(s)");
+
+                        executionContext.setPlan(std::move(plan));
+                        return;
+                    }
+                    catch(const std::exception& error)
+                    {
+                        HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                               << _engine.name << "' could not build a plan for "
+                                               << toString((*ranked)[rank].kernelId) << " at rank "
+                                               << rank << ": " << error.what()
+                                               << "; trying the next ranked entry");
+                    }
+                }
+
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                       << _engine.name
+                                       << "' found a benchmarked record whose entries no longer "
+                                          "resolve; falling back to normal selection");
+            }
+            else if(settings.benchmarkingEnabled)
+            {
+                // A record only ever reorders candidates measured together; it never
+                // replaces the heuristic's pick, so a record that does not fully cover
+                // `filtered` is ignored rather than partially trusted.
+                HIPDNN_PLUGIN_LOG_INFO(
+                    "ingestor: engine '"
+                    << _engine.name << "' has a benchmarked record that does not fully cover "
+                    << filtered.size() << " candidate(s); re-benchmarking all of them");
+            }
+        }
+
         if(!settings.benchmarkingEnabled)
         {
             HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
@@ -202,7 +265,9 @@ public:
                 candidates.push_back(
                     {kernel.kernelId,
                      std::make_unique<GenericPlan<THandle>>(
-                         _stateManager.getDispatchDetails(kernel), context, catalog.bound)});
+                         _stateManager.getDispatchDetails(kernel), context, catalog.bound),
+                     kernel.packId,
+                     kernel.dispatchId});
             }
             catch(const std::exception& error)
             {
@@ -214,10 +279,16 @@ public:
 
         // An empty vector here (every candidate's GenericPlan threw) throws
         // INTERNAL_ERROR out of BenchmarkPlan's constructor, propagating unhandled.
-        executionContext.setPlan(
-            std::make_unique<BenchmarkPlan<THandle>>(std::move(candidates), handle));
+        // The callback is the write-back channel, already bound to the key: it captures
+        // the state manager by reference, which the engine owns and which strictly
+        // outlives every plan it hands out.
+        executionContext.setPlan(makeBenchmarkPlan(
+            std::move(candidates),
+            handle,
+            [&stateManager = _stateManager, winnerKey](std::vector<RankedEntry> ranking) {
+                stateManager.recordWinner(winnerKey, std::move(ranking));
+            }));
     }
-
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
         getCustomKnobs(const THandle& handle, const IGraph& opGraph) const override
@@ -272,10 +343,36 @@ public:
     }
 
 private:
+    /// The seam for a deterministic test timer is the constructor's `timer` parameter,
+    /// not this factory: tests exercise this exact code path rather than overriding it.
+    std::unique_ptr<IPlan<THandle>>
+        makeBenchmarkPlan(std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates,
+                          const THandle& handle,
+                          typename BenchmarkPlan<THandle>::RecordRankingFn recordRanking) const
+    {
+        return std::make_unique<BenchmarkPlan<THandle>>(
+            std::move(candidates), handle, _timer, std::move(recordRanking));
+    }
+
+    /// An arch-independent pack (empty `arch` list, itself legal) passes `archSupports`
+    /// regardless of device identity, so the catalog can be non-empty with no device
+    /// resolved.
     MatchContext contextFor(const THandle& handle, const IGraph& opGraph) const
     {
         const auto deviceId = _deviceResolver.deviceId(handle);
-        return MatchContext{opGraph, deviceId, _deviceResolver.deviceProperties(deviceId)};
+        const auto& deviceProperties = _deviceResolver.deviceProperties(deviceId);
+        if(deviceId == NO_DEVICE || deviceProperties.gcnArchName.empty())
+        {
+            const auto* reason = deviceId == NO_DEVICE
+                                     ? "the device could not be resolved from the handle"
+                                     : "the resolved device reports no gcnArchName";
+            HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '" << _engine.name
+                                                         << "' cannot build a plan: " << reason);
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                        "engine '" + _engine.name
+                                            + "' cannot build a plan: " + reason);
+        }
+        return MatchContext{opGraph, deviceId, deviceProperties};
     }
 
     KnobFilter readKnobFilter(const IEngineConfig& engineConfig) const
@@ -387,6 +484,7 @@ private:
     const EngineDescriptor& _engine;
     const KernelIngestorStateManager<THandle>& _stateManager;
     const IDeviceResolver<THandle>& _deviceResolver;
+    typename BenchmarkPlan<THandle>::Timer _timer;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

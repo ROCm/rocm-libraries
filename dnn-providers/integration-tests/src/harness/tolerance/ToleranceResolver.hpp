@@ -55,6 +55,8 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
         return tol::matmul::getTolerance<T>();
     case NA::MoeGroupedMatmulAttributes:
         return tol::moe::getToleranceFwd<T>();
+    case NA::MoeGroupedMatmulBwdAttributes:
+        return tol::moe::getToleranceBwd<T>();
     case NA::ReductionAttributes:
         return tol::reduction::getTolerance<T>();
     case NA::RMSNormAttributes:
