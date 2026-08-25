@@ -181,6 +181,14 @@ ORIGAMI_EXPORT bool check_lds_capacity(const hardware_t& hardware,
                         const data_type_t& b_dtype);
 
 /**
+ * @brief Check kernel feasibility short-circuit rules used before latency ranking.
+ *
+ * Mirrors the pre-latency rejection rules in compute_total_latency (small-tile,
+ * dot2, and cache-hint gates). Returns false when the config should be dropped.
+ */
+ORIGAMI_EXPORT bool is_config_feasible(const problem_t& problem, const config_t& config);
+
+/**
  * @brief Compute limited achievable memory bandwidth based on active CUs
  *
  * @param hardware Hardware characteristics (@see origami::hardware_t)
