@@ -19,20 +19,6 @@
 namespace {
 using namespace stinkytofu;
 
-static void addSources(RegKeySet& sources, const StinkyInstruction& inst) {
-    for (const StinkyRegister& r : inst.getSrcRegs())
-        forEachRegUnit(r, [&](const RegKey& k) { sources.insert(k); });
-}
-
-static bool hasDestSourceOverlap(const StinkyInstruction& inst, const RegKeySet& sources) {
-    for (const StinkyRegister& d : inst.getDestRegs()) {
-        bool overlaps = false;
-        forEachRegUnit(d, [&](const RegKey& k) { overlaps |= sources.contains(k); });
-        if (overlaps) return true;
-    }
-    return false;
-}
-
 // VA_VDST producer — must match InsertWaitAluPass's classification.
 static bool bumpsVaVdst(const StinkyInstruction& inst) {
     return isVectorALU(inst) || isTranscendental(inst) || isMatrixInstruction(inst);
