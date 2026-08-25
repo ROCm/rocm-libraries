@@ -1198,7 +1198,7 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
     rocke_value_t* k_sub = rocke_b_add(b_, ctx->k_off, col);
 
     // Same k_out-innermost decomposition as _tilde_dy_descriptor (must match).
-    // B (KYXC) stride along k_out = Y*X*C — not contiguous; load_vec_b stays 1.
+    // c (row axis) is stride-1 in KYXC; vectorised loads along c use vector_axis_row=true.
     rocke_value_t* k_out = rocke_b_mod(b_, k_sub, ctx->c_K);
     rocke_value_t* yx_rem = rocke_b_div(b_, k_sub, ctx->c_K);
     rocke_value_t* ydot = rocke_b_div(b_, yx_rem, ctx->rec_x_dot_slice);
@@ -1769,16 +1769,58 @@ static rocke_kernel_def_t*
         rocke_coalesced_tile_loader_choose_vec(block_m, block_k, block_size, max_from_K, &safe_vec);
         load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : safe_vec;
     }
-    // load_vec_b: B (KYXC) stride along k_out = Y*X*C != 1 — non-contiguous along K.
-    // Vectorising B requires a transposed loader; keep at 1 for now.
+    // load_vec_b: B (W, KYXC) — the GEMM row axis is N_dg = c (input channels), which
+    // is the stride-1 axis of KYXC.  Vectorise along the free (row) axis and transpose
+    // into the row-major (N, K) LDS tile on store (vector_axis_row=true),
+    // exactly as wgrad does for its B (X, NHWC) operand.  Condition: C % load_vec_b == 0.
     int load_vec_b = 1;
+    bool axis_b_row = false;
+    {
+        bool is_fp32_b = (spec->dtype_b && strcmp(spec->dtype_b, "fp32") == 0);
+        int cand[] = {is_fp32_b ? 4 : 8, 4, 2, 1};
+        int max_from_C = 1;
+        for(int v : cand)
+            if(p->C % v == 0)
+            {
+                max_from_C = v;
+                break;
+            }
+        int chosen = 1;
+        rocke_coalesced_tile_loader_choose_vec_axis(
+            block_n, block_k, threads, max_from_C, true, &chosen);
+        if(spec->has_vector_size_b)
+        {
+            load_vec_b = spec->vector_size_b;
+            axis_b_row = (load_vec_b > 1);
+        }
+        else if(chosen > 1)
+        {
+            load_vec_b = chosen;
+            axis_b_row = true;
+        }
+    }
 
     rocke_coalesced_tile_loader_t a_sync_loader;
+    a_sync_loader.tile_rows = block_m;
+    a_sync_loader.tile_cols = block_k;
+    a_sync_loader.block_size = threads;
+    a_sync_loader.load_vec = load_vec_a;
+    a_sync_loader.use_buffer_rsrc = true;
+    a_sync_loader.oob_sentinel = 2147483647;
+    a_sync_loader.vector_axis_row = false;
+    a_sync_loader.has_inner_dim = false;
+    a_sync_loader.inner_dim = 0;
+
     rocke_coalesced_tile_loader_t b_sync_loader;
-    rocke_coalesced_tile_loader_from_tile(
-        block_m, block_k, threads, load_vec_a, true, &a_sync_loader);
-    rocke_coalesced_tile_loader_from_tile(
-        block_n, block_k, threads, load_vec_b, true, &b_sync_loader);
+    b_sync_loader.tile_rows = block_n;
+    b_sync_loader.tile_cols = block_k;
+    b_sync_loader.block_size = threads;
+    b_sync_loader.load_vec = load_vec_b;
+    b_sync_loader.use_buffer_rsrc = true;
+    b_sync_loader.oob_sentinel = 2147483647;
+    b_sync_loader.vector_axis_row = axis_b_row;
+    b_sync_loader.has_inner_dim = false;
+    b_sync_loader.inner_dim = 0;
 
     tilde_dy_ctx_t dy_tctx;
     dy_tctx.block_m_off = block_m_off_v;
