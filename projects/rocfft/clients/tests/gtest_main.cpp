@@ -250,6 +250,12 @@ void precompile_test_kernels(const std::string& precompile_file)
                 {
                     rocfft_params params_forward;
                     params_forward.from_token(token);
+
+                    // JIT callbacks would require JIT state to be
+                    // specified which we're not doing here
+                    if(params_forward.run_callbacks == fft_callback_type_jit)
+                        continue;
+
                     params_forward.validate();
                     params_forward.setup_structs();
 
