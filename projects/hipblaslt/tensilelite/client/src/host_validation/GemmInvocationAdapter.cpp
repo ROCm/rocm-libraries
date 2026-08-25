@@ -455,6 +455,12 @@ namespace TensileLite::Client::reference_adapter
             std::optional<Tensor>      bTensor;
             std::optional<Tensor>      cTensor;
             std::optional<Tensor>      dTensor;
+            const bool readC = beta != std::complex<double>(0.0, 0.0);
+            const auto makeAddendTensor = [&](const Layout& layout,
+                                              std::span<const std::byte> source) {
+                return readC ? Tensor(typeC, layout, source)
+                             : Tensor(typeC, layout, TensorStorage::allocateUninitialized);
+            };
             const bool initializeOutput = globalSelection.selectsAll()
                                           || scalarTypeInfo(typeD).storageBits % 8 != 0;
             const auto makeOutputTensor = [&](const Layout& layout,
@@ -477,7 +483,8 @@ namespace TensileLite::Client::reference_adapter
             if(inputs.batchC == nullptr)
             {
                 cStorage = detail::descriptorStorage(typeC, problem.c(), inputs.c, batchOffsetC);
-                cTensor.emplace(typeC, detail::hostValidationLayout(problem.c()), cStorage);
+                cTensor.emplace(
+                    makeAddendTensor(detail::hostValidationLayout(problem.c()), cStorage));
             }
             if(inputs.batchD == nullptr)
             {
@@ -699,7 +706,7 @@ namespace TensileLite::Client::reference_adapter
                                       : Tensor(typeB, layoutB, currentBStorage);
                 Tensor currentC = inputs.batchC == nullptr
                                       ? cTensor->alias(layoutC)
-                                      : Tensor(typeC, layoutC, currentCStorage);
+                                      : makeAddendTensor(layoutC, currentCStorage);
                 Tensor currentD = inputs.batchD == nullptr
                                       ? dTensor->alias(layoutD)
                                       : makeOutputTensor(layoutD, currentDStorage);
