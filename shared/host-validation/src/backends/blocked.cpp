@@ -3,6 +3,9 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <limits>
 #include <optional>
 #include <roc/host_validation/backends/blocked.hpp>
 #include <span>
@@ -10,6 +13,7 @@
 #include <vector>
 
 #include "detail/reference_gemm.hpp"
+#include "detail/threading.hpp"
 
 namespace roc::host_validation {
 namespace {
@@ -34,6 +38,77 @@ struct SelectedOutputBlockPlan {
     std::vector<PlannedOutputBlock> blocks;
     std::vector<size_t> localIndices;
 };
+
+size_t saturatedProduct(size_t left, size_t right) {
+    if (left != 0 && right > std::numeric_limits<size_t>::max() / left)
+        return std::numeric_limits<size_t>::max();
+    return left * right;
+}
+
+bool storageOverlaps(const Tensor& left, const Tensor& right) {
+    if (left.storage().empty() || right.storage().empty()) return false;
+    const uintptr_t leftBegin = reinterpret_cast<uintptr_t>(left.storage().data());
+    const uintptr_t rightBegin = reinterpret_cast<uintptr_t>(right.storage().data());
+    const uintptr_t leftEnd = leftBegin + left.storage().size();
+    const uintptr_t rightEnd = rightBegin + right.storage().size();
+    return leftBegin < rightEnd && rightBegin < leftEnd;
+}
+
+bool canParallelizeOutput(const GemmRequest& problem) {
+    if (!detail::hasProvablyIndependentElements(problem.d)) return false;
+    if (storageOverlaps(problem.d, problem.a.values) ||
+        storageOverlaps(problem.d, problem.b.values) || storageOverlaps(problem.d, problem.c))
+        return false;
+    for (const VectorBinding& binding : problem.a.preQuantizationScales)
+        if (storageOverlaps(problem.d, binding.values)) return false;
+    for (const VectorBinding& binding : problem.b.preQuantizationScales)
+        if (storageOverlaps(problem.d, binding.values)) return false;
+    if (problem.a.blockScale && storageOverlaps(problem.d, problem.a.blockScale->values))
+        return false;
+    if (problem.b.blockScale && storageOverlaps(problem.d, problem.b.blockScale->values))
+        return false;
+    if (problem.epilogue.bias && storageOverlaps(problem.d, problem.epilogue.bias->values))
+        return false;
+    if (problem.epilogue.scaleAlpha &&
+        storageOverlaps(problem.d, problem.epilogue.scaleAlpha->values))
+        return false;
+    if (problem.epilogue.scaleA && storageOverlaps(problem.d, *problem.epilogue.scaleA))
+        return false;
+    if (problem.epilogue.scaleB && storageOverlaps(problem.d, *problem.epilogue.scaleB))
+        return false;
+    return true;
+}
+
+template <typename Function>
+void forEachOutputBlock(size_t blockCount, size_t arithmeticWork, bool canParallelize,
+                        Function&& function) {
+    const int threadCount =
+        std::min<int>(canParallelize ? detail::operationThreadCount(arithmeticWork, 1'000'000) : 1,
+                      static_cast<int>(std::min(
+                          blockCount, static_cast<size_t>(std::numeric_limits<int>::max()))));
+#ifdef _OPENMP
+    if (threadCount > 1 &&
+        blockCount <= static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())) {
+        std::exception_ptr error;
+#pragma omp parallel for schedule(dynamic, 1) num_threads(threadCount)
+        for (ptrdiff_t block = 0; block < static_cast<ptrdiff_t>(blockCount); ++block) {
+            try {
+                function(static_cast<size_t>(block));
+            } catch (...) {
+#pragma omp critical(roc_host_validation_blocked_gemm_error)
+                {
+                    if (!error) error = std::current_exception();
+                }
+            }
+        }
+        if (error) std::rethrow_exception(error);
+        return;
+    }
+#else
+    (void)threadCount;
+#endif
+    for (size_t block = 0; block < blockCount; ++block) function(block);
+}
 
 SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selection,
                                                  size_t logicalElements, size_t outputColumns) {
@@ -120,7 +195,6 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
                                                         problem.epilogue.outputConversion);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
-
     std::vector<RuntimeVectorReader<Accumulator>> preScalesA;
     std::vector<RuntimeVectorReader<Accumulator>> preScalesB;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
@@ -232,20 +306,33 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
     size_t outputElementsCovered = 0;
     const size_t outputElementsWritten =
         problem.outputSelection.selectedCount(problem.d.shape().elementCount());
+    const bool parallelOutput = canParallelizeOutput(problem);
     if (problem.outputSelection.selectsAll()) {
-        for (size_t rowBase = 0; rowBase < m; rowBase += outputBlockRows) {
-            for (size_t columnBase = 0; columnBase < n; columnBase += outputBlockColumns)
-                outputElementsCovered += executeBlock(rowBase, columnBase, true, {});
-        }
+        const size_t rowBlockCount = (m + outputBlockRows - 1) / outputBlockRows;
+        const size_t columnBlockCount = (n + outputBlockColumns - 1) / outputBlockColumns;
+        const size_t blockCount = rowBlockCount * columnBlockCount;
+        outputElementsCovered = m * n;
+        forEachOutputBlock(blockCount, saturatedProduct(outputElementsCovered, k), parallelOutput,
+                           [&](size_t block) {
+                               const size_t rowBase = (block / columnBlockCount) * outputBlockRows;
+                               const size_t columnBase =
+                                   (block % columnBlockCount) * outputBlockColumns;
+                               (void)executeBlock(rowBase, columnBase, true, {});
+                           });
     } else {
         const SelectedOutputBlockPlan plan =
             planSelectedOutputBlocks(problem.outputSelection, problem.d.shape().elementCount(), n);
         const std::span<const size_t> localIndices(plan.localIndices);
-        for (const PlannedOutputBlock& block : plan.blocks) {
-            outputElementsCovered += executeBlock(
-                block.rowBase, block.columnBase, false,
-                localIndices.subspan(block.firstSelectedOutput, block.selectedOutputCount));
-        }
+        for (const PlannedOutputBlock& block : plan.blocks)
+            outputElementsCovered += std::min(outputBlockRows, m - block.rowBase) *
+                                     std::min(outputBlockColumns, n - block.columnBase);
+        forEachOutputBlock(plan.blocks.size(), saturatedProduct(outputElementsCovered, k),
+                           parallelOutput, [&](size_t index) {
+                               const PlannedOutputBlock& block = plan.blocks[index];
+                               (void)executeBlock(block.rowBase, block.columnBase, false,
+                                                  localIndices.subspan(block.firstSelectedOutput,
+                                                                       block.selectedOutputCount));
+                           });
     }
 
     return {
