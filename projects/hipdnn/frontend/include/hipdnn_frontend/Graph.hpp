@@ -2410,7 +2410,18 @@ public:
         notes.reserve(backendNotes.size());
         for(auto note : backendNotes)
         {
-            notes.push_back(fromHipdnnBehaviorNote(note));
+            // A note this frontend does not recognize is dropped rather than
+            // surfaced: a newer backend may define notes past this frontend's
+            // range, and reporting them would require inventing a meaning.
+            if(const auto mapped = fromHipdnnBehaviorNote(note); mapped.has_value())
+            {
+                notes.push_back(*mapped);
+            }
+            else
+            {
+                HIPDNN_FE_LOG_INFO(
+                    "Skipping behavior note unknown to this frontend: " << static_cast<int>(note));
+            }
         }
 
         return {ErrorCode::OK, ""};
@@ -5255,11 +5266,11 @@ public:
      *
      * Applies an element-wise function to three input tensors.
      * Currently only BINARY_SELECT uses this overload:
-     * `out[i] = in0[i] ? in1[i] : in2[i]`
+     * `out[i] = in2[i] ? in0[i] : in1[i]`
      *
-     * @param in0 Condition tensor (selector mask)
-     * @param in1 Value selected where in0 is non-zero
-     * @param in2 Value selected where in0 is zero
+     * @param in0 Value selected where in2 is true
+     * @param in1 Value selected where in2 is false
+     * @param in2 Condition tensor (selector mask)
      * @param attributes Configuration specifying the pointwise mode
      * @return out0: Output tensor
      *

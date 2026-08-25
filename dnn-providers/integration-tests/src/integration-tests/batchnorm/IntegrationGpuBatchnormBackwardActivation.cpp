@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <iostream>
 
@@ -119,7 +120,7 @@ public:
 
         // DX_dactiv = pointwise(DY, BN_Y, activation_mode)
         graph::PointwiseAttributes activBwdAttrs;
-        activBwdAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        activBwdAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
             activBwdAttrs.set_relu_lower_clip(activTestCase.reluLowerClip.value());

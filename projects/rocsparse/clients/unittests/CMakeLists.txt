@@ -47,6 +47,7 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
   unit_test_enum_traits.cpp
   unit_test_indextype_utils.cpp
   unit_test_datatype_utils.cpp
+  unit_test_csrmv_adaptive_analysis.cpp
 )
 
 # Host-pure library translation units under test. These are compiled directly
@@ -124,14 +125,76 @@ rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
 # ---------------------------------------------------------------------------
 set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
+  unit_test_host_conversion_generic.cpp
   unit_test_host_conversion_sort.cpp
-  unit_test_internal_collectives.cpp
+  # --- Core/misc unit tests (level1, aux, generic, info, reordering) [AISPARSE-644]
+  # Distinct anchor (right after the conversion group) so this leaf does not
+  # conflict with sibling unit-test branches that append after
+  # rocsparse_unit_test_main or at the end of the level-2 group.
+  unit_test_device_level1.cpp
+  unit_test_primitives.cpp
+  unit_test_host_level1_generic.cpp
+  unit_test_host_level1_legacy.cpp
+  unit_test_host_auxiliary.cpp
+  unit_test_host_info.cpp
+  unit_test_host_generic.cpp
+  unit_test_host_reordering.cpp
+  unit_test_internal_collectives_blockreduce.cpp
+  unit_test_internal_collectives_warpreduce.cpp
+  unit_test_internal_collectives_segmented.cpp
+  unit_test_internal_collectives_search.cpp
+  unit_test_internal_collectives_shfl.cpp
+  unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
-  unit_test_internal_hostblocks.cpp
+  #10156: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_precond_direct.cpp
+  unit_test_internal_hostblocks_bitops.cpp
+  unit_test_internal_hostblocks_csrmm_alg.cpp
+  #10152: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_extra_csrgemm.cpp
+  unit_test_internal_hostblocks_indextype.cpp
+  unit_test_internal_hostblocks_itilu0.cpp
+  #10153: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_extra_bsrgemm.cpp
+  # Residual in-scope internal-routine coverage: device __global__ wrappers for
+  # collective/atomic/hash device helpers, plus host-path primitive helpers.
+  # unit_test_internal_primitives_host_extras.cpp additionally needs the
+  # segmented-radix-sort / radix-sort-pairs primitive TUs compiled in (appended
+  # to ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below) so this leaf links standalone.
+  unit_test_internal_collective_extras_wfreduce.cpp
+  unit_test_internal_collective_extras_atomics.cpp
+  unit_test_internal_collective_extras_elementwise.cpp
+  unit_test_internal_collective_extras_nontemporal.cpp
+  unit_test_internal_collective_extras_lower_bound.cpp
+  #10155: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_precond_itilu0.cpp
+  unit_test_internal_collective_extras_insert.cpp
+  unit_test_internal_primitives_host_extras.cpp
+  # Host-path C-API coverage for previously-untested in-scope routines. These
+  # drive public entry points so the host dispatch/validation/buffer-size code
+  # in librocsparse (already coverage-instrumented) is counted. They link
+  # roc::rocsparse directly, so they need no compile-in library TUs.
+  unit_test_internal_util_checkmatrix.cpp
+  #10149: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_conversion_bsr.cpp
+  unit_test_internal_conversion_extras.cpp
+  unit_test_internal_extra_geam.cpp
+  #10154: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_extra_geam.cpp
+  unit_test_internal_level3_sddmm.cpp
+  unit_test_internal_level3_bsrmm.cpp
+  #10158: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_level3.cpp
+  unit_test_internal_level2_extras.cpp
+  # --- Level 2 (SpMV/gebsrmv) public C-API host tests [AISPARSE-642] --------
+  # Distinct anchor (end of the level-2 group) so this leaf does not conflict
+  # with sibling unit-test branches that append after rocsparse_unit_test_main.
+  # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
+  unit_test_host_level2.cpp
 )
 
-# Host building-block library translation units under test by
-# unit_test_internal_hostblocks.cpp. Compiled into the device (GPU) test binary
+# Host building-block library translation units under test by the
+# unit_test_internal_hostblocks_*.cpp files. Compiled into the device (GPU) test binary
 # because their include chain (rocsparse_control.hpp -> rocsparse_common.hpp)
 # requires the HIP compile mode; the routines themselves are host-pure logic.
 # This is build wiring only -- NO library source changes. Subsequent leaves
@@ -139,6 +202,73 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
 set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3/rocsparse_csrmm_default_alg.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_determine_indextype.cpp
+  # --- Added for unit_test_internal_infostructs.cpp -------------------------
+  # Member functions of the internal info structs are defined (non-inline) in
+  # these library TUs; librocsparse hides them (CXX_VISIBILITY_PRESET "hidden"),
+  # so the defining TU is compiled into this test binary. Host-pure logic; they
+  # compile under -x hip only because their include chain pulls HIP intrinsics.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_numeric_boost.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgemm_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_adaptive_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_lrb_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_nnzsplit_info.cpp
+  # --- Standalone-link support (self-contained on ut-infra) -----------------
+  # The info-struct TUs above reference internal helpers that librocsparse
+  # hides (CXX_VISIBILITY_PRESET "hidden"): error/warning_message, the
+  # hip->rocsparse status mapper, the rocsparse handle/blas/debug/envariables
+  # infrastructure their (de)allocation paths pull in, and the enum
+  # stringifiers used for logging. Compile in the closure of defining TUs so
+  # this binary links WITHOUT the sibling public-API family-leaf tests present
+  # (i.e. each PR builds independently in CI). Build wiring only -- no
+  # library/src changes.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_message.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_handle.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_blas.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_blas_rocblas.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_debug.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_envariables.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_argdescr.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/auxiliary/rocsparse_error.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/auxiliary/rocsparse_auxiliary.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_mat_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_position_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_trm_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_trm_data_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_trm_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_assign_async.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_bsric0_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_bsrilu0_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_csric0_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_csrilu0_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_pivot_info_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_singular_info_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_sorted_coo2csr_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_valset.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_datatype_utils.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_indextype_utils.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_bsrmv_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csritsv_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_spgeam.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_nnz.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_numeric.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_symbolic.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_nnz_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_numeric_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_symbolic_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_convert_array.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_convert_scalar.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_gcoo2csr.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_coo2csr.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_exclusive_scan.cpp
+  # Added at this (extras) leaf for unit_test_internal_primitives_host_extras.cpp:
+  # sort_csr_column_indices / radix_sort_pairs primitive host wrappers.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
+  # --------------------------------------------------------------------------
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
@@ -148,6 +278,16 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
 # directly into this GPU test binary. They pull in rocprim, hence roc::rocprim
 # is added to the link libraries below. (No library source changes.)
 set(ROCSPARSE_UNIT_TEST_PRIMITIVE_SOURCES
+  # Primitive library TUs exercised by unit_test_primitives.cpp that are not
+  # already compiled into this target via ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
+  # above (exclusive_scan / segmented_radix_sort_keys / radix_sort_pairs are
+  # already present there; do not re-add them or the object is defined twice).
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_inclusive_scan.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_find_max.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_find_sum.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_run_length_encode.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_keys.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_pairs.cpp
 )
 
 add_executable(rocsparse-unit-test-device
@@ -186,6 +326,19 @@ target_link_libraries(rocsparse-unit-test-device PRIVATE
   hip::host
   hip::device
 )
+
+# rocsparse_blas_rocblas.cpp is compiled into this target (see
+# ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES). When rocBLAS is present the clients
+# directory defines -DROCSPARSE_WITH_ROCBLAS (clients/CMakeLists.txt), so that
+# TU includes <rocblas/rocblas.h> and calls into rocBLAS. Mirror the library
+# (library/CMakeLists.txt links roc::rocblas) so this test target picks up
+# rocBLAS's include directories and symbols in that configuration; without it
+# the compile fails with "'rocblas/rocblas.h' file not found" under the CI
+# with-rocBLAS build. Test-only; no library change. When rocBLAS is absent the
+# macro is undefined and the TU compiles as a stub, so no link is needed.
+if(rocblas_FOUND AND TARGET roc::rocblas)
+  target_link_libraries(rocsparse-unit-test-device PRIVATE roc::rocblas)
+endif()
 
 apply_omp_settings(rocsparse-unit-test-device)
 
