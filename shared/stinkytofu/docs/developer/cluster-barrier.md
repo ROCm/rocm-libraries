@@ -76,9 +76,16 @@ Multiple loads sharing the same workgroup signal receive one handshake.
 
 1. The **wait anchor** (Rule 3(b)) is the workgroup `s_barrier_signal -1`.
 2. The **signal anchor** (Rule 3(a)) is found by walking backward from the wait
-   anchor by up to `kRule3SignalLeadCycles` estimated cycles, bounded by the
-   current segment. The walk stops at a preceding handshake so cluster phases
-   never overlap.
+   anchor until it stands `kRule3SignalLeadCycles` estimated cycles ahead of it,
+   somewhere the handshake may legally go. The lead is a target, not a cap: a spot
+   inside a live SCC range is not one the walk may take, so it keeps climbing, and
+   `kRule3SignalMaxLeadCycles` is what bounds the answer. Past that ceiling it
+   turns around and sinks back towards the wait instead.
+
+   It stops outright at a preceding handshake or at any `s_barrier_wait -3`, so
+   cluster phases never overlap, and at a call or an unconditional branch. With
+   `kRule3CrossLoop` false every label and branch stops it too, which confines it
+   to the wait's own segment.
 
 When cycle estimates are unavailable, the signal co-locates with the wait.
 
@@ -208,10 +215,15 @@ has no `drain loop-carried cluster signal` wait.
 - When `found.hops > 0`, **loop-carried compensation** runs via
   `emitLoopCarriedCompensation`:
   - Optional **preheader signal** when the climb crossed the back edge.
-    `findPreLoopSignalAnchor` climbs from the loop head and stops at the nearest
-    `s_barrier_wait -1`, kernel `label_*`, or `tensor_load_to_lds` (pass `skipCB*`
-    labels are skipped). Signal-only after a workgroup wait; workgroup barrier +
-    signal after a label or load.
+    `findPreLoopSignalAnchor` climbs from the loop head and comes to rest below the
+    nearest `s_barrier_wait -1`, `s_barrier_wait -3`, kernel `label_*`, or
+    `tensor_load_to_lds` (pass `skipCB*` labels are skipped). A cluster wait stops
+    it for a second reason: that wait drinks a token, so a signal planted above one
+    never reaches the first trip. Signal-only after a workgroup wait — the one stop
+    that already proves the group has gathered — and workgroup barrier + signal
+    after anything else. The anchor slides down to the first SCC-dead spot when SCC
+    is live where it landed, and a preheader offering no spot at all is why the
+    climb declines to cross the back edge in the first place.
   - **Drain wait** at loop exit: `s_barrier_wait -3` with comment
     `drain loop-carried cluster signal`.
   - **`label_*_skipCBWait`** on paths that leave the loop with no token in
@@ -242,8 +254,10 @@ exit has drain wait + skip path.
 ### Tests
 
 - `InsertClusterBarrierPassTest` / `DAGSchedulerPassTest`: cross-loop cases use
-  `IF_RULE3_CROSS_LOOP` (omitted from the binary while `STINKY_KRULE3_CROSS_LOOP` is 0);
-  `CrossLoopOffKeepsSignalsInsideTheirSegments` requires false.
+  `IF_RULE3_CROSS_LOOP`, so they are omitted from the binary while
+  `STINKY_KRULE3_CROSS_LOOP` is 0. Cases that need the switch off stay in the binary
+  and `GTEST_SKIP` themselves when it is 1. Covering the pass therefore means
+  building and running both settings.
 
 ---
 

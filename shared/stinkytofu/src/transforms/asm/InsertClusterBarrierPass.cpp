@@ -561,8 +561,6 @@ struct Rule3SignalAnchor {
     IRBase* outOfSegmentNomination = nullptr;
 };
 
-/// Walk backward from the wait for cycle lead. \p maxHops 0 = in-segment only
-/// (kRule3CrossLoop false); 1 = one segment hop allowed (kRule3CrossLoop true).
 /// Whether \p anchor came to rest in the wait's own segment after all.
 bool rule3AnchorInWaitSegment(IRBase* anchor, IRBase* defaultAnchor, BasicBlock::iterator segBegin,
                               StinkyInstruction* referenceAnchor) {
@@ -600,6 +598,8 @@ Rule3SignalAnchor rule3ReportAnchor(IRBase* anchor, IRBase* defaultAnchor, int h
 /// edge, which is the only thing that makes the compensation necessary.
 bool preheaderCanTakeCompensatingSignal(StinkyInstruction* loopHead);
 
+/// Walk backward from the wait for cycle lead. \p maxHops 0 = in-segment only
+/// (kRule3CrossLoop false); 1 = one segment hop allowed (kRule3CrossLoop true).
 Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
