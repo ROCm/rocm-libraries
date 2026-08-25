@@ -258,6 +258,12 @@ void precompile_test_kernels(const std::string& precompile_file)
                         {
                             hipfft_params params;
                             params.from_token(token);
+
+                            // JIT callbacks would require JIT state to be
+                            // specified which we're not doing here
+                            if(params.run_callbacks == fft_callback_type_jit)
+                                continue;
+
                             params.validate();
                             params.create_plan();
                             if(params.is_forward())
