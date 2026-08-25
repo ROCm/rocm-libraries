@@ -30,6 +30,8 @@
 #include <cstring> /* strcmp, memset, memcpy */
 
 #include "rocke/error_boundary.hpp"
+#include "rocke/helper_rocke.helpers.layouts.h" /* TransposeLdsReader */
+#include "rocke/helper_rocke.helpers.loads.h" /* load_global / store split, staged */
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_implicit_gemm.h"
@@ -172,14 +174,20 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, spk{N}, spkauto  -- Python boolean flags */
+    /* flags: async, tr, spk{N}, spkauto  -- Python boolean flags.
+     * Python order is {async, kpf, tr, spk*}; kpf (k_prefetch) is Python-only
+     * and never set here, so async -> tr -> spk preserves the emitted order. */
     char spk_flag[32] = {0};
-    const char* flag_names[3];
-    int flag_on[3];
+    const char* flag_names[4];
+    int flag_on[4];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
     flag_on[n_flags] = s->async_dma ? 1 : 0;
+    n_flags++;
+
+    flag_names[n_flags] = "tr";
+    flag_on[n_flags] = s->lds_transpose_read ? 1 : 0;
     n_flags++;
 
     if(s->split_k > 1)
@@ -234,6 +242,27 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                      "grouped convolution (groups=%d > 1) is not supported for wgrad",
                      s->problem.groups);
         return false;
+    }
+
+    /* lds_transpose_read gates (mirror Python validate()): mutually exclusive
+     * with async_dma/unroll_k; 16x16 atom; warp_tile_k in {16,32}; 16-mult tiles. */
+    if(s->lds_transpose_read)
+    {
+        const char* why = NULL;
+        if(s->async_dma || s->unroll_k)
+            why = "lds_transpose_read is mutually exclusive with async_dma / unroll_k";
+        else if(s->warp_tile_m != 16 || s->warp_tile_n != 16)
+            why = "lds_transpose_read requires the 16x16 MFMA atom";
+        else if(s->warp_tile_k != 16 && s->warp_tile_k != 32)
+            why = "lds_transpose_read requires warp_tile_k in {16, 32}";
+        else if((s->tile_m % 16) || (s->tile_n % 16) || (s->tile_k % 16))
+            why = "lds_transpose_read requires 16-multiple tiles";
+        if(why)
+        {
+            if(reason && reason_cap)
+                snprintf(reason, reason_cap, "%s", why);
+            return false;
+        }
     }
 
     /* geometry */
@@ -1426,6 +1455,24 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     }
 
     /* smem_alloc A_smem / B_smem */
+    if(spec->lds_transpose_read)
+    {
+        /* Block-contiguous LDS: a sequence of 16x16 (K x M/N) tiles, each
+         * row-major (256 elems) so ds_read_b64_tr_b16 with a per-lane address
+         * transposes it into the MFMA operand.  Mirrors the Python
+         * lds_transpose_read alloc: [n_k_blk*n_mn_blk, 256]. */
+        int n_m_blk = ctx->block_m / 16;
+        int n_n_blk = ctx->block_n / 16;
+        int n_k_blk = ctx->block_k / 16;
+        int a_sh[2] = {n_k_blk * n_m_blk, 256};
+        int b_sh[2] = {n_k_blk * n_n_blk, 256};
+        ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_sh, 2, "A_smem");
+        ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_sh, 2, "B_smem");
+        ctx->double_buffer = false;
+        ctx->A_smem2 = ctx->A_smem;
+        ctx->B_smem2 = ctx->B_smem;
+    }
+    else
     {
         int a_sh[2] = {ctx->block_m, ctx->lds_layout.row_stride};
         int b_sh[2] = {ctx->block_n, ctx->lds_layout.row_stride};
@@ -1585,6 +1632,188 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         = rocke_schedule_policy_for_pipeline(b, ctx->async_dma ? "async_dma" : spec->pipeline);
 
     return rocke_ir_builder_ok(b);
+}
+
+// ---------------------------------------------------------------------------
+// wgrad lds_transpose_read K-loop
+//
+// Mirrors the Python `elif spec.lds_transpose_read and not spec.async_dma`
+// branch (+ its emit_store_tr / emit_mfma_tr closures) in
+// conv_implicit_gemm_wgrad.py, op-for-op for byte-identity.  split_k==1 uses
+// [c0, c_K_gemm) exactly like the simple K-loop.
+// ---------------------------------------------------------------------------
+
+// Operand IR dtype for the transpose reads (mirrors Python ir_dtype_a/b).
+// Transpose-read operands are always 16-bit (fp16 / bf16).
+static const rocke_type_t* wgrad_tr_ir_dtype(const char* dt)
+{
+    if(dt && strcmp(dt, "bf16") == 0)
+        return rocke_bf16();
+    return rocke_f16();
+}
+
+// _read_frag: 1 (16x16x16) or 2 (16x16x32) ds_read_b64_tr_b16 reads -> operand.
+static rocke_value_t* wgrad_tr_read_frag(rocke_ir_builder_t* b,
+                                         rocke_value_t* smem,
+                                         rocke_value_t* base_k,
+                                         rocke_value_t* mn_blk,
+                                         int n_mn_blk,
+                                         int kb_per_atom,
+                                         rocke_value_t* tr_intra,
+                                         const rocke_type_t* dtype)
+{
+    rocke_value_t* reads[2] = {NULL, NULL};
+    for(int sub = 0; sub < kb_per_atom; ++sub)
+    {
+        rocke_value_t* blk_k = rocke_b_add(b, base_k, rocke_b_const_i32(b, sub));
+        rocke_value_t* block_id
+            = rocke_b_add(b, rocke_b_mul(b, blk_k, rocke_b_const_i32(b, n_mn_blk)), mn_blk);
+        rocke_value_t* idx[2] = {block_id, tr_intra};
+        reads[sub] = rocke_b_ds_read_tr16_b64(b, smem, idx, 2, dtype);
+    }
+    if(kb_per_atom == 1)
+        return reads[0];
+    return rocke_b_vec_concat(b, reads[0], reads[1]);
+}
+
+static void wgrad_emit_kloop_transpose(rocke_conv_build_ctx_t* ctx,
+                                       const rocke_implicit_gemm_conv_wgrad_spec_t* spec)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int n_m_blk = ctx->block_m / 16;
+    const int n_n_blk = ctx->block_n / 16;
+    const int kb_per_atom = spec->warp_tile_k / 16;
+    rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+    const rocke_type_t* dtype_a = wgrad_tr_ir_dtype(spec->dtype_a);
+    const rocke_type_t* dtype_b = wgrad_tr_ir_dtype(spec->dtype_b);
+
+    /* _tr_reader = TransposeLdsReader(K=16, M=16).bind(b, lane)
+     * _tr_intra  = b.add(b.mul(_tr_reader.row(0, 0), 16), _tr_reader.col) */
+    rocke_transpose_lds_reader_t tr = rocke_transpose_lds_reader_make(16);
+    rocke_bound_transpose_lds_reader_t* trb = rocke_transpose_lds_reader_bind(b, &tr, ctx->lane);
+    rocke_value_t* tr_row = rocke_bound_transpose_lds_reader_row(b, trb, 0, 0);
+    rocke_value_t* tr_intra = rocke_b_add(b, rocke_b_mul(b, tr_row, c16), trb->col);
+
+    int num_accs = ctx->num_accs;
+    rocke_iter_arg_t iter_args[ROCKE_CONV_MAX_ACCS];
+    for(int i = 0; i < num_accs; ++i)
+    {
+        iter_args[i].name = ctx->acc_names[i];
+        iter_args[i].init = ctx->acc_inits[i];
+    }
+    rocke_for_t for_op = rocke_b_scf_for_iter(b,
+                                              ctx->c0,
+                                              ctx->c_K_gemm,
+                                              ctx->c_block_k,
+                                              iter_args,
+                                              num_accs,
+                                              "k0",
+                                              /*unroll=*/false,
+                                              /*elide_trailing_barrier=*/true);
+    rocke_value_t* k0 = for_op.iv;
+    rocke_value_t* iter_vars[ROCKE_CONV_MAX_ACCS];
+    for(int i = 0; i < for_op.num_iter_vars; ++i)
+        iter_vars[i] = for_op.iter_vars[i];
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        /* --- emit_store_tr(k0) --- */
+        ctx->k_off_capture = k0;
+        rocke_ctl_staged_t staged_a, staged_b;
+        rocke_coalesced_tile_loader_load_global(b,
+                                                &ctx->a_sync_loader,
+                                                ctx->tid,
+                                                wgrad_dy_descriptor,
+                                                ctx,
+                                                ctx->a_rsrc,
+                                                NULL,
+                                                &staged_a);
+        rocke_coalesced_tile_loader_load_global(b,
+                                                &ctx->b_sync_loader,
+                                                ctx->tid,
+                                                wgrad_x_descriptor,
+                                                ctx,
+                                                ctx->b_rsrc,
+                                                NULL,
+                                                &staged_b);
+        /* _store_blocks(A) then _store_blocks(B) */
+        for(int i = 0; i < staged_a.count; ++i)
+        {
+            rocke_value_t* mn_row = staged_a.vecs[i].row;
+            rocke_value_t* k_col = staged_a.vecs[i].col;
+            rocke_value_t* blk_k = rocke_b_div(b, k_col, c16);
+            rocke_value_t* ik = rocke_b_mod(b, k_col, c16);
+            rocke_value_t* blk_mn = rocke_b_div(b, mn_row, c16);
+            rocke_value_t* imn = rocke_b_mod(b, mn_row, c16);
+            rocke_value_t* block_id
+                = rocke_b_add(b, rocke_b_mul(b, blk_k, rocke_b_const_i32(b, n_m_blk)), blk_mn);
+            rocke_value_t* intra = rocke_b_add(b, rocke_b_mul(b, ik, c16), imn);
+            rocke_value_t* idx[2] = {block_id, intra};
+            rocke_b_smem_store_vN(
+                b, ctx->A_smem, idx, 2, staged_a.vecs[i].v, ctx->a_sync_loader.load_vec);
+        }
+        for(int i = 0; i < staged_b.count; ++i)
+        {
+            rocke_value_t* mn_row = staged_b.vecs[i].row;
+            rocke_value_t* k_col = staged_b.vecs[i].col;
+            rocke_value_t* blk_k = rocke_b_div(b, k_col, c16);
+            rocke_value_t* ik = rocke_b_mod(b, k_col, c16);
+            rocke_value_t* blk_mn = rocke_b_div(b, mn_row, c16);
+            rocke_value_t* imn = rocke_b_mod(b, mn_row, c16);
+            rocke_value_t* block_id
+                = rocke_b_add(b, rocke_b_mul(b, blk_k, rocke_b_const_i32(b, n_n_blk)), blk_mn);
+            rocke_value_t* intra = rocke_b_add(b, rocke_b_mul(b, ik, c16), imn);
+            rocke_value_t* idx[2] = {block_id, intra};
+            rocke_b_smem_store_vN(
+                b, ctx->B_smem, idx, 2, staged_b.vecs[i].v, ctx->b_sync_loader.load_vec);
+        }
+
+        rocke_b_sync(b);
+
+        /* --- emit_mfma_tr(iter_vars) --- */
+        rocke_value_t* warp_m_blk = rocke_b_div(b, rocke_warp_grid_warp_m_off(b, &ctx->grid), c16);
+        rocke_value_t* warp_n_blk = rocke_b_div(b, rocke_warp_grid_warp_n_off(b, &ctx->grid), c16);
+        rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+        for(int i = 0; i < num_accs; ++i)
+            new_accs[i] = iter_vars[i];
+        for(int kk = 0; kk < ctx->k_atoms; ++kk)
+        {
+            rocke_value_t* base_k = rocke_b_const_i32(b, kk * kb_per_atom);
+            rocke_value_t* a_rows[ROCKE_CONV_MAX_ACCS];
+            for(int mi = 0; mi < ctx->mfmas_m; ++mi)
+            {
+                rocke_value_t* mn_blk = rocke_b_add(b, warp_m_blk, rocke_b_const_i32(b, mi));
+                a_rows[mi] = wgrad_tr_read_frag(
+                    b, ctx->A_smem, base_k, mn_blk, n_m_blk, kb_per_atom, tr_intra, dtype_a);
+            }
+            rocke_value_t* b_cols[ROCKE_CONV_MAX_ACCS];
+            for(int ni = 0; ni < ctx->mfmas_n; ++ni)
+            {
+                rocke_value_t* mn_blk = rocke_b_add(b, warp_n_blk, rocke_b_const_i32(b, ni));
+                b_cols[ni] = wgrad_tr_read_frag(
+                    b, ctx->B_smem, base_k, mn_blk, n_n_blk, kb_per_atom, tr_intra, dtype_b);
+            }
+            int flat = 0;
+            for(int mi = 0; mi < ctx->mfmas_m; ++mi)
+                for(int ni = 0; ni < ctx->mfmas_n; ++ni)
+                {
+                    new_accs[flat] = rocke_conv_emit_mfma(
+                        b, ctx->atom, a_rows[mi], b_cols[ni], new_accs[flat]);
+                    ++flat;
+                }
+            rocke_schedule_policy_emit_after_mfma_step(
+                &ctx->schedule, b, ctx->mfmas_m + ctx->mfmas_n, ctx->mfmas_m * ctx->mfmas_n);
+        }
+
+        rocke_b_sync(b);
+        rocke_b_scf_yield(b, new_accs, num_accs);
+    }
+    rocke_b_region_leave(b);
+    /* final_accs = for_op.results (rocke_conv_set_final_accs is static in the
+     * kloop-drivers TU; write the ctx slot the epilogue reads directly). */
+    ctx->num_final_accs = for_op.op->num_results;
+    for(int i = 0; i < for_op.op->num_results; ++i)
+        ctx->final_accs[i] = for_op.op->results[i];
 }
 
 // ---------------------------------------------------------------------------
@@ -1770,6 +1999,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     /* --- K-loop --- */
     if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
+    else if(spec->lds_transpose_read)
+        wgrad_emit_kloop_transpose(&ctx, spec);
     else if(!spec->async_dma)
         rocke_conv_emit_kloop_simple(&ctx);
     else

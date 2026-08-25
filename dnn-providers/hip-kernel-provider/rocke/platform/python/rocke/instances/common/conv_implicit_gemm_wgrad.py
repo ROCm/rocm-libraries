@@ -1202,7 +1202,9 @@ def build_implicit_gemm_conv_wgrad(
                 block_id = b.add(b.mul(blk_k, b.const_i32(n_mn_blk)), mn_blk)
                 reads.append(
                     b.ds_read_tr16_b64(
-                        smem_dst, block_id, _tr_intra,
+                        smem_dst,
+                        block_id,
+                        _tr_intra,
                         dtype=ir_dtype_a if smem_dst is A_smem else ir_dtype_b,
                     )
                 )
@@ -1218,16 +1220,20 @@ def build_implicit_gemm_conv_wgrad(
                 for mi in range(mfmas_m):
                     a_rows.append(
                         _read_frag(
-                            A_smem, base_k,
-                            b.add(warp_m_blk, b.const_i32(mi)), _n_m_blk_tr,
+                            A_smem,
+                            base_k,
+                            b.add(warp_m_blk, b.const_i32(mi)),
+                            _n_m_blk_tr,
                         )
                     )
                 b_cols = []
                 for ni in range(mfmas_n):
                     b_cols.append(
                         _read_frag(
-                            B_smem, base_k,
-                            b.add(warp_n_blk, b.const_i32(ni)), _n_n_blk_tr,
+                            B_smem,
+                            base_k,
+                            b.add(warp_n_blk, b.const_i32(ni)),
+                            _n_n_blk_tr,
                         )
                     )
                 flat = 0

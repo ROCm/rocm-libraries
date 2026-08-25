@@ -114,6 +114,12 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
     const char* epilogue; /* default "default" */
     bool async_dma; /* default false */
     bool unroll_k; /* default false */
+    /* gfx950 HW LDS transpose-read path (WgradConvSpec.lds_transpose_read):
+     * stage 16x16 (K x M/N) tile blocks contiguously in LDS via one wide
+     * ds_write and feed the MFMA via ds_read_b64_tr_b16.  Requires the 16x16
+     * atom (warp_tile_m/n == 16, warp_tile_k in {16,32}), mma/wave64, and
+     * free-axis load vec == 8.  Mutually exclusive with async_dma / unroll_k. */
+    bool lds_transpose_read; /* default false */
 
     bool has_lds_k_pad; /* false => Python None */
     int lds_k_pad;

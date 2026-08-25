@@ -21,6 +21,7 @@
 #   8  -- 3-D conv (Z/Di), mem/default, gfx950
 #   9  -- split-K=4 bf16 output (packed bf16 atomic + accumulation-error path), gfx950
 #   10 -- chiplet swizzle enabled, gfx950
+#   11 -- lds_transpose_read (gfx950 HW ds_read_b64_tr_b16), 16x16x16 atom
 #   (async_dma omitted: C++ async load path does not yet honour the wgrad A-descriptor
 #    override, so it would produce different IR and break the byte-identity gate)
 #
@@ -306,6 +307,26 @@ def _spec(idx: int):
                 warp_tile_k=16,
                 pipeline="mem",
                 epilogue="default",
+            ),
+            "gfx950",
+        )
+    if idx == 11:
+        # lds_transpose_read: gfx950 HW ds_read_b64_tr_b16 path, 16x16x16 atom.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                lds_transpose_read=True,
             ),
             "gfx950",
         )
