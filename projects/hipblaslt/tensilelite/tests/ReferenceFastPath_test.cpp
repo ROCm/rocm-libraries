@@ -623,11 +623,11 @@ TEST(ReferenceStandaloneEpilogue, SamplesGradientBiasSourceA)
     std::vector<float> d(M * N, -99);
     std::vector<float> bias(M, 0);
 
-    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 0.0f, 0.0f);
     inputs.bias = bias.data();
 
     ASSERT_TRUE(tryReferenceGemm(problem, inputs, /*elementsToValidate=*/2));
-    EXPECT_EQ(d, (std::vector<float>{4, -99, -99, 6, -99, -99}));
+    EXPECT_EQ(d, (std::vector<float>{0, -99, -99, 0, -99, -99}));
     EXPECT_EQ(bias, (std::vector<float>{4, 6}));
 }
 
@@ -650,11 +650,11 @@ TEST(ReferenceStandaloneEpilogue, SamplesGradientBiasSourceB)
     std::vector<float> d(M * N, -99);
     std::vector<float> bias(N, 0);
 
-    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 0.0f, 0.0f);
     inputs.bias = bias.data();
 
     ASSERT_TRUE(tryReferenceGemm(problem, inputs, /*elementsToValidate=*/2));
-    EXPECT_EQ(d, (std::vector<float>{3, -99, -99, 7, -99, -99}));
+    EXPECT_EQ(d, (std::vector<float>{0, -99, -99, 0, -99, -99}));
     EXPECT_EQ(bias, (std::vector<float>{3, 7, 11}));
 }
 
