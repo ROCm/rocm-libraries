@@ -1,0 +1,80 @@
+name: Sync stacked PRs after merge
+
+on:
+  pull_request:
+    types: [closed]
+
+concurrency:
+  group: sync-stack-${{ github.event.pull_request.head.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-stack:
+    if: >-
+      github.event.pull_request.merged == true
+      && github.repository == 'ROCm/rocm-libraries'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Retarget and rebase child PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGED_BRANCH: ${{ github.event.pull_request.head.ref }}
+          MERGED_BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          echo "Merged branch: $MERGED_BRANCH into $MERGED_BASE"
+
+          # Find PRs whose base is the branch we just merged
+          CHILDREN=$(gh pr list --state open --base "$MERGED_BRANCH" \
+            --json number,headRefName --jq '.[]' 2>/dev/null || true)
+
+          if [ -z "$CHILDREN" ]; then
+            echo "No child PRs stacked on $MERGED_BRANCH — nothing to do."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "$CHILDREN" | jq -s '.' | jq -c '.[]' | while read -r CHILD; do
+            CHILD_NUM=$(echo "$CHILD" | jq -r '.number')
+            CHILD_BRANCH=$(echo "$CHILD" | jq -r '.headRefName')
+
+            echo ""
+            echo "=== Syncing PR #$CHILD_NUM ($CHILD_BRANCH) ==="
+
+            # Step 1: Retarget the child PR's base to the merged PR's base
+            echo "Retargeting PR #$CHILD_NUM base: $MERGED_BRANCH → $MERGED_BASE"
+            gh pr edit "$CHILD_NUM" --base "$MERGED_BASE"
+
+            # Step 2: Rebase the child branch onto the new base.
+            # Use --onto to handle squash merges: only replay commits
+            # unique to the child (after the old parent tip), skipping
+            # the parent's commits that were squashed into a new commit.
+            git fetch origin "$CHILD_BRANCH" "$MERGED_BRANCH" "$MERGED_BASE"
+            git checkout "origin/$CHILD_BRANCH"
+
+            echo "Rebasing: --onto origin/$MERGED_BASE origin/$MERGED_BRANCH"
+            if git rebase --onto "origin/$MERGED_BASE" "origin/$MERGED_BRANCH"; then
+              git push --force-with-lease origin HEAD:"$CHILD_BRANCH"
+              echo "PR #$CHILD_NUM rebased and pushed."
+            else
+              git rebase --abort || true
+              echo "::warning::PR #$CHILD_NUM has conflicts — manual rebase required."
+              BODY="Stack sync: the parent PR was merged but this branch has rebase conflicts. "
+              BODY+="Please rebase manually: "
+              BODY+="git fetch origin && "
+              BODY+="git rebase --onto origin/${MERGED_BASE} origin/${MERGED_BRANCH} ${CHILD_BRANCH} "
+              BODY+="then resolve conflicts and git push --force-with-lease origin HEAD:${CHILD_BRANCH}"
+              gh pr comment "$CHILD_NUM" --body "$BODY" || true
+            fi
+          done
