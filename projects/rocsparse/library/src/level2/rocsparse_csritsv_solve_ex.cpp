@@ -58,8 +58,8 @@ namespace rocsparse
                                     T* __restrict__ y_,
                                     const T* __restrict__ invdiag)
     {
-        for(J tid = rocsparse::csritsv_grid_stride_begin<BLOCKSIZE, J>(); tid < m;
-            tid += rocsparse::csritsv_grid_stride_step<BLOCKSIZE, J>())
+        for(J tid = rocsparse::csritsv_grid_index<BLOCKSIZE>(); tid < m;
+            tid += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
         {
             y_[tid] = y_[tid] + invdiag[tid] * r_[tid];
         }
@@ -85,8 +85,8 @@ namespace
                                      rocsparse_index_base ptr_diag_base,
                                      rocsparse_int* __restrict__ zero_pivot)
         {
-            for(J tid = rocsparse::csritsv_grid_stride_begin<BLOCKSIZE, J>(); tid < m;
-                tid += rocsparse::csritsv_grid_stride_step<BLOCKSIZE, J>())
+            for(J tid = rocsparse::csritsv_grid_index<BLOCKSIZE>(); tid < m;
+                tid += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
             {
                 const I k = ptr_diag[tid] - ptr_diag_base + ptr_shift;
                 const J j = ind[k] - base;

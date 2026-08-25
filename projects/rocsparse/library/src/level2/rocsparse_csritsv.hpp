@@ -32,31 +32,31 @@
 namespace rocsparse
 {
     //
-    // Shared grid-stride helpers for the row-parallel csritsv analysis/solve
-    // kernels. Every one of those kernels maps one thread to one row and used to
-    // compute the global row id as `BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x`
-    // in 32-bit unsigned arithmetic, which wraps at 2^32 for a 64-bit index type
-    // `J`. These helpers compute the id (and the stride) in `J` *before* the
-    // multiply, so no overflow occurs, and expose a grid stride so the kernel can
-    // cover an `m` larger than the (clamped) grid via a loop.
+    // Shared grid helpers for the row-parallel csritsv analysis/solve kernels.
+    // Every one of those kernels maps one thread to one row via a grid-stride
+    // loop. csritsv_grid_index() returns the global thread (row) index of the
+    // current thread and csritsv_grid_stride() the number of rows advanced per
+    // iteration. The launch grid is clamped (see csritsv_grid_stride_blocks) so
+    // the reachable grid index fits in 32 bits; both are therefore computed in
+    // uint32_t. The loop variable stays the (possibly 64-bit) index type J so it
+    // can range over all `m` rows.
     //
     // Usage inside a kernel:
-    //   for(J row = rocsparse::csritsv_grid_stride_begin<BLOCKSIZE, J>();
+    //   for(J row = rocsparse::csritsv_grid_index<BLOCKSIZE>();
     //       row < m;
-    //       row += rocsparse::csritsv_grid_stride_step<BLOCKSIZE, J>())
+    //       row += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
     //   { ... }
     //
-    template <uint32_t BLOCKSIZE, typename J>
-    __device__ __forceinline__ J csritsv_grid_stride_begin()
+    template <uint32_t BLOCKSIZE>
+    __device__ __forceinline__ uint32_t csritsv_grid_index()
     {
-        return static_cast<J>(BLOCKSIZE) * static_cast<J>(hipBlockIdx_x)
-               + static_cast<J>(hipThreadIdx_x);
+        return BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
     }
 
-    template <uint32_t BLOCKSIZE, typename J>
-    __device__ __forceinline__ J csritsv_grid_stride_step()
+    template <uint32_t BLOCKSIZE>
+    __device__ __forceinline__ uint32_t csritsv_grid_stride()
     {
-        return static_cast<J>(BLOCKSIZE) * static_cast<J>(hipGridDim_x);
+        return BLOCKSIZE * hipGridDim_x;
     }
 
     //
@@ -64,10 +64,10 @@ namespace rocsparse
     // clamped to the device's maximum grid size in the x dimension so the launch
     // is always valid even when `m` is very large.
     //
-    template <uint32_t BLOCKSIZE, typename J>
-    static uint32_t csritsv_grid_stride_blocks(rocsparse_handle handle, J m)
+    template <uint32_t BLOCKSIZE>
+    static uint32_t csritsv_grid_stride_blocks(rocsparse_handle handle, int64_t m)
     {
-        const int64_t nblocks  = (static_cast<int64_t>(m) - 1) / BLOCKSIZE + 1;
+        const int64_t nblocks  = (m - 1) / BLOCKSIZE + 1;
         const int64_t max_grid = static_cast<int64_t>(handle->properties.maxGridSize[0]);
         return static_cast<uint32_t>((nblocks < max_grid) ? nblocks : max_grid);
     }
