@@ -31,14 +31,31 @@ Do not invoke this skill for anything that edits the ingestor runtime itself
 (`DescriptorLoader.hpp`, `KernelIngestorStateManager.hpp`, `NativeRegistry.hpp`) — this
 skill only calls that code through the generator and the validator, never modifies it.
 
+## The two dialects — settle this before anything else
+
+A bundle is authored in one of two dialects, and they are not interchangeable:
+
+| | `direct_load` | `packaged` |
+|---|---|---|
+| Kernel | a `.cpp`/`.hip` the provider embeds | a rocKE builder, or a `.cpp` compiled at build time |
+| `kernel_source.kind` | `embedded_source` | `rocke` or `hip` |
+| Consumed by | `DescriptorLoader.hpp` at runtime | `hkp_pack` at build time |
+| Validated with | `hipdnn_validate_descriptors` | `hkp_pack`'s `load_flat_input`, then pack, then `hipdnn_validate_descriptors` on the PACKED tree |
+| `HIPDNN_DESCRIPTOR_FILES` | spliced in | **never** |
+
+**A rocKE kernel is always `packaged`.** The runtime has no rocKE adapter: `hkp_pack`
+lowers the builder through comgr at build time and rewrites the shipped descriptor to
+`kind: kpack` before the loader sees it. Authoring `rocke_builder` for the runtime is
+rejected, and correctly so.
+
 ## The two flows, at a glance
 
-**Create** (new engine): ask for the kernel sources *first*, infer aggressively from
-them (entry points, signatures, candidate KMD fields, pack count), then confirm the
-remainder in **one batch** — engine name/namespace, arch list, which fields are knobs,
-dispatch/workspace policy, and whether a distinction becomes a UMD or lives in the UED's
-`graph_match`. Then invoke the generator, then the validator, then report. Full steps in
-`prompt.md` § Create flow.
+**Create** (new engine): settle the dialect, ask for the kernel sources *first*, infer
+aggressively from them (for rocKE: introspect the builder's spec dataclass rather than
+reading text), then confirm the remainder in **one batch** — engine name/namespace, arch
+list, which fields are knobs, dispatch/workspace policy, and whether a distinction
+becomes a UMD or lives in the UED's `graph_match`. Then invoke the generator, then the
+validator(s) for that dialect, then report. Full steps in `prompt.md` § Create flow.
 
 **Extend** (existing engine): point at the existing descriptor directory, add one pack
 or one kernel, mint only the *new* UUIDs, append to the existing CMake lists rather than
@@ -56,6 +73,10 @@ the **common** case, not an edge case — both flows must detect it explicitly (
 active build directory's `bin/`, and any install prefix, for `hipdnn_validate_descriptors`)
 and say so plainly in the completion report, rather than silently skipping the
 validation step. See `prompt.md` § Detecting an absent validator.
+
+`hkp_pack`'s authored-form validation needs no build at all — it is Python, importable
+straight from `descriptor-packaging/python`. Packing additionally needs `msgpack` and
+`zstandard` (the kpack reader's own dependencies) and a comgr for the rocKE path.
 
 ## Output contract (every run, both flows)
 

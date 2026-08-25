@@ -39,6 +39,33 @@ distinction is a UMD or lives in the engine's `graph_match` — are yours.
 
 ## Create flow
 
+### Step 0 — Settle the dialect first
+
+**Two authored dialects exist and they are not interchangeable.** Everything after this
+step differs between them, so decide before reading a single source file. Ask only if
+the sources do not already answer it — they usually do.
+
+| | `direct_load` | `packaged` |
+|---|---|---|
+| Kernel is | a `.cpp`/`.hip` the provider embeds | a rocKE builder, or a `.cpp` compiled at build time |
+| `kernel_source.kind` | `embedded_source` | `rocke` or `hip` |
+| Compiled | at plan-build time, on device | at build time, by `hkp_pack` |
+| Ships as | the descriptor, verbatim | a per-arch `.kpack` archive + a descriptor rewritten to `kind: kpack` |
+| Lands in | `descriptors/<slug>/` in the provider | the packager's source root, at your `authored_subpath` |
+| Spliced into `HIPDNN_DESCRIPTOR_FILES` | **yes** | **no — never** |
+
+Decide by asking one question: **is the kernel a rocKE builder?** If yes it is
+`packaged` with `kind: rocke`, and there is no alternative — the runtime has no rocKE
+adapter and is not getting one. A rocKE kernel reaches the loader already lowered to
+`kpack`.
+
+The most damaging mistake here is splicing a packaged bundle into
+`HIPDNN_DESCRIPTOR_FILES`. That installs a second, *unlowered* copy carrying
+`kind: rocke`, which the runtime loader rejects with "no implementation yet" — dropping
+the matcher, then the pack, then the engine, at a log level that is off by default. The
+generator's fragment says so explicitly for a packaged bundle; read it rather than
+assuming the five splice points always apply.
+
 ### Step 1 — Ask for the kernel sources first
 
 Before asking anything else, ask the user to point at the kernel source(s): one or more
@@ -46,12 +73,50 @@ Before asking anything else, ask the user to point at the kernel source(s): one 
 arch, knobs, or anything else yet — those come later, in one batch, after you've read
 the source and inferred what you can.
 
+For a **rocKE** kernel there is no file to point at: ask instead for the **builder
+module and function** (e.g. `kernels/gfx950/attention_dense.py` and
+`build_attention_dense`). The module path is dotted through the importable `kernels`
+package, *not* a path under the descriptor root — the rocKE descriptor folders ship no
+sources at all, which is the format's sharpest trap.
+
 If the user has already pasted or referenced the source in their request, skip the
 prompt and go straight to Step 2.
 
 ### Step 2 — Infer aggressively from the source
 
-Read every source file the user pointed at. Derive, in order:
+**For a rocKE builder, do not read the source at all — introspect it.** The builder
+carries its own answer in type annotations, so the extraction is exact rather than a
+text-scan guess:
+
+```
+python3 -c "
+from codegen.sources import introspect
+i = introspect('kernels/gfx950/attention_dense.py', 'build_attention_dense')
+print('signature:', i.signature_error or 'OK (spec, *, arch)')
+print('spec class:', i.spec_class)
+print('required:', [f.name for f in i.required_fields])
+print('arches:', i.supported_arches)
+"
+```
+
+Run it from the `IngestorGenerator` directory with the rocKE library on `PYTHONPATH`
+(`<provider>/rocke/library` and `<provider>/rocke/platform/python`). What it gives you:
+
+- **`signature_error` non-empty → STOP.** The builder does not take `(spec, *, arch)`,
+  and `hkp_pack` will refuse it rather than pack it. This is not a config problem you
+  can work around: the extra keyword-only parameter has nowhere to live in a descriptor
+  and would be silently frozen at its default. The gfx942 `attention_dense` builder is
+  exactly this case (an extra `tuning` object); PR #11237 is the fix. Report the message
+  and ask the user whether to target a different arch or wait for the refactor.
+- **`required_fields` are MANDATORY in the descriptor's `spec` block.** `hkp_pack`
+  hydrates with `Spec(**fields)`, so a missing one is a `TypeError` at pack time —
+  after the descriptor already looks complete.
+- **`supported_arches`** is the predicate's own answer for your spec. Empty means
+  *unknown*, never *unsupported*: rocKE declares arch support nowhere, and some
+  predicate shapes cannot be called generically at all. Ask the user rather than
+  inferring absence.
+
+For a **non-rocKE** source, read every file the user pointed at. Derive, in order:
 
 1. **Entry points and signatures.** Each kernel function (`__global__`, or whatever the
    provider's kernel-embedding convention names as an entry point) becomes one
@@ -114,9 +179,13 @@ create flow.
 
 ### Step 4 — Build the config and run the generator
 
-Assemble the YAML config from Steps 2–3 (engine name, KMD fields, knobs, packs with
-their kernels and `arch`, `heuristic` choice, `graph_match`/UMD decisions, workspace
-policy, `kernel_source_kind: embedded_source`). Pick an output directory (a scratch
+Assemble the YAML config from Steps 0–3: `dialect`, engine name, KMD fields, knobs,
+packs with their kernels and `arch`, `heuristic` choice, `graph_match`/UMD decisions,
+workspace policy, and `kernel_source_kind` (`embedded_source` for `direct_load`;
+`rocke` or `hip` for `packaged`). A packaged config also names `authored_subpath` —
+where the descriptors sit under the packager's ONE source root, preserved verbatim into
+the staged and installed trees. `configs/gfx950_attention_dense.yaml` is a working
+rocKE example. Pick an output directory (a scratch
 location unless the user names one) and run:
 
 ```
@@ -137,7 +206,58 @@ python3 <path-to>/IngestorGenerator/generate.py \
 Consider a `--dry-run` pass first (prints the file list, does not create the output
 directory) if you want to sanity-check the shape before writing anything.
 
-### Step 5 — Run the validator
+### Step 5 — Validate
+
+**Which validator depends on the dialect**, because the two check different artifacts.
+Run the one that matches; a packaged bundle has nothing for the runtime validator to
+read until it has been packed.
+
+#### 5a. Packaged dialect — validate the authored form, then pack, then validate the shipped form
+
+First, the authored form, through the packager's own validator:
+
+```
+PYTHONPATH=<provider>/descriptor-packaging/python:<provider>/rocke/library:<provider>/rocke/platform/python \
+python3 -c "
+from hkp_pack.descriptors import load_flat_input
+flat = load_flat_input('<output-dir>/descriptors')
+print('OK,', len(flat.descriptors), 'descriptors')
+"
+```
+
+This is the same `load_flat_input` the build calls, so it enforces exactly what the
+build enforces — required keys per `kind`, the `namespace:local` UED name, closed enum
+vocabularies, bare-arch ids, dangling cross-references, the reserved `kpack/` folder
+name. Do **not** reimplement these checks; call this.
+
+Then actually pack, which is what proves the builder lowers:
+
+```
+python3 -c "
+from hkp_pack.pipeline import run_pipeline
+res = run_pipeline(source_root='<output-dir>/descriptors', arches=['gfx950'],
+                   out_root='<pack-out>', hipcc='/opt/rocm/bin/hipcc',
+                   rocm_kpack_dir='<rocm_kpack>/python')
+print({a: (r.skipped, str(r.kpack_path)) for a, r in res.items()})
+"
+```
+
+Needs `msgpack` and `zstandard` importable (the kpack reader's own deps) — a bare venv
+will not have them. A skipped arch means no KDP targeted it; an exception names the
+failing stage.
+
+Finally the shipped form, through the real runtime loader:
+
+```
+<build-dir>/bin/hipdnn_validate_descriptors <pack-out>/<arch> \
+    --expect-engine <engine-name> --json
+```
+
+Point it at the PACKED tree, never the authored one: the authored descriptor still says
+`kind: rocke`, which the loader rejects by design. A `WARN` about the `provenance`
+extension key is expected and correct — the packager writes it, the loader ignores it.
+
+#### 5b. Direct-load dialect — the runtime validator alone
 
 See **Detecting an absent validator** below before this step — do it first if you
 haven't already located the binary this session.
@@ -299,6 +419,34 @@ as "validated" on the strength of generation alone.
 
 ## The CMake splice
 
+**Read the emitted `fragments/cmake_descriptor_files.txt` before applying anything.**
+It states which of the points below apply to the bundle you just generated, and for a
+packaged bundle it deliberately contains no CMake payload at all.
+
+### Packaged dialect — points 1 and 2 DO NOT APPLY
+
+A packaged bundle is consumed by `hkp_pack`, not installed for the runtime loader, so:
+
+- **Point 1 (`HIPDNN_DESCRIPTOR_FILES`) — never.** Adding an authored `kind: rocke`
+  descriptor there installs a second, unlowered copy beside the packed one. The loader
+  rejects it ("no implementation yet"), which drops the matcher, then the pack, then
+  the engine — silently, at the default log level. This is the single most damaging
+  mistake available in this flow.
+- **Point 2 (`HIPDNN_INGESTOR_PACK_KERNELS`) — never.** That list names embedded kernel
+  source stems compiled at plan-build time. A packaged kernel is already a compiled code
+  object inside the archive; a rocKE kernel's source is not even in this repository.
+
+Instead: place the authored descriptors under the packager's source root at the
+`authored_subpath` the config declares, and confirm the build points at that root.
+
+Points 3, 4 and 5 still apply **if and only if** this engine needs its own native pack
+(new match/score/dispatch symbols). A packaged bundle that reuses an existing pack's
+symbols — which is what a first integration usually does — needs none of them, and then
+there is nothing to splice at all. Say so plainly rather than listing five points that
+do not apply.
+
+### Direct-load dialect — all five apply
+
 The generator emits `fragments/*.txt`; it never edits provider CMake files itself.
 After generation (or after Step 5 of the extend flow), walk the user through all five
 touch points, in this order, using the matching fragment file from the generator's
@@ -338,6 +486,8 @@ touch points, in this order, using the matching fragment file from the generator
    `Test<Name>Packs.cpp` (complete) and `Test<Name>Matchers.cpp` (stub) so the new
    pack's shape census and matcher tests actually build and run.
 
-State all five explicitly in the completion report even if you also perform the edits
-yourself — the report is what lets a reviewer confirm nothing was missed, especially
-point 4's two-edit requirement, which is the one silent-failure mode in this list.
+State every point that applies explicitly in the completion report even if you also
+perform the edits yourself — the report is what lets a reviewer confirm nothing was
+missed, especially point 4's two-edit requirement, which is the one silent-failure mode
+in this list. For a packaged bundle, state just as explicitly that points 1 and 2 do
+**not** apply and why, so a reviewer does not "helpfully" add them back.

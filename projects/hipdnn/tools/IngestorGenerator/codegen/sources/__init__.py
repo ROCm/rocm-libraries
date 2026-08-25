@@ -8,21 +8,30 @@ Every adapter here returns the same shape the config loader itself builds
 (``codegen.models``), so the rest of the pipeline -- pre-mint checks,
 UUID minting, template rendering -- never needs to know which adapter
 produced its input. v1 ships ``interactive`` (a human/skill fills every
-field) and ``hiprtc`` (scan a ``.cpp`` for ``__global__`` entry points).
+field), ``hiprtc`` (scan a ``.cpp`` for ``__global__`` entry points), and
+``rocke`` (introspect a rocKE builder's spec dataclass).
 
-``rocke`` is a later adapter, added once the packer and kpack launcher
-land (per the design's ruling) -- deliberately absent, not stubbed. Adding
-it later means adding a new module here implementing the same
-``SourceAdapter`` protocol; nothing else in this package changes.
+``rocke`` differs from the other two in kind: it reads type annotations
+rather than text, so its extraction is exact rather than best-effort. It
+is also the only adapter whose output cannot be authored in the
+``direct_load`` dialect -- a rocKE kernel reaches the runtime already
+lowered to ``kpack`` by ``hkp_pack``, never as ``rocke_builder``.
+
+``rocke`` imports the rocKE library lazily, inside ``sources/rocke.py``,
+so IngestorGenerator keeps working with rocKE absent from PYTHONPATH.
 """
 
 from .base import SourceAdapter, SourceAdapterResult
 from .hiprtc import HiprtcAdapter
 from .interactive import InteractiveAdapter
+from .rocke import RockeAdapter, RockeIntrospectionError, introspect
 
 __all__ = [
     "SourceAdapter",
     "SourceAdapterResult",
     "HiprtcAdapter",
     "InteractiveAdapter",
+    "RockeAdapter",
+    "RockeIntrospectionError",
+    "introspect",
 ]

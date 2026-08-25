@@ -49,6 +49,18 @@ def binary_ops_config(load_test_config):
     return load_test_config("binary_ops.yaml")
 
 
+@pytest.fixture
+def gfx950_attention_dense_config(load_test_config):
+    """Packaged-dialect reference config, backed by a REAL rocKE builder.
+
+    Loading it needs no rocKE on PYTHONPATH -- the generator never imports the
+    builder; only the optional ``sources.rocke`` adapter does, and only when
+    asked. That separation is deliberate: descriptor generation must not
+    require the kernel toolchain to be installed.
+    """
+    return load_test_config("gfx950_attention_dense.yaml")
+
+
 @pytest.fixture(scope="session")
 def template_dir():
     """Path to the templates/ directory."""
@@ -63,4 +75,4 @@ def generator(template_dir):
 
 @pytest.fixture
 def all_config_names():
-    return ["scale_add.yaml", "binary_ops.yaml"]
+    return ["scale_add.yaml", "binary_ops.yaml", "gfx950_attention_dense.yaml"]

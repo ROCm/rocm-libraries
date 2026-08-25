@@ -18,17 +18,68 @@ from typing import Optional
 #: KMD field types the loader accepts (``DescriptorLoader.hpp``'s ``MetadataField``).
 KMD_FIELD_TYPES: tuple[str, ...] = ("bool", "int", "float", "string", "int_list")
 
-#: The only fully-adapted ``kernel_source.kind`` on develop.
+#: --- Dialects -------------------------------------------------------------
+#:
+#: Two authored dialects exist, and they are NOT interchangeable. Which one a
+#: bundle is written in decides the ``kernel_source`` key names, the accepted
+#: ``kind`` vocabulary, and who consumes the output.
+#:
+#: ``direct_load``: read straight by ``DescriptorLoader.hpp`` out of the
+#:   provider's installed ``descriptors/`` tree. ``kind: embedded_source``
+#:   (``source_file``/``entry_point``); the provider compiles the kernel at
+#:   plan-build time.
+#: ``packaged``: read by the build-time packager ``hkp_pack``, which compiles
+#:   or lowers the kernel, writes it into a per-arch ``.kpack`` archive, and
+#:   REWRITES the shipped descriptor to ``kind: kpack`` before the loader ever
+#:   sees it. ``kind: hip`` (``source``/``entry``/``build``) or ``kind: rocke``
+#:   (``source``/``builder``/``spec``).
+#:
+#: The rocKE path exists only in ``packaged``: the runtime has no
+#: ``rocke_builder`` adapter and never will need one, because a rocKE kernel
+#: reaches the loader already lowered to ``kpack``.
+DIALECT_DIRECT_LOAD = "direct_load"
+DIALECT_PACKAGED = "packaged"
+DIALECTS: tuple[str, ...] = (DIALECT_DIRECT_LOAD, DIALECT_PACKAGED)
+
+#: The one runtime-dispatchable kind authored directly, in ``direct_load``.
 KERNEL_SOURCE_KIND_EMBEDDED = "embedded_source"
-#: v1 ships no adapter; the config loader rejects this kind explicitly.
+#: Runtime kind, but never AUTHORED: ``hkp_pack`` produces it. A config naming
+#: it is rejected -- the packager stamps ``library``/``toc_key``/``symbol``/
+#: ``sha256`` from the artifact it actually built, and a hand-authored value
+#: would be a second, wrong source of truth.
+KERNEL_SOURCE_KIND_KPACK = "kpack"
+#: No adapter on either path; needs ``supportsSourceKind()``, which does not
+#: exist. The config loader rejects it explicitly.
 KERNEL_SOURCE_KIND_HSACO_FILE = "hsaco_file"
-#: Every kind the *format* accepts, whether or not IngestorGenerator can emit it.
+#: Legacy spelling of the runtime enum. Parsed by the loader, dispatchable by
+#: nothing -- a rocKE kernel is authored as ``rocke`` in the packaged dialect.
+KERNEL_SOURCE_KIND_ROCKE_BUILDER = "rocke_builder"
+
+#: ``packaged``-dialect authored kinds, matching ``hkp_pack``'s
+#: ``_validate_ukd_fields`` vocabulary exactly.
+KERNEL_SOURCE_KIND_HIP = "hip"
+KERNEL_SOURCE_KIND_ROCKE = "rocke"
+KERNEL_SOURCE_KIND_HSACO = "hsaco"
+
+#: Every kind either dialect's *format* accepts, whether or not
+#: IngestorGenerator can emit it.
 KERNEL_SOURCE_KINDS: tuple[str, ...] = (
     KERNEL_SOURCE_KIND_EMBEDDED,
     KERNEL_SOURCE_KIND_HSACO_FILE,
-    "kpack",
-    "rocke_builder",
+    KERNEL_SOURCE_KIND_KPACK,
+    KERNEL_SOURCE_KIND_ROCKE_BUILDER,
+    KERNEL_SOURCE_KIND_HIP,
+    KERNEL_SOURCE_KIND_ROCKE,
+    KERNEL_SOURCE_KIND_HSACO,
 )
+
+#: What each dialect will actually emit. Anything else is a ConfigError that
+#: names the dialect, so the diagnostic is "wrong dialect for this kind"
+#: rather than a bare "unsupported".
+EMITTABLE_KINDS_BY_DIALECT: dict[str, tuple[str, ...]] = {
+    DIALECT_DIRECT_LOAD: (KERNEL_SOURCE_KIND_EMBEDDED,),
+    DIALECT_PACKAGED: (KERNEL_SOURCE_KIND_HIP, KERNEL_SOURCE_KIND_ROCKE),
+}
 
 WORKSPACE_POLICIES: tuple[str, ...] = ("none", "fixed", "derived")
 
@@ -105,16 +156,70 @@ class KmdField:
 
 @dataclass
 class KernelSource:
-    """A kernel's ``kernel_source`` object.
+    """A kernel's ``kernel_source`` object, in either authored dialect.
 
-    Only ``embedded_source`` has a runtime adapter; the config loader
-    rejects every other kind before a UUID is minted (see
-    ``config_loader.validate_kernel_source_kind``).
+    One dataclass rather than one per dialect: the fields are disjoint per
+    ``kind``, and the emitter writes only the ones that ``kind`` owns (see
+    ``as_document``). The config loader rejects a kind the configured dialect
+    cannot emit, and rejects fields belonging to a different kind, so an
+    inconsistent combination never reaches a template.
     """
 
     kind: str
+    #: ``direct_load`` / ``embedded_source``.
     source_file: str = ""
     entry_point: str = ""
+    #: ``packaged`` / both kinds. For ``hip`` a path relative to the
+    #: descriptor that names it; for ``rocke`` a DOTTED PYTHON MODULE PATH
+    #: resolved through the importable ``kernels`` package -- not a file under
+    #: the descriptor root. That asymmetry is the format's sharpest trap, so
+    #: it is restated wherever ``source`` is written.
+    source: str = ""
+    #: ``packaged`` / ``hip``: the ``__global__`` entry point.
+    entry: str = ""
+    #: ``packaged`` / ``hip``: ``{"defines": {...}}``, the compile-time knobs.
+    build: dict = field(default_factory=dict)
+    #: ``packaged`` / ``rocke``: the builder function, which MUST take exactly
+    #: ``(spec, *, arch)`` -- ``hkp_pack``'s ``_require_spec_arch_signature``
+    #: refuses anything else rather than freeze an unsuppliable parameter at
+    #: its default.
+    builder: str = ""
+    #: ``packaged`` / ``rocke``: the builder's own spec dataclass, as a plain
+    #: dict. ``hkp_pack`` hydrates it with ``Spec(**fields)``, so every
+    #: non-defaulted field of that dataclass must be present.
+    spec: dict = field(default_factory=dict)
+
+    def as_document(self) -> dict:
+        """The ``kernel_source`` JSON object for this kind, and nothing more.
+
+        Emitting a key another kind owns is not harmless: the runtime loader
+        hard-fails an unknown key, and ``hkp_pack`` validates a closed field
+        set per kind. So this returns exactly the kind's own keys.
+        """
+        if self.kind == KERNEL_SOURCE_KIND_EMBEDDED:
+            return {
+                "kind": self.kind,
+                "source_file": self.source_file,
+                "entry_point": self.entry_point,
+            }
+        if self.kind == KERNEL_SOURCE_KIND_HIP:
+            return {
+                "kind": self.kind,
+                "source": self.source,
+                "entry": self.entry,
+                "build": self.build,
+            }
+        if self.kind == KERNEL_SOURCE_KIND_ROCKE:
+            return {
+                "kind": self.kind,
+                "source": self.source,
+                "builder": self.builder,
+                "spec": self.spec,
+            }
+        raise ValueError(
+            f"kernel_source kind '{self.kind}' has no emitter; the config "
+            f"loader should have rejected it before generation"
+        )
 
 
 @dataclass
@@ -230,13 +335,41 @@ class IngestorConfig:
     kmd_fields: list[KmdField] = field(default_factory=list)
     packs: list[PackSpec] = field(default_factory=list)
     graph_match: GraphMatchSpec = field(default_factory=GraphMatchSpec)
+    #: Which authored dialect to emit. Defaults to ``direct_load`` so every
+    #: config written before dialects existed keeps generating exactly what it
+    #: generated before.
+    dialect: str = DIALECT_DIRECT_LOAD
     kernel_source_kind: str = KERNEL_SOURCE_KIND_EMBEDDED
     workspace_policy: str = "none"
     delegates_to_existing_plan: bool = False
+    #: ``packaged`` only: the authored subpath under the packager's ONE source
+    #: root, e.g. ``rocKE/gfx950_attention_dense``. Preserved verbatim into the
+    #: staged and installed trees, so it is part of the shipped layout rather
+    #: than a scratch detail. Defaults to ``<kind>/<slug>``.
+    authored_subpath: str = ""
+
+    @property
+    def is_packaged(self) -> bool:
+        return self.dialect == DIALECT_PACKAGED
 
     @property
     def is_multi_pack(self) -> bool:
         return len(self.packs) > 1
+
+    @property
+    def descriptor_dir(self) -> str:
+        """Where this bundle's descriptor files go, relative to the output dir.
+
+        ``direct_load`` mirrors the provider's ``descriptors/<slug>/`` tree.
+        ``packaged`` mirrors the packager's source root, where the authored
+        subpath is meaningful and is carried through to the install layout.
+        """
+        if not self.is_packaged:
+            return f"descriptors/{self.engine.slug}"
+        subpath = (
+            self.authored_subpath or f"{self.kernel_source_kind}/{self.engine.slug}"
+        )
+        return f"descriptors/{subpath}"
 
     def kdp_stem(self, pack: PackSpec) -> str:
         """The KDP file's stem (no ``.kdp.json``), mirroring the shipped

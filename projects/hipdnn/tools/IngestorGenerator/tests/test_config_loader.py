@@ -228,6 +228,13 @@ class TestArchShapeCheck:
 
 
 class TestKernelSourceKindRejection:
+    """Each rejection must name the DIALECT, not merely 'unsupported'.
+
+    The common authoring mistake is a real kind written under the wrong
+    dialect, whose fix is a one-line ``dialect:`` change. A bare 'unsupported'
+    sends the author looking for a missing feature instead.
+    """
+
     def test_hsaco_file_rejected_naming_prerequisite(self):
         from codegen.config_loader import _check_kernel_source_kind_implemented
 
@@ -235,18 +242,68 @@ class TestKernelSourceKindRejection:
         with pytest.raises(ConfigError, match="supportsSourceKind"):
             _check_kernel_source_kind_implemented(config)
 
-    @pytest.mark.parametrize("kind", ["kpack", "rocke_builder"])
-    def test_unimplemented_kind_rejected(self, kind):
+    def test_kpack_rejected_as_produced_not_authored(self):
+        """kpack is what hkp_pack WRITES; authoring it is a second source of
+        truth for library/toc_key/symbol/sha256 that can silently disagree
+        with the archive those four are supposed to describe."""
         from codegen.config_loader import _check_kernel_source_kind_implemented
 
-        config = make_minimal_config(kernel_source_kind=kind)
-        with pytest.raises(ConfigError, match="no implementation yet"):
+        config = make_minimal_config(kernel_source_kind="kpack")
+        with pytest.raises(ConfigError, match="PRODUCED kind, never an authored one"):
+            _check_kernel_source_kind_implemented(config)
+
+    def test_rocke_builder_rejected_pointing_at_the_packaged_spelling(self):
+        """The runtime enum spelling parses and nothing dispatches it. A rocKE
+        kernel reaches the loader already lowered to kpack, so the authored
+        spelling is 'rocke' under the packaged dialect."""
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        config = make_minimal_config(kernel_source_kind="rocke_builder")
+        with pytest.raises(ConfigError, match="never reaches the runtime as rocKE"):
+            _check_kernel_source_kind_implemented(config)
+
+    def test_rocke_under_direct_load_names_the_right_dialect(self):
+        """The wrong-dialect case: 'rocke' is real, just not in direct_load."""
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        config = make_minimal_config(kernel_source_kind="rocke")
+        with pytest.raises(ConfigError, match="belongs to dialect 'packaged'"):
+            _check_kernel_source_kind_implemented(config)
+
+    def test_embedded_source_under_packaged_names_the_right_dialect(self):
+        """And the converse direction."""
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+        from codegen.models import DIALECT_PACKAGED
+
+        config = make_minimal_config(
+            kernel_source_kind="embedded_source", dialect=DIALECT_PACKAGED
+        )
+        with pytest.raises(ConfigError, match="belongs to dialect 'direct_load'"):
             _check_kernel_source_kind_implemented(config)
 
     def test_embedded_source_accepted(self):
         from codegen.config_loader import _check_kernel_source_kind_implemented
 
         config = make_minimal_config()
+        _check_kernel_source_kind_implemented(config)  # does not raise
+
+    def test_rocke_accepted_under_packaged(self):
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+        from codegen.models import DIALECT_PACKAGED
+
+        kernel = make_kernel(
+            kernel_source=KernelSource(
+                kind="rocke",
+                source="kernels/gfx950/attention_dense.py",
+                builder="build_attention_dense",
+                spec={"batch": 1},
+            )
+        )
+        config = make_minimal_config(
+            kernel_source_kind="rocke",
+            dialect=DIALECT_PACKAGED,
+            packs=[make_pack(kernels=[kernel], arch=["gfx950"])],
+        )
         _check_kernel_source_kind_implemented(config)  # does not raise
 
     def test_per_kernel_kind_also_checked(self):

@@ -159,11 +159,9 @@ def build_kdp(config: IngestorConfig, pack: PackSpec, ids: dict) -> dict:
             "version": "1.0",
             "id": ids[("kernel", pack.name, kernel.name)],
             "name": kernel.name,
-            "kernel_source": {
-                "kind": kernel.kernel_source.kind,
-                "source_file": kernel.kernel_source.source_file,
-                "entry_point": kernel.kernel_source.entry_point,
-            },
+            # Per-kind keys, never the union: the runtime loader hard-fails an
+            # unknown key and hkp_pack validates a closed set per kind.
+            "kernel_source": kernel.kernel_source.as_document(),
             "metadata": dict(kernel.metadata),
             "priority": kernel.priority,
         }
@@ -181,6 +179,15 @@ def build_kdp(config: IngestorConfig, pack: PackSpec, ids: dict) -> dict:
     }
     if pack.arch:
         kdp["arch"] = list(pack.arch)
+    elif config.is_packaged:
+        # hkp_pack REQUIRES arch on a KDP (_validate_kdp), unlike the runtime
+        # loader, which treats absence as a wildcard. Emitting a packaged KDP
+        # without it fails the pack rather than shipping something wrong, but
+        # the message would be about a missing key rather than the real cause,
+        # so the config loader rejects this earlier with a better one. Reaching
+        # here means that check was bypassed; keep the key present and empty so
+        # the packager's own diagnostic is the one the author sees.
+        kdp["arch"] = []
     return kdp
 
 
@@ -204,20 +211,19 @@ class IngestorGenerator:
     def preview_files(self, config: IngestorConfig) -> list[str]:
         """The file list :meth:`render` would write, without writing anything."""
         slug = config.engine.slug
+        ddir = config.descriptor_dir
         files = [
-            f"descriptors/{slug}/{slug}.kmd.json",
-            f"descriptors/{slug}/{slug}.ued.json",
-            f"descriptors/{slug}/{slug}.udd.json",
+            f"{ddir}/{slug}.kmd.json",
+            f"{ddir}/{slug}.ued.json",
+            f"{ddir}/{slug}.udd.json",
         ]
         if config.engine.has_heuristic:
-            files.append(f"descriptors/{slug}/{slug}.uhd.json")
-        files.append(f"descriptors/{slug}/kernel_dtype_matches_graph.umd.json")
+            files.append(f"{ddir}/{slug}.uhd.json")
+        files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
         for pack in config.packs:
-            files.append(f"descriptors/{slug}/{config.kdp_stem(pack)}.kdp.json")
+            files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
             if config.is_multi_pack:
-                files.append(
-                    f"descriptors/{slug}/operation_is_{pack.discriminator}.umd.json"
-                )
+                files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
         files.append(f"packs/{config.native_class_name}Native.cpp")
         files.append(f"tests/Test{config.engine.pascal_name}Packs.cpp")
         files.append(f"tests/Test{config.engine.pascal_name}Matchers.cpp")
@@ -232,33 +238,33 @@ class IngestorGenerator:
         ids = mint_ids(config)
         written: list[str] = []
         slug = config.engine.slug
-        descriptors_dir = output_dir / "descriptors" / slug
-        descriptors_dir.mkdir(parents=True, exist_ok=True)
+        ddir = config.descriptor_dir
+        (output_dir / ddir).mkdir(parents=True, exist_ok=True)
 
         def write_json(rel: str, obj: dict) -> None:
             path = output_dir / rel
             path.write_text(_dump(obj))
             written.append(rel)
 
-        write_json(f"descriptors/{slug}/{slug}.kmd.json", build_kmd(config, ids))
-        write_json(f"descriptors/{slug}/{slug}.ued.json", build_ued(config, ids))
-        write_json(f"descriptors/{slug}/{slug}.udd.json", build_udd(config, ids))
+        write_json(f"{ddir}/{slug}.kmd.json", build_kmd(config, ids))
+        write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
+        write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
         uhd = build_uhd(config, ids)
         if uhd is not None:
-            write_json(f"descriptors/{slug}/{slug}.uhd.json", uhd)
+            write_json(f"{ddir}/{slug}.uhd.json", uhd)
         write_json(
-            f"descriptors/{slug}/kernel_dtype_matches_graph.umd.json",
+            f"{ddir}/kernel_dtype_matches_graph.umd.json",
             build_kernel_match_umd(config, ids),
         )
         for pack in config.packs:
             write_json(
-                f"descriptors/{slug}/{config.kdp_stem(pack)}.kdp.json",
+                f"{ddir}/{config.kdp_stem(pack)}.kdp.json",
                 build_kdp(config, pack, ids),
             )
             op_umd = build_operation_umd(config, pack, ids)
             if op_umd is not None:
                 write_json(
-                    f"descriptors/{slug}/operation_is_{pack.discriminator}.umd.json",
+                    f"{ddir}/operation_is_{pack.discriminator}.umd.json",
                     op_umd,
                 )
 

@@ -20,9 +20,18 @@ import yaml
 
 from .models import (
     ARCH_BASE_ID_PATTERN,
+    DIALECT_DIRECT_LOAD,
+    DIALECT_PACKAGED,
+    DIALECTS,
+    EMITTABLE_KINDS_BY_DIALECT,
     ENGINE_NAME_PATTERN,
     KERNEL_SOURCE_KIND_EMBEDDED,
+    KERNEL_SOURCE_KIND_HIP,
+    KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_HSACO_FILE,
+    KERNEL_SOURCE_KIND_KPACK,
+    KERNEL_SOURCE_KIND_ROCKE,
+    KERNEL_SOURCE_KIND_ROCKE_BUILDER,
     KERNEL_SOURCE_KINDS,
     KMD_FIELD_TYPES,
     KNOWN_ARCH_BASE_IDS,
@@ -111,6 +120,11 @@ def load_config(path: Path) -> IngestorConfig:
                         kind=ks_raw["kind"],
                         source_file=ks_raw.get("source_file", ""),
                         entry_point=ks_raw.get("entry_point", ""),
+                        source=ks_raw.get("source", ""),
+                        entry=ks_raw.get("entry", ""),
+                        build=dict(ks_raw.get("build", {})),
+                        builder=ks_raw.get("builder", ""),
+                        spec=dict(ks_raw.get("spec", {})),
                     ),
                     metadata=dict(kernel_raw.get("metadata", {})),
                     priority=kernel_raw.get("priority", 0),
@@ -137,9 +151,11 @@ def load_config(path: Path) -> IngestorConfig:
         kmd_fields=kmd_fields,
         packs=packs,
         graph_match=graph_match,
+        dialect=raw.get("dialect", DIALECT_DIRECT_LOAD),
         kernel_source_kind=raw.get("kernel_source_kind", KERNEL_SOURCE_KIND_EMBEDDED),
         workspace_policy=raw.get("workspace_policy", "none"),
         delegates_to_existing_plan=bool(raw.get("delegates_to_existing_plan", False)),
+        authored_subpath=raw.get("authored_subpath", ""),
     )
 
     _validate_config(config)
@@ -384,12 +400,45 @@ def _check_arch_shape(config: IngestorConfig) -> list[str]:
     return messages
 
 
-def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
-    """Reject a ``kernel_source.kind`` this tool's runtime target cannot yet
-    dispatch, naming the missing prerequisite rather than emitting a
-    descriptor that parses and then fails construction with a generic
-    "no implementation yet" (``KernelIngestorStateManager.hpp:396-402``).
+def _check_dialect(config: IngestorConfig) -> None:
+    """The dialect is one of the two, and a packaged bundle names its arch.
+
+    ``hkp_pack._validate_kdp`` REQUIRES ``arch`` on every KDP, where the
+    runtime loader treats absence as a wildcard. Catching it here names the
+    cause; letting it through produces a missing-key error from the packager
+    about a file this tool wrote.
     """
+    if config.dialect not in DIALECTS:
+        raise ConfigError(
+            f"dialect '{config.dialect}' must be one of {DIALECTS}. "
+            f"'{DIALECT_DIRECT_LOAD}' emits descriptors the runtime loader reads "
+            f"straight out of the provider's descriptors/ tree; "
+            f"'{DIALECT_PACKAGED}' emits descriptors hkp_pack compiles/lowers "
+            f"into a per-arch .kpack archive at build time."
+        )
+    if not config.is_packaged:
+        return
+    for pack in config.packs:
+        if not pack.arch:
+            raise ConfigError(
+                f"pack '{pack.name}' declares no 'arch', which the packaged "
+                f"dialect requires: hkp_pack validates every KDP for a non-empty "
+                f"arch list and uses it to decide which per-arch shard the "
+                f"descriptor ships in. (The runtime loader is laxer -- it reads "
+                f"an absent arch as a wildcard -- but a packaged descriptor is "
+                f"read by the packager first.)"
+            )
+
+
+def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
+    """Reject a ``kernel_source.kind`` the configured dialect cannot emit.
+
+    Each rejection names the dialect, because the common mistake is a kind
+    that IS real but belongs to the other dialect -- a diagnostic saying
+    'unsupported' would send an author looking for a missing feature instead
+    of a one-line ``dialect:`` change.
+    """
+    emittable = EMITTABLE_KINDS_BY_DIALECT[config.dialect]
     for kind_source, where in [(config.kernel_source_kind, "kernel_source_kind")] + [
         (
             kernel.kernel_source.kind,
@@ -400,23 +449,85 @@ def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
     ]:
         if kind_source not in KERNEL_SOURCE_KINDS:
             raise ConfigError(
-                f"{where} '{kind_source}' is not a recognized kernel_source kind."
+                f"{where} '{kind_source}' is not a recognized kernel_source kind. "
+                f"Recognized: {', '.join(KERNEL_SOURCE_KINDS)}."
             )
-        if kind_source == KERNEL_SOURCE_KIND_HSACO_FILE:
+        if kind_source in emittable:
+            continue
+
+        if kind_source in (KERNEL_SOURCE_KIND_HSACO_FILE, KERNEL_SOURCE_KIND_HSACO):
             raise ConfigError(
-                f"{where} is 'hsaco_file', which is out of scope for v1: it "
-                f"needs supportsSourceKind() on IKernelDispatchHandler, which "
-                f"does not exist on develop and is a shared-SDK interface "
-                f"change wanting its own sign-off. Use 'embedded_source' "
-                f"instead, or wait for supportsSourceKind() to land."
+                f"{where} is '{kind_source}', which no adapter implements on "
+                f"either path. The runtime needs supportsSourceKind() on "
+                f"IKernelDispatchHandler -- a shared-SDK interface change that "
+                f"does not exist on develop and wants its own sign-off."
             )
-        if kind_source != KERNEL_SOURCE_KIND_EMBEDDED:
+        if kind_source == KERNEL_SOURCE_KIND_KPACK:
             raise ConfigError(
-                f"{where} is '{kind_source}', which parses but has no "
-                f"implementation yet (KernelIngestorStateManager.hpp:396-402: "
-                f"'no implementation yet'). Only 'embedded_source' is "
-                f"implemented; use it instead."
+                f"{where} is 'kpack', which is a PRODUCED kind, never an "
+                f"authored one. hkp_pack writes it -- stamping library, "
+                f"toc_key, symbol and sha256 from the artifact it actually "
+                f"built -- when it lowers a 'hip' or 'rocke' descriptor. "
+                f"Authoring those four by hand would be a second source of "
+                f"truth that silently disagrees with the archive. Author "
+                f"'{KERNEL_SOURCE_KIND_ROCKE}' or '{KERNEL_SOURCE_KIND_HIP}' "
+                f"under dialect '{DIALECT_PACKAGED}' instead."
             )
+        if kind_source == KERNEL_SOURCE_KIND_ROCKE_BUILDER:
+            raise ConfigError(
+                f"{where} is 'rocke_builder', the runtime enum spelling, which "
+                f"the loader parses and nothing dispatches. A rocKE kernel never "
+                f"reaches the runtime as rocKE: hkp_pack lowers it through comgr "
+                f"at build time and rewrites the shipped descriptor to 'kpack'. "
+                f"Author kind '{KERNEL_SOURCE_KIND_ROCKE}' under dialect "
+                f"'{DIALECT_PACKAGED}'."
+            )
+        # A real kind, wrong dialect -- the most likely mistake, so say exactly
+        # which one-line change fixes it.
+        other = (
+            DIALECT_PACKAGED
+            if config.dialect == DIALECT_DIRECT_LOAD
+            else DIALECT_DIRECT_LOAD
+        )
+        if kind_source in EMITTABLE_KINDS_BY_DIALECT[other]:
+            raise ConfigError(
+                f"{where} is '{kind_source}', which belongs to dialect "
+                f"'{other}', but this config declares dialect "
+                f"'{config.dialect}' (which emits "
+                f"{', '.join(emittable)}). Set 'dialect: {other}', or use one "
+                f"of this dialect's kinds."
+            )
+        raise ConfigError(
+            f"{where} is '{kind_source}', which dialect '{config.dialect}' "
+            f"cannot emit (it emits {', '.join(emittable)})."
+        )
+
+
+def _check_kernel_source_fields(config: IngestorConfig) -> None:
+    """Each kernel supplies its kind's own fields, and no other kind's.
+
+    Mirrors ``hkp_pack._validate_ukd_fields``, which requires exactly these
+    per kind. Checked here so an author sees it before a comgr run rather
+    than after.
+    """
+    required_by_kind = {
+        KERNEL_SOURCE_KIND_EMBEDDED: ("source_file", "entry_point"),
+        KERNEL_SOURCE_KIND_HIP: ("source", "entry"),
+        KERNEL_SOURCE_KIND_ROCKE: ("source", "builder", "spec"),
+    }
+    for pack in config.packs:
+        for kernel in pack.kernels:
+            where = f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source"
+            ks = kernel.kernel_source
+            for attr in required_by_kind.get(ks.kind, ()):
+                if not getattr(ks, attr):
+                    raise ConfigError(
+                        f"{where} is kind '{ks.kind}' but supplies no "
+                        f"'{attr}'. Kind '{ks.kind}' requires "
+                        f"{', '.join(required_by_kind[ks.kind])}."
+                    )
+            if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(ks.spec, dict):
+                raise ConfigError(f"{where}: 'spec' must be a mapping.")
 
 
 def _check_workspace_policy(config: IngestorConfig) -> None:
@@ -467,6 +578,10 @@ def _validate_config(config: IngestorConfig) -> list[str]:
 
     Returns any non-fatal warning messages (currently only from check #5).
     """
+    # The dialect decides which kinds are legal, so it is settled first --
+    # every kind diagnostic below names it.
+    _check_dialect(config)
+
     _check_engine_name_scoped(config)  # #1
     _check_knobs_int_typed(config)  # #2
     _check_kernel_metadata_against_kmd(config)  # #3
@@ -476,6 +591,7 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # Additional structural checks needed for a config to generate at all;
     # not among the five loader-mirroring checks, but still pre-mint.
     _check_kernel_source_kind_implemented(config)
+    _check_kernel_source_fields(config)
     _check_workspace_policy(config)
     _check_pack_discriminators(config)
 
