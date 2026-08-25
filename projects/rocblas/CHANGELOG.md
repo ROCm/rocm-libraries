@@ -7,7 +7,8 @@ rocBLAS documentation is available at
 
 ### Optimized
 
-* Level 2 `gemv` non-transposed (`transA == N`) for a short output and a long reduction. The grid was sized by the output length alone, so a small `m` could not fill the device however large `n` was; the `n` reduction is now split across `gridDim.y` and reduced, mirroring the existing skinny-`n` path on the transposed side. Measured on gfx1100 at a fixed 1074 MB operand, fp64: `m = 32` 25.9 ms to 1.75 ms, `m = 64` 17.6 ms to 1.66 ms, `m = 128` 15.4 ms to 1.66 ms, `m = 256` 7.78 ms to 1.65 ms, `m = 512` 3.96 ms to 1.62 ms. Applies for `m <= 512` (`m <= 256` for double-complex) with at least 2^20 elements; other shapes and `transA != N` are unchanged.
+* Level 2 `gemv` non-transposed (`transA == N`) for a short output and a long reduction: the `n` reduction is now split across `gridDim.y` and reduced in a second pass, mirroring the existing skinny-`n` path on the transposed side. The split is applied when the output grid has at most 8 tiles and the column split produces at least 4 parallel blocks; other shapes and `transA != N` are unchanged.
+
 ### Added
 
 * Level 3 grouped batched GEMM functions `rocblas_sgemm_grouped_batched`, `rocblas_dgemm_grouped_batched`, and `rocblas_gemm_grouped_batched_ex` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
