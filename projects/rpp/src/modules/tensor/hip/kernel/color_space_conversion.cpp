@@ -79,9 +79,8 @@ __device__ static void rpp_yuv_to_rgb_pixel(T y, T u, T v, T* r, T* g, T* b) {
 // offset (>>16) BEFORE the luma gain; the luma table bakes gain cy, black-level offset, +0x8000
 // rounding and uint8 clip. All shifts are arithmetic (floor), matching FFmpeg. u,v are the
 // already-upsampled 8-bit chroma samples. Used only by the cubic_v kernel.
-// See FFmpeg9_YUV_to_RGB_spec.md.
 template <typename T>
-__device__ static void rpp_yuv_to_rgb_pixel_ffmpeg(T y, T u, T v, T* r, T* g, T* b) {
+__device__ static void rpp_yuv_to_rgb_pixel_fixed(T y, T u, T v, T* r, T* g, T* b) {
     const int Y = (int)y, U = (int)u, V = (int)v;
     const int kR = Y + ((V * rpp_y2r_crv_s) >> 16) - (rpp_y2r_crv_s >> 9);
     const int kB = Y + ((U * rpp_y2r_cbu_s) >> 16) - (rpp_y2r_cbu_s >> 9);
@@ -196,7 +195,7 @@ __global__ void yuv_to_rgb_cubic_v_hip_kernel(uint8_t* __restrict__ dp_y, int y_
 
     // YUV → RGB conversion (FFmpeg-exact integer table math)
     T r_out, g_out, b_out;
-    rpp_yuv_to_rgb_pixel_ffmpeg<T>(luma, u_val, v_val, &r_out, &g_out, &b_out);
+    rpp_yuv_to_rgb_pixel_fixed<T>(luma, u_val, v_val, &r_out, &g_out, &b_out);
 
     T* p_dst = (T*)(dp_rgb + y * rgb_pitch + x * rgb_pp);
     p_dst[0] = r_out;
