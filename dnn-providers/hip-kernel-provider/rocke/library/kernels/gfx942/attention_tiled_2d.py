@@ -6035,8 +6035,17 @@ def build_gfx942_4warp_gqa(
     ) // 256  # V-fill: elements per thread (256 = 4 wave64 threads)
     v_fill_nloads = v_fill_epw // 8  # 8-wide (dwordx4) loads per thread
     ITERS = spec.binary_search_iters
+    from ..common.attention_unified import gfx942_gqa_fold_eligible
 
-    b = IRBuilder(spec.kernel_name() + "_4wgqa")
+    # GQA head-fold is the DEFAULT for the qualifying cohort (D128, GQA 4:1, sliding-
+    # window, bf16, paged block_size<=32): fold 4 query heads into the 128-row M-tile
+    # so KV loads once per kv-head. The SAME predicate drives the launch grid (no drift).
+    _FOLD = HD128_PIPE and gfx942_gqa_fold_eligible(
+        HD, GQAG, spec.sliding_window, spec.dtype, BS
+    )
+    TOKBLK = 32 if _FOLD else 128  # query tokens per CTA (fold packs 4 heads/tile)
+
+    b = IRBuilder(spec.kernel_name() + ("_4wgqa_fold" if _FOLD else "_4wgqa"))
     b.kernel.attrs["max_workgroup_size"] = 256  # 4 wave64 warps
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
@@ -6079,19 +6088,27 @@ def build_gfx942_4warp_gqa(
     lane = b.mod(tid, b.const_i32(64))
     ld = decode_mfma_lanes(b, at, lane)
     wq = b.mul(wid, b.const_i32(32))
-    qhead = b.block_id_x()  # grid.x = num_query_heads
-    kvh = b.div(qhead, b.const_i32(GQAG))
-    gqb = b.block_id_y()  # grid.y = total_q_blocks (BLOCK_M=128)
+    # FOLD: grid.x = num_kv_heads (one CTA covers GQAG q-heads for one kv-head, KV
+    # loaded once); non-fold: grid.x = num_query_heads (one head per CTA).
+    if _FOLD:
+        qhead = None
+        kvh = b.block_id_x()
+    else:
+        qhead = b.block_id_x()  # grid.x = num_query_heads
+        kvh = b.div(qhead, b.const_i32(GQAG))
+    gqb = b.block_id_y()  # fold: 32-token q-block; else BLOCK_M=128 q-block
 
     # in-kernel CTA->seq via binary_search on cu_seqlens_q (mirrors :5590)
-    sid = binary_search_seq_idx(b, CUQ, gqb, num_seqs_p, block_q=128, iterations=ITERS)
+    sid = binary_search_seq_idx(
+        b, CUQ, gqb, num_seqs_p, block_q=TOKBLK, iterations=ITERS
+    )
     cu_q_start = b.global_load_i32(CUQ, sid)
     cu_q_stop = b.global_load_i32(CUQ, b.add(sid, b.const_i32(1)))
     qlen = b.sub(cu_q_stop, cu_q_start)
-    q_block_start = b.add(b.div(cu_q_start, b.const_i32(128)), sid)
+    q_block_start = b.add(b.div(cu_q_start, b.const_i32(TOKBLK)), sid)
     lqb = b.sub(gqb, q_block_start)
     klen = b.global_load_i32(KL, sid)
-    qbase = b.mul(lqb, b.const_i32(128))
+    qbase = b.mul(lqb, b.const_i32(TOKBLK))
     qstart = b.add(cu_q_start, qbase)
     with b.scf_if(
         b.cmp_ge(qbase, qlen)
@@ -6155,7 +6172,7 @@ def build_gfx942_4warp_gqa(
     context_off = b.sub(klen, qlen)  # prefix in KV cache (qlen!=klen: chunked/decode)
     window = int(spec.sliding_window)  # 0 = causal; >0 = SWA (keep dist < window)
     causal_t = b.div(
-        b.add(b.add(context_off, qbase), b.const_i32(128 + BN - 1)), b.const_i32(BN)
+        b.add(b.add(context_off, qbase), b.const_i32(TOKBLK + BN - 1)), b.const_i32(BN)
     )
     klen_t = b.div(b.add(klen, b.const_i32(BN - 1)), b.const_i32(BN))
     kvend = b.select(b.cmp_lt(causal_t, klen_t), causal_t, klen_t)
@@ -6171,7 +6188,7 @@ def build_gfx942_4warp_gqa(
     # [kv*BN,kv*BN+BN): causal(key<=q) AND window(q-key<window) AND varlen(key<klen).
     q_blk_lo = b.add(context_off, qbase)  # min q_g
     q_blk_hi = b.add(
-        b.add(context_off, qbase), b.const_i32(127)
+        b.add(context_off, qbase), b.const_i32(TOKBLK - 1)
     )  # max q_g (BLOCK_M=128)
     _cn = b.sub(q_blk_lo, b.const_i32(BN - 1))  # causal-interior: kv*BN+BN-1<=q_blk_lo
     int_end_c = b.select(
@@ -6317,8 +6334,15 @@ def build_gfx942_4warp_gqa(
             koff = b.add(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
-            q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
-            q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
+            if _FOLD:
+                # m-map: M-row (wq + n_in_atom) -> (tok=m//4, head=m%4), head-fastest.
+                _m = b.add(wq, ld.n_in_atom)
+                _tok = b.add(qstart, b.div(_m, b.const_i32(4)))
+                _hd = b.add(b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(4)))
+                q_off, _ = q_desc.offset(b, token=_tok, head=_hd, dim=koff)
+            else:
+                q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+                q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
                 if HD128_PIPE:
@@ -6344,7 +6368,14 @@ def build_gfx942_4warp_gqa(
                     key_g = b.add(
                         b.add(b.mul(kv, b.const_i32(BN)), b.const_i32(kt * 32)), rr
                     )
-                    q_g = b.add(context_off, b.add(qbase, b.add(wq, cc)))
+                    if _FOLD:
+                        # fold: token = qbase + (wq+cc)//4 (mask is head-independent)
+                        q_g = b.add(
+                            context_off,
+                            b.add(qbase, b.div(b.add(wq, cc), b.const_i32(4))),
+                        )
+                    else:
+                        q_g = b.add(context_off, b.add(qbase, b.add(wq, cc)))
                     mask_cond = b.lor(b.cmp_gt(key_g, q_g), b.cmp_ge(key_g, klen))
                     if window > 0:
                         mask_cond = b.lor(
@@ -6461,8 +6492,19 @@ def build_gfx942_4warp_gqa(
         for i in range(CPL):
             r, c = at.lane_to_output(b, lane, i)
             dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
-            q_inseq = b.add(qbase, b.add(wq, c))
-            oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), b.const_i32(H)), qhead)
+            if _FOLD:
+                # inverse m-map: token = qstart + (wq+c)//4, head = kvh*GQAG + (wq+c)%4
+                _m = b.add(wq, c)
+                _tl = b.div(_m, b.const_i32(4))
+                _hl = b.mod(_m, b.const_i32(4))
+                q_inseq = b.add(qbase, _tl)
+                oi = b.add(
+                    b.mul(b.add(qstart, _tl), b.const_i32(H)),
+                    b.add(b.mul(kvh, b.const_i32(GQAG)), _hl),
+                )
+            else:
+                q_inseq = b.add(qbase, b.add(wq, c))
+                oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), b.const_i32(H)), qhead)
             val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
