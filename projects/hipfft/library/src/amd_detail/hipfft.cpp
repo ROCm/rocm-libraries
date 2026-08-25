@@ -845,6 +845,16 @@ struct hipfftHandle_t
     rocfft_comm_type comm_type   = rocfft_comm_none;
     void*            comm_handle = nullptr;
 
+    bool jit_load_callback_enabled() const
+    {
+        return !load_callback_symbol.empty() && !load_callback_bitcode.empty();
+    }
+
+    bool jit_store_callback_enabled() const
+    {
+        return !store_callback_symbol.empty() && !store_callback_bitcode.empty();
+    }
+
     bool is_valid_for(const hipLibXtDesc& lib_desc, fft_io desc_io_label) const
     {
         // Plan must be initialized for multi-device usage
@@ -1222,7 +1232,14 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                 rocfft_plan_description_set_comm(desc, plan->comm_type, plan->comm_handle));
 
         // set JIT callbacks if specified
-        if(!plan->load_callback_symbol.empty() && !plan->load_callback_bitcode.empty())
+
+        // JIT callbacks cannot currently be combined with multi-GPU
+        // transforms.
+        if((plan->jit_load_callback_enabled() || plan->jit_store_callback_enabled())
+           && plan->device_contexts.size() > 1)
+            return HIPFFT_NOT_IMPLEMENTED;
+
+        if(plan->jit_load_callback_enabled())
         {
             ROCFFT_EXPECT_SUCCESS(
                 rocfft_plan_description_set_load_callback(desc,
@@ -1231,7 +1248,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                                                           plan->load_callback_bitcode.size(),
                                                           plan->load_callback_lds_bytes));
         }
-        if(!plan->store_callback_symbol.empty() && !plan->store_callback_bitcode.empty())
+        if(plan->jit_store_callback_enabled())
         {
             ROCFFT_EXPECT_SUCCESS(
                 rocfft_plan_description_set_store_callback(desc,
@@ -1338,12 +1355,12 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     }
 
     // if JIT callbacks are used, pass the cbdata to the execution info
-    if(!plan->load_callback_symbol.empty() && !plan->load_callback_bitcode.empty())
+    if(plan->jit_load_callback_enabled())
     {
         ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_load_callback_data(
             plan->info, plan->load_callback_data, plan->device_contexts.size()));
     }
-    if(!plan->store_callback_symbol.empty() && plan->store_callback_bitcode.empty())
+    if(plan->jit_store_callback_enabled())
     {
         ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_store_callback_data(
             plan->info, plan->store_callback_data, plan->device_contexts.size()));
