@@ -10,7 +10,7 @@
 {% endif %}
     {{ slug }}/kernel_dtype_matches_graph.umd.json
 {% for pack in config.packs %}
-    {{ slug }}/{{ slug }}_{{ pack.name }}.kdp.json
+    {{ slug }}/{{ config.kdp_stem(pack) }}.kdp.json
 {% if config.is_multi_pack %}
     {{ slug }}/operation_is_{{ pack.discriminator }}.umd.json
 {% endif %}
