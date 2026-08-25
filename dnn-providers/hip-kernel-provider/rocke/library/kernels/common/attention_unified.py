@@ -2007,6 +2007,23 @@ def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
     )
 
 
+def _enable_gfx950_fp8_decode_wpe3(problem: UnifiedAttentionProblem) -> bool:
+    """gfx950 fp8 long-KV decode (routed to the 3D split-KV path) -> waves_per_eu=3.
+
+    Same-run A/B (waves_per_eu the only difference) showed a small consistent win
+    on the long-KV decode shapes and reduced the run-to-run variance. waves_per_eu
+    is a pure AMDGPU occupancy hint (kernel attribute only, no compute change), so
+    output is bit-identical. Same cohort ``_enable_fp8_decode_3d`` routes to 3D.
+    """
+    return (
+        _resolve_attention_arch() == "gfx950"
+        and problem.use_fp8
+        and problem.all_decode
+        and problem.sliding_window == 0
+        and problem.max_seqlen_k > 512
+    )
+
+
 def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
     """Gate the gfx942 fp16 transposed-x8 attention family.
 
@@ -2951,6 +2968,8 @@ def _gfx942_3d_tile_size_override(problem: UnifiedAttentionProblem) -> Optional[
 def _select_3d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
     if problem.waves_per_eu is not None:
         return problem.waves_per_eu
+    if _enable_gfx950_fp8_decode_wpe3(problem):
+        return 3
     if _resolve_attention_arch() == "gfx1250":
         return 2
     return None

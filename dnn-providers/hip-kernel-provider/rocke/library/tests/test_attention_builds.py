@@ -1966,10 +1966,17 @@ class TestAttentionHelpers(unittest.TestCase):
         is undersized). 2D is preserved where split-KV loses: short KV and SWA;
         prefill and bf16 are untouched by the gate.
         """
+
         def _p(**kw):
             base = dict(
-                total_q=64, num_seqs=64, num_query_heads=64, num_kv_heads=8,
-                head_size=64, block_size=16, max_seqlen_q=1, max_seqlen_k=8192,
+                total_q=64,
+                num_seqs=64,
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=1,
+                max_seqlen_k=8192,
                 dtype="bf16",
             )
             base.update(kw)
@@ -1983,6 +1990,45 @@ class TestAttentionHelpers(unittest.TestCase):
             _p(use_fp8=True, max_seqlen_q=512, total_q=512).select_path(), "2d"
         )
         self.assertEqual(_p(use_fp8=False).select_path(), "2d")
+
+    def test_gfx950_fp8_decode_3d_waves_per_eu(self):
+        """gfx950 fp8 long-KV decode (3D path) selects waves_per_eu=3 (occupancy
+        hint, bit-identical output). Same cohort as the fp8-decode->3d routing;
+        gfx942, short-KV/SWA, and bf16 are unaffected. An explicit
+        problem.waves_per_eu still wins.
+        """
+        import kernels.common.attention_unified as au
+
+        def _p(**kw):
+            base = dict(
+                total_q=64,
+                num_seqs=64,
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=1,
+                max_seqlen_k=8192,
+                dtype="bf16",
+            )
+            base.update(kw)
+            return UnifiedAttentionProblem(**base)
+
+        with _patch_resolved_arch("gfx950"):
+            self.assertEqual(au._select_3d_waves_per_eu(_p(use_fp8=True)), 3)
+            self.assertIsNone(
+                au._select_3d_waves_per_eu(_p(use_fp8=True, max_seqlen_k=512))
+            )
+            self.assertIsNone(
+                au._select_3d_waves_per_eu(_p(use_fp8=True, sliding_window=128))
+            )
+            self.assertIsNone(au._select_3d_waves_per_eu(_p(use_fp8=False)))
+            # explicit override still wins over the gate.
+            self.assertEqual(
+                au._select_3d_waves_per_eu(_p(use_fp8=True, waves_per_eu=2)), 2
+            )
+        with _patch_resolved_arch("gfx942"):
+            self.assertIsNone(au._select_3d_waves_per_eu(_p(use_fp8=True)))
 
     def test_gfx942_d64_decode_num_warps(self):
         """gfx942 D64 decode picks num_warps=1.
