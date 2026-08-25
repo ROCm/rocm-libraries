@@ -125,7 +125,7 @@ RppStatus rppt_tensor_max(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t maxA
 
 /*! \brief Normalize Generic augmentation on HIP/HOST backend
  * \details Normalizes the input generic ND buffer by removing the mean and dividing by the standard
- * deviation for a given ND Tensor. Supports u8->f32, i8->f32, f16->f16 and f32->f32 datatypes. Also
+ * deviation for a given ND Tensor. Supports u8->u8, i8->i8, f16->f16 and f32->f32 datatypes. Also
  * has toggle variant(NHWC->NCHW) support for 3D. \param [in] srcPtr source tensor in HIP memory
  * (for HIP backend) or HOST memory (for HOST backend) \param [in] srcGenericDescPtr source tensor
  * descriptor \param [out] dstPtr destination tensor in HIP memory (for HIP backend) or HOST memory

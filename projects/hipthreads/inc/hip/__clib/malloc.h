@@ -60,7 +60,7 @@ inline hipStream_t &getEnqueingStream() {
  * - Throws on HIP failure instead of returning `nullptr`.
  * - Guarantees stream sync before return (blocking semantics).
  *
- * @note Unlike `hipMalloc`, this function is safe to call while `hip::thread`
+ * @note Unlike `hipMalloc`, this function is safe to call while `hip::wthread`
  *       objects are alive. It uses `hipMallocAsync` on a non-blocking stream,
  *       avoiding the deadlock that would occur with synchronous HIP APIs when
  *       the hipThreads persistent scheduler holds the GPU context.

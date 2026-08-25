@@ -60,7 +60,7 @@ void test()
     int threads_active = N;
 
     for (int i = 0; i < N; ++i) {
-        hip::thread t = support::make_test_thread([&] {
+        hip::wthread t = support::make_test_thread([&] {
             // Emulate work being done.
             hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(1));
 

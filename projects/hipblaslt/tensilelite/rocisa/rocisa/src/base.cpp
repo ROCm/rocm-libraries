@@ -39,8 +39,8 @@ namespace rocisa
 
     std::string getGlcBitName()
     {
-        auto hasGLCModifier = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
-        auto hasSC0Modifier = rocIsa::getInstance().getAsmCaps()["HasSC0Modifier"];
+        auto hasGLCModifier = capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasGLCModifier");
+        auto hasSC0Modifier = capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasSC0Modifier");
         if(hasGLCModifier)
             return "glc";
         if(hasSC0Modifier)
@@ -50,8 +50,8 @@ namespace rocisa
 
     std::string getSlcBitName()
     {
-        auto hasGLCModifier = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
-        auto hasSC0Modifier = rocIsa::getInstance().getAsmCaps()["HasSC0Modifier"];
+        auto hasGLCModifier = capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasGLCModifier");
+        auto hasSC0Modifier = capOrDefault(rocIsa::getInstance().getAsmCaps(), "HasSC0Modifier");
         if(hasGLCModifier)
             return "slc";
         if(hasSC0Modifier)

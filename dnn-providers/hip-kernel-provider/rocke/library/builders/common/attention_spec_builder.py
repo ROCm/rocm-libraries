@@ -26,6 +26,8 @@ from kernels.common.attention_unified import (
     _enable_gfx942_bf16_flash,
     _enable_gfx942_flash_k_sliced_ldsseq,
     _enable_gfx942_flash_k_sliced_ring,
+    _select_gfx942_flash_ring_depth,
+    _select_gfx942_flash_k_slice_hd,
     _enable_gfx942_flash_mask_limit,
     _enable_gfx942_flash_q_direct,
     _enable_gfx942_fp16_flash,
@@ -49,7 +51,6 @@ from kernels.common.attention_unified import (
     _gfx942_flash_wide_setting,
     _kv_storage_dtype,
     _num_segments,
-    _resolve_attention_arch,
     _resolve_gfx1250_tiled3d,
     _select_2d_block_m_per_warp,
     _select_2d_num_warps,
@@ -64,13 +65,24 @@ from kernels.common.attention_unified import (
 # Imported as a module (not a bound symbol) so tests that
 # ``mock.patch.object(attention_unified, "_d256_gfx950_fast", ...)`` still steer
 # the builder's fast-route branch below (a bound import would freeze the ref).
+#
+# ``_resolve_attention_arch`` MUST be reached through this module handle for the
+# same reason, and is deliberately absent from the ``from ... import`` list
+# above. It used to be bound, which silently defeated
+# ``mock.patch.object(au, "_resolve_attention_arch", ...)``: the patch rebinds
+# the attribute on the module, but a bound reference captured at import time
+# still points at the original. The builder then resolved the REAL device arch,
+# ``_tiled_2d_impl`` handed back that arch's spec class, and the gfx950-only
+# override fields (e.g. ``use_q_direct_reg``) raised TypeError -- but only when
+# this module was already imported before the patch was applied, so the
+# breakage looked like flaky test ordering.
 from kernels.common import attention_unified as _kau
 
 
 def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ):
-    arch = _resolve_attention_arch()
+    arch = _kau._resolve_attention_arch()
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
     if arch == "gfx1250":
         return UnifiedAttention2DTiledSpec(
@@ -91,7 +103,14 @@ def _tiled_spec_from_problem(
             tile_size=_select_2d_tile_size(problem),
             block_m_per_warp=16,
         )
-    if _enable_gfx942_bf16_flash(problem):
+    # The gfx942 4-warp GQA cohort (D256 + D128 sliding-window, see _gfx942_4warp_fast)
+    # is built by build_gfx942_4warp_gqa with its own HD/BS-derived geometry, and needs
+    # the default branch's *discriminator* spec (num_warps=1, no mfma_32x32 / transposed_qk
+    # / single-buffer), NOT the flash spec. The prior PR opened the flash gate for D128-SW
+    # (kept as the fallback for SW edge cases the 4-warp excludes), so guard both flash
+    # branches against the 4-warp cohort here -- otherwise the flash fields (num_warps=2,
+    # single-buffer) build a spec the __post_init__ validator rejects for fp16 bs16/32.
+    if _enable_gfx942_bf16_flash(problem) and not _kau._gfx942_4warp_fast(problem):
         # gfx942 bf16 wide-K (32x32x8) transposed flash path. DEFAULT-ON for
         # eligible shapes (small_q_narrow excluded; see _enable_gfx942_bf16_flash).
         # Uses the CDNA3-legal mfma_f32_32x32x8_bf16 atom (the K=16 bf16 atom is
@@ -139,12 +158,14 @@ def _tiled_spec_from_problem(
             use_conflict_free_v_store=use_cfvst,
             use_k_single_buffer=single_k,
             use_k_sliced_ring=use_ring,
+            ring_depth=_select_gfx942_flash_ring_depth(problem),
+            k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
             use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
             use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
             kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
             use_i64_kv_addr=_enable_i64_kv_addr(problem),
         )
-    if _enable_gfx942_fp16_flash(problem):
+    if _enable_gfx942_fp16_flash(problem) and not _kau._gfx942_4warp_fast(problem):
         num_warps = _select_gfx942_flash_num_warps(problem)
         use_cfvst = _gfx942_flash_use_cfvst(problem)
         use_single = _gfx942_flash_use_single_buffer(problem)
@@ -175,6 +196,8 @@ def _tiled_spec_from_problem(
             use_conflict_free_v_store=use_cfvst,
             use_k_single_buffer=use_single,
             use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
+            ring_depth=_select_gfx942_flash_ring_depth(problem),
+            k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
             use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
             use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
             kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
@@ -314,7 +337,7 @@ def _tiled_spec_from_problem(
 def _tiled_3d_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ):
-    arch = _resolve_attention_arch()
+    arch = _kau._resolve_attention_arch()
     UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(arch)
     tile_size_override = _gfx942_3d_tile_size_override(problem)
     if arch == "gfx1250":

@@ -37,7 +37,7 @@ int main(int, char**) {
     ::std::shared_timed_mutex m;
     m.lock();
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       bool succeeded = m.try_lock();
       assert(!succeeded);
     });
@@ -51,7 +51,7 @@ int main(int, char**) {
     ::std::shared_timed_mutex m;
     m.lock_shared();
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       bool succeeded = m.try_lock();
       assert(!succeeded);
     });

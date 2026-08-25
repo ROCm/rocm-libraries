@@ -137,14 +137,13 @@ struct JoinableThread : std::thread
 };
 
 template <typename F, typename T, std::size_t... Is>
-static auto
-    callFuncUnpackArgsImpl(F f, T args, [[maybe_unused]] std::index_sequence<Is...> sequence)
+auto callFuncUnpackArgsImpl(F f, T args, [[maybe_unused]] std::index_sequence<Is...> sequence)
 {
     return f(std::get<Is>(args)...);
 }
 
 template <typename F, typename T>
-static auto callFuncUnpackArgs(F f, T args)
+auto callFuncUnpackArgs(F f, T args)
 {
     constexpr std::size_t N = std::tuple_size<T>{};
     return callFuncUnpackArgsImpl(f, args, std::make_index_sequence<N>{});
@@ -189,10 +188,11 @@ struct ParallelTensorFunctorDynamic
 
     void operator()(std::size_t numThreads = 1) const
     {
-        if(numThreads == 0 || totalElements == 0)
+        if(totalElements == 0)
         {
             return;
         }
+        numThreads = std::min(totalElements, std::max<std::size_t>(1, numThreads));
 
         const std::size_t workPerThread = (totalElements + numThreads - 1) / numThreads;
 
@@ -225,7 +225,7 @@ struct ParallelTensorFunctorDynamic
 };
 
 template <typename F>
-static auto makeParallelTensorFunctor(F f, const std::vector<int64_t>& dimensions)
+auto makeParallelTensorFunctor(F f, const std::vector<int64_t>& dimensions)
 {
     return ParallelTensorFunctorDynamic<F>(f, dimensions);
 }

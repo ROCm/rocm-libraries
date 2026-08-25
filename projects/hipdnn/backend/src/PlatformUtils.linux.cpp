@@ -8,6 +8,7 @@
 #include "HipdnnException.hpp"
 #include <dlfcn.h>
 #include <spdlog/fmt/fmt.h>
+#include <sys/random.h>
 #include <sys/utsname.h>
 
 namespace hipdnn_backend::platform_utilities
@@ -77,6 +78,21 @@ std::string getSystemInfo()
         buffer.release,
         buffer.version,
         buffer.machine);
+}
+
+std::array<uint8_t, 16> generateUuidV4()
+{
+    // getentropy() fills the whole buffer or fails, for any request up to 256 bytes.
+    std::array<uint8_t, 16> bytes{};
+    if(getentropy(bytes.data(), bytes.size()) != 0)
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Failed to generate graph UUID using getentropy.");
+    }
+
+    bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0fU) | 0x40U);
+    bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3fU) | 0x80U);
+    return bytes;
 }
 
 }

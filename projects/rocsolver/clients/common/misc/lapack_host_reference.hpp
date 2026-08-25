@@ -71,6 +71,11 @@ template <typename T>
 void cpu_syr(rocblas_fill uplo, rocblas_int n, T alpha, T *x,
                rocblas_int incx, T *A, rocblas_int lda);
 */
+template <typename T>
+void cpu_lacpy(char uplo, rocblas_int m, rocblas_int n, T* A, rocblas_int lda, T* B, rocblas_int ldb);
+
+template <typename T>
+void cpu_laset(char norm, rocblas_int m, rocblas_int n, T alpha, T beta, T* A, rocblas_int lda);
 
 template <typename T, typename S = decltype(std::real(T{}))>
 S cpu_lange(char norm, rocblas_int m, rocblas_int n, const T* A, rocblas_int lda, S* rwork);
@@ -363,6 +368,18 @@ void cpu_labrd(rocblas_int m,
                T* taup,
                T* X,
                rocblas_int ldx,
+               T* Y,
+               rocblas_int ldy);
+
+template <typename T>
+void cpu_lahr2(rocblas_int n,
+               rocblas_int k,
+               rocblas_int nb,
+               T* A,
+               rocblas_int lda,
+               T* tau,
+               T* T_,
+               rocblas_int ldt,
                T* Y,
                rocblas_int ldy);
 

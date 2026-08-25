@@ -50,7 +50,7 @@
  * - Single-fiber acquire: it is illegal for more than one fiber to be active
  *   while acquiring the lock (debug assert or livelock). Extra fibers will
  *   loop trying to acquire a lock already owned by a fiber in the same SIMD
- *   wave/hip::thread. Ownership is tracked using the block id so we can detect
+ *   wave/hip::wthread. Ownership is tracked using the block id so we can detect
  *   this invalid use in debug and assert instead of livelocking.
  */
 
@@ -103,7 +103,7 @@ class _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(capability("pseudo_mutex")) pseudo
      * @brief Acquire (spins with periodic pseudo_yield).
      *
      * Yields every 0x10000 failed attempts. Debug assert triggers on recursive attempt
-     * or attempting to acquire a lock already owned by another fiber in the same SIMD wave/hip::thread.
+     * or attempting to acquire a lock already owned by another fiber in the same SIMD wave/hip::wthread.
      */
     __device__ void lock() _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(acquire_capability()) {
         const uint64_t myBlockId = blockIdx.x + gridDim.x*blockIdx.y + gridDim.x*gridDim.y*blockIdx.z;

@@ -58,12 +58,8 @@ __device__ __host__ inline int64_t
     return j * lda + i * inca;
 }
 
-__device__ __host__ inline int32_t ceil(const int32_t n, const int32_t nb)
-{
-    return ((n - 1) / nb) + 1;
-}
-
-__device__ __host__ inline int64_t ceil(const int64_t n, const int64_t nb)
+template <typename I1, typename I2>
+__device__ __host__ inline I1 ceil(const I1 n, const I2 nb)
 {
     return ((n - 1) / nb) + 1;
 }

@@ -39,18 +39,18 @@
  *    specified duration (device/host variants routed through scheduler).
  *  - pseudo_yield(): Cooperative hint allowing other GPU work to progress.
  *  - get_width(): Returns logical participation width for the current
- *    work node (number of active lanes in this logical thread group).
+ *    work node (number of active lanes in this wthread).
  *  - get_fiber_id(): Internal / diagnostic identifier for the current
  *    fiber / lane (stable only within the lifetime of the work node).
  *
  * Notes:
  *  - Durations use cuda::std::chrono types (distinct from ::std).
  *  - pseudo_yield() allows the scheduler to switch to other ready work, but
- *    provides no guarantees about which thread runs next, when the yielding
- *    thread resumes, or scheduling fairness. Additionally, the yielding thread
+ *    provides no guarantees about which wthread runs next, when the yielding
+ *    wthread resumes, or scheduling fairness. Additionally, the yielding wthread
  *    cannot resume until the yieldee completes, which can cause deadlock in
  *    yield-loop scenarios (see pseudo_mutex documentation).
- *  - Width may be < warp size when a thread was launched with an
+ *  - Width may be < warp size when a wthread was launched with an
  *    explicit width parameter.
  */
 

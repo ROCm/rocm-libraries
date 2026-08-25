@@ -191,8 +191,8 @@ int main(int, char**)
 {
     // check basic functionality
     {
-        hip::thread t0 = support::make_test_thread(f0);
-        hip::thread t1 = support::make_test_thread(f0);
+        hip::wthread t0 = support::make_test_thread(f0);
+        hip::wthread t1 = support::make_test_thread(f0);
         t0.join();
         t1.join();
         assert(init0_called == 1);
@@ -200,8 +200,8 @@ int main(int, char**)
 #ifndef TEST_HAS_NO_EXCEPTIONS
     // check basic exception safety
     {
-        hip::thread t0 = support::make_test_thread(f3);
-        hip::thread t1 = support::make_test_thread(f3);
+        hip::wthread t0 = support::make_test_thread(f3);
+        hip::wthread t1 = support::make_test_thread(f3);
         t0.join();
         t1.join();
         assert(init3_called == 2);
@@ -210,8 +210,8 @@ int main(int, char**)
 #endif
     // check deadlock avoidance
     {
-        hip::thread t0 = support::make_test_thread(f41);
-        hip::thread t1 = support::make_test_thread(f42);
+        hip::wthread t0 = support::make_test_thread(f41);
+        hip::wthread t1 = support::make_test_thread(f42);
         t0.join();
         t1.join();
         assert(init41_called == 1);
@@ -220,16 +220,16 @@ int main(int, char**)
 #if TEST_STD_VER >= 11
     // check functors with 1 arg
     {
-        hip::thread t0 = support::make_test_thread(f1);
-        hip::thread t1 = support::make_test_thread(f1);
+        hip::wthread t0 = support::make_test_thread(f1);
+        hip::wthread t1 = support::make_test_thread(f1);
         t0.join();
         t1.join();
         assert(init1::called == 1);
     }
     // check functors with 2 args
     {
-        hip::thread t0 = support::make_test_thread(f2);
-        hip::thread t1 = support::make_test_thread(f2);
+        hip::wthread t0 = support::make_test_thread(f2);
+        hip::wthread t1 = support::make_test_thread(f2);
         t0.join();
         t1.join();
         assert(init2::called == 5);

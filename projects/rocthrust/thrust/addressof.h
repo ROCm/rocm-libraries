@@ -7,20 +7,20 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__memory/addressof.h)
-#else
-#  include <thrust/detail/memory_wrapper.h>
-#endif
+#include <thrust/detail/memory_wrapper.h>
 
 THRUST_NAMESPACE_BEGIN
-using _THRUST_STD::addressof;
+
+///////////////////////////////////////////////////////////////////////////////
+
+/*! Obtains the actual address of the object or function arg, even in presence of overloaded operator&.
+ */
+template <typename T>
+THRUST_HOST_DEVICE T* addressof(T& arg)
+{
+  return reinterpret_cast<T*>(&const_cast<char&>(reinterpret_cast<const volatile char&>(arg)));
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 THRUST_NAMESPACE_END

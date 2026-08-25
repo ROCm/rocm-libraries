@@ -141,6 +141,8 @@ namespace TensileLite
 
         void resetInternalArgs()
         {
+            // m_uniformSummationOrder is deliberately not reset: it is a
+            // correctness request from the user, not a tuning override.
             m_gsu = 0;
         }
 
@@ -172,9 +174,26 @@ namespace TensileLite
             return m_streamKTileSchedulingMode;
         }
 
+        // HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
+        void setUniformSummationOrder(bool uniformSummationOrder)
+        {
+            m_uniformSummationOrder = uniformSummationOrder;
+        }
+
+        bool uniformSummationOrder() const
+        {
+            return m_uniformSummationOrder;
+        }
+
         void setSmCountTarget(int smCountTarget)
         {
             m_smCountTarget = smCountTarget;
+            const bool preciseSMTarget = Debug::Instance().usePreciseSMTarget();
+            // Round down to multiple of 32 if not precise SM target
+            if(!preciseSMTarget)
+            {
+                m_smCountTarget = (m_smCountTarget / 32) * 32;
+            }
         }
 
         int smCountTarget() const
@@ -195,6 +214,7 @@ namespace TensileLite
         bool             m_fallbackStatus = false; // default value
         int              m_streamKTileSchedulingMode = 0; // SK5 hybrid mode tri-state (OFF default)
         int              m_smCountTarget = 0;
+        bool             m_uniformSummationOrder = false; // default value
     };
 
     /**
@@ -1636,6 +1656,11 @@ namespace TensileLite
 
         unsigned char const* metadata   = nullptr;
         void const*          compressed = nullptr;
+
+        int64_t batchOffsetA = 0;
+        int64_t batchOffsetB = 0;
+        int64_t batchOffsetC = 0;
+        int64_t batchOffsetD = 0;
 
         // Constants
         ConstantVariant              alpha = static_cast<float>(0);

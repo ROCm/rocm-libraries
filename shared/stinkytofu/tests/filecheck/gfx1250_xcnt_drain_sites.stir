@@ -1,0 +1,51 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --Gfx1250HazardPass=profile --print-output 2>&1
+#
+# Gfx1250HazardPass reports where each inserted s_wait_xcnt landed using two
+# facts about the block holding the drain: whether the block belongs to a loop
+# (the drain is paid on every iteration) and whether it holds a matrix
+# instruction (the drain sits in the MAC pipeline). Both are read from the final
+# CFG, so the report cannot drift from the code the pass just produced.
+#
+# Every block below opens a VMEM group and then hits an s_set_vgpr_msb whose
+# successor is not memory, so each takes exactly one drain. The four blocks
+# cover the four combinations:
+#
+#   ^loop_math    in loop, wmma      -> loop+matrix
+#   ^loop_latch   in loop, no wmma   -> loop
+#   ^tail_math    no loop, wmma      -> matrix
+#   ^epilogue     no loop, no wmma   -> other
+#
+# The report also splits the counts into the kernel body and the helper
+# functions, which needs a module (entry + callable functions) that .stir cannot
+# express; unit/asm/Gfx1250HazardProfileTest.cpp covers that in C++.
+#
+# TODO: teach .stir/stinkytofu-opt to represent a module and fold those cases
+# back into this test.
+#
+# CHECK: xcnt drains: total=4, loop+matrix=1, loop=1, matrix=1, other=1
+# CHECK: vgprMsb=4
+
+st.func @xcnt_drain_sites() {
+^entry:
+  "st.s_branch"("loop_math")
+  Successors: ^loop_math
+^loop_math:
+  v100 = "st.buffer_load_b32"(v0)
+  "st.s_set_vgpr_msb"(1)
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[24:31], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  Successors: ^loop_latch
+^loop_latch:
+  v101 = "st.buffer_load_b32"(v1)
+  "st.s_set_vgpr_msb"(1)
+  "st.s_cbranch_scc1"("loop_math", SCC0)
+  Successors: ^loop_math, ^tail_math
+^tail_math:
+  v102 = "st.buffer_load_b32"(v2)
+  "st.s_set_vgpr_msb"(1)
+  v[32:39] = "st.v_wmma_f32_16x16x16_bf16"(v[40:47], v[48:55], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  Successors: ^epilogue
+^epilogue:
+  v103 = "st.buffer_load_b32"(v3)
+  "st.s_set_vgpr_msb"(1)
+  v104 = "st.v_add_f32"(v4, v5)
+}
