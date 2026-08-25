@@ -345,15 +345,6 @@ int main(int argc, char** argv) noexcept
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
         hipdnn_integration_tests::bundle::SupportClaimReport::get().print();
 
-        {
-            std::vector<std::string> engineNames;
-            for(const auto& e : hipdnn_integration_tests::bundle::LoadedEngineTable::get().all())
-            {
-                engineNames.push_back(e.name);
-            }
-            hipdnn_integration_tests::bundle::SupportClaimReport::get().printMatrix(engineNames);
-        }
-
         int exitCode = result;
 
         if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()

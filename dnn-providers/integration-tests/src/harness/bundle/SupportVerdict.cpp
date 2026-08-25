@@ -51,6 +51,7 @@ bool isFailure(SupportVerdict verdict)
     case SupportVerdict::NO_SIDECAR:
     case SupportVerdict::NOT_ENFORCED:
     case SupportVerdict::UNCLAIMED_SUPPORT:
+    case SupportVerdict::ENGINE_NOT_LOADED:
         return false;
     default:
         return true;

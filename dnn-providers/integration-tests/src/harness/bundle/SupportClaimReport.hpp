@@ -6,12 +6,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
-#include <filesystem>
-#include <iomanip>
 #include <iostream>
-#include <map>
 #include <mutex>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -176,105 +172,6 @@ public:
         }
     }
 
-    void printMatrix(const std::vector<std::string>& engineNames,
-                     std::ostream& os = std::cerr) const
-    {
-        std::vector<SupportResult> records;
-        {
-            const std::lock_guard<std::mutex> lock(_mutex);
-            records = _records;
-        }
-
-        if(records.empty())
-        {
-            return;
-        }
-
-        struct Cell
-        {
-            size_t satisfied = 0;
-            size_t failed = 0;
-        };
-
-        std::map<std::string, std::map<std::string, Cell>> matrix;
-        std::set<std::string> allEngines;
-
-        for(const auto& r : records)
-        {
-            const auto opFamily = extractOpFamily(r.bundlePath);
-            if(opFamily.empty())
-            {
-                continue;
-            }
-            allEngines.insert(r.engineName);
-            auto& cell = matrix[opFamily][r.engineName];
-            if(r.verdict == SupportVerdict::SATISFIED)
-            {
-                ++cell.satisfied;
-            }
-            else if(isFailure(r.verdict))
-            {
-                ++cell.failed;
-            }
-        }
-
-        if(matrix.empty())
-        {
-            return;
-        }
-
-        const auto& engines = engineNames.empty()
-                                  ? std::vector<std::string>(allEngines.begin(), allEngines.end())
-                                  : engineNames;
-
-        os << "\n---- SUPPORT MATRIX (op-family x engine) ----\n";
-
-        size_t nameWidth = 10;
-        for(const auto& [name, _] : matrix)
-        {
-            nameWidth = std::max(nameWidth, name.size());
-        }
-
-        os << std::left << std::setw(static_cast<int>(nameWidth + 2)) << "  Op Family";
-        for(const auto& eng : engines)
-        {
-            os << std::setw(static_cast<int>(eng.size() + 3)) << eng;
-        }
-        os << "\n";
-
-        os << "  " << std::string(nameWidth, '-');
-        for(const auto& eng : engines)
-        {
-            os << "  " << std::string(eng.size() + 1, '-');
-        }
-        os << "\n";
-
-        for(const auto& [opFamily, engineCells] : matrix)
-        {
-            os << "  " << std::left << std::setw(static_cast<int>(nameWidth)) << opFamily;
-            for(const auto& eng : engines)
-            {
-                auto it = engineCells.find(eng);
-                std::string cell = "-";
-                if(it != engineCells.end())
-                {
-                    const auto& c = it->second;
-                    if(c.failed > 0)
-                    {
-                        cell = std::to_string(c.satisfied) + "/"
-                               + std::to_string(c.satisfied + c.failed);
-                    }
-                    else if(c.satisfied > 0)
-                    {
-                        cell = std::to_string(c.satisfied);
-                    }
-                }
-                os << "  " << std::setw(static_cast<int>(eng.size() + 1)) << cell;
-            }
-            os << "\n";
-        }
-    }
-
     void reset()
     {
         _graphsFound.store(0, std::memory_order_relaxed);
@@ -295,23 +192,6 @@ public:
 
 private:
     SupportClaimReport() = default;
-
-    static std::string extractOpFamily(const std::string& bundlePath)
-    {
-        auto hashPos = bundlePath.find('#');
-        auto clean = (hashPos != std::string::npos) ? bundlePath.substr(0, hashPos) : bundlePath;
-        auto p = std::filesystem::path(clean);
-        auto it = p.begin();
-        if(it != p.end())
-        {
-            ++it; // skip tier
-        }
-        if(it != p.end())
-        {
-            return it->string();
-        }
-        return {};
-    }
 
     mutable std::mutex _mutex;
     std::vector<SupportResult> _records;

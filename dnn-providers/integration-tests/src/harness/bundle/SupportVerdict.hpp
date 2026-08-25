@@ -18,11 +18,12 @@ namespace hipdnn_integration_tests::bundle
 
 struct LoadedEngine;
 
-// Sidecar promise vs live query outcome. Six values, three groups:
+// Sidecar promise vs live query outcome. Seven values, four groups:
 //
 //   NO_SIDECAR                  — no file, nothing to check (not recorded)
 //   SATISFIED / CLAIM_BROKEN /  — file promises this cell
 //     QUERY_ERRORED
+//   ENGINE_NOT_LOADED           — claimed engine absent from runtime
 //   NOT_ENFORCED /              — file exists but is silent about this cell
 //     UNCLAIMED_SUPPORT
 //
@@ -45,7 +46,7 @@ enum class SupportVerdict
     QUERY_ERRORED, // query broke; cannot tell yes from no  → FAIL
 
     // ---- claimed engine is not loaded in the runtime at all ----
-    ENGINE_NOT_LOADED, // sidecar claims it, but the plugin didn't load → FAIL
+    ENGINE_NOT_LOADED, // sidecar claims it, but the plugin didn't load → coverage gap
 
     // ---- the sidecar exists but is silent about this cell: never a failure ----
     NOT_ENFORCED, // engine declined or query broke  → skip

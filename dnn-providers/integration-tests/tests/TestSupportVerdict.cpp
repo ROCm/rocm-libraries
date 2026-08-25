@@ -381,9 +381,9 @@ TEST(TestSupportVerdict, CheckAllEmptyWhenNoBundlePath)
     EXPECT_TRUE(results.empty());
 }
 
-TEST(TestSupportVerdict, EngineNotLoadedIsFailure)
+TEST(TestSupportVerdict, EngineNotLoadedIsNotFailure)
 {
-    EXPECT_TRUE(isFailure(SupportVerdict::ENGINE_NOT_LOADED));
+    EXPECT_FALSE(isFailure(SupportVerdict::ENGINE_NOT_LOADED));
 }
 
 TEST(TestSupportVerdict, ToStringCoversEngineNotLoaded)

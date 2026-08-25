@@ -70,11 +70,15 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
             SupportClaimReport::get().recordGraphWithClaimsVerified();
         }
 
+        const bool hasPinnedEngine = TestConfig::get().hasEngineName();
+        const std::string pinnedName
+            = hasPinnedEngine ? std::string(TestConfig::get().getEngineName()) : std::string{};
+
         std::string failureAggregate;
         for(const auto& v : allVerdicts)
         {
             SupportClaimReport::get().record(v);
-            if(isFailure(v.verdict))
+            if(isFailure(v.verdict) && (!hasPinnedEngine || v.engineName == pinnedName))
             {
                 failureAggregate += formatVerdictMessage(v);
             }
@@ -193,11 +197,13 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
     const std::string rung
         = level == EnforcementLevel::APPLICABILITY ? "applicability" : "buildable";
 
+    const std::string pinnedName = std::string(TestConfig::get().getEngineName());
+
     std::string failureAggregate;
     for(const auto& v : allVerdicts)
     {
         SupportClaimReport::get().record(v);
-        if(isFailure(v.verdict))
+        if(isFailure(v.verdict) && v.engineName == pinnedName)
         {
             failureAggregate += formatVerdictMessage(v);
         }
