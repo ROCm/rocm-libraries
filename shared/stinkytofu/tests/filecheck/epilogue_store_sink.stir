@@ -1,9 +1,9 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --EpilogueStoreSinkPass=noGuard --print-output
 #
-# Epilogue store-sink rules. noGuard isolates the bulk sink in these tiny
-# functions (the msb guard needs real msb context these toys lack). Clustering
-# stays on (default 4) but only acts on runs of >=2 stores, so the single-store
-# cases are unaffected.
+# Epilogue store-sink rules with the msb guard off, isolating the bulk sink.
+# Guard cases live in epilogue_store_sink_msb_guard.stir.
+# Clustering stays on (default 4) but only acts on runs of >=2 stores, so the
+# single-store cases are unaffected.
 
 #--- Store sinks past following VALU (no hazard between).
 # CHECK-LABEL: @sink_past_valu
