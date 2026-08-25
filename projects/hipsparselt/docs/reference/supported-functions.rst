@@ -1,3 +1,5 @@
+ :orphan:
+
 .. meta::
   :description: List of ROCm and CUDA supported functions in hipBLASLt
   :keywords: hipSPARSELt, ROCm, API library, API reference, supported
