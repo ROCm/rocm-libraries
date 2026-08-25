@@ -151,6 +151,40 @@ or `select_spec()` output. This is an executable invariant in
 engine into that copy (never the shipped singleton), and asserts every
 pre-existing candidate's behavior is byte-identical with and without it.
 
+## Per-engine spec_fn (geometry ownership)
+
+The long-run goal is the GEMM shape: each engine builds its own kernel spec
+(`platform/python/rocke/dispatch/gemm/bf16_rcr.py` — one `_spec_*` per candidate),
+instead of one shared `_tiled_spec_from_problem` cascade of `if` branches.
+
+Migration is incremental — one cohort at a time.
+
+1. **Extract** the cohort's branch from `_tiled_spec_from_problem`
+   (`builders/common/attention_spec_builder.py`) into a named
+   `_spec_<cohort>(problem)` — a self-contained builder (resolves its own arch /
+   spec class). Pure move: byte-identical, no value change.
+2. The cascade branch **delegates** to it (`return _spec_<cohort>(problem)`), so
+   the shared function shrinks by one branch.
+3. If the cohort has a matching dispatch candidate, that candidate **documents
+   ownership** of the `spec_fn` (a docstring linkage). Some cohorts have no
+   candidate yet (they ride the generic `unified_2d`) — those spec_fns are
+   ORPHANS awaiting a future engine; note that in the spec_fn docstring. Either
+   way, geometry stays in the **builder layer** — do NOT move it into a candidate.
+   The dispatcher still decides only `(path, head_size, block_size)`, and the C++
+   parity identity is unchanged (see the top of this doc).
+4. **Test** byte-identity + non-interference (see the
+   `test_gfx942_*_flash_spec_fn.py` tests), then GPU-verify the cohort's arch
+   (kernel name / latency unchanged vs pre-change).
+
+Migrated so far:
+- `_spec_gfx942_fp16_flash` — owned by `attention_gfx942_dense_pipe`.
+- `_spec_gfx942_bf16_flash` — ORPHAN (no dispatch candidate yet; currently routed
+  via the generic `unified_2d`). Needs a future `gfx942_bf16` engine.
+
+Remaining cohorts to migrate this way: gfx950 combo / single-batch schedule,
+gfx1250. The D256 override is a related but distinct single-sourcing case (see
+`_d256_gfx950_spec_overrides`).
+
 ## Multi-engine benchmarking: `attention_sweep_space`
 
 `attention_sweep_space(req)` returns the deduped `select_spec` of every candidate
