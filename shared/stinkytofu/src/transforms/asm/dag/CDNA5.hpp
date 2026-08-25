@@ -493,6 +493,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     struct BarrierAfterOutput {
         int afterThreshold = 0;
         int overlapWmmaWindow = 0;
+        // Drain latency expressed in WMMA-window units from Step 4
+        // ((latency / wmmaIssueConfig.latency) + 1). Preserved for Layer 2 so it can
+        // recompute placement instead of only averaging after/before thresholds.
+        int latencyWmmaBudget = 0;
     };
 
     int wmmaIssuedCountThisRegion_ = 0;
@@ -1206,6 +1210,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         int afterThreshold;
         int lastOverlap;
         int wmmaWindowsNeeded;
+        int latencyWmmaBudget;
     };
 
     // Step 1a: collect all movable barriers with their PSEUDO src token sets, then merge
@@ -1272,10 +1277,10 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         int afterThreshold = overlapOrWindowBase + latencyWmmaBudget;
         for (StinkyInstruction* barrier : group.barriers) {
             barrierWmmaThresholds_[barrier] = afterThreshold;
-            result[barrier] = {afterThreshold, wmmaWindowsNeeded};
+            result[barrier] = {afterThreshold, wmmaWindowsNeeded, latencyWmmaBudget};
         }
-        overlapChecks.push_back(
-            {groupBarrier, group.barriers, afterThreshold, lastOverlap, wmmaWindowsNeeded});
+        overlapChecks.push_back({groupBarrier, group.barriers, afterThreshold, lastOverlap,
+                                 wmmaWindowsNeeded, latencyWmmaBudget});
         PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierAfterThresholds] barrier=" << groupBarrier
                              << " barrierGroupSize=" << group.barriers.size() << " afterThreshold="
                              << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
@@ -1328,17 +1333,23 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         const int adjustedAfterThreshold =
             std::min((int)wmmaIssueConfig.issuedCount,
                      pushedStart[i] + summary.wmmaWindowsNeeded + frontOverlapBudget[i]);
+        // Window length for Layer 2 after/before exclusive overlap:
+        // interval is [adjustedAfterThreshold - overlapWmmaWindow, adjustedAfterThreshold).
+        const int overlapWmmaWindow = std::max(
+            0, std::min(adjustedAfterThreshold, summary.wmmaWindowsNeeded + frontOverlapBudget[i]));
 
-        const int shift = adjustedAfterThreshold - summary.afterThreshold;
         for (StinkyInstruction* barrier : summary.barriers) {
             barrierWmmaThresholds_[barrier] = adjustedAfterThreshold;
-            result[barrier] = {adjustedAfterThreshold, shift};
+            result[barrier] = {adjustedAfterThreshold, overlapWmmaWindow,
+                               summary.latencyWmmaBudget};
         }
         PASS_DEBUG(
             std::cerr << "[CDNA5 computeBarrierAfterThresholds overlap] barrier="
                       << summary.barrierKey << " barrierGroupSize=" << summary.barriers.size()
                       << " baseAfterThreshold=" << summary.afterThreshold
-                      << " adjustedAfterThreshold=" << adjustedAfterThreshold << " shift=" << shift
+                      << " adjustedAfterThreshold=" << adjustedAfterThreshold
+                      << " overlapWmmaWindow=" << overlapWmmaWindow
+                      << " latencyWmmaBudget=" << summary.latencyWmmaBudget
                       << " intervalStart=" << (summary.afterThreshold - summary.wmmaWindowsNeeded)
                       << " intervalEnd=" << summary.afterThreshold << " wmmaWindowsNeeded="
                       << summary.wmmaWindowsNeeded << " pushedStart=" << pushedStart[i]
@@ -1997,15 +2008,22 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 const bool overlap = (adjustedAfterBegin < adjustedBeforeEnd) &&
                                      (adjustedBeforeBegin <= adjustedAfterEnd);
                 if (overlap) {
-                    const int deltaAfter = (adjustedAfterEnd - adjustedBeforeBegin + 1) / 2 + 1;
-                    const int deltaBefore = (adjustedAfterEnd - adjustedBeforeBegin) / 2 + 1;
+                    int deltaAfter = (adjustedAfterEnd - adjustedBeforeBegin + 1) / 2 + 1;
+                    int deltaBefore = (adjustedAfterEnd - adjustedBeforeBegin) / 2 + 1;
+                    if ((adjustedBeforeBegin + deltaBefore + beforeGroup.window > totalWmma) &&
+                        (adjustedAfterEnd - deltaAfter > afterGroup.window)) {
+                        const int targetBefore =
+                            totalWmma - adjustedBeforeBegin - beforeGroup.window;
+                        deltaAfter += deltaBefore - targetBefore;
+                        deltaBefore = targetBefore;
+                    }
                     adjustedAfterEnd = std::clamp(adjustedAfterEnd - deltaAfter, 0, totalWmma);
                     adjustedBeforeBegin =
                         std::clamp(adjustedBeforeBegin + deltaBefore, 0, totalWmma);
                     afterGroup.threshold = adjustedAfterEnd;
                     beforeGroup.threshold = adjustedBeforeBegin;
-                    setGroupThreshold(afterGroup, adjustedAfterEnd);
-                    setGroupThreshold(beforeGroup, adjustedBeforeBegin);
+                    setGroupThreshold(afterGroup, afterGroup.threshold);
+                    setGroupThreshold(beforeGroup, beforeGroup.threshold);
                 }
 
                 PASS_DEBUG(
