@@ -33,7 +33,7 @@
 
 from rocisa.container import sgpr
 from rocisa.instruction import (
-    SMovB32, SSubU32, SOrB32, SLShiftLeftB32,
+    SMovB32, SMovB64, SSubU32, SOrB32, SLShiftLeftB32,
 )
 
 
@@ -108,10 +108,10 @@ class SdmaPacketEmitter:
         13-dword block, and a stale register would be read as a coordinate.
 
         The two 64-bit bases are relayed a dword at a time rather than moved as
-        pairs, because this emitter requires no particular pktS alignment. At
+        pairs, because this method requires no particular pktS alignment. At
         the caller's 4-aligned pktS, DW1/DW2 starts odd and cannot form an
         SReg_64 at all; DW6/DW7 does land 2-aligned there, but pairing it would
-        silently depend on how the caller allocated the block.
+        also constrain dstBaseS, which no caller is asked to align.
         """
         module.add(SMovB32(dst=sgpr(pktS + 0), src=hex(self.copyHeaderDw0),
                            comment="SUBWIN DW0: op=COPY sub_op=RECT elementsize=log2(%dB)"
@@ -166,6 +166,9 @@ class SdmaPacketEmitter:
         The caller may hand this the SAME block it used for the COPY packet --
         8 dwords against the COPY's 13.  See emitPlacePacket's reuse note for
         why that is safe and what ordering it requires."""
+        assert pktS % 2 == 0, (
+            "pktS %r is not 2-aligned, which DW4-DW7's 64-bit zeroing requires"
+            % (pktS,))
         module.add(SMovB32(dst=sgpr(pktS + 0), src=hex(ATOMIC_HEADER_DW0),
                            comment="ATOMIC DW0: op=ATOMIC operation=ADD_RTN_32"))
         module.add(SMovB32(dst=sgpr(pktS + 1), src=sgpr(dstAddrS + 0),
@@ -174,11 +177,7 @@ class SdmaPacketEmitter:
                            comment="ATOMIC DW2: addr hi"))
         module.add(SMovB32(dst=sgpr(pktS + 3), src=hex(1),
                            comment="ATOMIC DW3: src_data lo (addend)"))
-        module.add(SMovB32(dst=sgpr(pktS + 4), src=hex(0),
-                           comment="ATOMIC DW4: src_data hi (unused by ADD_RTN_32)"))
-        module.add(SMovB32(dst=sgpr(pktS + 5), src=hex(0),
-                           comment="ATOMIC DW5: cmp_data lo (unused)"))
-        module.add(SMovB32(dst=sgpr(pktS + 6), src=hex(0),
-                           comment="ATOMIC DW6: cmp_data hi (unused)"))
-        module.add(SMovB32(dst=sgpr(pktS + 7), src=hex(0),
-                           comment="ATOMIC DW7: loop_interval=0"))
+        module.add(SMovB64(dst=sgpr(pktS + 4, 2), src=0,
+                           comment="ATOMIC DW4: src_data hi (unused by ADD_RTN_32), DW5: cmp_data lo (unused)"))
+        module.add(SMovB64(dst=sgpr(pktS + 6, 2), src=0,
+                           comment="ATOMIC DW6: cmp_data hi (unused), DW7: loop_interval=0"))

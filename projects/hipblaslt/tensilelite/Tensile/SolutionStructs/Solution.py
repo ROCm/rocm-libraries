@@ -1803,6 +1803,11 @@ class Solution(collections.abc.Mapping):
       return
 
     if state["FusedGemmA2A"]:
+      if isa[:2] not in ((9, 4), (9, 5)):
+        reject(state, printRejectionReason,
+               "FusedGemmA2A requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "
+               "packet layout is gfx9 only)")
+        return
       if not state["ProblemType"]["DestDataType"].isBFloat16():
         reject(state, printRejectionReason, "FusedGemmA2A only supports a bf16 D")
         return

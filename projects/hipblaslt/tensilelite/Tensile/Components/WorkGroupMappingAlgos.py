@@ -1160,14 +1160,13 @@ def FusedA2AWgRemap(writer, kernel):
     # boundary and classify PUSH/local at another.
     module.add(writer.argLoader.loadKernArg(sA, "KernArgAddress",
         sgprOffset=hex(fusedBase + layout["FusedAM"]), dword=1))
-    module.add(SWaitCnt(kmcnt=0, comment="wait FusedAM for the WG remap"))
-    module.add(SLShiftRightB32(dst=sgpr(sA), shiftHex=log2mt0, src=sgpr(sA),
-                               comment="A = AM_tiles = FusedAM >> log2(MT0=%u)" % kernel["MacroTile0"]))
-
     module.add(SMulI32(dst=sgpr(sT), src0=sgpr("NumWorkGroups0"), src1=sgpr("WorkGroup1"),
                        comment="t = wg1*N0 ..."))
     module.add(SAddU32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr("WorkGroup0"),
                        comment="... + wg0 (linear dispatch index)"))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedAM for the WG remap"))
+    module.add(SLShiftRightB32(dst=sgpr(sA), shiftHex=log2mt0, src=sgpr(sA),
+                               comment="A = AM_tiles = FusedAM >> log2(MT0=%u)" % kernel["MacroTile0"]))
     module.add(SMulI32(dst=sgpr(sS), src0=sgpr(sA), src1=sgpr("NumWorkGroups1"),
                        comment="S = A*N1 (size of the PUSH segment)"))
     module.add(SSubU32(dst=sgpr(sL), src0=sgpr("NumWorkGroups0"), src1=sgpr(sA),
