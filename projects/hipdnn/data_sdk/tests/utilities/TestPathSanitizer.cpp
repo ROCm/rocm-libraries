@@ -78,6 +78,48 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         "CON", "con", "Con", "PRN", "AUX", "NUL", "COM1", "com1", "COM9", "LPT1", "lpt1", "LPT9"));
 
+/// Windows resolves a device alias from the name before the FIRST dot, so "CON.txt" is
+/// the CON device just as "CON" is. Matching the whole stem misses it, and the hash
+/// suffix -- appended after the extension -- does not break the alias.
+TEST_F(TestPathSanitizer, AReservedStemWithAnExtensionIsStillBroken)
+{
+    const auto result = sanitizeForPath("CON.txt");
+
+    const auto dashPos = result.rfind('-');
+    ASSERT_NE(dashPos, std::string::npos);
+    EXPECT_EQ(result.substr(0, dashPos), "CON_.txt")
+        << "the guard must break the alias before the first dot, got \"" << result << "\"";
+}
+
+/// A control byte is illegal in a path component on both platforms, and an embedded NUL
+/// is worse than illegal: CreateFileW and c_str() end the name there, dropping the hash
+/// suffix that keeps distinct inputs apart.
+TEST_F(TestPathSanitizer, ControlBytesAreReplaced)
+{
+    const std::string raw("a\1b\x1f"
+                          "c\x7f"
+                          "d",
+                          7);
+
+    const auto result = sanitizeForPath(raw);
+
+    const auto dashPos = result.rfind('-');
+    ASSERT_NE(dashPos, std::string::npos);
+    EXPECT_EQ(result.substr(0, dashPos), "a_b_c_d");
+}
+
+TEST_F(TestPathSanitizer, AnEmbeddedNulDoesNotTruncateTheComponent)
+{
+    const std::string_view raw("engine\0name", 11);
+
+    const auto result = sanitizeForPath(raw);
+
+    EXPECT_EQ(result.find('\0'), std::string::npos)
+        << "a NUL survived into the component; the name would end there and lose the "
+           "disambiguating hash suffix";
+    EXPECT_EQ(result.rfind("engine_name-", 0), 0U);
+}
+
 TEST_F(TestPathSanitizer, InjectivityAcrossDistinctInputs)
 {
     // Includes pairs that would collide without the hash suffix under a naive
