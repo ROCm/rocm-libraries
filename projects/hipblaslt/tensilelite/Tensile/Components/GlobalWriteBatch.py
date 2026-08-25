@@ -25,7 +25,7 @@ from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOB
   SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
-  GlobalAtomicAddU32, GlobalLoadB32, SLoadB128, \
+  GlobalLoadB32, SLoadB128, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, \
   DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAddU64, SAndB32, \
@@ -2902,10 +2902,9 @@ class GlobalWriteBatchWriter:
   def _emitFusedA2AWave0Election(self, module, skipLabelName):
     """Elect wave 0 as the work-group's single writer, then narrow EXEC to lane 0.
 
-    EXEC is all-ones on entry (VReadfirstlaneB32(Serial) needs lane 0 active).
-    The counter atomic and flag store that follow are VECTOR ops on a lane-uniform
-    address, so under all-ones EXEC every lane would issue them and the counter
-    would jump by wavefrontSize per work-group, leaving old+1 == target unreachable.
+    EXEC is all-ones on entry (VReadfirstlaneB32(Serial) needs lane 0 active) and
+    stays narrowed until the restore after the handshake, covering the DRAIN polls.
+    The counter atomics under it are SMEM and ignore EXEC.
     """
     kw = self.parentWriter
     serialSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_hsSerial", preventOverflow=False)
@@ -2980,9 +2979,12 @@ class GlobalWriteBatchWriter:
       sgprOffset=hex(fusedBase + layout["counter_ptr"]), dword=2))
     argModule.add(SWaitCnt(kmcnt=0, comment="wait FusedMyRank/counter_ptr"))
     # Election target: the feature-tiles of ONE token-tile row in one rank's shard,
-    # since the counter is per (dst_rank, token-tile) pair.
+    # since the counter is per (dst_rank, token-tile) pair.  Held as tilesPerRank-1,
+    # the S_ATOMIC_INC wrap limit.
     argModule.add(SLShiftRightB32(dst=sgpr(targetSgpr), shiftHex=log2mt0, src=sgpr(nShardSgpr),
                                   comment=f"tilesPerRank = FusedNShard >> log2(MT0={mt0})"))
+    argModule.add(SSubU32(dst=sgpr(targetSgpr), src0=sgpr(targetSgpr), src1=1,
+                          comment="wrap limit = tilesPerRank - 1"))
 
     # --- switch-load peer flag/recv bases for dst_rank + numeric dst_rank. ---
     flagBaseSgpr = kw.sgprPool.checkOutAligned(4, 4, tag="fusedA2A_hsFlagBase", preventOverflow=False)
@@ -3034,24 +3036,17 @@ class GlobalWriteBatchWriter:
                        comment="counter[dst_rank][j] lo = counter_ptr + (dst_rank*tokenTiles+j)*4"))
     module.add(SAddCU32(dst=sgpr(counterPtrSgpr + 1), src0=sgpr(counterPtrSgpr + 1), src1=0,
                         comment="counter[dst_rank][j] hi (carry)"))
-    vCntAddr = kw.vgprPool.checkOutAligned(2, 2, tag="fusedA2A_hsCntAddr")
-    vOne     = kw.vgprPool.checkOut(1, tag="fusedA2A_hsOne")
-    vOld     = kw.vgprPool.checkOut(1, tag="fusedA2A_hsOld")
-    module.add(VMovB64(dst=vgpr(vCntAddr, 2), src=sgpr(counterPtrSgpr, 2), comment="counter addr -> vgpr"))
-    module.add(VMovB32(dst=vgpr(vOne), src=1, comment="counter increment = 1"))
-    offSaddr = vgpr("off", 1, False, False, True)
-    module.add(GlobalAtomicAddU32(
-      dst=vgpr(vOld), vaddr=vgpr(vCntAddr, 2), data=vgpr(vOne), saddr=offSaddr,
-      modifier=GLOBALModifiers(offset=FUSED_A2A_COUNTER1_OFFSET, glc=True, slc=False,
-                               scope=CacheScope.SCOPE_NONE),
-      comment="old = atomic_add(counter[dst_rank][j], 1) device scope, return pre-op (sc0)"))
-    module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait counter atomic return (load counter)"))
+    module.add(SMovB32(dst=sgpr(tmpSgpr2), src=sgpr(targetSgpr),
+                       comment="SDATA in = limit; the atomic overwrites it with the pre-op value"))
+    module.add(SAtomicInc(dst=sgpr(tmpSgpr2), base=sgpr(counterPtrSgpr, 2),
+                          soffset=hex(FUSED_A2A_COUNTER1_OFFSET),
+                          smem=SMEMModifiers(glc=True),
+                          comment="old = atomic_inc(counter[dst_rank][j]), wrap at tilesPerRank-1, return pre-op"))
+    module.add(SWaitCnt(kmcnt=0, comment="fused-A2A: wait counter atomic return (SMEM -> lgkmcnt)"))
 
-    # (4) last WG for (dst_rank, j) iff old+1 == tilesPerRank; else skip the release.
-    module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr2), src=vgpr(vOld), comment="old -> sgpr"))
-    module.add(SAddU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgpr2), src1=1, comment="old + 1"))
+    # (4) last WG for (dst_rank, j) iff the pre-op value is the wrap limit; else skip the release.
     module.add(SCmpEQU32(src0=sgpr(tmpSgpr2), src1=sgpr(targetSgpr),
-                         comment="old+1 == tilesPerRank? (last WG for (dst_rank, j))"))
+                         comment="pre-op == tilesPerRank-1? (last WG for (dst_rank, j))"))
     module.add(SCBranchSCC0(labelName=skipReleaseLabel.getLabelName(),
                             comment="not the last WG -> skip the SDMA submit"))
 
@@ -3063,31 +3058,32 @@ class GlobalWriteBatchWriter:
     # per peer down to exactly one, since the DRAIN poll address below depends only
     # on dst_rank.  counter2 is a MAX_RANKS-entry u32 array at a fixed byte offset in
     # the counter block (FUSED_A2A_COUNTER2_OFFSET).
-    # It is incremented AFTER _emitFusedA2ASdmaIssue returns, so old2+1 == tokenTiles
-    # identifies the WG that submitted this card's LAST packet to dst_rank.
+    # It is incremented AFTER _emitFusedA2ASdmaIssue returns, so the WG that reads
+    # back tokenTiles-1 is the one that submitted this card's LAST packet to dst_rank.
     #
     # counter3 (below) owns the DRAIN election; this one elects the work-group that
     # signals outbound completion on this card's queue to dst_rank.
     counter2PtrSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_hsCounter2Ptr", preventOverflow=False)
+    c2Limit         = kw.sgprPool.checkOut(1, tag="fusedA2A_hsCounter2Limit", preventOverflow=False)
     module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(dstRankSgpr), shiftHex=2,
                               comment="dst_rank * 4 (u32 counter byte offset)"))
     module.add(SAddU32(dst=sgpr(counter2PtrSgpr), src0=sgpr("FusedCounterPtr"), src1=sgpr(tmpSgpr2),
                        comment="counter2[dst_rank] lo = counter_ptr + dst_rank*4"))
     module.add(SAddCU32(dst=sgpr(counter2PtrSgpr + 1), src0=sgpr("FusedCounterPtr+1"), src1=0,
                         comment="counter2[dst_rank] hi (carry)"))
-    module.add(VMovB64(dst=vgpr(vCntAddr, 2), src=sgpr(counter2PtrSgpr, 2), comment="counter2 addr -> vgpr"))
+    module.add(SSubU32(dst=sgpr(c2Limit), src0=sgpr(tokenTilesSgpr), src1=1,
+                       comment="wrap limit = tokenTiles - 1"))
+    module.add(SMovB32(dst=sgpr(tmpSgpr2), src=sgpr(c2Limit),
+                       comment="SDATA in = limit; the atomic overwrites it with the pre-op value"))
+    module.add(SAtomicInc(dst=sgpr(tmpSgpr2), base=sgpr(counter2PtrSgpr, 2),
+                          soffset=hex(FUSED_A2A_COUNTER2_OFFSET),
+                          smem=SMEMModifiers(glc=True),
+                          comment="old2 = atomic_inc(counter2[dst_rank]), wrap at tokenTiles-1, return pre-op"))
+    module.add(SWaitCnt(kmcnt=0, comment="fused-A2A: wait counter2 atomic return (SMEM -> lgkmcnt)"))
     kw.sgprPool.checkIn(counter2PtrSgpr)
-    module.add(VMovB32(dst=vgpr(vOne), src=1, comment="counter2 increment = 1"))
-    module.add(GlobalAtomicAddU32(
-      dst=vgpr(vOld), vaddr=vgpr(vCntAddr, 2), data=vgpr(vOne), saddr=offSaddr,
-      modifier=GLOBALModifiers(offset=FUSED_A2A_COUNTER2_OFFSET, glc=True, slc=False,
-                               scope=CacheScope.SCOPE_NONE),
-      comment="old2 = atomic_add(counter2[dst_rank], 1) device scope, return pre-op (sc0)"))
-    module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait counter2 atomic return"))
-    module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr2), src=vgpr(vOld), comment="old2 -> sgpr"))
-    module.add(SAddU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgpr2), src1=1, comment="old2 + 1"))
-    module.add(SCmpEQU32(src0=sgpr(tmpSgpr2), src1=sgpr(tokenTilesSgpr),
-                         comment="old2+1 == tokenTiles? (this card's last packet to dst_rank)"))
+    module.add(SCmpEQU32(src0=sgpr(tmpSgpr2), src1=sgpr(c2Limit),
+                         comment="pre-op == tokenTiles-1? (this card's last packet to dst_rank)"))
+    kw.sgprPool.checkIn(c2Limit)
     module.add(SCBranchSCC0(labelName=skipReleaseLabel.getLabelName(),
                             comment="not the last submitter for dst_rank -> skip the "
                                     "outbound-completion signal"))
@@ -3206,6 +3202,8 @@ class GlobalWriteBatchWriter:
     # mask below and both poll predicates are its only remaining readers and exactly
     # one work-group in the grid reaches them.
     c3WSgpr  = kw.sgprPool.checkOut(1, tag="fusedA2A_c3W", preventOverflow=False)
+    vPollOff = kw.vgprPool.checkOut(1, tag="fusedA2A_drainPollOff")
+    vPollVal = kw.vgprPool.checkOut(1, tag="fusedA2A_drainPollVal")
     module.add(kw.argLoader.loadKernArg(drainRankSgpr, "KernArgAddress",
       sgprOffset=hex(fusedBase + layout["FusedMyRank"]), dword=1))
     module.add(kw.argLoader.loadKernArg(c3WSgpr, "KernArgAddress",
@@ -3237,7 +3235,7 @@ class GlobalWriteBatchWriter:
     # thread id within the WG, so for wave 0 lane j it is exactly j.  The saddr form
     # keeps the per-lane part a single 32-bit offset -- no 64-bit vector add, and VCC
     # stays free for the reduction below.
-    module.add(VLShiftLeftB32(dst=vgpr(vCntAddr), shiftHex=2, src=vgpr("Serial"),
+    module.add(VLShiftLeftB32(dst=vgpr(vPollOff), shiftHex=2, src=vgpr("Serial"),
                               comment="lane j -> self flag slot byte offset j*4"))
     # spin: system-scope load (sc0 sc1) bypasses this card's stale L2 to read the HBM
     # truth accumulated by the SDMA engines.  v_cmp_ne sets one VCC bit per lane that
@@ -3245,11 +3243,11 @@ class GlobalWriteBatchWriter:
     # hold the barrier -- and vccnz loops while any of the W is short.
     module.add(drainPollLabel)
     module.add(GlobalLoadB32(
-      dst=vgpr(vOld), vaddr=vgpr(vCntAddr), saddr=sgpr(drainFlagBase, 2),
+      dst=vgpr(vPollVal), vaddr=vgpr(vPollOff), saddr=sgpr(drainFlagBase, 2),
       modifier=GLOBALModifiers(glc=True, slc=True, scope=CacheScope.SCOPE_NONE, isStore=False),
       comment="poll self flag[lane] low dword (system scope, sc0 sc1)"))
     module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait poll load"))
-    module.add(VCmpNeU32(VCC(), vgpr(vOld), sgpr("FusedTokenTiles"),
+    module.add(VCmpNeU32(VCC(), vgpr(vPollVal), sgpr("FusedTokenTiles"),
                          comment="any lane's flag != tokenTiles? (peer still sending)"))
     module.add(SCBranchVCCNZ(labelName=drainPollLabel.getLabelName(),
                              comment="some peer incomplete -> spin (poll again)"))
@@ -3265,15 +3263,15 @@ class GlobalWriteBatchWriter:
     module.add(SCBranchSCC1(labelName=skipSendLabel.getLabelName(),
                             comment="DRAIN_SEND clear -> skip the outbound poll"))
 
-    module.add(VMovB32(dst=vgpr(vCntAddr), src=0, comment="voffset = 0 (single counter)"))
+    module.add(VMovB32(dst=vgpr(vPollOff), src=0, comment="voffset = 0 (single counter)"))
     module.add(sendPollLabel)
     module.add(GlobalLoadB32(
-      dst=vgpr(vOld), vaddr=vgpr(vCntAddr), saddr=sgpr(drainFlagBase, 2),
+      dst=vgpr(vPollVal), vaddr=vgpr(vPollOff), saddr=sgpr(drainFlagBase, 2),
       modifier=GLOBALModifiers(offset=FUSED_A2A_OUTBOUND_OFFSET, glc=True, slc=True,
                                scope=CacheScope.SCOPE_NONE, isStore=False),
       comment="poll the outbound counter (system scope, sc0 sc1)"))
     module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait outbound poll load"))
-    module.add(VCmpNeU32(VCC(), vgpr(vOld), sgpr(c3WSgpr),
+    module.add(VCmpNeU32(VCC(), vgpr(vPollVal), sgpr(c3WSgpr),
                          comment="outbound != W? (a queue is still reading D)"))
     module.add(SCBranchVCCNZ(labelName=sendPollLabel.getLabelName(),
                              comment="some queue incomplete -> spin (poll again)"))
@@ -3287,9 +3285,8 @@ class GlobalWriteBatchWriter:
     kw.sgprPool.checkIn(drainTmp)
     kw.sgprPool.checkIn(drainFlagBase)
 
-    kw.vgprPool.checkIn(vOld)
-    kw.vgprPool.checkIn(vOne)
-    kw.vgprPool.checkIn(vCntAddr)
+    kw.vgprPool.checkIn(vPollVal)
+    kw.vgprPool.checkIn(vPollOff)
     kw.sgprPool.checkIn(tmpSgpr2)
     kw.sgprPool.checkIn(dstRankSgpr)
     kw.sgprPool.checkIn(flagBaseSgpr)

@@ -453,7 +453,6 @@ namespace rocisa
         }
     };
 
-    // No soffset operand, unlike the other scalar atomics.
     struct SMemAtomicDecInstruction : public AtomicReadWriteInstruction
     {
         SMemAtomicDecInstruction(InstType                          instType,
@@ -2313,51 +2312,6 @@ namespace rocisa
 
     private:
         std::shared_ptr<Container> dst;
-    };
-
-    struct GlobalAtomicAddU32 : public GLOBALStoreInstruction
-    {
-        GlobalAtomicAddU32(const std::shared_ptr<RegisterContainer>& dst,
-                           const std::shared_ptr<RegisterContainer>& vaddr,
-                           const std::shared_ptr<RegisterContainer>& data,
-                           const std::shared_ptr<RegisterContainer>& saddr,
-                           std::optional<GLOBALModifiers>            modifier = std::nullopt,
-                           const std::string&                        comment  = "")
-            : GLOBALStoreInstruction(InstType::INST_B32, vaddr, data, saddr, modifier, comment)
-            , dst(dst)
-        {
-            setInst("global_atomic_add");
-        }
-
-        GlobalAtomicAddU32(const GlobalAtomicAddU32& other)
-            : GLOBALStoreInstruction(other)
-            , dst(other.dst ? other.dst->clone2() : nullptr)
-        {
-        }
-
-        std::shared_ptr<Item> clone() const override
-        {
-            return std::make_shared<GlobalAtomicAddU32>(*this);
-        }
-
-        std::vector<InstructionInput> getDstParams() const override
-        {
-            return {dst};
-        }
-
-        std::string getArgStr() const override
-        {
-            return dst->toString() + ", " + vaddr->toString() + ", " + srcData->toString() + ", "
-                   + saddr->toString();
-        }
-
-        std::string typeConvert() const override
-        {
-            return "";
-        }
-
-    private:
-        std::shared_ptr<RegisterContainer> dst;
     };
 
     struct GlobalStoreB8 : public GLOBALStoreInstruction
