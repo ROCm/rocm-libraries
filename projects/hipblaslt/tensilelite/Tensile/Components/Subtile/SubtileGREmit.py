@@ -39,6 +39,7 @@ from .SubtileGeometry import (
     GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleGRLDSSwap
+from .SubtileTLUSwizzle import selectTLUSwizzle
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
@@ -923,12 +924,27 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
   module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize - 1,
              comment="%s: laneId" % tc))
 
+  swz = selectTLUSwizzle(tileInfo)
   tmpVgpr = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_tmpVgpr")
+  swzTmp = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_swzTmp") if swz else None
   for i in range(tileInfo.numGRPerSubtile):
     out = tile.sharedVgprGROffset[i]
     # K row handled by this lane in load i: laneId + i*wavesize
     module.add(VAddU32(dst=vgpr(tmpVgpr), src0=hex(i * wavesize), src1=vgpr(laneId),
                comment="%s: K row = laneId + %u" % (tc, i * wavesize)))
+    # Bank-conflict swizzle (NT LDS layout): permute which global K-row this
+    # lane loads so physical LDS chunk P holds logical K = fswz(P).  fswz is an
+    # involution, so the LR read applies the same flip and A round-trips.  See
+    # SubtileTLUSwizzle and format.md.
+    if swz:
+      module.add(VLShiftRightB32(dst=vgpr(swzTmp), shiftHex=hex(swz.xorFromBit),
+                 src=vgpr(tmpVgpr), comment="%s: chunk >> %u" % (tc, swz.xorFromBit)))
+      module.add(VAndB32(dst=vgpr(swzTmp), src0=vgpr(swzTmp), src1=hex(1),
+                 comment="%s: chunk[%u]" % (tc, swz.xorFromBit)))
+      module.add(VLShiftLeftB32(dst=vgpr(swzTmp), shiftHex=hex(swz.xorToBit),
+                 src=vgpr(swzTmp), comment="%s: -> bit %u" % (tc, swz.xorToBit)))
+      module.add(VXorB32(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr), src1=vgpr(swzTmp),
+                 comment="%s: chunk[%u] ^= chunk[%u]" % (tc, swz.xorToBit, swz.xorFromBit)))
     # * strideK (elements)
     module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=strideK,
                src1=vgpr(tmpVgpr), comment="%s: * strideK" % tc))
@@ -937,6 +953,8 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
                src=vgpr(tmpVgpr), comment="%s: K*stride*bpe" % tc))
     module.add(VLShiftRightB32(dst=vgpr(out), shiftHex=hex(3), src=vgpr(tmpVgpr),
                comment="%s: to bytes" % tc))
+  if swzTmp is not None:
+    writer.vgprPool.checkIn(swzTmp)
   writer.vgprPool.checkIn(tmpVgpr)
   writer.vgprPool.checkIn(laneId)
   return module
@@ -991,8 +1009,15 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
 
   subtileOffset = int(math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize))
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
+  swz = selectTLUSwizzle(tileInfo)
   for i in range(tileInfo.numGRPerSubtile):
     m0Offset = int(i * subtileOffset + (sId0 + sId1 * tileInfo.globalSubtileGrid[0]) * tileInfo.subtileSize)
+    # Bank-conflict swizzle: insert padBytes between load-blocks so physical
+    # LDS chunk P sits at P*mStripBytes + (P>>blockChunkBits)*padBytes.  Each GR
+    # load i covers one wavesize-chunk block, so it shifts by i*padBytes.  The
+    # LR read applies the same pad. See SubtileTLUSwizzle.
+    if swz:
+      m0Offset += i * swz.padBytes
     module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset - offsetK)))
     mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
 
