@@ -124,9 +124,22 @@ the kernel will actually run can** — that benchmark took ~1 h against ~14 h of
 
 ## What would actually fix it
 
-1. **Rank kernels the way they will run.** Selection must come from single-dispatch measurement
-   (`--algo_method heuristic --requested_solution 1`, or `--solution_index` one kernel per process),
-   not from a 298-kernel enumeration. This is slower and it is the only fix the evidence supports.
+1. **Rank kernels the way they will run — MEASURED, not asserted.** `--solution_index` (one kernel
+   per process) was checked against the catalog benchmark on 30 treated queries:
+
+   | instrument | median ratio | corr vs benchmark | sign agreement |
+   |---|---|---|---|
+   | `--algo_method all` at the query shape | +17.6% claimed | **-0.368** | 41% |
+   | **`--solution_index`, one kernel per process** | **0.988** vs benchmark **0.988** | **+0.989** | **93%** |
+
+   Single-dispatch reproduces the benchmark almost exactly, and independently confirms the
+   regression (0.988x = the chosen kernel is slower). **This is the valid ranking instrument.**
+
+   Cost: one process per (kernel, shape). A full 9 680 x 298 sweep this way is infeasible, so a
+   two-stage scheme — shortlist with `--algo_method all`, then rank the shortlist single-dispatch —
+   is the obvious candidate. **UNTESTED, and it has a specific failure mode worth checking first:
+   the biased enumeration may not even contain the true winner in its top-K.** Verify that before
+   relying on it.
 2. **Calibrate before trusting any enumeration.** For a sample of (kernel, shape) pairs, measure
    both ways and check the bias ratio is ~1.0. Here it is 1.16x, and that alone predicts failure.
 3. **Repeating the sweep does NOT help** — refuted in test 1. Neither does capping implausible
