@@ -175,22 +175,7 @@ TEST(ErrorPathsTest, ComputeTypes)
     hipblasLtMatmulDescDestroy(matmul);
 }
 
-// Test Suite 8: Non-square Layouts
-// Targets: hipblaslt.cpp layout handling for various shapes
-TEST(ErrorPathsTest, NonSquareLayouts)
-{
-    hipblasLtMatrixLayout_t mat;
-
-    // Test various non-square layouts
-    EXPECT_EQ(hipblasLtMatrixLayoutCreate(&mat, HIP_R_16F, 256, 128, 256),
-              HIPBLAS_STATUS_SUCCESS);
-    hipblasLtMatrixLayoutDestroy(mat);
-
-    EXPECT_EQ(hipblasLtMatrixLayoutCreate(&mat, HIP_R_32F, 128, 512, 128),
-              HIPBLAS_STATUS_SUCCESS);
-    hipblasLtMatrixLayoutDestroy(mat);
-
-    EXPECT_EQ(hipblasLtMatrixLayoutCreate(&mat, HIP_R_16BF, 1024, 64, 1024),
-              HIPBLAS_STATUS_SUCCESS);
-    hipblasLtMatrixLayoutDestroy(mat);
-}
+// Note: Non-square layout tests are in utility_helpers_test.cpp (DataValidationTest.NonSquareMatrices)
+// Note: hipblasLtMatrixLayoutCreate currently does not validate dimension parameters
+// (zero dimensions, ld < rows, invalid enums all return SUCCESS).
+// Invalid inputs may cause undefined behavior at matmul execution time.

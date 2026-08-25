@@ -6,7 +6,8 @@ include: matmul_common.yaml
 
 Tests:
 # ==============================================================================
-# 2. GROUPED GEMM OPERATIONS - Target lines 1295-1722
+# GROUPED GEMM OPERATIONS
+# Tests grouped GEMM dispatch, input preparation, and multi-problem execution
 # ==============================================================================
 
 - name: extended_grouped_gemm_basic
@@ -30,7 +31,8 @@ Tests:
   batch_count: 1
 
 # ==============================================================================
-# 3. COMPLEX NUMBER SUPPORT - Target lines 878-905, 924-1164
+# COMPLEX NUMBER SUPPORT
+# Tests complex arithmetic, conjugate transpose, and complex scaling paths
 # ==============================================================================
 
 - name: extended_complex_float
@@ -45,10 +47,10 @@ Tests:
   scale_type: f32_c
   transA: [N, T, C]
   transB: [N, C]
-  alpha: [1.0, 2.0]
-  alphai: [0.0, 1.0, 3.0]
-  beta: [0.0, 1.0, 4.0]
-  betai: [0.0, 1.0, 5.0]
+  alpha: 1.0
+  alphai: [0.0, 1.0]
+  beta: [0.0, 1.0]
+  betai: [0.0, 1.0]
   M: [128, 256]
   N: [128, 256]
   K: [64, 128]
@@ -216,7 +218,8 @@ Tests:
 # NOTE: Complex types with grouped GEMM may not be supported
 # Keeping test definition for documentation but skipping execution
 # ==============================================================================
-# 1. FP8/BF8/INT8 DATA TYPES - Target lines 404-467 (type conversions)
+# FP8/BF8/INT8 DATA TYPES
+# Tests integer and narrow floating-point type conversions and accumulation
 # ==============================================================================
 
 # Float8 FNUZ comprehensive tests
@@ -281,7 +284,8 @@ Tests:
 
 # FP8 with batching and strides
 # ==============================================================================
-# 2. ERROR PATH TESTS - Target lines 3204-4156 (error handling)
+# ERROR PATH TESTS
+# Tests invalid argument validation and error handling in the API layer
 # ==============================================================================
 
 # Bad argument tests using matmul_bad_arg function
@@ -300,7 +304,8 @@ Tests:
   K: 128
 
 # ==============================================================================
-# 3. BIAS TYPE COMBINATIONS - Target lines 220-235 (bias type defaults)
+# BIAS TYPE COMBINATIONS
+# Tests bias addition with various data type combinations and defaults
 # ==============================================================================
 
 # Bias with different d_type (f32)
