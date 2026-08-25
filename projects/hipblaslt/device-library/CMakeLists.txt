@@ -66,6 +66,13 @@ create_device_library(
     ${_codegen_product_args}
 )
 
+if(ORIGAMI_ENABLE_NN)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/OrigamiNNWeights.cmake)
+    foreach(_arch IN LISTS GPU_TARGETS)
+        origami_nn_colocate_weights("${_arch}" "${HIPBLASLT_TENSILE_LIBPATH}")
+    endforeach()
+endif()
+
 if(HIPBLASLT_ENABLE_EXTOPS)
     add_subdirectory(extops)
 endif()
