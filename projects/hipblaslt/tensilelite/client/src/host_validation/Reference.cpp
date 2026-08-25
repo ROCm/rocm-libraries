@@ -203,12 +203,8 @@ namespace TensileLite
             const bool partialSelection
                 = elementsToValidate != 0
                   && elementsToValidate < problem.d().totalLogicalElements();
-            const bool preserveStepwiseAccumulator
-                = partialSelection
-                  && (problem.computeType() == rocisa::DataType::Half
-                      || problem.computeType() == rocisa::DataType::BFloat16);
 
-            if(!preserveStepwiseAccumulator)
+            if(!partialSelection)
             {
                 ScopedTimer timer("solve_cpu_fast");
                 if(const auto runInfo = tryReferenceGemm(problem,
@@ -217,11 +213,10 @@ namespace TensileLite
                                                         ReferenceGemmExecution::BlockedPreferred))
                     return *runInfo;
             }
-            else if(const auto runInfo
-                    = tryReferenceGemm(problem,
-                                       inputs,
-                                       elementsToValidate,
-                                       ReferenceGemmExecution::Pointwise))
+            else if(const auto runInfo = tryReferenceGemm(problem,
+                                                          inputs,
+                                                          elementsToValidate,
+                                                          ReferenceGemmExecution::Pointwise))
                 return *runInfo;
 
             throw std::runtime_error(
