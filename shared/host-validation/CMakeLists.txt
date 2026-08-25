@@ -188,6 +188,9 @@ set_target_properties(host-validation
 
 target_compile_features(host-validation-blocked PUBLIC cxx_std_20)
 target_link_libraries(host-validation-blocked PUBLIC roc::host-validation)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(host-validation-blocked PRIVATE OpenMP::OpenMP_CXX)
+endif()
 target_include_directories(host-validation-blocked
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"

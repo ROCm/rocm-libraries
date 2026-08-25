@@ -455,6 +455,15 @@ namespace TensileLite::Client::reference_adapter
             std::optional<Tensor>      bTensor;
             std::optional<Tensor>      cTensor;
             std::optional<Tensor>      dTensor;
+            const bool initializeOutput = globalSelection.selectsAll()
+                                          || scalarTypeInfo(typeD).storageBits % 8 != 0;
+            const auto makeOutputTensor = [&](const Layout& layout,
+                                              std::span<std::byte> destination) {
+                return initializeOutput ? Tensor(typeD, layout, destination)
+                                        : Tensor(typeD,
+                                                 layout,
+                                                 TensorStorage::allocateUninitialized);
+            };
             if(inputs.batchA == nullptr)
             {
                 aStorage = detail::descriptorStorage(typeA, problem.a(), inputs.a, batchOffsetA);
@@ -474,7 +483,8 @@ namespace TensileLite::Client::reference_adapter
             {
                 dStorage
                     = detail::mutableDescriptorStorage(typeD, problem.d(), inputs.d, batchOffsetD);
-                dTensor.emplace(typeD, detail::hostValidationLayout(problem.d()), dStorage);
+                dTensor.emplace(
+                    makeOutputTensor(detail::hostValidationLayout(problem.d()), dStorage));
             }
 
             std::optional<ScalarType>  biasType;
@@ -692,7 +702,7 @@ namespace TensileLite::Client::reference_adapter
                                       : Tensor(typeC, layoutC, currentCStorage);
                 Tensor currentD = inputs.batchD == nullptr
                                       ? dTensor->alias(layoutD)
-                                      : Tensor(typeD, layoutD, currentDStorage);
+                                      : makeOutputTensor(layoutD, currentDStorage);
 
                 std::optional<VectorBinding>        runtimeBias;
                 std::optional<Tensor>               runtimeBiasOutput;
@@ -883,21 +893,13 @@ namespace TensileLite::Client::reference_adapter
     {
         for(const auto& copyBack : copyBacks)
         {
-            if(copyBack.source.storage().size() != copyBack.destination.size())
-                throw std::invalid_argument(
-                    "TensileLite translated output storage size does not match its destination.");
-            roc::host_validation::Tensor destination(
-                copyBack.source.type(), copyBack.source.layout(), copyBack.destination);
-            if(copyBack.selection && !copyBack.selection->selectsAll())
-            {
-                const auto selected = copyBack.selection->indices(copyBack.source.size());
-                destination.copyFrom(copyBack.source, selected);
-            }
+            if(!copyBack.selection || copyBack.selection->selectsAll())
+                copyBack.source.copyTo(copyBack.destination);
             else
             {
-                destination.copyFrom(copyBack.source);
+                const auto selected = copyBack.selection->indices(copyBack.source.size());
+                copyBack.source.copyTo(copyBack.destination, selected);
             }
-            std::ranges::copy(destination.storage(), copyBack.destination.begin());
         }
     }
 
