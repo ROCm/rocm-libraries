@@ -7089,8 +7089,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       mtB = kernel["MacroTile1"]
       padA = int(getattr(aTileInfo, "ldsRowPadBytes", 0)) * mtA
       padB = int(getattr(bTileInfo, "ldsRowPadBytes", 0)) * mtB
-      sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + readSize-1) // readSize) * readSize)
-      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + readSize-1) // readSize) * readSize)
+      # TLU=1 bank-conflict swizzle inserts pad bytes per subtile strip; fold it
+      # into the LDS footprint so adjacent strips don't overlap.
+      from Tensile.Components.Subtile.SubtileTLUSwizzle import swizzlePadPerStrip
+      swzPadA = swizzlePadPerStrip(aTileInfo) * numASubtiles
+      swzPadB = swizzlePadPerStrip(bTileInfo) * numBSubtiles
+      sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + swzPadA + readSize-1) // readSize) * readSize)
+      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + swzPadB + readSize-1) // readSize) * readSize)
       self.ldsStartOffsetB = sizeA
       sizeMXSA = 0
       sizeMXSB = 0

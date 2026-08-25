@@ -39,7 +39,7 @@ from .SubtileGeometry import (
     GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleGRLDSSwap
-from .SubtileTLUSwizzle import selectTLUSwizzle
+from .SubtileTLUSwizzle import selectTLUSwizzle, stripStrideBytes
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
@@ -862,6 +862,8 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   if tileInfoA.gr and isinstance(tileInfoA.gr.config.tag, GRTag_TLU1):
     module.add(_graTileAssignment_tlu(writer, kernel, tileInfoA))
     module.add(_graTileAssignment_tlu(writer, kernel, tileInfoB))
+    _grComputeSubtileOffsets_tlu(writer, module, tileInfoA)
+    _grComputeSubtileOffsets_tlu(writer, module, tileInfoB)
     return module
   subIterKBytes = tileInfoA.subIterKBytes
   wavesize = kernel["WavefrontSize"]
@@ -959,6 +961,33 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
   writer.vgprPool.checkIn(laneId)
   return module
 
+
+def _grComputeSubtileOffsets_tlu(writer, module, tileInfo):
+  """Fill per-subtile-row global-M soffset registers for TLU=1 (NT).
+
+  Each subtile strip covers ``subtileM = subtileShape[0]*instM`` free-dim rows.
+  For NT the free dim (M for A, N for B) is unit-stride, so the global byte
+  offset between adjacent strips is ``subtileM * bpe``.  Row 0 needs no soffset
+  (RegList empty); row r>=1 gets r*subtileM*bpe.  These feed the ``soffset``
+  field of the per-strip buffer_load in emitSingleBufferLoad.
+  """
+  tc = tileInfo.tc
+  subtileM = int(tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0])
+  strideBytes = int(subtileM * tileInfo.bpe)
+  for regId in range(len(tileInfo.localSubtilesRegister)):
+    rl = tileInfo.localSubtilesRegister[regId]
+    if len(rl) == 0:
+      continue  # row 0: soffset stays 0
+    off = strideBytes * regId
+    if rl.is_sgpr:
+      module.add(SMovB32(dst=rl.ref(0), src=hex(off),
+                 comment="%s: subtile row %u soffset = %u*subtileM*bpe" % (tc, regId, regId)))
+    else:
+      # VGPR fallback: bake soffset into each per-load offset VGPR.
+      for i, reg in enumerate(rl):
+        module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[i]),
+                   src1=hex(off), comment="%s: subtile row %u offset (vgpr)" % (tc, regId)))
+  return module
 ##################################################
 # Subroutine to generate GR load code
 #
@@ -1001,7 +1030,14 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   isSlc = bool(kernel["NonTemporal%s"%tc] & 0x2)
   isNT  = bool(kernel["NonTemporal%s"%tc] & 0x4)
 
-  regListIdx = tileInfo.grRegGroupForSubtileRow(sId0)
+  # For TLU=1 the scheduler yields sId0 in MMA-tile units (steps by
+  # subtileShape[0]); convert to a subtile-row index so multi-strip macro tiles
+  # (MT > one subtile) address the right LDS strip and soffset group.
+  isTLU1 = bool(tileInfo.gr and isinstance(tileInfo.gr.config.tag, GRTag_TLU1))
+  stackM = int(tileInfo.subtileShape[0])
+  subtileRow = (sId0 // stackM) if isTLU1 else sId0
+
+  regListIdx = tileInfo.grRegGroupForSubtileRow(subtileRow)
   regList = tileInfo.localSubtilesRegister[regListIdx]
   useSgpr = regList.is_sgpr
 
@@ -1010,8 +1046,14 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   subtileOffset = int(math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize))
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
   swz = selectTLUSwizzle(tileInfo)
+  # Pad-aware LDS stride between subtile strips (M/N direction).
+  stripStride = stripStrideBytes(tileInfo) if isTLU1 else int(tileInfo.subtileSize)
   for i in range(tileInfo.numGRPerSubtile):
-    m0Offset = int(i * subtileOffset + (sId0 + sId1 * tileInfo.globalSubtileGrid[0]) * tileInfo.subtileSize)
+    if isTLU1:
+      m0Offset = int(i * subtileOffset
+                     + (subtileRow + sId1 * tileInfo.globalSubtileGrid[0]) * stripStride)
+    else:
+      m0Offset = int(i * subtileOffset + (sId0 + sId1 * tileInfo.globalSubtileGrid[0]) * tileInfo.subtileSize)
     # Bank-conflict swizzle: insert padBytes between load-blocks so physical
     # LDS chunk P sits at P*mStripBytes + (P>>blockChunkBits)*padBytes.  Each GR
     # load i covers one wavesize-chunk block, so it shifts by i*padBytes.  The
