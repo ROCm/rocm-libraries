@@ -1639,9 +1639,16 @@ def runDispatcherCorrectnessTests(String arch, String compiler, String tier) {
         // Stream-K has its own registry-level driver test; its defaults are the
         // full 4x4 matrix (48 driver compiles / 96 GPU runs), so CI pins one
         // dtype/layout. Note it takes --arch, not --gfx.
+        //
+        // test_streamk_gpu_correctness.py is the bridge-level companion: the
+        // shared sweep above only ever builds the atomic reduction strategy
+        // (default_ci_config.json has no streamk_config, so expand_sweep falls
+        // back to ["atomic"]), leaving linear/tree unverified through ctypes.
+        // It takes --gfx and self-gates to gfx942.
         if (arch == "gfx942") {
             execute_cmd += """ && \
-        python3 ../dispatcher/tests/test_streamk_registry.py --arch ${arch} --datatypes fp16 --layouts rcr"""
+        python3 ../dispatcher/tests/test_streamk_registry.py --arch ${arch} --datatypes fp16 --layouts rcr && \
+        python3 ../dispatcher/tests/test_streamk_gpu_correctness.py --gfx ${arch}"""
         }
         // mx_gemm has no expand_sweep -- mx_gemm_utils exposes only
         // default_fp8_config()/default_fp4_config() -- so it cannot join the
@@ -1655,10 +1662,18 @@ def runDispatcherCorrectnessTests(String arch, String compiler, String tier) {
         // yet, so invoking them here would fail the lane on "can't open file"
         // before reaching a GPU. Add the calls back in the same change that adds
         // the tests.
+        //
+        // CAUTION for anyone extending this chain: execute_cmd is a single
+        // &&-joined string, so the FIRST non-zero exit aborts everything after
+        // it -- and a clean SKIP is exit 77, which is non-zero. A gfx950 test
+        // that skips will therefore silently truncate the rest of the lane.
+        // Append new calls at the END so a skip cannot mask a test that would
+        // otherwise have run. (Pre-existing hazard, not introduced here.)
         if (arch == "gfx950") {
             execute_cmd += """ && \
         python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \
-        python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py"""
+        python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py && \
+        python3 ../dispatcher/tests/test_aquant_gpu_correctness.py --gfx ${arch}"""
         }
     }
     try {

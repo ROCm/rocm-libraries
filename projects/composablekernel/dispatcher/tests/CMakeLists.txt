@@ -245,6 +245,64 @@ set_tests_properties(dispatcher_test_streamk_registry PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# GPU numeric-correctness tests for the quantized / Stream-K bridges.
+#
+# These are script-style (argparse + `return 77` to skip), not unittest, so each
+# needs its own add_test + SKIP_RETURN_CODE pair -- they cannot join the
+# `unittest discover` foreach above, which has no skip code and a fixed timeout.
+#
+# Deliberately NOT given a --gfx argument: each test hipcc-compiles kernels with
+# --offload-arch and then runs them, so the arch must match the PHYSICAL GPU.
+# rocminfo auto-detection is the right source for that; the CMake-configured
+# GPU_TARGETS may legitimately differ from the card in the box. Every one of
+# these exits 77 (Skipped, not Passed) when no GPU is present or the detected
+# arch is not the one the operator supports.
+
+# Stream-K: atomic / linear / tree reduction through the ctypes bridge (gfx942).
+# 12 hipcc builds plus a 4096-cubed reference, hence the larger timeout.
+add_test(
+    NAME dispatcher_test_streamk_gpu_correctness
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_gpu_correctness.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_streamk_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 900
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# AQuant grouped GEMM: fp8 / bf8 per-(m,k)-group A-side scales (gfx950).
+add_test(
+    NAME dispatcher_test_aquant_gpu_correctness
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_aquant_gpu_correctness.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_aquant_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 600
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# BQuant grouped GEMM: C4 (fp8/bf8) + H3 (mx_*) B-side scales (gfx950).
+# The test already existed but ran only from the Jenkins gfx950 lane; this makes
+# it reachable from ctest too.
+add_test(
+    NAME dispatcher_test_bquant_gpu_correctness
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_bquant_gpu_correctness.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_bquant_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 600
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Stress Test Script
 add_test(
     NAME dispatcher_stress_test
