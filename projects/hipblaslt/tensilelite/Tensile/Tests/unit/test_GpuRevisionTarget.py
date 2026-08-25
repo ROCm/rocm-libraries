@@ -490,7 +490,7 @@ def test_every_overlay_file_declares_the_asic_revision_schedule_name():
 @_needs_logic_dir
 def test_every_overlay_file_keeps_the_base_architecture_name():
     # ArchitectureName keys the master library and must stay the arch:
-    # TensileCreateLibrary rejects a stepping there, and library/gfx1250v0/ is a
+    # TensileCreateLibrary rejects a revision token there, and library/gfx1250v0/ is a
     # directory the runtime never reads.
     offenders = {
         str(p.relative_to(_LOGIC_ROOT)): load_logic_gfx_arch(p)

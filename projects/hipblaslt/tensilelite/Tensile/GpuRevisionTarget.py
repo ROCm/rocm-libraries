@@ -56,8 +56,8 @@ def _normalize_gfx1250_asic_revision(base_arch, asic_revision):
     """Coerce FFM's gfx1250 asicRevision 2 to the shipping v1 value 1.
 
     FFM functional-model parts report asicRevision 2, which is not a
-    shipping stepping. Treat it as revision 1 so library / skip-set /
-    --gpu-targets selection match v1. Warn on stderr, never stdout:
+    shipping revision. Treat it as revision 1 so library / skip-set /
+    --gpu-targets selection match revision 1. Warn on stderr, never stdout:
     callers capture stdout as TENSILE_TARGET=$(invoke get-gpu-revision-target).
 
     Real rev0 (asicRevision 0) and every non-gfx1250 arch are unchanged.
@@ -78,7 +78,7 @@ def _revision_to_gpu_target(base_arch, asic_revision):
     v1 (revision 1), FFM's revision 2 after it is coerced to 1, an unknown
     revision (-1 when HIP is too old to expose the field), any future/
     unexpected value, and every non-gfx1250 arch -- is returned unchanged
-    so tests default to the v1 stepping.
+    so tests default to revision 1.
     """
     asic_revision = _normalize_gfx1250_asic_revision(base_arch, asic_revision)
     if base_arch == "gfx1250" and asic_revision == 0:

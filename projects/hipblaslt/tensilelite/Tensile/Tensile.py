@@ -108,7 +108,7 @@ def executeStepsInConfig(
         archNames (list): The gfx names this build was asked for, when the caller knows
             them. Only the LibraryClient step needs them: it re-spawns
             TensileCreateLibrary in a fresh process, and the ISA alone cannot say which
-            gfx1250 stepping to rebuild for.
+            gfx1250 revision to rebuild for.
     """
 
     buildTmpPath = outputPath / "build_tmp"

@@ -174,11 +174,9 @@ class TestGuardMatrix:
         assert exc.value.code == -1
         probe.assert_called_once_with(device_id=0)
         out = capsys.readouterr().out
-        assert "revision-1" in out
-        assert "revision-0" in out
-        assert "gfx1250v0" in out
-        assert "RevisionID 1" in out
         assert "skip-gfx1250v0" in out
+        assert "RevisionID: 1" in out
+        assert "revision 0" in out
         assert "--build-only" in out
 
     def test_skip_mark_without_field_on_rev0_aborts(self, monkeypatch):
@@ -306,7 +304,7 @@ def test_execute_steps_rev1_yaml_on_rev0_raises(monkeypatch, tmp_path, capsys):
         )
     assert exc.value.code == -1
     assert called["bp"] is False
-    assert "RevisionID 1" in capsys.readouterr().out
+    assert "RevisionID: 1" in capsys.readouterr().out
 
 
 def test_execute_steps_build_only_rev1_on_rev0_allowed(monkeypatch, tmp_path):

@@ -3087,7 +3087,7 @@ class Solution(collections.abc.Mapping):
           and len(state.get("MIBlock", [])) >= 2 \
           and state["MIBlock"][0] == 32 and state["MIBlock"][1] == 16:
         reject(state, printRejectionReason,
-               "This gfx1250 stepping does not support the fp4 32x16 matrix-instruction shape; "
+               "This gfx1250 revision does not support the fp4 32x16 matrix-instruction shape; "
                "use a 16x16 MatrixInstruction or build for gfx1250")
         return
       if state["ProblemType"]["MacDataTypeA"].isFloat4() or state["ProblemType"]["MacDataTypeB"].isFloat4():

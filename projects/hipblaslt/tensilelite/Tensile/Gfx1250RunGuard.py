@@ -26,12 +26,14 @@ GFX1250_ISA = (12, 5, 0)
 DEFAULT_ASIC_REVISION = 0
 SKIP_GFX1250V0_MARK = "skip-gfx1250v0"
 
+GFX1250_REV1_ON_REV0_REASON = (
+    "This test is marked skip-gfx1250v0 / RevisionID: 1 and the selected GPU is "
+    "revision 0."
+)
 GFX1250_V1_ON_V0_ERROR = (
-    "Cannot run gfx1250 revision-1 kernels on revision-0 hardware "
-    "(asicRevision==0). This device is gfx1250v0. StreamK tests that set "
-    "skip-gfx1250v0 or RevisionID 1 do not run on this device. --build-only "
-    "remains allowed so revision-1 code can still be cross-compiled on this "
-    "machine."
+    GFX1250_REV1_ON_REV0_REASON
+    + " --build-only remains allowed so revision-1 code can still be "
+    "cross-compiled on this machine."
 )
 
 
@@ -40,7 +42,7 @@ def _is_gfx1250_family_name(name):
 
 
 def is_gfx1250_family_compile(arch_names, isa_info_map):
-    """True when this invocation targets the gfx1250 ISA (any stepping)."""
+    """True when this invocation targets the gfx1250 ISA (revision 0 or 1)."""
     names = {_bare_arch_name(a) for a in (arch_names or []) if a}
     if any(_is_gfx1250_family_name(n) for n in names):
         return True
