@@ -124,7 +124,7 @@ size_t sinkStoresInBlock(BasicBlock& bb, unsigned targetValu, bool crossLoadcnt,
     std::vector<BasicBlock::iterator> stores;
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst && isGlobalMemStore(*inst)) stores.push_back(it);
+        if (inst && isVmemTexStore(*inst)) stores.push_back(it);
     }
     // Bottom-up so each store sinks into the slot the one below vacated.
     for (size_t k = 0; k < stores.size(); ++k) {
@@ -168,7 +168,7 @@ static size_t groupStoresInBlock(BasicBlock& bb, unsigned maxStoreGroupSize, boo
     std::vector<BasicBlock::iterator> stores;
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst && isGlobalMemStore(*inst)) stores.push_back(it);
+        if (inst && isVmemTexStore(*inst)) stores.push_back(it);
     }
     const size_t storeCount = stores.size();
     size_t moved = 0;
