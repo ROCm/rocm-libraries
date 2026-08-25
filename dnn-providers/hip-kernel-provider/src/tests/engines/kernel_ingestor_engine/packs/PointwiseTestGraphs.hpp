@@ -423,12 +423,18 @@ inline flatbuffers::FlatBufferBuilder
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-    const auto resolvedWDims = wDims.value_or(std::vector<int64_t>{1, xDims[1], 2, 2});
-    const auto resolvedYDims
-        = yDims.value_or(std::vector<int64_t>{xDims[0],
-                                              resolvedWDims[0],
-                                              xDims[2] - resolvedWDims[2] + 1,
-                                              xDims[3] - resolvedWDims[3] + 1});
+    // std::optional::value_or evaluates its argument unconditionally, so deriving the
+    // defaults with value_or indexes xDims even when the caller supplied w/y dims. The
+    // rank-3 refusal case passes a 3-element xDims, making xDims[3] an out-of-bounds
+    // read. Derive a default only when one is needed.
+    const auto resolvedWDims
+        = wDims.has_value() ? *wDims : std::vector<int64_t>{1, xDims.at(1), 2, 2};
+    const auto resolvedYDims = yDims.has_value()
+                                   ? *yDims
+                                   : std::vector<int64_t>{xDims.at(0),
+                                                          resolvedWDims.at(0),
+                                                          xDims.at(2) - resolvedWDims.at(2) + 1,
+                                                          xDims.at(3) - resolvedWDims.at(3) + 1};
     const auto resolvedWDataType = wDataType.value_or(dataType);
 
     const auto xStrides = xStridesOverride.value_or(packedRowMajorStrides(xDims));
