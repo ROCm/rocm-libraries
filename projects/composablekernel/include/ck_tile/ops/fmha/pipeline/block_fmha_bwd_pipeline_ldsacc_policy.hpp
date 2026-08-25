@@ -298,6 +298,72 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                 typename Problem::QDataType>::TransposedDstrEncode{});
     }
 
+    // dS box transposed to [kN0][kM0], for THIS pipeline only.
+    //
+    // v_wmma_f32_16x16x32_bf16 hands each lane 8 C values down a *column* (the M
+    // direction). With the box N-contiguous those 8 land in 8 different rows,
+    // kN0*sizeof(bf16) = 256 B apart, so the compiler cannot merge them -- 64
+    // ds_store_b16/_d16_hi per thread per iteration. M-contiguous instead and the
+    // same run collapses to ds_store_b128.
+    //
+    // This MUST stay an override: the base descriptor is shared by five other bwd
+    // pipelines, and only this one reads dS back through load_tile_transpose. A
+    // transposed box with a plain reader silently produces wrong dQ -- caught on
+    // d=32/64/100/127, which route through the register-resident pipeline.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeSGradLdsBlockDescriptor()
+    {
+        constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kN0;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kM0;
+        constexpr index_t kKPack     = GetSmemKPackSGrad<Problem>();
+
+        return MakeXLdsBlockDescriptor<kMPerBlock, kKPerBlock, kKPack>();
+    }
+
+    // gemm_4's A operand, wrapped so load_tile_transpose fills it -- the same
+    // trick the Q^T reader above uses.  Route (b): dS is stored into an
+    // M-contiguous [kN0][kM0] box so gemm_2's C fragment (8 values down a
+    // column) lands contiguously and the store collapses to ds_store_b128;
+    // gemm_4 then reads it back through ds_load_tr16_b128.
+    //
+    // kKPerBlock is kN0, not kK4: a kK4-wide window cannot be transposed here
+    // because kK4 == WarpGemm::kK, so KIterPerWarp collapses to 1 and the
+    // encoding comes out a lane-mapping factor short (is_sequence_suffix
+    // underflows on <2,1> against the required <2,2,1>).  The whole box is read
+    // once and sliced in registers instead, exactly as kt_reg_tensor is.
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeSGradRegSliceBlockDescriptor()
+    {
+        using BlockGemm       = remove_cvref_t<decltype(GetSGradKTBlockGemm<Problem>())>;
+        constexpr auto config = BlockGemm::Policy::template GetWarpGemmMWarpNWarp<Problem>();
+        using WarpGemm        = remove_cvref_t<decltype(config.template at<0>())>;
+
+        constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<0>{});
+        constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<1>{});
+
+        constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kN0;
+
+        constexpr index_t MIterPerWarp = kMPerBlock / (MWarp * WarpGemm::kM);
+        constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
+
+        constexpr auto ds_block_outer_dstr_encoding =
+            tile_distribution_encoding<sequence<NWarp>,
+                                       tuple<sequence<MIterPerWarp, MWarp>, sequence<KIterPerWarp>>,
+                                       tuple<sequence<1, 0>>,
+                                       tuple<sequence<1, 0>>,
+                                       sequence<1, 2>,
+                                       sequence<0, 0>>{};
+
+        constexpr auto ds_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+            ds_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
+
+        return make_static_tile_distribution(
+            typename InputTileDistributionTraits<
+                decltype(ds_block_dstr_encode),
+                typename Problem::GemmDataType>::TransposedDstrEncode{});
+    }
+
     // ---- V staged into LDS by TDM -------------------------------------------
     //
     // V used to go global -> registers (load_tile) -> LDS (store_tile). TDM
