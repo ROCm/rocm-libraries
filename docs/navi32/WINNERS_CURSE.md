@@ -219,6 +219,36 @@ Note *why* this survives while the re-map did not: the reduction only needs the 
 CONTAIN a good kernel, which is robust to a biased ordering. The re-map needs the ordering itself
 to be correct, which it is not. **Coverage questions tolerate the bias; ranking questions do not.**
 
+## No enum-derived signal works at all — including the incumbent's standing
+
+The last plausible salvage: maybe the enumeration's *ordering* is unusable but its verdict on how
+BAD the incumbent is still carries information, so one could re-map only rows where the incumbent
+is clearly poor. Tested on the 126 treated queries:
+
+| incumbent's rank in the enumeration | n | median actual | helped |
+|---|---|---|---|
+| top 20 (already good) | 15 | -0.5% | 40% |
+| 21-60 | 43 | -2.8% | 37% |
+| 61-120 | 23 | +0.2% | 52% |
+| 121-200 | 16 | -4.3% | 25% |
+| **201+ (looks clearly bad)** | 29 | **-4.3%** | **31%** |
+
+| incumbent as fraction of enum-best | n | median actual | helped |
+|---|---|---|---|
+| <75% | 52 | -4.3% | 31% |
+| 75-90% | 38 | -1.3% | 42% |
+| 90-97% | 27 | -0.8% | 41% |
+| >97% | 9 | -0.5% | 44% |
+
+**Backwards.** The rows where the enumeration says the incumbent is worst do the WORST when
+switched. That is coherent: "the enum thinks the incumbent is bad" frequently just means the
+incumbent does not benefit from the enum's artefact, which says nothing about real performance.
+
+**Nothing derived from `--algo_method all` guides a re-map** — not the predicted gain (any band),
+not a plausibility cap, not `--min-gain`, not the stratum, not the incumbent's rank or margin.
+That every derived signal fails is itself the signature of a broken instrument rather than a
+noisy one.
+
 ## Scope
 
 This affects **ranking** decisions built on `--algo_method all`. It does not automatically
