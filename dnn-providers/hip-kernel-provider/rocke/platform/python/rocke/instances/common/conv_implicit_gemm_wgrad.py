@@ -277,10 +277,8 @@ class WgradConvSpec:
 
     Pipeline, epilogue, and async-DMA options are the same as
     :class:`~.conv_implicit_gemm.ImplicitGemmConvSpec`.  Grouped convolution
-    (``groups > 1``) is supported via grid-per-group (group-batch index on
-    block_id_z), with optional group-merging (``num_groups_to_merge``) that fuses
-    Gm groups into one workgroup GEMM (block-diagonal dW).  Grouped support is
-    currently the direct-store epilogue at ``split_k=1`` (MFMA for merging).
+    (``groups > 1``) is supported via grid-per-group (the group index rides on
+    block_id_z), currently the direct-store epilogue at ``split_k=1``.
     """
 
     problem: ConvProblem
@@ -329,15 +327,6 @@ class WgradConvSpec:
     # ABI is identical across all values; K_wg is padded as needed.
     split_k: int = 1
 
-    # Merge ``Gm`` (NumGroupsToMerge) consecutive conv groups into one workgroup
-    # GEMM (CK NumGroupsToMerge).  1 = grid-per-group (no merge; one workgroup per
-    # group).  >1 packs ``Gm`` groups on both GEMM-M and GEMM-N with a
-    # block-diagonal dW address map so only the diagonal (group g grad × group g
-    # input) reaches memory.  Fills the MMA atom for cardinality-grouped shapes
-    # (tiny kpg/cpg).  Requires ``groups % Gm == 0`` and ``Gm`` a power of two in
-    # ``{1,2,4,8,16,32,64}``.
-    num_groups_to_merge: int = 1
-
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
@@ -364,13 +353,13 @@ class WgradConvSpec:
 
     @property
     def wg_M(self) -> int:
-        # Merged GEMM-M: Gm groups fuse on M -> Gm*kpg (== kpg when Gm==1).
-        return _wg_M(self.problem) * self.num_groups_to_merge
+        # GEMM-M: per-group output channels kpg (== K when groups==1).
+        return _wg_M(self.problem)
 
     @property
     def wg_N(self) -> int:
-        # Merged GEMM-N: Gm groups fuse on N -> Gm*Y*X*cpg (== Y*X*cpg when Gm==1).
-        return _wg_N(self.problem) * self.num_groups_to_merge
+        # GEMM-N: per-group Y*X*cpg (== Y*X*C when groups==1).
+        return _wg_N(self.problem)
 
     @property
     def wg_K(self) -> int:
@@ -440,17 +429,6 @@ class WgradConvSpec:
                     f"(packed <2 x dtype> atomic pairs must stay within one filter position); "
                     f"got C={self.problem.C}"
                 )
-        gm = self.num_groups_to_merge
-        if gm not in (1, 2, 4, 8, 16, 32, 64):
-            raise ValueError(
-                f"num_groups_to_merge must be a power of two in "
-                f"{{1,2,4,8,16,32,64}}, got {gm}"
-            )
-        if self.problem.groups % gm != 0:
-            raise ValueError(
-                f"groups={self.problem.groups} must be divisible by "
-                f"num_groups_to_merge={gm}"
-            )
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -579,10 +557,9 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     ):
         return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
 
-    # Grouped wgrad (groups>1): grid-per-group with the group-batch index on
-    # block_id_z; num_groups_to_merge>1 fuses Gm groups per workgroup with a
-    # block-diagonal dW map.  Supports the direct-store epilogue at split_k==1;
-    # cshuffle, split-K, and pointwise grouped are follow-ons.
+    # Grouped wgrad (groups>1): grid-per-group with the group index on
+    # block_id_z.  Supports the direct-store epilogue at split_k==1; cshuffle,
+    # split-K, and pointwise grouped are follow-ons.
     if spec.problem.groups > 1:
         if spec.epilogue != "default":
             return False, (
@@ -593,11 +570,6 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             return False, "grouped wgrad does not yet support split_k (use split_k=1)"
         if spec.problem.is_pointwise:
             return False, "grouped pointwise (1x1) wgrad is not yet supported"
-        if spec.num_groups_to_merge > 1 and family != "mma":
-            return False, (
-                "group merging (num_groups_to_merge>1) is currently MFMA-only "
-                "(the WMMA merge epilogue is a follow-on)"
-            )
 
     _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
     _lds_layout = spec.effective_lds_layout()
@@ -732,13 +704,10 @@ def build_implicit_gemm_conv_wgrad(
         raise ValueError(f"invalid wgrad spec for {arch}: {why}")
 
     p = spec.problem
-    # Group merging (num_groups_to_merge = Gm > 1): the load side (dY, X, GEMM
-    # dims, grid) is built from an "effective" problem whose group count is
-    # groups/Gm — i.e. Gm consecutive groups fuse into one contiguous super-group
-    # with Gm*kpg output channels and Gm*cpg input channels.  The dW epilogue
-    # keeps the real per-group cpg and applies the block-diagonal g_m==g_n mask.
-    gm = spec.num_groups_to_merge
-    p_load = p if gm == 1 else dc_replace(p, groups=p.groups // gm)
+    # Grouped wgrad is grid-per-group: one workgroup per conv group, the group
+    # index riding on block_id_z.  The load side (dY, X, GEMM dims, grid) is built
+    # straight from the per-group problem.
+    p_load = p
     ir_dtype_a = _ir_dtype(spec.data.dtype_a)
     ir_dtype_b = _ir_dtype(spec.data.dtype_b)
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
@@ -782,9 +751,9 @@ def build_implicit_gemm_conv_wgrad(
     )
     c_per_lane = op.c_frag_len
 
-    # Wgrad GEMM dims (from the effective/merged problem: Gm*kpg × Gm*Y*X*cpg).
-    wg_M = _wg_M(p_load)  # Gm*kpg  (K when groups==1)
-    wg_N = _wg_N(p_load)  # Gm*Y*X*cpg  (Y*X*C when groups==1)
+    # Wgrad GEMM dims (per group): kpg × Y*X*cpg, reduction N*Ho*Wo.
+    wg_M = _wg_M(p_load)  # kpg  (K when groups==1)
+    wg_N = _wg_N(p_load)  # Y*X*cpg  (Y*X*C when groups==1)
     wg_K = _wg_K(p_load)  # N*Ho*Wo (reduction; group-independent)
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
@@ -808,25 +777,15 @@ def build_implicit_gemm_conv_wgrad(
     c_block_k = b.const_i32(block_k)
     c_wg_K = b.const_i32(wg_K)
 
-    # Grouped wgrad: the group index rides on ``block_id_z`` alongside split-K.
-    # The launch z-extent is ``groups * split_k``; decode
-    #   group   = block_id_z // split_k     (blockIdx.z advances the group last)
-    #   sk_slice = block_id_z %  split_k
-    # For split_k==1 this is just ``group = block_id_z`` (matches forward's
-    # grid-per-group).  ``group_v`` is None for the ungrouped path so all
-    # groups==1 IR stays byte-identical.
-    # Grouped wgrad: the group index rides on ``block_id_z``.  Grouped specs are
-    # gated to split_k==1 (is_valid_wgrad_spec), so for grouped the z-axis is a
-    # pure group index; ``group_v`` stays None on the ungrouped path so all
-    # groups==1 IR is byte-identical to the pre-grouped kernel.
-    # ``grouped`` drives the load-side group threading and uses the EFFECTIVE
-    # (merged) problem: with Gm groups fused, there are groups/Gm group-batches,
-    # each owning a contiguous Gm*kpg / Gm*cpg super-group slab.  group_v is the
-    # group-batch index (block_id_z).
+    # Grouped wgrad: the group index rides on ``block_id_z`` (grid-per-group,
+    # matching forward).  Grouped specs are gated to split_k==1
+    # (is_valid_wgrad_spec), so for grouped the z-axis is a pure group index;
+    # ``group_v`` stays None on the ungrouped path so all groups==1 IR is
+    # byte-identical to the pre-grouped kernel.
     grouped = p_load.groups > 1
     group_v = None
     if grouped:
-        c_kpg = b.const_i32(p_load.kpg)  # Gm*kpg: dY output-channel slab stride
+        c_kpg = b.const_i32(p_load.kpg)  # kpg: dY output-channel slab stride
         group_v = b.to_sgpr_u32(b.block_id_z())
 
     # Split-K K-slice bounds.  K_wg is padded to the next multiple of
@@ -964,8 +923,8 @@ def build_implicit_gemm_conv_wgrad(
         _c_wgK_ir = b.const_i32(wg_K)
     else:
         dY_desc = make_dy_descriptor(p, dtype=spec.data.dtype_a)
-        # X uses the effective (merged) problem so its channel decode spans the
-        # fused Gm*cpg super-group slab selected by the group-batch index.
+        # X's channel decode spans the group's cpg slab, selected by the group
+        # index (grid-per-group).
         X_desc = make_x_wgrad_descriptor(p_load, dtype=spec.data.dtype_b)
         _c_K_ir = _c_C_ir = _c_wgM_ir = _c_wgN_ir = _c_wgK_ir = None
 
@@ -1466,44 +1425,15 @@ def _emit_wgrad_direct_epilogue(
     channel slab and pass ``group`` for the channel embed ``c = group*cpg + …``.
     """
     p = spec.problem
-    gm = spec.num_groups_to_merge
     if p.is_pointwise:
         _c_N = b.const_i32(_wg_N(p))
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
 
-    elif gm > 1:
-        # Group merging: one workgroup fuses Gm groups on both M and N.  The fused
-        # product has Gm^2 (g_m, g_n) blocks; only the Gm diagonal blocks
-        # (g_m == g_n) are real dW.  Compute the packed-dW offset for the diagonal
-        # and drop the off-diagonal via the valid predicate (CK's block-diagonal
-        # weight write, expressed as an epilogue mask).  ``group`` is the
-        # group-batch index (None when there is a single batch, i.e. groups==Gm).
-        _c_base_kpg = b.const_i32(gm * p.kpg)  # k_out slab stride per group-batch
-        _c_kpg = b.const_i32(p.kpg)
-        _c_cpg = b.const_i32(p.cpg)
-        _c_gmcpg = b.const_i32(gm * p.cpg)  # super-group channel period on N
-        _spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
-        _c_yxcpg = b.const_i32(_spatial * p.cpg)  # packed per-k_out stride
-
-        def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-            g_m = b_.div(m_val, _c_kpg)  # M-side group within the batch
-            c_super = b_.mod(n_val, _c_gmcpg)  # (g_n, c_in) packed
-            yx = b_.div(n_val, _c_gmcpg)  # flattened [z,]y,x
-            g_n = b_.div(c_super, _c_cpg)  # N-side group within the batch
-            c_in = b_.mod(c_super, _c_cpg)  # per-group channel
-            # global output channel = group_batch*Gm*kpg + m_val
-            k_out = (
-                m_val if group is None else b_.add(m_val, b_.mul(group, _c_base_kpg))
-            )
-            off = b_.add(b_.add(b_.mul(k_out, _c_yxcpg), b_.mul(yx, _c_cpg)), c_in)
-            # block-diagonal: only the g_m == g_n pair is real weight gradient.
-            return off, b_.cmp_eq(g_m, g_n)
-
     elif group is not None:
-        # Grouped, no merge (Gm==1): dW packed [K,Y,X,cpg]; the group rides on the
-        # global k_out only (m_val is the per-group [0,kpg) row).
+        # Grouped: dW packed [K,Y,X,cpg]; the group rides on the global k_out
+        # only (m_val is the per-group [0,kpg) row).
         dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
         _c_kpg = b.const_i32(p.kpg)
 
@@ -1517,13 +1447,12 @@ def _emit_wgrad_direct_epilogue(
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return dW_desc.offset(b_, k_out=m_val, n_wg=n_val)
 
-    _gm = spec.num_groups_to_merge
     DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
         b,
         accs=accs,
         addr_fn=dw_addr,
         d_rsrc=dw_rsrc,
-        bounds=(b.const_i32(_wg_M(p) * _gm), b.const_i32(_wg_N(p) * _gm)),
+        bounds=(b.const_i32(_wg_M(p)), b.const_i32(_wg_N(p))),
     )
 
 

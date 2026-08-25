@@ -174,7 +174,6 @@ def build_conv_wgrad(
     epilogue="default",
     split_k=1,
     dtype_d="fp16",
-    num_groups_to_merge=1,
 ):
     def _build():
         from rocke.instances.common.conv_implicit_gemm_wgrad import (
@@ -203,7 +202,6 @@ def build_conv_wgrad(
             pipeline=pipeline,
             epilogue=epilogue,
             split_k=split_k,
-            num_groups_to_merge=num_groups_to_merge,
         )
         return build_implicit_gemm_conv_wgrad(spec, arch=arch)
 
@@ -1030,8 +1028,8 @@ def cases():
     wgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
     wgrad2 = (2, 16, 16, 32, 32, 1, 1, 1, 1, 0, 0, 1, 1)
     # wgrad_g4: grouped 3x3 conv (N1 H8 W8 C64 K64 Y3 X3, groups=4 -> cpg=kpg=16).
-    # 14th tuple element sets ConvProblem.groups. Exercises the grouped/merged
-    # block-diagonal dW IR (grid-per-group + NumGroupsToMerge); MFMA-only.
+    # 14th tuple element sets ConvProblem.groups. Exercises the grouped
+    # (grid-per-group) dW IR.
     wgrad_g4 = (1, 8, 8, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 4)
     add(
         "conv_wgrad",
@@ -1192,8 +1190,7 @@ def cases():
             tile_k=32,
         ),
     )
-    # gfx1250 WMMA grouped (wave32, 16x16x32 -- its only fp16/bf16 atom). Gm=1
-    # only: group merging is MFMA-only on the WMMA path.
+    # gfx1250 WMMA grouped (wave32, 16x16x32 -- its only fp16/bf16 atom).
     add(
         "conv_wgrad",
         "conv_wgrad/gfx1250/n1h8c64k64r3_g4",
@@ -1209,42 +1206,6 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=32,
-        ),
-    )
-    add(
-        "conv_wgrad",
-        "conv_wgrad/gfx942/n1h8c64k64r3_g4_gm2",
-        "gfx942",
-        build_conv_wgrad(
-            "irhash_wgrad_942_g4_gm2",
-            "gfx942",
-            wgrad_g4,
-            wave_size=64,
-            wtm=16,
-            wtn=16,
-            wtk=16,
-            tile_m=64,
-            tile_n=32,
-            tile_k=16,
-            num_groups_to_merge=2,
-        ),
-    )
-    add(
-        "conv_wgrad",
-        "conv_wgrad/gfx950/n1h8c64k64r3_g4_gm2",
-        "gfx950",
-        build_conv_wgrad(
-            "irhash_wgrad_950_g4_gm2",
-            "gfx950",
-            wgrad_g4,
-            wave_size=64,
-            wtm=32,
-            wtn=32,
-            wtk=16,
-            tile_m=64,
-            tile_n=64,
-            tile_k=32,
-            num_groups_to_merge=2,
         ),
     )
 

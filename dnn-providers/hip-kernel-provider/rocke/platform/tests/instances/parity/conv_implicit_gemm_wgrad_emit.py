@@ -26,7 +26,6 @@
 #
 # Negative cases (configs 100+) verify that invalid specs are rejected:
 #   100 -- odd C with fp16 split-K (must raise ValueError)
-#   101 -- num_groups_to_merge=3 (not a power of two, must raise ValueError)
 #   102 -- split_k > 1 on RDNA gfx1151 (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
 # 0-10, so run_diff.py stops at the shared END before reaching 100+; these
@@ -292,28 +291,6 @@ def _spec(idx: int):
                 pipeline="mem",
                 epilogue="default",
                 split_k=4,
-            ),
-            "gfx950",
-        )
-    if idx == 101:
-        # num_groups_to_merge=3 -- must raise (Gm must be a power of two in
-        # {1,2,4,8,16,32,64}).  Grouped wgrad and group-merging ARE supported now;
-        # this exercises the merge-factor validator instead.
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, groups=8)
-        return (
-            WgradConvSpec(
-                problem=p,
-                tile_m=64,
-                tile_n=64,
-                tile_k=64,
-                warp_m=2,
-                warp_n=2,
-                warp_tile_m=32,
-                warp_tile_n=32,
-                warp_tile_k=16,
-                pipeline="mem",
-                epilogue="default",
-                num_groups_to_merge=3,
             ),
             "gfx950",
         )

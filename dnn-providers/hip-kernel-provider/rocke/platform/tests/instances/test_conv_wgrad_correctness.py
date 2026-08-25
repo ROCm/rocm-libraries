@@ -85,7 +85,6 @@ class _Shape:
     dH: int = 1
     dW: int = 1
     groups: int = 1
-    num_groups_to_merge: int = 1
 
 
 # Kept intentionally small (fast compile + run). C and K are multiples of 8 so
@@ -252,7 +251,6 @@ def _make_spec(
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=split_k,
-        num_groups_to_merge=shape.num_groups_to_merge,
     )
     return spec, problem, atom.k
 
@@ -334,12 +332,11 @@ def _run_one(
         return False, f"kernel load failed: {e}"
 
     # wgrad grid: x = ceil(N_wg / tile_n), y = ceil(M / tile_m),
-    # z = ceil(groups / num_groups_to_merge) * split_k (the group-batch axis rides
-    # on z alongside split-K; == split_k for groups=1).
+    # z = groups * split_k (the group axis rides on z alongside split-K;
+    # == split_k for groups=1).
     gx = (spec.wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (spec.wg_M + spec.tile_m - 1) // spec.tile_m
-    gm = spec.num_groups_to_merge
-    gz = ((p.groups + gm - 1) // gm) * spec.split_k
+    gz = p.groups * spec.split_k
     grid = (gx, gy, gz)
     block = (spec.block_size, 1, 1)
 
@@ -487,73 +484,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
                 with self.subTest(shape=shape.id, dtype=dtype):
                     self._check(shape, dtype, "mem", "default")
 
-    def test_grouped_merged(self):
-        # Group merging (num_groups_to_merge = Gm > 1): Gm groups fuse into one
-        # workgroup GEMM with a block-diagonal dW write.  Fills the MMA atom for
-        # cardinality-grouped shapes.  MFMA-only; direct-store; split_k=1.
-        merged = [
-            _Shape(
-                "g4_gm2_N2H12W12C64K64",
-                N=2,
-                Hi=12,
-                Wi=12,
-                C=64,
-                K=64,
-                Y=3,
-                X=3,
-                pH=1,
-                pW=1,
-                groups=4,
-                num_groups_to_merge=2,
-            ),
-            _Shape(
-                "g4_gm4_N2H12W12C64K64",
-                N=2,
-                Hi=12,
-                Wi=12,
-                C=64,
-                K=64,
-                Y=3,
-                X=3,
-                pH=1,
-                pW=1,
-                groups=4,
-                num_groups_to_merge=4,
-            ),
-            _Shape(
-                "g8_gm2_N2H12W12C64K64",
-                N=2,
-                Hi=12,
-                Wi=12,
-                C=64,
-                K=64,
-                Y=3,
-                X=3,
-                pH=1,
-                pW=1,
-                groups=8,
-                num_groups_to_merge=2,
-            ),
-            _Shape(
-                "g32_gm4_hero_N2H14W14C256K256",
-                N=2,
-                Hi=14,
-                Wi=14,
-                C=256,
-                K=256,
-                Y=3,
-                X=3,
-                pH=1,
-                pW=1,
-                groups=32,
-                num_groups_to_merge=4,
-            ),
-        ]
-        for dtype in _DTYPES:
-            for shape in merged:
-                with self.subTest(shape=shape.id, dtype=dtype):
-                    self._check(shape, dtype, "mem", "default")
-
     def test_grouped_depthwise(self):
         # Depthwise (groups == C, cpg == 1): each input channel is its own group.
         # kpg==1 (K==C) is pure depthwise; kpg==2 (K==2C) is a channel multiplier.
@@ -605,20 +535,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
                 pH=1,
                 pW=1,
                 groups=64,
-            ),
-            _Shape(
-                "dw_merged_g32_gm4_c32k32",
-                N=2,
-                Hi=12,
-                Wi=12,
-                C=32,
-                K=32,
-                Y=3,
-                X=3,
-                pH=1,
-                pW=1,
-                groups=32,
-                num_groups_to_merge=4,
             ),
         ]
         for dtype in _DTYPES:
