@@ -474,6 +474,11 @@ compilation::KpackModuleCache& pointwiseKpackModuleCache()
     return s_moduleCache;
 }
 
+void resetPointwiseModuleCache()
+{
+    pointwiseKpackModuleCache().clear();
+}
+
 namespace
 {
 

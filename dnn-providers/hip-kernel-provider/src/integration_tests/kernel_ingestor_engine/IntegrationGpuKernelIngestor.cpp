@@ -25,6 +25,7 @@
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
@@ -246,6 +247,30 @@ class IntegrationGpuKernelIngestor
                                                                                       ExecuteCase>
 {
 protected:
+    /// A cache root private to ONE test case, not merely to this binary.
+    ///
+    /// main() already scopes HIPDNN_CACHE_DIR away from the developer's ~/.cache/hipdnn,
+    /// which stops one RUN inheriting another's shards. It does not stop one CASE
+    /// inheriting another's: every case in this process shares that single root.
+    /// ExecutesCorrectlyWithBenchmarkingEnabled records a measured ranking for a
+    /// single-node FLOAT add, and ReportsAKnobWhoseValuesComeFromTheCatalog and
+    /// ReportsTheMaximumWorkspaceAcrossSurvivingKernels then read it back: a benchmarked
+    /// record replaces the heuristic order, so the knob default and the plan's workspace
+    /// both follow the measured winner instead of the catalog's own ranking.
+    ///
+    /// That made those two cases fail under --gtest_shuffle, and -- because the shard
+    /// outlives the process -- in default order too, on any machine where an earlier run
+    /// left one behind. It is also nondeterministic rather than merely order-dependent:
+    /// the two surviving FLOAT candidates differ by a few nanoseconds, so which one the
+    /// sweep records is a coin flip.
+    ///
+    /// Scope::TEST rather than the default: a deferring instance nested inside main()'s
+    /// would see HIPDNN_CACHE_DIR already set and quietly own nothing, isolating exactly
+    /// nothing. Destroyed with the fixture, so the redirect is undone and the scratch
+    /// tree removed on the failing path as well as the passing one.
+    hipdnn_test_sdk::utilities::ScopedTestCacheDir _cacheDir{
+        "ingestor-case", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
+
     static int64_t engineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);

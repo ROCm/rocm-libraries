@@ -244,6 +244,66 @@ std::string recoverAbandonedBackups(const std::vector<std::filesystem::path>& ar
     return {};
 }
 
+/// Drops the provider's resident kpack modules, so the next dispatch re-reads its
+/// archive from disk.
+///
+/// The module cache is process-lifetime by design -- one hipModule_t per
+/// (archive, toc_key, arch), deliberately outliving every Container. That is correct
+/// for the product and fatal for ...SurvivesABrokenArchive: if any earlier case has
+/// already executed the packaged kernel, a resident module serves the plan, the corrupt
+/// bytes are read by nothing, and the diagnostics this suite asserts on never fire.
+/// This suite used to depend on being FIRST in the file to avoid that, which
+/// --gtest_shuffle destroys.
+///
+/// Reached by dlsym rather than a direct call because this binary links only the SDKs;
+/// the provider arrives via dlopen. Same route as
+/// IntegrationGpuKernelIngestorDirectAbi.SelfRegistersAllEngineIds, except that this
+/// takes the RTLD_NOLOAD form: the harness has already loaded the plugin, and the point
+/// is to reach the statics in THAT copy. openLibrary() would refcount the same image
+/// rather than produce a second one, but asking for a load at all would misstate the
+/// intent -- if the plugin is somehow not resident, resetting a freshly loaded copy's
+/// empty caches would be a silent no-op rather than the error it should be.
+///
+/// Returns a description of the failure, or an empty string.
+std::string resetProviderModuleCaches()
+{
+    const std::filesystem::path pluginTarget(PLUGIN_PATH);
+    const auto pluginFile = hipdnn_data_sdk::utilities::LIB_PREFIX
+                            + pluginTarget.filename().string()
+                            + hipdnn_data_sdk::utilities::SHARED_LIB_EXT;
+    const auto pluginPath = std::filesystem::weakly_canonical(
+        getCurrentExecutableDirectory() / pluginTarget.parent_path() / pluginFile);
+
+    // RTLD_NOLOAD: returns null rather than throwing when the image is not already
+    // resident, unlike openLibrary().
+    auto* library = hipdnn_data_sdk::utilities::openLoadedLibrary(pluginPath);
+    if(library == nullptr)
+    {
+        return "the provider at " + pluginPath.string()
+               + " is not loaded, so there are no resident modules to reset";
+    }
+
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* reset = reinterpret_cast<void (*)()>(hipdnn_data_sdk::utilities::getSymbol(
+        library, "hipdnnEnginePluginResetKpackModuleCacheForTesting"));
+    if(reset == nullptr)
+    {
+        // Balances the RTLD_NOLOAD reference taken above before bailing out.
+        hipdnn_data_sdk::utilities::closeLibrary(library);
+        return "the provider at " + pluginPath.string()
+               + " exports no hipdnnEnginePluginResetKpackModuleCacheForTesting; it was "
+                 "built without HIPDNN_ENABLE_KERNEL_INGESTOR, or the test-only reset "
+                 "hook was removed";
+    }
+
+    reset();
+
+    // Drops only the reference this call took. The harness holds its own, so the plugin
+    // stays loaded and the statics just reset are the ones the next dispatch will use.
+    hipdnn_data_sdk::utilities::closeLibrary(library);
+    return {};
+}
+
 } // namespace
 
 class IntegrationGpuKernelIngestorKpack
@@ -335,13 +395,17 @@ protected:
 // ---------------------------------------------------------------------------
 // The artifact fails without taking the process with it
 //
-// First in the file, and that is load-bearing. Gtest runs suites in order of first
-// registration, which within one translation unit is definition order, so this suite runs
-// before IntegrationGpuKernelIngestorKpack below. It has to: the module cache is
-// process-lifetime, so once the packaged kernel has been executed once, a resident module
-// serves the plan and the corrupt bytes on disk are read by nothing. Nothing in this repo
-// or in the generated build passes --gtest_shuffle, which is what makes definition order a
-// sound guarantee rather than a coincidence.
+// Position-independent, deliberately. This suite used to rely on being FIRST in the
+// file -- gtest registers suites in definition order within a translation unit, so it
+// ran before IntegrationGpuKernelIngestorKpack below and therefore before any case had
+// executed the packaged kernel. That mattered because the module cache is
+// process-lifetime: once the kernel has run, a resident hipModule_t serves the plan and
+// the corrupt bytes on disk are read by nothing, so every diagnostic below silently
+// stops firing. --gtest_shuffle destroys that ordering, and the suite failed
+// deterministically whenever the shuffle put the executing case first.
+//
+// SetUp() now drops the resident modules explicitly, so the corrupt archive is re-read
+// whatever ran before. Nothing here depends on file position any more.
 // ---------------------------------------------------------------------------
 
 /// A truncated archive must produce a diagnosable failure, never a crash, and must leave
@@ -437,6 +501,14 @@ protected:
                 EXPECT_EQ(readWholeFile(_victim).size(), restored.size())
                     << "the staged archive was only partly restored: " << _victim;
             }
+
+            // Symmetric with the reset in the test body: the restored archive is the
+            // pristine one again, but the resident module still holds what was loaded
+            // from the corrupt bytes (or nothing at all, if that load failed). Dropping
+            // it here means the next case in this binary loads the good archive from
+            // disk rather than inheriting this suite's damage. Unconditional, so it runs
+            // whether the restore above succeeded or not.
+            EXPECT_EQ(resetProviderModuleCaches(), "");
             _corrupted = false;
         }
         _backup.reset();
@@ -454,6 +526,14 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
 {
     ASSERT_TRUE(writeWholeFile(_victim, std::vector<char>(CORRUPTION_BYTE_COUNT, '\0')))
         << "could not write the corrupt archive at " << _victim;
+
+    // After the corruption, not in SetUp: a reset before the bytes change would be
+    // undone by anything that builds a plan in between, and the cache would be warm
+    // again by the time build_plans() below runs. Dropping the resident modules here
+    // is what forces the packaged engine to actually re-read the damaged archive --
+    // without it a module left over from an earlier case serves the plan, no diagnostic
+    // is emitted, and every EXPECT below fails for a reason that is not the product's.
+    ASSERT_EQ(resetProviderModuleCaches(), "");
 
     // No preferred engine here, unlike ExecutesAPackagedKernelOnDevice. Both engines claim
     // this graph, and the point of this case is what happens when one of them is broken:
