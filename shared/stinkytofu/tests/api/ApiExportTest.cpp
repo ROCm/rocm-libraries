@@ -78,6 +78,7 @@
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
@@ -239,6 +240,7 @@ TEST(ApiExport, GetGfxArchID) {
 
 TEST(ApiExport, PassFactories) {
     EXPECT_NE(createStinkyDAGSchedulerPass(), nullptr);
+    EXPECT_NE(createStinkyMergeBarrierPass(), nullptr);
     EXPECT_NE(createSetMatrixReusePass(), nullptr);
     EXPECT_NE(createStinkyBuildImplicitDependencyPass(), nullptr);
     EXPECT_NE(createStinkyRemoveWaitCntPass(), nullptr);
