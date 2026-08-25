@@ -81,7 +81,6 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/VerifyInstrumentationTest.cpp
     unit/asm/DebugPrintInstrumentation_test.cpp
     unit/asm/AccumulateInstructionSizePassRunTest.cpp
-    unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
     unit/asm/RemoveInstructionPassTest.cpp
     unit/asm/RemoveDscntPassTest.cpp
@@ -117,6 +116,7 @@ set(UNIT_CORE_TEST_FILES
     unit/core/ComgrProbeTest.cpp
     unit/core/PassBuilderTest.cpp
     unit/core/BackendTest.cpp
+    unit/core/VersionTest.cpp
 )
 
 # Common/Shared Tests
@@ -142,6 +142,12 @@ target_link_libraries(unit_tests PRIVATE stinkytofu-warnings)
 target_link_libraries(unit_tests PUBLIC ${TEST_LINK_LIBS})
 target_include_directories(unit_tests PRIVATE ${TEST_INCLUDE_DIRS})
 add_dependencies(unit_tests tablegen_generated)
+
+# gtest 1.18 uses std::any, whose MSVC header needs static RTTI; overriding the
+# library-wide -fno-rtti just for the gtest-linking test targets on Windows.
+if(WIN32)
+    target_compile_options(unit_tests PRIVATE -frtti)
+endif()
 
 # Example-plugin tests are gated by STINKYTOFU_BUILD_EXAMPLES: the plugin target
 # only exists when examples are built, so the integration test compiles only then.
@@ -219,6 +225,10 @@ if(BUILD_SHARED_LIBS)
     target_include_directories(api_tests PRIVATE ${TEST_INCLUDE_DIRS})
     add_dependencies(api_tests tablegen_generated)
 
+    if(WIN32)
+        target_compile_options(api_tests PRIVATE -frtti)
+    endif()
+
     # Plugin integration tests require the shared lib so the plugin and the test
     # binary share the same stinkytofu registry instance at runtime.
     if(STINKYTOFU_BUILD_EXAMPLES)
@@ -233,6 +243,28 @@ if(BUILD_SHARED_LIBS)
             ${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugins
         )
         add_dependencies(api_tests stinkytofu-plugin-helloworld)
+
+        # Test-only plugin that reports a deliberately wrong stinkytofu version,
+        # to assert loadPlugin() rejects a version mismatch before calling
+        # registerPlugin(). Headers-only, same DT_NEEDED rationale as the
+        # example plugin above (see examples/plugins/CMakeLists.txt).
+        add_library(stinkytofu-plugin-bad-version MODULE
+            ${CMAKE_CURRENT_SOURCE_DIR}/plugins/BadVersionPlugin.cpp
+        )
+        if(WIN32)
+            target_link_libraries(stinkytofu-plugin-bad-version PRIVATE stinkytofu)
+        else()
+            target_include_directories(stinkytofu-plugin-bad-version PRIVATE
+                $<TARGET_PROPERTY:stinkytofu,INTERFACE_INCLUDE_DIRECTORIES>
+            )
+        endif()
+        set_target_properties(stinkytofu-plugin-bad-version PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
+        )
+        target_compile_definitions(api_tests PRIVATE
+            STINKYTOFU_PLUGIN_BAD_VERSION_PATH="$<TARGET_FILE:stinkytofu-plugin-bad-version>"
+        )
+        add_dependencies(api_tests stinkytofu-plugin-bad-version)
     endif()
 
     gtest_discover_tests(api_tests

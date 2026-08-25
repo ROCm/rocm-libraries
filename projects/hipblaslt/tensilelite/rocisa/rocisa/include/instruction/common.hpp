@@ -2470,6 +2470,60 @@ namespace rocisa
         int storecnt;
     };
 
+    // Wait for outstanding async global stores (e.g. global_store_async_from_lds*)
+    // to complete. These are tracked by the dedicated ASYNC counter, NOT
+    // dscnt/storecnt -- emit `s_wait_asynccnt 0` before reusing the LDS staging
+    // region or before s_endpgm.
+    struct _SWaitAsynccnt : public Instruction
+    {
+        _SWaitAsynccnt(int asynccnt = -1, const std::string& comment = "")
+            : Instruction(InstType::INST_SWAIT, comment)
+            , asynccnt(asynccnt)
+        {
+        }
+
+        _SWaitAsynccnt(const _SWaitAsynccnt& other)
+            : Instruction(other)
+            , asynccnt(other.asynccnt)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<_SWaitAsynccnt>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {asynccnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {asynccnt};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
+            return formatWithComment("s_wait_asynccnt " + std::to_string(asynccnt));
+        }
+
+        int getAsynccnt() const
+        {
+            return asynccnt;
+        }
+
+    private:
+        int asynccnt;
+    };
+
     struct _SWaitLoadcnt : public Instruction
     {
         _SWaitLoadcnt(int loadcnt = -1, const std::string& comment = "")
@@ -2626,13 +2680,13 @@ namespace rocisa
 
     // s_wait_xcnt N drains in-flight VMEM ops to defeat XNACK-replay
     // reordering before a subsequent volatile/atomic VMEM op. Required on
-    // archs whose `RequiresXCntForVolatileVMEM` arch capability is set
-    // (e.g. gfx1250). The default `xcnt = 0` ("wait for all in-flight
-    // XNACK-replay tracking to drain") differs from the `-1` sentinel used
-    // by sibling `_SWait*cnt` classes because those are only emitted as
-    // members of the `SWaitCnt` composite (which uses `-1` to mean "skip
-    // this counter"); `SWaitXCnt` is a standalone wait, so the most useful
-    // default is the actual drain-everything immediate.
+    // archs whose `RequiresXCntForVolatileVMEM`/ `EnableXnackReplay` arch
+    // capability is set (e.g. gfx1250). The default `xcnt = 0` ("wait for
+    // all in-flight XNACK-replay tracking to drain") differs from the `-1`
+    // sentinel used by sibling `_SWait*cnt` classes because those are only
+    // emitted as members of the `SWaitCnt` composite (which uses `-1` to
+    // mean "skip this counter"); `SWaitXCnt` is a standalone wait, so the
+    // most usefuldefault is the actual drain-everything immediate.
     struct SWaitXCnt : public Instruction
     {
         SWaitXCnt(int xcnt = 0, const std::string& comment = "")

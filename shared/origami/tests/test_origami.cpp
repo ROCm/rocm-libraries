@@ -995,16 +995,18 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       REQUIRE(out_wgm_mall_is_important.wgmxcc == default_wgmxcc);
       REQUIRE(out_wgm_mall_is_important.wgm == 5);
 
-      // Test 7: Test WGM prediction with various wgmList values
+      // Test 7: Test WGM prediction with various wgmList values.
+      // bf16 with MT_K=32 is 64 bytes per K-iteration, so this shape sits exactly at
+      // kCoherentMinBytesPerKIter and takes the smaller of the tied WGM candidates.
       auto out_wgm = origami::select_workgroup_mapping(problem, hardware, config, skGrid);
       REQUIRE(out_wgm.wgmxccchunk == default_wgmxccchunk);
       REQUIRE(out_wgm.wgmxcc == default_wgmxcc);
       if (gpu_arch == 942)
-        REQUIRE(out_wgm.wgm == 8);
+        REQUIRE(out_wgm.wgm == 4);
       else if (gpu_arch == 950)
-        REQUIRE(out_wgm.wgm == 8);
+        REQUIRE(out_wgm.wgm == 4);
       else if (gpu_arch == 1250)
-        REQUIRE(out_wgm.wgm == 8);
+        REQUIRE(out_wgm.wgm == 4);
 
       // K-coherent split-K needs a grid that splits K within one wave of
       // workgroups, so these cases use fewer tiles than the machine has CUs.
