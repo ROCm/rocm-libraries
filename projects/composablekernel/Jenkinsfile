@@ -146,11 +146,11 @@ pipeline {
         booleanParam(
             name: "RUN_DISPATCHER_CORRECTNESS_TESTS",
             defaultValue: false,
-            description: "Smoke-tier verification of JIT-compiled dispatcher kernels on gfx942: gemm_universal sweep at budget 64 plus parity, batched_gemm and batched_contraction (default: OFF)")
+            description: "Smoke-tier verification of JIT-compiled dispatcher kernels on gfx942 + gfx950: gemm_universal sweep at budget 64 plus parity, grouped, multi_d, multi_abd, batched_gemm, batched_contraction, stream_k on gfx942, and mx_gemm + aquant + bquant + abquant on gfx950 (per-arch subset; default: OFF)")
         booleanParam(
             name: "RUN_DISPATCHER_CORRECTNESS_TESTS_DAILY",
             defaultValue: false,
-            description: "Full-tier verification of JIT-compiled dispatcher kernels on gfx942 + gfx950: gemm_universal sweep at budget 500 plus grouped, multi_d, multi_abd, batched_gemm, batched_contraction, stream_k on gfx942, and bquant + mx_gemm + rowcolquant + tensorquant on gfx950 (per-arch subset; default: OFF)")
+            description: "Full-tier verification of JIT-compiled dispatcher kernels on gfx942 + gfx950: the same operator set as the smoke tier, at budget 500 for the gemm_universal sweep and 64 for each variant sweep (default: OFF)")
         booleanParam(
             name: "BUILD_INSTANCES_ONLY",
             defaultValue: false,
@@ -744,9 +744,11 @@ pipeline {
                 }
             }
         }
-        // Smoke tier is gfx942-only on purpose: gfx950 is where the quant ops and
-        // the OCP-vs-FNUZ fp8 split live, which is full-tier territory, and a
-        // smoke lane that books two GPU node types is no longer a smoke lane.
+        // Both tiers fan out to gfx942 and gfx950. The quant operators (mx_gemm,
+        // aquant, bquant, abquant) are gfx950-only, so covering the full operator
+        // surface is impossible from a single node type. What separates smoke from
+        // daily is the search budget, not the operator count -- see the tier table
+        // on runDispatcherCorrectnessTests in groovy/vars/ck.groovy.
         stage("Run DISPATCHER_CORRECTNESS Tests")
         {
             when {
@@ -773,6 +775,27 @@ pipeline {
                         }
                     }
                 }
+                stage("Run DISPATCHER_CORRECTNESS Tests on gfx950")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_DISPATCHER_CORRECTNESS_TESTS.toBoolean() }
+                    }
+                    agent none
+                    steps{
+                        script {
+                            loadCk()
+                            ck.runOnHealthyNode(rocmnode("gfx950")) {
+                                deleteDir()
+                                ck.runDispatcherCorrectnessTests("gfx950", params.BUILD_COMPILER, "smoke")
+                                cleanWs()
+                            }
+                        }
+                    }
+                }
+                // No gfx1201 dispatcher stage: the dispatcher has no RDNA4 tile
+                // coverage, so such a stage could only ever run red. See the
+                // arch note on dispatcherGemmVariantsFor in groovy/vars/ck.groovy.
             }
         }
         stage("Run DISPATCHER_CORRECTNESS_DAILY Tests")

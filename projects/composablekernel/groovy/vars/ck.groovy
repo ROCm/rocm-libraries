@@ -1582,36 +1582,52 @@ def dispatcherGemmVariantsFor(String arch) {
 // dtypes/layouts are deliberately omitted: the runner picks per-variant defaults
 // (multi_d/multi_abd are fp16/rcrr-only, so naming the standard 4x4 matrix here
 // would enumerate configs that variant cannot build). multi_d likewise takes the
-// runner's default --elementwise-op PassThrough. The budget is well under the
-// standard lane's 500 because each variant JIT-compiles its own .so set and
-// these run in addition to, not instead of, the standard sweep.
+// runner's default --elementwise-op PassThrough.
+//
+// Both tiers run every variant, so the budget is what separates them. It stays
+// far under the standard sweep's (500 daily / 64 smoke) because each variant
+// JIT-compiles its own .so set and these run in addition to, not instead of,
+// that sweep -- 16 is enough for smoke to prove each variant still builds and
+// matches its reference, without paying the daily lane's coverage.
 def dispatcherVariantCmd(String arch, String variant, String tier) {
+    def budget = (tier == "daily") ? 64 : 16
     return """python3 ../dispatcher/tests/test_gemm_search_space.py \
                 --variant ${variant} \
                 --arch ${arch} \
-                --budget 64 \
+                --budget ${budget} \
                 --warmup 5 \
                 --repeat 5 \
                 --size 1024 \
                 --json dispatcher_${variant}_results_${tier}.json"""
 }
 
-// Verify JIT-compiled dispatcher kernels against a host reference. Two tiers:
+// Verify JIT-compiled dispatcher kernels against a host reference.
 //
-//   "smoke" -- the standard sweep at --budget 64 plus the three fixed-config
-//              tests (parity, batched_gemm, batched_contraction). The dtype and
-//              layout lists stay at the full 4x4 on purpose: the sweep samples
-//              per stratum, so 64 spreads ~4 configs across all 16 dtype x
-//              layout combinations rather than testing one combination deeply.
-//   "daily" -- the same, at --budget 500, plus every non-standard GEMM variant
-//              this arch can run and the arch-specific extras below.
+// BOTH tiers run the same operator set for the arch -- every dispatcher operator
+// with a bridge on develop. A developer touching the bridge needs pre-merge
+// signal on all of them, and a lane that covers four operators cannot give that.
+// The tier controls cost only:
+//
+//   "smoke" -- standard sweep at --budget 64, variants at --budget 16.
+//   "daily" -- standard sweep at --budget 500, variants at --budget 64.
+//
+// The dtype and layout lists stay at the full 4x4 in both tiers on purpose: the
+// sweep samples per stratum, so even 64 spreads ~4 configs across all 16 dtype x
+// layout combinations rather than testing one combination deeply.
 //
 // As in runDispatcherPerfTests, result filenames carry the tier so a build with
 // both lanes enabled does not have one stage's artifacts clobber the other's.
 def runDispatcherCorrectnessTests(String arch, String compiler, String tier) {
     def daily  = (tier == "daily")
     def budget = daily ? 500 : 64
+    // run_ok wraps the script-style tests, which signal a clean skip with exit
+    // 77. execute_cmd is one &&-joined string, so without this an unsupported
+    // arch or a missing ml_dtypes would abort the lane at that point and every
+    // later operator would silently never run. Only 77 is swallowed; any other
+    // non-zero exit still fails the lane. A function definition itself exits 0,
+    // so it chains cleanly ahead of cmake.
     def execute_cmd = """
+        run_ok() { "\$@"; rc=\$?; if [ \$rc -eq 77 ]; then echo "SKIP(77): \$*"; return 0; fi; return \$rc; } && \
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
             -D CMAKE_CXX_COMPILER="${compiler}" \
             -D CMAKE_BUILD_TYPE=Release \
@@ -1630,53 +1646,56 @@ def runDispatcherCorrectnessTests(String arch, String compiler, String tier) {
             --size 1024 \
             --json dispatcher_gemm_results_${tier}.json && \
         python3 ../dispatcher/tests/test_gemm_parity.py && \
-        python3 ../dispatcher/tests/test_batched_gemm_gpu_correctness.py --gfx ${arch} && \
-        python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx ${arch}"""
-    // Everything below is daily-only: each variant JIT-compiles its own .so set,
-    // which is the bulk of this lane's wall clock and the opposite of a smoke run.
-    if (daily) {
-        dispatcherGemmVariantsFor(arch).each { variant ->
-            execute_cmd += " && \\\n        " + dispatcherVariantCmd(arch, variant, tier)
-        }
-        // Stream-K has its own registry-level driver test; its defaults are the
-        // full 4x4 matrix (48 driver compiles / 96 GPU runs), so CI pins one
-        // dtype/layout. Note it takes --arch, not --gfx.
-        //
-        // test_streamk_gpu_correctness.py is the bridge-level companion: the
-        // shared sweep above only ever builds the atomic reduction strategy
-        // (default_ci_config.json has no streamk_config, so expand_sweep falls
-        // back to ["atomic"]), leaving linear/tree unverified through ctypes.
-        // It takes --gfx and self-gates to gfx942.
-        if (arch == "gfx942") {
-            execute_cmd += """ && \
-        python3 ../dispatcher/tests/test_streamk_registry.py --arch ${arch} --datatypes fp16 --layouts rcr && \
-        python3 ../dispatcher/tests/test_streamk_gpu_correctness.py --gfx ${arch}"""
-        }
-        // mx_gemm has no expand_sweep -- mx_gemm_utils exposes only
-        // default_fp8_config()/default_fp4_config() -- so it cannot join the
-        // --variant sweep above and instead runs the two-config smoke test merged
-        // in #10132. That test is unittest-based and self-gates to gfx950, so it
-        // takes no --gfx (unlike test_bquant, which does).
-        //
-        // rowcolquant and tensorquant are deliberately absent: the tile_engine
-        // side of both ops exists, but dispatcher/tests carries no
-        // test_rowcolquant_gpu_correctness.py / test_tensorquant_gpu_correctness.py
-        // yet, so invoking them here would fail the lane on "can't open file"
-        // before reaching a GPU. Add the calls back in the same change that adds
-        // the tests.
-        //
-        // CAUTION for anyone extending this chain: execute_cmd is a single
-        // &&-joined string, so the FIRST non-zero exit aborts everything after
-        // it -- and a clean SKIP is exit 77, which is non-zero. A gfx950 test
-        // that skips will therefore silently truncate the rest of the lane.
-        // Append new calls at the END so a skip cannot mask a test that would
-        // otherwise have run. (Pre-existing hazard, not introduced here.)
-        if (arch == "gfx950") {
-            execute_cmd += """ && \
-        python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \
+        run_ok python3 ../dispatcher/tests/test_batched_gemm_gpu_correctness.py --gfx ${arch} && \
+        run_ok python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx ${arch} && \
+        python3 ../dispatcher/tests/test_grouped_gemm_gpu_correctness.py && \
+        python3 ../dispatcher/tests/test_multi_d_gpu_correctness.py && \
+        python3 ../dispatcher/tests/test_multi_abd_gpu_correctness.py"""
+    // The three tests just added are the bridge-level companions to the grouped
+    // /multi_d/multi_abd --variant sweeps below: the sweep exercises the search
+    // space, they exercise the ctypes bridge. They were registered in ctest but
+    // never invoked from here. All three are unittest-based, take no --gfx, and
+    // exit 0 on an internal skip, so they need no run_ok.
+    dispatcherGemmVariantsFor(arch).each { variant ->
+        execute_cmd += " && \\\n        " + dispatcherVariantCmd(arch, variant, tier)
+    }
+    // Stream-K has its own registry-level driver test; its defaults are the
+    // full 4x4 matrix (48 driver compiles / 96 GPU runs), so CI pins one
+    // dtype/layout. Note it takes --arch, not --gfx.
+    //
+    // test_streamk_gpu_correctness.py is the bridge-level companion: the
+    // shared sweep above only ever builds the atomic reduction strategy
+    // (default_ci_config.json has no streamk_config, so expand_sweep falls
+    // back to ["atomic"]), leaving linear/tree unverified through ctypes.
+    // It takes --gfx and self-gates to gfx942.
+    if (arch == "gfx942") {
+        execute_cmd += """ && \
+        run_ok python3 ../dispatcher/tests/test_streamk_registry.py --arch ${arch} --datatypes fp16 --layouts rcr && \
+        run_ok python3 ../dispatcher/tests/test_streamk_gpu_correctness.py --gfx ${arch}"""
+    }
+    // The block-scale quant operators are gfx950-only: their utils modules pin
+    // _DEFAULT_GFX_ARCH = "gfx950" and the tests self-gate to it. This is why the
+    // smoke tier fans out to a gfx950 node as well as gfx942 -- see the stage
+    // comment in the Jenkinsfile.
+    //
+    // mx_gemm has no expand_sweep -- mx_gemm_utils exposes only
+    // default_fp8_config()/default_fp4_config() -- so it cannot join the
+    // --variant sweep above and instead runs the two-config smoke test merged
+    // in #10132. That test is unittest-based and self-gates to gfx950, so it
+    // takes no --gfx and needs no run_ok (unlike its neighbours, which do).
+    //
+    // rowcolquant and tensorquant are absent but no longer blocked: #10010
+    // landed their dispatcher bridges and ctest-registered GPU tests on develop
+    // after this lane's operator set was chosen. Wiring them in is a follow-up,
+    // not an oversight -- unlike their neighbours here, neither test self-gates
+    // on the detected arch (--gfx just defaults to gfx950), so adding them needs
+    // that skip path checked first or an unsupported node will run them red.
+    if (arch == "gfx950") {
+        execute_cmd += """ && \
+        run_ok python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \
         python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py && \
-        python3 ../dispatcher/tests/test_aquant_gpu_correctness.py --gfx ${arch}"""
-        }
+        run_ok python3 ../dispatcher/tests/test_aquant_gpu_correctness.py --gfx ${arch} && \
+        run_ok python3 ../dispatcher/tests/test_abquant_gpu_correctness.py --gfx ${arch}"""
     }
     try {
         buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
