@@ -14242,7 +14242,7 @@ class KernelWriterAssembly(KernelWriter):
       extReadEpilogueLabel    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
       extReadEpilogueLabelEnd = Label(label=self.labels.getNameInc("LoadExternalEpilogueStructEnd"), comment="")
       module.addComment0("Check if custom structure pointer is null")
-      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 ?"))
+      self.cmpNamedArgTypeEq(module, 2, "ArgType == 2 ?")
       module.add(SCBranchSCC1(labelName=extReadEpilogueLabel.getLabelName(), comment="branch if ArgType == 2"))
       _loadChunksNormal()
       module.add(SBranch(extReadEpilogueLabelEnd.getLabelName()))
@@ -14317,7 +14317,7 @@ class KernelWriterAssembly(KernelWriter):
       extReadEpilogueLabel    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
       extReadEpilogueLabelEnd = Label(label=self.labels.getNameInc("LoadExternalEpilogueStructEnd"), comment="")
       module.addComment0("Check if custom structure pointer is null")
-      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 ?"))
+      self.cmpNamedArgTypeEq(module, 2, "ArgType == 2 ?")
       module.add(SCBranchSCC1(labelName=extReadEpilogueLabel.getLabelName(), comment="branch if ArgType == 2"))
       argOffset = self.argLoader.getOffset() # Backup offset
       numStoreSgprToLoad = self.states.numStoreSgprToLoad
