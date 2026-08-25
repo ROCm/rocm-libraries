@@ -249,6 +249,31 @@ not a plausibility cap, not `--min-gain`, not the stratum, not the incumbent's r
 That every derived signal fails is itself the signature of a broken instrument rather than a
 noisy one.
 
+## PROOF OF CONCEPT: the same re-map, done with the right instrument, WORKS
+
+The campaign otherwise ends in five negative results, so it is worth showing the corrected method
+actually delivers. Three rows were re-pointed using **single-dispatch truth measured at the ROW
+key**, then benchmarked **at the QUERY** — so instrument validity *and* row->query transfer are
+both under test. 3 reps, cold, 60 CU:
+
+| query | stratum | poc_sd | A/A floor |
+|---|---|---|---|
+| 204x713x606 | med | **107.28%** | 99.25% |
+| 542x90x414 | skinny_N | 101.09% | 98.56% |
+| 23x344x893 | skinny_M | 99.72% | 100.32% |
+| 627x5x2074 | gemv | 98.28% | 98.16% *(row not re-pointed)* |
+| **TOTAL wall-clock** | | **101.82%** | **99.04%** |
+
+The `med` row predicted +20.7% at the row and delivered **+7.3%** at the query — eroded by
+transfer, exactly as expected. `skinny_M` predicted +0.1% and correctly did nothing.
+
+**Contrast: the enumeration-based re-map delivered 99.18% on treated queries. Same operation, same
+kind of rows, different instrument — and the sign flips.**
+
+**Scale honestly: n=3 re-pointed rows, one dominant case.** This is a demonstration that the
+corrected pipeline produces gains, not a measurement of how much a full re-tune would yield. But
+it does establish that the headroom is reachable, which none of the negative results could.
+
 ## Scope
 
 This affects **ranking** decisions built on `--algo_method all`. It does not automatically
