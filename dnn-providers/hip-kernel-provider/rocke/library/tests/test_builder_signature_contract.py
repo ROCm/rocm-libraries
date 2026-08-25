@@ -28,9 +28,10 @@
 # namespace-only walk would let a new builder in a new file escape the contract
 # simply by not being re-exported.
 #
-# KNOWN_VIOLATIONS below records the pre-existing back-edges so this guard
-# passes on current code while still failing on any NEW one. It is an allowlist
-# to burn down, not a place to add to.
+# There is no allowlist. Every builder under `library/kernels/` satisfies the
+# contract today, including the arch-neutral `attention_unified` ones: a builder
+# that ignores `arch` still takes it, so a descriptor can name a target without
+# calling the builder.
 
 from __future__ import annotations
 
@@ -41,18 +42,6 @@ import pkgutil
 import pytest
 
 import kernels
-
-# Fully-qualified `module.function` names that predate this guard.
-#
-# The three `attention_unified` builders are arch-neutral by construction: they
-# take an already-resolved spec and emit the same IR for every target, so they
-# never grew an `arch` parameter. Threading `arch` through them is an attention
-# refactor, tracked separately. Do not extend this list.
-KNOWN_VIOLATIONS = {
-    "kernels.common.attention_unified.build_unified_attention_2d",
-    "kernels.common.attention_unified.build_unified_attention_3d",
-    "kernels.common.attention_unified.build_unified_attention_reduce",
-}
 
 ALLOWED_PARAMS = {"spec", "arch"}
 
@@ -108,7 +97,6 @@ def test_builders_take_only_spec_and_arch() -> None:
     builders, _ = _discover()
 
     violations = []
-    seen_known = set()
     for qualname, sig in sorted(builders.items()):
         params = set(sig.parameters)
         extra = sorted(params - ALLOWED_PARAMS)
@@ -117,26 +105,17 @@ def test_builders_take_only_spec_and_arch() -> None:
             problems.append(f"extra parameter(s) {extra} -- move them into the spec")
         if "arch" not in params:
             problems.append("no 'arch' parameter")
-        if not problems:
-            continue
-        if qualname in KNOWN_VIOLATIONS:
-            seen_known.add(qualname)
-            continue
-        violations.append(f"  {qualname}{sig}\n      {'; '.join(problems)}")
+        if problems:
+            violations.append(f"  {qualname}{sig}\n      {'; '.join(problems)}")
 
     assert not violations, (
         "builder(s) break the (spec, arch) contract.\n"
         "A builder takes the spec and the arch and nothing else; an arch-specific\n"
         "knob is a field on an arch-specific spec subclass, not a third parameter.\n"
+        "A builder whose body is arch-neutral still takes `arch` -- validate it and\n"
+        "ignore it; the uniform shape is what a kernel descriptor depends on.\n"
         + "\n".join(violations)
     )
-
-    # Keep the allowlist honest: once a builder is fixed, its entry must go too,
-    # or it silently licenses a future re-introduction.
-    stale = KNOWN_VIOLATIONS - seen_known
-    assert (
-        not stale
-    ), f"KNOWN_VIOLATIONS entries no longer apply -- remove them: {sorted(stale)}"
 
 
 def test_spec_is_the_first_parameter() -> None:
