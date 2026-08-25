@@ -50,7 +50,7 @@ _LAYOUT_WORD = {"r": "row", "c": "col"}
 
 # --- Bridge shared helpers (canonical superset; byte-identical across bridges) ---
 # Supported GPU architectures for the bridge (single source of truth).
-_SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950")
+_SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 
 # Single source of truth for the preshuffle B-shuffle permutation used by the
 # bridge. The bridge codegen only emits the NON-permuteN preshuffle pipeline
@@ -2130,6 +2130,7 @@ _WARP_SUPPORTED_COMBINATIONS_FALLBACK = {
     "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
     "gfx942": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
     "gfx950": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
+    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1]],
     "gfx1201": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
 }
 
