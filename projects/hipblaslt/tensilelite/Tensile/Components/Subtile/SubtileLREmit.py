@@ -815,6 +815,10 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     subtileRow = sId0 // stackM
     mTileInStrip = sId0 % stackM
     stripStride = stripStrideBytes(tileInfo)
+    # sId1 is the K-window index (DepthU / MatrixInstK windows per strip).  GR
+    # writes window w at w * globalSubtileGrid[0] * stripStride in LDS
+    # (emitSingleBufferLoad m0), so the transpose read must add the same term.
+    kWindowStride = int(tileInfo.globalSubtileGrid[0]) * stripStride
     addrVgpr = tileInfo.sharedVgprLROffset[0]
     dstVgpr = dstTile.regList.indices[0]
     numRegs = len(dstTile.regList.indices)
@@ -822,7 +826,8 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     numReads = numRegs // REGS_PER_TR
     module = Module()
     for readIdx in range(numReads):
-      offset = subtileRow * stripStride + mTileInStrip * mTileBytes + readIdx * kReadStrideBytes
+      offset = (subtileRow * stripStride + sId1 * kWindowStride
+                + mTileInStrip * mTileBytes + readIdx * kReadStrideBytes)
       module.add(DSLoadB64TrB4(
           dst=vgpr(dstVgpr + readIdx * REGS_PER_TR, REGS_PER_TR),
           src=vgpr(addrVgpr),
