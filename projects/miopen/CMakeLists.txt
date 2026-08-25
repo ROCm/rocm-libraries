@@ -5,7 +5,6 @@ cmake_minimum_required( VERSION 3.15 )
 
 #Add a name for the rocm-libraries location
 set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../")
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (POLICY CMP0074)
   cmake_policy(SET CMP0074 NEW)
@@ -33,6 +32,7 @@ macro(set_if_bools_are_different var in1 in2)
 endmacro()
 
 get_property(MIOPEN_GENERATOR_IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.
 if(MIOPEN_GENERATOR_IS_MULTI_CONFIG)
@@ -143,6 +143,21 @@ option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
+
+# Gate for the MIOpen public/private library split. When ON, libMIOpen.so is built
+# as a thin public wrapper forwarding to a private implementation library
+# (libMIOpen_private.so); when OFF (the default), a single libMIOpen.so is produced
+# whose public ABI is unchanged from the pre-wrapper baseline. All of the split
+# machinery is compiled only when this flag is ON.
+option(MIOPEN_ENABLE_HIPDNN_WRAPPER
+    "Build MIOpen as a public wrapper over a private implementation, with optional forwarding to hipDNN."
+    OFF)
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    message(STATUS
+        "MIOPEN_ENABLE_HIPDNN_WRAPPER: ENABLED - building libMIOpen.so as a public "
+        "wrapper over libMIOpen_private.so. The wrapper is an unconditional "
+        "pass-through; runtime forwarding to hipDNN is not implemented yet.")
+endif()
 
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
 if(MIOPEN_INCBIN)

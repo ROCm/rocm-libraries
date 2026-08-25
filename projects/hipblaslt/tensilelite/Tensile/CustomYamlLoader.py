@@ -3,6 +3,7 @@
 
 import yaml
 from pathlib import Path
+from typing import List
 
 try:
     DEFAULT_YAML_LOADER = yaml.CSafeLoader
@@ -153,3 +154,18 @@ def load_logic_gfx_arch(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML
             return arch
     except RuntimeError as e:
         return load_yaml_dict_item(yaml_path, loader_type, 'ArchitectureName')
+
+def archMatch(arch: str, archs: List[str]) -> bool:
+    """Return True if a logic file's declared gfx `arch` belongs to `archs`.
+
+    An exact match, or a requested entry that starts with `arch` so a bare
+    header arch (e.g. "gfx942") matches a predicated request ("gfx942:xnack+").
+    """
+    return (arch in archs) or any(a.startswith(arch) for a in archs)
+
+def load_logic_schedule_name(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML_LOADER):
+    try:
+        SCHEDULE_NAME_IDX = 1
+        return load_yaml_sequence_item(yaml_path, loader_type, SCHEDULE_NAME_IDX)
+    except RuntimeError:
+        return load_yaml_dict_item(yaml_path, loader_type, 'ScheduleName')

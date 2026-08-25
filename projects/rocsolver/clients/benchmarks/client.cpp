@@ -209,6 +209,28 @@ try
             "                           Typically, the number of columns of a matrix on the right-hand side of a problem.\n"
             "                           ")
 
+        // bandwidth options
+        ("kd",
+         value<rocblas_int>(),
+            "Matrix/vector size parameter.\n"
+            "                           Bandwidth of Hermitian or symmetric matrix,\n"
+            "                           the number of super-diagonals and sub-diagonals.\n"
+            "                           ")
+
+        ("kl",
+         value<rocblas_int>(),
+            "Matrix/vector size parameter.\n"
+            "                           Lower bandwidth of general matrix,\n"
+            "                           the number of sub-diagonals.\n"
+            "                           ")
+
+        ("ku",
+         value<rocblas_int>(),
+            "Matrix/vector size parameter.\n"
+            "                           Upper bandwidth of general matrix,\n"
+            "                           the number of super-diagonals.\n"
+            "                           ")
+
         // increment options
         ("inca",
          value<rocblas_int>()->default_value(1),
@@ -251,6 +273,12 @@ try
          value<rocblas_int>(),
             "Matrix size parameter.\n"
             "                           Leading dimension of matrices C.\n"
+            "                           ")
+
+        ("ldr",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices R.\n"
             "                           ")
 
         ("ldt",
@@ -337,6 +365,12 @@ try
          value<rocblas_stride>(),
             "Matrix/vector stride parameter.\n"
             "                           Stride for vectors tau, taup, and ipiv.\n"
+            "                           ")
+
+        ("strideR",
+         value<rocblas_stride>(),
+            "Matrix/vector stride parameter.\n"
+            "                           Stride for matrices/vectors R.\n"
             "                           ")
 
         ("strideS",
@@ -565,6 +599,25 @@ try
             "                           Used in iterative Jacobi functions.\n"
             "                           ")
 
+        // cholqr options
+        ("cholshift",
+         value<char>()->default_value('N'),
+            "N = None, C = Computed, P = Provided.\n"
+            "                           Specifies how sigma is determined for the shifted cholqr method.\n"
+            "                           ")
+
+        ("cholnum",
+         value<rocblas_int>()->default_value(1),
+            "Total number of Cholesky factorizations performed by the cholqr method.\n"
+            "                           Cholnum - 1 factorizations are used for the refinement.\n"
+            "                           ")
+
+        ("sigma",
+         value<double>()->default_value(0),
+            "Value of sigma when provided for the shifted cholqr method .\n"
+            "                           Same value is used for all matrices in batched cases.\n"
+            "                           ")
+
         // other options
         ("abstol",
          value<double>()->default_value(0),
@@ -696,6 +749,7 @@ try
     argus.validate_itype("itype");
     argus.validate_norm_type("norm_type");
     argus.validate_rfinfo_mode("rfinfo_mode");
+    argus.validate_cholshift("cholshift");
 
     // prepare logging infrastructure and ignore environment variables
     rocsolver_log_begin();

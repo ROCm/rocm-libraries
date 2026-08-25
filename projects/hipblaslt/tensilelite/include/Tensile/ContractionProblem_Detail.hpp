@@ -157,7 +157,13 @@ namespace TensileLite
                                         lhs.mxTypeA(),
                                         rhs.mxTypeA(),
                                         lhs.mxTypeB(),
-                                        rhs.mxTypeB());
+                                        rhs.mxTypeB(),
+                                        lhs.getParams().smCountTarget(),
+                                        rhs.getParams().smCountTarget(),
+                                        lhs.getParams().streamKTileSchedulingMode(),
+                                        rhs.getParams().streamKTileSchedulingMode(),
+                                        lhs.getParams().uniformSummationOrder(),
+                                        rhs.getParams().uniformSummationOrder());
         }
     };
 } // namespace TensileLite
@@ -169,6 +175,7 @@ namespace std
     {
         inline size_t operator()(TensileLite::ContractionProblemGemm const& problem) const
         {
+            // Cached lookups include this flag because selection depends on it.
             return TensileLite::hash_combine(problem.operationIdentifier(),
                                              problem.a(),
                                              problem.b(),
@@ -202,7 +209,10 @@ namespace std
                                              problem.mxBlockA(),
                                              problem.mxBlockB(),
                                              problem.mxTypeA(),
-                                             problem.mxTypeB());
+                                             problem.mxTypeB(),
+                                             problem.getParams().smCountTarget(),
+                                             problem.getParams().streamKTileSchedulingMode(),
+                                             problem.getParams().uniformSummationOrder());
         }
     };
 

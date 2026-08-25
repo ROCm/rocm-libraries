@@ -2,13 +2,15 @@
 # SPDX-License-Identifier: MIT
 """Reference convolutions for verify paths.
 
-Two implementations are provided:
+Three forward/backward implementations are provided:
 
-* ``conv_reference``        — torch-based (``F.conv2d`` / ``F.conv3d``), works
+* ``conv_reference``         — torch-based (``F.conv2d`` / ``F.conv3d``), works
   on any GPU target.
 * ``conv_reference_gfx1250`` — hand-written numpy reference for gfx1250.
   Accumulates in float32 with no GPU driver dependency.  Only supports 2-D
   NHWC forward convolution.
+* ``dgrad_reference``        — torch-based backward-data reference via
+  ``torch.nn.grad.conv2d_input``.
 """
 
 from __future__ import annotations
@@ -60,6 +62,35 @@ def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
         )
         # KCDHW -> KDHWC (KZYXC)
         return dW_ncdhw.permute(0, 2, 3, 4, 1).contiguous()
+
+
+def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
+    """Compute a float32 reference input gradient for a convolution problem.
+
+    Uses ``torch.nn.grad.conv2d_input`` so the result is numerically identical
+    to what autograd would produce.  The output layout matches the dgrad kernel
+    convention: NHWC for 2-D.
+
+    Args:
+        dY: Output gradient, shape (N, Ho, Wo, K), any dtype.
+        W:  Weight tensor, shape (K, Y, X, C), any dtype.
+        p:  ConvProblem carrying stride/padding/dilation/groups.
+
+    Returns:
+        Input gradient as a float32 torch.Tensor in NHWC layout.
+    """
+    dY_t = dY.float().cuda().permute(0, 3, 1, 2).contiguous()  # NHWK -> NKHW
+    W_t = W.float().cuda().permute(0, 3, 1, 2).contiguous()  # KYXC -> KCYX
+    dX_nchw = torch.nn.grad.conv2d_input(
+        input_size=(p.N, p.C, p.Hi, p.Wi),
+        weight=W_t,
+        grad_output=dY_t,
+        stride=(p.sH, p.sW),
+        padding=(p.pH, p.pW),
+        dilation=(p.dH, p.dW),
+        groups=p.groups,
+    )
+    return dX_nchw.permute(0, 2, 3, 1).contiguous()  # NCHW -> NHWC
 
 
 def conv_reference(
