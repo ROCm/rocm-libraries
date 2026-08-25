@@ -79,6 +79,123 @@ from kernels.common.attention_unified import (
 from kernels.common import attention_unified as _kau
 
 
+def _spec_gfx942_fp16_flash(problem: UnifiedAttentionProblem):
+    """gfx942 fp16 transposed-x8 flash geometry (the ``gfx942_dense_pipe`` engine).
+
+    Self-contained per-engine spec builder (GEMM ``spec_fn`` pattern). Extracted
+    verbatim from the ``_enable_gfx942_fp16_flash`` branch of
+    ``_tiled_spec_from_problem`` -- byte-identical, no value change. The
+    ``gfx942_dense_pipe`` dispatch candidate owns this geometry; the dispatcher
+    itself still only decides ``(path, head_size, block_size)`` (see
+    ``dispatch/AGENTS.md``).
+    """
+    arch = _kau._resolve_attention_arch()
+    UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
+    num_warps = _select_gfx942_flash_num_warps(problem)
+    use_cfvst = _gfx942_flash_use_cfvst(problem)
+    use_single = _gfx942_flash_use_single_buffer(problem)
+    use_mask_limit = _enable_gfx942_flash_mask_limit(problem)
+    return UnifiedAttention2DTiledSpec(
+        head_size=problem.head_size,
+        block_size=problem.block_size,
+        num_query_heads=problem.num_query_heads,
+        num_kv_heads=problem.num_kv_heads,
+        dtype=problem.dtype,
+        use_sinks=problem.use_sinks,
+        sliding_window=problem.sliding_window,
+        has_softcap=problem.softcap > 0,
+        use_alibi=problem.use_alibi,
+        use_qq_bias=problem.use_qq_bias,
+        num_seqs=problem.num_seqs,
+        num_warps=num_warps,
+        waves_per_eu=_select_2d_waves_per_eu(problem),
+        kv_storage_dtype=_kv_storage_dtype(problem),
+        tile_size=_select_2d_tile_size(problem),
+        block_m_per_warp=_select_2d_block_m_per_warp(problem),
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=use_mask_limit,
+        use_transposed_invariant_hoist=use_mask_limit,
+        use_transposed_mask_once=use_mask_limit,
+        use_transposed_mask_limit=use_mask_limit,
+        use_conflict_free_v_store=use_cfvst,
+        use_k_single_buffer=use_single,
+        use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
+        ring_depth=_select_gfx942_flash_ring_depth(problem),
+        k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
+        use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
+        use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
+        kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr(problem),
+    )
+
+
+def _spec_gfx942_bf16_flash(problem: UnifiedAttentionProblem):
+    """gfx942 bf16 wide-K (32x32x8) transposed flash geometry.
+
+    Self-contained per-engine spec builder (GEMM ``spec_fn`` pattern), extracted
+    verbatim from the ``_enable_gfx942_bf16_flash`` branch of
+    ``_tiled_spec_from_problem`` -- byte-identical, no value change. Geometry lives
+    in the builder layer; the dispatcher's ``(path, head_size, block_size)``
+    identity + C++ parity are unchanged. See ``dispatch/AGENTS.md`` ->
+    "Per-engine spec_fn".
+
+    DEFAULT-ON for eligible shapes (small_q_narrow excluded; see
+    _enable_gfx942_bf16_flash). Uses the CDNA3-legal mfma_f32_32x32x8_bf16 atom
+    (the K=16 bf16 atom is gfx950-only). The transposed orientation consumes V
+    from strided LDS + P^T from registers (no P_lds, no gfx950-only transpose
+    reads). When the sliced-K ring is active (HIPDNN_GFX942_K_SLICED_RING not
+    disabled, prefill), the bf16 path mirrors the fp16 ring geometry: nw=4
+    (BLOCK_M=128), 3-slot K ring, cfvst, T=64. Without ring, falls back to the
+    legacy bf16-wide geometry: D64 -> nw=4, double-buffered K; D128 -> nw=2
+    (BLOCK_M=64=T) + K single-buffer (LDS=48 KB).
+    """
+    arch = _kau._resolve_attention_arch()
+    UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
+    use_ring = _enable_gfx942_flash_k_sliced_ring(problem)
+    if use_ring:
+        nw = _gfx942_flash_wide_setting()
+        single_k = False  # ring uses 3-slot staging, not single/double buffer
+        use_cfvst = True  # ring requires cfvst (spec validator enforces this)
+    else:
+        nw, single_k = _gfx942_bf16_wide_geometry(problem)
+        use_cfvst = _gfx942_bf16_wide_use_cfvst(problem)
+    use_mask_limit = _enable_gfx942_flash_mask_limit(problem)
+    return UnifiedAttention2DTiledSpec(
+        head_size=problem.head_size,
+        block_size=problem.block_size,
+        num_query_heads=problem.num_query_heads,
+        num_kv_heads=problem.num_kv_heads,
+        dtype=problem.dtype,
+        use_sinks=problem.use_sinks,
+        sliding_window=problem.sliding_window,
+        has_softcap=problem.softcap > 0,
+        use_alibi=problem.use_alibi,
+        use_qq_bias=problem.use_qq_bias,
+        num_seqs=problem.num_seqs,
+        num_warps=nw,
+        waves_per_eu=_select_2d_waves_per_eu(problem),
+        kv_storage_dtype=_kv_storage_dtype(problem),
+        tile_size=64 if use_ring else _gfx942_bf16_wide_tile_size(problem),
+        block_m_per_warp=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=use_mask_limit,
+        use_transposed_invariant_hoist=use_mask_limit,
+        use_transposed_mask_once=use_mask_limit,
+        use_transposed_mask_limit=use_mask_limit,
+        use_conflict_free_v_store=use_cfvst,
+        use_k_single_buffer=single_k,
+        use_k_sliced_ring=use_ring,
+        ring_depth=_select_gfx942_flash_ring_depth(problem),
+        k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
+        use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
+        use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
+        kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr(problem),
+    )
+
+
 def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ):
@@ -111,98 +228,9 @@ def _tiled_spec_from_problem(
     # branches against the 4-warp cohort here -- otherwise the flash fields (num_warps=2,
     # single-buffer) build a spec the __post_init__ validator rejects for fp16 bs16/32.
     if _enable_gfx942_bf16_flash(problem) and not _kau._gfx942_4warp_fast(problem):
-        # gfx942 bf16 wide-K (32x32x8) transposed flash path. DEFAULT-ON for
-        # eligible shapes (small_q_narrow excluded; see _enable_gfx942_bf16_flash).
-        # Uses the CDNA3-legal mfma_f32_32x32x8_bf16 atom (the K=16 bf16 atom is
-        # gfx950-only). The transposed orientation consumes V from strided LDS +
-        # P^T from registers (no P_lds, no gfx950-only transpose reads).
-        #
-        # When the sliced-K ring is active (HIPDNN_GFX942_K_SLICED_RING not
-        # disabled, prefill), the bf16 path mirrors the fp16 ring geometry:
-        #   nw=4 (BLOCK_M=128), 3-slot K ring, cfvst, T=64.
-        # Without ring, falls back to the legacy bf16-wide geometry:
-        #   D64  -> nw=4, double-buffered K.
-        #   D128 -> nw=2 (BLOCK_M=64=T) + K single-buffer: LDS=48 KB.
-        use_ring = _enable_gfx942_flash_k_sliced_ring(problem)
-        if use_ring:
-            nw = _gfx942_flash_wide_setting()
-            single_k = False  # ring uses 3-slot staging, not single/double buffer
-            use_cfvst = True  # ring requires cfvst (spec validator enforces this)
-        else:
-            nw, single_k = _gfx942_bf16_wide_geometry(problem)
-            use_cfvst = _gfx942_bf16_wide_use_cfvst(problem)
-        use_mask_limit = _enable_gfx942_flash_mask_limit(problem)
-        return UnifiedAttention2DTiledSpec(
-            head_size=problem.head_size,
-            block_size=problem.block_size,
-            num_query_heads=problem.num_query_heads,
-            num_kv_heads=problem.num_kv_heads,
-            dtype=problem.dtype,
-            use_sinks=problem.use_sinks,
-            sliding_window=problem.sliding_window,
-            has_softcap=problem.softcap > 0,
-            use_alibi=problem.use_alibi,
-            use_qq_bias=problem.use_qq_bias,
-            num_seqs=problem.num_seqs,
-            num_warps=nw,
-            waves_per_eu=_select_2d_waves_per_eu(problem),
-            kv_storage_dtype=_kv_storage_dtype(problem),
-            tile_size=64 if use_ring else _gfx942_bf16_wide_tile_size(problem),
-            block_m_per_warp=32,
-            use_mfma_32x32x8=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=use_mask_limit,
-            use_transposed_invariant_hoist=use_mask_limit,
-            use_transposed_mask_once=use_mask_limit,
-            use_transposed_mask_limit=use_mask_limit,
-            use_conflict_free_v_store=use_cfvst,
-            use_k_single_buffer=single_k,
-            use_k_sliced_ring=use_ring,
-            ring_depth=_select_gfx942_flash_ring_depth(problem),
-            k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
-            use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
-            use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
-            kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
-            use_i64_kv_addr=_enable_i64_kv_addr(problem),
-        )
+        return _spec_gfx942_bf16_flash(problem)
     if _enable_gfx942_fp16_flash(problem) and not _kau._gfx942_4warp_fast(problem):
-        num_warps = _select_gfx942_flash_num_warps(problem)
-        use_cfvst = _gfx942_flash_use_cfvst(problem)
-        use_single = _gfx942_flash_use_single_buffer(problem)
-        use_mask_limit = _enable_gfx942_flash_mask_limit(problem)
-        return UnifiedAttention2DTiledSpec(
-            head_size=problem.head_size,
-            block_size=problem.block_size,
-            num_query_heads=problem.num_query_heads,
-            num_kv_heads=problem.num_kv_heads,
-            dtype=problem.dtype,
-            use_sinks=problem.use_sinks,
-            sliding_window=problem.sliding_window,
-            has_softcap=problem.softcap > 0,
-            use_alibi=problem.use_alibi,
-            use_qq_bias=problem.use_qq_bias,
-            num_seqs=problem.num_seqs,
-            num_warps=num_warps,
-            waves_per_eu=_select_2d_waves_per_eu(problem),
-            kv_storage_dtype=_kv_storage_dtype(problem),
-            tile_size=_select_2d_tile_size(problem),
-            block_m_per_warp=_select_2d_block_m_per_warp(problem),
-            use_mfma_32x32x8=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=use_mask_limit,
-            use_transposed_invariant_hoist=use_mask_limit,
-            use_transposed_mask_once=use_mask_limit,
-            use_transposed_mask_limit=use_mask_limit,
-            use_conflict_free_v_store=use_cfvst,
-            use_k_single_buffer=use_single,
-            use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
-            ring_depth=_select_gfx942_flash_ring_depth(problem),
-            k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
-            use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
-            use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
-            kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
-            use_i64_kv_addr=_enable_i64_kv_addr(problem),
-        )
+        return _spec_gfx942_fp16_flash(problem)
     combo = _enable_combo_2d(problem)
     combo_no_sw = combo and problem.sliding_window == 0
     # The transposed-softmax VALU sub-flags now fire for the WHOLE no-SW
