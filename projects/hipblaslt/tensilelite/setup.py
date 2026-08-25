@@ -12,7 +12,11 @@ _metadata = runpy.run_path(str(Path(__file__).with_name("release_metadata.py")))
 
 
 class CleanBuildPy(build_py):
-    """Prevent ignored/stale packages in build/lib from leaking into wheels."""
+    """
+    Regenerate ``build/lib`` so stale files cannot leak into a wheel.
+
+    Setuptools does not prune files left by earlier package layouts or exclusions.
+    """
 
     def run(self):
         build_lib = Path(self.build_lib)
