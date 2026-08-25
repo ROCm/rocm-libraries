@@ -416,7 +416,39 @@ conservative choice, mark it, and raise it in Step 9.
 ### Step 7 — Splice, build, and confirm the engine loads
 
 Apply the fragments (see **The CMake splice**) — *apply* them, do not merely describe
-them. Then build and confirm:
+them.
+
+#### The build flags, which are easy to get wrong
+
+Three switches, three different jobs, and two of them read like each other:
+
+| Flag | Default | Job |
+|---|---|---|
+| `HIPDNN_ENABLE_KERNEL_INGESTOR` | **OFF** | The ingestor: descriptor loading, the kpack adapter, and `hipdnn_validate_descriptors`. **ON for any descriptor-backed integration** — nothing here works without it, and it is why the validator is usually missing. |
+| `HIPDNN_ENABLE_SDPA` | **OFF** | The SDPA **frontend**. With it off the SDPA graph API is `#ifdef`-compiled out, so an attention graph cannot be expressed and the plan silently DECLINEs. **ON for any attention integration**, and it must be ON in BOTH the hipDNN SDK at `HIPDNN_ROOT` and the provider. |
+| `ENABLE_ASM_SDPA_ENGINE` | **ON** | A **competing** hand-written ASM SDPA engine. Nothing to do with the frontend, despite the name. |
+
+`HIPDNN_ENABLE_SDPA=OFF` wastes a whole build: the provider compiles, your engine
+enumerates, and every attention graph declines with nothing pointing at the flag.
+
+#### Competing engines will hide yours
+
+The shared integration suite exercises the **winning** engine for a graph, not every
+engine that could serve it. A new attention engine competing against ASM SDPA may never
+execute while the suite passes — green, and blind to you.
+
+Two ways to get real signal, and you want at least one:
+
+- **Build with `-DENABLE_ASM_SDPA_ENGINE=OFF`** so the incumbent is absent. Cleanest for
+  a focused integration run; the flag exists for this.
+- **Assert on engine identity**, not only on numbers. A test that checks the output is
+  correct proves *something* computed it. One that also checks *which* engine was
+  selected proves yours did.
+
+Provider-local tests under `src/integration_tests/kernel_ingestor_engine/` construct the
+engine directly and do not have this problem.
+
+#### Build and confirm
 
 ```
 cmake --build <build-dir> --target hip_kernel_provider
