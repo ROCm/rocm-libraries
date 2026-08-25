@@ -136,5 +136,26 @@ class TestGroupedWgradDispatch(unittest.TestCase):
         self.assertTrue(ok, why)
 
 
+class TestGroupedConvDirectionSurface(unittest.TestCase):
+    """All three grouped-conv directions are reachable from one module.
+
+    dgrad keeps its own family (different request/ABI/grid), but its registry +
+    dispatcher are re-exported from ``dispatch.grouped_convolution`` so fwd,
+    wgrad, and dgrad share a single import surface.
+    """
+
+    def test_dgrad_reexported(self):
+        from dispatch import grouped_convolution as g
+
+        self.assertTrue(hasattr(g, "CONV_DGRAD_REGISTRY"))
+        self.assertTrue(callable(g.dispatch_conv_dgrad))
+        self.assertTrue(hasattr(g, "ConvDgradRequest"))
+        self.assertGreater(len(g.conv_grouped_candidates("dgrad")), 0)
+
+    def test_each_direction_returns_candidates(self):
+        for direction in ("fwd", "wgrad", "dgrad"):
+            self.assertGreater(len(conv_grouped_candidates(direction)), 0, direction)
+
+
 if __name__ == "__main__":
     unittest.main()
