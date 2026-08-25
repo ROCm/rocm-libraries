@@ -179,6 +179,23 @@ points of each other.
 4. **Validate on a fresh independent measurement before shipping, always.** The pushed commit was
    marked `[UNVALIDATED]`; that label is what kept this recoverable.
 
+## The 60-CU emulation is NOT the cause (tested, hypothesis refuted)
+
+Everything here was measured on gfx1100 (96 CU) emulating navi32 via `--sm_count_target 60` plus
+`HIPBLASLT_BENCH_CU_MASK=60`. The natural hope is that the enumeration's bias is an artefact of
+that emulation -- masked streams behaving oddly when 298 kernels dispatch back-to-back -- in which
+case the whole approach would be sound on native hardware. **It is not.** Both instruments were
+run in both regimes on the same 20 shape/kernel-pair cases:
+
+| regime | n | enum median ratio | single-dispatch median | corr | sign agreement |
+|---|---|---|---|---|---|
+| MASKED (`sm_count_target` + CU mask) | 20 | 1.077 | 0.961 | -0.039 | 50% |
+| **UNMASKED (native 96 CU)** | 20 | 1.038 | 0.931 | **-0.410** | **35%** |
+
+Unmasked is if anything *worse*. In both regimes the enumeration says the challenger is faster
+(>1) while single-dispatch says it is slower (<1). **The bias is intrinsic to `--algo_method all`,
+not to the emulation — so this does not become correct by moving to real navi32.**
+
 ## Scope
 
 This affects **ranking** decisions built on `--algo_method all`. It does not automatically
