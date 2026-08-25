@@ -20,7 +20,10 @@
 
 #include "../../../shared/environment.h"
 #include "rtc_cache.h"
+#include <array>
+#include <fstream>
 #include <gtest/gtest.h>
+#include <vector>
 
 #if __has_include(<filesystem>)
 #include <filesystem>
@@ -72,4 +75,95 @@ TEST(rocfft_internal, rtc_helper_crash)
 
     // we should get compiled code back
     ASSERT_FALSE(code.empty());
+}
+
+// The cache is keyed on kernel name, GPU architecture, and a checksum of the
+// generator.  Anything stored under one key must come back under that key and
+// only that key, otherwise a kernel gets handed the wrong compiled code.
+TEST(rocfft_internal, rtc_cache_store_then_get)
+{
+    RTCCache cache;
+
+    const std::string    name = "internal_test_kernel";
+    const std::string    arch = "gfx942";
+    std::array<char, 32> sum{};
+    sum[0]                       = 'a';
+    const std::vector<char> code = {'c', 'o', 'd', 'e'};
+
+    // nothing stored yet
+    EXPECT_TRUE(cache.get_code_object(name, arch, sum).empty());
+
+    cache.store_code_object(name, arch, sum, code);
+    EXPECT_EQ(cache.get_code_object(name, arch, sum), code);
+
+    // a different name, architecture or generator checksum is a different kernel
+    EXPECT_TRUE(cache.get_code_object("other_kernel", arch, sum).empty());
+    EXPECT_TRUE(cache.get_code_object(name, "gfx90a", sum).empty());
+
+    std::array<char, 32> other_sum{};
+    other_sum[0] = 'b';
+    EXPECT_TRUE(cache.get_code_object(name, arch, other_sum).empty());
+}
+
+// Storing the same key twice replaces the entry instead of leaving two.
+TEST(rocfft_internal, rtc_cache_store_replaces)
+{
+    RTCCache cache;
+
+    const std::string    name = "internal_test_replace";
+    const std::string    arch = "gfx942";
+    std::array<char, 32> sum{};
+
+    cache.store_code_object(name, arch, sum, {'o', 'l', 'd'});
+    cache.store_code_object(name, arch, sum, {'n', 'e', 'w'});
+
+    EXPECT_EQ(cache.get_code_object(name, arch, sum), (std::vector<char>{'n', 'e', 'w'}));
+}
+
+// The cache can be handed to another process as a blob.  What goes out has to
+// come back, or precompiled kernel bundles silently do nothing.
+TEST(rocfft_internal, rtc_cache_serialize_round_trip)
+{
+    const std::string       name = "internal_test_serialize";
+    const std::string       arch = "gfx942";
+    std::array<char, 32>    sum{};
+    const std::vector<char> code = {'s', 'e', 'r'};
+
+    void*  buffer     = nullptr;
+    size_t buffer_len = 0;
+    {
+        RTCCache source;
+        source.store_code_object(name, arch, sum, code);
+        ASSERT_EQ(source.serialize(&buffer, &buffer_len), rocfft_status_success);
+    }
+    ASSERT_NE(buffer, nullptr);
+    ASSERT_GT(buffer_len, 0u);
+
+    RTCCache destination;
+    EXPECT_TRUE(destination.get_code_object(name, arch, sum).empty());
+    ASSERT_EQ(destination.deserialize(buffer, buffer_len), rocfft_status_success);
+    EXPECT_EQ(destination.get_code_object(name, arch, sum), code);
+
+    RTCCache::serialize_free(buffer);
+}
+
+// A cache file that is not a database at all must not stop the library from
+// starting up; it should fall back to compiling.
+TEST(rocfft_internal, rtc_cache_corrupt_file_is_survivable)
+{
+    const auto path = fs::temp_directory_path() / "rocfft_internal_test_corrupt_cache.db";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << "this is not a sqlite database";
+    }
+
+    EnvironmentSetTemp env_path("ROCFFT_RTC_CACHE_PATH", path.string().c_str());
+
+    std::array<char, 32> sum{};
+    EXPECT_NO_THROW({
+        RTCCache cache;
+        EXPECT_TRUE(cache.get_code_object("internal_test_corrupt", "gfx942", sum).empty());
+    });
+
+    fs::remove(path);
 }

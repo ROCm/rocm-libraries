@@ -21,14 +21,29 @@
 include( ../../../cmake/sqlite.cmake )
 
 add_executable( rocfft-internal-test
+  data_layout_test.cpp
+  function_map_key_test.cpp
   function_pool_test.cpp
+  kernel_name_test.cpp
   rtc_test.cpp
+  solution_map_test.cpp
+  # data_layout and enum_printer are compiled into the rocfft shared library
+  # rather than an object library, so build them here to reach them.
+  ../data_layout.cpp
+  ../enum_printer.cpp
   ../rocfft_stub.cpp
+)
+
+# Lets the solution map test find the .dat files that ship with the library.
+target_compile_definitions( rocfft-internal-test PRIVATE
+  ROCFFT_TEST_SOLUTION_MAP_DIR="${ROCFFT_SOLUTION_MAP_DIR}"
 )
 
 target_include_directories( rocfft-internal-test PRIVATE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device/generator>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/library/src/device>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/shared>
   $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
@@ -47,7 +62,12 @@ target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-rtc-cache
   rocfft-rtc-common
   rocfft-rtc-compile
+  rocfft-rtc-gen
   rocfft-rtc-subprocess
+  rocfft-solution-map
+  # rocfft-rtc-gen builds kernel source with the code generator, so that has
+  # to come along too.
+  generator
   hip::host
   ${ROCFFT_SQLITE_LIB}
 )
