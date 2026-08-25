@@ -51,6 +51,16 @@ add_test(
 add_executable(host-validation-blocked-tests blocked_backend_test.cpp)
 target_link_libraries(host-validation-blocked-tests PRIVATE roc::host-validation-blocked)
 add_test(NAME host-validation-blocked-tests COMMAND host-validation-blocked-tests)
+add_test(
+    NAME host-validation-blocked-tests-four-threads
+    COMMAND host-validation-blocked-tests
+)
+set_tests_properties(
+    host-validation-blocked-tests-four-threads
+    PROPERTIES
+        ENVIRONMENT "OMP_NUM_THREADS=4;OMP_DYNAMIC=FALSE"
+        PROCESSORS 4
+)
 
 add_executable(host-validation-core-tests tensor_core_test.cpp)
 target_link_libraries(host-validation-core-tests PRIVATE roc::host-validation-core)
@@ -221,5 +231,15 @@ if(HOST_VALIDATION_BUILD_BENCHMARKS)
         host-validation-comparison-benchmark
         PRIVATE
             roc::host-validation
+    )
+
+    add_executable(
+        host-validation-gemm-benchmark
+        gemm_benchmark.cpp
+    )
+    target_link_libraries(
+        host-validation-gemm-benchmark
+        PRIVATE
+            roc::host-validation-blocked
     )
 endif()

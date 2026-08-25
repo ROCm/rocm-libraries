@@ -260,7 +260,7 @@ TEST(ReferenceGemmSelection, ZeroRequestedElementsUsesSelectAllPolicy)
     EXPECT_EQ(d, std::vector<Half>(M * N, Half(blockedExpected)));
 }
 
-TEST(ReferenceGemmSelection, UsesBlockedTilesForSparseFloatValidation)
+TEST(ReferenceGemmSelection, UsesPointwiseForSparseFloatValidation)
 {
     const size_t M                  = 384;
     const size_t N                  = 384;
@@ -275,10 +275,9 @@ TEST(ReferenceGemmSelection, UsesBlockedTilesForSparseFloatValidation)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
     const auto runInfo = SolveGemmCPU(problem, inputs, elementsToValidate);
-    EXPECT_EQ(runInfo.backendUsed, roc::host_validation::GemmBackend::Blocked);
+    EXPECT_EQ(runInfo.backendUsed, roc::host_validation::GemmBackend::Pointwise);
     EXPECT_EQ(runInfo.outputElementsWritten, elementsToValidate);
-    EXPECT_EQ(runInfo.outputElementsCovered, 12 * 32 * 32);
-    EXPECT_GT(runInfo.outputElementsCovered, elementsToValidate);
+    EXPECT_EQ(runInfo.outputElementsCovered, elementsToValidate);
     EXPECT_LT(runInfo.outputElementsCovered, M * N);
 
     const auto selection

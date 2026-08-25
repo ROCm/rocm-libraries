@@ -152,6 +152,7 @@ Scalar::storage();
 Scalar::as<T>();
 
 TensorStorage::allocate(bytes);
+TensorStorage::allocateUninitialized(bytes);
 TensorStorage::wrap(owner, mutableBytes);
 
 Tensor::Tensor(ScalarType, Shape);
@@ -172,6 +173,8 @@ Tensor::storeFrom(indices, value);
 Tensor::alias(Layout);
 Tensor::clone();
 Tensor::clone(TensorStorageAllocator);
+Tensor::copyTo(destination);
+Tensor::copyTo(destination, linearIndices);
 Tensor::copyFrom(Tensor);
 Tensor::copyFrom(Tensor, linearIndices);
 Tensor::reshape(Shape);

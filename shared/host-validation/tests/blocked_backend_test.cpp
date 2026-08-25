@@ -355,6 +355,57 @@ void testFullSelectionParity() {
                 run.blocked.outputElementsCovered == rows * columns,
             "Full blocked selection did not preserve complete-output accounting.");
 }
+
+void testParallelFullSelectionParity() {
+    constexpr size_t rows = 128;
+    constexpr size_t reductionElements = 128;
+    constexpr size_t columns = 128;
+
+    const std::vector<float> a = makeValues(rows, reductionElements, 15);
+    const std::vector<float> b = makeValues(reductionElements, columns, 16);
+    const std::vector<float> c = makeValues(rows, columns, 17);
+    Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
+    Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
+
+    GemmRequest pointwiseProblem =
+        makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
+    GemmRequest blockedProblem =
+        makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
+
+    const ParityRunInfo run =
+        runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
+                  "Parallel blocked GEMM differs from the pointwise reference.");
+    require(run.blocked.outputElementsWritten == rows * columns &&
+                run.blocked.outputElementsCovered == rows * columns,
+            "Parallel blocked GEMM reported the wrong output counts.");
+}
+
+void testOverlappingOutputUsesSerialTraversal() {
+    using namespace roc::host_validation;
+
+    constexpr size_t rows = 33;
+    constexpr size_t reductionElements = 512;
+    constexpr size_t columns = 64;
+
+    std::vector<float> a(rows * reductionElements);
+    for (size_t row = 0; row < rows; ++row)
+        std::fill_n(a.begin() + row * reductionElements, reductionElements,
+                    static_cast<float>(row + 1));
+    const std::vector<float> b(reductionElements * columns, 1.0f);
+    const std::vector<float> c(rows * columns, 0.0f);
+    Tensor output(ScalarType::Float32, Layout(Shape{rows, columns}, {0, 0}));
+    GemmRequest problem = makeProblem(a, b, c, output, rows, reductionElements, columns);
+
+    BlockedGemmBackend backend;
+    referenceGemm(problem,
+                  {
+                      .backend = GemmBackend::Blocked,
+                      .requireRequestedBackend = true,
+                  },
+                  &backend);
+    require(output.loadAs<float>({0, 0}) == static_cast<float>(rows * reductionElements),
+            "Blocked GEMM parallelized an overlapping output layout.");
+}
 }  // namespace
 
 int main() {
@@ -363,5 +414,7 @@ int main() {
     testStridedSelectionBlockPlan();
     testBlockScaledSelectionBlockPlan();
     testFullSelectionParity();
+    testParallelFullSelectionParity();
+    testOverlappingOutputUsesSerialTraversal();
     return 0;
 }
