@@ -219,12 +219,14 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
         const size_t rows = std::min(outputBlockRows, m - rowBase);
         const size_t columns = std::min(outputBlockColumns, n - columnBase);
         std::vector<Accumulator> accumulator(rows * columns, Accumulator(0));
+        const size_t maximumReductions = std::min(reductionBlockElements, k);
+        std::vector<Accumulator> aBlock(rows * maximumReductions);
+        std::vector<Accumulator> bBlock(maximumReductions * columns);
+        std::vector<Accumulator> partial(blockScaleA ? rows * columns : 0);
 
         for (size_t reductionBase = 0; !finalizer.alphaIsZero() && reductionBase < k;
              reductionBase += reductionBlockElements) {
             const size_t reductions = std::min(reductionBlockElements, k - reductionBase);
-            std::vector<Accumulator> aBlock(rows * reductions);
-            std::vector<Accumulator> bBlock(reductions * columns);
             for (size_t row = 0; row < rows; ++row) {
                 for (size_t reduction = 0; reduction < reductions; ++reduction) {
                     Accumulator value = conjugateIfNeeded(
@@ -258,7 +260,7 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
                 }
             }
 
-            std::vector<Accumulator> partial(blockScaleA ? rows * columns : 0, Accumulator(0));
+            if (blockScaleA) std::fill(partial.begin(), partial.end(), Accumulator(0));
             std::vector<Accumulator>& destination = blockScaleA ? partial : accumulator;
             for (size_t row = 0; row < rows; ++row) {
                 for (size_t reduction = 0; reduction < reductions; ++reduction) {
