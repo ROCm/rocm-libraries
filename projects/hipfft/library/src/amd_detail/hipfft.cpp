@@ -1358,7 +1358,7 @@ hipfftResult
     hipfftMakePlan1d(hipfftHandle plan, int nx, hipfftType type, int batch, size_t* workSize)
 try
 {
-    if(nx < 0 || batch < 0)
+    if(nx <= 0 || batch <= 0)
     {
         return HIPFFT_INVALID_SIZE;
     }
@@ -1389,7 +1389,7 @@ catch(...)
 hipfftResult hipfftMakePlan2d(hipfftHandle plan, int nx, int ny, hipfftType type, size_t* workSize)
 try
 {
-    if(nx < 0 || ny < 0)
+    if(nx <= 0 || ny <= 0)
     {
         return HIPFFT_INVALID_SIZE;
     }
@@ -1421,7 +1421,7 @@ hipfftResult
     hipfftMakePlan3d(hipfftHandle plan, int nx, int ny, int nz, hipfftType type, size_t* workSize)
 try
 {
-    if(nx < 0 || ny < 0 || nz < 0)
+    if(nx <= 0 || ny <= 0 || nz <= 0)
     {
         return HIPFFT_INVALID_SIZE;
     }

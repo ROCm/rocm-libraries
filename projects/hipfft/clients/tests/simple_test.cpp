@@ -138,6 +138,32 @@ TEST(hipfftTest, Create1dPlan)
     ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
 }
 
+#ifdef __HIP_PLATFORM_AMD__
+// Degenerate lengths and batch counts must be rejected with an error.
+TEST(hipfftTest, ZeroSizePlan)
+{
+    PROB_SKIP_UNITTEST();
+    hipfftHandle plan     = INVALID_HIPFFT_PLAN_HANDLE;
+    size_t       workSize = 0;
+    ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
+
+    EXPECT_EQ(hipfftMakePlan1d(plan, 0, HIPFFT_C2C, 1, &workSize), HIPFFT_INVALID_SIZE);
+    EXPECT_EQ(hipfftMakePlan1d(plan, 64, HIPFFT_C2C, 0, &workSize), HIPFFT_INVALID_SIZE);
+    EXPECT_EQ(hipfftMakePlan2d(plan, 0, 64, HIPFFT_C2C, &workSize), HIPFFT_INVALID_SIZE);
+    EXPECT_EQ(hipfftMakePlan2d(plan, 64, 0, HIPFFT_C2C, &workSize), HIPFFT_INVALID_SIZE);
+    EXPECT_EQ(hipfftMakePlan3d(plan, 0, 64, 64, HIPFFT_C2C, &workSize), HIPFFT_INVALID_SIZE);
+    EXPECT_EQ(hipfftMakePlan3d(plan, 64, 0, 64, HIPFFT_C2C, &workSize), HIPFFT_INVALID_SIZE);
+    EXPECT_EQ(hipfftMakePlan3d(plan, 64, 64, 0, HIPFFT_C2C, &workSize), HIPFFT_INVALID_SIZE);
+
+    ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
+
+    // the call reported in the issue
+    hipfftHandle reported = INVALID_HIPFFT_PLAN_HANDLE;
+    EXPECT_EQ(hipfftPlan1d(&reported, 0, HIPFFT_C2C, 1), HIPFFT_INVALID_SIZE);
+    EXPECT_EQ(hipfftDestroy(reported), HIPFFT_SUCCESS);
+}
+#endif
+
 TEST(hipfftTest, CreatePlanMany)
 {
     PROB_SKIP_UNITTEST();
