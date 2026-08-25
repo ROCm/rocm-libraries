@@ -83,6 +83,7 @@
     X(EnableESM2TrackValuVsrc, bool)              \
     X(VgprMsbMode, int)                           \
     X(RequiresXCntForVolatileVMEM, bool)          \
+    X(EnableXnackReplay, bool)                    \
     X(EnableSwInstructionPrefetchRelStatic, bool) \
     X(EnableSwInstructionPrefetchAbs, bool)       \
     X(SwInstructionPrefetchAbsBaseSgpr, int)      \

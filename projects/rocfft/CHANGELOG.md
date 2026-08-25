@@ -8,6 +8,7 @@ Documentation for rocFFT is available at
 ### Added
 
 * Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+
 * Implemented `rocfft_plan_description_set_load_callback` and `rocfft_plan_description_set_store_callback` APIs, to 
   allow for user-defined device functions to be called when loading input or storing output of a transform.  These 
   callback functions are specified during plan creation and allow rocFFT to Just-In-Time (JIT) compile the code into 
@@ -21,6 +22,8 @@ Documentation for rocFFT is available at
   These APIs are not currently compatible with transforms that have
   fields or bricks also specified on the same plan description.  This
   support will be added in a future release of rocFFT.
+
+* Added support for very large FFTs on gfx1250.
 
 ### Deprecations
 

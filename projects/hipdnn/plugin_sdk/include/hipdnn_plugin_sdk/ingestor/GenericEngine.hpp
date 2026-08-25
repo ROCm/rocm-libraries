@@ -17,6 +17,9 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
@@ -101,6 +104,11 @@ public:
         flatbuffers::FlatBufferBuilder builder;
 
         std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobOffsets;
+        // Advertised out-of-band: staying out of _engine.knobs keeps findUndeclaredKnob
+        // from seeing it and readKnobFilter from filtering on it. Unconditional, since
+        // the class-level static_assert already requires THandle to supply a stream.
+        knobOffsets.push_back(KnobFactory::createIntKnob(
+            builder, BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {}));
         for(const auto& knob : _planBuilder.getCustomKnobs(handle, opGraph))
         {
             knobOffsets.push_back(hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knob));
