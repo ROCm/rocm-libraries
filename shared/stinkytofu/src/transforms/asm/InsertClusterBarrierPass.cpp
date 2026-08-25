@@ -625,6 +625,18 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // range, means coming to rest in front of the def. The boundary returns below still
     // win: a cluster wait or a prior handshake's barrier cannot be crossed just to find a
     // better spot, and neither can a segment edge once the hop budget is spent.
+    //
+    // This is not a second notion of liveness competing with isSccLiveBefore. While the climb
+    // walks the text the two are the same thing: same recurrence, and this one starts from
+    // that function's answer at the wait, so it just avoids rescanning at every step. They
+    // part company once the climb follows a latch, and then neither is the whole answer,
+    // because a wrapped anchor has two ways on. This flag describes the way the loop takes,
+    // over the back edge and down to the wait; isSccLiveBefore, which clearScc reads off the
+    // code below the anchor, describes the way that leaves the loop. A climb that comes to
+    // rest of its own accord has to be clear on both, which is why it asks this one and
+    // clearScc the other rather than either standing in for both. A boundary stop is judged
+    // on placement alone, and on purpose: see curSegBeginSccLive, where stepping over a
+    // conditional exit sets this flag by construction and would veto every settled climb.
     bool sccLive = isSccLiveBefore(referenceAnchor);
     bool targetMet = false;
     StinkyInstruction* leadPoint = nullptr;
@@ -785,7 +797,10 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
                     return report(clearSccNote(settle(curSegBegin.getNodePtr(), accum)));
                 it = BasicBlock::iterator(latch);
                 // The latch is landed on rather than stepped over, so its own read of the
-                // loop condition has to be folded in by hand.
+                // loop condition has to be folded in by hand. Carrying the flag across the
+                // jump by hand is also what puts it on the path the loop runs rather than the
+                // one the text reads, which is the whole of what it knows that clearScc does
+                // not.
                 sccLive = readsScc(*latch) || (sccLive && !writesScc(*latch));
                 auto latchCycle = cycleMap.find(latch);
                 if (latchCycle != cycleMap.end())
