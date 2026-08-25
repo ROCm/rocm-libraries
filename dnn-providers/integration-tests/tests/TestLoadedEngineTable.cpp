@@ -50,22 +50,24 @@ TEST_F(TestLoadedEngineTable, AllReturnsAllEngines)
     EXPECT_EQ(all[2].name, "ENGINE_C");
 }
 
-TEST_F(TestLoadedEngineTable, ResetClearsTable)
+TEST_F(TestLoadedEngineTable, ResetClearsBuiltFlag)
 {
     LoadedEngineTable::get().setForTesting({{42, "ENGINE_A"}});
-    ASSERT_TRUE(LoadedEngineTable::get().isLoaded("ENGINE_A"));
+    ASSERT_TRUE(LoadedEngineTable::get().isBuilt());
 
     LoadedEngineTable::get().reset();
 
-    EXPECT_TRUE(LoadedEngineTable::get().all().empty());
-    EXPECT_FALSE(LoadedEngineTable::get().isLoaded("ENGINE_A"));
+    EXPECT_FALSE(LoadedEngineTable::get().isBuilt());
 }
 
-TEST_F(TestLoadedEngineTable, EmptyTableIsLoadedAlwaysFalse)
+TEST_F(TestLoadedEngineTable, AllThrowsBeforeBuild)
 {
-    EXPECT_TRUE(LoadedEngineTable::get().all().empty());
-    EXPECT_FALSE(LoadedEngineTable::get().isLoaded("anything"));
-    EXPECT_FALSE(LoadedEngineTable::get().isLoaded(""));
+    EXPECT_THROW(LoadedEngineTable::get().all(), std::runtime_error);
+}
+
+TEST_F(TestLoadedEngineTable, IsLoadedThrowsBeforeBuild)
+{
+    EXPECT_THROW(LoadedEngineTable::get().isLoaded("anything"), std::runtime_error);
 }
 
 // NOLINTEND(readability-identifier-naming)

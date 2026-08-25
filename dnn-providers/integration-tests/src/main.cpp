@@ -29,32 +29,6 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
-namespace
-{
-
-using hipdnn_integration_tests::getEngineInfo;
-
-bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
-{
-    size_t numEngines = 0;
-    if(hipdnnGetEngineCount_ext(handle, &numEngines) != HIPDNN_STATUS_SUCCESS || numEngines == 0)
-    {
-        return false;
-    }
-
-    for(size_t i = 0; i < numEngines; ++i)
-    {
-        auto info = getEngineInfo(handle, i);
-        if(info.engineName == targetEngineName)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-} // namespace
-
 int main(int argc, char** argv) noexcept
 {
     // Shared hipdnn handle + HIP stream are created below before any fixture
@@ -320,9 +294,20 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        // Verify target engine is loaded (only when --test-engine was provided)
+        try
+        {
+            hipdnn_integration_tests::bundle::LoadedEngineTable::get().build(handle);
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << e.what() << "\n";
+            static_cast<void>(hipStreamDestroy(stream));
+            return 1;
+        }
+
         if(hipdnn_integration_tests::TestConfig::get().hasEngineName()
-           && !engineIsLoaded(handle, hipdnn_integration_tests::TestConfig::get().getEngineName()))
+           && !hipdnn_integration_tests::bundle::LoadedEngineTable::get().isLoaded(
+               hipdnn_integration_tests::TestConfig::get().getEngineName()))
         {
             std::cerr << "Error: Engine '"
                       << hipdnn_integration_tests::TestConfig::get().getEngineName()
@@ -342,7 +327,7 @@ int main(int argc, char** argv) noexcept
             {
                 for(size_t i = 0; i < numEngines; ++i)
                 {
-                    auto info = getEngineInfo(handle, i);
+                    auto info = hipdnn_integration_tests::getEngineInfo(handle, i);
                     loadedEngineNames.push_back(info.engineName);
                     engineNamesById.emplace(info.engineId, std::move(info.engineName));
                 }
@@ -350,8 +335,6 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().setEngineNames(
                 std::move(engineNamesById));
         }
-
-        hipdnn_integration_tests::bundle::LoadedEngineTable::get().build(handle);
 
         hipdnn_integration_tests::bundle::registerBundleTests();
 

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -40,13 +41,18 @@ public:
     void build(hipdnnHandle_t handle)
     {
         _engines.clear();
+        _built = false;
 
         size_t numEngines = 0;
         if(hipdnnGetEngineCount_ext(handle, &numEngines) != HIPDNN_STATUS_SUCCESS)
         {
-            std::cerr << "[LoadedEngineTable] hipdnnGetEngineCount_ext failed; "
-                         "engine table will be empty\n";
-            return;
+            throw std::runtime_error("[LoadedEngineTable] hipdnnGetEngineCount_ext failed");
+        }
+
+        if(numEngines == 0)
+        {
+            throw std::runtime_error(
+                "[LoadedEngineTable] no engines loaded — check the plugin path");
         }
 
         _engines.reserve(numEngines);
@@ -73,6 +79,7 @@ public:
 
     const std::vector<LoadedEngine>& all() const
     {
+        requireBuilt();
         return _engines;
     }
 
@@ -83,6 +90,7 @@ public:
 
     bool isLoaded(std::string_view name) const
     {
+        requireBuilt();
         return std::any_of(_engines.begin(), _engines.end(), [name](const LoadedEngine& e) {
             return e.name == name;
         });
@@ -90,6 +98,14 @@ public:
 
 private:
     LoadedEngineTable() = default;
+
+    void requireBuilt() const
+    {
+        if(!_built)
+        {
+            throw std::runtime_error("[LoadedEngineTable] accessed before build() succeeded");
+        }
+    }
 
     std::vector<LoadedEngine> _engines;
     bool _built = false;

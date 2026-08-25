@@ -242,10 +242,12 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
 
 void IntegrationBundleVerificationHarness::runComparison()
 {
-    if(TestConfig::get().enforceSupportClaims()
-       && _bundle->metadata.enforcementLevel != EnforcementLevel::FULL)
+    if(_bundle->metadata.enforcementLevel != EnforcementLevel::FULL)
     {
-        enforceAtLevel(_bundle->metadata.enforcementLevel);
+        if(TestConfig::get().enforceSupportClaims())
+        {
+            enforceAtLevel(_bundle->metadata.enforcementLevel);
+        }
         return;
     }
 
