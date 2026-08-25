@@ -484,6 +484,82 @@ class TestConvWgradCorrectness(unittest.TestCase):
                 with self.subTest(shape=shape.id, dtype=dtype):
                     self._check(shape, dtype, "mem", "default")
 
+    def test_grouped_cshuffle(self):
+        # Grouped wgrad with the LDS-staged cshuffle epilogue: the staged store
+        # must thread the per-group k_out fold (group*kpg) and bound its store
+        # vector by cpg.  split_k=1 (cshuffle has no split-K path).
+        grouped = [
+            _Shape(
+                "g4_N2H14W14C64K64",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+            ),
+            _Shape(
+                "g4_asym_N2H14W14C64K128",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=128,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+            ),
+        ]
+        for dtype in _DTYPES:
+            for shape in grouped:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(shape, dtype, "mem", "cshuffle")
+
+    def test_grouped_split_k(self):
+        # Grouped wgrad with split-K: the group and the K-slice share block_id_z
+        # (grid z = groups*split_k) and the atomic epilogue folds group*kpg into
+        # k_out.  cpg is even on every shape (packed <2 x dtype> atomic pairs must
+        # stay within one filter position's cpg slab).
+        grouped = [
+            _Shape(
+                "g4_N2H14W14C64K64",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,  # cpg=kpg=16
+            ),
+            _Shape(
+                "g8_N2H12W12C64K64",
+                N=2,
+                Hi=12,
+                Wi=12,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=8,  # cpg=kpg=8
+            ),
+        ]
+        for dtype in _DTYPES:
+            for shape in grouped:
+                for split_k in (4, -1):  # fixed degree + CK auto-select
+                    with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
+                        self._check(shape, dtype, "mem", "default", split_k)
+
     def test_grouped_depthwise(self):
         # Depthwise (groups == C, cpg == 1): each input channel is its own group.
         # kpg==1 (K==C) is pure depthwise; kpg==2 (K==2C) is a channel multiplier.

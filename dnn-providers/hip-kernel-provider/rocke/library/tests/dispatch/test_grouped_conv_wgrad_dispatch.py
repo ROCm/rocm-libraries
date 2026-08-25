@@ -21,6 +21,7 @@ import unittest
 
 from dispatch.grouped_convolution import (
     ConvGroupedRequest,
+    _problem,
     conv_grouped_candidates,
     dispatch_conv_grouped,
 )
@@ -48,16 +49,32 @@ def _wgrad(arch="gfx942", **kw):
 
 
 def _expected_grid(req, spec):
-    p_groups = int(req.G)
-    kpg = req.K // p_groups
-    cpg = req.C // p_groups
-    spatial = req.Y * req.X  # 2D shapes in this test
+    # Mirror dispatch._wgrad_grid: per-group tiling on x/y, and z = groups *
+    # split_k with the group riding block_id_z alongside the K-slice. split_k
+    # == -1 is the auto sentinel; resolve it via the same CK formula the grid
+    # uses so this stays an independent re-derivation of the wiring.
+    p = _problem(req)
+    spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
+    kpg = p.K // p.groups
+    cpg = p.C // p.groups
     wg_M = kpg
     wg_N = spatial * cpg
     gx = math.ceil(wg_N / spec.tile_n)
     gy = math.ceil(wg_M / spec.tile_m)
-    gz = p_groups * spec.split_k
-    return (gx, gy, gz)
+    split_k = spec.split_k
+    if split_k == -1:
+        from rocke.helpers.split_k import select_split_k_wgrad
+
+        split_k = select_split_k_wgrad(
+            wg_M=wg_M,
+            wg_N=wg_N,
+            wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
+            tile_m=spec.tile_m,
+            tile_n=spec.tile_n,
+            tile_k=spec.tile_k,
+            arch=spec.arch,
+        ).split_k
+    return (gx, gy, p.groups * split_k)
 
 
 class TestGroupedWgradDispatch(unittest.TestCase):
@@ -65,13 +82,24 @@ class TestGroupedWgradDispatch(unittest.TestCase):
     # ---- admittance + grid ---------------------------------------------------
 
     def test_grouped_admitted_grid_per_group(self):
-        # groups=4: grid-per-group, one group per z index.
+        # groups=4: grid-per-group. The group rides block_id_z alongside the
+        # K-slice, so z = groups*split_k (split_k auto-resolved, >= 1).
         for arch in ("gfx942", "gfx950"):
             r = dispatch_conv_grouped(_wgrad(arch, G=4))
             self.assertEqual(r.spec.direction, "wgrad")
             self.assertEqual(r.spec.epilogue, "default")
-            self.assertEqual(r.spec.split_k, 1, "grouped wgrad must use split_k=1")
-            self.assertEqual(r.grid[2], 4, "z must be one index per group")
+            self.assertEqual(r.grid[2] % 4, 0, "z must be a multiple of groups")
+            self.assertGreaterEqual(r.grid[2] // 4, 1, "split_k >= 1 per group")
+            self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
+
+    def test_grouped_cshuffle_admitted(self):
+        # A grouped request whose vec derives a cshuffle epilogue is admitted:
+        # grouping is orthogonal to the epilogue (the staged store threads the
+        # per-group k_out fold).
+        for arch in ("gfx942", "gfx950"):
+            r = dispatch_conv_grouped(_wgrad(arch, G=4, vec_size_c=8))
+            self.assertEqual(r.spec.direction, "wgrad")
+            self.assertEqual(r.spec.epilogue, "cshuffle")
             self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
 
     def test_gfx1250_grouped_admitted_wmma(self):

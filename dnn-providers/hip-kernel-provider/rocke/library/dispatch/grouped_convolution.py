@@ -402,13 +402,14 @@ def _epilogue_for(req: ConvGroupedRequest) -> str:
 def _wgrad_grouped_overrides(req: ConvGroupedRequest) -> Tuple[str, int]:
     """(epilogue, split_k) for a wgrad spec.
 
-    Grouped wgrad (G>1) is gated to the direct-store epilogue at split_k==1 (the
-    group index rides on block_id_z; see is_valid_wgrad_spec).  Ungrouped keeps
-    the vec-derived epilogue and the auto split-K formula (split_k=-1),
-    byte-identically to the pre-grouped path.
+    Grouping is orthogonal to the epilogue and split-K: every epilogue (direct,
+    cshuffle, and the split-K atomic path) threads the per-group fold
+    ``k_out += group*kpg`` into the dW store, and when split_k>1 the group rides
+    block_id_z alongside the K-slice (z = groups*split_k).  So grouped uses the
+    same vec-derived epilogue and auto split-K formula (split_k=-1) as ungrouped.
+    (WMMA grouped is handled by its own candidate, which forces
+    default@split_k=1 -- WMMA has neither a cshuffle nor a split-K path.)
     """
-    if int(req.G) > 1:
-        return "default", 1
     return _epilogue_for(req), -1
 
 
@@ -510,15 +511,18 @@ class ConvGroupedSpec:
 
         target = ArchTarget.from_gfx(self.arch)
         p = problem
-        # Grouped wgrad requires split_k=1 (the group-batch index owns block_id_z;
-        # is_valid_wgrad_spec rejects split_k>1 for groups>1). Only auto-resolve
-        # split_k for the ungrouped path.
-        if p.groups > 1:
-            resolved_split_k = 1
+        # Honor a concrete split-K fixed by the candidate (WMMA forces 1 -- it
+        # has no split-K path); otherwise auto-resolve via the CK formula on the
+        # per-group GEMM dims (== full dims when groups==1).  Grouped rides the
+        # group on block_id_z alongside the K-slice (z = groups*split_k), so
+        # grouped split-K is valid on MFMA.
+        if self.split_k != -1:
+            resolved_split_k = self.split_k
         else:
+            spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
             resolved_split_k = select_split_k_wgrad(
-                wg_M=p.K,
-                wg_N=(p.Z if p.is_3d else 1) * p.Y * p.X * p.C,
+                wg_M=p.K // p.groups,
+                wg_N=spatial * (p.C // p.groups),
                 wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
                 tile_m=self.tile_m,
                 tile_n=self.tile_n,
@@ -589,9 +593,9 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
         ).split_k
     else:
         split_k = spec.split_k
-    # The group index rides on block_id_z alongside split-K. Grouped specs are
-    # gated to split_k==1, so for groups>1 z is a pure group axis; for G==1 this
-    # is (gx, gy, split_k).
+    # The group index rides on block_id_z alongside the K-slice: z = groups*
+    # split_k, decoded in-kernel as group = z // split_k, slice = z % split_k.
+    # For G==1 this reduces to (gx, gy, split_k); for split_k==1 to (gx, gy, groups).
     return (gx, gy, p.groups * split_k)
 
 

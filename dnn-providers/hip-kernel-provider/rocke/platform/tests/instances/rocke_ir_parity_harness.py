@@ -1190,6 +1190,64 @@ def cases():
             tile_k=32,
         ),
     )
+    # Grouped + cshuffle epilogue (MFMA): the LDS-staged store threads the
+    # per-group k_out fold (group*kpg) and derives its store-vec from cpg.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_cshuffle",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_cshuffle",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            epilogue="cshuffle",
+        ),
+    )
+    # Grouped + split-K (MFMA): the group and the K-slice share block_id_z
+    # (z = groups*split_k) and the atomic epilogue folds group*kpg into k_out.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_spk4",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            split_k=4,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_spk4",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_g4_spk4",
+            "gfx942",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            split_k=4,
+        ),
+    )
     # gfx1250 WMMA grouped (wave32, 16x16x32 -- its only fp16/bf16 atom).
     add(
         "conv_wgrad",
