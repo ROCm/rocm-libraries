@@ -39,7 +39,7 @@ struct rocsolver_handle_data_
     rocsolver_alg_mode bdsqr_mode = rocsolver_alg_mode_gpu;
     rocsolver_alg_mode sterf_mode = rocsolver_alg_mode_gpu;
     rocsolver_alg_mode steqr_mode = rocsolver_alg_mode_gpu;
-    rocsolver_alg_mode hetrd_mode = rocsolver_alg_mode_1stage;
+    rocsolver_alg_mode sytrd_hetrd_mode = rocsolver_alg_mode_1stage;
 };
 
 typedef struct rocsolver_handle_data_* rocsolver_handle_data;

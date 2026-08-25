@@ -93,11 +93,11 @@ try
             return rocblas_status_success;
         }
         break;
-    case rocsolver_function_hetrd:
+    case rocsolver_function_sytrd_hetrd:
         if(mode == rocsolver_alg_mode_1stage || mode == rocsolver_alg_mode_2stage
            || mode == rocsolver_alg_mode_auto)
         {
-            handle_data->hetrd_mode = mode;
+            handle_data->sytrd_hetrd_mode = mode;
             return rocblas_status_success;
         }
         break;
@@ -146,8 +146,8 @@ try
         else
             *mode = rocsolver_alg_mode_mixed;
         break;
-    case rocsolver_function_hetrd:
-        *mode = handle_data ? handle_data->hetrd_mode : rocsolver_alg_mode_1stage;
+    case rocsolver_function_sytrd_hetrd:
+        *mode = handle_data ? handle_data->sytrd_hetrd_mode : rocsolver_alg_mode_1stage;
         break;
     default: return rocblas_status_invalid_value;
     }

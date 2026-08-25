@@ -213,8 +213,16 @@ typedef enum rocsolver_function_
     rocsolver_function_gesvd = 402, /**< Affected by bdsqr. */
     rocsolver_function_sterf = 403,
     rocsolver_function_steqr = 404,
+
     rocsolver_function_syev_heev = 405, /**< Affected by sterf and steqr. */
-    rocsolver_function_hetrd = 406, /**< Controls 1-stage vs 2-stage tridiagonalization. */
+    rocsolver_function_syev = rocsolver_function_syev_heev, /**< Affected by sterf and steqr. (Alias) */
+    rocsolver_function_heev = rocsolver_function_syev_heev, /**< Affected by sterf and steqr. (Alias) */
+
+    rocsolver_function_sytrd_hetrd = 406, /**< 1-stage vs 2-stage tridiagonalization. */
+    rocsolver_function_sytrd = rocsolver_function_sytrd_hetrd,
+    /**< 1-stage vs 2-stage tridiagonalization. (Alias) */
+    rocsolver_function_hetrd = rocsolver_function_sytrd_hetrd,
+    /**< 1-stage vs 2-stage tridiagonalization. (Alias) */
 } rocsolver_function;
 
 #endif /* ROCSOLVER_EXTRA_TYPES_H */
