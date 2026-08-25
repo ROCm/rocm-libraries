@@ -593,13 +593,19 @@ inline std::string uniqueSuffix()
            + std::to_string(s_counter.fetch_add(1));
 }
 
-/// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime
-/// and restores the caller's value after.
+/// Points HIPDNN_CACHE_DIR at a directory of this test's own for the guard's lifetime and
+/// restores the caller's value after.
+///
+/// Also neutralizes HIPDNN_DISABLE_CACHE for the same window. An ambient truthy value in
+/// the runner's environment makes cacheRoot() return empty before it reads
+/// HIPDNN_CACHE_DIR at all, which silently turns every disk test below into a test of the
+/// in-memory fallback.
 class ScopedCacheDir
 {
 public:
     explicit ScopedCacheDir(const std::string& name)
         : _previous(hipdnn_data_sdk::utilities::getEnv(CACHE_DIR_ENV))
+        , _previousDisable(hipdnn_data_sdk::utilities::getEnv(DISABLE_CACHE_ENV))
         , _path(std::filesystem::temp_directory_path()
                 / ("hipdnn_winner_cache_test_" + uniqueSuffix() + "_" + name))
     {
@@ -607,6 +613,7 @@ public:
         std::filesystem::create_directories(_path);
         const std::string value = _path.string();
         hipdnn_data_sdk::utilities::setEnv(CACHE_DIR_ENV, value.c_str());
+        hipdnn_data_sdk::utilities::unsetEnv(DISABLE_CACHE_ENV);
     }
 
     ScopedCacheDir(const ScopedCacheDir&) = delete;
@@ -624,6 +631,10 @@ public:
         {
             hipdnn_data_sdk::utilities::setEnv(CACHE_DIR_ENV, _previous.c_str());
         }
+        if(!_previousDisable.empty())
+        {
+            hipdnn_data_sdk::utilities::setEnv(DISABLE_CACHE_ENV, _previousDisable.c_str());
+        }
         std::error_code ignored;
         std::filesystem::remove_all(_path, ignored);
     }
@@ -635,8 +646,10 @@ public:
 
 private:
     static constexpr const char* CACHE_DIR_ENV = "HIPDNN_CACHE_DIR";
+    static constexpr const char* DISABLE_CACHE_ENV = "HIPDNN_DISABLE_CACHE";
 
     std::string _previous;
+    std::string _previousDisable;
     std::filesystem::path _path;
 };
 
@@ -685,10 +698,11 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroug
     EXPECT_EQ(served->front().kernelId, testId(0x11));
 }
 
-/// gcnArchName is raw and suffixed; ':' is illegal in a Windows path component, so the
-/// arch directory must be the stripped base id. Run on Linux CI, where a Windows-only
-/// break would otherwise never surface.
-TEST(TestIngestorWinnerCache, TheArchShardComponentCarriesNoColon)
+/// gcnArchName is raw, driver-supplied and suffixed. ':' is illegal in a Windows path
+/// component, and a separator would move the shard out of the cache tree entirely, so the
+/// arch directory must be the sanitized stripped base id. Run on Linux CI, where a
+/// Windows-only break would otherwise never surface.
+TEST(TestIngestorWinnerCache, TheArchShardComponentIsOneSanitizedComponent)
 {
     const ScopedCacheDir cacheDir("arch_component");
 
@@ -696,12 +710,22 @@ TEST(TestIngestorWinnerCache, TheArchShardComponentCarriesNoColon)
     ASSERT_FALSE(path.empty());
 
     const auto archComponent = path.parent_path().filename().string();
-    EXPECT_EQ(archComponent, "gfx942");
     EXPECT_EQ(archComponent.find(':'), std::string::npos);
+    EXPECT_EQ(archComponent.rfind("gfx942-", 0), 0U)
+        << "the arch directory must stay the readable stripped base id plus the "
+           "sanitizer's hash suffix, got \""
+        << archComponent << "\"";
 
     // The engine component is sanitized too: a conforming scoped name contains a colon.
     const auto engineComponent = path.parent_path().parent_path().filename().string();
     EXPECT_EQ(engineComponent.find(':'), std::string::npos);
+
+    // A driver string carrying separators must collapse into ONE component instead of
+    // walking out of the engine directory.
+    const auto hostile = winnerCacheShardPath("test:ArchComponent", "../../../evil");
+    ASSERT_FALSE(hostile.empty());
+    EXPECT_EQ(hostile.parent_path().parent_path(), path.parent_path().parent_path())
+        << "an arch string carrying separators escaped the engine directory: " << hostile;
 }
 
 /// The shard is per-arch but the key is per-device: two parts reporting the same arch with
@@ -840,16 +864,21 @@ TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
 /// legitimately append a superseding line per thread and the expected count would not
 /// be fixed.
 ///
-/// Falsifying mutation: delete `_winnerCacheMutex` (or otherwise stop
-/// `writeBackToShard()`'s read-then-append critical section from being serialized
-/// per-shard), leaving only the file-level fcntl lock. POSIX fcntl locks are
-/// (process, inode)-scoped, not per-descriptor or per-thread: with one process-wide
-/// registry entry per shard, every thread of this test shares the SAME native
-/// descriptor, so the OS lock alone cannot serialize them against each other, and the
-/// shared key's raw line count exceeds 1 (observed 2-35+ extra lines in a standalone
-/// repro of the exact critical section). This guards only the mutex half of A2; the
-/// cross-process (file-lock) half, which this in-process test structurally cannot
-/// observe, is covered by B1.2 in TestLineStore.cpp/LineStoreLockHelper.cpp.
+/// Falsifying mutation: make the in-process mutex in `acquireLineStoreLock()` a no-op,
+/// leaving only the file-level fcntl lock. POSIX fcntl locks are (process, inode)-scoped,
+/// not per-descriptor or per-thread: with one process-wide registry entry per shard,
+/// every thread of this test shares the SAME native descriptor, so the OS lock alone
+/// cannot serialize them against each other, and the shared key's raw line count exceeds
+/// 1 (observed 2-35+ extra lines in a standalone repro of the exact critical section).
+///
+/// NOT `_winnerCacheMutex`: `recordWinner()` calls `writeBackToShard()` BEFORE taking
+/// it, so the shard's own lock -- taken by `lockLineStore()` and held across the
+/// read-then-append -- is what this oracle depends on. Deleting `_winnerCacheMutex`
+/// races the `_winnerCache` map instead and leaves the line counts below untouched.
+///
+/// This guards only the in-process (mutex) half of A2; the cross-process (file-lock)
+/// half, which this in-process test structurally cannot observe, is covered by B1.2 in
+/// TestLineStore.cpp/LineStoreLockHelper.cpp.
 TEST(TestIngestorWinnerCacheStateManager, ConcurrentRecordWinnerOnOneKeyAppendsExactlyOneLine)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
