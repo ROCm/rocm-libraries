@@ -123,6 +123,15 @@ rocfft_status rocfft_execution_info_set_load_callback(rocfft_execution_info info
                                                       size_t                shared_mem_bytes)
 try
 {
+    log_trace(__func__,
+              "info",
+              info,
+              "cb_functions",
+              cb_functions,
+              "cb_data",
+              cb_data,
+              "shared_mem_bytes",
+              shared_mem_bytes);
     if(!info)
         return rocfft_status_invalid_arg_value;
 
@@ -146,6 +155,7 @@ rocfft_status rocfft_execution_info_set_load_callback_data(rocfft_execution_info
                                                            size_t                count)
 try
 {
+    log_trace(__func__, "info", info, "cb_data", cb_data, "count", count);
     if(!info)
         return rocfft_status_invalid_arg_value;
 
@@ -169,6 +179,15 @@ rocfft_status rocfft_execution_info_set_store_callback(rocfft_execution_info inf
                                                        size_t                shared_mem_bytes)
 try
 {
+    log_trace(__func__,
+              "info",
+              info,
+              "cb_functions",
+              cb_functions,
+              "cb_data",
+              cb_data,
+              "shared_mem_bytes",
+              shared_mem_bytes);
     if(!info)
         return rocfft_status_invalid_arg_value;
 
@@ -192,6 +211,7 @@ rocfft_status rocfft_execution_info_set_store_callback_data(rocfft_execution_inf
                                                             size_t                count)
 try
 {
+    log_trace(__func__, "info", info, "cb_data", cb_data, "count", count);
     if(!info)
         return rocfft_status_invalid_arg_value;
 
