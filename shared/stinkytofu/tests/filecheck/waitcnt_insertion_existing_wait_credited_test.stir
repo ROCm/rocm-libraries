@@ -1,0 +1,96 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# An s_wait_* already present in the input drains the counter just as one the
+# pass plans, so the dataflow credits it (observedWaitDrains /
+# creditObservedWait in WaitDataflow.cpp) and does not emit a duplicate. This
+# matters because StinkyRemoveWaitCntPass does not strip every wait: kmcnt and
+# xcnt drains survive it, and blocks outside the processed region keep theirs.
+#
+# A credited wait is trimmed from the model exactly like an emitted one, so a
+# wait that is too weak for what a consumer needs still gets its own.
+
+#--- An existing wait of exactly the required strength suppresses ours.
+#--- Four ds_loads then a WMMA consuming loads 0,1 requires dscnt 2, which the
+#--- hand-placed wait already provides; the CHECK-NEXT onto the WMMA is what
+#--- pins the absence of a second wait.
+# CHECK-LABEL: @existing_dscnt_exact_is_credited
+# CHECK: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 2
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# The second WMMA consumes loads 2,3, which the credited wait left in flight.
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 0
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+
+st.func @existing_dscnt_exact_is_credited() {
+^entry:
+  v[20:21] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[30:31] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[40:41] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[50:51] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_wait_dscnt"(2) { mod.swaitcnt = { dlcnt = 2 } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[40:47], v[50:57], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
+}
+
+#--- An existing wait too weak for the consumer does not suppress ours: dscnt 3
+#--- leaves load 1 in flight, and the WMMA needs it.
+# CHECK-LABEL: @existing_dscnt_too_weak_still_emits
+# CHECK: s_wait_dscnt
+# CHECK-SAME: dlcnt = 3
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 2
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+
+st.func @existing_dscnt_too_weak_still_emits() {
+^entry:
+  v[20:21] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[30:31] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[40:41] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[50:51] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_wait_dscnt"(3) { mod.swaitcnt = { dlcnt = 3 } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
+}
+
+#--- kmcnt is the counter StinkyRemoveWaitCntPass preserves, so this is the case
+#--- the crediting exists for: a full drain already in the stream means the
+#--- consumer needs nothing.
+# CHECK-LABEL: @existing_kmcnt_zero_is_credited
+# CHECK: s_load_b64
+# CHECK-NEXT: s_load_b64
+# CHECK-NEXT: s_wait_kmcnt
+# CHECK-SAME: kmcnt = 0
+# CHECK-NEXT: s_add_u32
+# CHECK-NOT: s_wait_kmcnt
+
+st.func @existing_kmcnt_zero_is_credited() {
+^entry:
+  s[8:9] = "st.s_load_b64"(s[0:1])
+  s[10:11] = "st.s_load_b64"(s[0:1])
+  "st.s_wait_kmcnt"(0) { mod.swaitcnt = { kmcnt = 0 } }
+  s20 = "st.s_add_u32"(s8, s8)
+}
+
+#--- kmcnt returns out of order, so a NONZERO existing kmcnt names no
+#--- particular load and must not be credited -- the consumer of load 0 still
+#--- needs a full drain of its own.
+# CHECK-LABEL: @existing_kmcnt_nonzero_is_not_credited
+# CHECK: s_load_b64
+# CHECK-NEXT: s_load_b64
+# CHECK-NEXT: s_wait_kmcnt
+# CHECK-SAME: kmcnt = 1
+# CHECK-NEXT: s_wait_kmcnt
+# CHECK-SAME: kmcnt = 0
+# CHECK-NEXT: s_add_u32
+
+st.func @existing_kmcnt_nonzero_is_not_credited() {
+^entry:
+  s[8:9] = "st.s_load_b64"(s[0:1])
+  s[10:11] = "st.s_load_b64"(s[0:1])
+  "st.s_wait_kmcnt"(1) { mod.swaitcnt = { kmcnt = 1 } }
+  s20 = "st.s_add_u32"(s8, s8)
+}

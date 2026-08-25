@@ -404,6 +404,9 @@ class StateValues:
   tailloopInNllmaxUnit: int              = 0
   staggerUCode: bool                     = 0
   waveIdxReleasedAfterStagger: bool      = False
+  # Wave-separated TDM packs loop-invariant wave parity into sgpr ArgType bit 8
+  # before releasing WaveIdx. Named ArgType value tests must mask 0xFF.
+  tdmParityPackedInArgType: bool         = False
   scheduleGROverBarrier: bool            = False
   numLDSBlk: int                         = 0
   IncLdsBufSwitch: bool                  = False
@@ -3090,13 +3093,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.calculateStagger(kernel,tPM))
         # Calculate stagger B(MXSB)
         module.add(self.calculateStagger(kernel, tensorParametersB))
+        # Wave-separated TDM picks WrapUA or WrapUB by wave parity. Both the parity
+        # (a function of Serial) and the two WrapU values are loop-invariant, so fold
+        # the choice into WrapUA once here instead of redoing it every unroll iteration.
+        module.add(self.hoistWaveParityWrapUSel(kernel, tensorParametersA, tensorParametersB))
 
       # WaveIdx sits at a very low physical index, and checkOutAligned scans the pool
       # from 0, so holding it past the prologue both removes a slot and fragments the
       # low pool for the unroll loop's aligned temps -- enough to push the tightest
-      # gfx1250 StreamK configs over MaxSgpr. Release it here: the stagger prologue
-      # above is its last cheap-parity consumer, everything later recomputes parity
-      # from vgpr("Serial").
+      # gfx1250 StreamK configs over MaxSgpr. Pack wave-parity into ArgType bit 8
+      # first (in-place SALU, no tmp while WaveIdx is live), then release: later
+      # parity sites s_bitcmp1 ArgType rather than v_readfirstlane(Serial).
+      # ClusterBarrier keeps WaveIdx and must not pack.
+      module.add(self.packTdmParityIntoArgType(kernel))
       module.add(self.releaseWaveIdxAfterStagger(kernel))
 
       # LRO and LWA as assigned
@@ -9467,7 +9476,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # since the General Batched GEMM will also use this value like
     # Grouped GEMM but has to piggy back on Strided Batched GEMM logic.
     #if kernel["ProblemType"]["SupportUserArgs"]:
-    self.defineSgpr("ArgType", 1)  # 0: normal, 1: hbm, 2: user args
+    self.defineSgpr("ArgType", 1)  # 0: normal, 1: hbm, 2: user args, 3: general batched; bit 8 = TDM wave-parity
 
     # To avoid corrupting tmp sgprs that may be used around the assert,
     # reserve some sgprs to save/restore the execmask
@@ -11409,8 +11418,28 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:
     assert False, "Should be overrided"
 
-  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0) -> Module:
+  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0,
+                                 hoistedWrapUSel=False) -> Module:
     assert False, "Should be overrided"
+
+  def hoistWaveParityWrapUSel(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def packTdmParityIntoArgType(self, kernel) -> Module:
+    assert False, "Should be overrided"
+
+  def cmpNamedArgTypeEq(self, module, value, comment=""):
+    """Compare the named ArgType domain (low 8 bits) to *value*.
+
+    Bit 8 of sgpr ArgType is a TDM wave-parity side channel on wave-separated
+    stagger kernels. Masking every named value test keeps == 2 / == 3 dispatch
+    correct independent of whether pack has run yet (persistent graWorkGroup
+    is emitted before pack but runs after pack on tile N+1).
+    """
+    with self.allocTmpSgpr(1, tag="cmpNamedArgTypeEq") as tmp:
+      module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("ArgType"), src1=hex(0xFF),
+                         comment="mask ArgType domain (bit 8 = TDM wave-parity)"))
+      module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=value, comment=comment))
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
