@@ -1604,8 +1604,8 @@ def dispatcherVariantCmd(String arch, String variant, String tier) {
 // Verify JIT-compiled dispatcher kernels against a host reference.
 //
 // BOTH tiers run the same operator set for the arch -- every dispatcher operator
-// with a bridge on develop. A developer touching the bridge needs pre-merge
-// signal on all of them, and a lane that covers four operators cannot give that.
+// with a bridge on develop -- 13 of them. A developer touching the bridge needs
+// pre-merge signal on all of them, and a lane covering four cannot give that.
 // The tier controls cost only:
 //
 //   "smoke" -- standard sweep at --budget 64, variants at --budget 16.
@@ -1650,12 +1650,19 @@ def runDispatcherCorrectnessTests(String arch, String compiler, String tier) {
         run_ok python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx ${arch} && \
         python3 ../dispatcher/tests/test_grouped_gemm_gpu_correctness.py && \
         python3 ../dispatcher/tests/test_multi_d_gpu_correctness.py && \
-        python3 ../dispatcher/tests/test_multi_abd_gpu_correctness.py"""
-    // The three tests just added are the bridge-level companions to the grouped
-    // /multi_d/multi_abd --variant sweeps below: the sweep exercises the search
-    // space, they exercise the ctypes bridge. They were registered in ctest but
-    // never invoked from here. All three are unittest-based, take no --gfx, and
-    // exit 0 on an internal skip, so they need no run_ok.
+        python3 ../dispatcher/tests/test_multi_abd_gpu_correctness.py && \
+        run_ok python3 ../dispatcher/tests/test_rowcolquant_gpu_correctness.py --gfx ${arch} && \
+        run_ok python3 ../dispatcher/tests/test_tensorquant_gpu_correctness.py --gfx ${arch}"""
+    // The grouped/multi_d/multi_abd tests are the bridge-level companions to the
+    // --variant sweeps below: the sweep exercises the search space, they exercise
+    // the ctypes bridge. They were registered in ctest but never invoked from
+    // here. All three are unittest-based, take no --gfx, and exit 0 on an
+    // internal skip, so they need no run_ok.
+    //
+    // rowcolquant and tensorquant sit here rather than in the gfx950 block
+    // because, unlike the other quant ops, both support gfx942 as well --
+    // _SUPPORTED_ARCHES is ("gfx942", "gfx950") and their _fp8_uses_ocp mirrors
+    // the FNUZ/OCP split instead of assuming OCP. Their bridges landed in #10010.
     dispatcherGemmVariantsFor(arch).each { variant ->
         execute_cmd += " && \\\n        " + dispatcherVariantCmd(arch, variant, tier)
     }
@@ -1683,13 +1690,6 @@ def runDispatcherCorrectnessTests(String arch, String compiler, String tier) {
     // --variant sweep above and instead runs the two-config smoke test merged
     // in #10132. That test is unittest-based and self-gates to gfx950, so it
     // takes no --gfx and needs no run_ok (unlike its neighbours, which do).
-    //
-    // rowcolquant and tensorquant are absent but no longer blocked: #10010
-    // landed their dispatcher bridges and ctest-registered GPU tests on develop
-    // after this lane's operator set was chosen. Wiring them in is a follow-up,
-    // not an oversight -- unlike their neighbours here, neither test self-gates
-    // on the detected arch (--gfx just defaults to gfx950), so adding them needs
-    // that skip path checked first or an unsupported node will run them red.
     if (arch == "gfx950") {
         execute_cmd += """ && \
         run_ok python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \

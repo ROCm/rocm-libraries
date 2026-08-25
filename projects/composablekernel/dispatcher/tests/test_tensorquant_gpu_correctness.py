@@ -43,6 +43,7 @@ from grouped_gemm_tensorquant_utils import (
 log = logging.getLogger(__name__)
 
 TOLERANCE = 0.05  # 5% max relative error — fp8/bf8 precision floor
+SKIP_EXIT = 77    # ctest SKIP_RETURN_CODE; see main()
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +297,12 @@ TESTS = [
 def main():
     parser = argparse.ArgumentParser(
         description="TensorQuant GPU correctness tests")
-    parser.add_argument("--gfx", default="gfx950")
+    # No hardcoded default: an explicit --gfx is an override the caller is
+    # trusted on, but falling back to a fixed arch would make a CPU-only or
+    # gfx90a box compile for gfx950 and crash instead of skipping.
+    parser.add_argument("--gfx", default=None,
+                        help=f"GPU arch override (default: auto-detect; "
+                             f"{'/'.join(_SUPPORTED_ARCHES)} only)")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
@@ -306,6 +312,27 @@ def main():
         format="%(levelname)s: %(message)s",
     )
 
+    # The pytest path gates on the requires_gpu marker; this standalone path is
+    # what CI drives, so it needs the same gates spelled out. SKIP_EXIT keeps a
+    # clean skip distinguishable from a failure -- ctest maps it via
+    # SKIP_RETURN_CODE and the Jenkins lane via its run_ok helper.
+    gfx = args.gfx or _GFX_ARCH
+    if not gfx:
+        print("SKIP: no supported GPU detected (rocm_agent_enumerator)")
+        return SKIP_EXIT
+    if gfx not in _SUPPORTED_ARCHES:
+        print(f"SKIP: TensorQuant needs native fp8 "
+              f"({'/'.join(_SUPPORTED_ARCHES)}); detected {gfx}")
+        return SKIP_EXIT
+    if not _has_hipcc():
+        print("SKIP: hipcc not found in PATH; cannot JIT-compile kernels")
+        return SKIP_EXIT
+    if _ml_dtypes is None:
+        # _require_ml_dtypes raises pytest.skip's Skipped, which derives from
+        # BaseException and so slips past the per-test except Exception below.
+        print("SKIP: ml_dtypes not installed; fp8/bf8 encoding unavailable")
+        return SKIP_EXIT
+
     out_dir = args.output_dir or Path(tempfile.mkdtemp(prefix="tensorquant_gpu_test_"))
     log.info("Kernel output dir: %s", out_dir)
 
@@ -313,7 +340,7 @@ def main():
     for name, fn in TESTS:
         log.info("--- Running %s ---", name)
         try:
-            status, detail = fn(out_dir, args.gfx)
+            status, detail = fn(out_dir, gfx)
         except Exception as exc:
             status, detail = "FAIL", f"{name}: exception: {exc}"
         results.append((name, status, detail))
