@@ -212,6 +212,12 @@ private:
         // Validate all other tensor layouts are consistent with the reference tensor layout
         for(const auto& [name, dims, strides] : otherTensorProps)
         {
+            if(!hipdnn_data_sdk::utilities::isTensorPacked(dims, strides))
+            {
+                throw std::invalid_argument("Batchnorm requires " + name
+                                            + " tensor strides to be packed");
+            }
+
             if(!hipdnn_data_sdk::utilities::isLayoutAgnostic(dims)
                && hipdnn_data_sdk::utilities::extractStrideOrder(strides) != inputStrideOrder)
             {

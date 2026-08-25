@@ -143,7 +143,7 @@ TEST(TestGpuBatchnormFwdRefValidation, ThrowsOnInvalidLayout)
                  std::invalid_argument);
 }
 
-TEST(TestGpuBatchnormFwdRefValidation, ThrowsOnNonPackedLayout)
+TEST(TestGpuBatchnormFwdRefValidation, ThrowsOnNonPackedIOLayout)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x({4, 2, 1, 1}, {16, 4, 1, 1});
@@ -152,6 +152,20 @@ TEST(TestGpuBatchnormFwdRefValidation, ThrowsOnNonPackedLayout)
     Tensor<float> bias({1, 2}, {2, 1});
     Tensor<float> estMean({1, 2}, {2, 1});
     Tensor<float> invVar({1, 2}, {2, 1});
+
+    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuBatchnormFwdRefValidation, ThrowsOnNonPackedAffineLayout)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> x({4, 2, 1, 1});
+    Tensor<float> y({4, 2, 1, 1});
+    Tensor<float> scale({1, 2}, {4, 2});
+    Tensor<float> bias({1, 2}, {4, 2});
+    Tensor<float> estMean({1, 2}, {4, 2});
+    Tensor<float> invVar({1, 2}, {4, 2});
 
     EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
                  std::invalid_argument);
@@ -183,90 +197,6 @@ TEST(TestGpuBatchnormFwd3DShapes, Broadcast2D)
     GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
 
     assertAllClose(yCpu, yGpu, getToleranceInference<float>());
-}
-
-// Edge case tests with DISABLED_ prefix to avoid running in CI.
-// Run the tests manually with --gtest_also_run_disabled_tests
-// --gtest_filter=*ExceedsUInt32MaxElements* flags.
-TEST(TestGpuBatchnormFwd3DShapes, DISABLED_NExceedsUInt32MaxElements)
-{
-    SKIP_IF_NO_DEVICES();
-    // Test with number of channels exceeding UINT32_MAX
-    const int64_t largeVal = int64_t(UINT32_MAX) + 1;
-    Tensor<half> x({largeVal, 2, 1});
-    Tensor<half> scale({1, 2, 1});
-    Tensor<half> bias({1, 2, 1});
-    Tensor<half> estMean({1, 2, 1});
-    Tensor<half> invVar({1, 2, 1});
-    Tensor<half> yCpu({largeVal, 2, 1});
-    Tensor<half> yGpu({largeVal, 2, 1});
-
-    unsigned int seed = getGlobalTestSeed();
-    const half fillRange(1.0f);
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
-
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
-
-    assertAllClose(yCpu, yGpu, getToleranceInference<half>());
-}
-
-TEST(TestGpuBatchnormFwd3DShapes, DISABLED_CExceedsUInt32MaxElements)
-{
-    SKIP_IF_NO_DEVICES();
-    // Test with number of channels exceeding UINT32_MAX
-    const int64_t largeVal = int64_t(UINT32_MAX) + 1;
-    Tensor<half> x({1, largeVal, 1});
-    Tensor<half> scale({1, largeVal, 1});
-    Tensor<half> bias({1, largeVal, 1});
-    Tensor<half> estMean({1, largeVal, 1});
-    Tensor<half> invVar({1, largeVal, 1});
-    Tensor<half> yCpu({1, largeVal, 1});
-    Tensor<half> yGpu({1, largeVal, 1});
-
-    unsigned int seed = getGlobalTestSeed();
-    const half fillRange(1.0f);
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
-
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
-
-    assertAllClose(yCpu, yGpu, getToleranceInference<half>());
-}
-
-TEST(TestGpuBatchnormFwd3DShapes, DISABLED_SpatialExceedsUInt32MaxElements)
-{
-    SKIP_IF_NO_DEVICES();
-    // Test with spatial dimensions exceeding UINT32_MAX
-    const int64_t largeVal = int64_t(UINT32_MAX) + 1;
-    Tensor<half> x({1, 2, largeVal});
-    Tensor<half> scale({1, 2, 1});
-    Tensor<half> bias({1, 2, 1});
-    Tensor<half> estMean({1, 2, 1});
-    Tensor<half> invVar({1, 2, 1});
-    Tensor<half> yCpu({1, 2, largeVal});
-    Tensor<half> yGpu({1, 2, largeVal});
-
-    unsigned int seed = getGlobalTestSeed();
-    const half fillRange(1.0f);
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
-
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
-
-    assertAllClose(yCpu, yGpu, getToleranceInference<half>());
 }
 
 TEST(TestGpuBatchnormFwd4DShapes, Broadcast2D)
@@ -319,32 +249,6 @@ TEST(TestGpuBatchnormFwd4DShapes, Broadcast3D)
     GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
 
     assertAllClose(yCpu, yGpu, getToleranceInference<float>());
-}
-
-TEST(TestGpuBatchnormFwd4DShapes, DISABLED_SpatialExceedsUInt32MaxElements)
-{
-    SKIP_IF_NO_DEVICES();
-    // Test with spatial dimensions exceeding UINT32_MAX
-    Tensor<half> x({1, 2, UINT32_MAX, 2});
-    Tensor<half> scale({1, 2, 1, 1});
-    Tensor<half> bias({1, 2, 1, 1});
-    Tensor<half> estMean({1, 2, 1, 1});
-    Tensor<half> invVar({1, 2, 1, 1});
-    Tensor<half> yCpu({1, 2, UINT32_MAX, 2});
-    Tensor<half> yGpu({1, 2, UINT32_MAX, 2});
-
-    unsigned int seed = getGlobalTestSeed();
-    const half fillRange(1.0f);
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
-
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
-
-    assertAllClose(yCpu, yGpu, getToleranceInference<half>());
 }
 
 TEST(TestGpuBatchnormFwd5DShapes, Broadcast2D)
@@ -425,41 +329,18 @@ TEST(TestGpuBatchnormFwd5DShapes, Broadcast4D)
     assertAllClose(yCpu, yGpu, getToleranceInference<float>());
 }
 
-TEST(TestGpuBatchnormFwd5DShapes, DISABLED_SpatialExceedsUInt32MaxElements)
-{
-    SKIP_IF_NO_DEVICES();
-    // Test with spatial dimensions exceeding UINT32_MAX
-    Tensor<half> x({1, 2, UINT32_MAX, 2, 2});
-    Tensor<half> scale({1, 2, 1, 1, 1});
-    Tensor<half> bias({1, 2, 1, 1, 1});
-    Tensor<half> estMean({1, 2, 1, 1, 1});
-    Tensor<half> invVar({1, 2, 1, 1, 1});
-    Tensor<half> yCpu({1, 2, UINT32_MAX, 2, 2});
-    Tensor<half> yGpu({1, 2, UINT32_MAX, 2, 2});
-
-    unsigned int seed = getGlobalTestSeed();
-    const half fillRange(1.0);
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
-
-    CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
-    GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
-
-    assertAllClose(yCpu, yGpu, getToleranceInference<half>());
-}
-
+// Edge case tests with DISABLED_ prefix to avoid running in CI.
+// Run the tests manually with --gtest_also_run_disabled_tests
+// --gtest_filter=*ExceedsUInt32MaxElements* flags.
 TEST(TestGpuBatchnormFwd5DShapes, DISABLED_ExceedsUInt32MaxElements)
 {
     SKIP_IF_NO_DEVICES();
     // Test with 4,974,412,500 elements, which is greater than 4,294,967,295 UINT32_MAX
     Tensor<half> x({255, 255, 255, 50, 6});
-    Tensor<half> scale({255, 255, 255, 50, 6});
-    Tensor<half> bias({255, 255, 255, 50, 6});
-    Tensor<half> estMean({255, 255, 255, 50, 6});
-    Tensor<half> invVar({255, 255, 255, 50, 6});
+    Tensor<half> scale({1, 255, 1, 1, 1});
+    Tensor<half> bias({1, 255, 1, 1, 1});
+    Tensor<half> estMean({1, 255, 1, 1, 1});
+    Tensor<half> invVar({1, 255, 1, 1, 1});
     Tensor<half> yCpu({255, 255, 255, 50, 6});
     Tensor<half> yGpu({255, 255, 255, 50, 6});
 

@@ -84,8 +84,9 @@ std::pair<std::array<unsigned int, 3>, std::array<unsigned int, 3>>
         localSize[0] = 1;
         localSize[1] = maxLocalsize;
     }
-    gridSize[0] = (cUint + localSize[0] - 1) / localSize[0];
-    gridSize[1] = (cStrideUint + localSize[1] - 1) / localSize[1];
+    gridSize[0] = cUint / localSize[0] + static_cast<unsigned int>(cUint % localSize[0] != 0);
+    gridSize[1]
+        = cStrideUint / localSize[1] + static_cast<unsigned int>(cStrideUint % localSize[1] != 0);
 
     // Check the device limits for grid size
     int deviceId;
@@ -95,13 +96,16 @@ std::pair<std::array<unsigned int, 3>, std::array<unsigned int, 3>>
                             "hipGetDeviceProperties failed");
 
     localSize[2] = 1;
-    const unsigned int activeThreadsXy = gridSize[0] * gridSize[1] * localSize[0] * localSize[1];
-    auto maxActiveThreads = static_cast<unsigned int>(deviceProps.multiProcessorCount) * 32
-                            * static_cast<unsigned int>(deviceProps.warpSize);
+    const uint64_t activeThreadsXy
+        = static_cast<uint64_t>(gridSize[0]) * static_cast<uint64_t>(gridSize[1])
+          * static_cast<uint64_t>(localSize[0]) * static_cast<uint64_t>(localSize[1]);
+    const uint64_t maxActiveThreads = static_cast<uint64_t>(deviceProps.multiProcessorCount) * 32
+                                      * static_cast<uint64_t>(deviceProps.warpSize);
 
     if(activeThreadsXy < maxActiveThreads)
     {
-        gridSize[2] = std::min(maxActiveThreads / activeThreadsXy, nUint);
+        gridSize[2]
+            = std::min(static_cast<unsigned int>(maxActiveThreads / activeThreadsXy), nUint);
     }
     else
     {
