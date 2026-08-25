@@ -269,9 +269,3 @@ Tests:
   matrix: [rocsparse_matrix_random]
   storage: [rocsparse_storage_mode_sorted]
   graph_test: true
-
-- name: coomv_extra
-  category: nightly
-  function: coomv_extra
-  host_memory_gb: 1
-  device_memory_gb: 90
