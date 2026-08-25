@@ -689,14 +689,12 @@ static bool IsApplicableBase(const ExecutionContext& ctx, const ProblemDescripti
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.isXnackEnabled())
+    if(target.isXnackEnabled() || IsXnackNeutralGfx9(target))
         return false;
 
     const auto name = ctx.GetStream().GetDeviceName();
     if(!(StartsWith(name, "gfx9") || StartsWith(name, "gfx10") || StartsWith(name, "gfx11") ||
          StartsWith(name, "gfx120")))
-        return false;
-    if(StartsWith(name, "gfx90") && !target.xnack.isReported())
         return false;
     if(problem.IsFp16() &&
        !(name == "gfx906" || name == "gfx908" || name == "gfx90a" || name == "gfx942" ||

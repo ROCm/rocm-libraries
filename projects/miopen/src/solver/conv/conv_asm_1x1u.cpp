@@ -548,7 +548,7 @@ bool ConvAsm1x1U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.isXnackEnabled())
+    if(target.isXnackEnabled() || IsXnackNeutralGfx9(target))
         return false;
 
     if(!problem.IsLayoutDefault())

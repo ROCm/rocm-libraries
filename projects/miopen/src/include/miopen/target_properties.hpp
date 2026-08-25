@@ -189,6 +189,15 @@ public:
     MIOPEN_INTERNALS_EXPORT void Init(const Handle*);
 };
 
+// gfx9 client APUs (gfx90c/gfx902/gfx909) expose no xnack mode, so they report a
+// bare, xnack-neutral target id whose loader only accepts xnack-neutral code
+// objects. The hand-written .s conv kernels hardcode an xnack-off mask and cannot
+// be assembled neutral, so they can never load on these devices.
+inline bool IsXnackNeutralGfx9(const TargetProperties& target)
+{
+    return StartsWith(target.Name(), "gfx90") && !target.xnack.isReported();
+}
+
 } // namespace miopen
 
 #endif // GUARD_TARGET_PROPERTIES_HPP

@@ -499,7 +499,7 @@ bool ConvAsmBwdWrW1x1::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.isXnackEnabled())
+    if(target.isXnackEnabled() || IsXnackNeutralGfx9(target))
         return false;
 
     if(!problem.IsLayoutDefault())
