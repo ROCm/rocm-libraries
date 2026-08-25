@@ -30,16 +30,16 @@ include( ExternalProject )
 # subdirectory where we need gtest.
 set( _gtest_prefix ${PROJECT_BINARY_DIR}/googletest )
 set( _gtest_lib
-  ${_gtest_prefix}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX} )
+  ${_gtest_prefix}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX} )
 set( _gtest_main_lib
-  ${_gtest_prefix}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX} )
+  ${_gtest_prefix}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX} )
 
 if( NOT TARGET googletest )
   ExternalProject_Add( googletest
     PREFIX ${_gtest_prefix}
     URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
     URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
-    CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${_gtest_prefix}
+    CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${_gtest_prefix} -DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
     BUILD_BYPRODUCTS ${_gtest_lib} ${_gtest_main_lib}
     DOWNLOAD_NO_PROGRESS YES
     DOWNLOAD_EXTRACT_TIMESTAMP YES
