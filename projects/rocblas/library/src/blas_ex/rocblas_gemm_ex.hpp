@@ -70,27 +70,42 @@ rocblas_status rocblas_copy_alpha_beta_to_host_if_on_device(rocblas_handle   han
 template <bool BATCHED, typename TScal, typename TiConstPtr, typename ToConstPtr, typename ToPtr>
 constexpr bool rocblas_is_gemv_supported_types()
 {
-    using Tex               = rocblas_type_from_ptr_t<TScal, false>;
-    using Ti                = rocblas_type_from_ptr_t<TiConstPtr, BATCHED>;
-    using Toc               = rocblas_type_from_ptr_t<ToConstPtr, BATCHED>;
-    using Tod               = rocblas_type_from_ptr_t<ToPtr, BATCHED>;
-    constexpr bool is_sgemv = std::is_same_v<Tex, float> && std::is_same_v<Tex, Ti>
-                              && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
-    constexpr bool is_dgemv = std::is_same_v<Tex, double> && std::is_same_v<Tex, Ti>
-                              && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
-    constexpr bool is_cgemv = std::is_same_v<Tex, rocblas_float_complex> && std::is_same_v<Tex, Ti>
-                              && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
-    constexpr bool is_zgemv = std::is_same_v<Tex, rocblas_double_complex> && std::is_same_v<Tex, Ti>
-                              && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
-    constexpr bool is_hshgemv = std::is_same_v<Tex, float> && std::is_same_v<Ti, rocblas_half>
-                                && std::is_same_v<Toc, rocblas_half> && std::is_same_v<Toc, Tod>;
-    constexpr bool is_hssgemv = std::is_same_v<Tex, float> && std::is_same_v<Ti, rocblas_half>
-                                && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
-    constexpr bool is_tstgemv = std::is_same_v<Tex, float> && std::is_same_v<Ti, rocblas_bfloat16>
-                                && std::is_same_v<Toc, rocblas_bfloat16>
-                                && std::is_same_v<Toc, Tod>;
-    constexpr bool is_tssgemv = std::is_same_v<Tex, float> && std::is_same_v<Ti, rocblas_bfloat16>
-                                && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
+    using Tex = rocblas_type_from_ptr_t<TScal, false>;
+    using Ti  = rocblas_type_from_ptr_t<TiConstPtr, BATCHED>;
+    using Toc = rocblas_type_from_ptr_t<ToConstPtr, BATCHED>;
+    using Tod = rocblas_type_from_ptr_t<ToPtr, BATCHED>;
+    constexpr bool is_sgemv
+        = std::is_same_v<
+              Tex,
+              float> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_dgemv
+        = std::is_same_v<
+              Tex,
+              double> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_cgemv
+        = std::is_same_v<
+              Tex,
+              rocblas_float_complex> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_zgemv
+        = std::is_same_v<
+              Tex,
+              rocblas_double_complex> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_hshgemv
+        = std::is_same_v<
+              Tex,
+              float> && std::is_same_v<Ti, rocblas_half> && std::is_same_v<Toc, rocblas_half> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_hssgemv
+        = std::is_same_v<
+              Tex,
+              float> && std::is_same_v<Ti, rocblas_half> && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_tstgemv
+        = std::is_same_v<
+              Tex,
+              float> && std::is_same_v<Ti, rocblas_bfloat16> && std::is_same_v<Toc, rocblas_bfloat16> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_tssgemv
+        = std::is_same_v<
+              Tex,
+              float> && std::is_same_v<Ti, rocblas_bfloat16> && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
 
     return is_sgemv || is_dgemv || is_cgemv || is_zgemv || is_hshgemv || is_hssgemv || is_tstgemv
            || is_tssgemv;
@@ -158,31 +173,42 @@ bool rocblas_use_gemv_in_gemm(rocblas_handle    handle,
     // Can only use gemv in the case where m == 1 || n == 1
     if((m == 1 || n == 1) && k != 0)
     {
-        using Tex               = rocblas_type_from_ptr_t<TScal, false>;
-        using Ti                = rocblas_type_from_ptr_t<TiConstPtr, BATCHED>;
-        using Toc               = rocblas_type_from_ptr_t<ToConstPtr, BATCHED>;
-        using Tod               = rocblas_type_from_ptr_t<ToPtr, BATCHED>;
-        constexpr bool is_sgemv = std::is_same_v<Tex, float> && std::is_same_v<Tex, Ti>
-                                  && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
-        constexpr bool is_dgemv = std::is_same_v<Tex, double> && std::is_same_v<Tex, Ti>
-                                  && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
-        constexpr bool is_cgemv = std::is_same_v<Tex, rocblas_float_complex>
-                                  && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc>
-                                  && std::is_same_v<Toc, Tod>;
-        constexpr bool is_zgemv = std::is_same_v<Tex, rocblas_double_complex>
-                                  && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc>
-                                  && std::is_same_v<Toc, Tod>;
-        constexpr bool is_hshgemv = std::is_same_v<Tex, float> && std::is_same_v<Ti, rocblas_half>
-                                    && std::is_same_v<Toc, rocblas_half>
-                                    && std::is_same_v<Toc, Tod>;
-        constexpr bool is_hssgemv = std::is_same_v<Tex, float> && std::is_same_v<Ti, rocblas_half>
-                                    && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
+        using Tex = rocblas_type_from_ptr_t<TScal, false>;
+        using Ti  = rocblas_type_from_ptr_t<TiConstPtr, BATCHED>;
+        using Toc = rocblas_type_from_ptr_t<ToConstPtr, BATCHED>;
+        using Tod = rocblas_type_from_ptr_t<ToPtr, BATCHED>;
+        constexpr bool is_sgemv
+            = std::is_same_v<
+                  Tex,
+                  float> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_dgemv
+            = std::is_same_v<
+                  Tex,
+                  double> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_cgemv
+            = std::is_same_v<
+                  Tex,
+                  rocblas_float_complex> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_zgemv
+            = std::is_same_v<
+                  Tex,
+                  rocblas_double_complex> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_hshgemv
+            = std::is_same_v<
+                  Tex,
+                  float> && std::is_same_v<Ti, rocblas_half> && std::is_same_v<Toc, rocblas_half> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_hssgemv
+            = std::is_same_v<
+                  Tex,
+                  float> && std::is_same_v<Ti, rocblas_half> && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
         constexpr bool is_tstgemv
-            = std::is_same_v<Tex, float> && std::is_same_v<Ti, rocblas_bfloat16>
-              && std::is_same_v<Toc, rocblas_bfloat16> && std::is_same_v<Toc, Tod>;
-        constexpr bool is_tssgemv = std::is_same_v<Tex, float>
-                                    && std::is_same_v<Ti, rocblas_bfloat16>
-                                    && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
+            = std::is_same_v<
+                  Tex,
+                  float> && std::is_same_v<Ti, rocblas_bfloat16> && std::is_same_v<Toc, rocblas_bfloat16> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_tssgemv
+            = std::is_same_v<
+                  Tex,
+                  float> && std::is_same_v<Ti, rocblas_bfloat16> && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
 
         bool gemv_constraints = rocblas_can_use_gemv_in_gemm(trans_a,
                                                              trans_b,
