@@ -308,6 +308,16 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return inst;
     }
 
+    // `s_swappc_b64` -- a call, which is a segment boundary that falls through rather than
+    // naming a label, so the code below it is reached the ordinary way.
+    StinkyInstruction* createCall() {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_swappc_b64, arch));
+        inst->addDestReg(StinkyRegister("s", 2, 2));
+        inst->addSrcReg(StinkyRegister("s", 0, 2));
+        return inst;
+    }
+
     // `s_cmp_eq_u32 s<srcSgpr>, 0` -- writes SCC and nothing else.
     StinkyInstruction* createSCmpWritingScc(int srcSgpr) {
         AsmIRBuilder builder(*bb, arch);
@@ -901,6 +911,71 @@ TEST_F(InsertClusterBarrierPassTest, HoistedClusterWaitStaysIdempotent) {
     const auto afterFirst = clusterBarrierCounts();
     runPass();
     EXPECT_EQ(clusterBarrierCounts(), afterFirst) << "re-running the pass must be a no-op";
+// A call ends the climb whatever the hop budget says. It is the one boundary that gets there
+// by falling through rather than by naming a label, so the segment below it is reached the
+// ordinary way and nothing about the listing warns that the code above ran under a callee's
+// register state:
+//
+//     label_TestLoop:
+//     v_wmma ... (x150)     <- where the lead would be met, if the climb were allowed up there
+//     s_swappc_b64          <- the call
+//     v_wmma ... (x3)       <- all the climb may have, and not enough for the lead
+//     s_barrier_signal -1   <- the wait
+//
+// Asked with a hop to spare, so the answer is about the call rather than about the budget:
+// the anchor has to be the first spot below it, with no hop billed and no crossing claimed.
+TEST_F(InsertClusterBarrierPassTest, CallStopsTheClimbEvenWithAHopToSpare) {
+    const int kLead = 500;
+    const int kMaxLead = 900;
+
+    appendGsu1Preheader();
+    openLoop();
+    // Long enough to hold the lead, which is what makes the call the reason the climb stops.
+    for (int i = 0; i < 150; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* call = createCall();
+    for (int i = 0; i < 3; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    closeLoop();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    StinkyInstruction* belowCall = firstRealInstAfter(call);
+    ASSERT_NE(belowCall, nullptr);
+    StinkyInstruction* aboveCall = firstRealInstAfter(loopHead);
+    ASSERT_NE(aboveCall, nullptr);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    const auto cyclesAt = [&](const StinkyInstruction* inst) -> int64_t {
+        auto it = cycleMap.find(inst);
+        return (it == cycleMap.end()) ? -1 : static_cast<int64_t>(it->second);
+    };
+    ASSERT_GE(cyclesAt(trigger), 0);
+    ASSERT_GE(cyclesAt(belowCall), 0);
+    ASSERT_GE(cyclesAt(aboveCall), 0);
+
+    // Both halves of the premise. Below the call there is not enough room for the lead, so the
+    // climb has every reason to keep going; above it there is, so a climb that crossed would
+    // have come back with something. Either one missing and the test would prove nothing.
+    ASSERT_LT(cyclesAt(trigger) - cyclesAt(belowCall), kLead)
+        << "the segment below the call must be too short to hold the lead:" << blockListing(*bb);
+    ASSERT_GT(cyclesAt(trigger) - cyclesAt(aboveCall), kLead)
+        << "the stretch above the call must be able to hold the lead:" << blockListing(*bb);
+
+    const auto found = cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+        trigger, segBeginAfter(call), trigger, cycleMap, kLead, kMaxLead,
+        /*priorWaitAnchors=*/{}, /*maxHops=*/1, loopHead);
+
+    EXPECT_EQ(found.anchor, static_cast<IRBase*>(belowCall))
+        << "the climb had a hop left and a better spot above, and still may not pass a call:"
+        << blockListing(*bb);
+    EXPECT_EQ(found.hops, 0) << "nothing was crossed, so nothing may be billed:"
+                             << blockListing(*bb);
+    EXPECT_FALSE(found.crossedLoopHead)
+        << "a call is not a back edge and asks for no compensation:" << blockListing(*bb);
+}
+
 // The cycle lead alone would drop the Rule 3 signal anchor inside a live SCC range:
 //
 //     v_wmma ...              <- padding, so "in front of the def" is not the segment start
