@@ -65,3 +65,27 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
     if float(tileInfo.bpe) != 0.5:
         return None
     return _SWIZZLE_BY_STACK.get(stack)
+
+
+def swizzlePadPerStrip(tileInfo) -> int:
+    """Extra LDS bytes a swizzled subtile strip occupies beyond subtileSize.
+
+    The pad is inserted once per load-block above block 0, so a strip that spans
+    ``numGRPerSubtile`` blocks grows by ``(numGRPerSubtile - 1) * padBytes``.
+    Returns 0 when the stack has no swizzle.  GR write, LR read, and the LDS
+    size computation must all fold this in so adjacent strips do not overlap.
+    """
+    swz = selectTLUSwizzle(tileInfo)
+    if not swz:
+        return 0
+    numBlocks = max(1, int(getattr(tileInfo, "numGRPerSubtile", 1)))
+    return (numBlocks - 1) * int(swz.padBytes)
+
+
+def stripStrideBytes(tileInfo) -> int:
+    """LDS bytes between the start of consecutive subtile strips (M/N direction).
+
+    Equals the nominal contiguous strip size plus any swizzle pad.  Used as the
+    per-subtile-row LDS stride on both the GR write and LR read sides.
+    """
+    return int(tileInfo.subtileSize) + swizzlePadPerStrip(tileInfo)
