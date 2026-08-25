@@ -60,7 +60,9 @@ endif()
 
 add_executable(rpp_tests ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp ${RPP_TEST_SOURCES})
 target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-set_property(TARGET rpp_tests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+
+# Warnings are errors for the suite's own sources.
+target_compile_options(rpp_tests PRIVATE -Wall -Wextra -Werror)
 
 # src/main.cpp provides main() (it installs the suite's own reporter), so gtest_main is not used.
 target_link_libraries(rpp_tests PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest)
