@@ -13,13 +13,23 @@ _metadata = runpy.run_path(str(Path(__file__).with_name("release_metadata.py")))
 
 
 def _build_rocm_version() -> str:
-    value = os.environ.get("TENSILELITE_ROCM_VERSION")
-    if not value:
+    """
+    Return the ROCm identity encoded in the TensileLite wheel.
+
+    CMake and Invoke pass ``TENSILELITE_ROCM_VERSION`` as the authoritative
+    selected build identity, including TheRock's package identity.
+    Tox needs a narrow bootstrap fallback while it installs the package,
+    so it reads the selected ``ROCM_PATH/.info/version``.
+    Other direct ``setup.py`` calls fail rather than silently tag a wheel
+    from an ambient ROCm installation.
+    """
+    explicit_rocm_version = os.environ.get("TENSILELITE_ROCM_VERSION")
+    if not explicit_rocm_version:
         raise RuntimeError(
             "TENSILELITE_ROCM_VERSION=X.Y.Z is required to build a TensileLite wheel. "
             "Use the CMake or Invoke build frontend, or supply the selected SDK base version explicitly."
         )
-    return value
+    return explicit_rocm_version
 
 
 class CleanBuildPy(build_py):
