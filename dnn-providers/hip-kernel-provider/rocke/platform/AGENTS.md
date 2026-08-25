@@ -229,6 +229,14 @@ GPU node.
   IR builder is side-effecting (`b.const_i32(8)` emits an op even if its handle is
   unused), so F841 autofix silently changes kernels. Lint with `ruff check` (no
   `--fix`).
+- **Builders take exactly `(spec, *, arch)`**: the spec object and the target
+  arch, and nothing else. An arch-specific knob is a **field on the spec** - on an
+  arch-specific subclass of the shared spec when it only applies to one arch -
+  never an extra builder parameter. A third parameter is invisible to anything
+  that has to *describe* a kernel without calling it (the kernel-descriptor
+  format, the downstream packager), so it forces a per-arch file format; the
+  breakage surfaces months later, downstream. Enforced for `library/kernels` by
+  [`library/tests/test_builder_signature_contract.py`](../library/tests/test_builder_signature_contract.py).
 - **Cross-platform**: do not add bash/Linux-specific helper scripts. Scripts
   under `rocke/platform/` are Python, not `.sh`; use `tempfile`, `os.cpu_count()`,
   `pathlib`, `shutil.which` - no `/tmp`, `nproc`, `sudo`, or shell-only flows.

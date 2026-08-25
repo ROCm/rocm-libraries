@@ -201,8 +201,24 @@ def my_op_grid(M: int, spec: MyOpSpec) -> Tuple[int, int, int]:
 
 ### 3.6 Builder
 
+A builder takes **exactly `(spec, *, arch)`** — the spec object and the target
+arch, and nothing else. An arch-specific knob is a **field on the spec** (on an
+arch-specific subclass of the shared spec, when it only applies to one arch),
+never an extra builder parameter.
+
+This is not style. A third parameter is invisible to anything that has to
+*describe* a kernel without calling it — the kernel-descriptor format and the
+downstream packager both hydrate a spec from a file and then call the builder.
+An extra parameter has nowhere to live in that file, so it forces a separate
+descriptor format per arch, and the breakage surfaces far from the commit that
+caused it. Keeping one signature everywhere means the specs may differ freely in
+*content* between arches while staying identical in *shape*.
+
+[`library/tests/test_builder_signature_contract.py`](../../../library/tests/test_builder_signature_contract.py)
+enforces this for `library/kernels`.
+
 ```python
-def build_my_op(spec: MyOpSpec) -> KernelDef:
+def build_my_op(spec: MyOpSpec, *, arch: str = "gfx950") -> KernelDef:
     ok, why = is_valid_spec(spec)
     if not ok:
         raise ValueError(f"invalid MyOpSpec: {why}")
