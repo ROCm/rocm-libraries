@@ -174,7 +174,8 @@ With cluster barrier enabled:
 
 - `maxSegmentHops = 0`: the Rule 3 climb cannot leave the wait's segment.
 - Signals stay **in-segment**, paired near their waits.
-- No **loop-wrap** at the latch (`scanTailForRemainder`).
+- No **loop-wrap** at the latch: the climb stops at the loop head rather than
+  following the back edge.
 - No **preheader signal**, **loop-exit drain wait**, or **`skipCBWait`**
   bypass labels (`emitLoopCarriedCompensation` is never called).
 
@@ -194,9 +195,13 @@ has no `drain loop-carried cluster signal` wait.
 
 - `maxSegmentHops = kMaxSegmentHops` (1): Rule 3 may cross **one** segment
   boundary per climb.
-- When the head-phase climb reaches the loop head short of the lead target, it
-  may **wrap to the latch** (`scanTailForRemainder`) and plant the signal for
-  the remaining cycles only (Part A: wait→head; Part B: latch→anchor).
+- When the climb reaches the loop head short of the lead target, it **follows the
+  latch** (`findLatchBranchFor`) rather than leaving the loop textually into the
+  preheader, and keeps accumulating from there — so the lead is the sum of the
+  two parts (wait→head and latch→anchor). It only crosses while the preheader
+  has a spot for the compensating signal
+  (`preheaderCanTakeCompensatingSignal`); otherwise it comes to rest below the
+  head as if the hops had run out.
 - When `found.hops > 0`, **loop-carried compensation** runs via
   `emitLoopCarriedCompensation`:
   - Optional **preheader signal** when the climb crossed the back edge.
@@ -226,7 +231,7 @@ exit has drain wait + skip path.
 |----------|-------|------|
 | `maxSegmentHops` in Rule 3 | 0 | 1 |
 | Segment-boundary climb | stops at boundary | may cross one hop |
-| `scanTailForRemainder` | not reached | latch wrap when head climb short |
+| Latch follow at the loop head | not reached | wraps when the climb is short of the lead |
 | `if (found.hops > 0)` block | skipped | preheader + hoistedLoops |
 | `emitLoopCarriedCompensation` | not called | drain / skipCBWait |
 | Live-out SCC `earliestClock` | not set | ≤50 cycles from region end |
