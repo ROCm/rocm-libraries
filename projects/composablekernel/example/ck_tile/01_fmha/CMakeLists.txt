@@ -65,6 +65,10 @@ set(FMHA_FWD_CODE_GEN_COMMON_ARGS
 set(FMHA_BWD_INSTANCE_FILTER "" CACHE STRING
   "fnmatch filter for generated FMHA BWD kernels: dot_do_o@convert_dq@dq_dk_dv. Empty = all.")
 
+option(CK_TILE_EXPERIMENTAL_FMHA_BWD_WAVE_SCHED_MODE
+  "Enable aiter-style gfx1250 WAVE_SCHED_MODE[1:0]=2 for CK Tile FMHA BWD instances"
+  OFF)
+
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
@@ -172,6 +176,26 @@ else()
 endif()
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -fgpu-flush-denormals-to-zero)
 
+# The gfx12-only build turns on expert scheduling mode globally (top-level
+# CMakeLists). The bwd kernel is faster WITHOUT it once the causal mirror
+# pairing is in: measured on gfx1250 @ 2272 MHz, best-of-5, 4-way interleaved
+# against the pre-pairing tree as an in-run anchor,
+#
+#              expert sched ON     expert sched OFF
+#   b2 h8  s4096 causal   1.458x            1.795x
+#   b4 h32 s4096 causal   1.025x            1.328x
+#   b8 h8  s1024 causal   1.321x            1.287x
+#   b2 h8  s4096 mask=0   1.046x            1.071x
+#
+# Three of four shapes prefer it off, by up to 37 points. Subtract it here
+# rather than at the top level so the fwd kernel -- which was never re-measured
+# without it -- keeps the flag. `=false` overrides the earlier `on` (verified:
+# the instruction stream is byte-identical to a build that never set it).
+if(CK_GFX12_ONLY_BUILD)
+  list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS
+    "SHELL: -mllvm -amdgpu-expert-scheduling-mode=false")
+endif()
+
 # conditionally enable call to the fwd_splitkv API in fmha_fwd example and tests
 if("fwd_splitkv" IN_LIST FMHA_FWD_ENABLE_APIS)
   list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_SPLITKV_API=1)
@@ -237,6 +261,11 @@ endif()
 # use RTN_ASM on float to bfloat16 conversion by default, align with FA upstream
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3)
 list(APPEND FMHA_BWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3)
+
+if(CK_TILE_EXPERIMENTAL_FMHA_BWD_WAVE_SCHED_MODE)
+  list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS
+    -DCK_TILE_EXPERIMENTAL_FMHA_BWD_WAVE_SCHED_MODE=1)
+endif()
 
 target_compile_options(${FMHA_FWD_INSTANCES}
   PRIVATE ${FMHA_FWD_PRIVATE_COMPILE_OPTIONS}
