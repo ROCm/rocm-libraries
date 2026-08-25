@@ -38,11 +38,9 @@ identities (or `X.Y.Z` on an older install). A `+g<commit>` wheel makes no ROCm
 claim and is not compared. `rocisa` is a separately prepared Python dependency;
 TensileLite requires it to be importable but does not prescribe its layout.
 
-At present the Python-SDK path is implemented but gated off until a published
-`rocm-sdk-core` nightly ships the tool console scripts it needs
-(`clang-offload-bundler`); until then a pip-installed SDK is reached through
-`ROCM_PATH`.
-
+The Python SDK is used whenever `rocm_sdk_core` is installed in the same
+Python; there is no separate switch. Its compiler and tool commands are the
+console scripts in that interpreter's scripts directory.
 
 ## Supported interface
 
@@ -96,17 +94,15 @@ python -m pip install --index-url <rocm-wheel-index> \
 python -m pip install --index-url <rocm-wheel-index> tensilelite
 ```
 
-When the strict validation gate is enabled, import fails when the wheel and ROCm
-release differ or when rocisa cannot be imported. The client is resolved and
-validated only when a
-benchmark/validation workflow requests its path. A configured client binding
-always wins for a conventional-prefix installation. The Python SDK model
-currently reports that the client is unavailable because `rocm-sdk-libraries`
-does not yet ship it; its final state uses that package's exact
-`tensilelite-client` console script from the active Python environment. The
-conventional-prefix model uses
-`$ROCM_PATH/libexec/hipblaslt/tensilelite/tensilelite-client` (with `.exe` on
-Windows). Neither model performs a broad client search on `PATH`.
+Import fails when a `+rocm`/`+devrocm` wheel and the selected ROCm differ, and
+warns once for a `+g<commit>` wheel. The client is
+resolved and validated only when a benchmark or validation workflow requests
+its path. A configured client binding always wins; otherwise the lookup is
+limited to the selected installation's executable paths: the graph-prepared
+`PATH` for TheRock CI, interpreter script directories for Python SDK packages,
+and `<prefix>/bin` plus `<prefix>/lib/llvm/bin` for a conventional prefix. If
+no compatible `tensilelite-client` is available there, the requesting workflow
+reports an error rather than searching broadly on `PATH`.
 
 Optional runtime capabilities remain available as extras:
 
@@ -121,7 +117,6 @@ python -m pip install 'tensilelite[simplejson]'
 Only one JSON extra is needed. If multiple backends are installed, TensileLite
 prefers orjson, then ujson, then simplejson, and finally the Python standard
 library.
-
 
 ## Source development
 
