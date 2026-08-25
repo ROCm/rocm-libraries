@@ -348,7 +348,6 @@ globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
 )
-globalParameters["ValidateMetadata"] = False  # Set to True to validate custom.config metadata at build time
 
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
@@ -457,12 +456,12 @@ defaultBenchmarkCommonParameters = [
     {"LdsPadMXSA": [ -1 ] },
     {"LdsPadB": [-1]},
     {"LdsPadMXSB": [ -1 ] },
-    {"LdsPadMetadata": [0]},
+    {"LdsPadMetadata": [-1]},
     {"LdsBlockSizePerPadA": [-1]},
     {"LdsBlockSizePerPadMXSA": [ -1 ] },
     {"LdsBlockSizePerPadB": [-1]},
     {"LdsBlockSizePerPadMXSB": [ -1 ] },
-    {"LdsBlockSizePerPadMetadata": [0]},
+    {"LdsBlockSizePerPadMetadata": [-1]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
     {"MaxOccupancy": [40]},
@@ -565,7 +564,7 @@ defaultBenchmarkCommonParameters = [
     {"NonVolatileWS": [0]},
     {"NonVolatileMetadata": [0]},
     {"PreloadKernArgs": [True]},
-    # {"CustomKernel": [{"name": "", "args": [], "macrotile": [0,0,0], "threads": [0,0,0], "grid": [0,0,0]}]},
+    {"CustomKernelName": [""]},
     {"NoReject": [False]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},

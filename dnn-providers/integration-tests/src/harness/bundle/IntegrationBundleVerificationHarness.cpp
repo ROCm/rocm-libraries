@@ -12,9 +12,9 @@
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
-#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
@@ -151,6 +151,9 @@ void IntegrationBundleVerificationHarness::runComparison()
         return;
     case VerificationMode::AUTO:
         runAutoMode();
+        return;
+    case VerificationMode::GOLDEN_CHECK:
+        runGoldenCheckMode();
         return;
     default:
         FAIL() << "Unknown verification mode";
@@ -290,6 +293,37 @@ void IntegrationBundleVerificationHarness::runAutoMode()
             FAIL() << "Unknown RefStatus";
             return;
         }
+    }
+}
+
+void IntegrationBundleVerificationHarness::runGoldenCheckMode()
+{
+    if(!_bundle->hasGoldenOutputs)
+    {
+        skipUnverifiable("no golden data (verification-mode=golden-check)");
+        return;
+    }
+
+    OutputTensors cpuOutputs;
+    const RefRunResult result
+        = runReferenceCapturingOutputs(ReferenceExecutorType::CPU, cpuOutputs);
+    switch(result.status)
+    {
+    case RefStatus::CAPABILITY_MISS:
+        skipUnverifiable("CPU ref cannot run this op (golden-check): " + result.message);
+        return;
+    case RefStatus::RUNTIME_ERROR:
+        recordRefError("CPU ref errored (golden-check): " + result.message);
+        FAIL() << "CPU ref errored (golden-check): " << result.message;
+        return;
+    case RefStatus::RAN:
+        compareEach(cpuOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
+            return *_bundle->tensors->at(uid);
+        });
+        return;
+    default:
+        FAIL() << "Unknown RefStatus";
+        return;
     }
 }
 
@@ -558,59 +592,20 @@ void IntegrationBundleVerificationHarness::compareOutputTensor(
 
     if(!passed)
     {
+        const auto label = labelFor(uid, attrs);
+        hipdnn_test_sdk::utilities::ComparisonContext ctx;
+        ctx.contextLine = "Bundle: " + _bundlePath.string();
+        ctx.tensorLabel = label + " (UID " + std::to_string(uid) + ", output)";
+        ctx.dtypeName = hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
+        ctx.atol = atol;
+        ctx.rtol = rtol;
+
         std::ostringstream report;
-        report << reportHeader(uid, attrs, dataType, expected, atol, rtol);
-        appendTensorDiff(report, uid, attrs, dataType, expected, actual, atol, rtol);
+        report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, expected);
+        hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(
+            report, dataType, label, expected, actual, atol, rtol);
         EXPECT_TRUE(false) << report.str();
     }
-}
-
-void IntegrationBundleVerificationHarness::appendTensorDiff(
-    std::ostream& os,
-    int64_t uid,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-    hipdnn_data_sdk::utilities::ITensor& expected,
-    hipdnn_data_sdk::utilities::ITensor& actual,
-    float atol,
-    float rtol)
-{
-    using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-    using hipdnn_data_sdk::types::bfloat16;
-    using hipdnn_data_sdk::types::half;
-
-    switch(dataType)
-    {
-    case DT::FLOAT:
-        appendFpDiff<float>(os, uid, attrs, expected, actual, atol, rtol);
-        return;
-    case DT::HALF:
-        appendFpDiff<half>(os, uid, attrs, expected, actual, atol, rtol);
-        return;
-    case DT::BFLOAT16:
-        appendFpDiff<bfloat16>(os, uid, attrs, expected, actual, atol, rtol);
-        return;
-    case DT::DOUBLE:
-        appendFpDiff<double>(os, uid, attrs, expected, actual, atol, rtol);
-        return;
-    default:
-        os << "  (no element-wise diff available for this data type)\n";
-    }
-}
-
-template <typename T>
-void IntegrationBundleVerificationHarness::appendFpDiff(
-    std::ostream& os,
-    int64_t uid,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-    hipdnn_data_sdk::utilities::ITensor& expected,
-    hipdnn_data_sdk::utilities::ITensor& actual,
-    float atol,
-    float rtol)
-{
-    const auto summary
-        = hipdnn_test_sdk::utilities::computeTensorDiff<T>(expected, actual, atol, rtol);
-    hipdnn_test_sdk::utilities::printTensorDiffSummary(os, labelFor(uid, attrs), summary);
 }
 
 std::string IntegrationBundleVerificationHarness::labelFor(
@@ -618,30 +613,6 @@ std::string IntegrationBundleVerificationHarness::labelFor(
 {
     const auto* name = attrs.name();
     return (name != nullptr && !name->empty()) ? name->str() : ("uid=" + std::to_string(uid));
-}
-
-std::string IntegrationBundleVerificationHarness::reportHeader(
-    int64_t uid,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-    hipdnn_data_sdk::utilities::ITensor& expected,
-    float atol,
-    float rtol) const
-{
-    std::ostringstream os;
-    os << "\nGolden comparison FAILED\n"
-       << "  Bundle: " << _bundlePath << "\n"
-       << "  Tensor: " << labelFor(uid, attrs) << " (UID " << uid << ", output)\n"
-       << "  Shape:  " << hipdnn_test_sdk::utilities::StreamVec(expected.dims()) << "  "
-       << dataTypeName(dataType) << "\n"
-       << "  Tolerance: atol=" << atol << " rtol=" << rtol << "\n";
-    return os.str();
-}
-
-std::string IntegrationBundleVerificationHarness::dataTypeName(
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
-{
-    return hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
 }
 
 void IntegrationBundleVerificationHarness::applyMetadataGuards() const

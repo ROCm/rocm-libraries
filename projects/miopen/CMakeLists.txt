@@ -144,6 +144,21 @@ option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIO
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
 
+# Gate for the MIOpen public/private library split. When ON, libMIOpen.so is built
+# as a thin public wrapper forwarding to a private implementation library
+# (libMIOpen_private.so); when OFF (the default), a single libMIOpen.so is produced
+# whose public ABI is unchanged from the pre-wrapper baseline. All of the split
+# machinery is compiled only when this flag is ON.
+option(MIOPEN_ENABLE_HIPDNN_WRAPPER
+    "Build MIOpen as a public wrapper over a private implementation, with optional forwarding to hipDNN."
+    OFF)
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    message(STATUS
+        "MIOPEN_ENABLE_HIPDNN_WRAPPER: ENABLED - building libMIOpen.so as a public "
+        "wrapper over libMIOpen_private.so. The wrapper is an unconditional "
+        "pass-through; runtime forwarding to hipDNN is not implemented yet.")
+endif()
+
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
 if(MIOPEN_INCBIN)
     enable_language(ASM)

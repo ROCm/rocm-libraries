@@ -91,6 +91,11 @@ public:
         return true;
     }
 
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        return {_builder.GetBufferPointer(), _builder.GetSize()};
+    }
+
     uint32_t nodeCount() const override
     {
         return 0;
@@ -244,10 +249,36 @@ inline void ensureNoopDispatchRegistered(const std::string& symbol = "test.dispa
     }
 }
 
-class TestDeviceResolver : public IDeviceResolver<int>
+/// The minimal handle the state-manager and plan-builder tests pass around. It carries
+/// a stream because GenericPlanBuilder requires one of any ingestor handle, and an
+/// equality operator so per-handle device resolution can be asserted. Implicitly
+/// convertible from int so tests can keep identifying handles by a bare literal.
+struct TestHandle
+{
+    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
+    TestHandle(int handleId = 0)
+        : id(handleId)
+    {
+    }
+
+    int id = 0;
+
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    hipStream_t getStream() const
+    {
+        return nullptr;
+    }
+
+    friend bool operator==(const TestHandle& lhs, const TestHandle& rhs)
+    {
+        return lhs.id == rhs.id;
+    }
+};
+
+class TestDeviceResolver : public IDeviceResolver<TestHandle>
 {
 public:
-    DeviceId deviceId(const int& /*handle*/) const override
+    DeviceId deviceId(const TestHandle& /*handle*/) const override
     {
         return 0;
     }
@@ -290,9 +321,9 @@ inline KernelDescriptor makeTestKernel(const DescriptorId& id,
     return kernel;
 }
 
-inline std::unique_ptr<KernelIngestorStateManager<int>>
+inline std::unique_ptr<KernelIngestorStateManager<TestHandle>>
     makeTestStateManager(size_t cacheCapacity
-                         = KernelIngestorStateManager<int>::DEFAULT_CATALOG_CACHE_CAPACITY)
+                         = KernelIngestorStateManager<TestHandle>::DEFAULT_CATALOG_CACHE_CAPACITY)
 {
     MetadataSchema schema;
     schema.id = SCHEMA_ID;
@@ -302,7 +333,7 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
 
     std::vector<MatchDescriptor> matchers{
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}};
-    ensureNoopDispatchRegistered<int>("hipdnn.kernel_ingestor.test.dispatch");
+    ensureNoopDispatchRegistered<TestHandle>("hipdnn.kernel_ingestor.test.dispatch");
     std::vector<DispatchDescriptor> dispatches{
         {DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}};
 
@@ -316,7 +347,7 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
                     makeTestKernel(testId(0x65), "kernel_256_float", 256, "FLOAT"),
                     makeTestKernel(testId(0x66), "kernel_64_half", 64, "HALF")};
 
-    return std::make_unique<KernelIngestorStateManager<int>>(
+    return std::make_unique<KernelIngestorStateManager<TestHandle>>(
         std::move(schema),
         std::move(matchers),
         std::move(dispatches),
@@ -414,9 +445,9 @@ public:
 
 constexpr const char* NAN_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.nan_score";
 
-/// Scores the largest block size NaN and everything else by block size, so a ranking
-/// that mishandles NaN misorders the *finite* kernels too -- the failure this models is
-/// one pack poisoning the order for the rest, not merely losing its own place.
+/// Scores the largest block size NaN and everything else by block size, modeling one
+/// pack poisoning the whole ranking: a comparator that mishandles NaN misorders the
+/// finite kernels too, not just the NaN-scored one.
 inline double scoreNanForLargestBlock(const MatchContext& /*context*/,
                                       const BoundTokens& /*bound*/,
                                       const KernelDefinition& kernel)
@@ -516,7 +547,7 @@ inline std::vector<MatchDescriptor> makeTestMatchers()
             {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
 }
 
-template <typename THandle = int>
+template <typename THandle = TestHandle>
 inline std::vector<DispatchDescriptor> makeTestDispatches()
 {
     ensureNoopDispatchRegistered<THandle>();
@@ -571,7 +602,6 @@ private:
     std::string _kernelSymbol;
 };
 
-using TestHandle = int;
 using StateManager = KernelIngestorStateManager<TestHandle>;
 
 /// The default engine: a graph match plus one kernel-scoped criterion, and no
@@ -629,6 +659,9 @@ private:
     const IKernelDispatchHandler<THandle>* _previous = nullptr;
 };
 
+/// Models a real provider handle: every shipped handle exposes getStream(), and
+/// GenericPlanBuilder static_asserts it, since benchmarking times candidates on that
+/// stream.
 struct StubHandle
 {
     void storeEngineDetailsDetachedBuffer(const void* /*ptr*/,
@@ -637,13 +670,19 @@ struct StubHandle
         _buffers.push_back(std::move(buffer));
     }
 
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    hipStream_t getStream() const
+    {
+        return nullptr;
+    }
+
 private:
     std::vector<std::unique_ptr<flatbuffers::DetachedBuffer>> _buffers;
 };
 
 struct StubSettings
 {
-    KnobFilter ingestorKnobFilter;
+    IngestorSettings ingestorSettings;
 };
 
 struct StubContext

@@ -181,7 +181,17 @@ def test_kernel_name_pins_the_two_shipped_cache_collisions():
 # legal value to perturb to, so the property is untestable (and uninteresting -- an
 # unbuildable config cannot collide with anything). Rejection itself is covered by
 # test_supports_rejects_modes_deferred_to_later_phases.
-_UNBUILDABLE_SPEC_FIELDS = frozenset({"varlen", "ragged", "sliding_window"})
+_UNBUILDABLE_SPEC_FIELDS = frozenset(
+    {
+        "varlen",
+        "ragged",
+        "sliding_window",
+        "paged",
+        "block_size",
+        "num_kv_blocks",
+        "use_sinks",
+    }
+)
 
 # Fields that move the NAME but never the gfx942 IR. Over-naming is SAFE -- it costs
 # a duplicate compile and can never serve a wrong binary -- so these are recorded,
@@ -205,6 +215,9 @@ _SPEC_PERTURBATIONS = {
     "sliding_window": (),  # unbuildable -- see _UNBUILDABLE_SPEC_FIELDS
     "ragged": (),  # unbuildable
     "varlen": (),  # unbuildable
+    "paged": (),  # unbuildable (not yet supported)
+    "block_size": (),  # unbuildable (paged-only, paged not supported)
+    "num_kv_blocks": (),  # unbuildable (paged-only, paged not supported)
     "block_n": (32, 128),
     "waves_per_eu": (3, 4),
     "lds_k_group_pad": (0, 16),
@@ -213,6 +226,7 @@ _SPEC_PERTURBATIONS = {
     "interleave": (True, False),
     "persist_decode": ("qb_major", "hkv_major"),
     "lazy_rescale": (False, True),
+    "use_sinks": (),  # unbuildable (not yet supported)
 }
 
 _TUNING_PERTURBATIONS = {
@@ -414,6 +428,7 @@ def test_supports_rejects_non_gfx942():
         (dict(varlen=True), "varlen"),
         (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
         (dict(sliding_window=64), "sliding_window"),
+        (dict(use_sinks=True), "sinks"),
     ],
 )
 def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
