@@ -877,6 +877,18 @@ NB_MODULE(_stinkytofu, m) {
     m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
           "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
           "[\"gfx1250\"]).");
+    m.def(
+        "isMnemonicSupported",
+        [](const std::string& mnemonic, std::array<int, 3> arch) {
+            const auto* info = ArchHelper::getInstance().getArchInfo(arch[0], arch[1], arch[2]);
+            if (!info) return false;
+            const auto& map = info->getMnemonicToIsaOpcodeMap();
+            return map.find(mnemonic) != map.end();
+        },
+        nb::arg("mnemonic"), nb::arg("arch"),
+        "Return True if StinkyTofu has a hardware instruction definition for *mnemonic* on "
+        "[major, minor, stepping]. Lets a generator ask before emitting, instead of finding "
+        "out when the mnemonic fails to lower.");
 
     // ========================================================================
     // Hardware capability dictionaries (replaces rocisa getAsmCaps/etc.)

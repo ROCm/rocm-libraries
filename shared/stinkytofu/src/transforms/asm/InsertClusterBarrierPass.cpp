@@ -205,7 +205,7 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
     signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
 
     static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     StinkyInstruction* lblInst = irBuilder.create(&labelMCID, anchor);
     lblInst->addModifier<LabelData>(LabelData{labelName, /*alignment=*/1});
 }
@@ -246,7 +246,7 @@ void insertRule1ClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuild
     insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
 
     static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     StinkyInstruction* lclLblInst = irBuilder.create(&labelMCID, anchor);
     lclLblInst->addModifier<LabelData>(LabelData{lclLabelName, /*alignment=*/1});
 }

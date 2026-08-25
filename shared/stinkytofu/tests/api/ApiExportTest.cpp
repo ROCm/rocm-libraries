@@ -82,6 +82,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
+#include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 
 using namespace stinkytofu;
 
@@ -246,6 +247,7 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createStinkyRemoveNopPass(), nullptr);
     EXPECT_NE(createStinkyWaitCntInsertionPass(), nullptr);
     EXPECT_NE(createGfx1250HazardPass(), nullptr);
+    EXPECT_NE(createWaitAwareScheduleRepairPass(), nullptr);
     EXPECT_NE(createBuildUseDefChainPass(true, false), nullptr);
     EXPECT_NE(createCFGBuilderPass(), nullptr);
     EXPECT_NE(createDumpStinkyModulePass({}), nullptr);
