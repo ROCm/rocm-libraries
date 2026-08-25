@@ -36,8 +36,8 @@ The nine stages, in order. A run is **incomplete** until stage 8:
 |---|---|---|
 | 1 | Dialect settled | `direct_load` vs `packaged` decided from the kernel's nature |
 | 2 | Sources mined | For rocKE: spec introspected AND the Python applicability rules extracted |
-| 3 | Batch confirmed with the human | Name, arch, knobs, workspace, UMD-vs-graph_match answered |
-| 4 | Descriptors generated | `generate.py` exit 0 |
+| 3 | Batch confirmed with the human | Name, arch, **which knobs are exposed and which knob values ship AOT**, the variant set, workspace, UMD-vs-graph_match answered |
+| 4 | Descriptors generated | `generate.py` exit 0, emitting the **full variant set** — not one kernel (see `prompt.md` § Sizing the variant set) |
 | 5 | **Hook bodies implemented** | `graph_match`, `kernel_match`, `score`, dispatch all written — no `// TODO` left in a code path the engine reaches |
 | 6 | Spliced | Every applicable CMake/registration point applied, edits made not just described |
 | 7 | Built | Provider compiles with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`; engine appears in `hipdnn_list_engines` |

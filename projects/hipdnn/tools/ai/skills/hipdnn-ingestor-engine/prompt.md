@@ -172,12 +172,22 @@ authoring from scratch:
   Lowercase, no feature suffix (`gfx942`, not `GFX942` or `gfx942:sramecc+`). Warn on
   an unrecognized-but-well-formed id (e.g. `gfx94`) rather than silently accepting it —
   it parses but matches no real device.
-- **Which fields are knobs.** From the candidate KMD fields in Step 2, ask which
-  should be exposed as `knobs` on the UED. Only `int`-typed fields can become a real
-  knob — the loader's `getCustomKnobs` silently drops a non-int knob at plan-build time
-  with no error and no warning, so screen this **before** confirming, not after: if the
-  user wants a knob on a non-int field, tell them now and ask them to either retype the
-  field or drop it from the knob list.
+- **Which knobs to expose, and which knob values to ship AOT.** Two separate decisions,
+  both the human's to make, both needing your proposal first:
+  - *Exposed knobs* — which KMD fields become `knobs` on the UED, i.e. what a caller or
+    the autotuner is allowed to steer. Only `int`-typed fields become a real knob: the
+    loader's `getCustomKnobs` silently drops a non-int knob at plan-build time, with no
+    error and no warning, discovered only against a real device. Screen this **before**
+    confirming — if they want a knob on a non-int field, say so now and offer to retype
+    the field or drop it.
+  - *AOT variant values* — for each exposed knob, which concrete values get compiled
+    into the shipped kernel set. An exposed knob with one compiled value is a knob in
+    name only. See *Sizing the variant set* below.
+
+  Ask both as one question: "Expose `block_n` and `num_warps` as knobs; ship
+  `block_n ∈ {64,128}` × `num_warps ∈ {1,2,4}` = 6 tuning variants per capability —
+  confirm or adjust?" If they do not answer, ship your proposal and mark it an
+  assumption.
 - **Dispatch and workspace policy.** Whether this engine's `IKernelDispatchHandler`
   needs a workspace at all (`none`), a fixed size, or a size derived from the bound
   tokens/kernel metadata (`derived`). You will implement `workspaceBytes` in Step 6, so
@@ -206,6 +216,54 @@ cannot settle alone:**
 
 Wait for the user's answers before proceeding — this is the one blocking prompt in the
 create flow.
+
+#### Sizing the variant set — a real integration ships many kernels
+
+**A one-kernel engine is not an integration, it is a demo.** With a single variant
+`score` never ranks anything, the UED's knobs select nothing, autotuning has no candidate
+set, and the first graph whose dtype or head size differs finds nothing to serve it. The
+heuristic path is dead code that still reports green.
+
+Every shipped pack carries several variants — `pointwise_add` ships
+`{f32/block64, f32/block256, f16/block64}` across block size *and* dtype; `conv_fwd` the
+same shape. Real production engines go much wider.
+
+**Two things the variant set must deliver, and they are different:**
+
+1. **Feature coverage** — one variant per combination of *supported capability* a graph
+   can ask for: each dtype, each head size, each mode flag the matcher admits. A
+   capability with no variant behind it is a capability the engine advertises and cannot
+   serve.
+2. **Performance headroom** — several variants along the *tuning* knobs (tile size, warp
+   count, occupancy hints) for the same capability, so the heuristic and the autotuner
+   have something to choose between. One variant per capability makes selection a no-op.
+
+**Where to find the candidate axes**, in order of authority:
+
+- **The rocKE dispatcher for this kernel family** (`rocke/library/dispatch/<family>/`) —
+  it already encodes which configurations are worth generating and which are
+  best-performing per regime. For attention, `dispatch/attention/common.py` declares
+  `UNIFIED_HEAD_SIZES = (64, 128, 256)`, `UNIFIED_BLOCK_SIZES = (16, 32, 64)`,
+  `UNIFIED_DTYPES = ("fp16", "bf16")` and
+  `ATTENTION_FEATURES = {"causal", "sliding_window", "sinks"}`. Read the per-arch module
+  too — `gfx950.py` picks `_DENSE_BLOCK_N = 64` as its best-config default and switches
+  the persistent variant on above a work threshold. That is a tuned answer, and it is
+  telling you both the axis and the sensible values.
+- **The spec dataclass's own knob comments**, which frequently record measured results
+  ("64 and 128 both match ~peak; 3+ waves_per_eu is a measured trap at -20%"). Prefer a
+  knob the kernel author says matters; skip one they say is neutral.
+- **The `supports_*` predicate's allowed sets**, for the hard capability bounds.
+
+**Budget: keep the total under ~100 kernels for a first integration.** Every variant is a
+separately compiled code object — it costs build time, archive size, and install
+footprint. A full cross-product of every axis blows past that immediately, so choose:
+cover each capability once, then spend the remaining budget on tuning variants for the
+configurations that actually matter. Say what you pruned and why.
+
+**Bring a proposal, not a question.** Enumerate the concrete variant list with its KMD
+tuples, note which axes are capability and which are tuning, and give the total count.
+If the human does not answer, ship your proposal as the default and mark it an
+assumption — do not fall back to one kernel.
 
 ### Step 4 — Build the config and run the generator
 
