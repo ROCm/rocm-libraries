@@ -30,6 +30,13 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+/*
+ * ===========================================================================
+ *    he2hb is not intended for inclusion in the public API.
+ *    It is used as a step in eigenvalue solvers (heev*).
+ * ===========================================================================
+ */
+
 //------------------------------------------------------------------------------
 // Reduces Hermitian/symmetric matrix A to Hermitian/symmetric band form
 // by a unitary similarity transformation:
