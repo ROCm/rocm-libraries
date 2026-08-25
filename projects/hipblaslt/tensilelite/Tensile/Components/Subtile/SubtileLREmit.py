@@ -22,7 +22,7 @@ from rocisa.instruction import (
     DSLoadB128,
     DSLoadB64TrB4,
     SMovB32, SMovB64,
-    VAddU32, VAndB32, VMovB32, VXorB32,
+    VAddU32, VAndB32, VMovB32, VOrB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
     VMulLOU32, VPermlane16SwapB32,
 )
@@ -31,7 +31,7 @@ from .SubtileGeometry import (
     LRTag_1x1, LRTag_1x2, LRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleLRLDSSwap
-from .SubtileTLUSwizzle import selectTLUSwizzle, stripStrideBytes
+from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter, stripStrideBytes
 
 
 ################################################################################
@@ -585,6 +585,71 @@ def _lraTileAssignment_fp8_legacy(writer, kernel, module):
   return module
 
 
+def _lraColScatterBase(writer, module, tc, base, csc):
+  """Build the column-scatter LR base LDS byte offset in ``base``.
+
+  On entry ``base`` holds the logical K-column (kGroup*groupKStride + frow).
+  On exit it holds ``load*blkBytes + interleave(col_group)*16`` (m_chunk=0; the
+  m_chunk and readIdx terms are added as ds_read immediates in emitSingleDsRead).
+
+      load      = k_col & (N-1)
+      col_group = k_col >> log2(N)
+      t         = sum_i col_group[i] << cgThreadBits[i]      (bit-interleave)
+      base      = load*blkBytes + t*16
+
+  This mirrors the GR de-interleave (physical thread T holds col_group whose bit
+  i sits at thread bit cgThreadBits[i]); interleave is its inverse, so GR write
+  and LR read address the identical LDS chunk.  See SubtileTLUSwizzle.
+  """
+  N = csc.N
+  logN = N.bit_length() - 1
+  kcol = writer.vgprPool.checkOut(1, tag="_lraColScatter_kcol")
+  tbit = writer.vgprPool.checkOut(1, tag="_lraColScatter_tbit")
+  tval = writer.vgprPool.checkOut(1, tag="_lraColScatter_tval")
+  # load = k_col & (N-1)
+  module.add(VAndB32(dst=vgpr(kcol), src0=vgpr(base), src1=hex(N - 1),
+             comment="%s: load = k_col %% %u" % (tc, N)))
+  # col_group = k_col >> logN (reuse base register to hold it)
+  module.add(VLShiftRightB32(dst=vgpr(base), shiftHex=hex(logN), src=vgpr(base),
+             comment="%s: col_group = k_col / %u" % (tc, N)))
+  # t = interleave(col_group): place col_group bit i at thread bit cgThreadBits[i].
+  module.add(VMovB32(dst=vgpr(tval), src=0, comment="%s: interleaved thread = 0" % tc))
+  for i, tb in enumerate(csc.cgThreadBits):
+    module.add(VLShiftRightB32(dst=vgpr(tbit), shiftHex=hex(i), src=vgpr(base),
+               comment="%s: col_group bit %u" % (tc, i)))
+    module.add(VAndB32(dst=vgpr(tbit), src0=vgpr(tbit), src1=hex(1),
+               comment="%s: isolate" % tc))
+    if tb == 0:
+      module.add(VOrB32(dst=vgpr(tval), src0=vgpr(tval), src1=vgpr(tbit),
+                 comment="%s: -> thread bit 0" % tc))
+    else:
+      module.add(VLShiftLeftB32(dst=vgpr(tbit), shiftHex=hex(tb), src=vgpr(tbit),
+                 comment="%s: -> thread bit %u" % (tc, tb)))
+      module.add(VOrB32(dst=vgpr(tval), src0=vgpr(tval), src1=vgpr(tbit),
+                 comment="%s: accumulate" % tc))
+  # base = load*blkBytes + t*16.  blkBytes = wavesize*16 + padBytes (e.g. 1032)
+  # is not a power of two, and v_mul_lo_u32 forbids a literal operand, so build
+  # load*blkBytes as (load << log2(wavesize*16)) + load*padBytes.
+  blockBits = (csc.blkBytes - csc.padBytes).bit_length() - 1   # log2(wavesize*16)
+  module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=hex(blockBits), src=vgpr(kcol),
+             comment="%s: load << %u (wavesize*16)" % (tc, blockBits)))
+  if csc.padBytes:
+    padTmp = writer.vgprPool.checkOut(1, tag="_lraColScatter_pad")
+    padBits = int(csc.padBytes).bit_length() - 1   # padBytes is a power of two (8 -> 3)
+    module.add(VLShiftLeftB32(dst=vgpr(padTmp), shiftHex=hex(padBits), src=vgpr(kcol),
+               comment="%s: load * %u (pad)" % (tc, csc.padBytes)))
+    module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(padTmp),
+               comment="%s: + load pad -> load*%u" % (tc, csc.blkBytes)))
+    writer.vgprPool.checkIn(padTmp)
+  module.add(VLShiftLeftB32(dst=vgpr(tval), shiftHex=hex(4), src=vgpr(tval),
+             comment="%s: interleaved thread * 16" % tc))
+  module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(tval),
+             comment="%s: col_scatter LDS base" % tc))
+  writer.vgprPool.checkIn(tval)
+  writer.vgprPool.checkIn(tbit)
+  writer.vgprPool.checkIn(kcol)
+
+
 def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
   """LR per-lane LDS base offset for TLU=1 (NT) transpose reads.
 
@@ -637,8 +702,17 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
              src=vgpr(kGroup), comment="%s: kGroup * %u (groupKStride)" % (tc, groupKStride)))
   module.add(VAddU32(dst=vgpr(base), src0=vgpr(kGroup), src1=vgpr(frow),
              comment="%s: kGroup*%u + frow" % (tc, groupKStride)))
-  module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=hex(mStripBytes.bit_length() - 1),
-             src=vgpr(base), comment="%s: * %u (mStripBytes)" % (tc, mStripBytes)))
+  # Column-scatter LR base (8x1 and up): ``base`` now holds the logical K-column
+  # (kGroup*groupKStride + frow).  Build the scattered LDS byte address from it
+  # (load*blkBytes + interleave(col_group)*16) and skip the contiguous
+  # *mStripBytes + single-bit XOR path used by 2x1/4x1.  The per-wave and LDS
+  # start tails below still apply.
+  csc = selectTLUColScatter(tileInfo)
+  if csc is not None:
+    _lraColScatterBase(writer, module, tc, base, csc)
+  else:
+    module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=hex(mStripBytes.bit_length() - 1),
+               src=vgpr(base), comment="%s: * %u (mStripBytes)" % (tc, mStripBytes)))
   # Bank-conflict swizzle: apply the same chunk XOR + load-block pad the GR write
   # used, so the transpose read addresses the permuted physical chunk.  fswz is
   # an involution, so GR and LR apply the identical flip and A round-trips.
@@ -809,6 +883,13 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     mStripBytes = int(subtileM * bpe)     # LDS bytes per K row (free-dim strip width)
     mTileBytes = int(instM * bpe)         # sId0 M-tile block stride within the strip
     kReadStrideBytes = int(16 * mStripBytes)  # second read steps 16 K cols
+    # Column-scatter (8x1+): the scattered LDS layout collapses the readIdx step
+    # to a fixed byte stride (the two transpose reads land 16 K-columns apart,
+    # which the bit-interleave maps to csc.readStrideBytes).  mTileBytes still
+    # steps M-tiles within the strip.  See SubtileTLUSwizzle (TLUColScatter).
+    csc = selectTLUColScatter(tileInfo)
+    if csc is not None:
+      kReadStrideBytes = int(csc.readStrideBytes)
     # sId0 is a global MMA-row index. Split it into which subtile strip and
     # which instM-row M-tile within that strip.  Adjacent strips are stripStride
     # bytes apart in LDS (pad-aware); within a strip, M-tiles step mTileBytes.

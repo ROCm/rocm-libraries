@@ -26,6 +26,7 @@ stacks fall back to no swizzle (``None``) until their rules are validated.
 
 from dataclasses import dataclass
 from typing import Optional
+import math
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,88 @@ class TLUSwizzle:
     xorToBit: int
     padBytes: int
     blockChunkBits: int
+
+
+@dataclass(frozen=True)
+class TLUColScatter:
+    """Column-scatter layout for a taller TLU fp4 stack (8x1 and up).
+
+    A single-bit XOR can no longer reach 1-way once stackM >= 8: the two
+    ds_read phases are stackM loads apart and the pad-induced bank-pair shift
+    wraps, so no within-load permutation separates them.  Instead of each DTL
+    load owning a contiguous block of K-columns, spread them: K-column k goes to
+    load ``k % N`` (N = stackM), and its ``col_group = k // N`` is placed at a
+    thread position by a bit-interleave that lands the distinguishing group bit
+    at thread bit 3 (the LDS bank-pair bit).  With 8B inter-load padding the two
+    phases cover complementary halves of the even bank pairs -> 1-way.  Verified
+    against the bank model (1-way, exact A round-trip) for stackM in {8,16,32}.
+
+    Fields are all derived from N = stackM:
+      N:            loads / buffer_load instructions per strip (= stackM)
+      cpc:          chunks per K-column (= N/2 for fp4 b128)
+      gGroups:      col_groups per load (= instK / N)
+      cBits:        thread bits carrying m_chunk (= log2(N) - 1)
+      gBits:        thread bits carrying col_group (= 7 - log2(N))
+      gdBit:        the col_group bit that separates co-accessed groups
+      padBytes:     inter-load pad (8B, DS_READ_B64_TR_B4 8B alignment)
+      blkBytes:     bytes per padded load-block (= wavesize*16 + padBytes)
+      mChunkThreadBits: thread bit position for m_chunk bit j (list, len cBits)
+      cgThreadBits:     thread bit position for col_group bit i (list, len gBits)
+      readStrideBytes:  LR ds_read immediate step for readIdx (+16 in K-column)
+      mTileBytes:       LR ds_read immediate step for mTile
+    """
+    N: int
+    cpc: int
+    gGroups: int
+    cBits: int
+    gBits: int
+    gdBit: int
+    padBytes: int
+    blkBytes: int
+    mChunkThreadBits: tuple
+    cgThreadBits: tuple
+    readStrideBytes: int
+    mTileBytes: int
+
+
+def _buildColScatter(stackM: int, instM: int, instK: int, bpe: float,
+                     waveSize: int) -> TLUColScatter:
+    """Derive the col_scatter parameters for one TLU fp4 stack (all from N)."""
+    N = stackM
+    logN = int(math.log2(N))
+    cpc = int(stackM * instM * bpe) // 16          # chunks per K-column
+    gGroups = instK // N                            # col_groups per load
+    cBits = logN - 1                                # m_chunk bits
+    gBits = 7 - logN                                # col_group bits
+    gdBit = 5 - logN                                # distinguishing group bit
+    padBytes = 8
+    blkBytes = waveSize * 16 + padBytes
+    # Thread bit layout [5:0]: bit 3 is reserved for col_group[gdBit] (bank-pair
+    # separation).  The remaining positions 0,1,2,4,5 are filled sequentially,
+    # first with m_chunk[0..cBits-1], then with col_group[i != gdBit].
+    positions = [0, 1, 2, 4, 5]
+    mChunkThreadBits = tuple(positions[:cBits])
+    others = [i for i in range(gBits) if i != gdBit]
+    cgThreadBits = [0] * gBits
+    for j, i in enumerate(others):
+        cgThreadBits[i] = positions[cBits + j]
+    cgThreadBits[gdBit] = 3
+    mTileBytes = int(instM * bpe)
+    # readIdx advances the logical K-column by 16; that maps to a fixed LDS byte
+    # step because the interleave is affine in the changing col-group bits.  The
+    # model verifies it is a single constant across all lanes; recompute it here
+    # closed-form from the col-group bits that flip when k_col += 16.
+    #   k_col += 16 -> load unchanged (16 % N == 0 for N in {8,16}), cg += 16//N.
+    cgDelta = 16 // N
+    readStrideBytes = 0
+    for i in range(gBits):
+        if (cgDelta >> i) & 1:
+            readStrideBytes += (1 << cgThreadBits[i]) * 16
+    return TLUColScatter(N=N, cpc=cpc, gGroups=gGroups, cBits=cBits, gBits=gBits,
+                         gdBit=gdBit, padBytes=padBytes, blkBytes=blkBytes,
+                         mChunkThreadBits=mChunkThreadBits,
+                         cgThreadBits=tuple(cgThreadBits),
+                         readStrideBytes=readStrideBytes, mTileBytes=mTileBytes)
 
 
 # Keyed by stack size subtileShape[0]. Values verified against the bank model
@@ -74,6 +157,30 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
     return _SWIZZLE_BY_STACK.get(stack)
 
 
+# Stacks that use the column-scatter layout instead of a single-bit XOR.
+_COL_SCATTER_STACKS = frozenset({8})
+
+
+def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
+    """Return the col_scatter layout for this tile's stack, or None.
+
+    Mutually exclusive with selectTLUSwizzle: the XOR path handles 2x1/4x1, the
+    col_scatter path handles 8x1 (and, once wired, 16x1/32x1).  Guarded to fp4.
+    """
+    try:
+        stack = int(tileInfo.subtileShape[0])
+    except Exception:
+        return None
+    if float(tileInfo.bpe) != 0.5:
+        return None
+    if stack not in _COL_SCATTER_STACKS:
+        return None
+    instM = int(tileInfo.mmaTileShape[0])
+    instK = int(tileInfo.mmaTileShape[1])
+    waveSize = int(getattr(tileInfo, "waveSize", 0)) or 64
+    return _buildColScatter(stack, instM, instK, float(tileInfo.bpe), waveSize)
+
+
 def swizzlePadPerStrip(tileInfo) -> int:
     """Extra LDS bytes a swizzled subtile strip occupies beyond subtileSize.
 
@@ -83,8 +190,10 @@ def swizzlePadPerStrip(tileInfo) -> int:
     size computation must all fold this in so adjacent strips do not overlap.
     """
     swz = selectTLUSwizzle(tileInfo)
-    if not swz:
+    cs = selectTLUColScatter(tileInfo)
+    if not swz and not cs:
         return 0
+    padBytes = int(swz.padBytes) if swz else int(cs.padBytes)
     # A subtile strip spans exactly ONE MFMA K-window (subtileShape[1] MFMA
     # tiles of instK K-rows), regardless of DepthU: DepthU > instK just stacks
     # additional K-windows as further strips (sId1 in the emit paths).  One DTL
@@ -102,7 +211,7 @@ def swizzlePadPerStrip(tileInfo) -> int:
     mStripBytes = int(stackM * instM * tileInfo.bpe)
     chunksPerK = max(1, mStripBytes // 16)
     numBlocks = max(1, (instK * stackK * chunksPerK) // waveSize)
-    return (numBlocks - 1) * int(swz.padBytes)
+    return (numBlocks - 1) * padBytes
 
 
 def stripStrideBytes(tileInfo) -> int:
