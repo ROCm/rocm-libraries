@@ -5,12 +5,15 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/LineStore.hpp>
+#include <iostream>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
@@ -46,6 +49,49 @@ std::optional<std::string> parseLine(std::string_view line)
     }
     return std::string(line);
 }
+
+/// Aborts the process with a named diagnosis if the guarded scope does not finish within
+/// @p limit. A deadlock on the calling thread cannot be reported by that thread, and
+/// ctest's default timeout names only "timeout" -- this names the invariant that broke.
+class DeadlineWatchdog
+{
+public:
+    DeadlineWatchdog(std::chrono::milliseconds limit, std::string diagnosis)
+        : _diagnosis(std::move(diagnosis))
+    {
+        _worker = std::thread([this, limit]() {
+            std::unique_lock<std::mutex> guard(_mutex);
+            if(!_finish.wait_for(guard, limit, [this]() { return _finished; }))
+            {
+                // Flushed explicitly: abort() below skips every stream destructor.
+                std::cerr << "DEADLINE EXCEEDED: " << _diagnosis << '\n' << std::flush;
+                std::abort();
+            }
+        });
+    }
+
+    DeadlineWatchdog(const DeadlineWatchdog&) = delete;
+    DeadlineWatchdog& operator=(const DeadlineWatchdog&) = delete;
+    DeadlineWatchdog(DeadlineWatchdog&&) = delete;
+    DeadlineWatchdog& operator=(DeadlineWatchdog&&) = delete;
+
+    ~DeadlineWatchdog()
+    {
+        {
+            const std::lock_guard<std::mutex> guard(_mutex);
+            _finished = true;
+        }
+        _finish.notify_one();
+        _worker.join();
+    }
+
+private:
+    std::string _diagnosis;
+    std::mutex _mutex;
+    std::condition_variable _finish;
+    bool _finished = false;
+    std::thread _worker;
+};
 
 } // namespace
 
@@ -207,10 +253,16 @@ TEST_F(TestLineStore, ConcurrentReadersEachSeeTheWholeShard)
     {
         readers.emplace_back([this, t, &counts]() {
             auto [shard, openStatus] = openLineStore(_shardPath, "v1");
-            ASSERT_EQ(openStatus, LineStoreStatus::OK);
-            ASSERT_TRUE(shard.has_value());
+            // A fatal assertion only returns from this lambda, so every check here is an
+            // EXPECT plus an explicit return -- an ASSERT would fall through to *shard.
+            EXPECT_EQ(openStatus, LineStoreStatus::OK);
+            if(!shard.has_value())
+            {
+                ADD_FAILURE() << "reader " << t << " could not open the shard";
+                return;
+            }
             const auto [records, readStatus] = readAllLines(*shard, parseLine);
-            ASSERT_EQ(readStatus, LineStoreStatus::OK);
+            EXPECT_EQ(readStatus, LineStoreStatus::OK);
             counts[static_cast<size_t>(t)] = records.size();
         });
     }
@@ -226,6 +278,42 @@ TEST_F(TestLineStore, ConcurrentReadersEachSeeTheWholeShard)
             << " saw a partial shard: concurrent readers shared one "
                "file offset";
     }
+}
+
+/// The registry descriptor's file pointer sits at end-of-file only by accident: any other
+/// writer that grows the shard leaves it stale. POSIX pins every write to the end through
+/// O_APPEND, but Win32 cannot combine that with the write access the torn-write repair
+/// needs, so appendRawLineStoreLine() seeks to FILE_END itself before writing.
+///
+/// Falsifying mutation: drop the SetFilePointerEx(FILE_END) call in
+/// appendRawLineStoreLine(). The append below then lands at the stale offset and
+/// overwrites the external line instead of following it. This runs on both platforms and
+/// only Win32 can fail it, which is the point -- that branch has no CI to execute it.
+TEST_F(TestLineStore, AnAppendAfterAnotherWriterGrewTheFileGoesToTheEnd)
+{
+    auto [shard, openStatus] = openLineStore(_shardPath, "v1");
+    ASSERT_EQ(openStatus, LineStoreStatus::OK);
+    ASSERT_TRUE(shard.has_value());
+
+    // Grow the file behind the shard's back while nothing holds the lock, which leaves
+    // the registry descriptor's pointer short of the new end.
+    {
+        std::ofstream external(_shardPath, std::ios::binary | std::ios::app);
+        ASSERT_TRUE(external.is_open());
+        external << "written-by-another-writer\n";
+    }
+
+    ASSERT_EQ(lockLineStore(*shard), LineStoreStatus::OK);
+    EXPECT_EQ(appendLine(*shard, "written-through-the-shard"), LineStoreStatus::OK);
+    unlockLineStore(*shard);
+
+    const auto [records, readStatus] = readAllLines(*shard, parseLine);
+    ASSERT_EQ(readStatus, LineStoreStatus::OK);
+    ASSERT_EQ(records.size(), static_cast<size_t>(2))
+        << "the shard's append landed at a stale file offset and overwrote the line "
+           "another writer had already added";
+    EXPECT_EQ(records[0], "written-by-another-writer");
+    EXPECT_EQ(records[1], "written-through-the-shard");
 }
 
 TEST_F(TestLineStore, MultipleThreadsInOneProcessAppendWithoutCorruption)
@@ -719,10 +807,9 @@ TEST_F(TestLineStore, TwoPathsToOneInodeShareOneLock)
 /// design, `Results/pr11101-plan-review`'s LockFixAudit item 1). On POSIX this converts
 /// the exclusive lock to shared and the nested release drops it outright -- the probe
 /// process's `elapsedMs` collapses to near 0 despite the parent still holding the outer
-/// lock. (Standalone repro: reverting the nesting rule in this exact shape also
-/// self-deadlocks the calling thread on `accessMutex`, since `std::mutex`
-/// is not recursive -- confirmed separately; either failure mode is caught by removing
-/// the nesting rule, this test targets the data-race shape specifically.)
+/// lock. The same mutation also self-deadlocks the calling thread on `accessMutex`, which
+/// is not recursive; the DeadlineWatchdog below turns that hang into a named failure, so
+/// either shape of the defect reports instead of wedging the suite until ctest times out.
 TEST_F(TestLineStore, NestedReadAllLinesUnderAnExclusiveLockDoesNotReleaseIt)
 {
     const auto helperPath = resolveLockHelperPath();
@@ -733,9 +820,17 @@ TEST_F(TestLineStore, NestedReadAllLinesUnderAnExclusiveLockDoesNotReleaseIt)
     ASSERT_EQ(openStatus, LineStoreStatus::OK);
     ASSERT_EQ(lockLineStore(*shard), LineStoreStatus::OK);
 
-    // Same-thread nested read while the exclusive lock is held.
-    const auto [records, readStatus] = readAllLines(*shard, parseLine);
-    EXPECT_EQ(readStatus, LineStoreStatus::OK) << "the nested read itself must succeed";
+    // Same-thread nested read while the exclusive lock is held. Guarded, because the
+    // mutation that breaks it deadlocks this very thread: an unguarded call would hang
+    // the suite rather than name the defect.
+    {
+        const DeadlineWatchdog watchdog(std::chrono::seconds(30),
+                                        "the nested readAllLines() never returned -- the "
+                                        "per-thread nesting no-op was removed and the "
+                                        "non-recursive accessMutex self-deadlocked");
+        const auto [records, readStatus] = readAllLines(*shard, parseLine);
+        EXPECT_EQ(readStatus, LineStoreStatus::OK) << "the nested read itself must succeed";
+    }
 
     const auto probe = spawnLockProbe(helperPath, _shardPath, "v1");
     ASSERT_TRUE(probe.has_value()) << "failed to spawn the probe helper";

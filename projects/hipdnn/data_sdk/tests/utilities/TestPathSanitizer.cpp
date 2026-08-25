@@ -120,6 +120,42 @@ TEST_F(TestPathSanitizer, AnEmbeddedNulDoesNotTruncateTheComponent)
     EXPECT_EQ(result.rfind("engine_name-", 0), 0U);
 }
 
+/// The stem is capped by BYTE count and MSVC reads a narrow path as UTF-8, so a multibyte
+/// sequence surviving into the stem could be cut in half at the cap and reach path
+/// conversion malformed. Non-ASCII bytes are replaced instead, which deletes the boundary
+/// question rather than answering it.
+///
+/// Falsifying mutation: narrow isIllegal()'s test back to `byte < 0x20 || byte == 0x7f`.
+/// The sequences below then survive into the component.
+TEST_F(TestPathSanitizer, NonAsciiBytesAreReplaced)
+{
+    const auto result = sanitizeForPath("engine\xc3\xa9name");
+
+    const auto dashPos = result.rfind('-');
+    ASSERT_NE(dashPos, std::string::npos);
+    EXPECT_EQ(result.substr(0, dashPos), "engine__name")
+        << "both bytes of the two-byte sequence are replaced individually";
+}
+
+TEST_F(TestPathSanitizer, ALongNonAsciiInputCannotEndOnAPartialCodepoint)
+{
+    // Long enough that the 96-byte stem cap lands partway through a three-byte sequence.
+    std::string raw;
+    for(int i = 0; i < 200; ++i)
+    {
+        raw += "\xe4\xb8\xad";
+    }
+
+    const auto result = sanitizeForPath(raw);
+
+    for(const char c : result)
+    {
+        ASSERT_LT(static_cast<unsigned char>(c), 0x80U)
+            << "a non-ASCII byte reached the path component, so the byte cap can still "
+               "split a UTF-8 sequence and emit half a codepoint";
+    }
+}
+
 TEST_F(TestPathSanitizer, InjectivityAcrossDistinctInputs)
 {
     // Includes pairs that would collide without the hash suffix under a naive

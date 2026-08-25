@@ -25,13 +25,19 @@ namespace hipdnn_data_sdk::utilities
 /// unconditional, so two distinct inputs never produce the same result without needing a
 /// registry of names seen so far.
 ///
-/// The stem handles control bytes (NUL included -- a NUL would truncate the component at
-/// the C-string boundary and drop the hash suffix with it), the colon (illegal on
-/// Windows), Windows-reserved device names (CON, PRN, COM1-9, LPT1-9, matched
-/// case-insensitively against the part before the first dot, which is where Windows
-/// resolves a device alias), leading/trailing dots (stripped -- a lone leading dot makes
-/// a Unix dotfile, a trailing one is dropped by some Windows APIs), and an overall length
-/// cap so stem plus hash stay within a filesystem's component limit.
+/// The stem keeps only printable ASCII. Control bytes (NUL included -- a NUL would
+/// truncate the component at the C-string boundary and drop the hash suffix with it) and
+/// non-ASCII bytes are both replaced, the latter because the stem is capped by BYTE
+/// count while MSVC reads a narrow path as UTF-8: keeping them would let the cap split a
+/// multibyte sequence and hand path conversion half a codepoint. It also handles the
+/// colon (illegal on Windows), Windows-reserved device names (CON, PRN, COM1-9, LPT1-9,
+/// matched case-insensitively against the part before the first dot, which is where
+/// Windows resolves a device alias), leading/trailing dots (stripped -- a lone leading
+/// dot makes a Unix dotfile, a trailing one is dropped by some Windows APIs), and an
+/// overall length cap so stem plus hash stay within a filesystem's component limit.
+///
+/// A non-ASCII name therefore sanitizes to underscores plus its hash: still distinct and
+/// still safe, but no longer human-readable. hipDNN's engine names are ASCII identifiers.
 ///
 /// @param raw May be empty; every std::string_view is a valid input.
 /// @return A single, non-empty path component safe on Linux and Windows. Never throws.
@@ -44,8 +50,9 @@ inline std::string sanitizeForPath(std::string_view raw)
     auto isIllegal = [](char c) {
         const auto byte = static_cast<unsigned char>(c);
         // Control bytes are illegal in a path component on both platforms, and a NUL
-        // would silently end the name at the first C-string boundary.
-        if(byte < 0x20 || byte == 0x7f)
+        // would silently end the name at the first C-string boundary. Non-ASCII bytes go
+        // with them so the byte cap below can never split a UTF-8 sequence.
+        if(byte < 0x20 || byte >= 0x7f)
         {
             return true;
         }

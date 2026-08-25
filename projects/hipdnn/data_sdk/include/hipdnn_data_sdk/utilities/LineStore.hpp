@@ -32,6 +32,10 @@
 // finish would release the lock every other reader still relies on. Reads are rare and a
 // shard is small, so the mutex serializes them instead of counting them.
 //
+// One shard at a time. Each registry entry owns an independent mutex, so two threads
+// that take shards A then B and B then A deadlock. No in-tree path holds one shard while
+// opening or locking another; a caller that needs two at once must impose its own order.
+//
 // Nesting is handled by the registry rather than by caller discipline. Both lock modes
 // cover the whole file, so a shared acquisition nested inside an exclusive one is a
 // POSIX lock *conversion* -- the exclusive lock is replaced, and the inner release then
@@ -388,15 +392,24 @@ inline LineStoreRegistryEntry* openOrFindLineStoreEntry(const std::filesystem::p
 
         auto entry = std::make_unique<LineStoreRegistryEntry>();
         entry->handle = handle;
-        LineStoreRegistryEntry* const registered
-            = entries.emplace(*id, std::move(entry)).first->second.get();
+        const auto [position, inserted] = entries.emplace(*id, std::move(entry));
+        if(!inserted)
+        {
+            // peekLineStoreFileId() failed transiently for a file that IS registered, so
+            // the descriptor just opened is redundant. It stays open deliberately: a
+            // registered descriptor for this inode already exists, and on POSIX closing
+            // any descriptor for a file drops every lock the process holds on it --
+            // including one another thread is inside. Retaining it costs one descriptor
+            // per transient stat failure, which is the cheaper of the two defects.
+            return position->second.get();
+        }
         // Owned by the registry from here on, which never closes a descriptor. Blanked
-        // only now: emplace() can throw bad_alloc, and until it returns this is still the
-        // only reference to the descriptor the catch block below needs to close.
+        // only now: emplace() can throw, and until it returns this is still the only
+        // reference to the descriptor the catch block below needs to close.
         handle = INVALID_LINE_STORE_HANDLE;
-        return registered;
+        return position->second.get();
     }
-    catch(const std::bad_alloc&)
+    catch(...)
     {
         if(isValidLineStoreHandle(handle))
         {
@@ -415,6 +428,12 @@ inline LineStoreRegistryEntry* openOrFindLineStoreEntry(const std::filesystem::p
 /// shard object. Destroying a shard releases any lock it still holds but never closes the
 /// descriptor, because closing one descriptor for a file drops every fcntl lock the
 /// process holds on that file.
+///
+/// Thread affinity: a LOCKED shard belongs to the thread that locked it. Nesting depth is
+/// tracked per thread, so moving a locked shard to another thread and releasing it there
+/// finds depth 0, returns early, and leaves both the mutex and the OS lock held for the
+/// life of the process. Move a shard only while it is unlocked, or lock and release it on
+/// one thread. An unlocked shard moves freely.
 class LineStoreShard
 {
 public:
@@ -687,14 +706,23 @@ inline LineStoreStatus acquireLineStoreLock(LineStoreRegistryEntry& entry, bool 
             return LineStoreStatus::LOCK_FAILED;
         }
     }
-    catch(const std::exception&)
+    catch(...)
     {
         return LineStoreStatus::LOCK_FAILED;
     }
 
     // Exclusive for both modes; see accessMutex's declaration. The native lock still
     // distinguishes them, so other PROCESSES may read this shard concurrently.
-    entry.accessMutex.lock();
+    try
+    {
+        entry.accessMutex.lock();
+    }
+    catch(...)
+    {
+        // A failed acquisition surfaces as std::system_error; this function is noexcept,
+        // so letting it out would terminate the host over a cache lock.
+        return LineStoreStatus::LOCK_FAILED;
+    }
 
     const auto status = acquireNativeLineStoreLock(entry.handle, exclusive);
     if(status != LineStoreStatus::OK)
@@ -718,7 +746,7 @@ inline void releaseLineStoreLock(LineStoreRegistryEntry& entry) noexcept
     {
         depth = &lineStoreThreadDepth(&entry);
     }
-    catch(const std::exception&)
+    catch(...)
     {
         return;
     }
