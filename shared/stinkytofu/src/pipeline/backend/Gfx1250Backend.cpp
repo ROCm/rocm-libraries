@@ -66,6 +66,7 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
+#include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -183,6 +184,16 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
                 if (runScheduler) innerPM.addPass(createRemoveDscntPass());
             }
+
+            // The wait insertion above leaves each final wait immediately before the
+            // WMMA that consumes its loads, so that WMMA has nothing to issue behind
+            // it. Repair moves this many non-WMMA instructions past each anchor to
+            // refill those slots, without changing any wait immediate.
+            const int waitRepairSlotsAfterAnchor = 1;
+            if (runScheduler && waitRepairSlotsAfterAnchor > 0) {
+                innerPM.addPass(createWaitAwareScheduleRepairPass(waitRepairSlotsAfterAnchor));
+            }
+
             pm.addPass(createKernelToRegionsPassAdaptor(
                 module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));
         }
