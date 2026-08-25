@@ -95,6 +95,17 @@ if(_build_gfx1250v0)
         KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}"
         ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
     )
+
+    # Create symlink so in-tree tests find the gfx1250v0 library under the main
+    # Tensile library path. The runtime looks for library/gfx1250v0/ next to
+    # library/gfx1250/, but the build places v0 in a separate output directory.
+    add_custom_command(
+        TARGET tensilelite-device-libraries-gfx1250v0 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            "${_gfx1250v0_output_dir}/library/gfx1250v0"
+            "${HIPBLASLT_TENSILE_LIBPATH}/library/gfx1250v0"
+        COMMENT "Linking gfx1250v0 library into main Tensile path for in-tree tests"
+    )
 endif()
 
 if(HIPBLASLT_ENABLE_EXTOPS)
