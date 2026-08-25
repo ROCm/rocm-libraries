@@ -7,6 +7,8 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.7.0 for ROCm 10.1.0
 
+* Level 2 `gemv` non-transposed (`transA == N`) for a short output and a long reduction: the `n` reduction is now split across `gridDim.y` and reduced in a second pass, mirroring the existing skinny-`n` path on the transposed side. The split is applied when the output grid has at most 8 tiles and the column split produces at least 4 parallel blocks; other shapes and `transA != N` are unchanged.
+
 ### Added
 
 * Level 3 grouped batched GEMM functions `rocblas_sgemm_grouped_batched`, `rocblas_dgemm_grouped_batched`, and `rocblas_gemm_grouped_batched_ex` for both C and FORTRAN, including ILP64 API (`_64` name suffix).

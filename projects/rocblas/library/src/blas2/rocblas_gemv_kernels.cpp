@@ -128,15 +128,12 @@ inline size_t rocblas_gemvn_sm_min_elems()
 // given m. This matches the blocks formula in the launcher:
 //   real / complex-float: (m - 1) / (DIM_X * 4) + 1
 //   double-complex:       (m - 1) / DIM_X + 1   (DIM_X * 4 is too wide)
-// Both use DIM_X = 32. The launcher keys the double-complex formula off the
-// element (Tex) type, so strip pointer/cv from T to recognise the batched
-// case, where T is a pointer (e.g. rocblas_double_complex* const).
+// Both use DIM_X = 32.
 template <typename T>
 inline rocblas_int rocblas_gemvn_output_tiles(rocblas_int m)
 {
     constexpr int DIM_X = 32;
-    using element       = std::remove_cv_t<std::remove_pointer_t<T>>;
-    if constexpr(std::is_same_v<element, rocblas_double_complex>)
+    if constexpr(std::is_same_v<T, rocblas_double_complex>)
         return (m - 1) / DIM_X + 1;
     return (m - 1) / (DIM_X * 4) + 1;
 }
