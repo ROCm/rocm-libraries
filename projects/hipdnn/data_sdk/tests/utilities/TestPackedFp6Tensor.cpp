@@ -306,6 +306,33 @@ TYPED_TEST(PackedFp6TensorMirror, FillWithRandomValuesMirrorsUnpackedTensor)
     }
 }
 
+TYPED_TEST(PackedFp6TensorMirror, FillWithRandomValuesMirrorsUnpackedTensorWhenColumnMajor)
+{
+    const std::vector<int64_t> dims = {3, 8};
+    const std::vector<int64_t> strides = {1, 3}; // column-major, dense
+    const float minValue = -0.9f;
+    const float maxValue = 1.1f;
+    const unsigned int seedValue = 1337u;
+
+    PackedFp6Tensor<TypeParam> packed(dims, strides);
+    Tensor<TypeParam> unpacked(dims, strides);
+    packed.fillTensorWithRandomValues(minValue, maxValue, seedValue);
+    unpacked.fillTensorWithRandomValues(minValue, maxValue, seedValue);
+
+    const auto* packedHost = static_cast<const uint8_t*>(packed.rawHostData());
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            // Read the packed buffer the way a kernel does: code at the stride offset.
+            const auto slot = static_cast<size_t>((i0 * strides[0]) + (i1 * strides[1]));
+            EXPECT_EQ(unpackElementAt(packedHost, slot),
+                      encodedValue(unpacked.getHostValue(i0, i1)))
+                << "mismatch at coordinate (" << i0 << "," << i1 << ")";
+        }
+    }
+}
+
 TYPED_TEST(PackedFp6TensorMirror, FillWithRandomValuesMirrorsAtMxOperandShape)
 {
     // A real MX operand shape.

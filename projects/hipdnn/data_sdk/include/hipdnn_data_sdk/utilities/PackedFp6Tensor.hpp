@@ -28,7 +28,9 @@ namespace hipdnn_data_sdk::utilities
 ///
 /// Pair the two: this type for the GPU-side bundle, `Tensor<fp6_*>` for the
 /// CPU-reference bundle. Filled with the same (seed, min, max) they agree
-/// value-for-value.
+/// value-for-value, because randomization mirrors `Tensor<T>::fillWithRandomValues`
+/// exactly, each draw packed at the offset its coordinates reach through the
+/// strides — so the agreement holds for non-row-major layouts too.
 ///
 /// Only dense (packed-stride) layouts are supported. Element-wise host access is
 /// not provided.
@@ -122,8 +124,8 @@ public:
     }
 
     // Must match Tensor<T>::fillWithRandomValues draw-for-draw, or the packed and
-    // unpacked bundles disagree silently. That includes round-tripping the bounds
-    // through T before building the distribution, as TensorBase does.
+    // unpacked bundles disagree silently: bounds rounded through T first (as
+    // TensorBase does), and each draw placed via elementSlot rather than raw index i.
     void fillTensorWithRandomValues(float min,
                                     float max,
                                     unsigned int seed = std::random_device{}()) override
@@ -135,7 +137,7 @@ public:
         auto* host = static_cast<uint8_t*>(_memory.hostData());
         for(size_t i = 0; i < _elementCount; ++i)
         {
-            packElementAt(host, i, encodeElement(distribution(generator)));
+            packElementAt(host, elementSlot(i), encodeElement(distribution(generator)));
         }
         _memory.markHostModified();
     }
@@ -227,6 +229,22 @@ private:
     static uint8_t encodeElement(float value)
     {
         return static_cast<uint8_t>(T(value).data & ELEMENT_CODE_MASK);
+    }
+
+    // Bit-packed slot holding logical element `index`: the offset its coordinates
+    // reach through the strides. Equals `index` exactly when the strides are
+    // row-major.
+    size_t elementSlot(size_t index) const
+    {
+        size_t remaining = index;
+        int64_t offset = 0;
+        for(size_t axis = _dims.size(); axis-- > 0;)
+        {
+            const auto extent = static_cast<size_t>(_dims[axis]);
+            offset += static_cast<int64_t>(remaining % extent) * _strides[axis];
+            remaining /= extent;
+        }
+        return static_cast<size_t>(offset);
     }
 
     static void validateAllPositive(const std::vector<int64_t>& values, const char* valueName)
