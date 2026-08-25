@@ -60,6 +60,9 @@ class TestResolveSkipArchs:
     def test_probe_failure_on_real_gfx1250_is_fail_open(self):
         # detect_gpu_revision_target() returns "gfx1250" on probe failure.
         with mock.patch(
+            "Tensile.GpuRevisionTarget._probe_asic_revision",
+            return_value=None,
+        ), mock.patch(
             "Tensile.GpuRevisionTarget.detect_gpu_revision_target",
             return_value="gfx1250",
         ):
@@ -90,20 +93,35 @@ class TestResolveSkipArchs:
         with mock.patch(
             "Tensile.GpuRevisionTarget.detect_gpu_revision_target",
             side_effect=AssertionError("must not probe on gfx950"),
+        ), mock.patch(
+            "Tensile.GpuRevisionTarget._probe_asic_revision",
+            side_effect=AssertionError("must not probe on gfx950"),
         ):
             skip = resolve_skip_archs(
                 ["gfx950"], enumerated_archs=["gfx950"], revision_target=None)
         assert set(skip) == {"gfx950"}
 
-    def test_detect_gpu_revision_target_is_called_on_real_gfx1250(self):
+    def test_hip_probe_adds_gfx1250v0_on_real_rev0(self):
         with mock.patch(
-            "Tensile.GpuRevisionTarget.detect_gpu_revision_target",
-            return_value="gfx1250v0",
+            "Tensile.GpuRevisionTarget._probe_asic_revision",
+            return_value=("gfx1250", 0),
         ) as probe:
             skip = resolve_skip_archs(
                 ["gfx1250"], enumerated_archs=["gfx1250"], revision_target=None)
-        probe.assert_called_once()
+        probe.assert_called()
         assert set(skip) == {"gfx1250", "gfx1250v0"}
+
+    def test_tensile_options_gfx1250v0_expands_skip_without_probe(self):
+        from Tensile.Tests.gpu_detection import (
+            gpu_targets_from_tensile_options,
+            merge_pytest_compile_archs,
+        )
+        extra = gpu_targets_from_tensile_options("--gpu-targets,gfx1250v0")
+        assert extra == ["gfx1250v0"]
+        archs = merge_pytest_compile_archs("gfx1250", "--gpu-targets,gfx1250v0")
+        assert archs == ["gfx1250", "gfx1250v0"]
+        skip = _skip_set(archs, enumerated=["gfx1250"], revision_target="gfx1250")
+        assert skip == {"gfx1250", "gfx1250v0"}
 
 
 class TestFilenameArchToken:

@@ -153,8 +153,11 @@ def configMarks(filepath, rootDir, availableArchs):
     if arch_in_name and markNamed(arch_in_name) not in marks:
         marks.append(markNamed(arch_in_name))
 
-    # Architecture specific xfail marks
-    for arch in availableArchs:
+    # Architecture specific xfail / skip marks. skip-gfx1250v0 becomes a real
+    # pytest skip only when gfx1250v0 is in the skip set (revision-0 hardware
+    # or --gpu-targets gfx1250v0). The YAML string alone is a selection marker.
+    skip_archs = set(availableArchs or [])
+    for arch in skip_archs:
         ArchFail = "xfail-%s" % arch
         if markNamed(ArchFail) in marks:
             marks.append(pytest.mark.xfail)
@@ -208,6 +211,36 @@ def configMarks(filepath, rootDir, availableArchs):
         marks.append(markNamed(operationType))
 
     return marks
+
+
+def skip_gfx1250_rev1_yaml_on_rev0(filepath, tensile_args=None, pytestconfig=None):
+    """Skip a revision-1 gfx1250 YAML when pytest/tox is on revision 0.
+
+    Must run in the pytest process *before* ``test_config`` launches Tensile
+    ``--build-only`` in a subprocess. A skip inside that child becomes a
+    CalledProcessError FAIL, not SKIPPED.
+    """
+    from Tensile.Gfx1250RunGuard import (
+        GFX1250_REV1_ON_REV0_REASON,
+        should_skip_gfx1250_rev1_on_rev0,
+    )
+
+    try:
+        with open(filepath) as f:
+            doc = yaml.load(f, DEFAULT_YAML_LOADER)  # nosec B506
+    except (OSError, yaml.YAMLError):
+        return
+    argv = list(tensile_args or [])
+    if pytestconfig is not None:
+        gpu = pytestconfig.getoption("--gpu-targets", default=None)
+        if gpu:
+            argv.extend(["--gpu-targets", gpu])
+        extra = pytestconfig.getoption("--tensile-options")
+        if extra:
+            argv.extend(str(extra).split(","))
+    if should_skip_gfx1250_rev1_on_rev0(doc, filepath, tensile_argv=argv):
+        pytest.skip(GFX1250_REV1_ON_REV0_REASON)
+
 
 def findAvailableArchs(gpu_targets=None):
     """Detect available GPU architectures, or use an explicit override.

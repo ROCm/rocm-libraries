@@ -61,6 +61,7 @@ import py
 import pytest
 
 from artifact_helpers import artifact_name_for_config
+from config_helpers import skip_gfx1250_rev1_yaml_on_rev0
 
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -100,6 +101,7 @@ def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pyt
     """
     if pytestconfig.getoption("--build-only") or pytestconfig.getoption("--use-cache"):
         pytest.skip("split mode active — use test_config_build or test_config_run")
+    skip_gfx1250_rev1_yaml_on_rev0(config, tensile_args, pytestconfig)
     artifact_name = artifact_name_for_config(config)
     output_dir = os.path.join(tmpdir.strpath, artifact_name)
     artifact_dir = tmpdir.strpath

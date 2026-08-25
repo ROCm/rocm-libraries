@@ -156,6 +156,14 @@ class TestDetectGpuRevisionTarget:
         target, _ = self._detect("gfx1250", ("gfx1250:sramecc+:xnack-", 0))
         assert target == "gfx1250v0"
 
+    def test_suffixed_enumerator_arch_still_probes_rev0(self):
+        # detect_gpu_arch used to require an exact "gfx1250" string, so a
+        # feature-suffixed enumerator name skipped the HIP probe and left
+        # skip-gfx1250v0 inert on revision 0.
+        target, probe = self._detect("gfx1250:sramecc+:xnack-", ("gfx1250:sramecc+:xnack-", 0))
+        assert target == "gfx1250v0"
+        probe.assert_called_once()
+
     @pytest.mark.parametrize("probe_result", [
         ("gfx1250", 1),        # a confirmed non-v0 part
         None,                  # probe could not run
@@ -208,6 +216,14 @@ class TestRevisionSkipArchExpansion:
         assert gpu_rev.expand_revision_skip_archs("gfx1250v0[cu=64]") == {
             "gfx1250", "gfx1250v0"}
 
+    def test_argv_selects_gfx1250v0(self):
+        assert gpu_rev.argv_selects_gfx1250v0(["--gpu-targets", "gfx1250v0"])
+        assert gpu_rev.argv_selects_gfx1250v0("--gpu-targets,gfx1250v0".split(","))
+        assert gpu_rev.argv_selects_gfx1250v0(["--gpu-targets", "gfx1250v0:xnack-"])
+        assert not gpu_rev.argv_selects_gfx1250v0(["--gpu-targets", "gfx1250"])
+        assert not gpu_rev.argv_selects_gfx1250v0([])
+        assert not gpu_rev.argv_selects_gfx1250v0(None)
+
     def test_probed_rev0_skip_set(self):
         assert gpu_rev.skip_archs_for_gfx1250_revision_target("gfx1250v0") == {
             "gfx1250", "gfx1250v0"}
@@ -223,6 +239,17 @@ class TestRevisionSkipArchExpansion:
         # a gfx1250v1 skip identity.
         assert gpu_rev.expand_revision_skip_archs("gfx1250v1") == {"gfx1250v1"}
         assert gpu_rev.skip_archs_for_gfx1250_revision_target("gfx1250v1") == {"gfx1250"}
+
+    def test_revision_skip_target_uses_hip_probe_not_enumerator_string(self):
+        with mock.patch.object(gpu_rev, "_probe_asic_revision",
+                               return_value=("gfx1250:xnack-", 0)):
+            assert gpu_rev.gfx1250_revision_skip_target() == "gfx1250v0"
+
+    def test_revision_skip_target_fail_open_on_probe_miss(self):
+        with mock.patch.object(gpu_rev, "_probe_asic_revision", return_value=None), \
+             mock.patch.object(gpu_rev, "detect_gpu_revision_target",
+                               return_value="gfx1250"):
+            assert gpu_rev.gfx1250_revision_skip_target() == "gfx1250"
 
     def test_enumerator_gfx1250_only_matches_the_family_token(self):
         assert gpu_rev.enumerator_reports_gfx1250(["gfx1250"])

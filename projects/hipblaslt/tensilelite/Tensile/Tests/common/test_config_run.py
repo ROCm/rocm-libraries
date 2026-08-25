@@ -53,6 +53,7 @@ import pytest
 from Tensile import Tensile
 
 from artifact_helpers import artifact_name_for_config, extract_artifact
+from config_helpers import skip_gfx1250_rev1_yaml_on_rev0
 
 
 def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str]) -> None:
@@ -80,6 +81,7 @@ def test_config_run(tensile_args: list[str], config: str, tmpdir: py.path.local,
     """
     if not pytestconfig.getoption("--use-cache"):
         pytest.skip("requires --use-cache")
+    skip_gfx1250_rev1_yaml_on_rev0(config, tensile_args, pytestconfig)
     artifact_name = artifact_name_for_config(config)
     output_dir = os.path.join(tmpdir.strpath, artifact_name)
     _run(config, output_dir, pytestconfig.getoption("--artifact-dir"), tensile_args)

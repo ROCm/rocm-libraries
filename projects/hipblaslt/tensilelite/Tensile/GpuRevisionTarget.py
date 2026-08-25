@@ -27,26 +27,49 @@ _TENSILELITE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 _REVISION_PROBE_SRC = _TENSILELITE_ROOT / "tools" / "gpu_revision_probe.cpp"
 
 
+def _rocm_agent_enumerator():
+    """Prefer $ROCM_PATH/bin, then PATH. Same lookup as pytest get_available_archs()."""
+    rocmpath = os.environ.get(
+        "TENSILE_ROCM_PATH", os.environ.get("ROCM_PATH", "/opt/rocm")
+    )
+    candidate = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
+    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        return candidate
+    return shutil.which("rocm_agent_enumerator") or "rocm_agent_enumerator"
+
+
 def detect_gpu_arch():
     """First non-gfx000 gfx arch rocm_agent_enumerator reports, or None.
 
     Kept rocisa-free (no Tensile.Common import) so the invoke build path never
-    pulls in rocisa just to probe the arch.
+    pulls in rocisa just to probe the arch. Uses ``-t GPU`` (bare gfx names)
+    so pytest skip identity and invoke get-gpu-arch see the same enumerator.
     """
-    try:
-        result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
-        if result.returncode == 0:
-            target = next((line.strip() for line in result.stdout.splitlines() if line.startswith("gfx") and line.strip() != "gfx000"), None)
-            if target:
-                return target
-    except FileNotFoundError:
-        print("Error: 'rocm_agent_enumerator' command not found. Please install ROCm.", file=sys.stderr)
-
-    except subprocess.TimeoutExpired:
-        print("Error: GPU detection timed out. Hardware might be unresponsive.", file=sys.stderr)
-
-    except Exception as e:
-        print(f"An unexpected error occurred during GPU detection: {e}", file=sys.stderr)
+    enumerator = _rocm_agent_enumerator()
+    for args in ([enumerator, "-t", "GPU"], [enumerator, "-v"], [enumerator]):
+        try:
+            result = subprocess.run(
+                args, capture_output=True, text=True, timeout=5, check=True
+            )
+        except FileNotFoundError:
+            print("Error: 'rocm_agent_enumerator' command not found. Please install ROCm.", file=sys.stderr)
+            break
+        except subprocess.TimeoutExpired:
+            print("Error: GPU detection timed out. Hardware might be unresponsive.", file=sys.stderr)
+            continue
+        except Exception as e:
+            print(f"An unexpected error occurred during GPU detection: {e}", file=sys.stderr)
+            continue
+        target = next(
+            (
+                line.strip()
+                for line in result.stdout.splitlines()
+                if line.startswith("gfx") and line.strip() != "gfx000"
+            ),
+            None,
+        )
+        if target:
+            return target
 
     print(f"Failed to detect a valid GPU architecture (gfx target not found).", file=sys.stderr)
     return None
@@ -165,9 +188,12 @@ def detect_gpu_revision_target(build_dir=None, device_id=0):
     Non-gfx1250 arches are returned unchanged without probing. For gfx1250, the
     ASIC revision is probed via HIP: revision 0 -> gfx1250v0, otherwise (and on
     any probe failure or arch mismatch) -> gfx1250 (the v1 default).
+
+    Enumerator names may carry feature suffixes (``gfx1250:sramecc+:xnack-``);
+    those still count as gfx1250 and still get an asicRevision probe.
     """
     base_arch = detect_gpu_arch()
-    if base_arch != "gfx1250":
+    if arch_skip_token(base_arch) != GFX1250_ARCH:
         return base_arch
 
     probed = _probe_asic_revision(build_dir=build_dir, device_id=device_id)
@@ -179,7 +205,7 @@ def detect_gpu_revision_target(build_dir=None, device_id=0):
     probe_arch, revision = probed
     # gcnArchName carries feature suffixes on real hardware
     # (e.g. "gfx1250:sramecc+:xnack-"); compare only the base arch token.
-    if probe_arch.split(":")[0] != "gfx1250":
+    if arch_skip_token(probe_arch) != GFX1250_ARCH:
         print(f"warning: revision probe reported arch '{probe_arch}' != detected "
               "'gfx1250'; defaulting to gfx1250 (v1).", file=sys.stderr)
         return "gfx1250"
@@ -250,3 +276,36 @@ def skip_archs_for_gfx1250_revision_target(revision_target):
     if token == GFX1250_V0:
         return frozenset({GFX1250_ARCH, GFX1250_V0})
     return frozenset({GFX1250_ARCH})
+
+
+def argv_selects_gfx1250v0(argv):
+    """True when Tensile/pytest argv selects compile target gfx1250v0.
+
+    Matches pytest ``--gpu-targets gfx1250v0`` and tox's older
+    ``--tensile-options=--gpu-targets,gfx1250v0`` (comma-split into argv).
+    """
+    if not argv:
+        return False
+    args = [str(a) for a in argv]
+    for i, a in enumerate(args):
+        if a in ("--gpu-targets", "--gpu-target") and i + 1 < len(args):
+            for spec in args[i + 1].replace(",", ";").split(";"):
+                if arch_skip_token(spec) == GFX1250_V0:
+                    return True
+    return False
+
+
+def gfx1250_revision_skip_target(device_id=0):
+    """HIP asicRevision -> pytest skip identity on a known gfx1250 machine.
+
+    Used when the enumerator already listed gfx1250. Probes HIP directly so a
+    verbose/suffixed enumerator name cannot skip the probe and leave
+    skip-gfx1250v0 inert on revision 0.
+    """
+    probed = _probe_asic_revision(device_id=device_id)
+    if probed is not None:
+        probe_arch, revision = probed
+        if arch_skip_token(probe_arch) == GFX1250_ARCH:
+            return _revision_to_gpu_target("gfx1250", revision)
+    target = detect_gpu_revision_target(device_id=device_id)
+    return GFX1250_V0 if arch_skip_token(target) == GFX1250_V0 else GFX1250_ARCH

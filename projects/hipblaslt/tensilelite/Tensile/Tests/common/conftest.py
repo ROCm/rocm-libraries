@@ -26,7 +26,8 @@ from pathlib import Path
 
 import pytest
 
-from config_helpers import findAvailableArchs, findConfigs
+from config_helpers import findConfigs
+from Tensile.Tests.gpu_detection import merge_pytest_compile_archs
 
 _COMMON_DIR = Path(__file__).parent
 
@@ -80,6 +81,9 @@ def pytest_generate_tests(metafunc):
     if "config" not in metafunc.fixturenames:
         return
     gpu_targets = metafunc.config.getoption("--gpu-targets", default=None)
-    archs = findAvailableArchs(gpu_targets)
+    tensile_options = metafunc.config.getoption("--tensile-options")
+    # pytest --gpu-targets *and* --tensile-options=--gpu-targets,gfx1250v0
+    # (legacy tox) expand skip-gfx1250v0 to pytest.mark.skip.
+    archs = merge_pytest_compile_archs(gpu_targets, tensile_options)
     configs = findConfigs(availableArchs=archs)
     metafunc.parametrize("config", configs)

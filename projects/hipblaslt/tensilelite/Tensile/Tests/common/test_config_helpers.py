@@ -72,6 +72,40 @@ def test_revision_id_1_skips_on_gfx1250v0():
     assert pytest.mark.skip in marks
 
 
+def test_gpu_targets_option_gfx1250v0_skips_rev1_yaml():
+    """pytest --gpu-targets gfx1250v0 (tox on rev0) expands skip-gfx1250v0."""
+    from Tensile.Tests.gpu_detection import resolve_skip_archs
+    from config_helpers import findAvailableArchs
+    archs = findAvailableArchs("gfx1250v0")
+    skip = resolve_skip_archs(archs, enumerated_archs=[], revision_target=None)
+    marks = configMarks(_REV1_GFX1250_SK, _TESTS_ROOT, skip)
+    assert pytest.mark.skip in marks
+
+
+def test_tensile_options_gfx1250v0_skips_rev1_yaml():
+    """Legacy tox --tensile-options=--gpu-targets,gfx1250v0 still skips."""
+    from Tensile.Tests.gpu_detection import merge_pytest_compile_archs, resolve_skip_archs
+    archs = merge_pytest_compile_archs("gfx1250", "--gpu-targets,gfx1250v0")
+    skip = resolve_skip_archs(archs, enumerated_archs=[], revision_target=None)
+    marks = configMarks(_REV1_GFX1250_SK, _TESTS_ROOT, skip)
+    assert pytest.mark.skip in marks
+
+
+def test_skip_helper_skips_when_tensile_args_are_v0():
+    from config_helpers import skip_gfx1250_rev1_yaml_on_rev0
+    with pytest.raises(pytest.skip.Exception, match="revision 0"):
+        skip_gfx1250_rev1_yaml_on_rev0(
+            _REV1_GFX1250_SK, tensile_args=["--gpu-targets", "gfx1250v0"]
+        )
+
+
+def test_skip_helper_inert_for_rev0_yaml():
+    from config_helpers import skip_gfx1250_rev1_yaml_on_rev0
+    skip_gfx1250_rev1_yaml_on_rev0(
+        _PLAIN_GFX1250_CONFIG, tensile_args=["--gpu-targets", "gfx1250v0"]
+    )
+
+
 def test_revision_id_1_does_not_skip_on_gfx1250_rev1():
     """On gfx1250 rev1 the skip set has no gfx1250v0, so RevisionID 1 still runs."""
     marks = configMarks(_REV1_GFX1250_SK, _TESTS_ROOT, ["gfx1250"])

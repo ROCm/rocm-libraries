@@ -52,6 +52,7 @@ import pytest
 from Tensile import Tensile
 
 from artifact_helpers import artifact_name_for_config, compress_output
+from config_helpers import skip_gfx1250_rev1_yaml_on_rev0
 
 
 def _build(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str]) -> None:
@@ -75,5 +76,6 @@ def test_config_build(tensile_args: list[str], config: str, tmpdir: py.path.loca
     """
     if not pytestconfig.getoption("--build-only"):
         pytest.skip("requires --build-only")
+    skip_gfx1250_rev1_yaml_on_rev0(config, tensile_args, pytestconfig)
     output_dir = os.path.join(tmpdir.strpath, artifact_name_for_config(config))
     _build(config, output_dir, pytestconfig.getoption("--artifact-dir"), tensile_args)

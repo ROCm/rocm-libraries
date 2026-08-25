@@ -191,7 +191,7 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
 
     return rv
 
-def pytest_collection_modifyitems(items):
+def pytest_collection_modifyitems(config, items):
     """
     Mainly for tests that aren't simple YAML files (including unit tests).
     Adds a mark for the root directory name to each test.
@@ -203,6 +203,24 @@ def pytest_collection_modifyitems(items):
         # print(f"Items: {item}, Testdir: {testdir}, Components: {components}")
         if len(components) > 0 and len(components[0]) > 0:
             item.add_marker(getattr(pytest.mark, components[0]))
+
+    from Tensile.GpuRevisionTarget import GFX1250_V0, expand_revision_skip_archs
+    from Tensile.Gfx1250RunGuard import GFX1250_REV1_ON_REV0_REASON
+    from Tensile.Tests.gpu_detection import gpu_targets_from_tensile_options
+
+    tokens = set()
+    gpu = config.getoption("--gpu-targets", default=None)
+    if gpu:
+        for spec in str(gpu).split(";"):
+            tokens |= expand_revision_skip_archs(spec)
+    for spec in gpu_targets_from_tensile_options(config.getoption("--tensile-options")):
+        tokens |= expand_revision_skip_archs(spec)
+    if GFX1250_V0 not in tokens:
+        return
+    skip_mark = pytest.mark.skip(reason=GFX1250_REV1_ON_REV0_REASON)
+    for item in items:
+        if item.get_closest_marker("skip-gfx1250v0"):
+            item.add_marker(skip_mark)
 
 @pytest.fixture
 def useGlobalParameters(tensile_args):

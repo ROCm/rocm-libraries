@@ -15,7 +15,12 @@ uses the same helpers so skip and launch agree.
 import os
 import sys
 
-from Tensile.GpuRevisionTarget import detect_gpu_revision_target
+from Tensile.GpuRevisionTarget import (
+    GFX1250_V0,
+    arch_skip_token,
+    argv_selects_gfx1250v0,
+    detect_gpu_revision_target,
+)
 
 # Matches Tensile.Common.Architectures.baseArchName without importing rocisa.
 def _bare_arch_name(spec):
@@ -117,6 +122,26 @@ def requires_gfx1250_rev1(config, filepath=None):
     if not config_targets_gfx1250(config, filepath):
         return False
     return config_required_asic_revision(config) >= 1
+
+
+def should_skip_gfx1250_rev1_on_rev0(
+    config, filepath=None, tensile_argv=None, hardware_target=None
+):
+    """True when pytest/tox should skip this YAML on gfx1250 revision 0.
+
+    Pytest ``test_config`` always builds with Tensile ``--build-only``, which
+    disables the execute abort. Skip here (and at collection) so those tests
+    are SKIPPED instead of compile-reject FAIL. ``hardware_target`` is
+    injectable for tests; when omitted, probes the selected GPU.
+    """
+    if not requires_gfx1250_rev1(config, filepath):
+        return False
+    if argv_selects_gfx1250v0(tensile_argv):
+        return True
+    hw = hardware_target
+    if hw is None:
+        hw = detect_gpu_revision_target()
+    return arch_skip_token(hw) == GFX1250_V0
 
 
 def guard_gfx1250_v1_run_on_v0(

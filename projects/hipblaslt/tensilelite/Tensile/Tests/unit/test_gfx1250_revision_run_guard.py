@@ -161,6 +161,50 @@ class TestRevisionIdMetadata:
         assert guard.requires_gfx1250_rev1(cfg, path) is False
 
 
+class TestPytestSkipOnRev0:
+    """pytest/tox skip (not Tensile abort). hardware_target is injected; no GPU."""
+
+    def test_tensile_argv_gfx1250v0_skips_rev1(self):
+        assert guard.should_skip_gfx1250_rev1_on_rev0(
+            _rev1_config(),
+            tensile_argv=["--gpu-targets", "gfx1250v0"],
+            hardware_target="gfx1250",
+        )
+
+    def test_tensile_options_comma_argv_skips_rev1(self):
+        assert guard.should_skip_gfx1250_rev1_on_rev0(
+            _rev1_config(),
+            tensile_argv=["--gpu-targets", "gfx1250v0"],
+            hardware_target="gfx1250",
+        )
+        from Tensile.GpuRevisionTarget import argv_selects_gfx1250v0
+        assert argv_selects_gfx1250v0("--gpu-targets,gfx1250v0".split(","))
+        assert not argv_selects_gfx1250v0(["--gpu-targets", "gfx1250"])
+
+    def test_hardware_rev0_skips_rev1(self):
+        assert guard.should_skip_gfx1250_rev1_on_rev0(
+            _rev1_config(), tensile_argv=[], hardware_target="gfx1250v0")
+
+    def test_hardware_rev1_does_not_skip(self):
+        assert not guard.should_skip_gfx1250_rev1_on_rev0(
+            _rev1_config(), tensile_argv=[], hardware_target="gfx1250")
+
+    def test_rev0_yaml_still_runs_on_rev0(self):
+        assert not guard.should_skip_gfx1250_rev1_on_rev0(
+            _rev0_config(),
+            tensile_argv=["--gpu-targets", "gfx1250v0"],
+            hardware_target="gfx1250v0",
+        )
+
+    def test_argv_gfx1250v0_does_not_probe(self, monkeypatch):
+        probe = _patch_probe(monkeypatch, "gfx1250v0")
+        assert guard.should_skip_gfx1250_rev1_on_rev0(
+            _rev1_config(),
+            tensile_argv=["--gpu-targets", "gfx1250v0"],
+        )
+        probe.assert_not_called()
+
+
 class TestGuardMatrix:
     def test_rev0_yaml_on_rev0_hw_allowed(self, monkeypatch):
         probe = _patch_probe(monkeypatch, "gfx1250v0")
