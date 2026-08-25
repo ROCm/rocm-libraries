@@ -14,6 +14,11 @@ transform start or when storing output to global memory at the
 transform end.  If specified, these functions are Just-In-Time (JIT)
 compiled to combine them with rocFFT's own device code.
 
+.. note::
+   JIT callbacks cannot currently be used on transforms that
+   have fields or bricks also specified on the same plan description.
+   This support will be added in a future release of rocFFT.
+
 These optional user-defined callback functions can be supplied
 to the library using
 :cpp:func:`rocfft_plan_description_set_load_callback` and

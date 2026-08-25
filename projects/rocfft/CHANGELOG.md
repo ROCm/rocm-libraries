@@ -18,6 +18,10 @@ Documentation for rocFFT is available at
   specifying the data pointers for these callbacks, which may differ
   on each execution.
 
+  These APIs are not currently compatible with transforms that have
+  fields or bricks also specified on the same plan description.  This
+  support will be added in a future release of rocFFT.
+
 ### Deprecations
 
 * The `rocfft_execution_info_set_load_callback` and `rocfft_execution_info_set_store_callback` APIs are now

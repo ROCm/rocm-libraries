@@ -1642,6 +1642,13 @@ rocfft_status
         //    //
         //}
     }
+
+    // JIT callbacks cannot currently be combined with field
+    // decompositions, as we can't guarantee that a callback-running
+    // kernel will be first/last to load/store the data in the FFT.
+    if((!inFields.empty() || !outFields.empty()) && (loadOps.has_spirv() || storeOps.has_spirv()))
+        return rocfft_status_invalid_arg_value;
+
     return rocfft_status_success;
 }
 
