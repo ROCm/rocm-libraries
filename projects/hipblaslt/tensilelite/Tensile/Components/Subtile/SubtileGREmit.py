@@ -29,7 +29,7 @@ from rocisa.instruction import (
     SCBranchSCC1, SCmpEQU32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpXEqU32,
-    VLShiftLeftB32, VLShiftRightB32, VMovB32,
+    VLShiftLeftB32, VLShiftRightB32, VMovB32, VOrB32,
     TensorLoadToLds,
     VMulLOU32, VReadfirstlaneB32, VSubU32, VXorB32,
 )
@@ -39,7 +39,7 @@ from .SubtileGeometry import (
     GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleGRLDSSwap
-from .SubtileTLUSwizzle import selectTLUSwizzle, stripStrideBytes
+from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter, stripStrideBytes
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
@@ -897,6 +897,99 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   return module
 
 
+def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
+                                      strideK, cs):
+  """GR per-lane offsets for the column-scatter TLU layout (8x1 fp4 and up).
+
+  Each DTL load i owns a scattered set of K-columns: physical thread T within a
+  load holds logical (m_chunk, col_group) recovered by de-interleaving T (the
+  inverse of the bit-interleave the LR read applies).  The global K-column is
+  ``col = col_group * N + i`` and the free-dim (M/N) start is
+  ``m_chunk * elemsPerChunk``, so the per-lane byte offset for load i is
+
+      offset(T, i) = (col * strideK + m_chunk * elemsPerChunk) * bpe
+                   = ((col_group*N + i) * strideK + m_chunk * elemsPerChunk) * bpe
+
+  col_group and m_chunk are load-independent, so their contribution is computed
+  once per lane; the loop only adds ``i * strideK`` in K.  See SubtileTLUSwizzle
+  (TLUColScatter) and the verified bank model.
+  """
+  tc = tileInfo.tc
+  tile = tileInfo.gr
+  bpeBits = int(8 * tileInfo.bpe)
+  elemsPerChunk = int(16 / tileInfo.bpe)
+  N = cs.N
+
+  module.addComment0("%s: TLU=1 GR offset (col_scatter, %ux1)" % (tc, N))
+  # De-interleave laneId (= thread T within the load) into m_chunk and col_group.
+  mc = writer.vgprPool.checkOut(1, tag="_graColScatter_mc")
+  cg = writer.vgprPool.checkOut(1, tag="_graColScatter_cg")
+  bit = writer.vgprPool.checkOut(1, tag="_graColScatter_bit")
+  # m_chunk: gather thread bits cs.mChunkThreadBits[j] -> m_chunk bit j.
+  module.add(VMovB32(dst=vgpr(mc), src=0, comment="%s: m_chunk = 0" % tc))
+  for j, tb in enumerate(cs.mChunkThreadBits):
+    module.add(VLShiftRightB32(dst=vgpr(bit), shiftHex=hex(tb), src=vgpr(laneId),
+               comment="%s: laneId >> %u" % (tc, tb)))
+    module.add(VAndB32(dst=vgpr(bit), src0=vgpr(bit), src1=hex(1),
+               comment="%s: thread bit %u" % (tc, tb)))
+    if j == 0:
+      module.add(VMovB32(dst=vgpr(mc), src=vgpr(bit), comment="%s: m_chunk bit 0" % tc))
+    else:
+      module.add(VLShiftLeftB32(dst=vgpr(bit), shiftHex=hex(j), src=vgpr(bit),
+                 comment="%s: -> m_chunk bit %u" % (tc, j)))
+      module.add(VOrB32(dst=vgpr(mc), src0=vgpr(mc), src1=vgpr(bit),
+                 comment="%s: accumulate m_chunk" % tc))
+  # col_group: gather thread bits cs.cgThreadBits[i] -> col_group bit i.
+  module.add(VMovB32(dst=vgpr(cg), src=0, comment="%s: col_group = 0" % tc))
+  for i, tb in enumerate(cs.cgThreadBits):
+    module.add(VLShiftRightB32(dst=vgpr(bit), shiftHex=hex(tb), src=vgpr(laneId),
+               comment="%s: laneId >> %u" % (tc, tb)))
+    module.add(VAndB32(dst=vgpr(bit), src0=vgpr(bit), src1=hex(1),
+               comment="%s: thread bit %u" % (tc, tb)))
+    if i == 0:
+      module.add(VMovB32(dst=vgpr(cg), src=vgpr(bit), comment="%s: col_group bit 0" % tc))
+    else:
+      module.add(VLShiftLeftB32(dst=vgpr(bit), shiftHex=hex(i), src=vgpr(bit),
+                 comment="%s: -> col_group bit %u" % (tc, i)))
+      module.add(VOrB32(dst=vgpr(cg), src0=vgpr(cg), src1=vgpr(bit),
+                 comment="%s: accumulate col_group" % tc))
+  # col_group * N (load-independent K-column base).
+  module.add(VLShiftLeftB32(dst=vgpr(cg), shiftHex=hex(N.bit_length() - 1), src=vgpr(cg),
+             comment="%s: col_group * %u (= K-column at load 0)" % (tc, N)))
+  # m_chunk * elemsPerChunk (free-dim element start, load-independent).
+  module.add(VLShiftLeftB32(dst=vgpr(mc), shiftHex=hex(elemsPerChunk.bit_length() - 1),
+             src=vgpr(mc), comment="%s: m_chunk * %u (free-dim start)" % (tc, elemsPerChunk)))
+
+  waveAxisOffVgpr = _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo)
+  colK = writer.vgprPool.checkOut(1, tag="_graColScatter_colK")
+  for i in range(tileInfo.numGRPerSubtile):
+    out = tile.sharedVgprGROffset[i]
+    # K-column for load i = col_group*N + i.
+    module.add(VAddU32(dst=vgpr(colK), src0=hex(i), src1=vgpr(cg),
+               comment="%s: K-column = col_group*%u + %u" % (tc, N, i)))
+    # colK * strideK (elements).
+    module.add(VMulLOU32(dst=vgpr(colK), src0=strideK, src1=vgpr(colK),
+               comment="%s: K-column * strideK" % tc))
+    # + m_chunk*elemsPerChunk (free dim is unit stride).
+    module.add(VAddU32(dst=vgpr(colK), src0=vgpr(colK), src1=vgpr(mc),
+               comment="%s: + free-dim start" % tc))
+    # * bpe (sub-byte safe).
+    module.add(VLShiftLeftB32(dst=vgpr(colK), shiftHex=hex(bpeBits.bit_length() - 1),
+               src=vgpr(colK), comment="%s: * bpe" % tc))
+    module.add(VLShiftRightB32(dst=vgpr(out), shiftHex=hex(3), src=vgpr(colK),
+               comment="%s: to bytes" % tc))
+    if waveAxisOffVgpr is not None:
+      module.add(VAddU32(dst=vgpr(out), src0=vgpr(out), src1=vgpr(waveAxisOffVgpr),
+                 comment="%s: + per-wave free-dim (M/N) global offset" % tc))
+  if waveAxisOffVgpr is not None:
+    writer.vgprPool.checkIn(waveAxisOffVgpr)
+  writer.vgprPool.checkIn(colK)
+  writer.vgprPool.checkIn(bit)
+  writer.vgprPool.checkIn(cg)
+  writer.vgprPool.checkIn(mc)
+  return module
+
+
 def _graTileAssignment_tlu(writer, kernel, tileInfo):
   """GR per-lane offset for TLU=1 (NT / free-dim contiguous) subtile tiles.
 
@@ -925,6 +1018,16 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
   laneId = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_laneId")
   module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize - 1,
              comment="%s: laneId" % tc))
+
+  # Column-scatter GR (8x1 and up): a single-bit XOR can no longer reach 1-way,
+  # so each DTL load owns a scattered set of K-columns.  Handled in full by the
+  # helper below (per-lane deinterleave -> global K/M offset per load).
+  cs = selectTLUColScatter(tileInfo)
+  if cs is not None:
+    _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
+                                      strideK, cs)
+    writer.vgprPool.checkIn(laneId)
+    return module
 
   swz = selectTLUSwizzle(tileInfo)
   tmpVgpr = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_tmpVgpr")
@@ -1147,6 +1250,10 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   subtileOffset = int(math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize))
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
   swz = selectTLUSwizzle(tileInfo)
+  csc = selectTLUColScatter(tileInfo)
+  # Both the XOR swizzle and the col_scatter layout insert padBytes between
+  # consecutive DTL load-blocks; pick whichever applies (mutually exclusive).
+  padBytes = swz.padBytes if swz else (csc.padBytes if csc else 0)
   # Pad-aware LDS stride between subtile strips (M/N direction).
   stripStride = stripStrideBytes(tileInfo) if isTLU1 else int(tileInfo.subtileSize)
   # K-window (sId1) global-address advance for TLU=1.
@@ -1182,12 +1289,11 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
                      + (subtileRow + sId1 * tileInfo.globalSubtileGrid[0]) * stripStride)
     else:
       m0Offset = int(i * subtileOffset + (sId0 + sId1 * tileInfo.globalSubtileGrid[0]) * tileInfo.subtileSize)
-    # Bank-conflict swizzle: insert padBytes between load-blocks so physical
-    # LDS chunk P sits at P*mStripBytes + (P>>blockChunkBits)*padBytes.  Each GR
-    # load i covers one wavesize-chunk block, so it shifts by i*padBytes.  The
-    # LR read applies the same pad. See SubtileTLUSwizzle.
-    if swz:
-      m0Offset += i * swz.padBytes
+    # Bank-conflict swizzle / col_scatter: insert padBytes between load-blocks so
+    # each GR load i (one wavesize-chunk block) shifts by i*padBytes.  The LR
+    # read applies the same pad. See SubtileTLUSwizzle.
+    if padBytes:
+      m0Offset += i * padBytes
     if isTLU1:
       # LDS m0 already carries the window placement; the K-window global step
       # rides on soffset, so no offset12 immediate is needed here.

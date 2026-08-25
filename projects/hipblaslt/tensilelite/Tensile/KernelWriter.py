@@ -7083,7 +7083,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numASubtiles = int(aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1])
       numBSubtiles = int(bTileInfo.globalSubtileGrid[0] * bTileInfo.globalSubtileGrid[1])
       readSize = 2*aTileInfo.subtileSize
-      # Align A and B sizes to readSize for DTL 2xsubtile reads.
+      # Align A and B sizes so a tensor's LDS region is a whole number of DTL
+      # reads.  gfx1250's DTL path reads two subtiles at once, so its regions
+      # must round up to readSize (2*subtileSize); gfx950 reads one subtile per
+      # DTL, so subtileSize alignment is enough.  Using the larger 2x granularity
+      # on gfx950 would waste up to a full readSize per operand whenever the
+      # unpadded size lands on a readSize boundary (e.g. the TLU=1 bank-conflict
+      # swizzle pad tipping a large tile into an extra 16KB block).
+      alignSize = readSize if self.states.version[:2] == (12, 5) else int(aTileInfo.subtileSize)
       # TDM-based solution use padding per row. Take that into account for size calculation.
       mtA = kernel["MacroTile0"]
       mtB = kernel["MacroTile1"]
@@ -7094,8 +7101,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       from Tensile.Components.Subtile.SubtileTLUSwizzle import swizzlePadPerStrip
       swzPadA = swizzlePadPerStrip(aTileInfo) * numASubtiles
       swzPadB = swizzlePadPerStrip(bTileInfo) * numBSubtiles
-      sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + swzPadA + readSize-1) // readSize) * readSize)
-      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + swzPadB + readSize-1) // readSize) * readSize)
+      sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + swzPadA + alignSize-1) // alignSize) * alignSize)
+      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + swzPadB + alignSize-1) // alignSize) * alignSize)
       self.ldsStartOffsetB = sizeA
       sizeMXSA = 0
       sizeMXSB = 0
