@@ -196,8 +196,12 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
         n_flags++;
     }
 
+    /* "twostage" kernel-name flag: true when force_deterministic=true and
+     * split_k > 1 (workspace epilogue is emitted).  split_k=1 is always
+     * direct store regardless of force_deterministic. */
+    bool is_twostage_name = s->force_deterministic && (s->split_k > 1 || s->split_k == -1);
     flag_names[n_flags] = "twostage";
-    flag_on[n_flags] = s->two_stage ? 1 : 0;
+    flag_on[n_flags] = is_twostage_name ? 1 : 0;
     n_flags++;
 
     return rocke_kernel_name_join(
@@ -274,16 +278,9 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             snprintf(reason, reason_cap, "split_k must be -1 (auto), 1, or >1 (got %d)", sk);
         return false;
     }
-    /* two_stage=true requires split_k > 1 (or -1 for auto); mirrors Python validate(). */
-    if(s->two_stage && sk == 1)
-    {
-        if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "two_stage=true requires split_k > 1 (got split_k=1); "
-                     "with split_k=1 there is nothing to reduce and two_stage is a no-op");
-        return false;
-    }
+    /* force_deterministic only activates the workspace epilogue when split_k > 1.
+     * For split_k=1 the direct store is already deterministic so the flag is
+     * silently ignored — it is not an error to set it with split_k=1. */
 
     /* split_k > 1 requires a CDNA arch (ctx->atom != NULL at build time).
      * On RDNA the op family is "wmma" and atom is NULL, so the split-K
@@ -1734,9 +1731,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     rocke_value_t* X_bytes = rocke_b_param(b, "X_bytes", rocke_i32(), NULL);
     rocke_value_t* dW_bytes = rocke_b_param(b, "dW_bytes", rocke_i32(), NULL);
 
-    /* Two-stage only: workspace ptr (f32) and its byte size.
-     * Only present when two_stage=true && split_k>1. */
-    bool is_two_stage = is_split_k && spec->two_stage;
+    /* is_two_stage: workspace epilogue is used when force_deterministic=true
+     * and split_k > 1.  For split_k=1 force_deterministic has no effect. */
+    bool is_two_stage = is_split_k && spec->force_deterministic;
     rocke_value_t* ws_ptr = NULL;
     if(is_two_stage)
     {

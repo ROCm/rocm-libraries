@@ -634,6 +634,7 @@ class DispatchResult:
     block: Tuple[int, int, int]
     signature: Tuple[dict, ...]
     explanation: Tuple[str, ...]
+    workspace_bytes: int = 0
 
     def build(self) -> Any:
         """Build the IR for this selection.

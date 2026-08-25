@@ -3,26 +3,32 @@
 
 """Backward-weight convolution (wgrad) dispatcher family.
 
-Implements the deterministic two-stage wgrad path (Parts 1 & 2).
+Three execution paths are available, selected by ``split_k`` and
+``force_deterministic``:
 
-The two-stage path avoids nondeterministic atomic adds by:
-  1. Stage 1: writing f32 partial sums per split-K partition to a workspace.
-  2. Stage 2: summing workspace slices in a fixed sequential order into dW.
+* **split_k=1** — single-pass direct store.  Always deterministic.  No
+  workspace, no atomics.  ``force_deterministic`` has no effect here.
+* **split_k>1, force_deterministic=False** (default) — each CTA
+  atomic-adds its partial f32 accumulator directly into ``dW``.  Faster
+  than two-stage but nondeterministic.  No workspace; caller must zero-init
+  ``dW`` before every launch.
+* **split_k>1, force_deterministic=True** — two-stage deterministic path.
+  Stage 1 writes f32 partial sums to a workspace buffer; Stage 2 reduces
+  them in a fixed sequential order into ``dW``.  Bit-exact reproducible.
+  Requires a workspace buffer of ``split_k * wg_M * wg_N * 4`` bytes (f32).
+  When the workspace exceeds the hard cap (2 GiB) the dispatcher falls back
+  to ``split_k=1`` (direct store, still deterministic).
 
-Workspace sizing
-----------------
-Required bytes = ``split_k * wg_M * wg_N * 4`` (always f32).
-A hard cap of 2 GiB is applied; when the preferred workspace exceeds the cap
-the dispatcher transparently falls back to ``split_k = 1`` (no workspace, no
-atomics, always correct).
+The ``two_stage`` field on :class:`WgradConvSpec` is an internal flag set by
+the dispatcher based on ``force_deterministic`` and ``split_k``; it is not
+intended to be set directly by callers.
 
 Query::
 
     from rocke.dispatch.families.conv_wgrad import query_wgrad_support
     info = query_wgrad_support(req, split_k=8)
     print(info["workspace"].preferred_bytes)
-
-Fast atomic mode (split_k > 1 without two-stage) is deferred to Part 3.
+    print(info["supports_fast_atomic"])
 """
 
 from __future__ import annotations
@@ -64,13 +70,13 @@ def _wgrad_dtype(dtype: str) -> str:
 
 
 _FAMILY = "conv_bwd_weight"
-_ALGORITHM = "implicit_gemm_wgrad_two_stage"
-CONV_WGRAD_ABI_VERSION = "hipkg-conv-wgrad-two-stage/v1"
+_ALGORITHM = "implicit_gemm_wgrad"
+CONV_WGRAD_ABI_VERSION = "hipkg-conv-wgrad/v1"
 
-# Hard cap on workspace allocation.  Requests that exceed this fall back to
-# split_k=1 (single pass, no workspace, always correct and deterministic).
-# Kept one f32 element below 2 GiB so ws_bytes (passed as i32) never overflows
-# signed int32 (max 2,147,483,647).
+# Hard cap on workspace allocation for the two-stage path.  When the preferred
+# workspace exceeds this the dispatcher falls back to split_k=1 (direct store,
+# always deterministic).  Kept one f32 element below 2 GiB so ws_bytes (passed
+# as i32) never overflows signed int32 (max 2,147,483,647).
 CONV_WGRAD_WORKSPACE_HARD_CAP: int = 2 * 1024 * 1024 * 1024 - 4  # 2 GiB − 1 f32
 
 
@@ -105,6 +111,10 @@ class ConvWgradRequest(OperatorRequest):
     layout: str = "NHWC"
     algorithm: str = "auto"
     spec_id: str = "auto"
+    force_deterministic: bool = False
+    """When True and split_k > 1, use the two-stage workspace path instead of
+    atomic adds.  Has no effect for split_k=1 (direct store is already
+    deterministic).  Defaults to False (atomic path preferred for performance)."""
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -218,7 +228,6 @@ def compute_wgrad_workspace_spec(
             f"got split_k={split_k}. Resolve split_k=-1 (auto) before calling."
         )
     if split_k == 1:
-        # Single-pass path: no workspace needed.
         return ConvWgradWorkspaceSpec(
             preferred_bytes=0,
             minimum_bytes=0,
@@ -257,19 +266,20 @@ def query_wgrad_support(
     split_k: int,
     hard_cap: int = CONV_WGRAD_WORKSPACE_HARD_CAP,
 ) -> dict:
-    """Return a human-readable support dict for the two-stage wgrad path.
+    """Return a human-readable support dict for the wgrad paths.
 
     Keys:
         workspace:              :class:`ConvWgradWorkspaceSpec`
-        supports_deterministic: True when workspace fits within the hard cap.
-        supports_fast_atomic:   Always False (Part 3).
+        supports_deterministic: True when split_k=1 or workspace fits the cap
+                                (two-stage path available for split_k>1).
+        supports_fast_atomic:   True when split_k > 1 (atomic path available).
         abi_version:            The ABI version string for this family.
     """
     ws = compute_wgrad_workspace_spec(req, split_k, hard_cap)
     return {
         "workspace": ws,
-        "supports_deterministic": ws.workspace_fits,
-        "supports_fast_atomic": False,
+        "supports_deterministic": split_k == 1 or ws.workspace_fits,
+        "supports_fast_atomic": split_k > 1,
         "abi_version": CONV_WGRAD_ABI_VERSION,
     }
 
@@ -327,6 +337,18 @@ def _selector_matches(
     return True, "ok"
 
 
+def _dtype_kernel(req: ConvWgradRequest) -> str:
+    """Normalise request dtype to the kernel's dtype_a/b/d convention."""
+    _dtype_map = {
+        "f16": "fp16",
+        "fp16": "fp16",
+        "bf16": "bf16",
+        "fp32": "fp32",
+        "f32": "fp32",
+    }
+    return _dtype_map.get(req.dtype.lower(), "fp16")
+
+
 def _default_wgrad_spec(
     req: ConvWgradRequest,
     tile_m: int = 64,
@@ -339,29 +361,21 @@ def _default_wgrad_spec(
     warp_tile_k: int = 16,
     pipeline: str = "mem",
 ) -> WgradConvSpec:
-    """Build a default WgradConvSpec for the given request.
+    """Build a WgradConvSpec honouring ``req.force_deterministic``.
 
-    The request dtype is threaded through to ConvDataSpec so that fp16, bf16,
-    and fp32 requests produce correctly-typed kernels.  For fp16/bf16 inputs the
-    dtype_a/dtype_b are set to the request dtype; the internal accumulator and
-    the workspace are always f32.
+    ``two_stage`` is derived internally and must not be set by callers:
+
+    * ``split_k=1``                            → ``two_stage=False`` (direct store).
+    * ``split_k>1, force_deterministic=False`` → ``two_stage=False`` (atomic adds).
+    * ``split_k>1, force_deterministic=True``  → ``two_stage=True``  (workspace path).
+      If the workspace would exceed the hard cap the dispatcher falls back to
+      ``split_k=1`` (direct store, still deterministic).
     """
     from ...instances.common._conv_implicit_gemm_common import ConvDataSpec
 
     p = _problem(req)
-    # Map dispatcher dtype string to the kernel's dtype_a/b/d convention.
-    # Dispatcher uses "f16"/"bf16" (normalized); kernel uses "fp16"/"bf16"/"fp32".
-    _dtype_map = {
-        "f16": "fp16",
-        "fp16": "fp16",
-        "bf16": "bf16",
-        "fp32": "fp32",
-        "f32": "fp32",
-    }
-    dtype_kernel = _dtype_map.get(req.dtype.lower(), "fp16")
-    data = ConvDataSpec(
-        dtype_a=dtype_kernel, dtype_b=dtype_kernel, dtype_d=dtype_kernel
-    )
+    dtype_k = _dtype_kernel(req)
+    data = ConvDataSpec(dtype_a=dtype_k, dtype_b=dtype_k, dtype_d=dtype_k)
 
     decision = select_split_k_wgrad(
         wg_M=_wg_M(p),
@@ -372,8 +386,17 @@ def _default_wgrad_spec(
         tile_k=tile_k,
         arch=req.arch,
     )
-    ws_spec = compute_wgrad_workspace_spec(req, decision.split_k)
-    effective_k = decision.split_k if ws_spec.workspace_fits else 1
+
+    if req.force_deterministic and decision.split_k > 1:
+        # Two-stage path: check workspace cap and fall back to split_k=1 if needed.
+        ws_spec = compute_wgrad_workspace_spec(req, decision.split_k)
+        effective_k = decision.split_k if ws_spec.workspace_fits else 1
+        two_stage = effective_k > 1
+    else:
+        # Atomic path (split_k>1) or direct store (split_k=1): no workspace.
+        effective_k = decision.split_k
+        two_stage = False
+
     return WgradConvSpec(
         problem=p,
         tile_m=tile_m,
@@ -386,7 +409,7 @@ def _default_wgrad_spec(
         warp_tile_k=warp_tile_k,
         pipeline=pipeline,
         split_k=effective_k,
-        two_stage=(effective_k > 1),
+        two_stage=two_stage,
         data=data,
     )
 
@@ -405,7 +428,13 @@ def _make_candidate(
     arches: Tuple[str, ...],
     dtypes: Tuple[str, ...] = ("f16", "bf16"),
 ) -> KernelCandidate:
-    """Factory mirroring conv.py's _make_candidate."""
+    """Factory for wgrad candidates.
+
+    The spec produced by ``spec_fn`` determines the execution path:
+    * ``two_stage=False, split_k=1``  → direct store (deterministic).
+    * ``two_stage=False, split_k>1``  → atomic adds (nondeterministic).
+    * ``two_stage=True,  split_k>1``  → workspace + sequential reduce (deterministic).
+    """
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -432,7 +461,6 @@ def _make_candidate(
         p = spec.problem
         gm = (_wg_M(p) + spec.tile_m - 1) // spec.tile_m
         gn = (_wg_N(p) + spec.tile_n - 1) // spec.tile_n
-        # Z dimension = split_k (each partition is one Z-slice)
         return (gn, gm, max(1, spec.split_k))
 
     candidate = KernelCandidate(
@@ -445,6 +473,9 @@ def _make_candidate(
         capability=Capability(arches=arches, dtypes=dtypes, layouts=("NHWC",)),
         _supports=support,
         select_spec=select,
+        # Signature depends on the spec's two_stage flag (set by _default_wgrad_spec):
+        # two_stage=True  → 8-param ABI with ws_ptr / ws_bytes.
+        # two_stage=False → standard 6-param ABI.
         signature=lambda spec: (
             _wgrad_stage1_signature(spec)
             if spec.two_stage
@@ -453,12 +484,9 @@ def _make_candidate(
         grid=grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
-        # When two_stage=True (the common split_k>1 case), build() returns only
-        # Stage 1.  Callers that need both stages must use
-        # build_implicit_gemm_conv_wgrad_two_stage(spec, arch) directly.
-        # DispatchResult.build() is intentionally Stage 1 only so the KernelDef
-        # can be lowered and inspected independently; the full pipeline is
-        # assembled by the launcher (see conv_implicit_gemm_wgrad_two_stage.py).
+        # build() returns the Stage 1 kernel def in all cases.  For the two-stage
+        # path the full pipeline (Stage 1 + Stage 2) is assembled by the caller
+        # via build_implicit_gemm_conv_wgrad_two_stage(spec, arch).
         build=build_implicit_gemm_conv_wgrad,
     )
     return candidate
@@ -473,7 +501,6 @@ _CDNA_ARCHES = ("gfx942", "gfx950")
 
 def _spec_cdna_mem_64x64(req: ConvWgradRequest) -> WgradConvSpec:
     # gfx942 only supports 16x16x16 f16 atom; gfx950 supports 32x32x16 too.
-    wt_m, wt_n, wt_k = (16, 16, 16)
     return _default_wgrad_spec(
         req,
         tile_m=64,
@@ -481,15 +508,14 @@ def _spec_cdna_mem_64x64(req: ConvWgradRequest) -> WgradConvSpec:
         tile_k=64,
         warp_m=4,
         warp_n=4,
-        warp_tile_m=wt_m,
-        warp_tile_n=wt_n,
-        warp_tile_k=wt_k,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
         pipeline="mem",
     )
 
 
 def _spec_cdna_mem_128x64(req: ConvWgradRequest) -> WgradConvSpec:
-    wt_m, wt_n, wt_k = (16, 16, 16)
     return _default_wgrad_spec(
         req,
         tile_m=128,
@@ -497,9 +523,9 @@ def _spec_cdna_mem_128x64(req: ConvWgradRequest) -> WgradConvSpec:
         tile_k=64,
         warp_m=8,
         warp_n=4,
-        warp_tile_m=wt_m,
-        warp_tile_n=wt_n,
-        warp_tile_k=wt_k,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
         pipeline="mem",
     )
 
@@ -587,10 +613,15 @@ def dispatch_conv_wgrad(
 ) -> DispatchResult:
     """Select a registered wgrad candidate for ``req``.
 
-    **Two-stage launch note:** ``result.grid`` and ``result.block`` describe
-    Stage 1 only (the GEMM kernel, Z-dim = split_k).  Stage 2 (the workspace
-    reduce kernel) uses a different grid with no Z dimension.  Obtain the full
-    pipeline via::
+    The ``two_stage`` flag on the returned spec is derived from
+    ``req.force_deterministic`` and the resolved ``split_k``:
+
+    * ``split_k=1``                            → direct store; ``workspace_bytes=0``.
+    * ``split_k>1, force_deterministic=False`` → atomic adds; ``workspace_bytes=0``.
+    * ``split_k>1, force_deterministic=True``  → two-stage; ``workspace_bytes > 0``.
+
+    For the two-stage path, ``result.grid`` and ``result.block`` describe Stage 1
+    only.  Stage 2 uses a different grid; obtain the full pipeline via::
 
         from rocke.instances.common.conv_implicit_gemm_wgrad_two_stage import (
             build_implicit_gemm_conv_wgrad_two_stage)
@@ -601,27 +632,33 @@ def dispatch_conv_wgrad(
     spec = candidate.select_spec(req)
     kid = _kernel_id(req, candidate, spec)
     s1_grid = candidate.grid(spec, req)
+
     if spec.two_stage:
         s2_grid = wgrad_stage2_grid(spec)
         grid_explanation = f"stage1_grid={s1_grid} stage2_grid={s2_grid}"
     else:
         grid_explanation = f"grid={s1_grid}"
-    # Recompute workspace spec so the fallback reason (if any) is visible in the
-    # explanation tuple.  Callers who skipped two_stage due to a workspace cap
-    # overflow can detect this from the explanation without inspecting internals.
-    ws_spec = compute_wgrad_workspace_spec(req, spec.split_k)
+
+    ws_bytes = spec.split_k * spec.wg_M * spec.wg_N * 4 if spec.two_stage else 0
+
     explanation: tuple = (
         f"selected {candidate.name} for wgrad on {req.arch}",
         f"algorithm={candidate.algorithm}",
         f"spec_id={candidate.spec_id}",
         f"two_stage={spec.two_stage}",
         f"split_k={spec.split_k}",
+        f"force_deterministic={req.force_deterministic}",
         grid_explanation,
+        f"workspace_bytes={ws_bytes}",
         f"spec_hash={kid.spec_hash}",
         f"request_hash={kid.request_hash}",
     )
-    if ws_spec.fallback_reason:
-        explanation = explanation + (f"workspace_fallback: {ws_spec.fallback_reason}",)
+    if spec.two_stage:
+        ws_spec = compute_wgrad_workspace_spec(req, spec.split_k)
+        if ws_spec.fallback_reason:
+            explanation = explanation + (
+                f"workspace_fallback: {ws_spec.fallback_reason}",
+            )
     return DispatchResult(
         request=req,
         candidate=candidate,
@@ -631,4 +668,5 @@ def dispatch_conv_wgrad(
         block=candidate.block(spec),
         signature=tuple(candidate.signature(spec)),
         explanation=explanation,
+        workspace_bytes=ws_bytes,
     )

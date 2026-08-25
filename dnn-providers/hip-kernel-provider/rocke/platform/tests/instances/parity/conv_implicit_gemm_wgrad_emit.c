@@ -22,8 +22,8 @@
  *   8  3-D conv N4Di14H14W14C32_K32Z3Y3X3, t64x64x64, w2x2, a32x32x16, mem/default, gfx950
  *   9  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 bf16
  *  10  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, chiplet_swizzle
- *  11  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 two_stage fp16
- *  12  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,      gfx942, split_k=4 two_stage fp16
+ *  11  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default, gfx950, spk4 force_det fp16
+ *  12  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default, gfx942, spk4 force_det fp16
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,8 +51,7 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
     spec->pipeline = "mem";
     spec->epilogue = "default";
 
-    switch(idx)
-    {
+    switch (idx) {
     case 0:
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
         *arch = "gfx950";
@@ -128,21 +127,22 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         *arch = "gfx950";
         return 0;
     case 11:
-        /* Two-stage deterministic: workspace-store epilogue, split_k=4, fp16, gfx950. */
+        /* Deterministic two-stage: force_deterministic=true activates workspace-store
+         * epilogue for split_k=4, fp16, gfx950. */
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
         spec->split_k = 4;
-        spec->two_stage = true;
+        spec->force_deterministic = true;
         *arch = "gfx950";
         return 0;
     case 12:
-        /* Two-stage deterministic: workspace-store epilogue, split_k=4, fp16, gfx942
+        /* Deterministic two-stage: force_deterministic=true, split_k=4, fp16, gfx942
          * (16x16x16 MFMA only). */
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
         spec->warp_tile_m = 16;
         spec->warp_tile_n = 16;
         spec->warp_tile_k = 16;
         spec->split_k = 4;
-        spec->two_stage = true;
+        spec->force_deterministic = true;
         *arch = "gfx942";
         return 0;
     default:
@@ -152,8 +152,7 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
 
 int main(int argc, char** argv)
 {
-    if(argc < 2)
-    {
+    if (argc < 2) {
         fprintf(stderr, "usage: %s <config_index> [ll|ir|verify]\n", argv[0]);
         return 2;
     }
@@ -162,16 +161,14 @@ int main(int argc, char** argv)
 
     rocke_implicit_gemm_conv_wgrad_spec_t spec;
     const char* arch = "gfx950";
-    if(make_cfg(idx, &spec, &arch) != 0)
-    {
+    if (make_cfg(idx, &spec, &arch) != 0) {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
     rocke_ir_builder_t b;
     rocke_kernel_def_t* kernel = rocke_build_implicit_gemm_conv_wgrad_new(&b, &spec, arch);
-    if(kernel == NULL)
-    {
+    if (kernel == NULL) {
         const char* m = rocke_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
         rocke_ir_builder_free(&b);
@@ -179,51 +176,40 @@ int main(int argc, char** argv)
     }
 
     int ret = 0;
-    if(strcmp(mode, "ll") == 0)
-    {
+    if (strcmp(mode, "ll") == 0) {
         char* llvm_text = NULL;
         rocke_status_t st
             = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
-        if(st != ROCKE_OK || !llvm_text)
-        {
+        if (st != ROCKE_OK || !llvm_text) {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
             rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
         free(llvm_text);
-    }
-    else if(strcmp(mode, "ir") == 0)
-    {
+    } else if (strcmp(mode, "ir") == 0) {
         char* t = NULL;
         rocke_status_t st = rocke_ir_serialize(kernel, &t);
-        if(st != ROCKE_OK || !t)
-        {
+        if (st != ROCKE_OK || !t) {
             fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
             rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
         free(t);
-    }
-    else if(strcmp(mode, "verify") == 0)
-    {
+    } else if (strcmp(mode, "verify") == 0) {
         rocke_diag_t* d = NULL;
         size_t n = 0;
         rocke_verify(kernel, &d, &n);
-        for(size_t i = 0; i < n; i++)
-        {
+        for (size_t i = 0; i < n; i++) {
             char* s = rocke_diag_to_string(&d[i]);
-            if(s)
-            {
+            if (s) {
                 puts(s);
                 free(s);
             }
         }
         rocke_diags_free(d, n);
-    }
-    else
-    {
+    } else {
         fprintf(stderr, "unknown mode %s\n", mode);
         rocke_ir_builder_free(&b);
         return 2;

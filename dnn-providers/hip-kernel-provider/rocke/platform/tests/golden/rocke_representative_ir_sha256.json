@@ -2,278 +2,6 @@
   "flavors": {
     "llvm20": {
       "cases": {
-        "attention/gfx942/2d_bf16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 393929,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16",
-          "sha256": "f2e657c99be9a646228a2ab2a8a04610437eab7fc46b15e8345bb6b6a1984f5f",
-          "status": "ok"
-        },
-        "attention/gfx942/2d_fp16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 382259,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16",
-          "sha256": "09324ad9a9c0526bc91ece6ea5886946d97dd6b41d9e634652222a60d6889d74",
-          "status": "ok"
-        },
-        "attention/gfx942/3d_bf16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 228943,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_bf16",
-          "sha256": "9574cfe6bee9e68c975ee8d662fc3960e4c41ce85eae7186e98037cbe50ea880",
-          "status": "ok"
-        },
-        "attention/gfx942/3d_fp16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 227590,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_fp16",
-          "sha256": "13f0c9fdc72a6463a17e1149037de06d5088c3ff6f1fa7773bd63e2bab0e3722",
-          "status": "ok"
-        },
-        "attention/gfx942/reduce_bf16_d128": {
-          "arch": "gfx942",
-          "bytes": 9443,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_bf16",
-          "sha256": "2d019098d54a0db2fe66898153afebac7ff2195c6f624b403d8755b2f23bf452",
-          "status": "ok"
-        },
-        "attention/gfx942/reduce_fp16_d128": {
-          "arch": "gfx942",
-          "bytes": 9431,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_fp16",
-          "sha256": "1ced74796048cd1ffdd5e575fecd1d7bdc81e4100245f678c0757c39b29d6f98",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_bf16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 167306,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16",
-          "sha256": "2abd4496e76992fab4b141b21db3f7b125495beb78a50be8dab9f9b26e130b9a",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_fp16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 165729,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16",
-          "sha256": "ca1dfcbc61b643a1b4e24d850886faf39610ea10ad627498046e3579cd209827",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_fp16_d128_b64_alibi": {
-          "arch": "gfx950",
-          "bytes": 170904,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_alibi",
-          "sha256": "18a968fd63f18c22592433ff37ac1a11551acbaf6753cebcaecff0ad3ea930e7",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_fp16_d128_b64_softcap": {
-          "arch": "gfx950",
-          "bytes": 173761,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_softcap",
-          "sha256": "789b89e8b91df3def11cbae2b5a161bb5d45d1222016a40c2174d37801b74807",
-          "status": "ok"
-        },
-        "attention/gfx950/3d_bf16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 228943,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_bf16",
-          "sha256": "9574cfe6bee9e68c975ee8d662fc3960e4c41ce85eae7186e98037cbe50ea880",
-          "status": "ok"
-        },
-        "attention/gfx950/3d_fp16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 227590,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_fp16",
-          "sha256": "13f0c9fdc72a6463a17e1149037de06d5088c3ff6f1fa7773bd63e2bab0e3722",
-          "status": "ok"
-        },
-        "attention/gfx950/reduce_bf16_d128": {
-          "arch": "gfx950",
-          "bytes": 9443,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_bf16",
-          "sha256": "2d019098d54a0db2fe66898153afebac7ff2195c6f624b403d8755b2f23bf452",
-          "status": "ok"
-        },
-        "attention/gfx950/reduce_fp16_d128": {
-          "arch": "gfx950",
-          "bytes": 9431,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_fp16",
-          "sha256": "1ced74796048cd1ffdd5e575fecd1d7bdc81e4100245f678c0757c39b29d6f98",
-          "status": "ok"
-        },
-        "attention_d256/gfx942/4warp_gqa": {
-          "arch": "gfx942",
-          "bytes": 466836,
-          "family": "attention_d256",
-          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "84ce0eaeddd692826ee85103f7c505786e963722a457ccff899bb72ec622db05",
-          "status": "ok"
-        },
-        "attention_d256/gfx950/pad_interleave": {
-          "arch": "gfx950",
-          "bytes": 596490,
-          "family": "attention_d256",
-          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg",
-          "sha256": "82882e1ae3bd102a32d47417d63662cf03e07b82c6d1ff552dc94c93d30345aa",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/bn128_sq512": {
-          "arch": "gfx950",
-          "bytes": 598747,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn128_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "0c0129af3ef10cbcae74771b30790a10907c0e639678b0a87e78243fc9b27e3a",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/default_causal_sq512": {
-          "arch": "gfx950",
-          "bytes": 336175,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "60071a493386264d6a64b4fbcbd90afd1b1917b7ee00ef5eb0c150e2143fd586",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/fp16_h64_sq512": {
-          "arch": "gfx950",
-          "bytes": 210986,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_fp16_kpad8_sq512_sk512_causal_lazyrs",
-          "sha256": "b88b4e9b4d184c1ea7d10e82d8109a6a50ecdd0f477ebbf67eec23d1c5fb60af",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/lazy_off_sq512": {
-          "arch": "gfx950",
-          "bytes": 331902,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal",
-          "sha256": "606f27b50e02364359830fb652f42e812376576a031e192f650dfa03d16c6686",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/noncausal_sq512": {
-          "arch": "gfx950",
-          "bytes": 214010,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_full_lazyrs",
-          "sha256": "221a93f343a77640acc6fe0015094f6b20ca6829049f88dcc3e879f4d4c32bbe",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_h64_sq512": {
-          "arch": "gfx950",
-          "bytes": 215178,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "5ac5adad5ad54088bf767d75679b37fd8ba844948f4e8a8a5aab8e90fa785b6d",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_hkvmaj_sq512": {
-          "arch": "gfx950",
-          "bytes": 320090,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
-          "sha256": "3cf82133454d9d48dc484407ba3a0d3c478cbacda360121e3476d7000c038901",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_intl_sq512": {
-          "arch": "gfx950",
-          "bytes": 319752,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_intl",
-          "sha256": "5ac3f9a4e4e6f0d6f0af053f3711c3062c5fb0b7b96ee9a29619752258fc3f0a",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_lazy_off_sq512": {
-          "arch": "gfx950",
-          "bytes": 315002,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_persist256",
-          "sha256": "8b7b301936689bbbc318595437aabfbc2fad0a3752a4576b0878bdeac0b77bf7",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_qbmaj_sq512": {
-          "arch": "gfx950",
-          "bytes": 319311,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "6ce869b64b26a831799bc8273946b698faa11e343deef18b15fe8820a89539f4",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_ragged_sq500": {
-          "arch": "gfx950",
-          "bytes": 320622,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs_persist256",
-          "sha256": "7c3a5c72acbb0548fe22c57b91ed387232313e44f796067161857dc07750b558",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_swa_w128_sq512": {
-          "arch": "gfx950",
-          "bytes": 434326,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs_persist256",
-          "sha256": "a2bb22c00a0f0e5454ceda1d586eeea0567890d90cc4779f8e335087bde11d19",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persistent_causal_sq512": {
-          "arch": "gfx950",
-          "bytes": 319311,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "6ce869b64b26a831799bc8273946b698faa11e343deef18b15fe8820a89539f4",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/ragged_causal_sq500": {
-          "arch": "gfx950",
-          "bytes": 337505,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "f6a308567dde0c53fd7be8082330280b744766f744a92cfada277de03e971871",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/ragged_full_sq500": {
-          "arch": "gfx950",
-          "bytes": 243850,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_full_ragged_lazyrs",
-          "sha256": "bc2e5854be1e89de5d67aefad35d90bb9cb631f22078f35b4f06f1ac023b6a65",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/ragged_h64_sq500": {
-          "arch": "gfx950",
-          "bytes": 215206,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "18f91926181355d1dd6d18f42acda5030d95ce8eac8c2f0724bf3688f6f03372",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/swa_w128_sq512": {
-          "arch": "gfx950",
-          "bytes": 455578,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs",
-          "sha256": "651d71715d9587c1fb4d9086ae10863b5ced7bfbd9dc74e79f5e52d11690364d",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/varlen_sq512": {
-          "arch": "gfx950",
-          "bytes": 337589,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_varlen_lazyrs",
-          "sha256": "d2b50bcdca579ac3119b80061223b9b1f1bc1d5dfbab4559a81fdfae9a95427a",
-          "status": "ok"
-        },
         "conv/gfx1151/n1h8c16k32r3": {
           "arch": "gfx1151",
           "bytes": 28515,
@@ -691,7 +419,144 @@
           "status": "ok"
         }
       },
-      "expected_failures": {},
+      "expected_failures": {
+        "attention/gfx942/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_alibi": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_softcap": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx942/4warp_gqa": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx950/pad_interleave": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/bn128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/default_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/fp16_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/noncausal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_hkvmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_intl_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_qbmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_ragged_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persistent_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_causal_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_full_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_h64_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/varlen_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        }
+      },
       "summary": {
         "arches": {
           "gfx11-generic": 1,
@@ -699,14 +564,11 @@
           "gfx1201": 7,
           "gfx1250": 2,
           "gfx90a": 4,
-          "gfx942": 14,
-          "gfx950": 50
+          "gfx942": 7,
+          "gfx950": 23
         },
-        "expected_failures": 0,
+        "expected_failures": 34,
         "families": {
-          "attention": 14,
-          "attention_d256": 2,
-          "attention_dense": 18,
           "conv": 9,
           "conv_wgrad": 7,
           "conv_wgrad_reduce": 3,
@@ -715,283 +577,11 @@
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 86
+        "ok_cases": 52
       }
     },
     "llvm22": {
       "cases": {
-        "attention/gfx942/2d_bf16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 394025,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16",
-          "sha256": "864c0ee45f501c76c8a167a2cb3e36d16d54ce09cf7858e11d2795384d8b0140",
-          "status": "ok"
-        },
-        "attention/gfx942/2d_fp16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 382355,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16",
-          "sha256": "72dc6aad6e3a1db8786de0cf7edb1dfaa3637b3d0efd154253cf92c8d2d837ae",
-          "status": "ok"
-        },
-        "attention/gfx942/3d_bf16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 229039,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_bf16",
-          "sha256": "915dee9cf59936432cbb47936fb39a8891b1e099f441f6f784345f02ca4da4cb",
-          "status": "ok"
-        },
-        "attention/gfx942/3d_fp16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 227686,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_fp16",
-          "sha256": "0ff3d0f097dcf73e49ea01b32c3fc01d1519acd1a4639ffc83b76bf1e68852ba",
-          "status": "ok"
-        },
-        "attention/gfx942/reduce_bf16_d128": {
-          "arch": "gfx942",
-          "bytes": 9450,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_bf16",
-          "sha256": "89e8da100b7756c5a53647d0b04f5afcfddfb72826631e4eb25152b00965d279",
-          "status": "ok"
-        },
-        "attention/gfx942/reduce_fp16_d128": {
-          "arch": "gfx942",
-          "bytes": 9438,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_fp16",
-          "sha256": "59bb6bd9c8c60592edff9c566a305014c98c679036933dd2bc455a45b00be1c0",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_bf16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 167402,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16",
-          "sha256": "16c6ebf9e1f600e9161072e9b0f9ffd94443bc5034336a996ed48e8db622f0ad",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_fp16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 165825,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16",
-          "sha256": "f6b26707508e47fef3e1fbde81293a176e45da6256e0369fc64d1e77436ede83",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_fp16_d128_b64_alibi": {
-          "arch": "gfx950",
-          "bytes": 171000,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_alibi",
-          "sha256": "2efb344eaf24c748d74e8fbbb67d88d060da666aeeee74ffb6cec173852533bc",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_fp16_d128_b64_softcap": {
-          "arch": "gfx950",
-          "bytes": 173857,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_softcap",
-          "sha256": "e06c330cfd372eae9ab473e79c1a049cfec851dbeb9ba71cc2efbf89080de0ec",
-          "status": "ok"
-        },
-        "attention/gfx950/3d_bf16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 229039,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_bf16",
-          "sha256": "915dee9cf59936432cbb47936fb39a8891b1e099f441f6f784345f02ca4da4cb",
-          "status": "ok"
-        },
-        "attention/gfx950/3d_fp16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 227686,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_fp16",
-          "sha256": "0ff3d0f097dcf73e49ea01b32c3fc01d1519acd1a4639ffc83b76bf1e68852ba",
-          "status": "ok"
-        },
-        "attention/gfx950/reduce_bf16_d128": {
-          "arch": "gfx950",
-          "bytes": 9450,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_bf16",
-          "sha256": "89e8da100b7756c5a53647d0b04f5afcfddfb72826631e4eb25152b00965d279",
-          "status": "ok"
-        },
-        "attention/gfx950/reduce_fp16_d128": {
-          "arch": "gfx950",
-          "bytes": 9438,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_fp16",
-          "sha256": "59bb6bd9c8c60592edff9c566a305014c98c679036933dd2bc455a45b00be1c0",
-          "status": "ok"
-        },
-        "attention_d256/gfx942/4warp_gqa": {
-          "arch": "gfx942",
-          "bytes": 466843,
-          "family": "attention_d256",
-          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "4cd0855b9ab6c2171dd49448b75992eebcfba31b8ad586fde80ece53f6cb7aae",
-          "status": "ok"
-        },
-        "attention_d256/gfx950/pad_interleave": {
-          "arch": "gfx950",
-          "bytes": 596590,
-          "family": "attention_d256",
-          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg",
-          "sha256": "5b214f97efdfe8ca290bab32639c380ebef25c1a67dda1eab55871e2dbe28e43",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/bn128_sq512": {
-          "arch": "gfx950",
-          "bytes": 598847,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn128_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "7693e53f40bcef2215dab65932eedd6b8cf8673a513ffcdd85d20749dc628240",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/default_causal_sq512": {
-          "arch": "gfx950",
-          "bytes": 336275,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "67b21cad343c170f68894e99b7979a48dd40a4ec4fb8282f9a44d0c30034fddf",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/fp16_h64_sq512": {
-          "arch": "gfx950",
-          "bytes": 211082,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_fp16_kpad8_sq512_sk512_causal_lazyrs",
-          "sha256": "e1bb4a32e589baa43590d6da4140574d058be03d5722111d68294982f885c1c3",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/lazy_off_sq512": {
-          "arch": "gfx950",
-          "bytes": 332002,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal",
-          "sha256": "04410717b66ee5468e73255c7f5d3c5e45eff602e28ff20c210f263fafb27b5c",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/noncausal_sq512": {
-          "arch": "gfx950",
-          "bytes": 214106,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_full_lazyrs",
-          "sha256": "4746f206ac356c019c62a7a9396dc010d56e0fc4928348e1828291d5a463bfe5",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_h64_sq512": {
-          "arch": "gfx950",
-          "bytes": 215274,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "d9e9b50f1a2c9c6fb0b2209bc3657c02a2c386d1b844754e68664d47be779c71",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_hkvmaj_sq512": {
-          "arch": "gfx950",
-          "bytes": 320190,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
-          "sha256": "0daf837981ad031c0d6d7e3f1f023cb9e7863a32ae781243fdbfe09ad5fe8f1e",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_intl_sq512": {
-          "arch": "gfx950",
-          "bytes": 319852,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_intl",
-          "sha256": "e547cfa174a4002135543ca6fb349f273692e11a0fe50157e27066fb38371aa2",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_lazy_off_sq512": {
-          "arch": "gfx950",
-          "bytes": 315102,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_persist256",
-          "sha256": "dc8513024c10524602f9c7a4e87e27eb2c89533bc747f9b19ce0367a324fad5f",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_qbmaj_sq512": {
-          "arch": "gfx950",
-          "bytes": 319411,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "7eca034bc6c349020460f4573f4a08d2fbb813560f25a141ade52b97780b271f",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_ragged_sq500": {
-          "arch": "gfx950",
-          "bytes": 320767,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs_persist256",
-          "sha256": "69d4f488d57912a1d8555b76e578541648f859635dde2cca1ccc007bfa35151a",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_swa_w128_sq512": {
-          "arch": "gfx950",
-          "bytes": 434426,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs_persist256",
-          "sha256": "defda8fa152ab32b66eb730b4142699cafa1be38f730b535c8eab3dc3360b986",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persistent_causal_sq512": {
-          "arch": "gfx950",
-          "bytes": 319411,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "7eca034bc6c349020460f4573f4a08d2fbb813560f25a141ade52b97780b271f",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/ragged_causal_sq500": {
-          "arch": "gfx950",
-          "bytes": 337650,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "ce6cb2b605b4feb3d83b70aab0dd5643ed57b4528332c8296e0cda365f1286cd",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/ragged_full_sq500": {
-          "arch": "gfx950",
-          "bytes": 243989,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_full_ragged_lazyrs",
-          "sha256": "27c75b408275a0eb147f28efba6fa67cfef5ee3b66ee1a12f546b4a2fc86773b",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/ragged_h64_sq500": {
-          "arch": "gfx950",
-          "bytes": 215345,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "4f252c05b2db02883252687a545e8f7667e86970cc159dfa597b14f1838eed2e",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/swa_w128_sq512": {
-          "arch": "gfx950",
-          "bytes": 455678,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs",
-          "sha256": "598829e9f68acae142c9765d630929e612335bd3af7e5b0334e2199199ad8707",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/varlen_sq512": {
-          "arch": "gfx950",
-          "bytes": 337689,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_varlen_lazyrs",
-          "sha256": "7173d5dee62ecc91be63bf331ac07f4a9ee7ee70b2a27bc1d62f8273f8546325",
-          "status": "ok"
-        },
         "conv/gfx1151/n1h8c16k32r3": {
           "arch": "gfx1151",
           "bytes": 28654,
@@ -1409,7 +999,144 @@
           "status": "ok"
         }
       },
-      "expected_failures": {},
+      "expected_failures": {
+        "attention/gfx942/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_alibi": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_softcap": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx942/4warp_gqa": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx950/pad_interleave": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/bn128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/default_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/fp16_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/noncausal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_hkvmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_intl_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_qbmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_ragged_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persistent_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_causal_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_full_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_h64_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/varlen_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        }
+      },
       "summary": {
         "arches": {
           "gfx11-generic": 1,
@@ -1417,14 +1144,11 @@
           "gfx1201": 7,
           "gfx1250": 2,
           "gfx90a": 4,
-          "gfx942": 14,
-          "gfx950": 50
+          "gfx942": 7,
+          "gfx950": 23
         },
-        "expected_failures": 0,
+        "expected_failures": 34,
         "families": {
-          "attention": 14,
-          "attention_d256": 2,
-          "attention_dense": 18,
           "conv": 9,
           "conv_wgrad": 7,
           "conv_wgrad_reduce": 3,
@@ -1433,283 +1157,11 @@
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 86
+        "ok_cases": 52
       }
     },
     "llvm23": {
       "cases": {
-        "attention/gfx942/2d_bf16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 394029,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16",
-          "sha256": "6e0d39d2695a6c99c427594b1dc4ec7b83def905bbb768714b6afcbfaeb7a912",
-          "status": "ok"
-        },
-        "attention/gfx942/2d_fp16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 382359,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16",
-          "sha256": "de36175e1d20d6d257d327113a9624e3f95545fd0e7f2ee1405b6b9fc09c3eda",
-          "status": "ok"
-        },
-        "attention/gfx942/3d_bf16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 229043,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_bf16",
-          "sha256": "6e52b5b08a6cdddd7d938593afd5a5b92b2ac0f2b1a8b2adadf4f361b5615e83",
-          "status": "ok"
-        },
-        "attention/gfx942/3d_fp16_d128_b64": {
-          "arch": "gfx942",
-          "bytes": 227690,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_fp16",
-          "sha256": "8e849b8d23bfa6dee1c1a94602d0ddd4c1ebcf62154e367611173e0db9f168c5",
-          "status": "ok"
-        },
-        "attention/gfx942/reduce_bf16_d128": {
-          "arch": "gfx942",
-          "bytes": 9454,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_bf16",
-          "sha256": "6aba4525062ac594de4fb13152f60c9a773042926b24143bac69939e17e4c806",
-          "status": "ok"
-        },
-        "attention/gfx942/reduce_fp16_d128": {
-          "arch": "gfx942",
-          "bytes": 9442,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_fp16",
-          "sha256": "9d75f0fe84e9ee9e9620f7fbf6ae8faa32e3d78f57c52d1d8457d5be483e042d",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_bf16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 167406,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16",
-          "sha256": "01c342f8d0078c3888fb70edf0ead9eb6c6d73ac29d227e951865b72082a1091",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_fp16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 165829,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16",
-          "sha256": "cc1eeedc44fc432b337fa98199f8ec67b7f1d742fb362269a1b3a0e433ce9592",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_fp16_d128_b64_alibi": {
-          "arch": "gfx950",
-          "bytes": 171004,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_alibi",
-          "sha256": "1f312afde6a83bc5f32b3931163210b6ded7e9a5467f7c7fd9a942802d03d6ec",
-          "status": "ok"
-        },
-        "attention/gfx950/2d_fp16_d128_b64_softcap": {
-          "arch": "gfx950",
-          "bytes": 173861,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_softcap",
-          "sha256": "40ff94fdc0665be87d920e37e48cba75fbdb36c8e8e8f4cceac1809e915e73b0",
-          "status": "ok"
-        },
-        "attention/gfx950/3d_bf16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 229043,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_bf16",
-          "sha256": "6e52b5b08a6cdddd7d938593afd5a5b92b2ac0f2b1a8b2adadf4f361b5615e83",
-          "status": "ok"
-        },
-        "attention/gfx950/3d_fp16_d128_b64": {
-          "arch": "gfx950",
-          "bytes": 227690,
-          "family": "attention",
-          "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_fp16",
-          "sha256": "8e849b8d23bfa6dee1c1a94602d0ddd4c1ebcf62154e367611173e0db9f168c5",
-          "status": "ok"
-        },
-        "attention/gfx950/reduce_bf16_d128": {
-          "arch": "gfx950",
-          "bytes": 9454,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_bf16",
-          "sha256": "6aba4525062ac594de4fb13152f60c9a773042926b24143bac69939e17e4c806",
-          "status": "ok"
-        },
-        "attention/gfx950/reduce_fp16_d128": {
-          "arch": "gfx950",
-          "bytes": 9442,
-          "family": "attention",
-          "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_fp16",
-          "sha256": "9d75f0fe84e9ee9e9620f7fbf6ae8faa32e3d78f57c52d1d8457d5be483e042d",
-          "status": "ok"
-        },
-        "attention_d256/gfx942/4warp_gqa": {
-          "arch": "gfx942",
-          "bytes": 466847,
-          "family": "attention_d256",
-          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "c2b546605348afc53538218b0b3a07f37ba7735b27e14ae1237261a192828d70",
-          "status": "ok"
-        },
-        "attention_d256/gfx950/pad_interleave": {
-          "arch": "gfx950",
-          "bytes": 596594,
-          "family": "attention_d256",
-          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg",
-          "sha256": "c8939df265ac3d2fb074226bdd8ce1de058eb75bba62b603ed4d07a5b25d9a25",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/bn128_sq512": {
-          "arch": "gfx950",
-          "bytes": 598851,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn128_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "16745fee6d39f36116c8b0fc35cf2fbd5e0bc8248a7658970fa8f8ba7cfeb5fe",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/default_causal_sq512": {
-          "arch": "gfx950",
-          "bytes": 336279,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs",
-          "sha256": "14c3edc10d6fc6cf61d49a4dbf5fa72b62824f93d484314219a8399135f76575",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/fp16_h64_sq512": {
-          "arch": "gfx950",
-          "bytes": 211086,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_fp16_kpad8_sq512_sk512_causal_lazyrs",
-          "sha256": "70c06bd0cbf65b4768710a536792d9745cb6ecfb1d6e5d5caf2e932fb34db17e",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/lazy_off_sq512": {
-          "arch": "gfx950",
-          "bytes": 332006,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal",
-          "sha256": "72d5d3fd3f2f2ab0de1e9e447c45159e4cae15d86d1d2476bf5f095661fc9b92",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/noncausal_sq512": {
-          "arch": "gfx950",
-          "bytes": 214110,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_full_lazyrs",
-          "sha256": "c7c30bebbc1fdfd0b3e57fcf23a68cbcd7f4b3e89244991ad979dc6399e32965",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_h64_sq512": {
-          "arch": "gfx950",
-          "bytes": 215278,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "2f3a2437992d371755635b18274313a799e07495babbc5f99b8d11e81910764a",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_hkvmaj_sq512": {
-          "arch": "gfx950",
-          "bytes": 320194,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
-          "sha256": "e125aa896a58114eb501147da26542f9f9048387b2936cfad2ab2252017332e8",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_intl_sq512": {
-          "arch": "gfx950",
-          "bytes": 319856,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_intl",
-          "sha256": "5e200a4a16b25a69df4ee70bee48b61f53bd9bf03c68c4494cbe39a372aa102a",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_lazy_off_sq512": {
-          "arch": "gfx950",
-          "bytes": 315106,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_persist256",
-          "sha256": "37869a6ac5859c672947b5a9b7d7bcdd2d90e33c90cc64ab09b0331da3a846a8",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_qbmaj_sq512": {
-          "arch": "gfx950",
-          "bytes": 319415,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "be9bf1de3193bb32dd08b95a02d9016be2ba1df8598b2ab908b8a01fa9523da7",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_ragged_sq500": {
-          "arch": "gfx950",
-          "bytes": 320771,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs_persist256",
-          "sha256": "f70cacd91eb226e6bb68f9238a8343e147cdba6b3f34c3c47322b375f4c7f576",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persist_swa_w128_sq512": {
-          "arch": "gfx950",
-          "bytes": 434430,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs_persist256",
-          "sha256": "812badd5b8a85a430ad0f1f11dc798f1013dc0b6f9b5e959b0264d42e279f5ac",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/persistent_causal_sq512": {
-          "arch": "gfx950",
-          "bytes": 319415,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256",
-          "sha256": "be9bf1de3193bb32dd08b95a02d9016be2ba1df8598b2ab908b8a01fa9523da7",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/ragged_causal_sq500": {
-          "arch": "gfx950",
-          "bytes": 337654,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "29882bd3e1b04a728229fbd7c24cc8430ad9bc07b0dbc0eab9b65f07b753145f",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/ragged_full_sq500": {
-          "arch": "gfx950",
-          "bytes": 243993,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk500_full_ragged_lazyrs",
-          "sha256": "a000d2870faeab11b31bb9ed63b2bf3b57e2b366c9c455584d737a5422ecbfc2",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/ragged_h64_sq500": {
-          "arch": "gfx950",
-          "bytes": 215349,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d64_hq128_kv8_bn64_bf16_kpad8_sq500_sk500_causal_ragged_lazyrs",
-          "sha256": "323481d96466c8a685e02db1ac6b0b6d3dd7653c7e58b574f2c93fc020573efb",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/swa_w128_sq512": {
-          "arch": "gfx950",
-          "bytes": 455682,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_swa128_lazyrs",
-          "sha256": "8c4b2ff314a6a31cdf6732832e5958286d51b3a23ae96f90897df370353491a6",
-          "status": "ok"
-        },
-        "attention_dense/gfx950/varlen_sq512": {
-          "arch": "gfx950",
-          "bytes": 337693,
-          "family": "attention_dense",
-          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_varlen_lazyrs",
-          "sha256": "006e8b663ec4fd1da0c0a85ae5fc389d5e7d82e3fd4f60cedba1153f91bfe640",
-          "status": "ok"
-        },
         "conv/gfx1151/n1h8c16k32r3": {
           "arch": "gfx1151",
           "bytes": 28658,
@@ -2127,7 +1579,144 @@
           "status": "ok"
         }
       },
-      "expected_failures": {},
+      "expected_failures": {
+        "attention/gfx942/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_alibi": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_softcap": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx942/4warp_gqa": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx950/pad_interleave": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/bn128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/default_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/fp16_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/noncausal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_hkvmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_intl_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_qbmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_ragged_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persistent_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_causal_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_full_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_h64_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/varlen_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        }
+      },
       "summary": {
         "arches": {
           "gfx11-generic": 1,
@@ -2135,14 +1724,11 @@
           "gfx1201": 7,
           "gfx1250": 2,
           "gfx90a": 4,
-          "gfx942": 14,
-          "gfx950": 50
+          "gfx942": 7,
+          "gfx950": 23
         },
-        "expected_failures": 0,
+        "expected_failures": 34,
         "families": {
-          "attention": 14,
-          "attention_d256": 2,
-          "attention_dense": 18,
           "conv": 9,
           "conv_wgrad": 7,
           "conv_wgrad_reduce": 3,
@@ -2151,7 +1737,7 @@
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 86
+        "ok_cases": 52
       }
     }
   },

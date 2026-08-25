@@ -141,12 +141,24 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
     /* split_k: -1 = auto, 1 = off, >1 = fixed degree. */
     int split_k; /* default 1 */
 
-    /* two_stage: when true and split_k > 1, Stage 1 writes f32 partial sums
-     * to a workspace buffer (ws_ptr / ws_bytes kernel params) instead of
-     * atomic-adding into dW.  Stage 2 (conv_wgrad_workspace_reduce) then
-     * reduces the workspace slices into dW in a fixed sequential order.
-     * This guarantees bit-exact, deterministic output. */
-    bool two_stage; /* default false */
+    /* force_deterministic: when true and split_k > 1, the builder uses the
+     * two-stage workspace epilogue (plain f32 stores to ws_ptr per CTA) instead
+     * of atomic-adding into dW.  Stage 2 (rocke_build_wgrad_workspace_reduce)
+     * then reduces the workspace slices into dW in a fixed sequential order,
+     * guaranteeing bit-exact, deterministic output.
+     *
+     * When split_k == 1 this flag has no effect: the kernel always uses a direct
+     * store (already deterministic, no atomics, no workspace).
+     *
+     * Caller contract when force_deterministic=true and split_k > 1:
+     *   - Allocate workspace of split_k * wg_M * wg_N * 4 bytes (f32).
+     *   - Pass ws_ptr and ws_bytes as the last two kernel arguments (Stage 1).
+     *   - Launch Stage 2 (workspace-reduce kernel) after Stage 1 completes.
+     *
+     * When force_deterministic=false and split_k > 1, the kernel atomic-adds its
+     * partial accumulator directly into dW.  The caller must zero-init dW before
+     * every launch; no workspace is needed. */
+    bool force_deterministic; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

@@ -268,8 +268,8 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 11:
-        # Two-stage deterministic: workspace-store epilogue instead of atomic-add.
-        # split_k=4, two_stage=True, fp16 output, gfx950.
+        # Deterministic two-stage (force_deterministic=True at user level → two_stage=True
+        # on the internal WgradConvSpec): workspace-store epilogue, split_k=4, fp16, gfx950.
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
         return (
             WgradConvSpec(
@@ -290,7 +290,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 12:
-        # Two-stage deterministic, gfx942 (16x16x16 MFMA only).
+        # Deterministic two-stage, gfx942 (16x16x16 MFMA only).
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
         return (
             WgradConvSpec(
