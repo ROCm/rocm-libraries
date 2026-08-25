@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-import collections
 import logging
 import random
 import unittest
+from dataclasses import replace
 
 from ck4inductor.universal_gemm.gen_instances import (
     gen_ops_library as gen_gemm_ops_library,
@@ -239,24 +239,31 @@ class TestDeterministicOrder(unittest.TestCase):
         # Canonical means a fixed point: re-canonicalizing changes nothing.
         self.assertEqual([op.name() for op in canonical_instances(result)], names)
 
-    def test_duplicate_names_are_equal_instances(self):
-        # Why dropping a same-name op is legal, checked against the real pool
-        # rather than asserted in a comment: `name()` derives from dict_items(),
-        # so two ops sharing a name agree on every template parameter. If CK ever
-        # ships two *different* kernels that render the same name, the dedup would
-        # silently discard one -- this is the test that would catch it.
-        for label, fn in self.ENUMERATORS:
-            with self.subTest(enumerator=label):
-                by_name = collections.defaultdict(list)
-                for op in fn():
-                    by_name[op.name()].append(op)
-                for name, group in by_name.items():
-                    for other in group[1:]:
-                        self.assertEqual(
-                            group[0],
-                            other,
-                            f"{label}: ops share name {name} but differ in fields",
-                        )
+    def test_name_collision_between_distinct_instances_is_reported(self):
+        # Dropping a same-name op is only legal because `name()` is a total key:
+        # it derives from dict_items(), so two ops sharing a name agree on every
+        # template parameter. The helper enforces that rather than assuming it.
+        instances = gen_conv_ops_library()
+        self.assertTrue(instances)
+
+        # Forge a collision: same name(), different template parameters.
+        impostor = replace(instances[0], k_per_block=instances[0].k_per_block + 8)
+        self.assertNotEqual(impostor, instances[0])
+        impostor.name = instances[0].name  # bind the victim's name onto it
+
+        with self.assertLogs("ck4inductor.util", level="ERROR") as captured:
+            result = canonical_instances([instances[0], impostor])
+        self.assertIn("share the name", "\n".join(captured.output))
+
+        # Reported, not raised: collisions cost coverage, not correctness, so
+        # the pool stays usable. One of the two is still dropped -- that is the
+        # loss the log exists to surface.
+        self.assertEqual(len(result), 1)
+
+        # And an honest pool logs nothing.
+        with self.assertNoLogs("ck4inductor.util", level="ERROR"):
+            names = [op.name() for op in canonical_instances(instances[:4])]
+        self.assertEqual(names, sorted(op.name() for op in instances[:4]))
 
     def test_every_grep_based_enumerator_is_sorted(self):
         # Guards the wiring: the helper existing is not the same as each enumerator

@@ -2,10 +2,13 @@
 # SPDX-License-Identifier: MIT
 
 import functools
+import logging
 import os
 import shutil
 import subprocess
 import tempfile
+
+log = logging.getLogger(__name__)
 
 
 @functools.lru_cache(None)
@@ -148,12 +151,22 @@ def canonical_instances(op_instances):
     arms of a `get_device_name()` branch; the WMMA header repeats its `// generic
     instance` into each partN list, and separate translation units consume those.
     Grepping a directory flattens those partitions into one pool, so the repeats
-    become genuine duplicates *here* and nowhere else. 
+    become genuine duplicates *here* and nowhere else.
     """
-    seen = set()
-    unique = []
+    survivors = {}
     for op in sorted(op_instances, key=lambda op: op.name()):
-        if op.name() not in seen:
-            seen.add(op.name())
-            unique.append(op)
-    return unique
+        kept = survivors.setdefault(op.name(), op)
+        # Dropping a same-name op is only legal because name() is a total key --
+        # it is built from dict_items(), so equal names imply equal parameters.
+        # Check that here rather than trusting it: after the fact both ops are
+        # no longer available to compare, so this is the only point where the
+        # loss is detectable.
+        if kept is not op and kept != op:
+            log.error(
+                "ck4inductor: instances differ but share the name %r; keeping "
+                "the first and dropping the other, so one kernel is missing "
+                "from the pool. name() derives from dict_items(), so a template "
+                "parameter has stopped contributing to it.",
+                op.name(),
+            )
+    return list(survivors.values())
