@@ -381,7 +381,7 @@ hipsparseStatus_t hipsparseLtDestroy(const hipsparseLtHandle_t* handle);
  *  @param[in]
  *  alignment  memory alignment in bytes (not used by the HIP backend).
  *  @param[in]
- *  valueType  data type of the matrix. See \ref hipDataType.
+ *  valueType  data type of the matrix. See hipDataType.
  *  @param[in]
  *  order      memory layout: \p HIPSPARSE_ORDER_COL or \p HIPSPARSE_ORDER_ROW.
  *
@@ -418,7 +418,7 @@ hipsparseStatus_t hipsparseLtDenseDescriptorInit(const hipsparseLtHandle_t*  han
  *  @param[in]
  *  alignment  memory alignment in bytes (not used by the HIP backend).
  *  @param[in]
- *  valueType  data type of the matrix. See \ref hipDataType.
+ *  valueType  data type of the matrix. See hipDataType.
  *  @param[in]
  *  order      memory layout: \p HIPSPARSE_ORDER_COL or \p HIPSPARSE_ORDER_ROW.
 
