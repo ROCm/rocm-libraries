@@ -632,7 +632,7 @@ class LineStoreAccess
 public:
     static LineStoreShard make()
     {
-        return LineStoreShard();
+        return {};
     }
 
     static LineStoreRegistryEntry* entry(const LineStoreShard& shard) noexcept
