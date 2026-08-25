@@ -173,7 +173,7 @@ public:
                            const std::vector<int64_t>& order) override
     {
         const std::string combinedKeyHex = combinedKey(key, deviceKey);
-        const auto shardPath = shardPathFor(combinedKeyHex);
+        const auto shardPath = shardPathFor(combinedKeyHex, /*createSubtree=*/true);
         if(!shardPath.has_value())
         {
             return RankingWriteStatus::UNAVAILABLE;
@@ -261,7 +261,8 @@ public:
         };
 
         const std::string combinedKeyHex = combinedKey(key, deviceKey);
-        const auto shardPath = shardPathFor(combinedKeyHex);
+        // No subtree creation: a lookup that misses must leave no trace.
+        const auto shardPath = shardPathFor(combinedKeyHex, /*createSubtree=*/false);
         if(!shardPath.has_value())
         {
             setStatus(RankingLookupStatus::UNAVAILABLE);
@@ -269,7 +270,14 @@ public:
         }
 
         auto [shard, openStatus]
-            = hipdnn_data_sdk::utilities::openLineStore(*shardPath, detail::shardVersion());
+            = hipdnn_data_sdk::utilities::openExistingLineStore(*shardPath, detail::shardVersion());
+        if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::NOT_FOUND)
+        {
+            // Nothing was ever written under this key: an ordinary miss, and the common
+            // case for any graph that has not been swept.
+            setStatus(RankingLookupStatus::MISS);
+            return std::nullopt;
+        }
         if(openStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK || !shard.has_value())
         {
             setStatus(RankingLookupStatus::UNAVAILABLE);
@@ -334,8 +342,14 @@ private:
         return detail::hexEncode(combined);
     }
 
-    /// Resolves the shard path for @p combinedKeyHex, or nullopt if the cache root is unavailable.
-    static std::optional<std::filesystem::path> shardPathFor(const std::string& combinedKeyHex)
+    /// Resolves the shard path for @p combinedKeyHex, or nullopt if the cache root is
+    /// unavailable.
+    ///
+    /// @param createSubtree Create the versioned subtree when absent. True for put(),
+    ///     which is about to write into it; false for get(), where an absent subtree
+    ///     already means nothing has been written.
+    static std::optional<std::filesystem::path> shardPathFor(const std::string& combinedKeyHex,
+                                                             bool createSubtree)
     {
         const auto root = hipdnn_data_sdk::utilities::cacheRoot();
         if(root.empty())
@@ -344,11 +358,14 @@ private:
         }
 
         const auto subtree = root / "autotune-rankings" / detail::shardVersion();
-        std::error_code failed;
-        std::filesystem::create_directories(subtree, failed);
-        if(failed || !std::filesystem::is_directory(subtree))
+        if(createSubtree)
         {
-            return std::nullopt;
+            std::error_code failed;
+            std::filesystem::create_directories(subtree, failed);
+            if(failed || !std::filesystem::is_directory(subtree))
+            {
+                return std::nullopt;
+            }
         }
 
         return subtree / (hipdnn_data_sdk::utilities::sanitizeForPath(combinedKeyHex) + ".jsonl");

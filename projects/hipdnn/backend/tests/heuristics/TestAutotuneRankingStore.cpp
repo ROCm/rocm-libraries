@@ -409,6 +409,121 @@ TEST_F(TestAutotuneRankingStore, UnwritableCacheRootDeclinesReadAndWriteWithoutT
 }
 #endif // defined(__linux__)
 
+// --- A lookup must not create state --------------------------------------------------
+//
+// The read path runs for every graph on the default heuristic policy list, over an
+// unbounded key space: one shard per distinct (graph, device) pair. Were a miss to
+// materialize the shard it failed to find, a process finalizing many distinct graphs
+// would leave an empty file for each, plus an open descriptor -- the registry never
+// closes an entry, since POSIX locks are per (process, inode). Creating state belongs to
+// the write path.
+
+TEST_F(TestAutotuneRankingStore, MissDoesNotCreateAShard)
+{
+    const FileAutotuneRankingStore store;
+    const std::vector<uint8_t> key{4, 4, 4};
+    const std::vector<uint8_t> deviceKey{1};
+
+    RankingLookupStatus status = RankingLookupStatus::HIT;
+    const auto entry = store.get(key, deviceKey, &status);
+
+    EXPECT_FALSE(entry.has_value());
+    EXPECT_EQ(status, RankingLookupStatus::MISS)
+        << "an absent shard is an ordinary miss, not an unavailable cache";
+
+    size_t created = 0;
+    std::error_code ignored;
+    for(const auto& e : std::filesystem::recursive_directory_iterator(_cacheDir, ignored))
+    {
+        if(e.is_regular_file())
+        {
+            ++created;
+        }
+    }
+    EXPECT_EQ(created, 0u) << "a pure lookup created " << created << " file(s) under " << _cacheDir;
+}
+
+// Files scale with distinct keys looked up, so a read-only workload must create none
+// however many keys it touches.
+TEST_F(TestAutotuneRankingStore, ManyDistinctMissesCreateNothing)
+{
+    const FileAutotuneRankingStore store;
+    constexpr int DISTINCT_KEYS = 64;
+
+    for(int i = 0; i < DISTINCT_KEYS; ++i)
+    {
+        const std::vector<uint8_t> key{static_cast<uint8_t>(i), 0xAB};
+        RankingLookupStatus status = RankingLookupStatus::HIT;
+        EXPECT_FALSE(store.get(key, {}, &status).has_value());
+        EXPECT_EQ(status, RankingLookupStatus::MISS);
+    }
+
+    size_t created = 0;
+    std::error_code ignored;
+    for(const auto& e : std::filesystem::recursive_directory_iterator(_cacheDir, ignored))
+    {
+        if(e.is_regular_file())
+        {
+            ++created;
+        }
+    }
+    EXPECT_EQ(created, 0u) << DISTINCT_KEYS << " distinct misses created " << created << " file(s)";
+}
+
+#if defined(__linux__)
+// States the resource bound directly, via /proc/self/fd. The file-count assertions above
+// would still pass if the store opened a descriptor per key and leaked it without
+// creating anything -- the half that reaches RLIMIT_NOFILE and then fails unrelated
+// dlopen/hipModuleLoad calls.
+TEST_F(TestAutotuneRankingStore, DistinctMissesDoNotAccumulateDescriptors)
+{
+    const auto openDescriptors = [] {
+        size_t count = 0;
+        std::error_code ignored;
+        for(const auto& e : std::filesystem::directory_iterator("/proc/self/fd", ignored))
+        {
+            (void)e;
+            ++count;
+        }
+        return count;
+    };
+
+    const FileAutotuneRankingStore store;
+    const size_t before = openDescriptors();
+
+    for(int i = 0; i < 64; ++i)
+    {
+        const std::vector<uint8_t> key{static_cast<uint8_t>(i), 0xCD};
+        RankingLookupStatus status = RankingLookupStatus::HIT;
+        EXPECT_FALSE(store.get(key, {}, &status).has_value());
+    }
+
+    EXPECT_EQ(openDescriptors(), before)
+        << "64 distinct-key misses changed this process's open descriptor count";
+}
+#endif // defined(__linux__)
+
+// Not creating on read must not stop a written record from being found: a get() that
+// always missed would satisfy the assertions above.
+TEST_F(TestAutotuneRankingStore, WriteThenReadStillHitsAfterNonCreatingRead)
+{
+    FileAutotuneRankingStore store;
+    const std::vector<uint8_t> key{5, 5};
+    const std::vector<uint8_t> deviceKey{2};
+
+    RankingLookupStatus status = RankingLookupStatus::HIT;
+    EXPECT_FALSE(store.get(key, deviceKey, &status).has_value());
+    EXPECT_EQ(status, RankingLookupStatus::MISS);
+
+    ASSERT_EQ(store.put(key, deviceKey, {1, 2, 3}, {3, 1, 2}), RankingWriteStatus::WRITTEN);
+
+    const auto entry = store.get(key, deviceKey, &status);
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(status, RankingLookupStatus::HIT);
+    EXPECT_EQ(entry->order, (std::vector<int64_t>{3, 1, 2}));
+    EXPECT_EQ(entry->sampledEngineIds, (std::vector<int64_t>{1, 2, 3}));
+}
+
 // --- Cross-process oracle -------------------------------------------------------------
 //
 // Persistence across process boundaries is unobservable within a single test process,
