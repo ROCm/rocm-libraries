@@ -1515,7 +1515,7 @@ def runTileEngineGemmTests(String arch, String compiler) {
 // The tier is woven into every result filename. Both lanes write into
 // projects/composablekernel/build, so without it a build with both enabled
 // would have the second stage's archiveArtifacts overwrite the first's.
-def runDispatcherPerfTests(String compiler, String tier) {
+def runDispatcherPerfTests(String compiler, String tier, String gpuTarget = "gfx942") {
     def daily          = (tier == "daily")
     def samplingTier   = daily ? "daily" : "500"
     def gemmDatatype   = daily ? "fp8;fp16;bf8;bf16" : "fp16"
@@ -1525,23 +1525,49 @@ def runDispatcherPerfTests(String compiler, String tier) {
                                : '"1024,1024,1024"'
     def problemConfigs = daily ? '"g=2;m=1024;n=1024;k=1024" "g=4;m=2048;n=2048;k=2048"'
                                : '"g=2;m=1024;n=1024;k=1024"'
-    def execute_cmd = """
-        cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-            -D BUILD_CK_TILE_ENGINE="ON" \
-            -D CMAKE_CXX_COMPILER="${compiler}" \
-            -D CMAKE_BUILD_TYPE=Release \
-            -D GPU_TARGETS="gfx942" \
-            -D GEMM_UNIVERSAL_DATATYPE="${gemmDatatype}" \
-            -D GEMM_UNIVERSAL_LAYOUT="${gemmLayout}" \
-            -D BATCHED_GEMM_DATATYPE="fp16" \
-            -D BATCHED_GEMM_LAYOUT="rcr" \
-            -D BATCHED_CONTRACTION_DATATYPE="fp16" \
-            -D BATCHED_CONTRACTION_LAYOUT="rcr" \
-            -D TILE_ENGINE_SAMPLING_TIER=${samplingTier} .. && \
-        ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_batched_gemm_all benchmark_batched_contraction_all && \
-        python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_universal_results_${tier}.json && \
-        python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json batched_gemm_results_${tier}.json && \
-        python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs ${problemConfigs} --warmup 5 --repeat 5 --verbose --json batched_contraction_results_${tier}.json"""
+    // gemm_aquant and gemm_bquant are fp8/bf8-only; run on gfx950 where those
+    // data types are natively supported. gemm_streamk and the original three ops
+    // run on gfx942.
+    def quantDatatype  = daily ? "fp8;bf8" : "fp8"
+    def quantLayout    = daily ? "rcr;rrr;ccr;crr" : "rcr"
+    def execute_cmd
+    if (gpuTarget == "gfx950") {
+        execute_cmd = """
+            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+                -D BUILD_CK_TILE_ENGINE="ON" \
+                -D CMAKE_CXX_COMPILER="${compiler}" \
+                -D CMAKE_BUILD_TYPE=Release \
+                -D GPU_TARGETS="gfx950" \
+                -D GEMM_AQUANT_DATATYPE="${quantDatatype}" \
+                -D GEMM_AQUANT_LAYOUT="${quantLayout}" \
+                -D GEMM_BQUANT_DATATYPE="${quantDatatype}" \
+                -D GEMM_BQUANT_LAYOUT="${quantLayout}" \
+                -D TILE_ENGINE_SAMPLING_TIER=${samplingTier} .. && \
+            ninja -j${nthreads()} benchmark_gemm_aquant_all benchmark_gemm_bquant_all && \
+            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_aquant/gemm_aquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_aquant_results_${tier}.json && \
+            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_bquant/gemm_bquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_bquant_results_${tier}.json"""
+    } else {
+        execute_cmd = """
+            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+                -D BUILD_CK_TILE_ENGINE="ON" \
+                -D CMAKE_CXX_COMPILER="${compiler}" \
+                -D CMAKE_BUILD_TYPE=Release \
+                -D GPU_TARGETS="gfx942" \
+                -D GEMM_UNIVERSAL_DATATYPE="${gemmDatatype}" \
+                -D GEMM_UNIVERSAL_LAYOUT="${gemmLayout}" \
+                -D BATCHED_GEMM_DATATYPE="fp16" \
+                -D BATCHED_GEMM_LAYOUT="rcr" \
+                -D BATCHED_CONTRACTION_DATATYPE="fp16" \
+                -D BATCHED_CONTRACTION_LAYOUT="rcr" \
+                -D GEMM_STREAMK_DATATYPE="${gemmDatatype}" \
+                -D GEMM_STREAMK_LAYOUT="${gemmLayout}" \
+                -D TILE_ENGINE_SAMPLING_TIER=${samplingTier} .. && \
+            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_batched_gemm_all benchmark_batched_contraction_all benchmark_gemm_streamk_all && \
+            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_universal_results_${tier}.json && \
+            python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json batched_gemm_results_${tier}.json && \
+            python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs ${problemConfigs} --warmup 5 --repeat 5 --verbose --json batched_contraction_results_${tier}.json && \
+            python3 ../tile_engine/ops/gemm_streamk/gemm_streamk_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_streamk_results_${tier}.json"""
+    }
     try {
         buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
     } finally {

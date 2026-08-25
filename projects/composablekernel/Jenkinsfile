@@ -138,11 +138,11 @@ pipeline {
         booleanParam(
             name: "RUN_DISPATCHER_PERF_TESTS",
             defaultValue: false,
-            description: "Smoke-tier benchmark of ahead-of-time tile_engine GEMM instances on gfx942: gemm_universal, batched_gemm, batched_contraction at fp16/rcr, one problem size, 500-instance budget (default: OFF)")
+            description: "Smoke-tier benchmark of ahead-of-time tile_engine GEMM instances on gfx942+gfx950: gemm_universal, batched_gemm, batched_contraction, gemm_streamk at fp16/rcr on gfx942; gemm_aquant, gemm_bquant at fp8/rcr on gfx950, one problem size, 500-instance budget (default: OFF)")
         booleanParam(
             name: "RUN_DISPATCHER_PERF_TESTS_DAILY",
             defaultValue: false,
-            description: "Full-tier benchmark of ahead-of-time tile_engine GEMM instances on gfx942: the same three ops across the fp8/fp16/bf8/bf16 x rcr/rrr/crr/ccr matrix, three problem sizes, 8000-instance budget (default: OFF)")
+            description: "Full-tier benchmark of ahead-of-time tile_engine GEMM instances on gfx942+gfx950: gemm_universal, batched_gemm, batched_contraction, gemm_streamk across fp8/fp16/bf8/bf16 x rcr/rrr/crr/ccr on gfx942; gemm_aquant, gemm_bquant across fp8/bf8 x rcr/rrr/ccr/crr on gfx950, three problem sizes, 8000-instance budget (default: OFF)")
         booleanParam(
             name: "RUN_DISPATCHER_CORRECTNESS_TESTS",
             defaultValue: false,
@@ -644,7 +644,25 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx942")) {
                                 deleteDir()
-                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "smoke")
+                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "smoke", "gfx942")
+                                cleanWs()
+                            }
+                        }
+                    }
+                }
+                stage("Run DISPATCHER_PERF Tests on gfx950")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_DISPATCHER_PERF_TESTS.toBoolean() }
+                    }
+                    agent none
+                    steps{
+                        script {
+                            loadCk()
+                            ck.runOnHealthyNode(rocmnode("gfx950")) {
+                                deleteDir()
+                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "smoke", "gfx950")
                                 cleanWs()
                             }
                         }
@@ -672,7 +690,25 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx942")) {
                                 deleteDir()
-                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "daily")
+                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "daily", "gfx942")
+                                cleanWs()
+                            }
+                        }
+                    }
+                }
+                stage("Run DISPATCHER_PERF_DAILY Tests on gfx950")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_DISPATCHER_PERF_TESTS_DAILY.toBoolean() }
+                    }
+                    agent none
+                    steps{
+                        script {
+                            loadCk()
+                            ck.runOnHealthyNode(rocmnode("gfx950")) {
+                                deleteDir()
+                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "daily", "gfx950")
                                 cleanWs()
                             }
                         }
