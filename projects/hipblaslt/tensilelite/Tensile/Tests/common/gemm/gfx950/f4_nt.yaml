@@ -1,11 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# NT MXFP4 subtile bring-up: single point.
+# NT F4 subtile GEMM.
 #   - NT (TransposeA=False, TransposeB=True) -> TLUA=TLUB=True, both operands
 #     free-dim contiguous, both need transpose-read (ds_read_b64_tr_b4).
 #   - Plain F4, no MXBlock -> no scale tiles, unit-scale MFMA fallback.
-#   - MT32x32, MI 16x16x128, DepthU 128 (one MFMA-K).
+#   - MT32x32, MI 16x16x128, DepthU 128.
+#   - Sizes cover single/multi K-iteration and single/multi workgroup.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
@@ -60,3 +61,6 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [32, 32, 1, 128]
+          - Exact: [32, 32, 1, 256]
+          - Exact: [64, 64, 1, 256]
+          - Exact: [256, 256, 1, 512]
