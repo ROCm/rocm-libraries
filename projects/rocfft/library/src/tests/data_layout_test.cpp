@@ -22,8 +22,6 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 
-// The header documents which inputs the constructor must reject.  Nothing
-// checks that it still does.
 TEST(rocfft_internal, data_layout_constructor_rejects_bad_input)
 {
     // no batch axis at all
@@ -42,7 +40,6 @@ TEST(rocfft_internal, data_layout_constructor_rejects_bad_input)
     EXPECT_NO_THROW(data_layout_t({1, 0, 0}, {4, 8, 1}, {1, 4, 32}, 1, true));
 }
 
-// batch() and distance() only make sense with exactly one batch axis.
 TEST(rocfft_internal, data_layout_single_batch_axis_accessors)
 {
     auto one = data_layout_t::default_full_layout({4, 8}, 3);
@@ -57,8 +54,6 @@ TEST(rocfft_internal, data_layout_single_batch_axis_accessors)
     EXPECT_THROW(two.distance(), std::logic_error);
 }
 
-// Default strides pack the data: innermost stride 1, each outer axis steps
-// over everything inside it.
 TEST(rocfft_internal, data_layout_default_strides_are_packed)
 {
     auto packed = data_layout_t::default_full_layout({4, 8}, 3);
@@ -70,8 +65,6 @@ TEST(rocfft_internal, data_layout_default_strides_are_packed)
     EXPECT_TRUE(packed == data_layout_t::full_layout({4, 8}, {1, 4}, 3, 32));
 }
 
-// How many elements do I hold, versus how big a buffer do I need.  These are
-// equal only when the data is packed.
 TEST(rocfft_internal, data_layout_counts_packed_vs_padded)
 {
     auto packed = data_layout_t::default_full_layout({4, 8}, 3);
@@ -87,9 +80,6 @@ TEST(rocfft_internal, data_layout_counts_packed_vs_padded)
     EXPECT_FALSE(padded.is_contiguous());
 }
 
-// Asking a padded layout for packed strides gives back packed ones; asking a
-// layout that is already packed leaves it alone, even when the axes are not
-// ordered by increasing stride.
 TEST(rocfft_internal, data_layout_contiguous_strides)
 {
     auto padded = data_layout_t::default_full_layout({4, 8}, 3, true);
@@ -101,7 +91,6 @@ TEST(rocfft_internal, data_layout_contiguous_strides)
     EXPECT_EQ(swapped.contiguous_strides_and_distances(), (std::vector<size_t>{8, 1, 32}));
 }
 
-// Where does a sub-region start inside the buffer of the region that holds it.
 TEST(rocfft_internal, data_layout_offset_in)
 {
     auto outer = data_layout_t::full_layout({8, 8}, {1, 8}, 1, 64);
@@ -119,8 +108,6 @@ TEST(rocfft_internal, data_layout_offset_in)
     EXPECT_THROW(other_rank.offset_in(outer), std::invalid_argument);
 }
 
-// A sub-region is one unbroken run of memory only if it is narrowed along the
-// slowest axis.  Narrowing a fast axis leaves gaps.
 TEST(rocfft_internal, data_layout_continuous_chunk)
 {
     data_layout_t whole({0, 0, 0}, {4, 8, 1}, {1, 4, 32}, 1, true);
@@ -134,7 +121,6 @@ TEST(rocfft_internal, data_layout_continuous_chunk)
     EXPECT_FALSE(slice_of_fast_axis.is_continuous_in(whole));
 }
 
-// Overlap of two regions, given packed strides.
 TEST(rocfft_internal, data_layout_intersection)
 {
     auto          first = data_layout_t::full_layout({8, 8}, {1, 8}, 1, 64);
@@ -153,8 +139,6 @@ TEST(rocfft_internal, data_layout_intersection)
     EXPECT_TRUE(data_layout_t::make_contiguous_intersection_of(far, near).is_empty());
 }
 
-// Complex transforms read and write the same shape, so an in-place complex
-// transform just hands the layout straight back.
 TEST(rocfft_internal, data_layout_inplace_complex_is_unchanged)
 {
     auto in  = data_layout_t::default_full_layout({16}, 4);
@@ -164,9 +148,6 @@ TEST(rocfft_internal, data_layout_inplace_complex_is_unchanged)
     EXPECT_TRUE(*out == in);
 }
 
-// A real in-place transform has to fit both the real and the half-spectrum
-// view in one buffer.  Deriving one from the other is where silent corruption
-// comes from, so check the derived shape and strides exactly.
 TEST(rocfft_internal, data_layout_inplace_real_derives_matching_shape)
 {
     // 8 real values per batch, padded to 2*(8/2+1) = 10 reals
@@ -188,8 +169,6 @@ TEST(rocfft_internal, data_layout_inplace_real_derives_matching_shape)
     EXPECT_TRUE(*back == real_side);
 }
 
-// Real in-place layouts that cannot work must be refused, not silently
-// accepted with a wrong stride.
 TEST(rocfft_internal, data_layout_inplace_real_refuses_impossible_layouts)
 {
     // batch distance is odd, so it cannot also be a whole number of complex
@@ -219,8 +198,6 @@ TEST(rocfft_internal, data_layout_inplace_real_refuses_impossible_layouts)
             .has_value());
 }
 
-// Odd real lengths do not round-trip through n/2+1 on their own, so the caller
-// has to say the length was odd.
 TEST(rocfft_internal, data_layout_inplace_real_odd_length)
 {
     // 5 complex values came from either 8 or 9 real values
@@ -237,7 +214,6 @@ TEST(rocfft_internal, data_layout_inplace_real_odd_length)
     EXPECT_EQ(odd->lengths(), (std::vector<size_t>{9}));
 }
 
-// Bad arguments to the in-place query are rejected rather than guessed at.
 TEST(rocfft_internal, data_layout_inplace_query_rejects_bad_arguments)
 {
     auto layout = data_layout_t::default_full_layout({8}, 1);
@@ -252,7 +228,6 @@ TEST(rocfft_internal, data_layout_inplace_query_rejects_bad_arguments)
                  std::logic_error);
 }
 
-// Sorting axes by stride, with and without keeping the innermost axis first.
 TEST(rocfft_internal, data_layout_axes_by_increasing_stride)
 {
     auto layout = data_layout_t::full_layout({4, 8, 2}, {8, 1, 32}, 1, 64);
@@ -261,7 +236,6 @@ TEST(rocfft_internal, data_layout_axes_by_increasing_stride)
     EXPECT_EQ(layout.length_axes_by_increasing_strides(true), (std::vector<size_t>{0, 1, 2}));
 }
 
-// Picking a subset of axes: the rest become batch axes.
 TEST(rocfft_internal, data_layout_subset_of_axes)
 {
     auto layout = data_layout_t::default_full_layout({4, 8, 2}, 3);

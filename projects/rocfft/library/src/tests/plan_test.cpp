@@ -29,9 +29,8 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-// Builds the plan tree the way rocfft_plan_create does, stopping short of
-// kernel compilation.  ProcessNode is the whole planning pipeline: build the
-// tree, collect leaves, assign buffers, fuse, pad and collapse.
+// ProcessNode is the whole planning pipeline: build the tree, collect leaves,
+// assign buffers, fuse, pad and collapse.
 static std::unique_ptr<ExecPlan> build_plan(const std::vector<size_t>& length,
                                             size_t                     batch,
                                             rocfft_transform_type      type,
@@ -95,7 +94,6 @@ static std::unique_ptr<ExecPlan> build_c2c(const std::vector<size_t>& length,
     return build_plan(length, 1, rocfft_transform_type_complex_forward, placement);
 }
 
-// A length the hardware handles in one pass must not be split up.
 TEST(rocfft_internal, plan_small_1d_is_a_single_kernel)
 {
     auto plan = build_c2c({64});
@@ -104,8 +102,6 @@ TEST(rocfft_internal, plan_small_1d_is_a_single_kernel)
     EXPECT_EQ(plan->execSeq.front()->scheme, CS_KERNEL_STOCKHAM);
 }
 
-// A length too big for one pass has to be decomposed, otherwise it could not
-// run at all.
 TEST(rocfft_internal, plan_large_1d_splits_into_multiple_kernels)
 {
     auto plan = build_c2c({8192});
@@ -114,8 +110,6 @@ TEST(rocfft_internal, plan_large_1d_splits_into_multiple_kernels)
     EXPECT_GT(plan->execSeq.size(), 1u);
 }
 
-// Lengths with no native radix support fall back to Bluestein, which needs a
-// chirp kernel.
 TEST(rocfft_internal, plan_prime_length_uses_bluestein)
 {
     auto plan = build_c2c({1009});
@@ -124,8 +118,6 @@ TEST(rocfft_internal, plan_prime_length_uses_bluestein)
     EXPECT_TRUE(contains(schemes_of(*plan), CS_KERNEL_CHIRP));
 }
 
-// Bluestein is much slower, so a length that is natively supported must not
-// end up using it.
 TEST(rocfft_internal, plan_supported_length_avoids_bluestein)
 {
     auto plan = build_c2c({64});
@@ -134,7 +126,6 @@ TEST(rocfft_internal, plan_supported_length_avoids_bluestein)
     EXPECT_FALSE(contains(schemes_of(*plan), CS_KERNEL_CHIRP));
 }
 
-// The Bluestein decision itself, without building a whole plan.
 TEST(rocfft_internal, plan_bluestein_decision_matches_radix_support)
 {
     function_pool pool(get_curr_device_prop());
@@ -143,8 +134,6 @@ TEST(rocfft_internal, plan_bluestein_decision_matches_radix_support)
     EXPECT_FALSE(NodeFactory::SupportedLength(pool, rocfft_precision_single, 1009));
 }
 
-// One kernel per dimension for these sizes.  A change here means the
-// decomposition changed.
 TEST(rocfft_internal, plan_2d_and_3d_decompose_per_dimension)
 {
     auto plan2d = build_c2c({64, 64});
@@ -156,9 +145,8 @@ TEST(rocfft_internal, plan_2d_and_3d_decompose_per_dimension)
     EXPECT_EQ(plan3d->execSeq.size(), 3u);
 }
 
-// Large 3D uses kernels that do the transform and the transpose together.  If
-// fusion stops firing these become separate transpose nodes and the transform
-// silently gets slower.
+// If fusion stops firing these split into separate transpose nodes and the
+// transform silently gets slower.
 TEST(rocfft_internal, plan_large_3d_fuses_transpose_into_transform)
 {
     auto       plan    = build_c2c({128, 128, 128});
@@ -169,8 +157,6 @@ TEST(rocfft_internal, plan_large_3d_fuses_transpose_into_transform)
     EXPECT_FALSE(contains(schemes, CS_KERNEL_TRANSPOSE_XY_Z));
 }
 
-// Every node must know where it reads and writes, or execution would use an
-// unassigned buffer.
 TEST(rocfft_internal, plan_every_node_has_buffers_assigned)
 {
     for(const auto& length : std::vector<std::vector<size_t>>{{64}, {8192}, {64, 64}, {64, 64, 64}})
@@ -185,8 +171,6 @@ TEST(rocfft_internal, plan_every_node_has_buffers_assigned)
     }
 }
 
-// Out-of-place reads the caller's input and leaves the result in the caller's
-// output.
 TEST(rocfft_internal, plan_out_of_place_reads_input_and_writes_output)
 {
     auto plan = build_c2c({64, 64}, rocfft_placement_notinplace);
@@ -196,7 +180,6 @@ TEST(rocfft_internal, plan_out_of_place_reads_input_and_writes_output)
     EXPECT_EQ(plan->execSeq.back()->obOut, OB_USER_OUT);
 }
 
-// In-place has no separate input buffer, so nothing may read one.
 TEST(rocfft_internal, plan_in_place_never_reads_a_separate_input)
 {
     auto plan = build_c2c({64, 64}, rocfft_placement_inplace);
@@ -207,8 +190,6 @@ TEST(rocfft_internal, plan_in_place_never_reads_a_separate_input)
         EXPECT_NE(node->obIn, OB_USER_IN);
 }
 
-// A single-kernel transform needs no scratch space.  Allocating one here would
-// be wasted memory that no accuracy test would notice.
 TEST(rocfft_internal, plan_single_kernel_uses_no_temp_buffer)
 {
     auto plan = build_c2c({64});

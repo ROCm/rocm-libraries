@@ -77,9 +77,6 @@ TEST(rocfft_internal, rtc_helper_crash)
     ASSERT_FALSE(code.empty());
 }
 
-// The cache is keyed on kernel name, GPU architecture, and a checksum of the
-// generator.  Anything stored under one key must come back under that key and
-// only that key, otherwise a kernel gets handed the wrong compiled code.
 TEST(rocfft_internal, rtc_cache_store_then_get)
 {
     RTCCache cache;
@@ -105,7 +102,6 @@ TEST(rocfft_internal, rtc_cache_store_then_get)
     EXPECT_TRUE(cache.get_code_object(name, arch, other_sum).empty());
 }
 
-// Storing the same key twice replaces the entry instead of leaving two.
 TEST(rocfft_internal, rtc_cache_store_replaces)
 {
     RTCCache cache;
@@ -120,8 +116,6 @@ TEST(rocfft_internal, rtc_cache_store_replaces)
     EXPECT_EQ(cache.get_code_object(name, arch, sum), (std::vector<char>{'n', 'e', 'w'}));
 }
 
-// The cache can be handed to another process as a blob.  What goes out has to
-// come back, or precompiled kernel bundles silently do nothing.
 TEST(rocfft_internal, rtc_cache_serialize_round_trip)
 {
     const std::string       name = "internal_test_serialize";
@@ -147,8 +141,6 @@ TEST(rocfft_internal, rtc_cache_serialize_round_trip)
     RTCCache::serialize_free(buffer);
 }
 
-// A cache file that is not a database at all must not stop the library from
-// starting up; it should fall back to compiling.
 TEST(rocfft_internal, rtc_cache_corrupt_file_is_survivable)
 {
     const auto path = fs::temp_directory_path() / "rocfft_internal_test_corrupt_cache.db";

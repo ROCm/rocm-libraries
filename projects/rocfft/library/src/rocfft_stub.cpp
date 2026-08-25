@@ -25,8 +25,8 @@
 #include "plan.h"
 #include "transform.h"
 
-// The internal test executable builds the planning sources but leaves out
-// powX.cpp, which carries device code.  Planning never calls these.
+// The internal test builds the planning sources but leaves out powX.cpp,
+// which carries device code.  Planning never calls these.
 bool PlanPowX(ExecPlan&)
 {
     return false;

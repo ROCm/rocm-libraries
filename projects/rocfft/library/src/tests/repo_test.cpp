@@ -28,9 +28,8 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-// Twiddle tables are built on the device and shared between plans.  Rebuilding
-// one that is already cached is wasted work and wasted memory, and no accuracy
-// test would ever notice.
+// Rebuilding a cached twiddle table is wasted work and memory that no accuracy
+// test would notice.
 class repo_test : public ::testing::Test
 {
 protected:
@@ -97,7 +96,6 @@ TEST_F(repo_test, twiddles_2d_are_reused)
     EXPECT_EQ(first.first, second.first);
 }
 
-// Bluestein reuses one chirp table per length.
 TEST_F(repo_test, chirp_is_reused)
 {
     auto first  = Repo::GetChirp(1009, rocfft_precision_single, deviceProp);

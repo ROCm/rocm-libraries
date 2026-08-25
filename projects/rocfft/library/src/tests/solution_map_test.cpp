@@ -55,8 +55,6 @@ static std::vector<fs::path> shipped_solution_map_files()
     return files;
 }
 
-// Read every tuning file we ship.  These are what the tuning workflow points
-// the library at, so they have to be readable by the reader we ship with them.
 TEST(rocfft_internal, shipped_solution_maps_are_readable)
 {
     auto files = shipped_solution_map_files();
@@ -71,8 +69,6 @@ TEST(rocfft_internal, shipped_solution_maps_are_readable)
     }
 }
 
-// Write the built-in solutions out and read them back.  If the writer and the
-// reader ever disagree about the format, saved tuning results stop loading.
 TEST(rocfft_internal, solution_map_write_then_read)
 {
     auto& map = solution_map::get_solution_map();
@@ -89,7 +85,6 @@ TEST(rocfft_internal, solution_map_write_then_read)
     fs::remove(path);
 }
 
-// A file that is not there is a normal situation, not a crash.
 TEST(rocfft_internal, solution_map_missing_file)
 {
     auto& map = solution_map::get_solution_map();
@@ -100,7 +95,6 @@ TEST(rocfft_internal, solution_map_missing_file)
     EXPECT_FALSE(map.read_solution_map_data(path, false));
 }
 
-// A file that exists but is empty should be reported as unreadable.
 TEST(rocfft_internal, solution_map_empty_file)
 {
     auto& map = solution_map::get_solution_map();
@@ -115,7 +109,6 @@ TEST(rocfft_internal, solution_map_empty_file)
     fs::remove(path);
 }
 
-// A file cut short is bad input, not a reason to read past the end of it.
 TEST(rocfft_internal, solution_map_truncated_file)
 {
     auto files = shipped_solution_map_files();

@@ -24,9 +24,6 @@
 #include <string>
 #include <vector>
 
-// Keys that differ in any field must compare unequal, hash differently, and
-// order consistently.  The function pool stores kernels in a sorted map, so a
-// broken comparison silently returns the wrong kernel.
 TEST(rocfft_internal, function_map_key_comparison_and_hash)
 {
     const std::string arch = "gfx942";
@@ -58,10 +55,8 @@ TEST(rocfft_internal, function_map_key_comparison_and_hash)
                            KernelConfig::EmptyConfig(),
                            "gfx90a");
 
-    // The keys live in an unordered_multimap, so two different keys sharing a
-    // hash is allowed and handled by the equality check.  What must hold is
-    // that changing any one field changes the hash, otherwise a field that was
-    // left out of the hash would go unnoticed.
+    // Hash collisions are allowed; what must hold is that changing any field
+    // changes the hash, so a field left out of it would be noticed.
     const auto base_hash = SimpleHash{}(base);
 
     for(const auto& other : different)
@@ -81,9 +76,6 @@ TEST(rocfft_internal, function_map_key_comparison_and_hash)
     EXPECT_FALSE(copy < base);
 }
 
-// Partial-pass keys are looked up by binary search over batch ranges, which
-// only works if keys for the same problem sort together and are then ordered
-// by batch.  The header spells this out as a contract; this checks it holds.
 TEST(rocfft_internal, partial_pass_key_orders_problem_before_batch)
 {
     const std::string arch = "gfx942";

@@ -30,9 +30,6 @@
 #include <string>
 #include <vector>
 
-// The generated kernel name is what the compiled-code cache is keyed on.  Two
-// kernels that differ in any way must not end up with the same name, or the
-// cache will hand back the wrong code with no error at all.
 TEST(rocfft_internal, transpose_kernel_names_are_unique)
 {
     const std::vector<unsigned int>     tiles = {16, 32, 64};
@@ -74,8 +71,6 @@ TEST(rocfft_internal, transpose_kernel_names_are_unique)
     EXPECT_EQ(names.size(), combinations);
 }
 
-// Same idea for the small helper kernels: every table type and precision needs
-// its own name.
 TEST(rocfft_internal, twiddle_and_chirp_kernel_names_are_unique)
 {
     const std::vector<TwiddleTableType> types = {TwiddleTableType::RADICES,
@@ -105,8 +100,6 @@ TEST(rocfft_internal, twiddle_and_chirp_kernel_names_are_unique)
     EXPECT_EQ(names.size(), combinations);
 }
 
-// A kernel that scales its output is a different kernel.  If the suffix went
-// missing it would share a cache entry with the unscaled version.
 TEST(rocfft_internal, load_store_ops_change_the_name)
 {
     LoadOps  plainLoad;
@@ -122,9 +115,6 @@ TEST(rocfft_internal, load_store_ops_change_the_name)
               load_store_name_suffix(plainLoad, plainStore));
 }
 
-// PrintKernelSchemeAbbr throws on anything it does not know.  Walk the whole
-// scheme list so that adding a scheme and forgetting this switch shows up
-// here rather than at runtime.
 TEST(rocfft_internal, kernel_scheme_abbreviations)
 {
     std::set<std::string> abbreviations;
@@ -159,8 +149,6 @@ TEST(rocfft_internal, kernel_scheme_abbreviations)
     EXPECT_EQ(PrintKernelSchemeAbbr(CS_KERNEL_STOCKHAM_BLOCK_RC), "sbrc");
 }
 
-// Every scheme must print to a name that reads back as the same scheme.  These
-// strings end up in the tuning files, so a gap here corrupts saved data.
 TEST(rocfft_internal, every_scheme_round_trips_through_its_name)
 {
     for(int i = CS_NONE; i <= CS_KERNEL_3D_SINGLE; ++i)
@@ -172,8 +160,6 @@ TEST(rocfft_internal, every_scheme_round_trips_through_its_name)
     }
 }
 
-// The same round-trip requirement for the smaller enums that appear in tuning
-// files.
 TEST(rocfft_internal, enum_printers_round_trip)
 {
     for(auto precision : {rocfft_precision_half, rocfft_precision_single, rocfft_precision_double})
