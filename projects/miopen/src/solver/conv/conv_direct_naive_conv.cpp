@@ -54,6 +54,11 @@ constexpr size_t NAIVE_CONV_BLOCK_SIZE = 256;
 // where one block can no longer cover the spatial dimension in its thread-loop.
 constexpr size_t WRW_SPATIAL_TILING_THRESHOLD = 262144;
 
+// The fp8 naive conv path lives in a separate source file. The BWD-data block-size
+// heuristic special-cases it (see NaiveConv2DBWDBlockSize), and the invoker uses it
+// to select the fp8 kernel's distinct argument list.
+constexpr const char* FP8_NAIVE_CONV_KERNEL_FILE = "fp8_naive_conv.cpp";
+
 bool ConvDirectNaiveConvIsAssemblyKernel(const ExecutionContext& ctx,
                                          const ProblemDescription& problem)
 {
@@ -237,7 +242,7 @@ std::string ConvDirectNaiveConvKernelFile(const ExecutionContext& ctx,
     //         return "naive_conv_gcn.s";
     // }
     if(problem.IsFp8() || problem.IsTensorsCasted() || problem.IsBfp8())
-        return "fp8_naive_conv.cpp";
+        return FP8_NAIVE_CONV_KERNEL_FILE;
     if(problem.IsDirectionForward())
         return "naive_conv_fwd.cpp";
     if(problem.IsDirectionBackwardData())
@@ -348,6 +353,47 @@ void conv_internal::DebugPrintTensorStrides(const TensorDescriptor& inDesc,
 // grid_size * block_size < 2^32
 // max_grid_size = 2^32 / block_size = 4,294,967,296 / 256 = 16,777,216
 constexpr size_t MAX_GRID_SIZE = static_cast<size_t>(16) * 1024 * 1024; // 16M work groups max
+
+// Chooses the workgroup size for the 2D naive conv BWD-data launch.
+inline size_t
+NaiveConv2DBWDBlockSize(const Handle& handle, const std::string& kernel_file, size_t grid_size)
+{
+    constexpr size_t default_block = 256;
+
+    // The 1024 path is only valid when the launch derives its spatial tiling from this block size.
+    // The per-direction naive_conv_bwd.cpp does: num_spatial_tiles = ceil(thread_length/block_size)
+    // and covers the domain with an `if(tid < thread_length)` guard, so any block size stays
+    // correct. fp8_naive_conv.cpp instead hardcodes `tid += 256` in its own loop, so it must stay
+    // at the default regardless of grid size.
+    if(kernel_file == FP8_NAIVE_CONV_KERNEL_FILE)
+        return default_block;
+
+    // 1024-thread work groups while the grid is too small to fill the GPU. The launch fixes the
+    // work-group count (in the grid.x dimension) at n*hi (NHWC) / n*c (NCHW); a wider group never
+    // reaches more CUs -- it only puts more resident waves on the ones it does reach, which is what
+    // hides this memory-bound kernel's latency. Worth 1.3x-2.1x geomean, measured on gfx90a, gfx942
+    // and gfx950 only.
+    //
+    // NOTE: the 5*CU crossover below was tuned upstream against a gridDim.y=1 grid-stride launch.
+    // This branch's BWD-d kernel instead spreads the spatial domain across gridDim.y tiles, so the
+    // effective occupancy is grid_size * num_spatial_tiles. The heuristic is preserved as-is as a
+    // known-good no-regression starting point, but the crossover should be re-validated on CDNA CI
+    // against this launch geometry before being treated as optimal.
+    constexpr size_t large_block = 1024;
+    const auto device_name       = handle.GetDeviceName();
+    if(!(StartsWith(device_name, "gfx90a") || StartsWith(device_name, "gfx942") ||
+         StartsWith(device_name, "gfx950")))
+        return default_block;
+
+    // Measured crossover: at or above this many work groups per CU, 256 is the faster of the two.
+    constexpr size_t large_block_max_blocks_per_cu = 5;
+    if(grid_size >= large_block_max_blocks_per_cu * handle.GetMaxComputeUnits())
+        return default_block;
+
+    MIOPEN_LOG_I2("naive conv bwd block size: " << large_block << " (grid_size=" << grid_size
+                                                << ")");
+    return large_block;
+}
 
 // Helper function to calculate batch chunk size to prevent grid size overflow.
 // Keeps the original if/else structure for layout handling.
@@ -467,7 +513,7 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     kernel.l_wk.push_back(1);
     kernel.l_wk.push_back(1);
 
-    const auto is_f8 = (kernel.kernel_file == "fp8_naive_conv.cpp");
+    const auto is_f8 = (kernel.kernel_file == FP8_NAIVE_CONV_KERNEL_FILE);
 
     kernel.comp_options = ConvDirectNaiveConvCompileOption(ctx, problem);
 
@@ -847,7 +893,7 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     kernel.l_wk.push_back(1);
     kernel.l_wk.push_back(1);
 
-    const auto is_f8 = (kernel.kernel_file == "fp8_naive_conv.cpp");
+    const auto is_f8 = (kernel.kernel_file == FP8_NAIVE_CONV_KERNEL_FILE);
 
     kernel.comp_options = ConvDirectNaiveConvCompileOption(ctx, problem);
 
@@ -1111,7 +1157,6 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    size_t block_size    = NAIVE_CONV_BLOCK_SIZE;
     size_t grid_size     = 1;
     size_t thread_length = 1;
     if(problem.IsLayoutDefault())
@@ -1128,6 +1173,12 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     {
         MIOPEN_THROW("Unsupported layout");
     }
+
+    const auto kernel_file = ConvDirectNaiveConvKernelFile(ctx, problem);
+    // On CDNA (gfx90a/gfx942/gfx950) a small grid uses 1024-thread groups; 256 otherwise. Must be
+    // computed before num_spatial_tiles below, which derives the tile count from block_size.
+    size_t block_size = NaiveConv2DBWDBlockSize(ctx.GetStream(), kernel_file, grid_size);
+
     // BWD-d kernel uses a single if(tid < thread_length) guard with no loop,
     // so tiling is required for correctness — unlike FWD which has a grid-stride
     // loop and only tiles for occupancy.
@@ -1135,7 +1186,7 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
 
     KernelInfo kernel;
 
-    kernel.kernel_file = ConvDirectNaiveConvKernelFile(ctx, problem);
+    kernel.kernel_file = kernel_file;
     kernel.kernel_name = ConvDirectNaiveConvKernelName(problem);
     kernel.g_wk.clear();
 
@@ -1147,7 +1198,7 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     kernel.l_wk.push_back(1);
     kernel.l_wk.push_back(1);
 
-    const auto is_f8 = (kernel.kernel_file == "fp8_naive_conv.cpp");
+    const auto is_f8 = (kernel.kernel_file == FP8_NAIVE_CONV_KERNEL_FILE);
 
     kernel.comp_options = ConvDirectNaiveConvCompileOption(ctx, problem);
 

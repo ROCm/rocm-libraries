@@ -1,0 +1,73 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Designed config for gfx942 KernelWriterConversion / BetaOnly / Reduction
+# characterization.
+#
+# Target: exercise the methodlogy-A missing branches in
+# Tensile/KernelWriterConversion.py (115 uncovered lines).
+#
+# Knob family:
+#   GlobalSplitU=[2,4]  -> _GlobalAccumulation=MultipleBuffer
+#                          -> triggers KernelWriterConversion + KernelWriterBetaOnly
+#   GlobalSplitUAlgorithm=[MultipleBuffer] (implicit for GSU>1 BBS configs)
+#
+# ProblemType: BBS (bf16 in / bf16 out / f32 compute), NT, HPA + Bias + Activation.
+# Derived from seed.yaml; ONLY ForkParameters replaced.
+#
+# 2 x 2 = 4 emitted GEMM kernels (within <=8 budget).
+# Helpers emitted per solution: conversion VW=[1,2,4] x GSU x betaOnly.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BBS (bf16 in / bf16 out / f32 compute) NT, HPA + Bias + Activation
+  # GlobalSplitU sweep -> drives conversion + beta-only helper kernels
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      BiasDataTypeList: [b]
+      Batched: True
+      Activation: True
+      ActivationType: all
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1 ]
+        - GlobalSplitU: [2, 4]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['b']
+        - ActivationArgs:
+          - [Enum: relu]

@@ -96,10 +96,12 @@ def worker_lock_path(tmp_path_factory, worker_id):
     # Under FFM each worker gets its own emulator instance, so there is
     # no GPU contention — give each worker a private lock so client
     # invocations can run in parallel across workers.
+    # On real hardware, assign_gpu_to_worker() assigns separate GPUs to
+    # each worker, so there is also no GPU contention — use per-worker locks.
     if os.environ.get("HSA_MODEL_MEMFILE"):
       return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
 
-    return tmp_path_factory.getbasetemp().parent / "client_execution.lock"
+    return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
 
 @pytest.fixture(scope="session", autouse=True)
 def assign_gpu_to_worker(worker_id):

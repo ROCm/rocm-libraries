@@ -1,0 +1,8 @@
+{
+  "version": "0.1",
+  "id": "udd-solo",
+  "name": "Solo dispatch",
+  "grid": [1, 1, 1],
+  "block": ["block_size", 1, 1],
+  "args": ["ptr", "ptr", "ptr"]
+}

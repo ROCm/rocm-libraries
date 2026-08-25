@@ -1,0 +1,18 @@
+# serializer version: 1
+# name: test_build_source_code_object_files
+  dict({
+    'co_names': list([
+      'Kernels.so-000-gfx942.hsaco',
+    ]),
+    'num_co': 1,
+  })
+# ---
+# name: test_compute_co_filename_fallback
+  '/build/TensileLibrary_fallback_gfx942.hsaco.raw'
+# ---
+# name: test_compute_co_filename_other
+  '/build/Kernels.so-000-gfx942.hsaco.raw'
+# ---
+# name: test_compute_co_filename_tensilelibrary_variant
+  '/build/TensileLibrary_gfx942-xnack-.hsaco.raw'
+# ---

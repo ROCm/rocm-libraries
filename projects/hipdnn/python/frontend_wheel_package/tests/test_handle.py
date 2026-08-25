@@ -1,0 +1,97 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+"""GPU tests for the Handle lifecycle, stream, and engine metadata APIs."""
+
+import pytest
+
+import hipdnn_frontend as hipdnn
+
+from .graph_builders import build_conv_fprop_graph
+from .helpers import build_all_plans
+
+
+@pytest.mark.gpu
+class TestHandle:
+    """Tests for handle creation, metadata, stream access, and destruction."""
+
+    @pytest.mark.parametrize("factory", [hipdnn.Handle, hipdnn.create_handle])
+    def test_construct_returns_valid_pointer(self, factory):
+        """Both the Handle ctor and create_handle() yield a valid pointer."""
+        handle = factory()
+        assert int(handle) != 0
+
+    @pytest.mark.parametrize("factory", [hipdnn.Handle, hipdnn.create_handle])
+    def test_construct_with_stream_binds_stream(self, factory):
+        """Both entry points bind the handle to the given stream."""
+        handle = factory(0)
+        assert handle.get_stream() == 0
+
+    @pytest.mark.parametrize(
+        "set_stream, get_stream",
+        [
+            (lambda h, s: h.set_stream(s), lambda h: h.get_stream()),
+            (hipdnn.set_stream, hipdnn.get_stream),
+        ],
+        ids=["method", "module_fn"],
+    )
+    def test_set_and_get_stream(self, set_stream, get_stream):
+        """set_stream()/get_stream() round-trip via both method and module fn."""
+        handle = hipdnn.create_handle()
+        set_stream(handle, 0)
+        assert get_stream(handle) == 0
+
+    def test_get_engine_info_for_the_planned_engine(self):
+        """The engine backing a built plan exposes its metadata to Python.
+
+        Asserts the shape of the EngineInfo binding, not any one provider's
+        identity, so this holds for the test stub and a real engine alike.
+        """
+        graph, *_ = build_conv_fprop_graph()
+        handle = build_all_plans(graph)
+        engine_id = graph.get_execution_plan_engine_id()
+
+        info = handle.get_engine_info(engine_id)
+
+        assert isinstance(info, hipdnn.EngineInfo)
+        assert info.engine_id == engine_id
+        for field in ("engine_name", "plugin_name", "version", "type"):
+            value = getattr(info, field)
+            assert isinstance(value, str) and value, f"{field} is empty"
+        with pytest.raises(AttributeError):
+            info.version = "overridden"
+
+    def test_get_engine_info_for_unknown_engine_raises(self):
+        """An ID absent from the loaded plugins raises IndexError."""
+        handle = hipdnn.create_handle()
+
+        with pytest.raises(IndexError, match="Engine ID is not loaded"):
+            handle.get_engine_info(9223372036854775807)
+
+    def test_destroy_handle(self):
+        """destroy_handle() invalidates the handle (repr shows destroyed)."""
+        handle = hipdnn.create_handle()
+        hipdnn.destroy_handle(handle)
+        assert "destroyed" in repr(handle)
+
+    def test_get_stream_after_destroy_raises(self):
+        """Accessing the stream after destroy raises RuntimeError."""
+        handle = hipdnn.create_handle()
+        hipdnn.destroy_handle(handle)
+        with pytest.raises(RuntimeError):
+            handle.get_stream()
+
+    def test_set_stream_after_destroy_raises(self):
+        """Setting the stream after destroy raises RuntimeError."""
+        handle = hipdnn.create_handle()
+        hipdnn.destroy_handle(handle)
+        with pytest.raises(RuntimeError):
+            handle.set_stream(0)
+
+    def test_get_engine_info_after_destroy_raises(self):
+        """Metadata lookup on a destroyed handle raises RuntimeError."""
+        handle = hipdnn.create_handle()
+        hipdnn.destroy_handle(handle)
+
+        with pytest.raises(RuntimeError, match="Handle has been destroyed"):
+            handle.get_engine_info(0)

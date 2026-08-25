@@ -1,0 +1,78 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4 designed seed config for gfx942 INT8 GEMM characterization.
+#
+# Goal: exercise the INT8 MFMA + HighPrecisionAccumulate arms that are absent
+# from all existing gfx942 seeds (BBS, F8N, GG, HSS, DB, etc. all use non-I8
+# data types). INT8 with HPA drives:
+#
+#   KernelWriter.py:
+#     - line 6409/6415 : MacDataTypeA/B.isInt8() -> numVgprBufferPackA/B
+#     - line 6745      : DataType.isInt8() in HPA validity guard
+#     - line 7855      : DataType.isInt8() -> startVgprValuPackTemp
+#     - line 8873/8882 : DataType.isInt8() in miVALUInstrDataHazard table (gfx1250)
+#     - line 8895      : DataType.isInt8() && HPA -> canCheckValueC
+#
+#   Components/MAC_I8_HPA.py (FMA_I8_HPA.__call__):
+#     - lines 50-78    : INT8 sign-extend + v_mad_i32_i24 accumulate loop
+#
+# ForkParameters design:
+#   - MatrixInstruction : [16,16,32,1,...] -- canonical gfx942 I8I8 MFMA shape
+#     plus [32,32,16,1,...] for a second distinct accumulate tile shape.
+#   - GlobalSplitU      : [1, 2] -- single + split to widen helper-kernel paths.
+# => 2 x 2 = 4 emitted kernels (under the <=8 budget).
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # I8 in / i8 out / s (int32) compute, NT, HPA=True + Bias
+  # Exercises: MAC_I8_HPA, INT8 VGPR-pack, HPA validity guard, canCheckValueC
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  1, 1,  2, 1]
+          - [32, 32, 16, 1,  1,  1, 1,  2, 1]
+        - GlobalSplitU: [1, 2]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [1]
+        - TransposeLDS: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - ExpandPointerSwap: [False]
+        - StaggerU: [0]
+        - WorkGroupMapping: [4]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['I8']

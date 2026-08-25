@@ -337,6 +337,7 @@ std::string RocBlasLt_TestName_to_string(std::unordered_map<std::string, size_t>
     // Replace non-alphanumeric characters with letters
     std::replace(name.begin(), name.end(), '-', 'n'); // minus
     std::replace(name.begin(), name.end(), '.', 'p'); // decimal point
+    std::replace(name.begin(), name.end(), '+', 'P'); // plus (e.g. exponent in 1e+09)
 
     // Complex (A,B) is replaced with ArBi
     name.erase(std::remove(name.begin(), name.end(), '('), name.end());
@@ -502,20 +503,177 @@ TEST(aux_handle_test, get_sm_count_target_rejects_null_handle)
     ASSERT_EQ(hipblasLtGetSmCountTarget(nullptr, &value), HIPBLAS_STATUS_NOT_INITIALIZED);
 }
 
-TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_default_is_disabled)
+TEST(aux_handle_test, set_uniform_summation_order_default_is_zero)
 {
-    hipblaslt_ext::GemmPreference pref;
-    ASSERT_FALSE(pref.getDynPersistentTileEnabled());
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_NE(handle, nullptr);
+
+    int32_t value = -42;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 0);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
 }
 
-TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_round_trip)
+TEST(aux_handle_test, set_uniform_summation_order_round_trip)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 1), HIPBLAS_STATUS_SUCCESS);
+    int32_t value = -1;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 1);
+
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 0), HIPBLAS_STATUS_SUCCESS);
+    value = -1;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 0);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, set_uniform_summation_order_rejects_out_of_range)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 1), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 2), HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Out-of-range input must leave the previously stored value untouched.
+    int32_t value = -1;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 1);
+
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, -1), HIPBLAS_STATUS_INVALID_VALUE);
+    value = -1;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 1);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, get_uniform_summation_order_rejects_null_pointer)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(handle, nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, set_uniform_summation_order_rejects_null_handle)
+{
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(nullptr, 1), HIPBLAS_STATUS_NOT_INITIALIZED);
+}
+
+TEST(aux_handle_test, get_uniform_summation_order_rejects_null_handle)
+{
+    int32_t value = 0;
+    ASSERT_EQ(hipblasLtGetUniformSummationOrder(nullptr, &value), HIPBLAS_STATUS_NOT_INITIALIZED);
+}
+
+TEST(aux_handle_test, set_uniform_summation_order_does_not_mutate_desc)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    hipblasLtMatmulDesc_t desc = nullptr;
+    ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+              HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtSetUniformSummationOrder(handle, 1), HIPBLAS_STATUS_SUCCESS);
+
+    int32_t desc_value  = -1;
+    size_t  sizeWritten = 0;
+    ASSERT_EQ(hipblasLtMatmulDescGetAttribute(desc,
+                                              HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                              &desc_value,
+                                              sizeof(desc_value),
+                                              &sizeWritten),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(desc_value, 0);
+
+    ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_default_is_off)
 {
     hipblaslt_ext::GemmPreference pref;
-    pref.setDynPersistentTileEnabled(true);
-    ASSERT_TRUE(pref.getDynPersistentTileEnabled());
+    ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+}
 
-    pref.setDynPersistentTileEnabled(false);
-    ASSERT_FALSE(pref.getDynPersistentTileEnabled());
+TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_round_trip)
+{
+    hipblaslt_ext::GemmPreference pref;
+
+    pref.setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_ON);
+    ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_ON);
+
+    pref.setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
+    ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
+
+    pref.setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+    ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+}
+
+TEST(aux_ext_test, gemm_preference_uniform_summation_order_default_is_off)
+{
+    hipblaslt_ext::GemmPreference pref;
+    ASSERT_FALSE(pref.getUniformSummationOrder());
+}
+
+TEST(aux_ext_test, gemm_preference_uniform_summation_order_round_trip)
+{
+    hipblaslt_ext::GemmPreference pref;
+
+    pref.setUniformSummationOrder(true);
+    ASSERT_TRUE(pref.getUniformSummationOrder());
+
+    // GemmPreferenceImpl is copied member-wise by the hand-rolled copy
+    // constructor and copy assignment, so both have to carry the new member.
+    hipblaslt_ext::GemmPreference copy_constructed(pref);
+    ASSERT_TRUE(copy_constructed.getUniformSummationOrder());
+
+    hipblaslt_ext::GemmPreference copy_assigned;
+    copy_assigned = pref;
+    ASSERT_TRUE(copy_assigned.getUniformSummationOrder());
+
+    pref.setUniformSummationOrder(false);
+    ASSERT_FALSE(pref.getUniformSummationOrder());
+    ASSERT_TRUE(copy_constructed.getUniformSummationOrder());
+    ASSERT_TRUE(copy_assigned.getUniformSummationOrder());
+}
+
+TEST(aux_attr_test, desc_streamk_tile_scheduling_ext_set_rejects_out_of_range)
+{
+    hipblasLtMatmulDesc_t desc = nullptr;
+    ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+              HIPBLAS_STATUS_SUCCESS);
+
+    for(int32_t valid : {int32_t{0}, int32_t{1}, int32_t{2}})
+    {
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                  &valid,
+                                                  sizeof(valid)),
+                  HIPBLAS_STATUS_SUCCESS);
+    }
+
+    for(int32_t bad : {int32_t{-1}, int32_t{3}, int32_t{100}})
+    {
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                  &bad,
+                                                  sizeof(bad)),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
 }
 
 // Standalone gtests that pin coverage of the invalid-buffer-size branches in
@@ -555,21 +713,21 @@ TEST(aux_attr_test, desc_sm_count_target_get_rejects_undersized_buffer)
     ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
 }
 
-TEST(aux_attr_test, desc_dyn_persistent_tile_ext_set_rejects_undersized_buffer)
+TEST(aux_attr_test, desc_streamk_tile_scheduling_ext_set_rejects_undersized_buffer)
 {
     hipblasLtMatmulDesc_t desc = nullptr;
     ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
               HIPBLAS_STATUS_SUCCESS);
     const int32_t value = 1;
     ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
-                                              HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                              HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                               &value,
                                               sizeof(int32_t) - 1),
               HIPBLAS_STATUS_INVALID_VALUE);
     ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
 }
 
-TEST(aux_attr_test, desc_dyn_persistent_tile_ext_get_rejects_undersized_buffer)
+TEST(aux_attr_test, desc_streamk_tile_scheduling_ext_get_rejects_undersized_buffer)
 {
     hipblasLtMatmulDesc_t desc = nullptr;
     ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
@@ -577,7 +735,7 @@ TEST(aux_attr_test, desc_dyn_persistent_tile_ext_get_rejects_undersized_buffer)
     int32_t out         = 0;
     size_t  sizeWritten = 0;
     ASSERT_EQ(hipblasLtMatmulDescGetAttribute(desc,
-                                              HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                              HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                               &out,
                                               sizeof(int32_t) - 1,
                                               &sizeWritten),

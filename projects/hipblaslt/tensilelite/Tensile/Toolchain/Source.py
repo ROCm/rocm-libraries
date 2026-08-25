@@ -27,7 +27,7 @@ import shutil
 
 from pathlib import Path
 from timeit import default_timer as timer
-from typing import List, Union, NamedTuple
+from typing import Dict, List, Optional, Union, NamedTuple
 
 from ..Common import print1, ensurePath
 from ..Common.TimingInstrumentation import timing_context
@@ -57,14 +57,20 @@ def _archNamesFromBundlerTarget(rawArch: str):
         single source of truth — callers that strip with `split("-xnack")[0]`
         AFTER ':' -> '-' conversion leave `gfx942-sramecc+` as the directory
         and silently place files in the wrong subdir.
-      * The filename keeps the full feature set so xnack+/xnack- code objects
-        don't collide, with ':' rewritten to '-' for filesystem safety.
+      * The filename keeps only the base arch and the xnack feature
+        (`gfx942`, `gfx942-xnack+`, `gfx942-xnack-`). The runtime helper-kernel
+        loader (HipSolutionAdapter / tensile_host) probes only
+        ``{"", "-xnack-", "-xnack+"}`` appended to ``<base>``; sramecc and any
+        other feature are never part of the loaded name, so keeping them here
+        produces a file the runtime can never find. xnack+/xnack- still get
+        distinct filenames, so they do not collide.
 
     Returns ``(filenameArch, baseArch)`` — both extracted from the same source
     token so they cannot drift apart.
     """
     baseArch     = rawArch.split(":", 1)[0]
-    filenameArch = re.sub(":", "-", rawArch)
+    xnack        = next((f for f in rawArch.split(":")[1:] if f.startswith("xnack")), None)
+    filenameArch = baseArch + ("-" + xnack if xnack else "")
     return filenameArch, baseArch
 
 
@@ -101,7 +107,8 @@ def buildSourceCodeObjectFiles(
         tmpObjDir: Union[Path, str],
         includeDir: Union[Path, str],
         kernelPath: Union[Path, str],
-        cmdlineArchs: List[str]
+        cmdlineArchs: List[str],
+        outputArchNames: Optional[Dict[str, str]]=None,
     ) -> List[str]:
     """Compiles a HIP source code file into a code object file.
 
@@ -113,11 +120,15 @@ def buildSourceCodeObjectFiles(
         tmpObjDir: The directory where HIP source object files are created.
         includeDir: The include directory path.
         kernelPath: The path to the kernel source file.
+        outputArchNames: base arch -> output subtree; a stepping routes into
+            destRoot/<stepping>/ keeping the compiler-target filename. Identity
+            for ordinary.
 
     Returns:
         List of paths to the created code objects.
     """
     start = timer()
+    outArchNames = outputArchNames or {}
     cache = HelperKernelCache()
 
     with timing_context("python_kernel_build_src_co.setup"):
@@ -133,7 +144,7 @@ def buildSourceCodeObjectFiles(
     # On a hit we skip compilation/unbundling entirely and return early.
     # The cache restore routes each file to its per-base subdir under destRoot.
     with timing_context("python_kernel_build_src_co.cache_check"):
-        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destRoot)
+        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destRoot, outArchNames)
     if hit:
         stop = timer()
         print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}  [cache hit]")
@@ -152,7 +163,7 @@ def buildSourceCodeObjectFiles(
             if not coPathRaw: continue
             bundler(target, objPath, str(coPathRaw))
 
-            destDir = Path(ensurePath(destRoot / baseArch))
+            destDir = Path(ensurePath(destRoot / outArchNames.get(baseArch, baseArch)))
             coPath = str(destDir / coPathRaw.stem)
             coPathsRaw.append(coPathRaw)
             coPaths.append(coPath)
@@ -164,7 +175,7 @@ def buildSourceCodeObjectFiles(
     # Save the freshly built code objects into the cache so subsequent
     # builds with the same inputs can skip recompilation.
     with timing_context("python_kernel_build_src_co.cache_populate"):
-        cache.store(coPaths)
+        cache.store(coPaths, outArchNames)
 
     stop = timer()
     print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}")

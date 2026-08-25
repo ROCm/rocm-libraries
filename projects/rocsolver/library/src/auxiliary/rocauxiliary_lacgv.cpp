@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,11 +26,13 @@
  * *************************************************************************/
 
 #include "rocauxiliary_lacgv.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <typename T, typename I>
 rocblas_status rocsolver_lacgv_impl(rocblas_handle handle, const I n, T* x, const I incx)
+try
 {
     ROCSOLVER_ENTER_TOP("lacgv", "-n", n, "--incx", incx);
 
@@ -55,6 +57,10 @@ rocblas_status rocsolver_lacgv_impl(rocblas_handle handle, const I n, T* x, cons
 
     // execution
     return rocsolver_lacgv_template<T>(handle, n, x, shiftx, incx, stridex, batch_count);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

@@ -1639,43 +1639,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvAsmImplicitGemmGTCDynamicBwdXdlops final : Co
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-/// Holds common member functions for the Solvers which share the same
-/// "legacy exhaustive search" machinery.
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwdLegacyExhaustiveSearch
-    : ConvTunableSolver<LegacyPerformanceConfig>
-{
-    LegacyPerformanceConfig
-    GetDefaultPerformanceConfig(const ExecutionContext&,
-                                const miopen::conv::ProblemDescription&) const override;
-    LegacyPerformanceConfig Search(const ExecutionContext&,
-                                   const miopen::conv::ProblemDescription&,
-                                   const AnyInvokeParams& invoke_ctx) const override;
-
-private:
-    template <typename Tgpu>
-    LegacyPerformanceConfig SearchImpl(const ExecutionContext&,
-                                       const miopen::conv::ProblemDescription&,
-                                       const AnyInvokeParams& invoke_ctx) const;
-};
-
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd final : ConvOclDirectFwdLegacyExhaustiveSearch
-{
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclDirectFwd>(); }
-
-    static ConvSolution BaseGetSolution(const ExecutionContext&,
-                                        const miopen::conv::ProblemDescription&,
-                                        const LegacyPerformanceConfig&);
-
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&,
-                             const LegacyPerformanceConfig&) const override;
-    bool IsValidPerformanceConfig(const ExecutionContext&,
-                                  const miopen::conv::ProblemDescription&,
-                                  const LegacyPerformanceConfig&) const override;
-};
-
 struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwdLegacyExhaustiveSearch
     : ConvTunableSolver<LegacyPerformanceConfig>
 {
@@ -4344,7 +4307,7 @@ struct PerformanceConfigHipImplicitGemmGroupBwdXdlops
     void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
     {
@@ -4448,7 +4411,7 @@ struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
     void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
     {
@@ -4592,6 +4555,71 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd2D final
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
                              const PerformanceConfigConvDepthwiseFwd2D&) const override;
+};
+
+struct PerformanceConfigConvDepthwiseBwdData2D
+    : PerfConfigBaseCK<PerformanceConfigConvDepthwiseBwdData2D>
+{
+    int index;
+    std::string kernel_id;
+    std::vector<std::string> valid_kernels;
+    PerformanceConfigConvDepthwiseBwdData2D(int idx, std::string kernl_id)
+        : index(idx), kernel_id(kernl_id)
+    {
+    }
+    PerformanceConfigConvDepthwiseBwdData2D() : PerformanceConfigConvDepthwiseBwdData2D(0, "") {}
+    PerformanceConfigConvDepthwiseBwdData2D(bool) : PerformanceConfigConvDepthwiseBwdData2D(0, "")
+    {
+    }
+    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
+                                               const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
+    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
+    {
+        return IsValid(problem);
+    }
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool
+    operator==(const PerformanceConfigConvDepthwiseBwdData2D& other) const;
+};
+
+struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseBwdData2D final
+    : ConvTunableSolver<PerformanceConfigConvDepthwiseBwdData2D>
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvDepthwiseBwdData2D>();
+    }
+
+    PerformanceConfigConvDepthwiseBwdData2D
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConfigConvDepthwiseBwdData2D&) const override;
+    PerformanceConfigConvDepthwiseBwdData2D
+    Search(const ExecutionContext&,
+           const miopen::conv::ProblemDescription&,
+           const AnyInvokeParams& invoke_ctx) const override;
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    bool MayNeedWorkspace() const override { return false; }
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override
+    {
+        return 0;
+    }
+
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConfigConvDepthwiseBwdData2D&) const override;
 };
 /// Common base for ConvWinogradNHWC transposing solvers (tunable and non-tunable).
 /// Provides ConvertFromApiParams, ConvertForInnerSolver, Transpose, and GetTransposes.
@@ -4833,12 +4861,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&) const override;
 };
-
-// Test helper functions for metadata validation
-// These functions return all CK kernel TypeStrings without problem-based filtering
-// Declared here but implemented in the respective solver .cpp files
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-#endif
 
 } // namespace conv
 } // namespace solver

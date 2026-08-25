@@ -14,10 +14,23 @@ target_include_directories(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
 )
 
+if(HIPBLASLT_ENABLE_COVERAGE)
+    target_include_directories(hipblaslt-clients-common
+        PUBLIC
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include
+            ${PROJECT_SOURCE_DIR}/tensilelite/rocisa
+            ${PROJECT_SOURCE_DIR}/../../shared/origami/include
+    )
+endif()
+
 add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
 if(HIPBLASLT_ENABLE_BLIS)
     target_link_libraries(hipblaslt-clients-common PUBLIC BLIS::BLIS)
+    target_compile_definitions(hipblaslt-clients-common PUBLIC HIPBLASLT_ENABLE_BLIS)
 endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
@@ -26,7 +39,7 @@ target_link_libraries(hipblaslt-clients-common
         ${LAPACK_LIBRARIES}
     PRIVATE
         hip::device
-        tensilelite::tensilelite-host
+        roc::tensilelite-host
 )
 
 if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
@@ -93,6 +106,19 @@ add_executable(hipblaslt-bench-extop-amax "${CMAKE_CURRENT_SOURCE_DIR}/bench/src
 target_link_libraries(hipblaslt-bench-extop-amax PRIVATE hipblaslt-clients-common hip::device)
 target_compile_definitions(hipblaslt-bench-extop-amax PRIVATE ROCBLASLT_INTERNAL_API)
 
+# CU-contention cotenant helper (clients/scripts/cotenant). A standalone HIP
+# binary, compiled as CXX so it picks up GPU_TARGETS via hip::device like the
+# other clients (the project does not enable the HIP language). POSIX-only
+# (unistd.h, pause(), usleep(), getpid()), so it is not built on Windows.
+if(NOT WIN32)
+    add_executable(hipblaslt-cotenant-kernel "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant/hipblaslt-cotenant-kernel.hip")
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant/hipblaslt-cotenant-kernel.hip"
+        PROPERTIES LANGUAGE CXX)
+    target_link_libraries(hipblaslt-cotenant-kernel PRIVATE hip::device)
+    target_compile_features(hipblaslt-cotenant-kernel PRIVATE cxx_std_17)
+endif()
+
 if(HIPBLASLT_ENABLE_YAML)
     find_package(LLVM REQUIRED)
     add_executable(hipblaslt-sequence "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_sequence.cpp")
@@ -111,6 +137,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common
+            roc::tensilelite-host
             GTest::gtest
             OpenMP::OpenMP_CXX
             ${CMAKE_DL_LIBS}
@@ -118,6 +145,31 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
+    endif()
+    if(HIPBLASLT_ENABLE_COVERAGE)
+        target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
+        # For coverage testing, link against hipblaslt's object files to access internal symbols
+        # This ensures we test the real library code, not stubs
+        target_link_libraries(hipblaslt-test PRIVATE
+            $<TARGET_OBJECTS:hipblaslt>
+            roc::tensilelite-host
+            ${CMAKE_DL_LIBS}
+        )
+        # Add roctracer if HIPBLASLT_ENABLE_MARKER is enabled
+        if(HIPBLASLT_ENABLE_MARKER)
+            target_link_libraries(hipblaslt-test PRIVATE ${rocTracer})
+        endif()
+        # Add msgpack if not using YAML
+        if(NOT HIPBLASLT_ENABLE_YAML)
+            target_link_libraries(hipblaslt-test PRIVATE ${hipblaslt_msgpack_target})
+        endif()
+        # Add rocroller dependencies if enabled
+        if(HIPBLASLT_ENABLE_ROCROLLER)
+            target_link_libraries(hipblaslt-test PRIVATE
+                $<TARGET_OBJECTS:hipblaslt-rocroller>
+                rocroller
+            )
+        endif()
     endif()
 
     add_subdirectory(tests)
@@ -130,3 +182,8 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/hipblaslt_gentest.py" "${CMAKE
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/data/hipblaslt_common.yaml" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt_common.yaml" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/data/hipblaslt_template.yaml" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt_template.yaml" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/bench/sequence.yaml" "${CMAKE_CURRENT_BINARY_DIR}/sequence.yaml" COPYONLY)
+if(NOT WIN32)
+    # Place the launcher next to the built kernel so it auto-finds the binary in
+    # the build tree (matching the installed bin/ layout) without --binary.
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant/hipblaslt-cotenant" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-cotenant" COPYONLY)
+endif()

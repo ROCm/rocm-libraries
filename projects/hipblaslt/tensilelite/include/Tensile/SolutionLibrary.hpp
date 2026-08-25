@@ -34,9 +34,7 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/Task.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -82,7 +80,15 @@ namespace TensileLite
         switch(searchType)
         {
         case SolutionLibrarySearchType::DEFAULT:
-            return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task);
+            // streamKDynamicQueueSupported() excludes StreamK dynamic-queue /
+            // work-stealing solutions (SK4 and the dynamic sub-path of SK5) on
+            // devices whose XCD count is not a power of two, warning the user
+            // once. This is reject-and-continue: selection falls through to
+            // another (SK3-static / non-StreamK) solution for the GEMM.
+            // uniformSummationOrderSupported() is the same kind of filter.
+            return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
+                   && solutions.streamKDynamicQueueSupported(problem, hardware)
+                   && solutions.uniformSummationOrderSupported(problem, hardware);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
             return isGemmTypeSame(solutions, problem);
@@ -127,7 +133,7 @@ namespace TensileLite
  *
  */
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    struct TENSILE_API SolutionLibrary
+    struct TENSILELITEHOST_EXPORT SolutionLibrary
     {
         virtual ~SolutionLibrary() = default;
 
@@ -223,4 +229,3 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

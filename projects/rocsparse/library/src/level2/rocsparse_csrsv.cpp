@@ -53,9 +53,9 @@ namespace rocsparse
         case rocsparse_indextype_i32:
         {
             int32_t p;
-            RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(&p, position, sizeof(int32_t), hipMemcpyDefault, handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                &p, position, sizeof(int32_t), hipMemcpyDefault, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
             if(p != -1)
             {
                 return rocsparse_status_zero_pivot;
@@ -65,9 +65,9 @@ namespace rocsparse
         case rocsparse_indextype_i64:
         {
             int64_t p;
-            RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(&p, position, sizeof(int64_t), hipMemcpyDefault, handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                &p, position, sizeof(int64_t), hipMemcpyDefault, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
             if(p != -1)
             {
                 return rocsparse_status_zero_pivot;
@@ -75,7 +75,7 @@ namespace rocsparse
             return rocsparse_status_success;
         }
             // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    "rocsparse_indextype_u16 not supported");

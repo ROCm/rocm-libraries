@@ -101,7 +101,7 @@ def _setup_msvc_env():
         return
     result = subprocess.run(
         f'"{vcvarsall}" amd64 && set',
-        capture_output=True, text=True, encoding="mbcs", shell=True,
+        capture_output=True, text=True, encoding="mbcs", errors="replace", shell=True,
     )
     original_lib = os.environ.get("LIB", "")
     for line in result.stdout.splitlines():
@@ -314,6 +314,62 @@ def _install_blis(c, build_dir: Path):
         symlink.symlink_to("libblis-mt.a")
 
 
+# gfx1250's two revisions share one ISA and compiler target, so the build cannot
+# tell them apart and does not try: it builds both revisions' trees by default and
+# lets the runtime probe hipDeviceProp_t::asicRevision to pick one. An optional
+# pin restricts the build to a single revision; it goes to CMake in its own cache
+# variable, never GPU_TARGETS -- extops/matrix-transform would feed gfx1250v0 to
+# --offload-arch, and it is not in the supported-target list.
+_ASIC_REVISIONS = ("v0", "v1")
+
+
+def _targets_include_gfx1250(architecture: str) -> bool:
+    """Whether --architecture can put gfx1250 in the build. 'all' and empty
+    (CMake's 'all') count; matched on the bare name so gfx1250v0 does not."""
+    targets = [t.strip() for t in (architecture or "").split(";")]
+    if not any(targets):
+        return True
+    return any(
+        t == "all" or t.split(":")[0].split("[")[0] == "gfx1250" for t in targets
+    )
+
+
+def _validate_asic_revision(asic_revision):
+    """Rejected here rather than in CMake, where an unrecognized value matches
+    no branch and quietly builds the default v1 revision instead."""
+    if asic_revision and asic_revision not in _ASIC_REVISIONS:
+        print("--asic-revision must be 'v0' or 'v1'")
+        sys.exit(2)
+
+
+def _asic_revision_option(architecture: str, asic_revision):
+    """The CMake option selecting which gfx1250 ASIC-revision trees to build, or
+    None when the build cannot produce gfx1250. The default builds both trees (no
+    local probe; the runtime picks by asicRevision); --asic-revision prunes to
+    one. Emitted even when empty, because the value is cached and builds are
+    incremental: an unset one would let a dir previously pinned to v0 stay v0."""
+    _validate_asic_revision(asic_revision)
+    targetsGfx1250 = _targets_include_gfx1250(architecture)
+    if asic_revision:
+        # Emitted even with no gfx1250 target (the value is cached); say so, or
+        # the line reads as though it changed something in the build.
+        how = "pinned by --asic-revision"
+        if not targetsGfx1250:
+            how += ", though these targets contain no gfx1250"
+        chose = asic_revision
+    elif not targetsGfx1250:
+        return None
+    else:
+        # CMake reads an empty value as "both"; --asic-revision defaults to
+        # None here, and interpolating that would send it the literal "None",
+        # which its validation rejects outright.
+        asic_revision = ""
+        how = "the runtime selects by asicRevision"
+        chose = "both"
+    print(f"gfx1250 ASIC revision: {chose} ({how})")
+    return f"-DHIPBLASLT_ASIC_REVISION={asic_revision}"
+
+
 # ---------------------------------------------------------------------------
 # invoke tasks
 # ---------------------------------------------------------------------------
@@ -325,6 +381,7 @@ def _install_blis(c, build_dir: Path):
         "clients": "Build library clients.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "architecture": "GPU target(s), e.g. 'all' or 'gfx90a:xnack+;gfx90a:xnack-'.",
+        "asic_revision": "Build only one gfx1250 ASIC-revision tree, 'v0' or 'v1'; the default builds both.",
         "cpu_ref_lib": "CPU reference library for testing: 'blis' or 'lapack'.",
         "use_system_packages": "Use system-installed msgpack/blas/lapack (requires --install-deps).",
         "debug": "Build with CMAKE_BUILD_TYPE=Debug.",
@@ -336,7 +393,7 @@ def _install_blis(c, build_dir: Path):
         "gprof": "Enable GNU gprof profiling (requires --static).",
         "no_tensile": "Build without the Tensile GEMM backend.",
         "tensile_logic": "Path for HIPBLASLT_LIBLOGIC_PATH.",
-        "tensile_threads": "Parallel build threads for TensileLite (default: nproc).",
+        "tensile_threads": "Parallel build threads for TensileLite (default: --jobs, or nproc if --jobs is also unset).",
         "tensile_verbose": "TensileLite verbosity level.",
         "no_lazy_load": "Disable lazy library loading.",
         "no_msgpack": "Use YAML backend instead of msgpack.",
@@ -390,6 +447,10 @@ def build(
     build_dir=None,
     rocm_path=None,
     clean=False,
+    # Appended rather than grouped with --architecture: invoke derives short
+    # flags in signature order, so inserting a parameter mid-signature takes
+    # -g from --gprof and cascades onto --logic-filter's -f.
+    asic_revision=None,
 ):
     _supported_distros()
 
@@ -414,7 +475,7 @@ def build(
     rocm_s = rocm.as_posix()
 
     if tensile_threads is None:
-        tensile_threads = os.cpu_count()
+        tensile_threads = jobs
     jobs = jobs or os.cpu_count()
 
     # Determine build type
@@ -444,6 +505,8 @@ def build(
     if gprof and not static:
         print("--gprof requires --static.")
         sys.exit(2)
+
+    _validate_asic_revision(asic_revision)
 
     # PATH setup — use os.pathsep (';' on Windows, ':' on Linux)
     # lib/llvm/bin is Windows-only: the ROCm Windows SDK stores tools there
@@ -480,6 +543,11 @@ def build(
         "-DMSGPACK_USE_BOOST=OFF",
     ]
 
+    if not no_tensile:
+        revision_opt = _asic_revision_option(architecture, asic_revision)
+        if revision_opt:
+            cmake_opts.append(revision_opt)
+
     if legacy_hipblas_direct:
         cmake_opts.append("-DHIPBLASLT_ENABLE_HIPBLAS_DIRECT=ON")
     if address_sanitizer:
@@ -510,7 +578,7 @@ def build(
         if tensile_logic:
             logic_path = tensile_logic if Path(tensile_logic).is_absolute() else str(ROOT_PATH / tensile_logic)
             cmake_opts.append(f"-DHIPBLASLT_LIBLOGIC_PATH={logic_path}")
-        if tensile_threads != os.cpu_count():
+        if tensile_threads is not None:
             cmake_opts.append(f"-DTENSILELITE_BUILD_PARALLEL_LEVEL={tensile_threads}")
 
     cmake_opts.append(f"-DHIPBLASLT_ENABLE_YAML={'OFF' if not no_msgpack else 'ON'}")
@@ -688,7 +756,7 @@ def _install_system_deps(
 ):
     tensile_msgpack_backend = not no_msgpack
 
-    lib_ubuntu = ["make", "pkg-config", "libnuma1", "git", "libmsgpack-dev"]
+    lib_ubuntu = ["make", "pkg-config", "libnuma1", "git", "libmsgpack-dev", "libgmock-dev", "libgtest-dev"]
     lib_centos = ["epel-release", "make", "gcc-c++", "rpm-build"]
     lib_centos8 = ["epel-release", "make", "gcc-c++", "rpm-build", "numactl-libs"]
     lib_fedora = ["make", "gcc-c++", "libcxx-devel", "rpm-build", "numactl-libs"]

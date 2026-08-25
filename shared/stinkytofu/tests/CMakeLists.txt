@@ -22,11 +22,19 @@ set(TEST_INCLUDE_DIRS
     ${TABLEGEN_OUTPUT_DIR}
 )
 
-# Common link libraries for all tests
+# Common link libraries for all tests.
+# unit_tests links the static lib so all symbols (including non-exported ones)
+# are accessible for white-box coverage testing. When BUILD_SHARED_LIBS=OFF,
+# stinkytofu itself is already static so no separate target is needed.
+if(BUILD_SHARED_LIBS)
+    set(_stinkytofu_test_lib stinkytofu_static)
+else()
+    set(_stinkytofu_test_lib stinkytofu)
+endif()
 set(TEST_LINK_LIBS
     GTest::gtest
     Threads::Threads
-    stinkytofu
+    ${_stinkytofu_test_lib}
 )
 
 # =============================================================================
@@ -37,6 +45,7 @@ set(TEST_LINK_LIBS
 set(UNIT_ASM_TEST_FILES
     unit/asm/WaitCntInsertionTest.cpp
     unit/asm/DAGSchedulerPassTest.cpp
+    unit/asm/ExecMaskGroupingTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
@@ -44,10 +53,16 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
+    unit/asm/ModuleAdaptorsTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
     unit/asm/AccumulateInstructionSizePassTest.cpp
-    unit/asm/SwPrefetchInsertionPassTest.cpp
+    unit/asm/SwInstructionPrefetchRelStaticPassTest.cpp
+    unit/asm/SwInstructionPrefetchRelDynamicPassTest.cpp
+    unit/asm/SwInstructionPrefetchAbsStaticPassTest.cpp
+    unit/asm/SwInstructionPrefetchAbsDynamicPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
+    unit/asm/StinkyModifiersTest.cpp
+    unit/asm/LegalizationUtilsTest.cpp
     unit/asm/VirtualRegisterTest.cpp
     # Parser/Lexer Tests (added for critical testing gaps)
     unit/asm/IRLexerTest.cpp
@@ -61,6 +76,22 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/BranchHelpersTest.cpp
     unit/asm/SetpcSwappcCfgTest.cpp
     unit/asm/LongBranchLoweringTest.cpp
+    unit/asm/MemTokenConsistencyCheckPassTest.cpp
+    unit/asm/InsertClusterBarrierPassTest.cpp
+    unit/asm/VerifyInstrumentationTest.cpp
+    unit/asm/DebugPrintInstrumentation_test.cpp
+    unit/asm/AccumulateInstructionSizePassRunTest.cpp
+    unit/asm/StinkyWmmaVgprReorderPassTest.cpp
+    unit/asm/RemoveInstructionPassTest.cpp
+    unit/asm/RemoveDscntPassTest.cpp
+    unit/asm/FlattenCalleesPassTest.cpp
+    unit/asm/Gfx1250HazardPassTest.cpp
+    unit/asm/Gfx1250HazardProfileTest.cpp
+    unit/asm/BasicBlockTest.cpp
+    unit/asm/DumpStinkyModulePassTest.cpp
+    unit/asm/StinkySignatureTest.cpp
+    unit/asm/RederiveExpertScopePassTest.cpp
+    unit/asm/HWModelTest.cpp
 )
 
 # High-Level IR Tests
@@ -75,6 +106,7 @@ set(UNIT_LOGICAL_TEST_FILES
     unit/logical/LogicalToAsmPipelineTest.cpp
     unit/logical/LogicalToAsmMultiArchTest.cpp
     unit/logical/LogicalIntrinsicFlowTest.cpp
+    unit/logical/LogicalIRVerifierPassTest.cpp
 )
 
 # Core Infrastructure Tests
@@ -82,6 +114,9 @@ set(UNIT_CORE_TEST_FILES
     unit/core/AnalysisManagerTest.cpp
     unit/core/BackendRegistryTest.cpp
     unit/core/ComgrProbeTest.cpp
+    unit/core/PassBuilderTest.cpp
+    unit/core/BackendTest.cpp
+    unit/core/VersionTest.cpp
 )
 
 # Common/Shared Tests
@@ -108,17 +143,145 @@ target_link_libraries(unit_tests PUBLIC ${TEST_LINK_LIBS})
 target_include_directories(unit_tests PRIVATE ${TEST_INCLUDE_DIRS})
 add_dependencies(unit_tests tablegen_generated)
 
+# gtest 1.18 uses std::any, whose MSVC header needs static RTTI; overriding the
+# library-wide -fno-rtti just for the gtest-linking test targets on Windows.
+if(WIN32)
+    target_compile_options(unit_tests PRIVATE -frtti)
+endif()
+
+# Example-plugin tests are gated by STINKYTOFU_BUILD_EXAMPLES: the plugin target
+# only exists when examples are built, so the integration test compiles only then.
+# Future example tests slot in under this same flag.
+#
+# Static build: plugin is an OBJECT lib linked directly into unit_tests.
+# Shared build: plugin is a MODULE loaded at runtime via loadPlugin(). Because
+# the plugin links stinkytofu.dll, the test binary must also use the shared lib
+# so both share the same registry instance. Plugin tests therefore live in
+# api_tests (which links stinkytofu shared), not unit_tests (which links
+# stinkytofu_static). Only the STINKYTOFU_BUILD_EXAMPLES compile definition is
+# added to unit_tests so non-plugin tests in the same file still compile.
+if(STINKYTOFU_BUILD_EXAMPLES)
+    if(BUILD_SHARED_LIBS)
+        # Shared build: plugin links stinkytofu.dll so the plugin test must run
+        # inside api_tests (which also links stinkytofu.dll). unit_tests links
+        # stinkytofu_static — two separate registry instances — so the plugin test
+        # would not see its registered passes. Leave STINKYTOFU_BUILD_EXAMPLES
+        # undefined here; PassBuilderTest.cpp's plugin section is compiled out.
+    else()
+        target_compile_definitions(unit_tests PRIVATE STINKYTOFU_BUILD_EXAMPLES)
+        target_include_directories(unit_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugins
+        )
+        target_link_libraries(unit_tests PRIVATE stinkytofu-plugin-helloworld)
+    endif()
+endif()
+
 gtest_discover_tests(unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     TIMEOUT 60
     PROPERTIES LABELS "unit_tests"
 )
 
+# Static link-level guard for #8342: assert libstinkytofu has no DT_NEEDED on a
+# plugin. This is an ELF property that a runtime gtest cannot observe (a broken
+# libstinkytofu would fail to load before any test starts), so it is checked by
+# inspecting the built .so directly. Linux/ELF only and only meaningful for a
+# shared libstinkytofu.
+if(UNIX AND NOT APPLE AND BUILD_SHARED_LIBS AND CMAKE_READELF)
+    add_test(
+        NAME LibStinkytofuHasNoPluginDependency
+        COMMAND ${CMAKE_COMMAND}
+            -DLIB=$<TARGET_FILE:stinkytofu>
+            -DREADELF=${CMAKE_READELF}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckNoPluginDependency.cmake
+    )
+    set_tests_properties(LibStinkytofuHasNoPluginDependency
+        PROPERTIES LABELS "unit_tests")
+endif()
+
+# =============================================================================
+# API Export Tests
+# Links stinkytofu as a SHARED library (or static when BUILD_SHARED_LIBS=OFF).
+# Purpose: verify that every symbol used by real consumers (rocisa,
+# stinkytofu-opt) is properly exported. A linker failure here means a symbol
+# was accidentally un-exported.
+# Only meaningful when BUILD_SHARED_LIBS=ON; skipped otherwise since all
+# symbols are always visible in a static build.
+# =============================================================================
+if(BUILD_SHARED_LIBS)
+    add_executable(api_tests
+        ${TEST_MAIN}
+        ${CMAKE_CURRENT_SOURCE_DIR}/api/ApiExportTest.cpp
+        # Address identity of the per-arch HWModel objects. Meaningful only against
+        # the shared lib; the unit_tests copy links statically and cannot fail.
+        ${CMAKE_CURRENT_SOURCE_DIR}/api/HWModelIdentityTest.cpp
+    )
+    target_link_libraries(api_tests PRIVATE stinkytofu-warnings)
+    target_link_libraries(api_tests PUBLIC
+        GTest::gtest
+        Threads::Threads
+        stinkytofu  # shared lib — only exported symbols visible
+    )
+    target_include_directories(api_tests PRIVATE ${TEST_INCLUDE_DIRS})
+    add_dependencies(api_tests tablegen_generated)
+
+    if(WIN32)
+        target_compile_options(api_tests PRIVATE -frtti)
+    endif()
+
+    # Plugin integration tests require the shared lib so the plugin and the test
+    # binary share the same stinkytofu registry instance at runtime.
+    if(STINKYTOFU_BUILD_EXAMPLES)
+        target_sources(api_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/unit/core/PassBuilderTest.cpp
+        )
+        target_compile_definitions(api_tests PRIVATE
+            STINKYTOFU_BUILD_EXAMPLES
+            STINKYTOFU_PLUGIN_HELLOWORLD_PATH="$<TARGET_FILE:stinkytofu-plugin-helloworld>"
+        )
+        target_include_directories(api_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugins
+        )
+        add_dependencies(api_tests stinkytofu-plugin-helloworld)
+
+        # Test-only plugin that reports a deliberately wrong stinkytofu version,
+        # to assert loadPlugin() rejects a version mismatch before calling
+        # registerPlugin(). Headers-only, same DT_NEEDED rationale as the
+        # example plugin above (see examples/plugins/CMakeLists.txt).
+        add_library(stinkytofu-plugin-bad-version MODULE
+            ${CMAKE_CURRENT_SOURCE_DIR}/plugins/BadVersionPlugin.cpp
+        )
+        if(WIN32)
+            target_link_libraries(stinkytofu-plugin-bad-version PRIVATE stinkytofu)
+        else()
+            target_include_directories(stinkytofu-plugin-bad-version PRIVATE
+                $<TARGET_PROPERTY:stinkytofu,INTERFACE_INCLUDE_DIRECTORIES>
+            )
+        endif()
+        set_target_properties(stinkytofu-plugin-bad-version PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
+        )
+        target_compile_definitions(api_tests PRIVATE
+            STINKYTOFU_PLUGIN_BAD_VERSION_PATH="$<TARGET_FILE:stinkytofu-plugin-bad-version>"
+        )
+        add_dependencies(api_tests stinkytofu-plugin-bad-version)
+    endif()
+
+    gtest_discover_tests(api_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 60
+        PROPERTIES LABELS "api_tests"
+    )
+endif()
+
 # =============================================================================
 # All Tests Target (convenience target to build all test executables)
 # =============================================================================
 add_custom_target(tests COMMENT "Build all test executables")
 add_dependencies(tests unit_tests)
+if(BUILD_SHARED_LIBS)
+    add_dependencies(tests api_tests)
+endif()
 
 # Note: Future test executables can be added here, e.g.:
 # add_executable(integration_tests ...)
@@ -140,8 +303,11 @@ target_include_directories(test_gen_instructions PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+# Pass the configured arch list so the test checks the same set the build declares outputs for,
+# instead of a list of its own that would silently stop tracking it.
 add_test(NAME GenInstructionsTest
          COMMAND $<TARGET_FILE:test_gen_instructions> ${CMAKE_CURRENT_SOURCE_DIR}/..
+                 ${STINKYTOFU_ARCHS_TO_BUILD}
          WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 set_tests_properties(GenInstructionsTest PROPERTIES
@@ -190,10 +356,14 @@ if(STINKYTOFU_BUILD_PYTHON)
                     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
                 )
 
-                # Set PYTHONPATH so pytest can find the module
+                # Set PYTHONPATH so pytest can find the module. The staleness-guard
+                # test briefly puts a probe .def in the scanned tree, which would
+                # make any concurrent `import stinkytofu` raise, so the Python tests
+                # share a lock rather than overlapping.
                 set_tests_properties(python.${TEST_NAME} PROPERTIES
                     ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/lib"
                     LABELS "python;unit_tests"
+                    RESOURCE_LOCK "stinkytofu_source_tree"
                 )
             endforeach()
 
@@ -220,6 +390,16 @@ file(GLOB FILECHECK_TESTS
     "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.stir"
     "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.s"
 )
+# v0-specific FileCheck tests invoke `--arch gfx1250v0`, so they are only valid
+# when the Gfx1250v0 stepping is built. Register them only then, keeping a
+# Gfx1250-only test build green.
+if("Gfx1250v0" IN_LIST STINKYTOFU_ARCHS_TO_BUILD)
+    file(GLOB FILECHECK_V0_TESTS
+        "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/v0/*.stir"
+        "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/v0/*.s"
+    )
+    list(APPEND FILECHECK_TESTS ${FILECHECK_V0_TESTS})
+endif()
 foreach(test_file ${FILECHECK_TESTS})
     get_filename_component(test_name ${test_file} NAME_WE)
     add_test(

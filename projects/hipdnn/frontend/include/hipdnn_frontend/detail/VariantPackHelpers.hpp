@@ -16,9 +16,10 @@
 namespace hipdnn_frontend::detail
 {
 
-inline Error populateBaseVariantPackDescriptor(ScopedHipdnnBackendDescriptor& variantPackDesc,
-                                               std::unordered_map<int64_t, void*>& variantPack,
-                                               void* workspace)
+inline Error
+    populateBaseVariantPackDescriptor(ScopedHipdnnBackendDescriptor& variantPackDesc,
+                                      const std::unordered_map<int64_t, void*>& variantPack,
+                                      void* workspace)
 {
     std::vector<int64_t> variantPackKeys;
     std::vector<void*> variantPackValues;

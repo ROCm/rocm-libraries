@@ -1,0 +1,66 @@
+{
+  "shape": {
+    "M": 2,
+    "N": 4096,
+    "K": 4096
+  },
+  "results": [
+    {
+      "label": "baseline_t16x64x32",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x32_w1x1",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x64_w1x1",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x128_w1x1",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x256_w1x1",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x64x64_w1x2",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x64x128_w1x2",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x64x256_w1x2",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x128_w1x1_preB",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x256_w1x1_preB",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x64x128_w1x2_preB",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x64x256_w1x2_preB",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x128_w1x1_compv4",
+      "error": "no samples"
+    },
+    {
+      "label": "t16x16x256_w1x1_compv4_preB",
+      "error": "no samples"
+    }
+  ],
+  "note": "Candidates inspired by rocprof of hipBLASLt's actual kernel MT16x16x512 PGR2 SK3 DTLA1 DTLB1 GRVWA8/B8 for this shape."
+}

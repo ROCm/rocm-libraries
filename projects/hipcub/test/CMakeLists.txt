@@ -62,15 +62,15 @@ function(add_relative_test test_name test_target resource_group)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
     # Set the resource group for the test. This must correspond to a gfxID present in resources.json.
     file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties([=[${test_name}]=] PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
-    # Track every hipCUB test target so the shared CTest categorization can
-    # later attach --gtest_filter category suites to each one.
-    set_property(GLOBAL APPEND PROPERTY HIPCUB_TEST_TARGETS "${test_target}")
+    # Track every hipCUB (test_target, resource_group) pair so the shared CTest
+    # categorization can attach --gtest_filter category suites to each one
+    # while inheriting the same RESOURCE_GROUPS pinning.
+    set_property(GLOBAL APPEND PROPERTY HIPCUB_TEST_TARGET_RESOURCE_PAIRS "${test_target}|${resource_group}")
 endfunction()
 
 # We'll use this small program to detect available GPUs and build the resource JSON file.
 set(GEN_RES_SPEC_PATH ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
 add_executable(generate_resource_spec ${GEN_RES_SPEC_PATH})
-target_compile_options(generate_resource_spec PRIVATE -Wno-unused-command-line-argument)
 set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_link_libraries(generate_resource_spec PRIVATE hip::host)
 # This test may still get the offload-compress flag passed. Since it does not include any kernel
@@ -140,9 +140,12 @@ if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
     set(HIPCUB_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
     if(EXISTS "${HIPCUB_TEST_CATEGORIES_YAML}")
         message(STATUS "Applying test categories for hipCUB")
-        get_property(_hc_test_targets GLOBAL PROPERTY HIPCUB_TEST_TARGETS)
-        list(REMOVE_DUPLICATES _hc_test_targets)
-        foreach(_hc_t IN LISTS _hc_test_targets)
+        get_property(_hc_pairs GLOBAL PROPERTY HIPCUB_TEST_TARGET_RESOURCE_PAIRS)
+        list(REMOVE_DUPLICATES _hc_pairs)
+        foreach(_hc_pair IN LISTS _hc_pairs)
+            string(REPLACE "|" ";" _hc_parts "${_hc_pair}")
+            list(GET _hc_parts 0 _hc_t)
+            list(GET _hc_parts 1 _hc_rg)
             get_target_property(_hc_dir ${_hc_t} RUNTIME_OUTPUT_DIRECTORY)
             if(NOT _hc_dir OR _hc_dir STREQUAL "_hc_dir-NOTFOUND")
                 set(_hc_dir "${CMAKE_BINARY_DIR}/test/hipcub")
@@ -152,6 +155,7 @@ if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
                 "${HIPCUB_TEST_CATEGORIES_YAML}"
                 "${_hc_dir}"
                 "${INSTALL_TEST_FILE}"
+                "${_hc_rg}"
             )
         endforeach()
     else()

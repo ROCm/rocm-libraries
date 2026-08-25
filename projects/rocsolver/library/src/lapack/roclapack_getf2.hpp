@@ -622,9 +622,7 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
 #endif
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     // prepare kernels
     I singular_thds = getf2_get_checksingularity_blksize(n);
@@ -684,7 +682,6 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
         }
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

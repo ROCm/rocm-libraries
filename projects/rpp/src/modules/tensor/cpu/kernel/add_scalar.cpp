@@ -24,32 +24,29 @@ SOFTWARE.
 
 #include "host_tensor_executors.hpp"
 
-inline void compute_add_16_host(__m256 *p, __m256 *pAddParam)
-{
-    p[0] = _mm256_add_ps(p[0], pAddParam[0]);    // add adjustment
-    p[1] = _mm256_add_ps(p[1], pAddParam[0]);    // add adjustment
+inline void compute_add_16_host(__m256* p, __m256* pAddParam) {
+    p[0] = _mm256_add_ps(p[0], pAddParam[0]);  // add adjustment
+    p[1] = _mm256_add_ps(p[1], pAddParam[0]);  // add adjustment
 }
 
-RppStatus add_scalar_f32_f32_host_tensor(Rpp32f *srcPtr,
-                                         RpptGenericDescPtr srcGenericDescPtr,
-                                         Rpp32f *dstPtr,
-                                         RpptGenericDescPtr dstGenericDescPtr,
-                                         Rpp32f *addTensor,
-                                         RpptROI3DPtr roiGenericPtrSrc,
-                                         RpptRoi3DType roiType,
-                                         RppLayoutParams layoutParams,
-                                         rpp::Handle& handle)
-{
+RppStatus add_scalar_f32_f32_host_tensor(Rpp32f* srcPtr, RpptGenericDescPtr srcGenericDescPtr,
+                                         Rpp32f* dstPtr, RpptGenericDescPtr dstGenericDescPtr,
+                                         Rpp32f* addTensor, RpptROI3DPtr roiGenericPtrSrc,
+                                         RpptRoi3DType roiType, RppLayoutParams layoutParams,
+                                         rpp::Handle& handle) {
     RpptROI3D roiDefault;
-    if(srcGenericDescPtr->layout==RpptLayout::NCDHW)
-        roiDefault = rpp_make_roi3d_xyzwhd_full((Rpp32s)srcGenericDescPtr->dims[4], (Rpp32s)srcGenericDescPtr->dims[3], (Rpp32s)srcGenericDescPtr->dims[2]);
-    else if(srcGenericDescPtr->layout==RpptLayout::NDHWC)
-        roiDefault = rpp_make_roi3d_xyzwhd_full((Rpp32s)srcGenericDescPtr->dims[3], (Rpp32s)srcGenericDescPtr->dims[2], (Rpp32s)srcGenericDescPtr->dims[1]);
+    if (srcGenericDescPtr->layout == RpptLayout::NCDHW)
+        roiDefault = rpp_make_roi3d_xyzwhd_full((Rpp32s)srcGenericDescPtr->dims[4],
+                                                (Rpp32s)srcGenericDescPtr->dims[3],
+                                                (Rpp32s)srcGenericDescPtr->dims[2]);
+    else if (srcGenericDescPtr->layout == RpptLayout::NDHWC)
+        roiDefault = rpp_make_roi3d_xyzwhd_full((Rpp32s)srcGenericDescPtr->dims[3],
+                                                (Rpp32s)srcGenericDescPtr->dims[2],
+                                                (Rpp32s)srcGenericDescPtr->dims[1]);
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstGenericDescPtr->dims[0]; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstGenericDescPtr->dims[0]; batchCount++) {
         RpptROI3D roi;
         RpptROI3DPtr roiPtrInput = &roiGenericPtrSrc[batchCount];
         compute_roi3D_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -68,37 +65,36 @@ RppStatus add_scalar_f32_f32_host_tensor(Rpp32f *srcPtr,
         __m256 pAddParam = _mm256_set1_ps(addParam);
 
         // Add without fused output-layout toggle (NCDHW -> NCDHW)
-        if((srcGenericDescPtr->layout == RpptLayout::NCDHW) && (dstGenericDescPtr->layout == RpptLayout::NCDHW))
-        {
-            srcPtrChannel = srcPtrImage + (roi.xyzwhdROI.xyz.z * srcGenericDescPtr->strides[2]) + (roi.xyzwhdROI.xyz.y * srcGenericDescPtr->strides[3]) + (roi.xyzwhdROI.xyz.x * layoutParams.bufferMultiplier);
+        if ((srcGenericDescPtr->layout == RpptLayout::NCDHW) &&
+            (dstGenericDescPtr->layout == RpptLayout::NCDHW)) {
+            srcPtrChannel = srcPtrImage + (roi.xyzwhdROI.xyz.z * srcGenericDescPtr->strides[2]) +
+                            (roi.xyzwhdROI.xyz.y * srcGenericDescPtr->strides[3]) +
+                            (roi.xyzwhdROI.xyz.x * layoutParams.bufferMultiplier);
 
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp32f *srcPtrDepth, *dstPtrDepth;
                 srcPtrDepth = srcPtrChannel;
                 dstPtrDepth = dstPtrChannel;
-                for(int i = 0; i < roi.xyzwhdROI.roiDepth; i++)
-                {
+                for (int i = 0; i < roi.xyzwhdROI.roiDepth; i++) {
                     Rpp32f *srcPtrRow, *dstPtrRow;
                     srcPtrRow = srcPtrDepth;
                     dstPtrRow = dstPtrDepth;
-                    for(int j = 0; j < roi.xyzwhdROI.roiHeight; j++)
-                    {
+                    for (int j = 0; j < roi.xyzwhdROI.roiHeight; j++) {
                         Rpp32f *srcPtrTemp, *dstPtrTemp;
                         srcPtrTemp = srcPtrRow;
                         dstPtrTemp = dstPtrRow;
                         int vectorLoopCount = 0;
-                        for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-                        {
+                        for (; vectorLoopCount < alignedLength;
+                             vectorLoopCount += vectorIncrement) {
                             __m256 p[2];
-                            rpp_simd_load(rpp_load16_f32_to_f32_avx, srcPtrTemp, p);    // simd loads
-                            compute_add_16_host(p, &pAddParam);                         // add adjustment
-                            rpp_simd_store(rpp_store16_f32_to_f32_avx, dstPtrTemp, p);  // simd stores
+                            rpp_simd_load(rpp_load16_f32_to_f32_avx, srcPtrTemp, p);  // simd loads
+                            compute_add_16_host(p, &pAddParam);  // add adjustment
+                            rpp_simd_store(rpp_store16_f32_to_f32_avx, dstPtrTemp,
+                                           p);  // simd stores
                             srcPtrTemp += vectorIncrement;
                             dstPtrTemp += vectorIncrement;
                         }
-                        for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                        {
+                        for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                             *dstPtrTemp++ = *srcPtrTemp++ + addParam;
                         }
                         srcPtrRow += srcGenericDescPtr->strides[3];
@@ -112,34 +108,32 @@ RppStatus add_scalar_f32_f32_host_tensor(Rpp32f *srcPtr,
             }
         }
         // Add without fused output-layout toggle (NDHWC -> NDHWC)
-        else if((srcGenericDescPtr->layout == RpptLayout::NDHWC) && (dstGenericDescPtr->layout == RpptLayout::NDHWC))
-        {
-            srcPtrChannel = srcPtrImage + (roi.xyzwhdROI.xyz.z * srcGenericDescPtr->strides[1]) + (roi.xyzwhdROI.xyz.y * srcGenericDescPtr->strides[2]) + (roi.xyzwhdROI.xyz.x * layoutParams.bufferMultiplier);
-            Rpp32f *srcPtrDepth = srcPtrChannel;
-            Rpp32f *dstPtrDepth = dstPtrChannel;
-            for(int i = 0; i < roi.xyzwhdROI.roiDepth; i++)
-            {
+        else if ((srcGenericDescPtr->layout == RpptLayout::NDHWC) &&
+                 (dstGenericDescPtr->layout == RpptLayout::NDHWC)) {
+            srcPtrChannel = srcPtrImage + (roi.xyzwhdROI.xyz.z * srcGenericDescPtr->strides[1]) +
+                            (roi.xyzwhdROI.xyz.y * srcGenericDescPtr->strides[2]) +
+                            (roi.xyzwhdROI.xyz.x * layoutParams.bufferMultiplier);
+            Rpp32f* srcPtrDepth = srcPtrChannel;
+            Rpp32f* dstPtrDepth = dstPtrChannel;
+            for (int i = 0; i < roi.xyzwhdROI.roiDepth; i++) {
                 Rpp32f *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrDepth;
                 dstPtrRow = dstPtrDepth;
-                for(int j = 0; j < roi.xyzwhdROI.roiHeight; j++)
-                {
+                for (int j = 0; j < roi.xyzwhdROI.roiHeight; j++) {
                     Rpp32f *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-                    {
+                    for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                         __m256 p[2];
-                        rpp_simd_load(rpp_load16_f32_to_f32_avx, srcPtrTemp, p);    // simd loads
-                        compute_add_16_host(p, &pAddParam);                         // add adjustment
+                        rpp_simd_load(rpp_load16_f32_to_f32_avx, srcPtrTemp, p);  // simd loads
+                        compute_add_16_host(p, &pAddParam);                       // add adjustment
                         rpp_simd_store(rpp_store16_f32_to_f32_avx, dstPtrTemp, p);  // simd stores
                         srcPtrTemp += vectorIncrement;
                         dstPtrTemp += vectorIncrement;
                     }
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                         *dstPtrTemp++ = *srcPtrTemp++ + addParam;
                     }
                     srcPtrRow += srcGenericDescPtr->strides[2];

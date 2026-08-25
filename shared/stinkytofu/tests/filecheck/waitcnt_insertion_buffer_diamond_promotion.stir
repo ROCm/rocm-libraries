@@ -1,0 +1,64 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# ShallowPredPromotion on the buffer (loadcnt) counter. Same shape as the
+# tensor diamond test but the merge anchor's RAW dep is a vgpr produced by
+# a buffer_load in the entry, so the wait emits as s_wait_loadcnt.
+#
+#                       ^entry
+#               v[0:3] = buffer_load   (B1, vgpr v0..v3)
+#               v[4:7] = buffer_load   (B2)
+#                  s_cbranch_scc1 p_shallow
+#                       /         \
+#         (taken)      /           \   (fall-through)
+#                     v             v
+#                ^p_shallow      ^p_deep
+#               (no extra ops)   v[20:23] = buffer_load   (B3)
+#                                v[24:27] = buffer_load   (B4)
+#                       \         /
+#                        v       v
+#                          ^merge
+#                    v_add_f32 v0, v0    (uses B1 -> dep on B1)
+#
+# Per-pred buffer queue at the merge anchor (dep on B1):
+#   via ^p_shallow: [B1, B2]                  -> w = 1   (B1 idx 0 of 2)
+#   via ^p_deep:    [B1, B2, B3, B4]          -> w = 3   (B1 idx 0 of 4)
+#
+# Both preds are correctable (single successor = ^merge), so:
+#   anchorWait      = max(w_shallow, w_deep) = 3
+#   shallow corrective at ^p_shallow tail = 1
+#
+# CHECK-LABEL: @waitcnt_insertion_buffer_diamond_promotion
+#
+# Deep path: no extra wait; the merge anchor's wait covers it.
+# CHECK-LABEL: ^p_deep:
+# CHECK-NOT: s_wait_loadcnt
+#
+# Shallow path: compensating drain so the relaxed anchor still drains B1.
+# CHECK-LABEL: ^p_shallow:
+# CHECK: s_wait_loadcnt
+# CHECK-SAME: vlcnt = 1
+#
+# Merge: deepest-path wait at the anchor consumer.
+# CHECK-LABEL: ^merge:
+# CHECK-NEXT: s_wait_loadcnt
+# CHECK-SAME: vlcnt = 3
+# CHECK-NEXT: v_add_f32
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_buffer_diamond_promotion() {
+^entry:
+  v[0:3] = "st.buffer_load_b128"(v8, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[4:7] = "st.buffer_load_b128"(v8, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 16, glc = false, slc = false, nt = false, lds = false } }
+  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1)
+  "st.s_cbranch_scc1"("p_shallow", SCC0)
+  Successors: ^p_shallow, ^p_deep
+^p_deep:
+  v[20:23] = "st.buffer_load_b128"(v100, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[24:27] = "st.buffer_load_b128"(v101, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 16, glc = false, slc = false, nt = false, lds = false } }
+  Successors: ^merge
+^p_shallow:
+  Successors: ^merge
+^merge:
+  v100 = "st.v_add_f32"(v0, v0)
+}

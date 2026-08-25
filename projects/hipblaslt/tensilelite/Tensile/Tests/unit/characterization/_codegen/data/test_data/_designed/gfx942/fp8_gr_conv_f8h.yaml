@@ -1,0 +1,87 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P5 designed config: FP8->Half global-read conversion arm (12231-12293)
+#
+# Target lines:
+#   12231-12293  — F8->H arm: DataType{tc}.isAnyFloat8() AND MacDataType{tc}.isHalf()
+#                  Emits FP8->F16 local-write conversion instructions.
+#                  Activated by DataType: h (sets MacDataType=h) + DataTypeA: F8N.
+#                  Fork GlobalReadVectorWidthA:[1,4] hits:
+#                    glvw==1 -> line 12232 tP["glvw"]==1 single-element arm
+#                    glvw >1 -> wide conversion arm (the else block)
+#
+# Architecture: gfx942 (HasMFMA_f8=1, NoSDWA=0, HasCvtFP8toF16=0).
+# MatrixInstruction [16,16,32,1,1,1,1,1,1] matches v_mfma_f32_16x16x32_fp8_fp8.
+# DataType: h sets MacDataTypeA/B = half.
+# DataTypeA: F8N overrides DataTypeA to FP8 (bpeGR=1, bpeDS=2).
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # F8->H arm (lines 12231-12293):
+  #   DataTypeA=F8N (fp8, bpeGR=1), MacDataTypeA=h (half, bpeDS=2).
+  #   The local-write CVT path (bpeGR != bpeDS) branches to
+  #   DataType{tc}.isAnyFloat8() AND MacDataType{tc}.isHalf().
+  #   Emits VCvtFP8toF32 + ECvtF32toF16 instructions (NoSDWA path on gfx942).
+  #   GlobalReadVectorWidthA fork: [1] -> glvw==1 (line 12232 single-element);
+  #                                [4] -> glvw >1 (wide arm, else block).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: F8N
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [32]
+        - GlobalReadVectorWidthA: [1, 4]
+        - GlobalReadVectorWidthB: [4]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [True]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - WaveSeparateGlobalReadB: [1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalReadPerMfma: [1.0]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

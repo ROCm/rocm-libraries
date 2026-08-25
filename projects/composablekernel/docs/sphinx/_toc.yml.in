@@ -9,8 +9,6 @@ subtrees:
     title: Install Composable Kernel
   - file: install/Composable-Kernel-build.rst
     title: Build from source
-  - file: install/Composable-Kernel-Docker.rst
-    title: Docker images
 
 - caption: Conceptual
   entries:
@@ -30,6 +28,8 @@ subtrees:
 
 - caption: Reference
   entries:
+  - file: reference/Composable_Kernel_data_type_support.rst
+    title: Precision support
   - file: reference/Composable_Kernel_supported_scalar_types.rst
     title: Scalar types
   - file: reference/Composable_Kernel_custom_types.rst

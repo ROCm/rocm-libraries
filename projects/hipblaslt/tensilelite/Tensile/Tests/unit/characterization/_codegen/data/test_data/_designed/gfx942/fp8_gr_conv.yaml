@@ -1,0 +1,94 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P5 designed config: FP8 global-read conversion arms in KernelWriterAssembly.py
+#
+# Target lines:
+#   12115-12225  — toF8 arm: DataType{tc}.isHalf() AND MacDataType{tc}.is8bitFloat()
+#                  Emits F16->F8 conversion instructions during local-write.
+#                  MacDataTypeA.isAnyFloat8() -> toF8=True (FP8, not BF8).
+#                  Activated by DataType: F8N + DataTypeA: h + DataTypeB: h.
+#
+#   12231-12293  — F8->H arm: DataType{tc}.isAnyFloat8() AND MacDataType{tc}.isHalf()
+#                  Emits FP8->F16 conversion instructions during local-write.
+#                  Activated by DataType: h + DataTypeA: F8N (or DataTypeB: F8N).
+#
+# GLVW fork [1, 4] hits both the glvw==1 single-element sub-arm (newBlockWidth==0.5
+# for toF8, or glvw==1 path for F8->H, line 12232) and the wider conversion arm.
+#
+# Config harness drives BenchmarkProblems[0] only, so the toF8 arm is the primary
+# target. We fork GlobalReadVectorWidthA:[1,4] -> 2 permutations, keeping budget <=8.
+#
+# Architecture: gfx942 (HasMFMA_f8=1, NoSDWA=0).
+# MatrixInstruction [16,16,32,1,1,1,1,1,1] matches v_mfma_f32_16x16x32_fp8_fp8.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # toF8 arm (lines 12115-12225):
+  #   DataTypeA=h (half, bpeGR=2), MacDataTypeA=F8N (fp8, bpeDS=1).
+  #   The local-write CVT path (bpeGR != bpeDS) branches to the
+  #   isHalf() AND is8bitFloat() block, sets toF8=True, and emits
+  #   VCvtPkF32toFP8 / VCvtSRF32toFP8 instructions.
+  #   GlobalReadVectorWidthA fork: [1] -> newBlockWidth==0.5 (single-element
+  #   arm, lines ~12121-12159); [4] -> newBlockWidth>0.5 (wide arm, 12160-12225).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8N
+      DataTypeA: h
+      DataTypeB: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [32]
+        - GlobalReadVectorWidthA: [1, 4]
+        - GlobalReadVectorWidthB: [4]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [True]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - WaveSeparateGlobalReadB: [1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalReadPerMfma: [1.0]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

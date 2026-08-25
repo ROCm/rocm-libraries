@@ -24,21 +24,15 @@ SOFTWARE.
 
 #include "host_tensor_executors.hpp"
 
-RppStatus copy_u8_u8_host_tensor(Rpp8u *srcPtr,
-                                 RpptDescPtr srcDescPtr,
-                                 Rpp8u *dstPtr,
-                                 RpptDescPtr dstDescPtr,
-                                 RppLayoutParams layoutParams,
-                                 rpp::Handle& handle)
-{
+RppStatus copy_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
+                                 RpptDescPtr dstDescPtr, RppLayoutParams layoutParams,
+                                 rpp::Handle& handle) {
     // Copy without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-    if ((srcDescPtr->c == 1) || (srcDescPtr->layout == dstDescPtr->layout))
-    {
+    if ((srcDescPtr->c == 1) || (srcDescPtr->layout == dstDescPtr->layout)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp8u *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -47,13 +41,12 @@ RppStatus copy_u8_u8_host_tensor(Rpp8u *srcPtr,
     }
 
     // Copy with fused output-layout toggle (NHWC -> NCHW)
-    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-    {
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp8u *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -67,8 +60,7 @@ RppStatus copy_u8_u8_host_tensor(Rpp8u *srcPtr,
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < srcDescPtr->h; i++)
-            {
+            for (int i = 0; i < srcDescPtr->h; i++) {
                 Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -76,18 +68,17 @@ RppStatus copy_u8_u8_host_tensor(Rpp8u *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount+=48)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += 48) {
                     __m128i px[3];
-                    rpp_simd_load(rpp_load48_u8pkd3_to_u8pln3, srcPtrTemp, px);    // simd loads
-                    rpp_simd_store(rpp_store48_u8pln3_to_u8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB, px);    // simd stores
+                    rpp_simd_load(rpp_load48_u8pkd3_to_u8pln3, srcPtrTemp, px);  // simd loads
+                    rpp_simd_store(rpp_store48_u8pln3_to_u8pln3, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, px);  // simd stores
                     srcPtrTemp += 48;
                     dstPtrTempR += 16;
                     dstPtrTempG += 16;
                     dstPtrTempB += 16;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount+=3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR++ = srcPtrTemp[0];
                     *dstPtrTempG++ = srcPtrTemp[1];
                     *dstPtrTempB++ = srcPtrTemp[2];
@@ -103,13 +94,12 @@ RppStatus copy_u8_u8_host_tensor(Rpp8u *srcPtr,
     }
 
     // Copy with fused output-layout toggle (NCHW -> NHWC)
-    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-    {
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp8u *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -123,8 +113,7 @@ RppStatus copy_u8_u8_host_tensor(Rpp8u *srcPtr,
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrImage;
 
-            for(int i = 0; i < srcDescPtr->h; i++)
-            {
+            for (int i = 0; i < srcDescPtr->h; i++) {
                 Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -132,18 +121,17 @@ RppStatus copy_u8_u8_host_tensor(Rpp8u *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount+=16)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += 16) {
                     __m128i px[3];
-                    rpp_simd_load(rpp_load48_u8pln3_to_u8pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB, px);    // simd loads
-                    rpp_simd_store(rpp_store48_u8pln3_to_u8pkd3, dstPtrTemp, px);    // simd stores
+                    rpp_simd_load(rpp_load48_u8pln3_to_u8pln3, srcPtrTempR, srcPtrTempG,
+                                  srcPtrTempB, px);                                // simd loads
+                    rpp_simd_store(rpp_store48_u8pln3_to_u8pkd3, dstPtrTemp, px);  // simd stores
                     srcPtrTempR += 16;
                     srcPtrTempG += 16;
                     srcPtrTempB += 16;
                     dstPtrTemp += 48;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = *srcPtrTempR++;
                     dstPtrTemp[1] = *srcPtrTempG++;
                     dstPtrTemp[2] = *srcPtrTempB++;
@@ -161,21 +149,15 @@ RppStatus copy_u8_u8_host_tensor(Rpp8u *srcPtr,
     return RPP_SUCCESS;
 }
 
-RppStatus copy_f32_f32_host_tensor(Rpp32f *srcPtr,
-                                   RpptDescPtr srcDescPtr,
-                                   Rpp32f *dstPtr,
-                                   RpptDescPtr dstDescPtr,
-                                   RppLayoutParams layoutParams,
-                                   rpp::Handle& handle)
-{
+RppStatus copy_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
+                                   RpptDescPtr dstDescPtr, RppLayoutParams layoutParams,
+                                   rpp::Handle& handle) {
     // Copy without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-    if ((srcDescPtr->c == 1) || (srcDescPtr->layout == dstDescPtr->layout))
-    {
+    if ((srcDescPtr->c == 1) || (srcDescPtr->layout == dstDescPtr->layout)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp32f *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -184,13 +166,12 @@ RppStatus copy_f32_f32_host_tensor(Rpp32f *srcPtr,
     }
 
     // Copy with fused output-layout toggle (NHWC -> NCHW)
-    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-    {
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp32f *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -204,8 +185,7 @@ RppStatus copy_f32_f32_host_tensor(Rpp32f *srcPtr,
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < srcDescPtr->h; i++)
-            {
+            for (int i = 0; i < srcDescPtr->h; i++) {
                 Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -213,18 +193,17 @@ RppStatus copy_f32_f32_host_tensor(Rpp32f *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount+=12)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += 12) {
                     __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);    // simd loads
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB, p);    // simd stores
+                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
+                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, p);  // simd stores
                     srcPtrTemp += 12;
                     dstPtrTempR += 4;
                     dstPtrTempG += 4;
                     dstPtrTempB += 4;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount+=3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR++ = srcPtrTemp[0];
                     *dstPtrTempG++ = srcPtrTemp[1];
                     *dstPtrTempB++ = srcPtrTemp[2];
@@ -236,18 +215,16 @@ RppStatus copy_f32_f32_host_tensor(Rpp32f *srcPtr,
                 dstPtrRowG += dstDescPtr->strides.hStride;
                 dstPtrRowB += dstDescPtr->strides.hStride;
             }
-
         }
     }
 
     // Copy with fused output-layout toggle (NCHW -> NHWC)
-    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-    {
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp32f *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -261,8 +238,7 @@ RppStatus copy_f32_f32_host_tensor(Rpp32f *srcPtr,
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrImage;
 
-            for(int i = 0; i < srcDescPtr->h; i++)
-            {
+            for (int i = 0; i < srcDescPtr->h; i++) {
                 Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -270,18 +246,17 @@ RppStatus copy_f32_f32_host_tensor(Rpp32f *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount+=4)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += 4) {
                     __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB, p);    // simd loads
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp, p);    // simd stores
+                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
+                                  srcPtrTempB, p);                                  // simd loads
+                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp, p);  // simd stores
                     srcPtrTempR += 4;
                     srcPtrTempG += 4;
                     srcPtrTempB += 4;
                     dstPtrTemp += 12;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = *srcPtrTempR++;
                     dstPtrTemp[1] = *srcPtrTempG++;
                     dstPtrTemp[2] = *srcPtrTempB++;
@@ -293,28 +268,21 @@ RppStatus copy_f32_f32_host_tensor(Rpp32f *srcPtr,
                 srcPtrRowB += srcDescPtr->strides.hStride;
                 dstPtrRow += dstDescPtr->strides.hStride;
             }
-
         }
     }
 
     return RPP_SUCCESS;
 }
 
-RppStatus copy_f16_f16_host_tensor(Rpp16f *srcPtr,
-                                   RpptDescPtr srcDescPtr,
-                                   Rpp16f *dstPtr,
-                                   RpptDescPtr dstDescPtr,
-                                   RppLayoutParams layoutParams,
-                                   rpp::Handle& handle)
-{
+RppStatus copy_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr,
+                                   RpptDescPtr dstDescPtr, RppLayoutParams layoutParams,
+                                   rpp::Handle& handle) {
     // Copy without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-    if ((srcDescPtr->c == 1) || (srcDescPtr->layout == dstDescPtr->layout))
-    {
+    if ((srcDescPtr->c == 1) || (srcDescPtr->layout == dstDescPtr->layout)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp16f *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -323,13 +291,12 @@ RppStatus copy_f16_f16_host_tensor(Rpp16f *srcPtr,
     }
 
     // Copy with fused output-layout toggle (NHWC -> NCHW)
-    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-    {
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp16f *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -350,8 +317,7 @@ RppStatus copy_f16_f16_host_tensor(Rpp16f *srcPtr,
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < srcDescPtr->h; i++)
-            {
+            for (int i = 0; i < srcDescPtr->h; i++) {
                 Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -359,30 +325,29 @@ RppStatus copy_f16_f16_host_tensor(Rpp16f *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount+= vectorIncrement)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
 #if __AVX2__
                     __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);    // simd loads
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, p);    // simd stores
+                    rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                    rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, p);  // simd stores
 #else
                     Rpp32f srcPtrTemp_ps[12], dstPtrTemp_ps[12];
 
-                    for(int cnt = 0; cnt < 12; cnt++)
-                    {
-                        *(srcPtrTemp_ps + cnt) = (Rpp32f) *(srcPtrTemp + cnt);
+                    for (int cnt = 0; cnt < 12; cnt++) {
+                        *(srcPtrTemp_ps + cnt) = (Rpp32f) * (srcPtrTemp + cnt);
                     }
 
                     __m128 p[4];
 
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);    // simd loads
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTemp_ps, dstPtrTemp_ps + 4, dstPtrTemp_ps + 8, p);    // simd stores
+                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);  // simd loads
+                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTemp_ps, dstPtrTemp_ps + 4,
+                                   dstPtrTemp_ps + 8, p);  // simd stores
 
-                    for(int cnt = 0; cnt < 4; cnt++)
-                    {
-                        *(dstPtrTempR + cnt) = (Rpp16f) *(dstPtrTemp_ps + cnt);
-                        *(dstPtrTempG + cnt) = (Rpp16f) *(dstPtrTemp_ps + 4 + cnt);
-                        *(dstPtrTempB + cnt) = (Rpp16f) *(dstPtrTemp_ps + 8 + cnt);
+                    for (int cnt = 0; cnt < 4; cnt++) {
+                        *(dstPtrTempR + cnt) = (Rpp16f) * (dstPtrTemp_ps + cnt);
+                        *(dstPtrTempG + cnt) = (Rpp16f) * (dstPtrTemp_ps + 4 + cnt);
+                        *(dstPtrTempB + cnt) = (Rpp16f) * (dstPtrTemp_ps + 8 + cnt);
                     }
 #endif
                     srcPtrTemp += vectorIncrement;
@@ -390,8 +355,7 @@ RppStatus copy_f16_f16_host_tensor(Rpp16f *srcPtr,
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount+=3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR++ = srcPtrTemp[0];
                     *dstPtrTempG++ = srcPtrTemp[1];
                     *dstPtrTempB++ = srcPtrTemp[2];
@@ -403,18 +367,16 @@ RppStatus copy_f16_f16_host_tensor(Rpp16f *srcPtr,
                 dstPtrRowG += dstDescPtr->strides.hStride;
                 dstPtrRowB += dstDescPtr->strides.hStride;
             }
-
         }
     }
 
     // Copy with fused output-layout toggle (NCHW -> NHWC)
-    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-    {
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp16f *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -435,8 +397,7 @@ RppStatus copy_f16_f16_host_tensor(Rpp16f *srcPtr,
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrImage;
 
-            for(int i = 0; i < srcDescPtr->h; i++)
-            {
+            for (int i = 0; i < srcDescPtr->h; i++) {
                 Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -444,30 +405,32 @@ RppStatus copy_f16_f16_host_tensor(Rpp16f *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount+= vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
 #if __AVX2__
                     __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG, srcPtrTempB, p);    // simd loads
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp, p);    // simd stores
+                    rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                                  srcPtrTempB, p);  // simd loads
+                    rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
+                                   p);  // simd stores
 #else
                     Rpp32f srcPtrTemp_ps[12], dstPtrTemp_ps[13];
 
-                    for(int cnt = 0; cnt < 4; cnt++)
-                    {
-                        *(srcPtrTemp_ps + cnt) = (Rpp32f) *(srcPtrTempR + cnt);
-                        *(srcPtrTemp_ps + 4 + cnt) = (Rpp32f) *(srcPtrTempG + cnt);
-                        *(srcPtrTemp_ps + 8 + cnt) = (Rpp32f) *(srcPtrTempB + cnt);
+                    for (int cnt = 0; cnt < 4; cnt++) {
+                        *(srcPtrTemp_ps + cnt) = (Rpp32f) * (srcPtrTempR + cnt);
+                        *(srcPtrTemp_ps + 4 + cnt) = (Rpp32f) * (srcPtrTempG + cnt);
+                        *(srcPtrTemp_ps + 8 + cnt) = (Rpp32f) * (srcPtrTempB + cnt);
                     }
 
                     __m128 p[4];
 
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTemp_ps, srcPtrTemp_ps + 4, srcPtrTemp_ps + 8, p);    // simd loads
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_ps, p);    // simd stores
+                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTemp_ps, srcPtrTemp_ps + 4,
+                                  srcPtrTemp_ps + 8, p);  // simd loads
+                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_ps,
+                                   p);  // simd stores
 
-                    for(int cnt = 0; cnt < 12; cnt++)
-                    {
-                        *(dstPtrTemp + cnt) = (Rpp16f) *(dstPtrTemp_ps + cnt);
+                    for (int cnt = 0; cnt < 12; cnt++) {
+                        *(dstPtrTemp + cnt) = (Rpp16f) * (dstPtrTemp_ps + cnt);
                     }
 #endif
                     srcPtrTempR += vectorIncrementPerChannel;
@@ -475,8 +438,7 @@ RppStatus copy_f16_f16_host_tensor(Rpp16f *srcPtr,
                     srcPtrTempB += vectorIncrementPerChannel;
                     dstPtrTemp += vectorIncrement;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = *srcPtrTempR++;
                     dstPtrTemp[1] = *srcPtrTempG++;
                     dstPtrTemp[2] = *srcPtrTempB++;
@@ -488,28 +450,21 @@ RppStatus copy_f16_f16_host_tensor(Rpp16f *srcPtr,
                 srcPtrRowB += srcDescPtr->strides.hStride;
                 dstPtrRow += dstDescPtr->strides.hStride;
             }
-
         }
     }
 
     return RPP_SUCCESS;
 }
 
-RppStatus copy_i8_i8_host_tensor(Rpp8s *srcPtr,
-                                 RpptDescPtr srcDescPtr,
-                                 Rpp8s *dstPtr,
-                                 RpptDescPtr dstDescPtr,
-                                 RppLayoutParams layoutParams,
-                                 rpp::Handle& handle)
-{
+RppStatus copy_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
+                                 RpptDescPtr dstDescPtr, RppLayoutParams layoutParams,
+                                 rpp::Handle& handle) {
     // Copy without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-    if ((srcDescPtr->c == 1) || (srcDescPtr->layout == dstDescPtr->layout))
-    {
-    omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
+    if ((srcDescPtr->c == 1) || (srcDescPtr->layout == dstDescPtr->layout)) {
+        omp_set_dynamic(0);
+        omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp8s *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -518,13 +473,12 @@ RppStatus copy_i8_i8_host_tensor(Rpp8s *srcPtr,
     }
 
     // Copy with fused output-layout toggle (NHWC -> NCHW)
-    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-    {
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp8s *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -538,8 +492,7 @@ RppStatus copy_i8_i8_host_tensor(Rpp8s *srcPtr,
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < srcDescPtr->h; i++)
-            {
+            for (int i = 0; i < srcDescPtr->h; i++) {
                 Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -547,18 +500,17 @@ RppStatus copy_i8_i8_host_tensor(Rpp8s *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount+=48)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += 48) {
                     __m128i px[3];
-                    rpp_simd_load(rpp_load48_i8pkd3_to_i8pln3, srcPtrTemp, px);    // simd loads
-                    rpp_simd_store(rpp_store48_i8pln3_to_i8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB, px);    // simd stores
+                    rpp_simd_load(rpp_load48_i8pkd3_to_i8pln3, srcPtrTemp, px);  // simd loads
+                    rpp_simd_store(rpp_store48_i8pln3_to_i8pln3, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, px);  // simd stores
                     srcPtrTemp += 48;
                     dstPtrTempR += 16;
                     dstPtrTempG += 16;
                     dstPtrTempB += 16;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount+=3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR++ = srcPtrTemp[0];
                     *dstPtrTempG++ = srcPtrTemp[1];
                     *dstPtrTempB++ = srcPtrTemp[2];
@@ -574,13 +526,12 @@ RppStatus copy_i8_i8_host_tensor(Rpp8s *srcPtr,
     }
 
     // Copy with fused output-layout toggle (NCHW -> NHWC)
-    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-    {
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
         omp_set_dynamic(0);
         omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-        for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-        {
+        for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
             Rpp8s *srcPtrImage, *dstPtrImage;
             srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
             dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -594,8 +545,7 @@ RppStatus copy_i8_i8_host_tensor(Rpp8s *srcPtr,
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrImage;
 
-            for(int i = 0; i < srcDescPtr->h; i++)
-            {
+            for (int i = 0; i < srcDescPtr->h; i++) {
                 Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -603,18 +553,17 @@ RppStatus copy_i8_i8_host_tensor(Rpp8s *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount+=16)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += 16) {
                     __m128i px[3];
-                    rpp_simd_load(rpp_load48_i8pln3_to_i8pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB, px);    // simd loads
-                    rpp_simd_store(rpp_store48_i8pln3_to_i8pkd3, dstPtrTemp, px);    // simd stores
+                    rpp_simd_load(rpp_load48_i8pln3_to_i8pln3, srcPtrTempR, srcPtrTempG,
+                                  srcPtrTempB, px);                                // simd loads
+                    rpp_simd_store(rpp_store48_i8pln3_to_i8pkd3, dstPtrTemp, px);  // simd stores
                     srcPtrTempR += 16;
                     srcPtrTempG += 16;
                     srcPtrTempB += 16;
                     dstPtrTemp += 48;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = *srcPtrTempR++;
                     dstPtrTemp[1] = *srcPtrTempG++;
                     dstPtrTemp[2] = *srcPtrTempB++;

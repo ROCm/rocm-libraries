@@ -26,6 +26,21 @@
 #include <unittest/special_types.h>
 #include <unittest/testframework.h>
 
+#ifdef ADDRESS_SANITIZER_BUILD
+#define CHECK_ASAN_ENABLEMENT() \
+{ \
+  static bool printed_warning = false; \
+  if (!printed_warning) \
+  { \
+    std::cerr << "Skipping test due to memory constraints in address sanitizer build." << std::endl; \
+	printed_warning = true; \
+  } \
+  return; \
+}
+#else
+#define CHECK_ASAN_ENABLEMENT()
+#endif
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  define THRUST_DEVICE_BACKEND                 hip
 #  define THRUST_DEVICE_BACKEND_DETAIL          hip_rocprim

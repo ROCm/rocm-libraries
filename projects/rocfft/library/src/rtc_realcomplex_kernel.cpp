@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 
 RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&    node,
                                                                  const std::string& gpu_arch,
-                                                                 bool enable_callbacks)
+                                                                 CallbackType       cbtype)
 {
     RTCGenerator generator;
 
@@ -58,7 +58,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
                            node.precision,
                            node.inArrayType,
                            node.outArrayType,
-                           node.GetCallbackType(enable_callbacks),
+                           cbtype,
                            node.loadOps,
                            node.storeOps};
 
@@ -132,7 +132,7 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
 
 RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafNode&    node,
                                                                      const std::string& gpu_arch,
-                                                                     bool enable_callbacks)
+                                                                     CallbackType       cbtype)
 {
     RTCGenerator generator;
 
@@ -171,7 +171,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
                                 node.precision,
                                 node.inArrayType,
                                 node.outArrayType,
-                                node.GetCallbackType(enable_callbacks),
+                                cbtype,
                                 node.loadOps,
                                 node.storeOps},
                                Ndiv4};
@@ -225,7 +225,7 @@ RTCKernelArgs RTCKernelRealComplexEven::get_launch_args(DeviceCallIn& data)
 }
 
 RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
-    const LeafNode& node, const std::string& gpu_arch, bool enable_callbacks)
+    const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype)
 {
     RTCGenerator generator;
     if(node.scheme != CS_KERNEL_R_TO_CMPLX_TRANSPOSE
@@ -237,12 +237,13 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
     unsigned int m   = node.length[1];
     unsigned int n   = node.length[0];
-    unsigned int dim = node.length.size();
+    unsigned int dim = node.dimension;
 
     unsigned int gridX;
     unsigned int gridX_1d;
     unsigned int gridY;
-    unsigned int gridZ = node.batch;
+    unsigned int gridZ
+        = node.batch * product(node.length.begin() + node.dimension, node.length.end());
 
     if(node.scheme == CS_KERNEL_R_TO_CMPLX_TRANSPOSE)
     {
@@ -295,7 +296,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
                                          node.precision,
                                          node.inArrayType,
                                          node.outArrayType,
-                                         node.GetCallbackType(enable_callbacks),
+                                         cbtype,
                                          node.loadOps,
                                          node.storeOps,
                                          grid3D}};
@@ -321,7 +322,7 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
 {
     RTCKernelArgs kargs;
 
-    kargs.append_size_t(data.node->length.size());
+    kargs.append_size_t(data.node->dimension);
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
@@ -343,23 +344,24 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
 
     // pass gridY and gridZ to restore a 3-D GPU grid, if needed for large grids
     unsigned int gridY;
-    unsigned int gridZ = data.node->batch;
+    unsigned int gridZ
+        = data.node->batch
+          * product(data.node->length.begin() + data.node->dimension, data.node->length.end());
 
     if(data.node->scheme == CS_KERNEL_R_TO_CMPLX_TRANSPOSE)
     {
         const unsigned int tileY = RealComplexEvenTransposeSpecs::TileY();
         unsigned int       m     = data.node->length[1];
-        unsigned int       dim   = data.node->length.size();
 
         gridY = ((m - 1) / tileY + 1)
-                * (dim > 2 ? static_cast<unsigned int>(data.node->length[2]) : 1);
+                * (data.node->dimension > 2 ? static_cast<unsigned int>(data.node->length[2]) : 1);
     }
     else
     {
         unsigned int       m     = data.node->length[1];
         const unsigned int tileY = RealComplexEvenTransposeSpecs::TileY();
 
-        if(data.node->length.size() > 2)
+        if(data.node->dimension > 2)
         {
             m = data.node->length[2];
         }

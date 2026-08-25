@@ -10,20 +10,19 @@
 # when VerifyCompiler.cmake is included.
 
 # For downloading, building, and installing required dependencies
-include(cmake/FetchContentIsolated.cmake)
+include(cmake/DownloadProject.cmake)
+include(FetchContent)
 
-# Suppress ROCmChecks warnings for local toolchain modifications.
-set(ROCM_WARN_TOOLCHAIN_VAR OFF)
-
-# Force older versions of option() in googletest to respect the local variable setting.
-set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-
-# Resolve Ninja generator errors regarding RPATH relinking during the install phase for
-# merged subprojects.
-set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+# Suppress ROCMChecks WARNING on third-party dependencies that modify CMAKE_CXX_FLAGS
+set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
+macro(rocm_check_toolchain_var var access value list_file)
+  if(NOT _ROCTHRUST_DISABLE_ROCM_CHECKS)
+    _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
+  endif()
+endmacro()
 
 # The option of using the SQLite provided by the system, instead of downloading a copy
-option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" OFF )
+option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" ON )
 
 # This function checks to see if the download branch given by "branch" exists in the repository.
 # It does so using the git ls-remote command.
@@ -62,7 +61,7 @@ endfunction()
 # This function fetches repository "repo_name" using the method specified by "method".
 # The result is stored in the parent scope version of "repo_path".
 # It does not build the repo.
-function(fetch_dep method repo_name repo_path download_branch)
+function(fetch_dep method repo_name repo_path package_min_ver_variable download_branch)
   set(method_value ${${method}})
 
   # Since the monorepo is large, we want to avoid downloading the whole thing if possible.
@@ -106,13 +105,13 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 
   if(${method_value} STREQUAL "PACKAGE")
-    message(STATUS "Searching for ${repo_name} package")
+    message(STATUS "Searching for ${repo_name} package version ${${package_min_ver_variable}}")
 
     # Add default install location for WIN32 and non-WIN32 as hint
-    find_package(${repo_name} ${MIN_ROCPRIM_PACKAGE_VERSION} CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/rocprim")
+    find_package(${repo_name} ${${package_min_ver_variable}} CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/${repo_name}")
 
     if(NOT ${${repo_name}_FOUND})
-      message(STATUS "No existing ${repo_name} package meeting the minimum version requirement (${MIN_ROCPRIM_PACKAGE_VERSION}) was found. Falling back to downloading it.")
+      message(STATUS "No existing ${repo_name} package meeting the minimum version requirement (${${package_min_ver_variable}}) was found. Falling back to downloading it.")
       # update local and parent variable values
       set(${method} "DOWNLOAD" PARENT_SCOPE)
       set(method_value "DOWNLOAD")
@@ -245,17 +244,22 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 endfunction()
 
-if(${LINK_HIP_DEVICE_LIBS})
-  fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH ROCM_DEP_RELEASE_BRANCH)
+if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
+  fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH MIN_ROCPRIM_PACKAGE_VERSION ROCM_DEP_RELEASE_BRANCH)
 
   if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
     # The fetch_dep call above should have downloaded/located the source. We just need to make it available.
     message(STATUS "Configuring rocPRIM")
-    fetch_content_isolated(
+    FetchContent_Declare(
       prim
       SOURCE_DIR    ${ROCPRIM_PATH}
-      CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_PREFIX_PATH=/opt/rocm
+      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
+      CMAKE_ARGS    -DBUILD_TEST=OFF -DBUILD_BENCHMARK=OFF -DBUILD_EXAMPLE=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
+      LOG_CONFIGURE TRUE
+      LOG_BUILD     TRUE
+      LOG_INSTALL   TRUE
     )
+    FetchContent_MakeAvailable(prim)
     if(NOT TARGET roc::rocprim)
       add_library(roc::rocprim ALIAS rocprim)
     endif()
@@ -280,19 +284,21 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
     option(INSTALL_GTEST "Enable installation of googletest." OFF)
     if(EXISTS /usr/src/googletest AND NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
-      set(GTEST_FETCH_ARGS SOURCE_DIR /usr/src/googletest)
+      FetchContent_Declare(
+        googletest
+        SOURCE_DIR /usr/src/googletest
+      )
     else()
       message(STATUS "Google Test not found. Fetching...")
-      set(GTEST_FETCH_ARGS 
+      FetchContent_Declare(
+        googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG        release-1.11.0
       )
     endif()
-    fetch_content_isolated(
-      googletest
-      ${GTEST_FETCH_ARGS}
-      CMAKE_ARGS -DBUILD_GTEST=ON -DBUILD_GMOCK=OFF -DINSTALL_GTEST=OFF
-    )
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
+    FetchContent_MakeAvailable(googletest)
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main  ALIAS gtest_main)
   endif()
@@ -301,34 +307,40 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     message(STATUS "TBB not found or force download TBB on. Downloading and building TBB.")
     set(TBB_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/tbb CACHE PATH "" FORCE)
 
-    fetch_content_isolated(
+    FetchContent_Declare(
       TBB
       GIT_REPOSITORY      https://github.com/oneapi-src/oneTBB.git
       GIT_TAG             1c4c93fc5398c4a1acb3492c02db4699f3048dea # v2021.13.0
-      CMAKE_ARGS          -DTBB_TEST=OFF -DTBB_BUILD=ON -DTBB_INSTALL=ON -DTBBMALLOC_PROXY_BUILD=OFF
+      INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/tbb
+      CMAKE_ARGS          -DCMAKE_CXX_COMPILER=g++ -DTBB_TEST=OFF -DTBB_BUILD=ON -DTBB_INSTALL=ON -DTBBMALLOC_PROXY_BUILD=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+      LOG_CONFIGURE       TRUE
+      LOG_BUILD           TRUE
+      LOG_INSTALL         TRUE
     )
+    FetchContent_MakeAvailable(TBB)
     if(NOT TARGET TBB::tbb)
       add_library(TBB::tbb)
     endif()
   endif()
 
   # SQlite (for run-to-run bitwise-reproducibility tests)
-  # Note: SQLite 3.36.0 enabled the backup API by default, which we need
-  # for cache serialization.  We also want to use a static SQLite,
-  # and distro static libraries aren't typically built
-  # position-independent.
-  if( SQLITE_USE_SYSTEM_PACKAGE )
-    find_package(SQLite3 3.36 REQUIRED)
+  # Note: SQLite 3.51.3 to address CVE https://github.com/advisories/GHSA-p36r-6g67-869c
+  set(SQLITE_MIN_VERSION "3.51.3")
+  string(REPLACE "." "_" SQLITE_VER_UNDERSCORE ${SQLITE_MIN_VERSION})
+
+  if(SQLITE_USE_SYSTEM_PACKAGE)
+    find_package(SQLite3 ${SQLITE_MIN_VERSION} REQUIRED)
     list(APPEND static_depends PACKAGE SQLite3)
     set(ROCTHRUST_SQLITE_LIB SQLite::SQLite3)
   else()
-    if(DEFINED ENV{SQLITE_3_50_2_SRC_URL})
-      set(SQLITE_3_50_2_SRC_URL_INIT $ENV{SQLITE_3_50_2_SRC_URL})
+    message(STATUS "Force download local copy of SQLite on. Downloading and building SQLite.")
+    if(DEFINED ENV{SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL})
+      set(SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL_INIT $ENV{SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL})
     else()
-      set(SQLITE_3_50_2_SRC_URL_INIT https://sqlite.org/2025/sqlite-amalgamation-3500200.zip)
+      set(SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL_INIT https://sqlite.org/2026/sqlite-amalgamation-3510300.zip)
     endif()
-    set(SQLITE_3_50_2_SRC_URL ${SQLITE_3_50_2_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
-    set(SQLITE_SRC_3_50_2_SHA3_256 75c118e727ee6a9a3d2c0e7c577500b0c16a848d109027f087b915b671f61f8a CACHE STRING "SHA3-256 hash of SQLite source code")
+    set(SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL ${SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
+    set(SQLITE_SRC_${SQLITE_VER_UNDERSCORE}_SHA3_256 ced02ff9738970f338c9c8e269897b554bcda73f6cf1029d49459e1324dbeaea CACHE STRING "SHA3-256 hash of SQLite source code")
 
     # embed SQLite
     if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
@@ -336,11 +348,11 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
       cmake_policy(SET CMP0135 NEW)
     endif()
 
-    message("Downloading SQLite.")
-    fetch_content_isolated(sqlite_local
-      URL ${SQLITE_3_50_2_SRC_URL}
-      URL_HASH SHA3_256=${SQLITE_SRC_3_50_2_SHA3_256}
+    FetchContent_Declare(sqlite_local
+      URL ${SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL}
+      URL_HASH SHA3_256=${SQLITE_SRC_${SQLITE_VER_UNDERSCORE}_SHA3_256}
     )
+    FetchContent_MakeAvailable(sqlite_local)
 
     add_library(sqlite3 OBJECT ${sqlite_local_SOURCE_DIR}/sqlite3.c)
     target_include_directories(sqlite3 PUBLIC ${sqlite_local_SOURCE_DIR})
@@ -365,50 +377,39 @@ endif()
 
 # Benchmark dependencies
 if(BUILD_BENCHMARK)
-  set(BENCHMARK_VERSION 1.9.5)
-  if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
-    # Google Benchmark (https://github.com/google/benchmark.git)
-    find_package(benchmark ${BENCHMARK_VERSION} QUIET)
-  else()
-    message(STATUS "Force installing Google Benchmark.")
-  endif()
-
-  if(NOT benchmark_FOUND)
-    message(STATUS "Google Benchmark not found or force download Google Benchmark on. Downloading and building Google Benchmark.")
-    set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/googlebenchmark CACHE PATH "")
-    set(BENCHMARK_CMAKE_ARGS -DBENCHMARK_ENABLE_TESTING=OFF
-                             -DBENCHMARK_ENABLE_INSTALL=OFF
-                             -DHAVE_STD_REGEX=ON
-                             -DRUN_HAVE_STD_REGEX=1)
-
-    message(STATUS "Google Benchmark not found. Fetching...")
-
-    fetch_content_isolated(
-      googlebench
-      GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v${BENCHMARK_VERSION}
-      CMAKE_ARGS     ${BENCHMARK_CMAKE_ARGS}
-    )
-    if(NOT TARGET benchmark::benchmark)
-      add_library(benchmark::benchmark ALIAS benchmark)
-    endif()
-  endif()
-
   # rocRAND (https://github.com/ROCm/rocm-libraries)
-  fetch_dep(ROCRAND_FETCH_METHOD rocrand ROCRAND_PATH ROCM_DEP_RELEASE_BRANCH)
+  fetch_dep(ROCRAND_FETCH_METHOD rocrand ROCRAND_PATH MIN_ROCRAND_PACKAGE_VERSION ROCM_DEP_RELEASE_BRANCH)
 
   # If we downloaded rocRAND or it are pulling it from the monorepo, we need to build it.
   # The path to the repo will is stored in ${ROCRAND_PATH}.
   if(${ROCRAND_FETCH_METHOD} STREQUAL "MONOREPO" OR ${ROCRAND_FETCH_METHOD} STREQUAL "DOWNLOAD")
     message(STATUS "Downloading and building rocrand.")
+    set(EXTRA_CMAKE_ARGS "-DGPU_TARGETS=${GPU_TARGETS}")
+    # CMAKE_ARGS of FetchContent_Declare (or ExternalProject_Add) can't contain ; so another separator
+    # is needed and LIST_SEPARATOR is passed to FetchContent_Declare()
+    string(REPLACE ";" "|" EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS}")
+    # Pass launcher so sccache can be used to speed up building rocRAND
+    if(CMAKE_CXX_COMPILER_LAUNCHER)
+      set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
+    endif()
 
-    fetch_content_isolated(
+    # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON and BUILD_TEST=ON leaks into
+    # rocrand and causes its benchmarks and unit tests to build. Suppress that here.
+    set(BUILD_BENCHMARK OFF)
+    set(BUILD_TEST OFF)
+    
+    FetchContent_Declare(
       rocrand
       SOURCE_DIR    ${ROCRAND_PATH}
-      CMAKE_ARGS    -DBUILD_TEST=OFF
-                    "-DGPU_TARGETS=${GPU_TARGETS}"
-                    -DCMAKE_PREFIX_PATH=/opt/rocm
+      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand
+      CMAKE_ARGS    -DBUILD_BENCHMARK=OFF -DBUILD_TEST=OFF -DBUILD_EXAMPLE=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
+      LOG_CONFIGURE TRUE
+      LOG_BUILD     TRUE
+      LOG_INSTALL   TRUE
     )
+    FetchContent_MakeAvailable(rocrand)
+    set(BUILD_BENCHMARK ON)
+    set(BUILD_TEST ON)
     if(NOT TARGET roc::rocrand)
       add_library(roc::rocrand ALIAS rocrand)
     endif()

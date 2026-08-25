@@ -5,7 +5,7 @@ os:
   - linux
 compiler:
   - g++
-  
+
 services:
   - docker
 
@@ -14,7 +14,7 @@ branches:
 
 install:
   - sudo apt update
-  
+
 before_script:
   - docker pull kiritigowda/ubuntu-18.04:rpp
   - docker run -it -d --name rocm_image --network host kiritigowda/ubuntu-18.04:rpp bash
@@ -27,7 +27,7 @@ script:
   # HIP Backend - Turn OFF HIP - (TBD - Turn ON all tests)
   ##- docker exec rocm_image cmake -H/rpp -B/_buildHIP -DCMAKE_BUILD_TYPE=Release -DBACKEND=HIP
   ##- docker exec rocm_image cmake --build /_buildHIP
-  # HIP Backend - Static 
+  # HIP Backend - Static
   ##- docker exec rocm_image cmake -H/rpp -B/_buildHIPStatic -DCMAKE_BUILD_TYPE=Release -DBACKEND=HIP -DCOMPILE=STATIC
   ##- docker exec rocm_image cmake --build /_buildHIPStatic
   # HIP Backend - HSACOO

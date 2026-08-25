@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -116,13 +116,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
             norm2 += x[i + 1] * conj(x[i + 1]);
 
         // reduce squared entries to find squared norm of x
-        norm2 += shift_left(norm2, 1);
-        norm2 += shift_left(norm2, 2);
-        norm2 += shift_left(norm2, 4);
-        norm2 += shift_left(norm2, 8);
-        norm2 += shift_left(norm2, 16);
-        if(warpSize > 32)
-            norm2 += shift_left(norm2, 32);
+        reduce_wave_sum(norm2);
         if(tid % warpSize == 0)
             sval[tid / warpSize] = norm2;
         __syncthreads();
@@ -166,13 +160,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
             norm2 += x[i] * conj(w[i]);
 
         // reduce squared entries to find squared norm of x
-        norm2 += shift_left(norm2, 1);
-        norm2 += shift_left(norm2, 2);
-        norm2 += shift_left(norm2, 4);
-        norm2 += shift_left(norm2, 8);
-        norm2 += shift_left(norm2, 16);
-        if(warpSize > 32)
-            norm2 += shift_left(norm2, 32);
+        reduce_wave_sum(norm2);
         if(tid % warpSize == 0)
             sval[tid / warpSize] = norm2;
         __syncthreads();
@@ -291,13 +279,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
             norm2 += x[i] * conj(x[i]);
 
         // reduce squared entries to find squared norm of x
-        norm2 += shift_left(norm2, 1);
-        norm2 += shift_left(norm2, 2);
-        norm2 += shift_left(norm2, 4);
-        norm2 += shift_left(norm2, 8);
-        norm2 += shift_left(norm2, 16);
-        if(warpSize > 32)
-            norm2 += shift_left(norm2, 32);
+        reduce_wave_sum(norm2);
         if(tid % warpSize == 0)
             sval[tid / warpSize] = norm2;
         __syncthreads();
@@ -340,13 +322,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
             norm2 += x[i] * conj(w[i]);
 
         // reduce squared entries to find squared norm of x
-        norm2 += shift_left(norm2, 1);
-        norm2 += shift_left(norm2, 2);
-        norm2 += shift_left(norm2, 4);
-        norm2 += shift_left(norm2, 8);
-        norm2 += shift_left(norm2, 16);
-        if(warpSize > 32)
-            norm2 += shift_left(norm2, 32);
+        reduce_wave_sum(norm2);
         if(tid % warpSize == 0)
             sval[tid / warpSize] = norm2;
         __syncthreads();
@@ -598,9 +574,7 @@ rocblas_status rocsolver_sytd2_hetd2_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     // configure kernels
     rocblas_int blocks = (n - 1) / BS1 + 1;
@@ -707,7 +681,6 @@ rocblas_status rocsolver_sytd2_hetd2_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(set_tridiag<T>, grid_n, threads, 0, stream, uplo, n, A, shiftA, lda,
                             strideA, D, strideD, E, strideE);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

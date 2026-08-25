@@ -40,15 +40,6 @@ if(DEFINED BUILD_SHARED_LIBS)
 endif()
 set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 
-# Suppress ROCmChecks warnings for local toolchain modifications.
-set(ROCM_WARN_TOOLCHAIN_VAR OFF)
-
-# Force older versions of option() in googletest to respect the local variable setting.
-set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-
-# Resolve Ninja generator errors regarding RPATH relinking during the install phase for merged subprojects.
-set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
-
 # Change variables before configuring dependencies
 set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "")
 # Turn off warnings and errors for all warnings in dependencies
@@ -88,21 +79,14 @@ if(NOT ROCmCMakeBuildTools_FOUND)
   else()
     set(SOURCE_SUBDIR_ARG)
   endif()
-  include(cmake/FetchContentIsolated.cmake)
-  fetch_content_isolated(
+  include(FetchContent)
+  FetchContent_Declare(
     rocm-cmake
     GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
     GIT_TAG        rocm-6.4.4
     ${SOURCE_SUBDIR_ARG}
   )
-  execute_process(
-    WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
-    COMMAND ${CMAKE_COMMAND} ${rocm-cmake_SOURCE_DIR} -DCMAKE_INSTALL_PREFIX=.
-  )
-  execute_process(
-    WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
-    COMMAND ${CMAKE_COMMAND} --build ${rocm-cmake_SOURCE_DIR} --target install
-  )
+  FetchContent_MakeAvailable(rocm-cmake)
   find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
 else()
   find_package(ROCmCMakeBuildTools 0.7.3 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
@@ -116,7 +100,8 @@ include(ROCMInstallSymlinks)
 include(ROCMCheckTargetIds)
 include(ROCMClients)
 
-include(cmake/FetchContentIsolated.cmake)
+# For downloading and building required dependencies
+include(FetchContent)
 # Test dependencies
 if(BUILD_TEST)
   # Google Test (https://github.com/google/googletest)
@@ -134,35 +119,15 @@ if(BUILD_TEST)
 
   if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
     message(STATUS "Google Test not found or force download on. Fetching...")
-    fetch_content_isolated(
+    option(BUILD_GTEST "Builds the googletest subproject" ON)
+    option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
+    option(INSTALL_GTEST "Enable installation of googletest" ON)
+    FetchContent_Declare(
       googletest
       GIT_REPOSITORY https://github.com/google/googletest.git
       GIT_TAG        v1.15.2
-      CMAKE_ARGS     -DBUILD_GTEST=ON -DBUILD_GMOCK=OFF -DINSTALL_GTEST=ON
     )
-  endif()
-endif()
-
-# Benchmark dependencies
-if(BUILD_BENCHMARK)
-  # Google Benchmark (https://github.com/google/benchmark)
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    find_package(benchmark 1.9.1 QUIET)
-  endif()
-
-  if(NOT TARGET benchmark::benchmark)
-    message(STATUS "Google Benchmark not found or force download on. Fetching...")
-
-    set(HAVE_STD_REGEX ON)
-    set(RUN_HAVE_STD_REGEX 1)
-
-    fetch_content_isolated(
-      googlebenchmark
-      GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v1.9.1
-      CMAKE_ARGS     -DBENCHMARK_ENABLE_TESTING=OFF -DBENCHMARK_ENABLE_INSTALL=OFF
-    )
-    FetchContent_MakeAvailable(googlebenchmark)
+    FetchContent_MakeAvailable(googletest)
   endif()
 endif()
 

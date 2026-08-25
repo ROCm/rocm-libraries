@@ -22,6 +22,153 @@ def _format_extra_args(extra_args):
     return " " + " ".join(shlex.quote(str(a)) for a in extra_args)
 
 
+def _cmake_quote(value):
+    """Quote one value as a CMake bracket argument."""
+    text = str(value)
+    for level in range(10):
+        marker = "=" * level
+        if f"]{marker}]" not in text:
+            return f"[{marker}[{text}]{marker}]"
+    raise ValueError("Unable to quote CMake argument")
+
+
+def _format_cmake_args(args):
+    """Format a list of command arguments for generated CMake add_test()."""
+    if not args:
+        return ""
+    return " " + " ".join(_cmake_quote(arg) for arg in args)
+
+
+def _is_match_everything(pattern):
+    """True if a gtest pattern matches every test name.
+
+    `*` matches any (possibly empty) substring, so a pattern made only of `*`
+    is match-all -- `**` is just a clumsier `*`. `*.*` is also match-all in
+    practice: every gtest full name is `Suite.Test`, so the dot always matches.
+    Such a pattern under `exclude_gpu` means "exclude the whole suite", which a
+    gtest filter cannot express -- see the DISABLED handling in main().
+    """
+    if not isinstance(pattern, str) or not pattern:
+        return False
+    return set(pattern) == {"*"} or pattern == "*.*"
+
+
+def _dedupe_preserve_order(values):
+    seen = set()
+    result = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _rtest_script_basename(name_prefix: str) -> str:
+    """Basename of the rtest driver script next to the gtest binary.
+
+    ``name_prefix`` is normally the gtest executable name used in CTest (for
+    example ``mylib-test``). The co-installed rtest driver is expected to be
+    ``<stem>_rtest.py`` where ``stem`` is ``name_prefix`` with a trailing
+    ``-test`` removed (``mylib-test`` -> ``mylib_rtest.py``). If there is no
+    ``-test`` suffix, hyphens in ``name_prefix`` are turned into underscores and
+    ``_rtest.py`` is appended.
+    """
+    if name_prefix.endswith("-test"):
+        return name_prefix[: -len("-test")] + "_rtest.py"
+    stem = name_prefix.replace("-", "_")
+    return stem + "_rtest.py"
+
+
+def _format_gtest_command_tail(
+    executable,
+    pattern_string,
+    extra_args_string,
+    command_args_string="",
+    test_yaml=None,
+):
+    """Gtest binary invocation: optional args, --yaml, --gtest_filter, then extra_args."""
+    tail = f"{executable}{command_args_string}"
+    if test_yaml:
+        tail += f" --yaml {shlex.quote(test_yaml)}"
+    if pattern_string:
+        tail += f" --gtest_filter={pattern_string}"
+    return f"{tail}{extra_args_string}"
+
+
+def _ctest_python_command(is_windows):
+    """Python executable name for CTest rtest invocations at run time.
+
+    Windows Python installs typically expose ``python`` on PATH, not ``python3``.
+    """
+    return "python" if is_windows else "python3"
+
+
+def _format_category_command(
+    use_rtest_driver,
+    name_prefix,
+    target_name,
+    pattern_string,
+    extra_args_string,
+    category_name,
+    test_yaml=None,
+    command_args_string="",
+    is_windows=False,
+):
+    """Return the COMMAND tail for add_test (everything after COMMAND)."""
+    if use_rtest_driver:
+        rtest_script = _rtest_script_basename(name_prefix)
+        rtest_set = f"ctest_{category_name}"
+        py = _ctest_python_command(is_windows)
+        return f"{py} {rtest_script} -t {rtest_set}{extra_args_string}"
+    return _format_gtest_command_tail(
+        target_name,
+        pattern_string,
+        extra_args_string,
+        command_args_string,
+        test_yaml,
+    )
+
+
+def _format_install_add_test_line(
+    use_rtest_driver,
+    name_prefix,
+    category_name,
+    target_name,
+    pattern_string,
+    extra_args_string,
+    cmake_python3,
+    test_yaml=None,
+    gpu_arch=None,
+    install_executable=None,
+    install_command_args_string="",
+    is_windows=False,
+):
+    """One-line add_test(...) for install-time CTestTestfile fragments."""
+    suffix = f"_{gpu_arch}" if gpu_arch else ""
+    test_name = f"{name_prefix}_{category_name}{suffix}_suite"
+    if use_rtest_driver:
+        py = (
+            shlex.quote(cmake_python3)
+            if cmake_python3
+            else _ctest_python_command(is_windows)
+        )
+        rtest_script = _rtest_script_basename(name_prefix)
+        rtest_set = f"ctest_{category_name}"
+        return (
+            f'add_test({test_name} {py} "../{rtest_script}" '
+            f"-t {rtest_set}{extra_args_string})\n"
+        )
+    exe = install_executable if install_executable is not None else f"../{target_name}"
+    gtest_tail = _format_gtest_command_tail(
+        _cmake_quote(exe),
+        pattern_string,
+        extra_args_string,
+        install_command_args_string,
+        test_yaml,
+    )
+    return f"add_test({test_name} {gtest_tail})\n"
+
+
 # Allowlist patterns for YAML-sourced values
 _IDENTIFIER_RE = re.compile(r"^[\w\-\.]+$")
 _GTEST_PATTERN_RE = re.compile(r"^[\w\*\.\-/]+$")
@@ -102,6 +249,17 @@ def validate_config(categories, exclude_gpu_config, is_windows, is_linux):
                 err = validate_identifier(label)
                 if err is not None:
                     errors.append(f"category {category_name!r} label: {err}")
+
+            test_yaml = category_info.get("test_yaml")
+            if test_yaml is not None:
+                err = validate_identifier(test_yaml)
+                if err is not None:
+                    errors.append(f"category {category_name!r} test_yaml: {err}")
+
+            if not patterns and not test_yaml:
+                errors.append(
+                    f"category {category_name!r}: must define test_patterns and/or test_yaml"
+                )
 
     if exclude_gpu_config is None:
         return errors
@@ -224,6 +382,96 @@ def main():
         default=None,
         help="Optional: Path to write install-time test definitions with relative paths",
     )
+    parser.add_argument(
+        "--resource-group",
+        default=None,
+        help=(
+            "Optional CTest RESOURCE_GROUPS token (e.g. 'gfx942' or 'gpus'). "
+            "When set, generated test names get a '_<resource>' segment after "
+            'the target name and each suite gets RESOURCE_GROUPS "1,<resource>:1" applied.'
+        ),
+    )
+    parser.add_argument(
+        "--test-name-prefix",
+        default=None,
+        help="Optional prefix for generated CTest names. Defaults to target_name.",
+    )
+    parser.add_argument(
+        "--command-arg",
+        action="append",
+        default=[],
+        help="Additional build-tree command argument. May be repeated.",
+    )
+    parser.add_argument(
+        "--install-command-arg",
+        action="append",
+        default=[],
+        help="Additional install-tree command argument. May be repeated.",
+    )
+    parser.add_argument(
+        "--install-executable",
+        default=None,
+        help="Install-tree executable path. Defaults to ../target_name.",
+    )
+    parser.add_argument(
+        "--additional-label",
+        action="append",
+        default=[],
+        help="Additional CTest label to append to every generated suite. May be repeated.",
+    )
+    parser.add_argument(
+        "--environment",
+        action="append",
+        default=[],
+        help=(
+            "Additional ENVIRONMENT entry (KEY=VALUE) applied to every generated "
+            "suite, e.g. CMake-side TEST_ENVIRONMENT (ASAN symbolizer path, "
+            "coverage LLVM_PROFILE_FILE). May be repeated. Overrides a "
+            "same-keyed execution_settings.environment entry from the YAML."
+        ),
+    )
+    parser.add_argument(
+        "--environment-modification",
+        action="append",
+        default=[],
+        dest="environment_modification",
+        help=(
+            "Additional ENVIRONMENT_MODIFICATION entry (e.g. "
+            "PATH=path_list_prepend:<dir>) applied to every generated suite. May "
+            "be repeated. Used to extend PATH for runtime DLL discovery without "
+            "clobbering the inherited value."
+        ),
+    )
+    parser.add_argument(
+        "--fixtures-required",
+        action="append",
+        default=[],
+        dest="fixtures_required",
+        help=(
+            "CTest FIXTURES_REQUIRED entry applied to every generated suite (e.g. "
+            "a setup fixture that must run before the suite). May be repeated. "
+            "Currently applied only to the build tree; not emitted into the install "
+            "tree, since no use case requires it there yet."
+        ),
+    )
+    parser.add_argument(
+        "--use-rtest-driver",
+        action="store_true",
+        dest="use_rtest_driver",
+        help=(
+            "Generate CTest commands that run the rtest driver script "
+            "(basename derived from name_prefix; typically mylib-test -> "
+            "mylib_rtest.py) with -t ctest_<category> instead of invoking the "
+            "gtest binary with --gtest_filter=... "
+            '(requires matching <test sets="ctest_<category>"> entries in the '
+            "project's rtest XML)."
+        ),
+    )
+    parser.add_argument(
+        "--cmake-python3",
+        default=None,
+        help="Absolute path to Python3 interpreter (for install-tree add_test lines).",
+    )
 
     args = parser.parse_args()
 
@@ -231,6 +479,46 @@ def main():
     target_name = args.target_name
     working_dir = args.working_dir
     install_test_file = args.install_test_file
+    resource_group = args.resource_group
+    use_rtest_driver = args.use_rtest_driver
+    cmake_python3 = args.cmake_python3
+    if args.test_name_prefix is not None:
+        err = validate_identifier(args.test_name_prefix)
+        if err is not None:
+            print(f"Error: invalid --test-name-prefix value: {err}", file=sys.stderr)
+            sys.exit(1)
+    for label in args.additional_label:
+        err = validate_identifier(label)
+        if err is not None:
+            print(f"Error: invalid --additional-label value: {err}", file=sys.stderr)
+            sys.exit(1)
+    cli_env_overrides = {}
+    for entry in args.environment:
+        if "=" not in entry:
+            print(
+                f"Error: invalid --environment value {entry!r}: expected KEY=VALUE",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        key, value = entry.split("=", 1)
+        cli_env_overrides[key] = value
+    if resource_group is not None:
+        err = validate_identifier(resource_group)
+        if err is not None:
+            print(f"Error: invalid --resource-group value: {err}", file=sys.stderr)
+            sys.exit(1)
+    base_name_prefix = args.test_name_prefix if args.test_name_prefix else target_name
+    name_prefix = (
+        f"{base_name_prefix}_{resource_group}" if resource_group else base_name_prefix
+    )
+    resource_groups_prop = (
+        f' RESOURCE_GROUPS "1,{resource_group}:1"' if resource_group else ""
+    )
+    command_args_string = _format_cmake_args(args.command_arg)
+    install_command_args_string = _format_cmake_args(args.install_command_arg)
+    install_executable = (
+        args.install_executable if args.install_executable else f"../{target_name}"
+    )
 
     config = load_yaml(yaml_file)
 
@@ -262,9 +550,18 @@ def main():
         execution_settings = config.get("execution_settings", {})
         timeouts = execution_settings.get("category_timeouts", {})
         timeout_multiplier = execution_settings.get("timeout_multiplier", 1)
-        env_dict = execution_settings.get("environment", {}) or {}
+        env_dict = dict(execution_settings.get("environment", {}) or {})
+        env_dict.update(cli_env_overrides)
         env_string = (
             ";".join(f"{k}={v}" for k, v in env_dict.items()) if env_dict else None
+        )
+        env_mod_string = (
+            ";".join(args.environment_modification)
+            if args.environment_modification
+            else None
+        )
+        fixtures_string = (
+            ";".join(args.fixtures_required) if args.fixtures_required else None
         )
         exclude_gpu_config = config.get("exclude_gpu", {})
 
@@ -294,10 +591,11 @@ def main():
         category_data = {}
 
         for category_name, category_info in categories.items():
-            patterns = category_info.get("test_patterns", [])
-            if not patterns:
+            patterns = category_info.get("test_patterns", []) or []
+            test_yaml = category_info.get("test_yaml")
+            if not patterns and not test_yaml:
                 print(
-                    f"Warning: Category '{category_name}' has no test_patterns defined, skipping.",
+                    f"Warning: Category '{category_name}' has no test_patterns or test_yaml defined, skipping.",
                     file=sys.stderr,
                 )
                 continue
@@ -333,6 +631,7 @@ def main():
                 "exclude_string": exclude_string,
                 "labels": labels[:],  # Make a copy
                 "timeout": timeout,
+                "test_yaml": test_yaml,
                 "extra_args": (
                     list(extra_args) if isinstance(extra_args, list) else extra_args
                 ),
@@ -345,26 +644,42 @@ def main():
             else:
                 pattern_string = positive_string
 
-            label_string = '"' + ";".join(labels) + '"'
+            combined_labels = _dedupe_preserve_order(labels + args.additional_label)
+            label_string = '"' + ";".join(combined_labels) + '"'
 
             # =======================================================================
             # Write category test to CMake file and install file.
             # =======================================================================
             print("add_test(")
-            print(f"  NAME {target_name}_{category_name}_suite")
-            print(
-                f"  COMMAND {target_name} --gtest_filter={pattern_string}{extra_args_string}"
+            print(f"  NAME {name_prefix}_{category_name}_suite")
+            cmd_tail = _format_category_command(
+                use_rtest_driver,
+                name_prefix,
+                target_name,
+                pattern_string,
+                extra_args_string,
+                category_name,
+                test_yaml,
+                command_args_string,
+                is_windows=is_windows,
             )
+            print(f"  COMMAND {cmd_tail}")
             print(f"  WORKING_DIRECTORY {working_dir}")
             print(")")
 
             print(
-                f"set_tests_properties({target_name}_{category_name}_suite PROPERTIES"
+                f"set_tests_properties({name_prefix}_{category_name}_suite PROPERTIES"
             )
             print(f"  LABELS {label_string}")
             print(f"  TIMEOUT {timeout}")
             if env_string:
                 print(f'  ENVIRONMENT "{env_string}"')
+            if env_mod_string:
+                print(f'  ENVIRONMENT_MODIFICATION "{env_mod_string}"')
+            if fixtures_string:
+                print(f'  FIXTURES_REQUIRED "{fixtures_string}"')
+            if resource_group:
+                print(f'  RESOURCE_GROUPS "1,{resource_group}:1"')
             print(")")
             print()
 
@@ -372,11 +687,30 @@ def main():
             if install_file_handle:
                 try:
                     install_file_handle.write(
-                        f'add_test({target_name}_{category_name}_suite "../{target_name}" --gtest_filter={pattern_string}{extra_args_string})\n'
+                        _format_install_add_test_line(
+                            use_rtest_driver,
+                            name_prefix,
+                            category_name,
+                            target_name,
+                            pattern_string,
+                            extra_args_string,
+                            cmake_python3,
+                            test_yaml,
+                            install_executable=install_executable,
+                            install_command_args_string=install_command_args_string,
+                            is_windows=is_windows,
+                        )
                     )
                     env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
+                    env_mod_prop = (
+                        f' ENVIRONMENT_MODIFICATION "{env_mod_string}"'
+                        if env_mod_string
+                        else ""
+                    )
+                    # FIXTURES_REQUIRED currently applies only to the build tree; no
+                    # use case requires it in the install tree yet.
                     install_file_handle.write(
-                        f"set_tests_properties({target_name}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop})\n\n"
+                        f"set_tests_properties({name_prefix}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop})\n\n"
                     )
                     install_file_handle.flush()
                 except OSError as e:
@@ -428,6 +762,11 @@ def main():
             # This includes exact matches and hierarchical matches (e.g., gfx1150 matches gfx115X, gfx11X)
             all_applicable_patterns = []
             all_applicable_categories = set()
+            # Categories a match-everything pattern applies to. Tracked per
+            # category, not per arch: patterns from several matching keys are
+            # unioned, so a key contributing "*" for one category must not
+            # disable a category that only a narrower key labelled.
+            fully_excluded_categories = set()
 
             for gpu_key, gpu_config in exclude_gpu_config.items():
                 config_arch, os_suffix = parse_exclude_gpu_key(gpu_key)
@@ -438,24 +777,30 @@ def main():
 
                 # Check if this config applies to our target GPU architecture
                 if gpu_arch_matches(gpu_arch, config_arch):
-                    patterns = gpu_config.get("test_patterns", [])
-                    if patterns:
-                        for p in patterns:
-                            if isinstance(p, list):
-                                all_applicable_patterns.extend(p)
-                            else:
-                                all_applicable_patterns.append(p)
+                    # test_patterns may be a flat list or a list-of-lists.
+                    flat_patterns = []
+                    for p in gpu_config.get("test_patterns", []) or []:
+                        if isinstance(p, list):
+                            flat_patterns.extend(p)
+                        else:
+                            flat_patterns.append(p)
+                    all_applicable_patterns.extend(flat_patterns)
+
+                    excludes_everything = any(
+                        _is_match_everything(p) for p in flat_patterns
+                    )
 
                     # Collect applicable categories from this config
                     gpu_labels = gpu_config.get("labels", [])
                     for label in gpu_labels:
                         if label in category_data:
                             all_applicable_categories.add(label)
+                            if excludes_everything:
+                                fully_excluded_categories.add(label)
 
             if not all_applicable_patterns:
                 continue
 
-            # Remove duplicates from all_applicable_patterns while preserving order
             seen = set()
             unique_patterns = []
             for pattern in all_applicable_patterns:
@@ -466,14 +811,42 @@ def main():
             # Build GPU exclusion pattern string - format: pattern1:pattern2
             gpu_exclude_string = ":".join(unique_patterns)
 
+            # A match-everything exclusion means "this suite does not run on
+            # this arch". That intent is NOT expressible as a gtest filter: the
+            # emitted "<positive>-<excludes>:*" has a negative half matching
+            # everything, so the suite still registers, still launches the
+            # binary, and selects 0 tests. That read as a silent pass until a
+            # zero-tests-ran guard turned it into a hard failure
+            # (dnn-providers/integration-tests/src/main.cpp) -- see
+            # https://github.com/ROCm/rocm-libraries/issues/11163.
+            #
+            # Emitting the suite DISABLED expresses it directly: CTest reports
+            # "Not Run (Disabled)" and never launches the binary. Two properties
+            # of DISABLED matter here, both verified against ctest 3.28:
+            #   - `ctest --print-labels` still publishes a disabled test's
+            #     labels, so arch discovery that greps for ex_gpu_<arch>
+            #     (TheRock's test_runner.py) keeps finding this arch.
+            #   - The skip stays visible in console output and in --output-junit
+            #     (status="disabled"), rather than the suite vanishing.
+            #
+            # Note this does NOT make the selection non-empty: CTest counts only
+            # enabled tests, so a selection of nothing but disabled suites still
+            # prints "No tests were found!!!" -- exit 0 under the default
+            # --no-tests=ignore, but exit 8 under --no-tests=error. Today the
+            # gfx110X lane stays non-empty because the sibling
+            # test_categories.yaml contributes enabled suites to the same
+            # directory; neither consumer passes --no-tests=error.
+
             # Create one test for each applicable category
             for category_name in all_applicable_categories:
                 cat_data = category_data[category_name]
+                suite_disabled = category_name in fully_excluded_categories
                 positive_string = cat_data["positive_string"]
                 cat_exclude_string = cat_data["exclude_string"]
                 cat_labels = cat_data["labels"]
                 timeout = cat_data["timeout"]
                 cat_extra_args_string = _format_extra_args(cat_data.get("extra_args"))
+                cat_test_yaml = cat_data.get("test_yaml")
 
                 # Build combined pattern string: positive - category_excludes:gpu_excludes
                 combined_exclude_string = ""
@@ -486,8 +859,9 @@ def main():
 
                 pattern_string = positive_string + "-" + combined_exclude_string
 
-                # Build label string: category_labels + ex_gpu_<arch> label
-                combined_labels = cat_labels + [ex_gpu_label]
+                combined_labels = _dedupe_preserve_order(
+                    cat_labels + args.additional_label + [ex_gpu_label]
+                )
                 label_string = '"' + ";".join(combined_labels) + '"'
 
                 # =======================================================================
@@ -495,20 +869,38 @@ def main():
                 # =======================================================================
                 print(f"# GPU exclusion for {gpu_arch} - {category_name} category")
                 print("add_test(")
-                print(f"  NAME {target_name}_{category_name}_{gpu_arch}_suite")
-                print(
-                    f"  COMMAND {target_name} --gtest_filter={pattern_string}{cat_extra_args_string}"
+                print(f"  NAME {name_prefix}_{category_name}_{gpu_arch}_suite")
+                # GPU-specific gtest slices are not represented in rtest XML; always use the binary.
+                cmd_tail = _format_category_command(
+                    False,
+                    name_prefix,
+                    target_name,
+                    pattern_string,
+                    cat_extra_args_string,
+                    category_name,
+                    cat_test_yaml,
+                    command_args_string,
+                    is_windows=is_windows,
                 )
+                print(f"  COMMAND {cmd_tail}")
                 print(f"  WORKING_DIRECTORY {working_dir}")
                 print(")")
 
                 print(
-                    f"set_tests_properties({target_name}_{category_name}_{gpu_arch}_suite PROPERTIES"
+                    f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES"
                 )
                 print(f"  LABELS {label_string}")
                 print(f"  TIMEOUT {timeout}")
                 if env_string:
                     print(f'  ENVIRONMENT "{env_string}"')
+                if env_mod_string:
+                    print(f'  ENVIRONMENT_MODIFICATION "{env_mod_string}"')
+                if fixtures_string:
+                    print(f'  FIXTURES_REQUIRED "{fixtures_string}"')
+                if resource_group:
+                    print(f'  RESOURCE_GROUPS "1,{resource_group}:1"')
+                if suite_disabled:
+                    print("  DISABLED TRUE")
                 print(")")
                 print()
 
@@ -516,11 +908,32 @@ def main():
                 if install_file_handle:
                     try:
                         install_file_handle.write(
-                            f'add_test({target_name}_{category_name}_{gpu_arch}_suite "../{target_name}" --gtest_filter={pattern_string}{cat_extra_args_string})\n'
+                            _format_install_add_test_line(
+                                False,
+                                name_prefix,
+                                category_name,
+                                target_name,
+                                pattern_string,
+                                cat_extra_args_string,
+                                cmake_python3,
+                                cat_test_yaml,
+                                gpu_arch=gpu_arch,
+                                install_executable=install_executable,
+                                install_command_args_string=install_command_args_string,
+                                is_windows=is_windows,
+                            )
                         )
                         env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
+                        env_mod_prop = (
+                            f' ENVIRONMENT_MODIFICATION "{env_mod_string}"'
+                            if env_mod_string
+                            else ""
+                        )
+                        # FIXTURES_REQUIRED currently applies only to the build tree; no
+                        # use case requires it in the install tree yet.
+                        disabled_prop = " DISABLED TRUE" if suite_disabled else ""
                         install_file_handle.write(
-                            f"set_tests_properties({target_name}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop})\n\n"
+                            f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop}{disabled_prop})\n\n"
                         )
                         install_file_handle.flush()
                     except OSError as e:

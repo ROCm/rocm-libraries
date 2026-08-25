@@ -23,6 +23,7 @@
 #pragma once
 
 #include <array>
+#include <climits>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -53,12 +54,6 @@ struct GemmTileConfig {
 /// Pass-specific feature configuration
 /// Categorizes optimization behaviors into semantics, properties, and features
 struct PassFeatureConfig {
-    /// Barrier semantics and unrolling behavior
-    /// These are code structure PROPERTIES (not optional features)
-    struct BarrierConfig {
-        bool unrollMovableBarrier = false;  ///< Whether GEMM barriers can be moved during unroll
-    };
-
     /// Loop structure and unrolling properties
     /// These are code structure PROPERTIES (not optional features)
     struct LoopConfig {
@@ -76,24 +71,20 @@ struct PassFeatureConfig {
     struct DagFeatures {
         bool distributeGlobalRead = false;                 ///< Enable global read distribution
         DsReadOrder dsReadOrder = DsReadOrder::Ascending;  ///< DS read reorder strategy
+        /// Max in-flight tensor_load_to_lds credits (HW queue depth, to connect to sw math cycles).
+        /// 0 disables the throttle (current behavior).
+        int globalReadQueueDepth = 0;
+        /// Modeled cycles until one tensor_load_to_lds credit frees. Fed from the
+        /// cost/cycle model; varies with layout and problem size.
+        int globalReadDrainLatency = 0;
+        int dsReadQueueDepth = 0;
+        int dsReadDrainLatency = 0;
+        int dsReadThrottleLatency = 0;
+        int dsReadPerWmma = INT_MAX;
     };
 
-    /// Generic before/after instruction-order snapshot written by PassManager.
-    struct PassOrderSnapshotConfig {
-        /// Output path; if non-empty, PassManager records snapshots into JSON
-        /// for tools/stinkytofu-analysis (schema stinkytofu-dag-schedule-v1).
-        std::string jsonPath;
-        /// Prepended to each region title (e.g. Tensile pipeline group: loopWithPrefetch).
-        std::string titlePrefix;
-        /// `Pass::getName()` strings; after each listed pass, emit one region.
-        /// If empty and jsonPath is set, defaults to StinkyDAGSchedulerPass only.
-        std::vector<std::string> dumpAfterPasses;
-    };
-
-    BarrierConfig barrierConfig;
     LoopConfig loopConfig;
     DagFeatures dagFeatures;
-    PassOrderSnapshotConfig passOrderSnapshot;
 };
 
 /// VGPR MSB encoding mode supported by the toolchain.
@@ -103,10 +94,25 @@ enum class VgprMsbMode : uint8_t {
     Msb16,  ///< 16-bit form (`s_set_vgpr_msb 0x0101`) — packs prev + curr MSB
 };
 
-/// Toolchain capabilities discovered by probing the assembler (via comgr or
-/// rocisa's initAsmCaps).  Populated either by the rocisa conversion layer or
-/// by ToolchainCaps::probe() for the standalone path.
+/// Capabilities forwarded from rocisa (asmCaps and archCaps) by the conversion
+/// layer, or discovered by ToolchainCaps::probe() for the standalone path.
 struct AsmCapsConfig {
     VgprMsbMode vgprMsbMode = VgprMsbMode::None;
+
+    /// rocisa archCaps `RequiresXCntForVolatileVMEM`. False on the standalone
+    /// path, which has no rocisa to ask.
+    /// When set alone (without `enableXnackReplay`), Gfx1250HazardPass only
+    /// inserts atomic drains (Rule 4a). See Gfx1250HazardPass for the full
+    /// rule set (Rules 1–4).
+    bool requiresXCntForVolatileVMEM = false;
+
+    /// Enable full XNACK replay protection in Gfx1250HazardPass:
+    ///   - Source-clobber checks: SMEM Rule 3, FLAT Rule 2
+    ///   - Boundary drains: ForeverSleep, ScalarPrefetch, VgprMsb
+    ///   - Atomic drains: Rule 4a (implies `requiresXCntForVolatileVMEM`)
+    /// When false, all of the above are skipped; only Rule 4a remains
+    /// active if `requiresXCntForVolatileVMEM` is set independently.
+    /// See Gfx1250HazardPass for the complete rule definitions.
+    bool enableXnackReplay = false;
 };
 }  // namespace stinkytofu

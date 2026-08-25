@@ -4,7 +4,24 @@ Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
 
-## Since last release (ROCm 7.13)
+## (Unreleased) hipSPARSE 4.8.0
+
+### Added
+* Added the generic API routines `hipsparseSpGEAM_createDescr`, `hipsparseSpGEAM_destroyDescr`, `hipsparseSpGEAM_bufferSize`, `hipsparseSpGEAM_nnz`, and `hipsparseSpGEAM` for sparse matrix-matrix addition (`C = alpha * op(A) + beta * op(B)`), along with the `hipsparseSpGEAMDescr_t` type and the `hipsparseSpGEAMAlg_t` algorithm enum, to match the cuSPARSE 13.3 generic `SpGEAM` API.
+* Added batched support to `hipsparseSDDMM` for CSR format.
+
+## hipSPARSE 4.7.0 for ROCm 10.0
+
+### Added
+* Added Blocked ELL format support to the `hipsparseDenseToSparse` routine, along with the new `hipsparseBlockedEllSetPointers` function.
+* Added the `HIPSPARSE_SPMV_CSR_ALG3` algorithm to `hipsparseSpMV`, which exposes the rocSPARSE CSR nnz split algorithm (`rocsparse_spmv_alg_csr_nnzsplit`).
+* Added CSC format support to `hipsparseSpSV`.
+* Added CSC format support to `hipsparseSpSM`.
+
+### Resolved issues
+* Fixed an issue with `hipsparseSpMM`, which produced incorrect results for the Blocked ELL sparse format.
+
+## hipSPARSE 4.6.0 for ROCm 7.14
 
 ### Added
 * Added `hipsparseCreateBsr` and `hipsparseCreateConstBsr` in order to enable BSR format support in generic routines.
@@ -15,7 +32,7 @@ Documentation for hipSPARSE is available at
 * Fixed an issue where calling `hipsparseSpMV` multiple times with different `hipsparseOperation_t`, `hipsparseSpMVAlg_t`, or compute-datatypes using the same sparse matrix descriptor resulted in errors.
 
 ### Upcoming changes
-* The routines `hipsparseXcsrgeamNnz`, `hipsparseScsrgeam`, `hipsparseDcsrgeam`, `hipsparseCcsrgeam`, and `hipsparseZcsrgeam` have been deprecated and will be removed in a future release. Users should use the generic SpGEAM routines instead.
+* The routines `hipsparseXcsrgeamNnz`, `hipsparseScsrgeam`, `hipsparseDcsrgeam`, `hipsparseCcsrgeam`, and `hipsparseZcsrgeam` have been deprecated and will be removed in a future release. Use `hipsparseScsrgeam2_bufferSizeExt`, `hipsparseDcsrgeam2_bufferSizeExt`, `hipsparseCcsrgeam2_bufferSizeExt`, `hipsparseZcsrgeam2_bufferSizeExt`, `hipsparseXcsrgeam2Nnz`, `hipsparseScsrgeam2`, `hipsparseDcsrgeam2`, `hipsparseCcsrgeam2`, and `hipsparseZcsrgeam2` instead.
 
 ## hipSPARSE 4.5.0 for ROCm 7.12.0
 

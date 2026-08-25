@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "ued-solo",
+  "name": "Solo engine",
+  "heuristic": "uhd-solo",
+  "metadata": "kmd-solo"
+}

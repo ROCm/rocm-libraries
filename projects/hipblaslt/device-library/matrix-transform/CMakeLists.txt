@@ -29,9 +29,10 @@ list(REMOVE_DUPLICATES archs)
 set(matrix_transform_cpp "${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform.cpp")
 
 foreach(arch IN LISTS archs)
+    tensilelite_offload_target(offload_arch "${arch}")
     set(output_library "${CMAKE_CURRENT_BINARY_DIR}/hipblasltTransform_${arch}.hsaco")
     add_custom_command(
-        COMMAND ${CMAKE_CXX_COMPILER} -x hip ${matrix_transform_cpp} --offload-arch=${arch} -c --offload-device-only -Xoffload-linker --build-id=sha1 -O3 -DNDEBUG -o ${output_library}
+        COMMAND ${CMAKE_CXX_COMPILER} -x hip ${matrix_transform_cpp} --offload-arch=${offload_arch} -c --offload-device-only -Xoffload-linker --build-id=sha1 -O3 -DNDEBUG -o ${output_library}
         OUTPUT ${output_library}
         COMMENT "Building hipblasltTransform_${arch}.hsaco"
     )

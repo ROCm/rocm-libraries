@@ -36,9 +36,7 @@
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 #define HIP_CHECK_EXC(expr)                                                                       \
     do                                                                                            \
@@ -269,4 +267,3 @@ namespace TensileLite
     } // namespace hip
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

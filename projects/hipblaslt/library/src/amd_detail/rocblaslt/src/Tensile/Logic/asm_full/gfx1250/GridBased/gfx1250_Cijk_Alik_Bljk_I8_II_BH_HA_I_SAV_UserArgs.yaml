@@ -315,7 +315,7 @@
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
-    StaggerUStride: 128.0
+    StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSyncOpt: 0
@@ -615,7 +615,7 @@
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
-    StaggerUStride: 128.0
+    StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSyncOpt: 0

@@ -26,7 +26,8 @@ public:
     /// a plan was attached or dropped during deserialize.
     bool hasExecutionPlan() const
     {
-        return _executionPlanDesc && _executionPlanDesc->valid();
+        const auto* execPlan = activeExecutionPlanPtr();
+        return execPlan != nullptr && execPlan->valid();
     }
 };
 

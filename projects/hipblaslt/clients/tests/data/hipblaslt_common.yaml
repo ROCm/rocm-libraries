@@ -83,7 +83,7 @@ Common threads and streams: &common_threads_streams
   - { threads: 0,  streams: 0}
   # - { threads: 0, streams: 1 }
   # - { threads: 1, streams: 0 }
-  # - { threads: 3, streams: 3 }
+  - { threads: 3, streams: 3 }
   # - { threads: 5, streams: 5 }
 
 Real precisions: &real_precisions
@@ -342,6 +342,14 @@ Real precisions gemm only: &real_precisions_gemm_only
   - &double_precision
     { a_type: f64_r, b_type: f64_r, c_type: f64_r, d_type: f64_r, compute_type: c_f64_r , scale_type: f64_r}
 
+# Floating-point only (no int): for special-FP tests (zero, +/-0, +/-Inf, NaN). f16, bf16, f32, TF32, f64.
+Floating point precisions for special FP tests: &floating_point_precisions_special_fp
+  - *hpa_half_precision
+  - *hpa_bf16_precision
+  - *single_precision
+  - *xf32_precision
+  - *double_precision
+
 Real mix precisions: &real_mix_precisions_fnuz
   - &fp8fp16_fnuz_precision_dst_fp16
     { a_type: f8_fnuz_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_fast_f16_r, scale_type: f32_r}
@@ -597,8 +605,23 @@ Arguments:
   - lde: c_int64*32
   - batch_count: c_int32
   - batch_mode: c_int32
+  - batch_offset_a: c_int64
+  - batch_offset_b: c_int64
+  - batch_offset_c: c_int64
+  - batch_offset_d: c_int64
   - iters: c_int32
   - cold_iters: c_int32
+  - warmup_time: c_float
+  - sample_time: c_float
+  - measure_time: c_float
+  - max_measure_time: c_float
+  - noise_threshold: c_float
+  - min_iters: c_int32
+  - max_iters: c_int32
+  - stability_threshold: c_float
+  - stability_window: c_int32
+  - stability_interval: c_int32
+  - adaptive: c_bool
   - algo: c_uint32
   - solution_index: c_int32
   - requested_solution_num: c_int32
@@ -621,6 +644,7 @@ Arguments:
   - norm_check: c_int8
   - allclose_check: c_int8
   - unit_check: c_int8
+  - ulp_check: c_int8
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -712,6 +736,10 @@ Defaults:
   transB: '*'
   batch_count: 1
   batch_mode: 0
+  batch_offset_a: 0
+  batch_offset_b: 0
+  batch_offset_c: 0
+  batch_offset_d: 0
   HMM: false
   pad: 4096
   threads: 0
@@ -722,9 +750,23 @@ Defaults:
   norm_check: 0
   allclose_check: 0
   unit_check: 1
+  ulp_check: 0
   timing: 0
   iters: 10
   cold_iters: 2
+  # Adaptive-timing preset defaults (used when adaptive=true); keep in sync with
+  # hipblaslt_bench::adaptive_defaults in benchmark_stats.hpp.
+  warmup_time: 50.0
+  sample_time: 1.0
+  measure_time: 500.0
+  max_measure_time: 2000.0
+  noise_threshold: 0.01
+  min_iters: 10
+  max_iters: 0
+  stability_threshold: 0.05
+  stability_window: 32
+  stability_interval: 16
+  adaptive: false
   algo: 0
   solution_index: -1
   requested_solution_num: 1

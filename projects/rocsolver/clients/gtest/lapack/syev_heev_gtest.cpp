@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -81,7 +81,7 @@ Arguments syev_heev_setup_arguments(syev_heev_tuple tup)
     return arg;
 }
 
-template <rocblas_int MODE>
+template <rocblas_int MODE, typename I>
 class SYEV_HEEV : public ::TestWithParam<syev_heev_tuple>
 {
 protected:
@@ -98,26 +98,42 @@ protected:
 
         if(arg.peek<rocblas_int>("n") == 0 && arg.peek<char>("evect") == 'N'
            && arg.peek<char>("uplo") == 'L')
-            testing_syev_heev_bad_arg<BATCHED, STRIDED, T>();
+            testing_syev_heev_bad_arg<BATCHED, STRIDED, T, I>();
 
         arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
-        testing_syev_heev<BATCHED, STRIDED, T>(arg);
+        testing_syev_heev<BATCHED, STRIDED, T, I>(arg);
     }
 };
 
-class SYEV : public SYEV_HEEV<0>
+class SYEV : public SYEV_HEEV<0, rocblas_int>
 {
 };
 
-class HEEV : public SYEV_HEEV<0>
+class HEEV : public SYEV_HEEV<0, rocblas_int>
 {
 };
 
-class SYEV_HYBRID : public SYEV_HEEV<1>
+class SYEV_HYBRID : public SYEV_HEEV<1, rocblas_int>
 {
 };
 
-class HEEV_HYBRID : public SYEV_HEEV<1>
+class HEEV_HYBRID : public SYEV_HEEV<1, rocblas_int>
+{
+};
+
+class SYEV_64 : public SYEV_HEEV<0, int64_t>
+{
+};
+
+class HEEV_64 : public SYEV_HEEV<0, int64_t>
+{
+};
+
+class SYEV_HYBRID_64 : public SYEV_HEEV<1, int64_t>
+{
+};
+
+class HEEV_HYBRID_64 : public SYEV_HEEV<1, int64_t>
 {
 };
 
@@ -247,6 +263,132 @@ TEST_P(HEEV_HYBRID, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// non-batch tests (int64_t API)
+
+TEST_P(SYEV_64, __float)
+{
+    run_tests<false, false, float>();
+}
+
+TEST_P(SYEV_64, __double)
+{
+    run_tests<false, false, double>();
+}
+
+TEST_P(HEEV_64, __float_complex)
+{
+    run_tests<false, false, rocblas_float_complex>();
+}
+
+TEST_P(HEEV_64, __double_complex)
+{
+    run_tests<false, false, rocblas_double_complex>();
+}
+
+TEST_P(SYEV_HYBRID_64, __float)
+{
+    run_tests<false, false, float>();
+}
+
+TEST_P(SYEV_HYBRID_64, __double)
+{
+    run_tests<false, false, double>();
+}
+
+TEST_P(HEEV_HYBRID_64, __float_complex)
+{
+    run_tests<false, false, rocblas_float_complex>();
+}
+
+TEST_P(HEEV_HYBRID_64, __double_complex)
+{
+    run_tests<false, false, rocblas_double_complex>();
+}
+
+// batched tests (int64_t API)
+
+TEST_P(SYEV_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(SYEV_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(HEEV_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEV_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(SYEV_HYBRID_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(SYEV_HYBRID_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(HEEV_HYBRID_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEV_HYBRID_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+// strided_batched tests (int64_t API)
+
+TEST_P(SYEV_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(SYEV_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(HEEV_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEV_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(SYEV_HYBRID_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(SYEV_HYBRID_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(HEEV_HYBRID_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEV_HYBRID_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 // daily_lapack tests normal execution with medium to large sizes
 INSTANTIATE_TEST_SUITE_P(daily_lapack, SYEV, Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
 
@@ -258,6 +400,22 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          HEEV_HYBRID,
+                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         SYEV_64,
+                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         HEEV_64,
+                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         SYEV_HYBRID_64,
+                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         HEEV_HYBRID_64,
                          Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
 
 // checkin_lapack tests normal execution with small sizes, invalid sizes,
@@ -272,4 +430,16 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HEEV_HYBRID,
+                         Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, SYEV_64, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, HEEV_64, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         SYEV_HYBRID_64,
+                         Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         HEEV_HYBRID_64,
                          Combine(ValuesIn(size_range), ValuesIn(op_range)));

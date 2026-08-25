@@ -136,12 +136,6 @@ private:
 };
 
 namespace kbp {
-struct OpenCL
-{
-    MIOPEN_INTERNALS_EXPORT static std::string
-    Generate(const std::vector<KernelBuildParameter>& options);
-};
-
 struct GcnAsm
 {
     MIOPEN_INTERNALS_EXPORT static std::string

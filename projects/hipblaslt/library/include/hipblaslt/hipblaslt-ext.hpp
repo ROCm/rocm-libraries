@@ -79,24 +79,40 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
         /*! \ingroup library_module
-         *  \brief Opt in to the dynamic persistent tile (work-stealing
-         *  StreamK) scheduler.
+         *  \brief Select the StreamK tile scheduling mode (hybrid SK3/SK4
+         *  tile scheduling for StreamK=5 kernels).
          *
          *  \details
          *  Exposed via the ``hipblaslt_ext`` namespace because it controls a
          *  hipBLASLt-internal scheduler with no equivalent in the base
-         *  ``hipblasLt`` C API. When ``enabled`` is ``true`` and the chosen
-         *  kernel supports the feature, hipBLASLt launches a persistent grid
-         *  that uses the dynamic work-stealing StreamK scheduler; otherwise
-         *  the library default scheduler is used.
+         *  ``hipblasLt`` C API. The ``mode`` argument is one of
+         *  ``hipblasLtStreamKTileSchedulingMode_t``:
+         *
+         *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF`` (default) — SK3 static
+         *      sub-path; when ``sm_count_target`` > 0 the library heuristic
+         *      still runs per launch to pick SK4 when appropriate.
+         *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_ON``  — always request the SK4 dynamic sub-path when the chosen kernel supports it.
+         *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO`` — always delegate to the library heuristic per launch.
+         *
+         *  The mode is tri-state: a caller can use the SK3 static
+         *  sub-path by default (``OFF``), force the SK4 dynamic sub-path (``ON``),
+         *  or always defer to the library heuristic (``AUTO``)
+         *  for the chosen kernel.
          *
          *  See ``hipblasLtSetSmCountTarget`` (non-ext) for the analogous
          *  cuBLAS-compatible hint on the number of compute units to target.
          *
          *  @param[in]
-         *  enabled  ``true`` to request the dynamic persistent tile path.
+         *  mode  Tri-state mode selector.
          */
-        HIPBLASLT_EXPORT void setDynPersistentTileEnabled(bool enabled);
+        HIPBLASLT_EXPORT void setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
+
+        /*! \ingroup library_module
+         *  \brief Enable uniform summation order for this Gemm.
+         *
+         *  See ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
+         */
+        HIPBLASLT_EXPORT void setUniformSummationOrder(bool value);
 
         /*! \ingroup library_module
          *  \brief This function returns the maximum workspace size that was set.
@@ -106,10 +122,17 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT const size_t getMaxWorkspaceBytes() const;
 
         /*! \ingroup library_module
-         *  \brief Return whether the dynamic persistent tile scheduler has
-         *  been requested via ``setDynPersistentTileEnabled``.
+         *  \brief Return the StreamK tile scheduling mode set via
+         *  ``setStreamKTileSchedulingMode``. Defaults to
+         *  ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF``.
          */
-        HIPBLASLT_EXPORT bool getDynPersistentTileEnabled() const;
+        HIPBLASLT_EXPORT hipblasLtStreamKTileSchedulingMode_t getStreamKTileSchedulingMode() const;
+
+        /*! \ingroup library_module
+         *  \brief Return the uniform-summation-order request set via
+         *  ``setUniformSummationOrder``. Defaults to ``false``.
+         */
+        HIPBLASLT_EXPORT bool getUniformSummationOrder() const;
 
     private:
         friend GemmInstance;
@@ -584,7 +607,9 @@ namespace hipblaslt_ext
         hipblasLtHandle_t     m_handle;
         std::shared_ptr<void> m_data;
 
-        size_t m_workspace_bytes = 0;
+        size_t  m_workspace_bytes        = 0;
+        int32_t m_streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
+        bool    m_uniform_summation_order = false;
     };
 
     /*! \ingroup types_module

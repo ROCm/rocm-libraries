@@ -64,15 +64,14 @@ constexpr size_t sdpaBwdDqAccBufferSize(size_t batch, size_t headsQ, size_t seqL
 }
 
 /// Total backward workspace size, accounting for accumulator type.
-/// - A32: D buffer (FP32) + dq_acc buffer (FP32)
-/// - A16: D buffer (FP32) only — a16 kernels write dQ directly in BF16
+/// Layout: D buffer | dq_acc (A32 only)
 constexpr size_t sdpaBwdWorkspaceSize(
-    size_t batch, size_t headsQ, size_t seqLenQ, size_t headDim, AccumulatorType accType)
+    size_t batch, size_t headsQ, size_t seqLenQ, size_t headDimQk, AccumulatorType accType)
 {
     size_t size = sdpaBwdDBufferSize(batch, headsQ, seqLenQ);
     if(accType == AccumulatorType::A32)
     {
-        size += sdpaBwdDqAccBufferSize(batch, headsQ, seqLenQ, headDim);
+        size += sdpaBwdDqAccBufferSize(batch, headsQ, seqLenQ, headDimQk);
     }
     return size;
 }

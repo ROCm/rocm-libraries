@@ -37,6 +37,13 @@ public:
 
 struct HipdnnEnginePluginExecutionContext
 {
+    // Engine ID captured at execution-context creation. Lets a plugin make
+    // per-engine execution decisions (e.g. an engine that fails on purpose).
+    int64_t engineId = 0;
+
+    // True if global.benchmarking=1 was set in the engine config knob settings.
+    // Used by autotune test plugins to simulate priming-only failures.
+    bool hasBenchmarkingKnobEnabled = false;
 };
 
 inline const char* apiVersionWithoutTweak()
@@ -244,6 +251,20 @@ public:
         }
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         return reinterpret_cast<Fn>(test_plugin_internal::lookupPluginSymbol(_handle, symbolName));
+    }
+
+    /// Like `lookup()`, but throws `std::runtime_error` when the symbol is
+    /// missing instead of returning nullptr. Use for mandatory recorder
+    /// symbols whose absence is a test-setup error.
+    template <typename Fn>
+    Fn requireSymbol(const char* symbolName) const
+    {
+        Fn fn = lookup<Fn>(symbolName);
+        if(fn == nullptr)
+        {
+            throw std::runtime_error("Failed to get symbol: " + std::string(symbolName));
+        }
+        return fn;
     }
 
     const std::string& pluginPath() const
@@ -798,6 +819,7 @@ public:
                 engineConfigWrapper(engineConfig->ptr, engineConfig->size);
 
             auto context = std::make_unique<HipdnnEnginePluginExecutionContext>();
+            context->engineId = engineConfigWrapper.engineId();
             *executionContext = context.release();
 
             LOG_API_SUCCESS(apiName,
