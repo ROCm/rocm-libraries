@@ -325,13 +325,21 @@ public:
             auto delim = ",";
             name_list << delim << "solution_index";
             value_list << delim << solution_index;
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
             // Record the name beside the index so replay can confirm the index
             // still identifies the kernel that was actually tuned. The kernel
             // name rather than the solution name, because that is the field the
             // library validates against and it leaves out the solution-level
             // GSU/WGM defaults.
+            //
+            // Only when the library can act on it. A build without the tuning
+            // cache validates offline files on the build stamp alone, exactly as
+            // it did before, and writing a column that nothing reads would put
+            // those files on a different validation path than the runtime they
+            // were produced for.
             name_list << delim << "kernel_name";
             value_list << delim << hipblaslt_strip_custom_tuning_suffix(kernel_name);
+#endif
 
             const char*   tuningEnv  = getenv("HIPBLASLT_TUNING_FILE");
             std::string   tuningPath = tuningEnv;

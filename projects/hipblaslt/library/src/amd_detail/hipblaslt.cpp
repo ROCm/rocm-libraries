@@ -527,9 +527,17 @@ try
     // legacy override in cache and tune mode, so running this preflight anyway
     // opened a file that will never be consulted and could then announce a build
     // mismatch about it. The startup line reports the override being ignored.
+    // Without the runtime cache there is no mode to lose to, so the override is
+    // always the one in play and the preflight runs unconditionally, as before.
     OverrideSingleton& override = OverrideSingleton::getInstance();
-    if(override.env_mode
-       && TensileLite::TuningModeSingleton::getInstance().mode() == TensileLite::TuningMode::Off)
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
+    const bool overrideIsInPlay
+        = override.env_mode
+          && TensileLite::TuningModeSingleton::getInstance().mode() == TensileLite::TuningMode::Off;
+#else
+    const bool overrideIsInPlay = override.env_mode;
+#endif
+    if(overrideIsInPlay)
     {
         bool override_success = override_path_compare_git_version(override, handle);
         if(override_success)

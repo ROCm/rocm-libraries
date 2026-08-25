@@ -94,6 +94,7 @@ private:
 
 namespace TensileLite
 {
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
     enum class TuningMode : uint32_t
     {
         Off   = 0,
@@ -144,6 +145,7 @@ namespace TensileLite
         TuningMode  m_mode = TuningMode::Off;
         std::string m_cachePath;
     };
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
     /**
      * Running tallies for the tuning cache.
@@ -478,9 +480,11 @@ namespace TensileLite
      * single write so a local filesystem will usually append them whole, but
      * nothing serialises the processes themselves.
      */
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
     bool appendTunedEntry(const std::string&                 path,
                           const RocblasltContractionProblem& problem,
                           const TunedEntry&                  entry);
+#endif
 
     /**
      * Load a tuning file into the map. Safe to call repeatedly; each distinct
@@ -488,6 +492,7 @@ namespace TensileLite
      */
     void getContractionProblemsFromFile(const std::string& path);
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
     /**
      * What one tuning attempt did.
      *
@@ -646,6 +651,27 @@ namespace TensileLite
                                   uint64_t* matched,
                                   uint64_t* fellback,
                                   uint64_t* tuned);
+
+#else // HIPBLASLT_ENABLE_TUNING_CACHE
+
+    /**
+     * Stubs for the shared lookup and validation paths, which stay compiled so
+     * the offline override file keeps working, and which call into the tuning
+     * bookkeeping above.
+     *
+     * recordTuningLookup feeds the closing summary, which does not exist here,
+     * so it drops the call. recordTuningInvalidation deduplicates a rejected
+     * entry across the several probes a tune-mode call makes; without tuning
+     * there is only the heuristic lookup, so every sighting is the first and
+     * the counter behaves exactly as it did before this feature existed.
+     */
+    inline void recordTuningLookup(const ProblemOverride&, bool) { }
+    inline bool recordTuningInvalidation(const ProblemOverride&, int)
+    {
+        return true;
+    }
+
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
     template <>
     struct Comparison<ProblemOverride>

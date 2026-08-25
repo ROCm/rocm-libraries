@@ -3467,6 +3467,7 @@ __global__ void hipblasltTuningFlushICache()
 
 namespace
 {
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
     /**
      * How much work a single shape's tuning does.
      *
@@ -4809,6 +4810,7 @@ namespace
         winnerIndexOut = bestIndex;
         return TuningAttempt::Tuned;
     }
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 } // namespace
 
 /******************************************************************************
@@ -4847,12 +4849,14 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(prob.trans_b == HIPBLAS_OP_C)
             data->problem.setBOps({TensileLite::TensorOp::ComplexConjugate()});
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
         // Noted before algo is filled in below, because it decides whether this
         // call can be served by the cache at all. A caller that supplies an algo
         // got it from the heuristic entry point, which already applied any
         // cached winner; a caller that does not is launched with default
         // selection no matter what the cache holds.
         const bool callerSuppliedAlgo = (algo != nullptr);
+#endif
 
         if(algo == nullptr)
         {
@@ -4874,6 +4878,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         int* solutionIndex = (int*)algo->data;
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
         // Online tuning.
         //
         // This decides for itself rather than acting on a flag the heuristic
@@ -5122,6 +5127,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(tunedIndex >= 0)
             solutionIndex = &tunedIndex;
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);

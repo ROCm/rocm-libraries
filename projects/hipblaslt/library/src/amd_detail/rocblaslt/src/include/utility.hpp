@@ -235,6 +235,7 @@ void log_info(const char* func, H head, Ts&&... xs)
  * would turn a logging problem into a failed GEMM. A broken sink also has
  * nowhere left to report the breakage to.
  */
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
 inline void log_tuning_lifecycle(const char* func, const std::string& body)
 {
     try
@@ -256,6 +257,7 @@ inline void log_tuning_lifecycle(const char* func, const std::string& body)
     {
     }
 }
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
 // if trace logging is turned on with
 // (handle->layer_mode & rocblaslt_layer_mode_log_api) == true

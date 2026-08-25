@@ -233,7 +233,15 @@ namespace
 
         // Once per key rather than once per lookup: a stale entry is rediscovered
         // on every call for that shape, and the message is the same every time.
+        // Without the runtime cache there is no per-key bookkeeping to consult,
+        // and only the heuristic lookup ever reaches here, so the plain info
+        // gate is both sufficient and what the rest of this file uses.
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
         if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Invalid, key))
+#else
+        static_cast<void>(key);
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+#endif
         {
             std::ostringstream msg;
             msg << "tuning-cache: cache-invalid index=" << entry.solutionIndex
@@ -243,6 +251,36 @@ namespace
         }
 
         return false;
+    }
+
+    /**
+     * The two per-problem cache events, in the wording each build can back up.
+     *
+     * With the runtime cache these are bounded to one line per key, since a
+     * replay loop would otherwise repeat them on every call. Without it there is
+     * no such bookkeeping, and the historical unbounded wording is what an
+     * existing override user already sees at this log level.
+     */
+    void logCacheHit(const char* func, const TensileLite::ProblemOverride& key, int index)
+    {
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
+        if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Hit, key))
+            log_info(func, "tuning-cache: cache-hit index=" + std::to_string(index));
+#else
+        static_cast<void>(key);
+        log_info(func, "Find solution with index: " + std::to_string(index));
+#endif
+    }
+
+    void logCacheMiss(const char* func, const TensileLite::ProblemOverride& key)
+    {
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
+        if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Miss, key))
+            log_info(func, "tuning-cache: cache-miss, no valid entry for this problem");
+#else
+        static_cast<void>(key);
+        log_info(func, "No valid solution index found in override file.");
+#endif
     }
 } // namespace
 
@@ -268,9 +306,11 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
         // and must not start paying for it.
         TensileLite::TuningCounters::instance().misses++;
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
         if(TensileLite::TuningModeSingleton::getInstance().mode() != TensileLite::TuningMode::Off)
             TensileLite::recordTuningLookup(RocblasltContractionProblem2ProblemOverride(problem),
                                             false);
+#endif
 
         log_info(__func__, "No valid entries found in override file.");
     }
@@ -355,24 +395,20 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
         {
             TensileLite::TuningCounters::instance().misses++;
             TensileLite::recordTuningLookup(prob_key, false);
-
-            if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Miss, prob_key))
-                log_info(__func__, "tuning-cache: cache-miss, no valid entry for this problem");
+            logCacheMiss(__func__, prob_key);
         }
         else
         {
             TensileLite::TuningCounters::instance().hits++;
             TensileLite::recordTuningLookup(prob_key, true);
-
-            if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Hit, prob_key))
-                log_info(__func__,
-                         "tuning-cache: cache-hit index=" + std::to_string(solutionIndex[0]));
+            logCacheHit(__func__, prob_key, solutionIndex[0]);
         }
     }
 
     return success;
 }
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
 // Declared for the execution-path hook in tensile_host.cpp, which must know
 // whether a key still has a usable entry rather than merely any entry.
 bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
@@ -466,6 +502,7 @@ bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
 
     return false;
 }
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
 bool problem_override_from_file_cpp(
     rocblaslt_handle&                               handle,
@@ -589,18 +626,13 @@ bool problem_override_from_file_cpp(
         {
             TensileLite::TuningCounters::instance().misses++;
             TensileLite::recordTuningLookup(prob_key, false);
-
-            if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Miss, prob_key))
-                log_info(__func__, "tuning-cache: cache-miss, no valid entry for this problem");
+            logCacheMiss(__func__, prob_key);
         }
         else
         {
             TensileLite::TuningCounters::instance().hits++;
             TensileLite::recordTuningLookup(prob_key, true);
-
-            if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Hit, prob_key))
-                log_info(__func__,
-                         "tuning-cache: cache-hit index=" + std::to_string(solutionIndex[0]));
+            logCacheHit(__func__, prob_key, solutionIndex[0]);
         }
     }
 
@@ -3115,6 +3147,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
     TensileLite::Debug::Instance().reloadDebugBitsForTest();
 }
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
 // Test support for the tuning cache, same rationale as hipblaslt_debug_reload:
 // the mode switch is latched on first use and the loaded-path set is per
 // process, so a test binary exercising several modes and several cache files
@@ -3188,3 +3221,4 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_lookup_tally_for_test(uint64_t
     if(tuned)
         *tuned = localTuned;
 }
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE

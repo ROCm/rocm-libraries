@@ -111,8 +111,18 @@ Runtime tuning
 ==============
 
 Instead of tuning offline with ``hipblaslt-bench``, hipBLASLt can benchmark candidate kernels itself
-the first time it sees a GEMM shape and remember the winner. This is off by default and is enabled
-with two environment variables:
+the first time it sees a GEMM shape and remember the winner.
+
+Runtime tuning is a build-time opt-in and is **not compiled into a default build**. It requires:
+
+.. code-block:: bash
+
+   cmake -DHIPBLASLT_ENABLE_TUNING_CACHE=ON ...
+
+Without that option none of the benchmarking, cache writing, or lifecycle reporting described below
+is present in the library, and the two environment variables have no effect. The offline
+``HIPBLASLT_TUNING_OVERRIDE_FILE`` path is unaffected either way. In a build that has it, the feature
+is still off until you ask for it, with two environment variables:
 
 .. code-block:: bash
 

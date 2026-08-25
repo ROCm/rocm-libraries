@@ -324,12 +324,14 @@ TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<voi
  * misses for a single matmul, and a hipblasLtMatmul given no algorithm, which is
  * launched with default selection whatever the cache holds.
  */
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
 bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
                                   const RocblasltContractionProblem&  problem,
                                   std::shared_ptr<void>               gemmData,
                                   size_t                              max_workspace_bytes,
                                   bool                                countLookup = true);
+#endif
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 

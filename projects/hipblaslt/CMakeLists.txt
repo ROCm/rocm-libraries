@@ -67,6 +67,14 @@ option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
 
+# Runtime tuning is compiled out by default. Off, no part of the benchmarker,
+# the cache writer, or the lifecycle diagnostics is built, and neither
+# HIPBLASLT_TUNING_MODE nor HIPBLASLT_TUNING_CACHE_PATH does anything. The
+# offline HIPBLASLT_TUNING_OVERRIDE_FILE path is unaffected either way.
+# Declared beside the other top-level options so the clients tree can read it
+# too; the host library is what actually consumes the compile definition.
+option(HIPBLASLT_ENABLE_TUNING_CACHE "Build the opt-in runtime tuning cache." OFF)
+
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
 option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
@@ -367,6 +375,11 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
+    endif()
+    if(HIPBLASLT_ENABLE_TUNING_CACHE)
+        # PUBLIC because the client tests compile against the same guarded
+        # declarations and link the test-only reset/telemetry exports.
+        target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_ENABLE_TUNING_CACHE)
     endif()
     if(NOT HIPBLASLT_ENABLE_YAML)
         target_link_libraries(hipblaslt PRIVATE ${hipblaslt_msgpack_target})

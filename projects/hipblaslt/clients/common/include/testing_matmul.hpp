@@ -6185,9 +6185,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                         // on its first use and the shape looks permanently
                         // untuned, so anything destined for the tuning file goes
                         // through the algo accessor instead.
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
                         if(tuningEnv)
                             kernelName = hipblaslt_ext::getKernelNameFromAlgo(
                                 handle, heuristicResult[sol].algo);
+#endif
                     }
                     else
                     {

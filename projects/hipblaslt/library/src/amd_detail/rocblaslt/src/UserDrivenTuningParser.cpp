@@ -57,6 +57,7 @@ namespace TensileLite
         return stamp;
     }
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
     TuningModeSingleton::TuningModeSingleton()
     {
         if(const char* env = getenv("HIPBLASLT_TUNING_MODE"))
@@ -115,7 +116,21 @@ namespace TensileLite
 
         return {true, tuning.writes(), tuning.cachePath()};
     }
+#else
+    /**
+     * Without the runtime cache there is only the offline override file, so the
+     * selection collapses to what it was before the feature existed.
+     */
+    TuningFileSelection selectTuningFile()
+    {
+        OverrideSingleton& legacy = OverrideSingleton::getInstance();
+        if(!legacy.env_mode)
+            return {};
+        return {true, false, legacy.file_path};
+    }
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
     bool tuningAttemptIsSkip(TuningAttempt result)
     {
         switch(result)
@@ -479,6 +494,7 @@ namespace TensileLite
     {
         summaryTally(shapes, matched, fellback, tuned);
     }
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
     namespace
     {
@@ -949,6 +965,7 @@ namespace TensileLite
         }
     } // namespace
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
     bool appendTunedEntry(const std::string&                 path,
                           const RocblasltContractionProblem& problem,
                           const TunedEntry&                  entry)
@@ -1074,6 +1091,7 @@ namespace TensileLite
         // at process exit.
         return out.good();
     }
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE
 
     void getContractionProblemsFromFile(const std::string& path)
     {
@@ -1082,8 +1100,13 @@ namespace TensileLite
 
         OverrideMap& m_override = OverrideMap::getMap();
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
         const bool fromManagedCache = (TuningModeSingleton::getInstance().mode() != TuningMode::Off)
                                       && (path == TuningModeSingleton::getInstance().cachePath());
+#else
+        // Only the offline override file exists here, and it is never announced.
+        const bool fromManagedCache = false;
+#endif
 
         // Claimed before the file is opened. Opening first meant every lookup on
         // an already-loaded path paid a filesystem open just to discover the
@@ -1091,6 +1114,7 @@ namespace TensileLite
         if(!m_override.claimLoad(path))
             return;
 
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
         // Announced from a scope guard because the load has several exits and
         // the user is owed the same startup line whichever one it takes.
         // Declared before the claim so it runs after it, once the accepted count
@@ -1107,6 +1131,9 @@ namespace TensileLite
                     announceTuningModeOnce(*status);
             }
         } announce{fromManagedCache, &loadStatus};
+#else
+        static_cast<void>(fromManagedCache);
+#endif
 
         struct LoadClaim
         {
@@ -1127,9 +1154,11 @@ namespace TensileLite
             // the first winner. A file that is there and still would not open is
             // a different problem, usually permissions, and reporting it as
             // missing sends the user looking for a file they already have.
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
             std::error_code ec;
             loadStatus = std::filesystem::exists(path, ec) ? TuningLoadStatus::ReadError
                                                            : TuningLoadStatus::NotFound;
+#endif
             return;
         }
 
@@ -1214,7 +1243,9 @@ namespace TensileLite
         // such as an I/O error partway through, would otherwise latch a
         // partially populated map as complete and never be retried.
         claim.success = !file_read.bad();
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
         if(!claim.success)
             loadStatus = TuningLoadStatus::ReadError;
+#endif
     }
 } // namespace TensileLite

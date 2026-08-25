@@ -90,6 +90,10 @@ For more information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-u
 Runtime tuning cache
 ====================
 
+Every variable in this section requires a build configured with
+``-DHIPBLASLT_ENABLE_TUNING_CACHE=ON``. A default build does not contain the
+feature, and these variables are ignored.
+
 Runtime tuning is opt-in. ``HIPBLASLT_TUNING_MODE`` and
 ``HIPBLASLT_TUNING_CACHE_PATH`` are read when tuning is first used in a process;
 set them before the first hipBLASLt call. The scratch cap is read on the first
