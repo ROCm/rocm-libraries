@@ -2,7 +2,7 @@
 # name: test_gfx942_grad_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_D_GradH_A_S_UserArgs_G2d4aMnxGm2lajw3b5Ks0RJ9HGAzDIGmumI4VtBhG14=',
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_D_GradH_A_S_UserArgs_ClKnrRNRiLcVtviz6RMsoTxs07iDtiUXhKWZT5VYpZQ=',
       'err': 0,
     }),
   ])

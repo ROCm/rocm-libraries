@@ -39,6 +39,8 @@
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_SYSTEM_DB_PATH)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_USER_DB_PATH)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_DISABLE_SYSTEM_DB)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_DISABLE_USER_DB)
 
 namespace miopen {
 
@@ -82,6 +84,24 @@ fs::path GetSystemDbPath()
     {
         return p;
     }
+}
+
+/// \note env::enabled() reads the process environment exactly once, when the variable is first
+/// touched, so neither predicate follows a setenv() issued after that point. What remains mutable
+/// is the in-library override behind miopen::debug::env::UpdateEnvVariable(), which the tests use
+/// to toggle the switches. Database objects therefore latch the answer at construction
+/// (PlainTextDb::disable_file_io, SQLiteBase::disable_file_io) instead of re-querying it per
+/// operation, so that a single instance cannot change its mind between its constructor and its
+/// operations, nor in the middle of one.
+
+bool IsSystemDbDisabled()
+{
+    return MIOPEN_DISABLE_SYSDB || env::enabled(MIOPEN_DEBUG_DISABLE_SYSTEM_DB);
+}
+
+bool IsUserDbDisabled()
+{
+    return MIOPEN_DISABLE_USERDB || env::enabled(MIOPEN_DEBUG_DISABLE_USER_DB);
 }
 
 namespace {
