@@ -108,24 +108,35 @@ The split-K epilogue (`global_atomic_add` / `global_atomic_add_pk_*`) already us
 
 ---
 
-## Next steps
+## Changelog (continued)
 
-### Enable vector loads for A and B
+### Free-axis vector loads for A and B
 
-Currently `load_vec_a` and `load_vec_b` are hard-coded to 1
-(`conv_implicit_gemm_wgrad.py:822`). The root cause is that the K_wg reduction
-axis is not the innermost dimension of either tensor:
+The K_wg reduction axis is not the innermost dimension of either input tensor:
 
 - **A (dY, NHWK):** consecutive K_wg positions are separated by stride K
-  (output channels).
-- **B (X, NHWC):** consecutive K_wg positions are separated by stride C
-  (input channels).
+  (output channels); the stride-1 axis is `k_out` (= GEMM **M**, the free axis).
+- **B (X, NHWC):** consecutive K_wg positions are separated by stride C (input
+  channels); the stride-1 axis is the inner C of `N_wg` (the free axis).
 
-`buffer_load_vN` with `N > 1` would read N consecutive *channel* values at the
-same spatial position instead of the intended N consecutive spatial positions.
-Enabling wider loads requires either rearranging the load tile so that the fast
-axis aligns with the last tensor dimension, or introducing a transposing LDS
-stage so the data lands in LDS in the order the MFMA atoms expect it.
+A `buffer_load_vN` along K_wg would read N consecutive *channel* values at one
+spatial position — wrong data — which is why the loads were historically scalar.
+The fix rearranges the load tile so the vector runs along the **free** axis
+(the last tensor dimension) instead of the reduction axis: the loader's new
+`vector_axis="row"` mode (`helpers/loads.py`) issues one coalesced
+`buffer_load_dwordx4` (V=8 fp16/bf16) along the stride-1 free axis, then
+*transposes on store* — scattering the V elements into `[row+i, col]` of the
+existing row-major `(M/N, K)` LDS tile. The MFMA consumer still reads that tile
+K-contiguously, unchanged (no new LDS layout, no consumer-read change).
+
+Enabled for the **sync CDNA-MFMA** path (`op.family == "mma"`): the width is
+`vec_a | K` (A) and `vec_b | C` (B, so a vector never crosses a `(y,x)` filter
+boundary), falling back to the scalar `vector_axis="col"` path (byte-identical)
+when a width > 1 is not admissible. The async-DMA and WMMA paths are follow-ons
+(see below). The optional `K0-M-K1` LDS layout below is an *additional*
+bank-conflict/wider-`ds_read` optimization, independent of this vectorised load.
+
+## Next steps
 
 ### Async DMA for all pipelines
 

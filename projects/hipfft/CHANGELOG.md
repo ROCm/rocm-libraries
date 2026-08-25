@@ -19,6 +19,12 @@ Documentation for hipFFT is available at
   Multi-device, unbatched one-dimensional transforms remain unimplemented pending
   further analyses of the exact behavior(s) to be matched.
 
+## hipFFT 1.0.25 for ROCm 10.0
+
+### Changed
+
+* Minor internal changes.
+
 ## hipFFT 1.0.24 for ROCm 7.14
 
 ### Added
