@@ -698,34 +698,48 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroug
     EXPECT_EQ(served->front().kernelId, testId(0x11));
 }
 
-/// gcnArchName is raw, driver-supplied and suffixed. ':' is illegal in a Windows path
-/// component, and a separator would move the shard out of the cache tree entirely, so the
-/// arch directory must be the sanitized stripped base id. Run on Linux CI, where a
-/// Windows-only break would otherwise never surface.
-TEST(TestIngestorWinnerCache, TheArchShardComponentIsOneSanitizedComponent)
+/// gcnArchName is raw, driver-supplied and suffixed. ALMIOPEN-2451's design record
+/// requires the arch directory to be the stripped base target id and to stay readable, so
+/// a user can find and delete one arch's cache by eye: `gfx942`, not `gfx942-<hash>` and
+/// not an opaque digest. Run on Linux CI, where a Windows-only break in the ':' handling
+/// would otherwise never surface.
+///
+/// Falsifying mutation: wrap the arch in sanitizeForPath(). The exact-equality check below
+/// fails on the appended hash suffix.
+TEST(TestIngestorWinnerCache, TheArchShardComponentIsTheReadableBaseTargetId)
 {
     const ScopedCacheDir cacheDir("arch_component");
 
     const auto path = winnerCacheShardPath("test:ArchComponent", "gfx942:sramecc+:xnack-");
     ASSERT_FALSE(path.empty());
 
-    const auto archComponent = path.parent_path().filename().string();
-    EXPECT_EQ(archComponent.find(':'), std::string::npos);
-    EXPECT_EQ(archComponent.rfind("gfx942-", 0), 0U)
-        << "the arch directory must stay the readable stripped base id plus the "
-           "sanitizer's hash suffix, got \""
-        << archComponent << "\"";
+    EXPECT_EQ(path.parent_path().filename().string(), "gfx942")
+        << "the arch directory must be the readable stripped base id, verbatim";
 
-    // The engine component is sanitized too: a conforming scoped name contains a colon.
+    // The engine component is sanitized: a conforming scoped name contains a colon, which
+    // is illegal on Windows, and an engine name has no restricted alphabet to lean on.
     const auto engineComponent = path.parent_path().parent_path().filename().string();
     EXPECT_EQ(engineComponent.find(':'), std::string::npos);
+}
 
-    // A driver string carrying separators must collapse into ONE component instead of
-    // walking out of the engine directory.
-    const auto hostile = winnerCacheShardPath("test:ArchComponent", "../../../evil");
-    ASSERT_FALSE(hostile.empty());
-    EXPECT_EQ(hostile.parent_path().parent_path(), path.parent_path().parent_path())
-        << "an arch string carrying separators escaped the engine directory: " << hostile;
+/// The arch is validated, not reshaped: a string that is not a plain path component is a
+/// driver anomaly, and declining the disk cache is safer than folding separators into a
+/// name that reads like a different arch. Callers already treat an empty path as
+/// in-memory-only.
+///
+/// Falsifying mutation: drop the isPlainArchComponent() guard in winnerCacheShardPath().
+/// Every case below then yields a non-empty path, and the first walks out of the tree.
+TEST(TestIngestorWinnerCache, AnArchThatIsNotAPlainComponentDeclinesTheShard)
+{
+    const ScopedCacheDir cacheDir("arch_reject");
+
+    for(const std::string_view hostile :
+        {"../../../evil", "gfx942/../../escape", "gfx942\\evil", ".", "..", "", "gfx942 evil"})
+    {
+        EXPECT_TRUE(winnerCacheShardPath("test:ArchComponent", hostile).empty())
+            << "an arch that is not a plain path component produced a shard path: \"" << hostile
+            << "\"";
+    }
 }
 
 /// The shard is per-arch but the key is per-device: two parts reporting the same arch with

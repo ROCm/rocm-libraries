@@ -13,6 +13,7 @@
 // reverify returns std::nullopt rather than throwing, so LineStore can skip one bad line
 // without losing the rest of the shard.
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -50,6 +51,22 @@ constexpr const char* WINNER_LINE_PACK_ID_FIELD = "pack_id";
 constexpr const char* WINNER_LINE_DISPATCH_ID_FIELD = "dispatch_id";
 constexpr const char* WINNER_LINE_TIME_MS_FIELD = "time_ms";
 
+/// True if @p arch is usable verbatim as a path component: a non-empty run of ASCII
+/// letters, digits, '_' and '-'.
+///
+/// Every base target id stripArchFeatures() can produce is of that form -- `gfx942`,
+/// `gfx90a`, `gfx1151`, the LLVM generic `gfx9-4-generic`. The check is a whitelist, so
+/// a separator, a dot, a colon, a control byte or a non-ASCII byte all fail it, which is
+/// what keeps a driver-supplied string inside the cache tree.
+inline bool isPlainArchComponent(std::string_view arch)
+{
+    return !arch.empty() && std::all_of(arch.begin(), arch.end(), [](char c) {
+        const auto byte = static_cast<unsigned char>(c);
+        return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z')
+               || (byte >= '0' && byte <= '9') || c == '_' || c == '-';
+    });
+}
+
 } // namespace detail
 
 /// The version string every winner-cache shard is stamped with and checked against;
@@ -60,14 +77,20 @@ inline std::string_view winnerCacheVersion()
 }
 
 /// Where @p engineName's shard for @p gcnArchName lives:
-/// `cacheRoot()/ingestor-winners/<version>/<sanitized-engine>/<sanitized-arch>/winners.jsonl`.
+/// `cacheRoot()/ingestor-winners/<version>/<sanitized-engine>/<base-arch>/winners.jsonl`.
 ///
-/// Both variable components are sanitized. `gcnArchName` comes from the driver and is
-/// only feature-stripped by `stripArchFeatures()`, so a string carrying a separator would
-/// otherwise place the shard outside the cache tree.
+/// The arch component is the stripped base target id VERBATIM, which ALMIOPEN-2451's
+/// design record requires: a user has to be able to find and delete one arch's cache by
+/// eye, so `gfx942` must read as `gfx942`. It is validated rather than sanitized --
+/// sanitizeForPath() would append its unconditional hash suffix and cost exactly that
+/// readability, and the arch has nothing to disambiguate, being drawn from a small set of
+/// known-good identifiers. An arch that is not a plain component is a driver anomaly:
+/// decline the disk cache rather than reshape the string into something that reads like a
+/// different arch.
 ///
-/// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory;
-///     callers must fall back to in-memory-only behavior. Never throws.
+/// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory, or if
+///     @p gcnArchName does not strip to a plain component; callers must fall back to
+///     in-memory-only behavior. Never throws.
 inline std::filesystem::path winnerCacheShardPath(std::string_view engineName,
                                                   std::string_view gcnArchName)
 {
@@ -77,9 +100,14 @@ inline std::filesystem::path winnerCacheShardPath(std::string_view engineName,
         return {};
     }
 
+    const auto arch = stripArchFeatures(gcnArchName);
+    if(!detail::isPlainArchComponent(arch))
+    {
+        return {};
+    }
+
     return root / "ingestor-winners" / std::string(winnerCacheVersion())
-           / hipdnn_data_sdk::utilities::sanitizeForPath(engineName)
-           / hipdnn_data_sdk::utilities::sanitizeForPath(stripArchFeatures(gcnArchName))
+           / hipdnn_data_sdk::utilities::sanitizeForPath(engineName) / std::string(arch)
            / "winners.jsonl";
 }
 
