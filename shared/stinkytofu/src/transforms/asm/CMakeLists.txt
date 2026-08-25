@@ -45,7 +45,6 @@ target_sources(stinkytofu_objs PRIVATE
     LoopRegionRemarkPass.cpp
     RemoveWaitAluPass.cpp
     InsertWaitAluPass.cpp
-    RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
     InsertCoexecHazardPass.cpp
     EpilogueStoreSinkPass.cpp
