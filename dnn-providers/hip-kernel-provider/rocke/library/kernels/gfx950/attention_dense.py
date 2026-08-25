@@ -285,9 +285,21 @@ class AttentionDenseSpec:
         if self.ragged:
             if self.seqlen_q <= 0 or self.seqlen_kv <= 0:
                 raise ValueError("ragged requires positive seqlen_q/seqlen_kv")
-            if self.seqlen_q != self.seqlen_kv:
+            # Self-attention only, EXCEPT under causal_bottom_right, where a short query
+            # block scored against a longer cache is the entire point -- and where the
+            # arbitrary lengths ragged allows are what a real chunked-prefill request
+            # looks like.
+            #
+            # The padded-key argument that lets causal skip the ktok<seqlen_kv mask still
+            # holds: the last REAL query is at seqlen_q-1 and reaches
+            # seqlen_q-1 + (seqlen_kv - seqlen_q) = seqlen_kv-1, so it still stops short
+            # of the partial tile's padding. Padded QUERY rows can reach past it, but
+            # they load 0 and are dropped by the guarded store, so they cannot affect
+            # the output.
+            if self.seqlen_q != self.seqlen_kv and not self.causal_bottom_right:
                 raise ValueError(
-                    "ragged is self-attention only (seqlen_q == seqlen_kv), got "
+                    "ragged is self-attention only (seqlen_q == seqlen_kv) unless "
+                    "causal_bottom_right is set, got "
                     f"{self.seqlen_q} != {self.seqlen_kv}"
                 )
             if self.varlen:
@@ -352,9 +364,8 @@ class AttentionDenseSpec:
                 # are the PADDED MAXIMA -- the real per-sequence lengths only exist at
                 # runtime, in cu_seqlens. Every sequence in the batch would get the same
                 # baked diagonal, and the n_upper clamp keeps it in bounds, so this is
-                # wrong numerics rather than a fault. Bottom-right is specified per
-                # sequence for variable lengths, so it needs a runtime
-                # (seqlen_kv_b - seqlen_q_b), not a compile-time constant.
+                # wrong numerics rather than a fault. A per-sequence runtime offset is
+                # tracked in AICK-2032.
                 raise ValueError(
                     "causal_bottom_right is not supported with varlen=True (the "
                     "diagonal offset would be baked from the padded maxima, not each "

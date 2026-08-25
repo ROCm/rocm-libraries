@@ -416,6 +416,10 @@ constexpr Geom CAUSAL_D128_B2{2, 256, 256, 4, 1, 128, true};
 constexpr Geom NONCAUSAL_D64{1, 256, 256, 4, 1, 64, false};
 constexpr Geom NONCAUSAL_D64_RAGGED{1, 197, 197, 4, 1, 64, false};
 constexpr Geom CHUNKED_BR{1, 256, 512, 4, 1, 128, true, true};
+// Chunked prefill at lengths that are NOT tile multiples, served by the ragged path.
+// 197 spans one partial query block; 300 spans two, the second partial.
+constexpr Geom CHUNKED_BR_RAGGED{1, 197, 400, 4, 1, 128, true, true};
+constexpr Geom CHUNKED_BR_RAGGED_2QB{1, 300, 1234, 4, 1, 128, true, true};
 
 TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16CausalMatchesReference)
 {
@@ -457,4 +461,22 @@ TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16NonCausalRaggedM
 TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16ChunkedBottomRightMatchesReference)
 {
     runDenseParity(CHUNKED_BR);
+}
+
+// The same thing at arbitrary lengths, which is what a chunk really looks like -- the KV
+// cache holds whatever it holds, not a multiple of the tile. Ragged pads the boundary
+// tiles on-chip, and the interaction worth testing is the partial LAST KV tile: plain
+// causal skips the key-pad mask because every query stops before the padding, while
+// bottom-right shifts every query's reach to the right. These check that the last real
+// query lands on key S_kv-1 exactly, and that the padding beyond it stays excluded.
+TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16ChunkedBottomRightRaggedMatchesReference)
+{
+    runDenseParity(CHUNKED_BR_RAGGED);
+}
+
+// Two query blocks, the second partial: exercises a per-block diagonal on a block whose
+// rows are themselves padded, which the single-block case above cannot reach.
+TEST(TestAotCatalogSdpaDenseNumericParityGfx950, DensePrefillF16ChunkedBottomRightRaggedTwoBlocksMatchesReference)
+{
+    runDenseParity(CHUNKED_BR_RAGGED_2QB);
 }

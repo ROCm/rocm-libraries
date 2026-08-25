@@ -31605,6 +31605,494 @@
                 }
             ],
             "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_attention_dense_d128_hq4_kv1_bn64_bf16_sq197_sk400_causal_br_ragged_lazyrs",
+            "co_file": "rocke_attention_dense_d128_hq4_kv1_bn64_bf16_sq197_sk400_causal_br_ragged_lazyrs__b1.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "B": {
+                    "equals": 1
+                },
+                "S_q": {
+                    "equals": 197
+                },
+                "S_kv": {
+                    "equals": 400
+                },
+                "H": {
+                    "equals": 4
+                },
+                "H_kv": {
+                    "equals": 1
+                },
+                "D": {
+                    "equals": 128
+                },
+                "gqa_ratio": {
+                    "equals": 4
+                },
+                "d_contiguous": {
+                    "equals": true
+                },
+                "batch_foldable": {
+                    "equals": true
+                },
+                "bshd_packed": {
+                    "equals": true
+                },
+                "causal": {
+                    "equals": true
+                },
+                "causal_bottom_right": {
+                    "equals": true
+                },
+                "has_diagonal_band": {
+                    "equals": false
+                },
+                "has_mma_core_mode": {
+                    "equals": false
+                },
+                "has_alibi": {
+                    "equals": false
+                },
+                "has_padding_mask": {
+                    "equals": false
+                },
+                "has_attn_mask": {
+                    "equals": false
+                },
+                "has_block_mask": {
+                    "equals": false
+                },
+                "has_sink": {
+                    "equals": false
+                },
+                "has_dropout": {
+                    "equals": false
+                },
+                "paged": {
+                    "equals": false
+                },
+                "varlen": {
+                    "equals": false
+                },
+                "gen_stats": {
+                    "equals": false
+                },
+                "fp8": {
+                    "equals": false
+                },
+                "runtime_scale": {
+                    "equals": false
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "S_q",
+                        256
+                    ]
+                },
+                "y": "H",
+                "z": "B"
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "Q",
+                    "type": "ptr"
+                },
+                {
+                    "name": "K",
+                    "type": "ptr"
+                },
+                {
+                    "name": "V",
+                    "type": "ptr"
+                },
+                {
+                    "name": "O",
+                    "type": "ptr"
+                },
+                {
+                    "name": "scale_raw",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_attention_dense_d128_hq4_kv1_bn64_fp16_sq197_sk400_causal_br_ragged_lazyrs",
+            "co_file": "rocke_attention_dense_d128_hq4_kv1_bn64_fp16_sq197_sk400_causal_br_ragged_lazyrs__b1.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "B": {
+                    "equals": 1
+                },
+                "S_q": {
+                    "equals": 197
+                },
+                "S_kv": {
+                    "equals": 400
+                },
+                "H": {
+                    "equals": 4
+                },
+                "H_kv": {
+                    "equals": 1
+                },
+                "D": {
+                    "equals": 128
+                },
+                "gqa_ratio": {
+                    "equals": 4
+                },
+                "d_contiguous": {
+                    "equals": true
+                },
+                "batch_foldable": {
+                    "equals": true
+                },
+                "bshd_packed": {
+                    "equals": true
+                },
+                "causal": {
+                    "equals": true
+                },
+                "causal_bottom_right": {
+                    "equals": true
+                },
+                "has_diagonal_band": {
+                    "equals": false
+                },
+                "has_mma_core_mode": {
+                    "equals": false
+                },
+                "has_alibi": {
+                    "equals": false
+                },
+                "has_padding_mask": {
+                    "equals": false
+                },
+                "has_attn_mask": {
+                    "equals": false
+                },
+                "has_block_mask": {
+                    "equals": false
+                },
+                "has_sink": {
+                    "equals": false
+                },
+                "has_dropout": {
+                    "equals": false
+                },
+                "paged": {
+                    "equals": false
+                },
+                "varlen": {
+                    "equals": false
+                },
+                "gen_stats": {
+                    "equals": false
+                },
+                "fp8": {
+                    "equals": false
+                },
+                "runtime_scale": {
+                    "equals": false
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "S_q",
+                        256
+                    ]
+                },
+                "y": "H",
+                "z": "B"
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "Q",
+                    "type": "ptr"
+                },
+                {
+                    "name": "K",
+                    "type": "ptr"
+                },
+                {
+                    "name": "V",
+                    "type": "ptr"
+                },
+                {
+                    "name": "O",
+                    "type": "ptr"
+                },
+                {
+                    "name": "scale_raw",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_attention_dense_d128_hq4_kv1_bn64_bf16_sq300_sk1234_causal_br_ragged_lazyrs",
+            "co_file": "rocke_attention_dense_d128_hq4_kv1_bn64_bf16_sq300_sk1234_causal_br_ragged_lazyrs__b1.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "B": {
+                    "equals": 1
+                },
+                "S_q": {
+                    "equals": 300
+                },
+                "S_kv": {
+                    "equals": 1234
+                },
+                "H": {
+                    "equals": 4
+                },
+                "H_kv": {
+                    "equals": 1
+                },
+                "D": {
+                    "equals": 128
+                },
+                "gqa_ratio": {
+                    "equals": 4
+                },
+                "d_contiguous": {
+                    "equals": true
+                },
+                "batch_foldable": {
+                    "equals": true
+                },
+                "bshd_packed": {
+                    "equals": true
+                },
+                "causal": {
+                    "equals": true
+                },
+                "causal_bottom_right": {
+                    "equals": true
+                },
+                "has_diagonal_band": {
+                    "equals": false
+                },
+                "has_mma_core_mode": {
+                    "equals": false
+                },
+                "has_alibi": {
+                    "equals": false
+                },
+                "has_padding_mask": {
+                    "equals": false
+                },
+                "has_attn_mask": {
+                    "equals": false
+                },
+                "has_block_mask": {
+                    "equals": false
+                },
+                "has_sink": {
+                    "equals": false
+                },
+                "has_dropout": {
+                    "equals": false
+                },
+                "paged": {
+                    "equals": false
+                },
+                "varlen": {
+                    "equals": false
+                },
+                "gen_stats": {
+                    "equals": false
+                },
+                "fp8": {
+                    "equals": false
+                },
+                "runtime_scale": {
+                    "equals": false
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "S_q",
+                        256
+                    ]
+                },
+                "y": "H",
+                "z": "B"
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "Q",
+                    "type": "ptr"
+                },
+                {
+                    "name": "K",
+                    "type": "ptr"
+                },
+                {
+                    "name": "V",
+                    "type": "ptr"
+                },
+                {
+                    "name": "O",
+                    "type": "ptr"
+                },
+                {
+                    "name": "scale_raw",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_attention_dense_d128_hq4_kv1_bn64_fp16_sq300_sk1234_causal_br_ragged_lazyrs",
+            "co_file": "rocke_attention_dense_d128_hq4_kv1_bn64_fp16_sq300_sk1234_causal_br_ragged_lazyrs__b1.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "B": {
+                    "equals": 1
+                },
+                "S_q": {
+                    "equals": 300
+                },
+                "S_kv": {
+                    "equals": 1234
+                },
+                "H": {
+                    "equals": 4
+                },
+                "H_kv": {
+                    "equals": 1
+                },
+                "D": {
+                    "equals": 128
+                },
+                "gqa_ratio": {
+                    "equals": 4
+                },
+                "d_contiguous": {
+                    "equals": true
+                },
+                "batch_foldable": {
+                    "equals": true
+                },
+                "bshd_packed": {
+                    "equals": true
+                },
+                "causal": {
+                    "equals": true
+                },
+                "causal_bottom_right": {
+                    "equals": true
+                },
+                "has_diagonal_band": {
+                    "equals": false
+                },
+                "has_mma_core_mode": {
+                    "equals": false
+                },
+                "has_alibi": {
+                    "equals": false
+                },
+                "has_padding_mask": {
+                    "equals": false
+                },
+                "has_attn_mask": {
+                    "equals": false
+                },
+                "has_block_mask": {
+                    "equals": false
+                },
+                "has_sink": {
+                    "equals": false
+                },
+                "has_dropout": {
+                    "equals": false
+                },
+                "paged": {
+                    "equals": false
+                },
+                "varlen": {
+                    "equals": false
+                },
+                "gen_stats": {
+                    "equals": false
+                },
+                "fp8": {
+                    "equals": false
+                },
+                "runtime_scale": {
+                    "equals": false
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "S_q",
+                        256
+                    ]
+                },
+                "y": "H",
+                "z": "B"
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "Q",
+                    "type": "ptr"
+                },
+                {
+                    "name": "K",
+                    "type": "ptr"
+                },
+                {
+                    "name": "V",
+                    "type": "ptr"
+                },
+                {
+                    "name": "O",
+                    "type": "ptr"
+                },
+                {
+                    "name": "scale_raw",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
         }
     ]
 }

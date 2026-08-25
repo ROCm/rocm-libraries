@@ -138,6 +138,15 @@ _CHUNKED_SHAPES = [
     (1, 2048, 32768, 40, 8, 128, True, False, True),  # Qwen3-14B long-cache chunk
 ]
 
+# Chunked prefill at ARBITRARY lengths, via the ragged path. The shapes above are all
+# tile-aligned; a real chunk is not, because the KV cache holds whatever it holds. Ragged
+# pads the boundary tiles on-chip, so no host padding is needed. Kept in step with
+# RAGGED_CHUNKED_SHAPES in gen_dense_family_json.py.
+_RAGGED_CHUNKED_SHAPES = [
+    (1, 197, 400, 4, 1, 128, True, True, True),    # parity: both lengths off-tile, 1 qblock
+    (1, 300, 1234, 4, 1, 128, True, True, True),   # parity: 2 query blocks, partial second
+]
+
 
 def _norm(t):
     """Widen a (b, S, ...) self-attention tuple to the full 9-field form."""
@@ -147,7 +156,7 @@ def _norm(t):
     return t
 
 
-_SHAPES = [_norm(t) for t in _SHAPES] + _CHUNKED_SHAPES
+_SHAPES = [_norm(t) for t in _SHAPES] + _CHUNKED_SHAPES + _RAGGED_CHUNKED_SHAPES
 _SHAPES = list(dict.fromkeys(_SHAPES))
 
 # Spec spelling ("fp16"/"bf16") differs from the catalog dtype constraint token

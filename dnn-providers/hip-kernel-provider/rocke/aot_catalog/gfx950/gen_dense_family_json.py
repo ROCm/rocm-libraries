@@ -95,6 +95,19 @@ CHUNKED_SHAPES = [
     (1, 2048, 32768, 40, 8, 128, True, False, True),  # Qwen3-14B long-cache chunk
 ]
 
+# Chunked prefill at ARBITRARY lengths, via the ragged path. The shapes above are all
+# tile-aligned, which a real chunk is not: the KV cache holds whatever it holds. Ragged
+# pads the boundary tiles on-chip, so these need no host padding.
+#
+# The risk these cover is the partial last KV tile. Plain causal skips the key-pad mask
+# because every query stops before the padding; bottom-right shifts every query's reach
+# right, so the parity cases below are what confirm the last real query lands on
+# S_kv - 1 exactly and no further.
+RAGGED_CHUNKED_SHAPES = [
+    (1, 197, 400, 4, 1, 128, True, True, True),    # parity: both lengths off-tile, 1 qblock
+    (1, 300, 1234, 4, 1, 128, True, True, True),   # parity: 2 query blocks, partial second
+]
+
 
 def _norm(t):
     """Widen a (b, S, ...) self-attention tuple to the full 9-field form."""
@@ -104,7 +117,7 @@ def _norm(t):
     return t
 
 
-SHAPES = [_norm(t) for t in SHAPES] + CHUNKED_SHAPES
+SHAPES = [_norm(t) for t in SHAPES] + CHUNKED_SHAPES + RAGGED_CHUNKED_SHAPES
 SHAPES = list(dict.fromkeys(SHAPES))   # order-preserving dedupe
 DTYPES = ["bf16", "fp16"]     # spec spelling
 PERSISTENT = [False, True]
