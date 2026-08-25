@@ -162,9 +162,18 @@ struct ABTransferThreadTiles
             }
             else
             {
-                return make_naive_tensor_descriptor(
-                    make_tuple(ABK0Number, Number<MNPerBlock>{}, ABK1Number),
-                    make_tuple(Number<MNPerBlock>{} * ABK1Number, I1, Number<MNPerBlock>{}));
+                constexpr index_t MN1    = 8;
+                constexpr auto base_desc = make_naive_tensor_descriptor(
+                    make_tuple(Number<MNPerBlock / MN1>{}, Number<KPerBlock>{}, Number<MN1>{}),
+                    make_tuple(Number<KPerBlock + 1>{} * Number<MN1>{}, Number<MN1>{}, I1));
+
+                return transform_tensor_descriptor(
+                    base_desc,
+                    make_tuple(
+                        make_merge_transform(make_tuple(Number<MNPerBlock / MN1>{}, Number<MN1>{})),
+                        make_unmerge_transform(make_tuple(ABK0Number, ABK1Number))),
+                    make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                    make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
             }
         }
         // xor tensor transformation request more unnecessary vgpr usage, would cause register spill
@@ -209,6 +218,7 @@ struct ABTransferThreadTiles
         }
         else
         {
+            static_assert(!UseLdsTranspose, "UseLdsTranspose is not supported for swizzled layout");
             // kfold and mpair dimension is not always required.
             // more dimension in merge_transform increase the difficulty of generating immarg offset
             // for compiler.
