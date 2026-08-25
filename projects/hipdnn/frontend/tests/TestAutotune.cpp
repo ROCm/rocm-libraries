@@ -343,7 +343,7 @@ TEST(TestAutotune, FixedAverageIgnoresMaxIterations)
 TEST(TestAutotune, FixedAverageRejectsZeroTimedIterations)
 {
     // Regression guard: FIXED_AVERAGE with timedIterations=0 must still be
-    // rejected (an empty timings vector would otherwise throw in computeMean).
+    // rejected (an empty timings vector would otherwise throw in mean()).
     hipdnn_frontend::graph::Graph g;
     AutotuneConfig config;
     config.strategy = AutotuneStrategy::FIXED_AVERAGE;
@@ -901,4 +901,237 @@ TEST(TestAutotune, SweepRankingFallsBackToRobustTimeWhenCallerSuppliesNone)
 
     // Same inputs as above, but with no caller function the robust ordering wins.
     EXPECT_EQ(results.front().engineName, "quick");
+}
+
+// ============================================================================
+// Sweep record plan: what a sweep persists, and when persisting is unsound
+// ============================================================================
+//
+// The read path (ConfigBuiltIn::applyExactCacheEntry) derives candidates from the
+// pre-compile applicability probe and then rejects an entry if any live candidate is
+// missing from its sampled set, or if the stored order is not the same size as the
+// candidate list. Both rejections are permanent in practice: a re-tune produces the same
+// record, and put() returns UNCHANGED without appending. These tests pin the writer-side
+// rules that keep a record appliable.
+
+namespace
+{
+
+AutotuneResult makeSucceeded(int64_t engineId, float robustTimeMs)
+{
+    AutotuneResult r;
+    r.engineId = engineId;
+    r.succeeded = true;
+    r.benchmarked = true;
+    r.robustTimeMs = robustTimeMs;
+    r.minTimeMs = robustTimeMs;
+    return r;
+}
+
+/// Reached the timing loop and failed there: an intrinsic, recurring outcome.
+AutotuneResult makeMeasuredFailure(int64_t engineId)
+{
+    AutotuneResult r;
+    r.engineId = engineId;
+    r.succeeded = false;
+    r.benchmarked = true;
+    return r;
+}
+
+/// Never reached the timing loop for a reason intrinsic to engine+graph, e.g. the plan
+/// would not compile or finalize. Also recurring.
+AutotuneResult makeIntrinsicMiss(int64_t engineId)
+{
+    AutotuneResult r;
+    r.engineId = engineId;
+    r.succeeded = false;
+    r.benchmarked = false;
+    r.excludedByCaller = false;
+    return r;
+}
+
+/// Held out of the timing loop by a caller choice: engineIdFilter, a deselect filter, or
+/// a workspace budget too small for the compiled plan. Not recurring -- the next call may
+/// admit it.
+AutotuneResult makeCallerExclusion(int64_t engineId)
+{
+    AutotuneResult r;
+    r.engineId = engineId;
+    r.succeeded = false;
+    r.benchmarked = false;
+    r.excludedByCaller = true;
+    return r;
+}
+
+} // namespace
+
+TEST(TestAutotuneSweepRecord, SucceededEnginesKeepTheirRankOrder)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeSucceeded(20, 2.0f), makeSucceeded(30, 3.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_TRUE(plan.persistable);
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20, 30}));
+}
+
+// An engine that is applicable but always fails is a live candidate on every later run.
+// Omitting it from the record makes it a candidate the record cannot account for, which
+// rejects the entry on every lookup, forever.
+TEST(TestAutotuneSweepRecord, MeasuredFailuresAreRecordedAfterSurvivors)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeMeasuredFailure(99), makeSucceeded(20, 2.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_TRUE(plan.persistable);
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20, 99}));
+}
+
+// A plan that never reached the timing loop because it would not compile or finalize.
+// The read path's candidate probe runs before any plan is built, so it reports this
+// engine too, and the record must name it.
+TEST(TestAutotuneSweepRecord, EnginesThatNeverBuiltAreStillRecorded)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeIntrinsicMiss(77), makeSucceeded(20, 2.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_TRUE(plan.persistable);
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20, 77}));
+    EXPECT_NE(std::find(plan.order.begin(), plan.order.end(), int64_t{77}), plan.order.end())
+        << "an engine that never compiled is still a live candidate at lookup time";
+}
+
+// Ordering among the three groups, in one case: survivors, then measured failures, then
+// engines that never built. Everything unmeasured must lose to everything measured.
+TEST(TestAutotuneSweepRecord, RecordOrdersSurvivorsThenMeasuredFailuresThenUnbuilt)
+{
+    const std::vector<AutotuneResult> results{makeIntrinsicMiss(77),
+                                              makeMeasuredFailure(99),
+                                              makeSucceeded(10, 1.0f),
+                                              makeSucceeded(20, 2.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20, 99, 77}));
+}
+
+// Results are one per plan spec, and specs are keyed on (engineId, knobSettings). Knob
+// variants therefore produce several results for one engine. The record stores ids only,
+// and the read path's order filter is non-consuming set membership, so a duplicate would
+// survive it and make the order longer than the candidate set -- rejecting every lookup.
+TEST(TestAutotuneSweepRecord, KnobVariantsCollapseToOneIdPerEngine)
+{
+    const std::vector<AutotuneResult> results{makeSucceeded(10, 1.0f),
+                                              makeSucceeded(10, 2.0f),
+                                              makeSucceeded(20, 3.0f),
+                                              makeSucceeded(10, 4.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_TRUE(plan.persistable);
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20}));
+    EXPECT_EQ(std::count(plan.order.begin(), plan.order.end(), int64_t{10}), 1)
+        << "a duplicated engine id makes the stored order un-appliable";
+}
+
+// First occurrence wins because results arrive rank-ordered, so it is the engine's best
+// showing. A last-wins collapse would rank an engine on its worst knob setting.
+TEST(TestAutotuneSweepRecord, DuplicateCollapseKeepsTheBestRankedOccurrence)
+{
+    // Rank order: 20 (fastest), then 10's good variant, then 10's poor variant.
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(20, 1.0f), makeSucceeded(10, 2.0f), makeSucceeded(10, 9.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{20, 10}));
+}
+
+// A measured result and an unmeasured one for the same engine must not both land in the
+// order; the measured one is the engine's showing.
+TEST(TestAutotuneSweepRecord, EngineMeasuredOnOneSpecIsNotAlsoRecordedAsFailed)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeMeasuredFailure(10), makeSucceeded(20, 2.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20}));
+}
+
+// The coverage gate. A caller-excluded engine may be a live candidate next run, so the
+// sweep did not cover the set a lookup will see. Recording it would claim a measurement
+// that never happened; omitting it makes every later lookup reject the entry.
+TEST(TestAutotuneSweepRecord, CallerExcludedCandidateMakesTheSweepUnpersistable)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeSucceeded(20, 2.0f), makeCallerExclusion(30)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_FALSE(plan.persistable)
+        << "a filtered or workspace-barred candidate must not produce a persisted ranking";
+    EXPECT_EQ(std::find(plan.order.begin(), plan.order.end(), int64_t{30}), plan.order.end())
+        << "a never-measured engine must never enter the record's sampled set";
+}
+
+// Distinguishes the two unmeasured kinds: an intrinsic miss recurs and is recordable, a
+// caller exclusion may not recur and is not.
+TEST(TestAutotuneSweepRecord, IntrinsicMissPersistsWhereCallerExclusionDoesNot)
+{
+    const std::vector<AutotuneResult> intrinsic{makeSucceeded(10, 1.0f), makeIntrinsicMiss(30)};
+    const std::vector<AutotuneResult> callerChosen{makeSucceeded(10, 1.0f),
+                                                   makeCallerExclusion(30)};
+
+    EXPECT_TRUE(autotune::detail::sweepRecordPlanFrom(intrinsic).persistable);
+    EXPECT_FALSE(autotune::detail::sweepRecordPlanFrom(callerChosen).persistable);
+}
+
+// One engine, two specs: excluded on one, measured on the other. The record covers that
+// id, so this is a full sweep for it. Guards against a naive any_of over the flag.
+TEST(TestAutotuneSweepRecord, EngineExcludedOnOneSpecButMeasuredOnAnotherStaysPersistable)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeCallerExclusion(10), makeSucceeded(20, 2.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_TRUE(plan.persistable);
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20}));
+}
+
+// The default sweep -- no filters, workspace large enough, one spec per engine -- is the
+// configuration the API documents, and it must persist.
+TEST(TestAutotuneSweepRecord, FullSweepWithNoExclusionsIsPersistable)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeSucceeded(20, 2.0f), makeSucceeded(30, 3.0f)};
+
+    EXPECT_TRUE(autotune::detail::sweepRecordPlanFrom(results).persistable);
+}
+
+TEST(TestAutotuneSweepRecord, EmptyResultsProduceAnEmptyPersistablePlan)
+{
+    const auto plan = autotune::detail::sweepRecordPlanFrom({});
+
+    EXPECT_TRUE(plan.order.empty());
+    EXPECT_TRUE(plan.persistable) << "nothing to decline when nothing was swept";
+}
+
+// The write outcome is how a caller learns a sweep was not persisted, so the new decline
+// must be reportable and distinct from the pre-existing ones.
+TEST(TestAutotuneSweepRecord, PartialSweepOutcomeHasADistinctName)
+{
+    EXPECT_STREQ(
+        autotuneCacheWriteOutcomeToString(AutotuneCacheWriteOutcome::NOT_ATTEMPTED_PARTIAL_SWEEP),
+        "NOT_ATTEMPTED_PARTIAL_SWEEP");
+    EXPECT_STRNE(
+        autotuneCacheWriteOutcomeToString(AutotuneCacheWriteOutcome::NOT_ATTEMPTED_PARTIAL_SWEEP),
+        autotuneCacheWriteOutcomeToString(
+            AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE));
 }

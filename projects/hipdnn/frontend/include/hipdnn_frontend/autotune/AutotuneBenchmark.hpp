@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace hipdnn_frontend::autotune::detail
@@ -166,6 +167,9 @@ inline AutotuneResult makeNonBenchmarkedResult(int64_t engineId,
 // Non-benchmarked result for a plan excluded by the runtime workspace ceiling. The
 // reported workspace size is the actual compiled workspace; estimatedWorkspaceSize
 // carries the pre-compile workspace size estimate.
+//
+// Sets excludedByCaller: the ceiling is the caller's workspaceSize, so a larger one
+// admits this engine.
 inline AutotuneResult makeSkippedResult(int64_t engineId,
                                         const std::vector<KnobSetting>& knobSettings,
                                         int64_t estimatedWorkspaceSize,
@@ -177,22 +181,28 @@ inline AutotuneResult makeSkippedResult(int64_t engineId,
                                         const std::string& exhaustiveNotRunReason,
                                         const std::string& engineName = {})
 {
-    return makeNonBenchmarkedResult(engineId,
-                                    knobSettings,
-                                    estimatedWorkspaceSize,
-                                    compiledWorkspaceSize,
-                                    config,
-                                    "Workspace size " + std::to_string(compiledWorkspaceSize)
-                                        + " exceeds limit " + std::to_string(maxWorkspaceSize),
-                                    supportsExhaustive,
-                                    ranExhaustive,
-                                    exhaustiveNotRunReason,
-                                    engineName);
+    auto result
+        = makeNonBenchmarkedResult(engineId,
+                                   knobSettings,
+                                   estimatedWorkspaceSize,
+                                   compiledWorkspaceSize,
+                                   config,
+                                   "Workspace size " + std::to_string(compiledWorkspaceSize)
+                                       + " exceeds limit " + std::to_string(maxWorkspaceSize),
+                                   supportsExhaustive,
+                                   ranExhaustive,
+                                   exhaustiveNotRunReason,
+                                   engineName);
+    result.excludedByCaller = true;
+    return result;
 }
 
 // Non-benchmarked result for a plan barred by a persistent user filter (deselect_engines()
 // engine ID or deselect_workspace_greater_than()). compiledWorkspaceSize is -1
 // when the plan was never compiled.
+//
+// Sets excludedByCaller: both deselect filters are caller-applied, so clearing them
+// admits this engine.
 inline AutotuneResult makeBarredResult(int64_t engineId,
                                        const std::vector<KnobSetting>& knobSettings,
                                        int64_t estimatedWorkspaceSize,
@@ -203,16 +213,18 @@ inline AutotuneResult makeBarredResult(int64_t engineId,
                                        const std::string& exhaustiveNotRunReason,
                                        const std::string& engineName = {})
 {
-    return makeNonBenchmarkedResult(engineId,
-                                    knobSettings,
-                                    estimatedWorkspaceSize,
-                                    compiledWorkspaceSize,
-                                    config,
-                                    "Plan barred (engine ID or workspace deselect filter).",
-                                    supportsExhaustive,
-                                    ranExhaustive,
-                                    exhaustiveNotRunReason,
-                                    engineName);
+    auto result = makeNonBenchmarkedResult(engineId,
+                                           knobSettings,
+                                           estimatedWorkspaceSize,
+                                           compiledWorkspaceSize,
+                                           config,
+                                           "Plan barred (engine ID or workspace deselect filter).",
+                                           supportsExhaustive,
+                                           ranExhaustive,
+                                           exhaustiveNotRunReason,
+                                           engineName);
+    result.excludedByCaller = true;
+    return result;
 }
 
 // Failed result for a plan whose execution-plan descriptor could not be compiled.
@@ -261,6 +273,8 @@ inline AutotuneResult makeFinalizeFailedResult(int64_t engineId,
 }
 
 // Non-benchmarked result for a plan excluded by config.engineIdFilter.
+//
+// Sets excludedByCaller: clearing the filter admits this engine.
 inline AutotuneResult makeFilteredResult(int64_t engineId,
                                          const std::vector<KnobSetting>& knobSettings,
                                          int64_t estimatedWorkspaceSize,
@@ -271,16 +285,18 @@ inline AutotuneResult makeFilteredResult(int64_t engineId,
                                          const std::string& exhaustiveNotRunReason,
                                          const std::string& engineName = {})
 {
-    return makeNonBenchmarkedResult(engineId,
-                                    knobSettings,
-                                    estimatedWorkspaceSize,
-                                    compiledWorkspaceSize,
-                                    config,
-                                    "Plan excluded by engineIdFilter.",
-                                    supportsExhaustive,
-                                    ranExhaustive,
-                                    exhaustiveNotRunReason,
-                                    engineName);
+    auto result = makeNonBenchmarkedResult(engineId,
+                                           knobSettings,
+                                           estimatedWorkspaceSize,
+                                           compiledWorkspaceSize,
+                                           config,
+                                           "Plan excluded by engineIdFilter.",
+                                           supportsExhaustive,
+                                           ranExhaustive,
+                                           exhaustiveNotRunReason,
+                                           engineName);
+    result.excludedByCaller = true;
+    return result;
 }
 
 // Copy knob settings while dropping the internal global.benchmarking knob,
@@ -352,6 +368,78 @@ inline AutotuneConfig sweepConfigFrom(AutotuneConfig config)
     config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
     config.rankingFn = sweepRankingOr(config.rankingFn);
     return config;
+}
+
+// What an exhaustive sweep persists: `order` is the engine-id ranking to store,
+// `persistable` whether storing it is sound.
+struct SweepRecordPlan
+{
+    std::vector<int64_t> order;
+    bool persistable = true;
+};
+
+// Reduces a sweep's per-plan-spec results to the per-engine record the cache stores.
+//
+// The read path takes its candidate list from the pre-compile applicability probe, then
+// rejects the entry if any live candidate is absent from the record's sampled set, or if
+// the stored order is not the same size as the candidate list. The record must therefore
+// name every engine that probe reports, exactly once. Hence:
+//
+//  1. One id per engine, first occurrence wins. Specs are keyed on
+//     (engineId, knobSettings), so knob variants yield several results for one engine.
+//     Results arrive rank-ordered, so the first is that engine's best.
+//  2. Order is succeeded, then measured-and-failed, then never-built (compile or
+//     finalize failures). The unmeasured groups recur on every run of this graph, so
+//     naming them is stable; omitting them would reject every later lookup.
+//  3. A candidate held out by a caller choice makes the sweep unpersistable. A later run
+//     may admit it as a live candidate this ranking never measured, and neither option
+//     is sound: recording it claims a measurement that never happened, omitting it
+//     rejects every later lookup.
+inline SweepRecordPlan sweepRecordPlanFrom(const std::vector<AutotuneResult>& results)
+{
+    SweepRecordPlan plan;
+    plan.order.reserve(results.size());
+    std::unordered_set<int64_t> seen;
+    seen.reserve(results.size());
+
+    const auto appendUnique = [&plan, &seen](int64_t engineId) {
+        if(seen.insert(engineId).second)
+        {
+            plan.order.push_back(engineId);
+        }
+    };
+
+    for(const auto& result : results)
+    {
+        if(result.succeeded)
+        {
+            appendUnique(result.engineId);
+        }
+    }
+    for(const auto& result : results)
+    {
+        if(!result.succeeded && result.benchmarked)
+        {
+            appendUnique(result.engineId);
+        }
+    }
+    for(const auto& result : results)
+    {
+        if(!result.succeeded && !result.benchmarked && !result.excludedByCaller)
+        {
+            appendUnique(result.engineId);
+        }
+    }
+
+    // An engine can be excluded on one spec and measured on another (same id, two knob
+    // variants); that is full coverage for the id, hence the membership test rather than
+    // a bare scan of the flag.
+    plan.persistable
+        = std::none_of(results.begin(), results.end(), [&seen](const AutotuneResult& r) {
+              return r.excludedByCaller && seen.find(r.engineId) == seen.end();
+          });
+
+    return plan;
 }
 
 // Rank benchmark results and select the winning plan.

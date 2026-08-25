@@ -95,7 +95,17 @@ enum class AutotuneCacheWriteOutcome
     DECLINED_UNKEYABLE,
     /// The cache already held this exact ranking, so nothing was written. Not a failure:
     /// a re-tune that measured the same order has nothing to add.
-    UNCHANGED
+    UNCHANGED,
+    /// A caller choice -- config.engineIdFilter, deselect_engines(),
+    /// deselect_workspace_greater_than(), or a workspaceSize too small for a compiled
+    /// plan -- kept at least one applicable candidate out of the timing loop, so the
+    /// sweep did not cover the engine set a later lookup will see.
+    ///
+    /// Declined because neither alternative is safe: omitting the engine from the sampled
+    /// set makes every later lookup reject the entry, and including it claims a
+    /// measurement that never happened. autotuneExhaustiveSweep() persists only a full
+    /// sweep; see its documentation.
+    NOT_ATTEMPTED_PARTIAL_SWEEP
 };
 
 /// Get the string representation of an AutotuneCacheWriteOutcome
@@ -113,6 +123,8 @@ inline const char* autotuneCacheWriteOutcomeToString(AutotuneCacheWriteOutcome o
         return "DECLINED_UNKEYABLE";
     case AutotuneCacheWriteOutcome::UNCHANGED:
         return "UNCHANGED";
+    case AutotuneCacheWriteOutcome::NOT_ATTEMPTED_PARTIAL_SWEEP:
+        return "NOT_ATTEMPTED_PARTIAL_SWEEP";
     default:
         return "UNKNOWN";
     }
@@ -229,15 +241,21 @@ struct AutotuneResult
     bool succeeded = false; ///< Whether this engine succeeded benchmarking
 
     /// true if this engine reached the timing loop, whether or not it produced a usable
-    /// measurement. Distinct from @ref succeeded, which is false for two very different
-    /// reasons: an engine that was measured and failed, and one that was never measured
-    /// at all (excluded by engineIdFilter, deselected, over the workspace ceiling, or
-    /// failed to compile).
-    ///
-    /// Only the first belongs in a cache record's sampled-engine set. Recording the
-    /// second would let a later run that lifts a filter get a hit on a ranking that never
-    /// measured the re-admitted engine.
+    /// measurement. Distinct from @ref succeeded, which is false both for an engine that
+    /// was measured and failed and for one never measured at all.
     bool benchmarked = false;
+
+    /// true if a caller choice kept this candidate out of the timing loop:
+    /// config.engineIdFilter, deselect_engines(), deselect_workspace_greater_than(), or a
+    /// compiled workspace over the workspaceSize passed to this call.
+    ///
+    /// Decides whether a sweep may be persisted. A miss intrinsic to the engine and graph
+    /// (failed to compile or finalize) recurs on every run, so the record can name it.
+    /// A caller-chosen miss may not recur: the next run can lift the filter or pass a
+    /// larger workspace, making the engine a live candidate the stored ranking never
+    /// measured. autotuneExhaustiveSweep() therefore declines the write; see
+    /// AutotuneCacheWriteOutcome::NOT_ATTEMPTED_PARTIAL_SWEEP.
+    bool excludedByCaller = false;
 
     std::string errorMessage; ///< Empty if no error; describes the benchmarking failure otherwise
 

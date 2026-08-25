@@ -3930,42 +3930,66 @@ public:
      * that order to the exact-match autotune cache. Takes no sweep/variant argument:
      * populate candidates before calling.
      *
-     * By default engines are ranked on @c AutotuneResult::robustTimeMs -- the mean of a
-     * candidate's iterations after discarding its slow tail -- so the order reflects what
-     * each engine usually costs. A candidate that is normally slower but occasionally lucky
-     * does not outrank a consistently faster one on the strength of a single good
-     * iteration. Set @c config.rankingFn to rank on any other criterion; the sweep persists
-     * whatever order it produces. Every field of @c AutotuneResult is available to it,
-     * including @c minTimeMs, @c avgTimeMs, and @c stddevMs.
+     * Run this once per graph: every later run of the same graph on the same device
+     * inherits the measured order. The record is keyed on the graph and device only --
+     * not on knobs, filters, or the workspace budget -- and every later run of that graph
+     * consults it however that run is configured. A record is sound only if the sweep
+     * that produced it measured every engine a later run could see.
      *
-     * Two @c config fields are locked, because they are what makes this call an exhaustive
+     * @par Requirements for a ranking to be persisted
+     * @parblock
+     * **One candidate per engine, no knob variants.** Populate candidates with
+     * add_engine_configs(), add_all_engines(), or add_engine() with no knob settings.
+     * A record stores engine ids, so several plan specs for one engine (from
+     * add_engine_sweep(), add_engine_variants(), or repeated add_engine() calls with
+     * different knobs) collapse to one id: the engine's best-ranked variant wins. The
+     * order stays well-formed, but the knob settings that produced the winning time are
+     * not recorded, so a later run ranks that engine first and then runs it with default
+     * knobs. To tune knobs, use autotune(), which keeps the winning settings on the
+     * active plan.
+     *
+     * **No filtering, and a workspace large enough for every candidate.** Leave
+     * @c config.engineIdFilter empty, apply no deselect_engines() or
+     * deselect_workspace_greater_than() filter, and pass a @c workspaceSize at least as
+     * large as get_autotune_workspace_size() reports. Each of these can hold an applicable
+     * engine out of the timing loop while leaving it a live candidate for a later
+     * unrestricted run -- an engine the ranking never measured. Rather than persist an
+     * unusable record, this call declines the write and reports
+     * AutotuneCacheWriteOutcome::NOT_ATTEMPTED_PARTIAL_SWEEP. The sweep still runs and
+     * @p results is still populated; only the cache write is skipped.
+     * @endparblock
+     *
+     * Two @c config fields are locked, because they are what makes this an exhaustive
      * sweep that populates the cache rather than an ordinary tune: @c mode
      * (TuneMode::EXHAUSTIVE) and @c primingFailurePolicy
-     * (PrimingFailurePolicy::BENCHMARK_UNPRIMED). Without the latter, one engine failing to
-     * prime would abandon the sweep and persist nothing, so a single broken plugin would
-     * deny a ranking for every graph on the machine. Both are set on input and any
-     * caller-supplied value is ignored.
+     * (PrimingFailurePolicy::BENCHMARK_UNPRIMED). Without the latter, one engine failing
+     * to prime would abandon the sweep and persist nothing, so a single broken plugin
+     * would deny a ranking for every graph on the machine. Caller-supplied values for
+     * both are ignored.
      *
      * Every other @c config field is honoured, including @c strategy, @c timedIterations,
-     * @c warmupIterations, @c engineIdFilter, and @c rankingFn. Calling with a
-     * default-constructed @c config performs a complete sweep.
+     * @c warmupIterations, @c engineIdFilter, and @c rankingFn. A default-constructed
+     * @c config performs a complete sweep. Note that @c engineIdFilter is honoured but
+     * suppresses the cache write, per the requirements above.
      *
      * An engine that failed to prime is still benchmarked, but without its internal caches
      * warmed, so it can rank below a slower engine that primed successfully. Per-result
      * @c ranExhaustive reports which engines were primed.
      *
-     * Giving candidates more iterations improves the odds that the genuinely fastest engine
-     * ranks first. Engines whose true times differ by a wide margin separate reliably at any
-     * count; engines within a few percent of each other need substantially more iterations
-     * to order correctly, because each measurement carries run-to-run jitter of a similar
-     * size. Raise @c config.timedIterations, or select AutotuneStrategy::FIXED_AVERAGE for a
-     * fixed count per candidate, when the ranking must resolve close candidates or will be
-     * reused by many later runs.
+     * More iterations improve the odds that the genuinely fastest engine ranks first.
+     * Engines whose true times differ by a wide margin separate reliably at any count;
+     * engines within a few percent of each other need substantially more iterations,
+     * because each measurement carries run-to-run jitter of a similar size. Which field
+     * controls this depends on @c config.strategy: @c timedIterations is the exact count
+     * per candidate under AutotuneStrategy::FIXED_AVERAGE, and is unused under the default
+     * AutotuneStrategy::RUN_UNTIL_STABLE, which runs until the trailing-window variation
+     * falls below @c stabilityThreshold or @c maxIterations is reached.
      *
-     * The cached order is keyed on this graph's serialized content and the handle's
-     * device. Engines that were measured and failed are appended after the successful
-     * ones, so a permanently failing engine cannot wedge the cache. A cache-write failure
-     * is logged and does not fail this call.
+     * Engines that were measured and failed, and engines that could not be compiled or
+     * finalized, are ranked after the successful ones. Both recur on every run of this
+     * graph, so recording them keeps a permanently broken engine from making later
+     * lookups reject the entry. A cache-write failure is logged and does not fail this
+     * call.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
@@ -4003,43 +4027,33 @@ public:
         HIPDNN_CHECK_ERROR(autotuneImpl(
             handle, variantPack, workspace, workspaceSize, config, storageConfig, &resultsOut));
 
-        // Ranked survivors first, then engines that were measured and failed.
-        //
-        // The failures have to be in this list, not just conceptually "sampled". The read path
-        // checks every live candidate against the record's sampled set and rejects the entry
-        // outright if one is missing, so an engine that is installed and always fails would
-        // wedge the cache permanently. It then applies a second gate requiring the stored order
-        // to be the same size as the live candidate set, which is why marking them sampled
-        // without also ranking them merely trades one rejection for another.
-        //
-        // Ranking them last is also the honest answer: they were measured, and they lost. The
-        // read path only reaches them if every better engine also fails to build, which is
-        // exactly where the ordinary fallback would have put them.
-        std::vector<int64_t> order;
-        order.reserve(resultsOut.size());
-        for(const auto& result : resultsOut)
-        {
-            if(result.succeeded)
-            {
-                order.push_back(result.engineId);
-            }
-        }
-        const size_t succeededCount = order.size();
-        for(const auto& result : resultsOut)
-        {
-            if(!result.succeeded && result.benchmarked)
-            {
-                order.push_back(result.engineId);
-            }
-        }
+        // What to persist, and whether persisting it is sound. sweepRecordPlanFrom()
+        // documents the rules.
+        const auto recordPlan = autotune::detail::sweepRecordPlanFrom(resultsOut);
+        const std::vector<int64_t>& order = recordPlan.order;
+
+        const auto succeededCount = static_cast<size_t>(
+            std::count_if(resultsOut.begin(), resultsOut.end(), [](const AutotuneResult& r) {
+                return r.succeeded;
+            }));
 
         AutotuneCacheWriteOutcome outcome
             = AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE;
 
+        if(!recordPlan.persistable)
+        {
+            outcome = AutotuneCacheWriteOutcome::NOT_ATTEMPTED_PARTIAL_SWEEP;
+            HIPDNN_FE_LOG_INFO(
+                "autotuneExhaustiveSweep: at least one applicable engine was excluded by a "
+                "caller filter or the workspace budget, so this sweep does not cover the "
+                "engine set a later lookup will see; declining to persist a ranking. Re-run "
+                "without engineIdFilter/deselect filters and with a workspace large enough "
+                "for every candidate to populate the cache.");
+        }
         // Gated on a real winner, not on `order` being non-empty: a sweep in which every engine
         // was measured and failed produces a non-empty order of nothing but failures, and
         // caching that would serve a ranking with no usable entry in it.
-        if(succeededCount > 0)
+        else if(succeededCount > 0)
         {
             if(hasValidGraphDesc())
             {
