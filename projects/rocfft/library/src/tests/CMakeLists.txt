@@ -21,8 +21,7 @@
 include( ../../../cmake/sqlite.cmake )
 
 # The planning core is compiled into the rocfft shared library rather than an
-# object library, so build those sources here to reach them.  powX.cpp is left
-# out because it carries device code; rocfft_stub.cpp stands in for it.
+# object library, so build those sources here to reach them.
 set( rocfft_planning_source
   ../assignment_policy.cpp
   ../auxiliary.cpp
@@ -64,8 +63,6 @@ add_executable( rocfft-internal-test
 )
 
 # ROCFFT_BUILD_INTERNAL_TEST picks the powX stubs out of rocfft_stub.cpp.
-# ROCFFT_TEST_SOLUTION_MAP_DIR lets the solution map test find the .dat files
-# that ship with the library.
 target_compile_definitions( rocfft-internal-test PRIVATE
   ROCFFT_BUILD_INTERNAL_TEST
   ROCFFT_TEST_SOLUTION_MAP_DIR="${ROCFFT_SOLUTION_MAP_DIR}"
@@ -99,8 +96,6 @@ target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-rtc-subprocess
   rocfft-solution-map
   rocfft-tuning-helper
-  # rocfft-rtc-gen builds kernel source with the code generator, so that has
-  # to come along too.
   generator
   hip::device
   ${ROCFFT_SQLITE_LIB}
