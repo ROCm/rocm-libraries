@@ -455,6 +455,12 @@ namespace TensileLite::Client::reference_adapter
             std::optional<Tensor>      bTensor;
             std::optional<Tensor>      cTensor;
             std::optional<Tensor>      dTensor;
+            const bool readA = alpha != std::complex<double>(0.0, 0.0)
+                               || (problem.useGradient() && problem.useBias()
+                                   && problem.biasSrc() == ContractionProblemGemm::A);
+            const bool readB = alpha != std::complex<double>(0.0, 0.0)
+                               || (problem.useGradient() && problem.useBias()
+                                   && problem.biasSrc() == ContractionProblemGemm::B);
             const bool readC = beta != std::complex<double>(0.0, 0.0);
             const auto makeAddendTensor = [&](const Layout& layout,
                                               std::span<const std::byte> source) {
@@ -470,12 +476,20 @@ namespace TensileLite::Client::reference_adapter
                                                  layout,
                                                  TensorStorage::allocateUninitialized);
             };
-            if(inputs.batchA == nullptr)
+            if(!readA)
+            {
+                aTensor.emplace(typeA, Layout(Shape{m, k}, {0, 0}));
+            }
+            else if(inputs.batchA == nullptr)
             {
                 aStorage = detail::descriptorStorage(typeA, problem.a(), inputs.a, batchOffsetA);
                 aTensor.emplace(typeA, detail::hostValidationLayout(problem.a()), aStorage);
             }
-            if(inputs.batchB == nullptr)
+            if(!readB)
+            {
+                bTensor.emplace(typeB, Layout(Shape{k, n}, {0, 0}));
+            }
+            else if(inputs.batchB == nullptr)
             {
                 bStorage = detail::descriptorStorage(typeB, problem.b(), inputs.b, batchOffsetB);
                 bTensor.emplace(typeB, detail::hostValidationLayout(problem.b()), bStorage);
@@ -698,10 +712,12 @@ namespace TensileLite::Client::reference_adapter
                           : std::span<std::byte>(static_cast<std::byte*>(inputs.batchD[batch])
                                                      + batchOffsetD,
                                                  storageBytesForLayout(typeD, layoutD));
-                Tensor currentA = inputs.batchA == nullptr
+                Tensor currentA = !readA                  ? *aTensor
+                                  : inputs.batchA == nullptr
                                       ? aTensor->alias(layoutA)
                                       : Tensor(typeA, layoutA, currentAStorage);
-                Tensor currentB = inputs.batchB == nullptr
+                Tensor currentB = !readB                  ? *bTensor
+                                  : inputs.batchB == nullptr
                                       ? bTensor->alias(layoutB)
                                       : Tensor(typeB, layoutB, currentBStorage);
                 Tensor currentC = inputs.batchC == nullptr
