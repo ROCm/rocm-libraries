@@ -87,11 +87,15 @@ switch `cluster_barrier::kRule3CrossLoop` in
 `InsertClusterBarrierPass.hpp` (default **false**). See
 [`kRule3CrossLoop`](#krule3crossloop) below.
 
-### SCC restore
+### SCC
 
-If SIA hoisted a live loop-exit `s_cmp_eq LCL, imm` whose SCC a downstream
-`cbranch` consumes, and no instruction between the signal and wait anchors
-redefines SCC, a clone of that compare is re-emitted after the signal block.
+The signal block opens with `s_cmp_eq_u32 s[sgprWaveIdx], 0`, so wherever it
+lands it destroys the SCC value standing there. Nothing puts that value back;
+the anchor search is what keeps the block out of a live range in the first
+place, and it may give up lead to do so — climbing to a spot in front of the
+def, or sinking below the range towards the wait. A range the loop closes
+across its back edge counts too, which is why the climb carries a liveness flag
+of its own alongside the forward scan the placement check runs.
 
 ### Drain hoisting
 
@@ -123,7 +127,6 @@ the SCC restore below.
     s_cbranch_scc0 label_skipCBPreSignal_<HASH>
     s_barrier_signal -3
   label_skipCBPreSignal_<HASH>:
-    <optional SCC restore cmp>
     ...
     s_barrier_wait -3
     <wait-cnt drains hoisted below the cluster wait>
