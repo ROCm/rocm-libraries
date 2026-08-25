@@ -19,20 +19,32 @@ ran a byte-identical catalog.
 The control does not move, so the regression is attributable to the re-mapped rows. `nogate`
 is no better, so the tiny/gemv gate is not the cause.
 
-## Confirmed across two independent runs
+## Confirmed across two complete independent runs
 
-The aggregate is not the evidence; per-shape reproducibility is. Treated shapes present in both
-runs (n=55 at the time of writing, run 2 still filling):
+600 shapes x 4 arms x 2 runs, **0 timeouts**. The aggregate is not the evidence; per-shape
+reproducibility is.
+
+| treated | run 1 | run 2 | spread |
+|---|---|---|---|
+| wall-clock | 99.18% | 99.20% | **0.02** |
+| geomean | 93.75% | 93.94% | 0.19 |
+| A/A floor | 100.31% | 100.85% | 0.54 |
 
 | | |
 |---|---|
-| per-shape delta correlation run 1 vs run 2 | **r = +0.983** |
-| same sign in both runs | **91%** |
-| same statistic on the A/A arm (noise reference) | **r = +0.351** |
-| slower in **both** runs | 30/55 (55%) |
-| median | run 1 −1.5%, run 2 −2.0% |
+| per-shape delta correlation run 1 vs run 2 | **r = +0.986** |
+| same sign in both runs | **93%** |
+| same statistic on the A/A arm (noise reference) | **r = +0.414** |
+| slower in **both** runs | **75/126** treated shapes |
 
-Worst repeat offenders: `skinny_N −43%`, `skinny_M −35%`, `skinny_M −31%`, `gemv −29%`.
+Per stratum, both runs agree to within ~0.5 pt — `med` 100.94/100.89, `skinny_M` 96.60/96.98,
+`skinny_N` 93.93/94.41, `gemv` 73.03/74.04 (n=3, not claimable). Worst repeat offenders:
+`skinny_N −43%`, `skinny_M −35%`, `skinny_M −31%`, `gemv −29%`.
+
+The regression reproduces to two decimal places on wall-clock. This is the same test that
+certified the original re-map as a genuine **+2.1%** (r=0.961, 90% sign agreement, A/A reference
+0.551); applied here it certifies the opposite with a tighter correlation: **the same shapes lose
+every time, so the loss is structural.**
 
 This is the same test that certified the original re-map as a genuine **+2.1%** (r=0.961, 90% sign
 agreement, against an A/A reference of 0.551). Applied here it certifies the opposite with a
