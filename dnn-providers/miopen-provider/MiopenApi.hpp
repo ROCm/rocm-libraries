@@ -10,11 +10,16 @@
 //
 // The provider always calls the public entry-point names. When MIOpen is built
 // with the public/private split (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON) the provider
-// links libMIOpen_private.so, whose symbols carry an _impl suffix; in that build
-// the compiler force-includes MiopenApiPrivateRename.hpp (see CMakeLists.txt),
-// which renames every public name — including the declarations pulled in here — to
-// its _impl form before this header is parsed. With the split OFF nothing is
-// renamed and the provider binds the public libMIOpen exactly as before the split.
+// links libMIOpen_private.so, whose miopen.h entry points carry an _impl suffix;
+// in that build the compiler force-includes MiopenApiPrivateRename.hpp (see
+// CMakeLists.txt), which renames those names to their _impl form before this
+// header is parsed. With the split OFF nothing is renamed and the provider binds
+// the public libMIOpen exactly as before the split.
+//
+// The three GetWorkSpaceSizeRange entry points declared below are the exception:
+// because they are not part of the miopen.h contract, the split leaves them
+// un-renamed on libMIOpen_private.so, so these declarations bind the same symbol
+// name in either build.
 #pragma once
 
 #include <miopen/miopen.h>

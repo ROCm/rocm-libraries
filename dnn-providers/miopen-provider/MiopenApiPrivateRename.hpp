@@ -15,11 +15,15 @@
 // call the public C API exactly as before the split.
 //
 // This mirrors the library's own src/private/miopen_private_rename.h and MUST be
-// kept in sync with it. It contains only preprocessor #defines, so it is safe to
-// force-include across all provider sources. The three
-// miopenConvolution*GetWorkSpaceSizeRange entry points are exported from
-// libMIOpen but intentionally absent from the public <miopen/miopen.h>; the
-// provider declares them in MiopenApi.hpp and they are renamed here too.
+// kept in sync with it — it renames exactly the entry points declared in
+// <miopen/miopen.h>, no more and no less. It contains only preprocessor
+// #defines, so it is safe to force-include across all provider sources.
+//
+// The three miopenConvolution*GetWorkSpaceSizeRange entry points are
+// deliberately NOT renamed here. They are exported with MIOPEN_EXPORT from
+// src/convolution_api.cpp but never declared in <miopen/miopen.h>, so the split
+// leaves them on libMIOpen_private.so under their original, un-suffixed names.
+// The provider forward-declares them in MiopenApi.hpp and binds them directly.
 #pragma once
 
 #define miopenGetErrorString miopenGetErrorString_impl
@@ -298,9 +302,3 @@
 #define miopenMultiMarginLossForward miopenMultiMarginLossForward_impl
 #define miopenSetTuningPolicy miopenSetTuningPolicy_impl
 #define miopenGetTuningPolicy miopenGetTuningPolicy_impl
-#define miopenConvolutionForwardGetWorkSpaceSizeRange \
-    miopenConvolutionForwardGetWorkSpaceSizeRange_impl
-#define miopenConvolutionBackwardDataGetWorkSpaceSizeRange \
-    miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl
-#define miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange \
-    miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl
