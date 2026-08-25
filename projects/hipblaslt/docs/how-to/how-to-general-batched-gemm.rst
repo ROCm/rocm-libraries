@@ -1,5 +1,5 @@
 .. meta::
-   :description: How to use General Batched GEMM (pointer-array batched GEMM) with hipBLASLt
+   :description: How to use general batched GEMM (pointer-array batched GEMM) with hipBLASLt
    :keywords: hipBLASLt, ROCm, library, API, batched GEMM, pointer array
 
 .. _general-batched-gemm:
@@ -23,16 +23,16 @@ Prerequisites: A ROCm installation with hipBLASLt built for your target GPU
 architecture. For build instructions, see
 :doc:`Build from source <../install/building-installing-hipblaslt>`.
 
-What is General Batched GEMM?
+What is general batched GEMM?
 =============================
 
 In GEMM, general is standard BLAS terminology for the usual rectangular matrix multiply (as
 opposed to symmetric, triangular, or other specialized variants). In general batched GEMM, general
 refers to the batching layout: each batch matrix may live at a separate device address,
 referenced through a pointer array, rather than in one contiguous strided buffer. This is also
-known as pointer array Batched GEMM.
+known as pointer-array batched GEMM.
 
-General Batched GEMM runs multiple GEMM operations where:
+General batched GEMM runs multiple GEMM operations where:
 
 * Each batch has its own matrices in separate memory locations.
 * Matrices are referenced through device pointer arrays (``A[]``, ``B[]``, ``C[]``, ``D[]``).
@@ -46,13 +46,13 @@ This mode is useful when:
 * You are integrating with code that already owns separate allocations.
 * You need maximum flexibility in where each batch's data lives in device memory.
 
-General Batched vs. Strided Batched GEMM
+General batched vs. strided batched GEMM
 =========================================
 
 hipBLASLt supports two batching modes. Choosing the right one affects both setup
 and performance.
 
-Strided Batched GEMM (``HIPBLASLT_BATCH_MODE_STRIDED``, value ``0``)
+Strided batched GEMM (``HIPBLASLT_BATCH_MODE_STRIDED``)
 --------------------------------------------------------------------
 
 Memory layout:
@@ -78,7 +78,7 @@ Use when:
 * You can allocate one buffer per operand.
 * Memory is limited or you want the simplest batched setup.
 
-General Batched GEMM (``HIPBLASLT_BATCH_MODE_POINTER_ARRAY``, value ``1``)
+General batched GEMM (``HIPBLASLT_BATCH_MODE_POINTER_ARRAY``)
 ---------------------------------------------------------------------------
 
 Memory layout:
@@ -109,7 +109,7 @@ Quick comparison
 ----------------
 
 .. csv-table::
-   :header: "Feature", "Strided Batched", "General Batched"
+   :header: "Feature", "Strided batched", "General batched"
    :widths: 30, 35, 35
 
    "Batch mode value (``hipblasltBatchMode_t``)", "``0`` (``HIPBLASLT_BATCH_MODE_STRIDED``)", "``1`` (``HIPBLASLT_BATCH_MODE_POINTER_ARRAY``)"
@@ -127,22 +127,22 @@ Quick comparison
    ``n``, ``k``, and leading dimensions (``lda``, ``ldb``, ``ldc``, and ``ldd``). General batched mode
    lets each batch live at a different address; it does not let each batch
    use different problem sizes in one call. For variable problem sizes, use
-   Grouped GEMM instead (see below).
+   grouped GEMM instead (see below).
 
-Not the same as Grouped GEMM
+Not the same as grouped GEMM
 ============================
 
-Grouped GEMM runs multiple GEMMs with different ``m``, ``n``, and/or ``k``
-values in one launch. General Batched GEMM runs multiple GEMMs that share the
+The grouped GEMM API runs multiple GEMMs with different ``m``, ``n``, and/or ``k``
+values in one launch. General batched GEMM runs multiple GEMMs that share the
 same dimensions and layout metadata but use separate memory for each batch.
 
 For strided batching examples in the hipBLASLt repository, see
 ``clients/samples/02_hipblaslt_gemm_batched/``.
 
-When to use General Batched GEMM
+When to use general batched GEMM
 =================================
 
-Choose General Batched GEMM when you have:
+Choose general batched GEMM when you have:
 
 1. Pre-allocated matrices already living in separate device buffers.
 2. Dynamic batch management where batches are added or removed independently.
@@ -150,7 +150,7 @@ Choose General Batched GEMM when you have:
 4. Legacy integration with code paths that already use per-batch pointers.
 5. Different data sources where matrices originate from separate modules or structures.
 
-Choose Strided Batched GEMM when you:
+Choose strided batched GEMM when you:
 
 1. Are allocating memory specifically for batched GEMM.
 2. Have uniform batch dimensions and can use contiguous buffers.
@@ -166,7 +166,7 @@ Basic command structure
 
    ./hipblaslt-bench [options]
 
-Key options for General Batched GEMM
+Key options for general batched GEMM
 ------------------------------------
 
 .. csv-table::
@@ -190,7 +190,7 @@ Key options for General Batched GEMM
    "``-v``, ``--verify``", "Enable CPU verification", "disabled", "``-v``"
    "``-i``, ``--iters``", "Timing iterations", "``10``", "``-i 100``"
 
-Example: Basic General Batched GEMM (FP32)
+Example: Basic general batched GEMM (FP32)
 ------------------------------------------
 
 .. code-block:: bash
@@ -271,7 +271,7 @@ below.
 Required layout attributes
 --------------------------
 
-For General Batched GEMM, set both of the following on all four matrix
+For general batched GEMM, set both of the following on all four matrix
 layouts (``A``, ``B``, ``C``, ``D``):
 
 1. ``HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT``, number of batches.
@@ -301,7 +301,7 @@ Known limitations
 Complete example
 ================
 
-The following standalone program demonstrates General Batched GEMM from scratch:
+The following standalone program demonstrates general batched GEMM from scratch:
 per-batch allocation, device pointer arrays, layout configuration, heuristic
 selection, execution, CPU verification, and cleanup.
 
@@ -325,13 +325,13 @@ Expected output:
 
 .. code-block:: text
 
-   === General Batched GEMM Example ===
+   === general batched GEMM example ===
    Problem size: M=128, N=64, K=96
    Batch count: 4
    Alpha=1.5, Beta=-0.5
 
    Algorithm selected with workspace size: XXXXX bytes
-   Executing General Batched GEMM...
+   Executing general batched GEMM...
    GEMM execution completed.
    Batch 0: PASSED
    Batch 1: PASSED
@@ -352,7 +352,7 @@ Performance considerations
 * Strided vs. general: For uniform batches where you control allocation,
   strided batched GEMM is usually simpler and can be faster because the runtime
   avoids pointer-array indirection and extra device memory for the arrays.
-* Pointer-array overhead: General batched mode allocates four pointer arrays
+* Pointer-array overhead: general batched mode allocates four pointer arrays
   plus ``batch_count`` separate buffers. Factor that into memory planning.
 * Heuristic reuse: Query heuristics once with
   :ref:`hipblasltmatmulalgogetheuristic` and reuse the selected algorithm for
@@ -384,7 +384,7 @@ Segfaults or garbage results
 Summary
 =======
 
-General Batched GEMM is the right choice when you need separate device allocations
+General batched GEMM is the right choice when you need separate device allocations
 per batch and cannot rely on contiguous strided buffers.
 
 Key points:
@@ -393,7 +393,7 @@ Key points:
 2. Pass device-resident pointer arrays to ``hipblasLtMatmul``.
 3. Do not use strided-batch offset attributes in this mode.
 4. All batches in one call share the same dimensions and leading dimensions.
-5. For variable ``m``/``n``/``k`` per problem, use Grouped GEMM instead.
+5. For variable ``m``/``n``/``k`` per problem, use grouped GEMM instead.
 
 Quick-start bench command:
 

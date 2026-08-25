@@ -151,7 +151,7 @@ int main()
 
     const size_t max_workspace_bytes = 64 * 1024 * 1024;  // 64 MB workspace limit
 
-    std::cout << "=== General Batched GEMM Example ===" << std::endl;
+    std::cout << "=== general batched GEMM example ===" << std::endl;
     std::cout << "Problem size: M=" << m << ", N=" << n << ", K=" << k << std::endl;
     std::cout << "Batch count: " << batch_count << std::endl;
     std::cout << "Alpha=" << alpha << ", Beta=" << beta << std::endl;
@@ -330,7 +330,7 @@ int main()
     // ============================================================================
     // Perform General Batched GEMM
     // ============================================================================
-    std::cout << "Executing General Batched GEMM..." << std::endl;
+    std::cout << "Executing general batched GEMM..." << std::endl;
 
     HIPBLASLT_CHECK(hipblasLtMatmul(
         handle,
