@@ -1043,7 +1043,9 @@ def collect_conservative_deps(
                 deps.append((prod, CK.TENSOR))
     # Untagged LDS writer / barrier cannot be proven disjoint from any in-flight
     # async LDS reader, so drain asynccnt fully.
-    if (is_lds_writer_anchor(inst) or is_lds_fence_barrier(inst)) and not inst.memtokens():
+    if (
+        is_lds_writer_anchor(inst) or is_lds_fence_barrier(inst)
+    ) and not inst.memtokens():
         if state.in_flight(CK.ASYNC):
             for prod in state.iter_ops(CK.ASYNC):
                 if state.count_from(CK.ASYNC, prod) > 0:
