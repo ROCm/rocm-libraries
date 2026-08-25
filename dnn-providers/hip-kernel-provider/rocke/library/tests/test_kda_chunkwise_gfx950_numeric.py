@@ -110,6 +110,187 @@ def test_fused_path_matches_token_serial(gate_low):
     assert worst <= TOL, f"gate {gate_low}: worst rel {worst:.3e}"
 
 
+@pytest.mark.parametrize("gate_low", GATES)
+def test_subtiled_fused_path_matches_token_serial(gate_low):
+    """The state-subtiled fused kernel, against the same oracle.
+
+    Subtiling narrows the scan atom so each wave owns a shorter band of ``S^T``
+    and twice as many waves cover the v extent, which halves each lane's
+    loop-carried state. That moves every one of the five products off a
+    single-atom output onto a tiled one, so this covers index arithmetic the
+    chunk-wide atom never exercises.
+    """
+    import kda_chunk_fused as fused
+
+    from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
+
+    spec = KdaChunkFusedSpec(tile=KdaTileSpec(block_size=512, scan_atom_m=16))
+    worst = fused.check(spec, 2, 4, 256, gate_low=gate_low, verbose=False)
+    assert worst <= TOL, f"gate {gate_low}: worst rel {worst:.3e}"
+
+
+def test_subtiled_and_chunk_wide_fused_agree_to_one_ulp():
+    """Subtiling must repartition the arithmetic without changing the answer.
+
+    Not bit-exact, and it should not be: the narrower atom packs twice the K per
+    instruction, so a contraction that took eight accumulation steps takes four,
+    and fp32 summation is not associative. What must hold is that this is the
+    *only* difference -- a last-bit effect on a small minority of elements. A
+    real indexing error in the retiled products would show up here as a large
+    difference on many elements, which no oracle tolerance would localize.
+    """
+    import torch
+
+    import kda_chunk_fused as fused
+
+    from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
+
+    B, H, T = 2, 4, 256
+    wide = KdaChunkFusedSpec(tile=KdaTileSpec())
+    sub = KdaChunkFusedSpec(tile=KdaTileSpec(block_size=512, scan_atom_m=16))
+    q, k, v, g, beta = fused.make_inputs(B, H, T, wide.head_k, wide.head_v)
+    o_w, ht_w = fused.launch_packed(wide, q, k, v, g, beta)
+    o_s, ht_s = fused.launch_packed(sub, q, k, v, g, beta)
+    torch.cuda.synchronize()
+
+    # One bf16 ULP is 2^-8 relative; allow half that against the tile's peak
+    # magnitude, which is far tighter than the 3e-2 oracle tolerance.
+    for name, a, b in (("output", o_w, o_s), ("final state", ht_w, ht_s)):
+        diff = (a.float() - b.float()).abs().max().item()
+        scale = a.float().abs().max().item()
+        frac = (a != b).float().mean().item()
+        assert diff <= 2e-3 * scale, (
+            f"{name} differs by {diff:.3e} ({diff / scale:.3e} of peak), "
+            "more than rounding: the retiled indexing is wrong"
+        )
+        assert frac <= 0.10, (
+            f"{name}: {frac:.1%} of elements differ; rounding alone should "
+            "touch only a small minority"
+        )
+
+
+@pytest.mark.parametrize("tile_kw", [{}, {"block_size": 512, "scan_atom_m": 16}])
+def test_input_prefetch_is_bitwise_identical(tile_kw):
+    """Staging a chunk's inputs one chunk early must not change the arithmetic.
+
+    The prefetch moves *when* g/k/q/beta reach LDS, never what lands there, so
+    this is a bitwise check rather than a tolerance one.
+
+    It is also the race detector. The tiles being written are the same ones the
+    current chunk staged into, and the hand-off deliberately adds no barrier of
+    its own -- it leans on the rendezvous the scan already has. A missed
+    dependency means some chunk reads its successor's inputs, and the earlier
+    attempt at this optimization showed that failure drifts in rather than
+    appearing on the first launch: the buffers have to already hold a previous
+    run's data. Hence the repeat.
+    """
+    import torch
+
+    import kda_chunk_fused as fused
+
+    from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
+
+    B, H, T = 2, 4, 256
+    tile = KdaTileSpec(**tile_kw)
+    # Both spelled out: the prefetch is the default, so leaving either implicit
+    # would compare a spec against itself.
+    base = KdaChunkFusedSpec(tile=tile, prefetch_inputs=False)
+    pf = KdaChunkFusedSpec(tile=tile, prefetch_inputs=True)
+    assert base.kernel_name() != pf.kernel_name()
+    q, k, v, g, beta = fused.make_inputs(B, H, T, base.head_k, base.head_v)
+
+    for it in range(3):
+        o_b, ht_b = fused.launch_packed(base, q, k, v, g, beta)
+        o_p, ht_p = fused.launch_packed(pf, q, k, v, g, beta)
+        torch.cuda.synchronize()
+        assert torch.equal(o_b, o_p), (
+            f"launch {it}: prefetched output differs from the in-phase staging; "
+            "a chunk read inputs the hand-off had not published"
+        )
+        assert torch.equal(ht_b, ht_p), f"launch {it}: final states diverge"
+
+
+def test_fused_lds_overlay_is_bitwise_identical():
+    """Explicit byte-pool views may change addresses, never values.
+
+    This catches lifetime mistakes in the overlay itself. Kt is produced while
+    the solve tiles are live and V survives into residual formation, so either
+    one being placed in the reusable tile-only span quickly produces NaNs.
+    """
+    import torch
+
+    import kda_chunk_fused as fused
+
+    from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
+
+    B, H, T = 2, 4, 256
+    tile = KdaTileSpec(block_size=512, scan_atom_m=16)
+    typed = KdaChunkFusedSpec(tile=tile, prefetch_inputs=False, overlay_lds=False)
+    overlay = KdaChunkFusedSpec(tile=tile, prefetch_inputs=False, overlay_lds=True)
+    q, k, v, g, beta = fused.make_inputs(B, H, T, typed.head_k, typed.head_v)
+    o_t, ht_t = fused.launch_packed(typed, q, k, v, g, beta)
+    o_o, ht_o = fused.launch_packed(overlay, q, k, v, g, beta)
+    torch.cuda.synchronize()
+
+    assert torch.isfinite(o_o).all() and torch.isfinite(ht_o).all()
+    assert torch.equal(o_t, o_o), "LDS overlay changed the fused output"
+    assert torch.equal(ht_t, ht_o), "LDS overlay changed the final state"
+
+
+def test_c32_tile_phase_16x16_panels_agree_to_one_ulp():
+    """Inner panels repartition C x C work without changing the algorithm.
+
+    The 16x16x32 atom takes four K steps where 32x32x16 takes eight, so fp32
+    accumulation order changes and bitwise identity is not expected. Differences
+    must remain last-bit effects rather than panel indexing errors.
+    """
+    import torch
+
+    import kda_chunk_fused as fused
+
+    from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
+
+    B, H, T = 2, 4, 256
+    common = dict(block_size=512, scan_atom_m=16)
+    atom32 = KdaChunkFusedSpec(tile=KdaTileSpec(**common, tile_atom_m=32))
+    panels16 = KdaChunkFusedSpec(tile=KdaTileSpec(**common, tile_atom_m=16))
+    q, k, v, g, beta = fused.make_inputs(B, H, T, atom32.head_k, atom32.head_v)
+    o_32, ht_32 = fused.launch_packed(atom32, q, k, v, g, beta)
+    o_16, ht_16 = fused.launch_packed(panels16, q, k, v, g, beta)
+    torch.cuda.synchronize()
+
+    for name, a, b in (("output", o_32, o_16), ("final state", ht_32, ht_16)):
+        diff = (a.float() - b.float()).abs().max().item()
+        scale = a.float().abs().max().item()
+        frac = (a != b).float().mean().item()
+        assert diff <= 2e-3 * scale, (
+            f"{name} differs by {diff:.3e} ({diff / scale:.3e} of peak), "
+            "more than atom accumulation order can explain"
+        )
+        assert (
+            frac <= 0.10
+        ), f"{name}: {frac:.1%} of elements differ; panel indexing is suspect"
+
+
+def test_c16_fused_matches_token_serial_oracle():
+    """Literal C=16 is a valid A/B even though it is not the throughput winner."""
+    import kda_chunk_fused as fused
+
+    from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
+
+    spec = KdaChunkFusedSpec(
+        tile=KdaTileSpec(
+            chunk=16,
+            block_size=512,
+            pad_cb=16,
+            tile_atom_m=16,
+            scan_atom_m=16,
+        )
+    )
+    worst = fused.check(spec, 2, 4, 256, verbose=False)
+    assert worst <= TOL, f"C16 fused worst relative error {worst:.3e}"
+
+
 def test_split_and_fused_agree_bitwise():
     """The two paths share one emitted scan body, so they must agree exactly.
 
@@ -122,13 +303,19 @@ def test_split_and_fused_agree_bitwise():
     import kda_chunk_fused as fused
     import kda_chunk_split as split
 
-    from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaChunkScanSpec
+    from kernels.gfx950.kda_chunkwise import (
+        KdaChunkFusedSpec,
+        KdaChunkScanSpec,
+        KdaTileSpec,
+    )
 
     B, H, T = 2, 4, 256
     spec_s = KdaChunkScanSpec()
     q, k, v, g, beta = fused.make_inputs(B, H, T, spec_s.head_k, spec_s.head_v)
     o_s, ht_s = split.launch_packed(spec_s, q, k, v, g, beta)
-    o_f, ht_f = fused.launch_packed(KdaChunkFusedSpec(), q, k, v, g, beta)
+    o_f, ht_f = fused.launch_packed(
+        KdaChunkFusedSpec(tile=KdaTileSpec()), q, k, v, g, beta
+    )
     torch.cuda.synchronize()
     assert torch.equal(o_s, o_f), "outputs diverge between the split and fused paths"
     assert torch.equal(ht_s, ht_f), "final states diverge"

@@ -255,7 +255,15 @@ def main():
     spec = KdaChunkFusedSpec(
         head_k=args.dk,
         head_v=args.dv,
-        tile=KdaTileSpec(chunk=args.chunk, solve_block=args.sb),
+        tile=KdaTileSpec(
+            chunk=args.chunk,
+            block_size=512,
+            pad_dk=16,
+            pad_cb=16,
+            tile_atom_m=16,
+            solve_block=args.sb,
+            scan_atom_m=16,
+        ),
     )
     ok, why = is_valid_fused_spec(spec)
     print(f"{spec.kernel_name()}  lds={spec.lds_bytes()} B  valid={ok} {why}")
