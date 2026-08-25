@@ -245,7 +245,9 @@ GPU node.
   lets an old descriptor auto-track what ships instead of freezing whatever the
   default was the day it was written. Same test freezes the required set per spec
   class; Python's "no non-defaulted field after a defaulted one" catches only the
-  append case, not an insert.
+  append case, not an insert. If the field really is problem shape, adding it to
+  `REQUIRED_FIELDS` is a **breaking change**: regenerate the descriptors and AOT
+  packs for that spec and say in the PR that the existing ones are invalidated.
 - **Cross-platform**: do not add bash/Linux-specific helper scripts. Scripts
   under `rocke/platform/` are Python, not `.sh`; use `tempfile`, `os.cpu_count()`,
   `pathlib`, `shutil.which` - no `/tmp`, `nproc`, `sudo`, or shell-only flows.

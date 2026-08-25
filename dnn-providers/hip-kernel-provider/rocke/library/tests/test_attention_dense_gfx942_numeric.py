@@ -242,9 +242,7 @@ def test_exp2_fast_matches_plain_exp2(dtype, d, hq, hkv, persistent):
         # subclass (at shipped defaults for every other private knob) so only
         # use_exp2_fast moves between the two arms.
         run_attention_dense_torch(
-            spec=dataclasses.replace(
-                _as_gfx942_spec(spec), use_exp2_fast=use_fast
-            ),
+            spec=dataclasses.replace(_as_gfx942_spec(spec), use_exp2_fast=use_fast),
             q=q,
             k=k,
             v=v,

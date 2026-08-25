@@ -658,9 +658,7 @@ def test_contract_grid_covers_every_tuning_field_on_both_sides():
     accepted_fields, rejected_fields = set(), set()
     for row in _CONTRACT_GRID:
         ok, _ = supports_attention_dense(_spec(**row), arch="gfx942")
-        (accepted_fields if ok else rejected_fields).update(
-            set(row) & _PRIVATE_FIELDS
-        )
+        (accepted_fields if ok else rejected_fields).update(set(row) & _PRIVATE_FIELDS)
     declared = set(_PRIVATE_FIELDS)
     missing = declared - (accepted_fields | rejected_fields)
     assert not missing, (

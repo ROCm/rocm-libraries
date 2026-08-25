@@ -227,6 +227,13 @@ rejects a non-defaulted field declared *after* a defaulted one, so appending bre
 loudly, while inserting the same field higher up is legal and breaks every existing
 descriptor silently.
 
+If a new field genuinely *is* problem shape — there is no kernel to describe without
+it — then old descriptors cannot be rescued, because they describe a problem the spec
+no longer expresses. That is a breaking change, not a test to route around: add the
+field to `REQUIRED_FIELDS`, regenerate the descriptors and AOT packs for that spec,
+and say in the PR that the existing ones are invalidated. Reach for it only after
+ruling out a `None` default resolved by policy.
+
 [`library/tests/test_builder_signature_contract.py`](../../../library/tests/test_builder_signature_contract.py)
 enforces both for `library/kernels`: the signature, and a frozen required-field set
 per spec class.
