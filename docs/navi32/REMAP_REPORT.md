@@ -130,15 +130,38 @@ weaker evidence than the aggregate.
 
 ## Status and recommendation
 
-**Not shipped — but the bar IS met, and the decision is now a judgment call rather than a
-blocker.** The gated variant clears the pre-registered criterion: +1.96% wall-clock against a
-100.13% A/A floor, tiny restored to parity, and no stratum regressing once the gemv reading is
-correctly attributed to noise.
+**SHIPPED for HHS-TN on both architectures**, after an independent confirming run settled the
+open question.
 
-I am leaving it unshipped for a reason that is about evidence rather than results: the gain is
-~+2% while per-stratum resolution is ±2.5%, so the aggregate is solid but the tail is not
-independently confirmed. A second run of the gated arm, or more shapes per stratum, would settle
-it cheaply. That is a smaller ask than the campaign that produced it.
+| | run 1 | run 2 | spread |
+|---|---|---|---|
+| gated wall-clock | 101.96% | **102.29%** | 0.33 |
+| A/A floor | 100.13% | 100.08% | 0.06 |
+| gated geomean | 101.50% | 102.16% | 0.67 |
+
+**The decisive test was not the aggregate but per-shape reproducibility.** Gains correlate at
+**r = 0.961** across independent runs with **90% sign agreement**, against an A/A noise reference
+of **r = 0.551** computed the same way on the same shapes. The same shapes win both times, so the
+effect is structural rather than noise averaging positive. A single run cannot make this
+distinction at all, which is why one good-looking number was never enough.
+
+Per stratum, run 2 confirms no regression anywhere — and **gemv reads 100.73%**, closing the
+question the correction above opened:
+
+| stratum | run 1 | run 2 |
+|---|---|---|
+| gemv | 98.11% | **100.73%** |
+| tiny | 99.93% | 100.00% |
+| skinny_M | 102.55% | **102.89%** |
+| skinny_N | 101.16% | 101.51% |
+| med | 102.57% | **104.65%** |
+| large | 101.98% | 101.97% |
+
+**Scope of the ship — deliberately partial.** Only **HHS-TN** is re-mapped. The cold matrix was
+measured against the HHS kernel library; BBS/AuxH/AuxB have different kernels (other data types,
+other epilogues), so the measured best-per-row does not transfer to them. They keep their lean
+mapping until measured in their own right. Both architectures pass the build gate: 97 kernels,
+0 assembler errors, 0 `overflowedResources`, ELF `0x46`/`0x47`, grid unchanged at 9 680 rows.
 
 Even gated, the realized gain is ~+2% wall-clock on treated queries — real, attributable, above
 the floor, but modest against the ~1% that lean cost. **The larger lever is coverage:** only
