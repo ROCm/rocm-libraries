@@ -54,7 +54,7 @@ rocsparse_routine::rocsparse_routine(const char* function)
 //
 //
 rocsparse_routine::rocsparse_routine()
-    : value((value_type)-1){};
+    : value((value_type)-1) {};
 
 //
 //

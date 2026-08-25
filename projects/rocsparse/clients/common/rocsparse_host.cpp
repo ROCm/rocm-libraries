@@ -5004,8 +5004,8 @@ void host_csrgeam_nnz(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -5098,8 +5098,8 @@ void host_csrgeam(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;

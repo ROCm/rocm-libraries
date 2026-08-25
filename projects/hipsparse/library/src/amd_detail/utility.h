@@ -716,8 +716,8 @@ public:
         bool                 is_implicit_stage_analysis_called{};
         bool                 is_stage_compute_subsequent{};
 
-        Entry()             = default;
-        Entry(const Entry&) = delete;
+        Entry()                        = default;
+        Entry(const Entry&)            = delete;
         Entry& operator=(const Entry&) = delete;
         Entry(Entry&& other) noexcept;
         Entry& operator=(Entry&&) = delete;

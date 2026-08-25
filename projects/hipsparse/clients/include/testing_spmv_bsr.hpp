@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
 void testing_spmv_bsr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int64_t              mb          = 10;
     int64_t              nb          = 10;
     int64_t              nnzb        = 10;
@@ -182,7 +182,7 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
 void testing_spmv_bsr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     J                    m         = argus.M;
     J                    n         = argus.N;
     J                    blockDim  = argus.block_dim;
