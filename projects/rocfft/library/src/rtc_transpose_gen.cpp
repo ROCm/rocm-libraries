@@ -90,8 +90,8 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     // NOTE:
     // Index variables declared as 32BIT are all bounded by grid limits,
     // and widening them to 64BIT would cost registers for nothing
-    src += rtc_precision_type_decl(specs.precision, array_type_is_complex(specs.inArrayType));
     src += rtc_index_type_decl(specs.itype);
+    src += rtc_precision_type_decl(specs.precision, array_type_is_complex(specs.inArrayType));
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
 
