@@ -12,6 +12,32 @@
 
 namespace ck_tile {
 
+
+// PROBE: drop the remaining hand-written GemmStagedScheduler prescriptions
+// (<0>, <3>, <4>) and/or the sched_barrier that follows each, the same way A2
+// did for <1>/<2>.  Bit N of the mask selects scheduler N.
+
+
+// PROBE: fence the softmax/dropout stage from the operand prefetch that follows
+// it. The hot-loop VGPR peak is a ~1000-line band where the scheduler has
+// hoisted the next gemm's ds_load_tr fragments into the dropout stage; this
+// measures what that overlap costs in registers.
+
+
+// A2: merge the gemm_1 / gemm_2 scheduling regions -- drop the sched_barrier
+// between them AND both hand-written GemmStagedScheduler prescriptions.
+// Both halves are required; doing either alone is a loss (see HANDOFF_A2).
+
+
+// PROBE: keep ONLY dV in registers, leave dK in LDS. Halves the extra register
+// cost versus the fully register-resident pipeline (128 VGPR instead of 256).
+// PROBE: sink the next iteration's Q/LSE loads past gemm_4, so their live
+// ranges do not span it.  dO/D are already loaded after gemm_4; Q/LSE were the
+// odd ones out.  Safe: gemm_4 touches neither, and nothing between gemm_4 and
+// the dO/D loads writes LDS or barriers, so they sit in the same validity
+// window the dO/D loads already rely on.
+
+
 // Same algorithm as BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP, with the dK and dV
 // accumulators held in LDS instead of registers.
 //
@@ -182,12 +208,12 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                                            Policy::template GetVGradAccSmemOffset<Problem>()),
             Policy::template MakeVGradAccLdsBlockDescriptor<Problem>());
 
-        auto dk_acc_lds_window =
+        [[maybe_unused]] auto dk_acc_lds_window =
             make_tile_window(dk_acc_lds,
                              make_tuple(number<kN0>{}, number<kQKHeaddim>{}),
                              {0, 0},
                              decltype(gemm_3.MakeCBlockTile())::get_tile_distribution());
-        auto dv_acc_lds_window =
+        [[maybe_unused]] auto dv_acc_lds_window =
             make_tile_window(dv_acc_lds,
                              make_tuple(number<kN0>{}, number<kVHeaddim>{}),
                              {0, 0},
@@ -407,12 +433,14 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         auto ds_lds = make_tensor_view<address_space_enum::lds>(
             ds_lds_ptr, Policy::template MakeSGradLdsBlockDescriptor<Problem>());
 
+        // Box is [kN0][kM0]; the gemm_4 slice is kK4 rows of it, and the window
+        // therefore walks dim 0 instead of dim 1.
         auto ds_lds_window =
-            make_tile_window(ds_lds, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
+            make_tile_window(ds_lds, make_tuple(number<kN0>{}, number<kM0>{}), {0, 0});
 
         auto ds_lds_read_window =
             make_tile_window(ds_lds_window.get_bottom_tensor_view(),
-                             make_tuple(number<kM0>{}, number<kK4>{}),
+                             make_tuple(number<kN0>{}, number<kM0>{}),
                              ds_lds_window.get_window_origin(),
                              Policy::template MakeSGradRegSliceBlockDescriptor<Problem>());
 
@@ -576,11 +604,13 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // Zero the LDS accumulators. No barrier: each element is written and
         // later read-modify-written by the same thread, so there is no sharing
         // to synchronise.
+        auto dk_acc = decltype(gemm_3.MakeCBlockTile()){};
+        clear_tile(dk_acc);
+        // Each accumulator is zeroed in LDS only if it actually lives there.
+        // (These two were previously joined under an `#if 0 / #else`, which made
+        // the pair unconditional -- so a register-resident arm still paid for a
+        // dead zero-store of the accumulator it had just hoisted out.)
         {
-            auto dk_zero = decltype(gemm_3.MakeCBlockTile()){};
-            clear_tile(dk_zero);
-            store_tile(dk_acc_lds_window, dk_zero);
-
             auto dv_zero = decltype(gemm_1.MakeCBlockTile()){};
             clear_tile(dv_zero);
             store_tile(dv_acc_lds_window, dv_zero);
@@ -714,8 +744,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             // STAGE 3, P^T@OGrad^T Gemm1
             Policy::template PTFromGemm0CToGemm1A<Problem>(pt_reg_tensor, p_gemm);
             {
-                // Running sum comes from LDS and goes straight back, so the
-                // register tile is live only across its own gemm.
                 auto dv_acc = load_tile(dv_acc_lds_window);
                 gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
                 store_tile(dv_acc_lds_window, dv_acc);
@@ -723,8 +751,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             auto qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
 
-            HotLoopScheduler::template GemmStagedScheduler<1>();
-            __builtin_amdgcn_sched_barrier(0);
             // STAGE 4, OGrad@V Gemm2
             auto dp_acc = SPGradBlockTileType{};
 
@@ -744,7 +770,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             // same as the prologue: Q/dO are on TENSORcnt now
             s_wait_tensorcnt_barrier<0>();
 
-            HotLoopScheduler::template GemmStagedScheduler<2>();
             __builtin_amdgcn_sched_barrier(0);
             // STAGE 5, P^T(PGrad^T - D)
             auto ds                 = SPGradBlockTileType{};
@@ -792,24 +817,18 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             Policy::template SGradTFromGemm2CToGemm3A<Problem>(dst_reg_tensor, ds_gemm);
 
-            {
-                auto dk_acc = load_tile(dk_acc_lds_window);
-                gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
-                store_tile(dk_acc_lds_window, dk_acc);
-            }
+            gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
 
             if constexpr(kHasBiasGrad)
             {
                 // SGrad and BiasGrad use the same address in LDS.
                 block_sync_lds();
             }
-            store_tile(ds_lds_window, ds_gemm);
+            store_tile(ds_lds_window, dst_reg_tensor);
 
             block_sync_lds();
 
-            auto ds_reg_tensor      = load_tile(ds_lds_read_window);
-            auto ds_reg_tensor_next = decltype(ds_reg_tensor){};
-            move_tile_window(ds_lds_read_window, {0, kK4});
+            auto ds_reg_tensor      = load_tile_transpose(ds_lds_read_window);
             q_reg_tensor = load_tile(q_lds_read_window);
             lse          = load_tile(lse_lds_read_window);
 
@@ -820,22 +839,16 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             clear_tile(dq_acc);
 
             static_for<0, k4_loops, 1>{}([&](auto i_k4) {
-                if constexpr(i_k4 < k4_loops - 1)
-                {
-                    ds_reg_tensor_next = load_tile(ds_lds_read_window);
-                    move_tile_window(ds_lds_read_window, {0, kK4});
-                }
                 auto kt_reg_tensor_slice = get_slice_tile(kt_reg_tensor,
                                                           sequence<0, i_k4 * kK4>{},
                                                           sequence<kQKHeaddim, (i_k4 + 1) * kK4>{});
-                gemm_4(dq_acc, ds_reg_tensor, kt_reg_tensor_slice);
+                gemm_4(dq_acc,
+                       get_slice_tile(ds_reg_tensor,
+                                      sequence<0, i_k4 * kK4>{},
+                                      sequence<kM0, (i_k4 + 1) * kK4>{}),
+                       kt_reg_tensor_slice);
 
-                if constexpr(i_k4 < k4_loops - 1)
-                {
-                    ds_reg_tensor.get_thread_buffer() = ds_reg_tensor_next.get_thread_buffer();
-                }
             });
-            move_tile_window(ds_lds_read_window, {0, -kN0});
 
             do_reg_tensor = load_tile(do_lds_read_window);
             d             = load_tile(d_lds_read_window);
@@ -987,8 +1000,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             store_tile(dv_acc_lds_window, dv_acc);
         }
 
-        HotLoopScheduler::template GemmStagedScheduler<1>();
-        __builtin_amdgcn_sched_barrier(0);
 
         // STAGE 4, OGrad@V Gemm2
         auto dp_acc = SPGradBlockTileType{};
@@ -1049,22 +1060,16 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                                                   decltype(dst_reg_tensor),
                                                   decltype(ds_gemm)>(dst_reg_tensor, ds_gemm);
 
-        {
-            auto dk_acc = load_tile(dk_acc_lds_window);
-            gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
-            store_tile(dk_acc_lds_window, dk_acc);
-        }
+        gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
 
         // SGrad and Bias/BiasGrad use the same address in LDS, finish loading bias/dbias or, when
         // bias is not used, loading ds in the hot loop to reuse LDS.
         block_sync_lds();
-        store_tile(ds_lds_window, ds_gemm);
+        store_tile(ds_lds_window, dst_reg_tensor);
 
         block_sync_lds();
 
-        auto ds_reg_tensor      = load_tile(ds_lds_read_window);
-        auto ds_reg_tensor_next = decltype(ds_reg_tensor){};
-        move_tile_window(ds_lds_read_window, {0, kK4});
+        auto ds_reg_tensor      = load_tile_transpose(ds_lds_read_window);
 
         HotLoopScheduler::template GemmStagedScheduler<3>();
         __builtin_amdgcn_sched_barrier(0);
@@ -1073,19 +1078,14 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         clear_tile(dq_acc);
 
         static_for<0, k4_loops, 1>{}([&](auto i_k4) {
-            if constexpr(i_k4 < k4_loops - 1)
-            {
-                ds_reg_tensor_next = load_tile(ds_lds_read_window);
-                move_tile_window(ds_lds_read_window, {0, kK4});
-            }
             auto kt_reg_tensor_slice = get_slice_tile(
                 kt_reg_tensor, sequence<0, i_k4 * kK4>{}, sequence<kQKHeaddim, (i_k4 + 1) * kK4>{});
 
-            gemm_4(dq_acc, ds_reg_tensor, kt_reg_tensor_slice);
-            if constexpr(i_k4 < k4_loops - 1)
-            {
-                ds_reg_tensor.get_thread_buffer() = ds_reg_tensor_next.get_thread_buffer();
-            }
+            gemm_4(dq_acc,
+                   get_slice_tile(ds_reg_tensor,
+                                  sequence<0, i_k4 * kK4>{},
+                                  sequence<kM0, (i_k4 + 1) * kK4>{}),
+                   kt_reg_tensor_slice);
         });
 
         HotLoopScheduler::template GemmStagedScheduler<4>();
@@ -1094,7 +1094,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // Pull the finished accumulators out of LDS. They come back with the
         // gemm C distribution, which is what the epilogue already expects, so
         // the return type is unchanged from the register-resident pipeline.
-        auto dk_acc = load_tile(dk_acc_lds_window);
         auto dv_acc = load_tile(dv_acc_lds_window);
 
         // Results Scale
