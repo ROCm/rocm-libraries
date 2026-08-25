@@ -274,6 +274,30 @@ kind of rows, different instrument — and the sign flips.**
 corrected pipeline produces gains, not a measurement of how much a full re-tune would yield. But
 it does establish that the headroom is reachable, which none of the negative results could.
 
+## Where exactly the instrument fails — and what that means for a SMALLER catalog
+
+`--algo_method all` is not random. Its ordering correlates with single-dispatch truth at
+**Spearman +0.747** over 298 kernels. It fails specifically at the TOP. Overlap between its top-K
+and the true top-K, measured on 8 shapes with full single-dispatch truth:
+
+| overlap with the true top-K | median |
+|---|---|
+| top-5 | **0%** |
+| top-10 | 25% |
+| top-20 | 45% |
+| top-50 | 51% |
+| top-100 | **70%** |
+
+**This one table explains the whole campaign.** A RE-MAP needs the #1 kernel — top-5 overlap is
+**0%**, so it fails absolutely. A REDUCTION only needs the kept set to CONTAIN something good —
+top-100 overlap is 70%, which is why 298->100 held at parity and survived an independent A/B.
+
+**Consequence for shrinking the catalog further.** At K=50 the overlap is only **51%**, and at
+K=20 it is **45%**. A catalog selected below ~100 kernels with this instrument would be choosing
+from a set that is half wrong, and unlike the re-map the error would be silent — a missing kernel
+shows up only on the shapes that needed it, which is exactly the tail that time-weighted means
+hide. **Below ~100 kernels, `lean_select.py` needs single-dispatch measurement feeding it.**
+
 ## Scope
 
 This affects **ranking** decisions built on `--algo_method all`. It does not automatically
