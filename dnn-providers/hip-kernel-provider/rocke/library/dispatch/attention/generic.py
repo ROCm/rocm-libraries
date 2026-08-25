@@ -53,7 +53,7 @@ _UNIFIED_CAPABILITY = Capability(
         ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
         ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
     ),
-    supports_features=ATTENTION_FEATURES | frozenset({"fp8"}),
+    supports_features=ATTENTION_FEATURES,
 )
 
 

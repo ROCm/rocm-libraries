@@ -144,7 +144,8 @@ ATTENTION_DIM_VOCABULARY = (
     "kv_block_size",
 )
 
-ATTENTION_FEATURES = frozenset({"causal", "sliding_window", "sinks"})
+# NOTE: dense_pipe reuses this set but does not implement fp8, saved only by its fp16-only dtype gate.
+ATTENTION_FEATURES = frozenset({"causal", "sliding_window", "sinks", "fp8"})
 
 
 def _request_errors(req: OperatorRequest) -> list[str]:
