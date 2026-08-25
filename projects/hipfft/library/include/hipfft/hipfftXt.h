@@ -163,19 +163,21 @@ typedef void (*hipfftJITCallbackStoreD)(
 /*! @brief Set a JIT callback on a plan
    *
    * @details Set either a load or store callback to run with a plan.
-   * The type of callback is specified with the 'cbtype' parameter.
+   * The type of callback is specified with the `cbtype` parameter.
    * The callback is provided as SPIR-V on AMD platforms and as
    * LTO-IR fatbin on CUDA platforms.
    *
-   * 'cbdata' is an optional array of pointers of data that is passed
-   * to the callback function, one per visible HIP device.  hipFFT may
-   * execute the callback function on the current HIP device as well
-   * as any device used by a multi-device transform.  The
-   * corresponding pointer for a device in the array will be passed to
-   * the callback function's `cbdata` parameter when it is executed on
-   * that device.
+   *  Note: JIT callbacks cannot currently be used on multi-GPU transforms.
+   *  This support will be added in a future release of hipFFT.
    *
-   * If specified, the 'cbdata' array must remain valid until either
+   * `cbdata` is an optional array of pointers of data that is passed
+   * to the callback function.  As JIT callbacks are currently only
+   * supported for single-device transforms, this array must have one
+   * pointer element in it if it is specified.  The pointer will be
+   * passed to the callback function's `cbdata` parameter when it is
+   * executed on that device.
+   *
+   * If specified, the `cbdata` array must remain valid until either
    * the plan is destroyed or callbacks are cleared from the plan.
    *
    * This function must be called after the plan is allocated using

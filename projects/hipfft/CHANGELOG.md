@@ -17,6 +17,9 @@ Documentation for hipFFT is available at
   On AMD platforms, the device function is provided as SPIR-V.  On CUDA platforms, the device function is provided as
   LTO-IR fatbin.
 
+  These APIs are not currently compatible with multi-GPU transforms.  This
+  support will be added in a future release of hipFFT.
+
 ### Changed
 
 * Modified the rocFFT backend's implementation details of hipFFT so that cuFFT backend's
