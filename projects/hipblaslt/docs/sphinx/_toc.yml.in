@@ -36,7 +36,7 @@ subtrees:
   - file: how-to/how-to-detect-nan
     title: Detect NaN in GEMM output
   - file: how-to/how-to-general-batched-gemm
-    title: General Batched GEMM
+    title: Use general batched GEMM
 
 - caption: Examples
   entries:

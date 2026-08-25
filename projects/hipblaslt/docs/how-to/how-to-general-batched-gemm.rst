@@ -19,17 +19,6 @@ Each batch can use separate memory allocations for ``A``, ``B``, ``C``, and ``D`
 This guide covers bench usage, the API workflow, a complete standalone example,
 and common pitfalls.
 
-.. note::
-
-   The word *general* appears twice in this topic, with different meanings.
-   In GEMM (General Matrix-Matrix Multiplication), general is standard BLAS
-   terminology for the usual rectangular matrix multiply (as opposed to symmetric,
-   triangular, or other specialized variants). In General Batched GEMM, general
-   describes the batching layout: each batch matrix may live at a separate device
-   address, referenced through a pointer array, rather than in one contiguous
-   strided buffer. The clearer synonym is Pointer Array Batched GEMM, which is
-   what ``HIPBLASLT_BATCH_MODE_POINTER_ARRAY`` selects.
-
 Prerequisites: A ROCm installation with hipBLASLt built for your target GPU
 architecture. For build instructions, see
 :doc:`Build from source <../install/building-installing-hipblaslt>`.
@@ -37,12 +26,17 @@ architecture. For build instructions, see
 What is General Batched GEMM?
 =============================
 
-General Batched GEMM (also called Pointer Array Batched GEMM) runs multiple
-GEMM operations where:
+In GEMM, general is standard BLAS terminology for the usual rectangular matrix multiply (as
+opposed to symmetric, triangular, or other specialized variants). In general batched GEMM, general
+refers to the batching layout: each batch matrix may live at a separate device address,
+referenced through a pointer array, rather than in one contiguous strided buffer. This is also
+known as pointer array Batched GEMM.
+
+General Batched GEMM runs multiple GEMM operations where:
 
 * Each batch has its own matrices in separate memory locations.
 * Matrices are referenced through device pointer arrays (``A[]``, ``B[]``, ``C[]``, ``D[]``).
-* Batch mode is set to ``HIPBLASLT_BATCH_MODE_POINTER_ARRAY`` (value ``1``).
+* Batch mode (``hipblasltBatchMode_t``) is set to ``HIPBLASLT_BATCH_MODE_POINTER_ARRAY`` ( or ``1``).
 * Strided-batch offset attributes are not used; each pointer in the array
   identifies the base address of one matrix.
 
@@ -73,8 +67,8 @@ Memory layout:
 Characteristics:
 
 * All matrices live in one contiguous buffer per operand.
-* Uniform stride between batches, set with
-  ``HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET``.
+* Batch mode (``hipblasltBatchMode_t``) is set to ``HIPBLASLT_BATCH_MODE_STRIDED`` ( or ``0``).
+* Uniform stride between batches set with ``HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET``.
 * More memory-efficient and often slightly better cache locality.
 * Less flexible: requires contiguous allocation.
 
@@ -118,7 +112,7 @@ Quick comparison
    :header: "Feature", "Strided Batched", "General Batched"
    :widths: 30, 35, 35
 
-   "Batch mode value", "``0`` (``HIPBLASLT_BATCH_MODE_STRIDED``)", "``1`` (``HIPBLASLT_BATCH_MODE_POINTER_ARRAY``)"
+   "Batch mode value (``hipblasltBatchMode_t``)", "``0`` (``HIPBLASLT_BATCH_MODE_STRIDED``)", "``1`` (``HIPBLASLT_BATCH_MODE_POINTER_ARRAY``)"
    "Memory layout", "Single contiguous buffer", "Separate allocations"
    "Stride attributes", "Required (uniform stride)", "Not used"
    "Setup complexity", "Simple", "Moderate (pointer arrays on device)"
