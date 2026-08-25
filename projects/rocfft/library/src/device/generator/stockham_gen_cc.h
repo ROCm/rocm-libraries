@@ -61,7 +61,6 @@ struct StockhamKernelCC : public StockhamKernel
     Variable tid_hor{"tid_hor", rtc_index_type(IndexType::U32)}; // id along row
     Variable stride_in{"stride_in", "const index_type", true};
     Variable stride_out{"stride_out", "const index_type", true};
-    Variable length_M_blue{"length_M_blue", "const " + std::string(rtc_index_type(IndexType::U32))};
 
     // large twiddle support
     Multiply ltwd_entries{Parens{ShiftLeft{1, large_twiddle_base}}, 3};
