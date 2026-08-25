@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/LineStore.hpp>
 #include <map>
@@ -17,6 +18,9 @@
 #include <vector>
 
 #if defined(__linux__)
+#include <cerrno>
+#include <csignal>
+#include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -99,6 +103,31 @@ TEST_F(TestLineStore, MalformedLineIsSkippedNotFatal)
     EXPECT_EQ(records[1], "good2");
 }
 
+/// A record carrying a newline would be read back as two records, silently splitting one
+/// caller's entry into a valid line plus a fragment the parse callback either rejects or,
+/// worse, accepts as a different record. appendLine() rejects it at the boundary instead.
+///
+/// Falsifying mutation: drop the `line.find('\n')` guard in appendLine() -- the append
+/// reports OK and the read-back returns three records instead of one.
+TEST_F(TestLineStore, ALineCarryingANewlineIsRejected)
+{
+    auto [shard, openStatus] = openLineStore(_shardPath, "v1");
+    ASSERT_EQ(openStatus, LineStoreStatus::OK);
+    ASSERT_TRUE(shard.has_value());
+
+    ASSERT_EQ(lockLineStore(*shard), LineStoreStatus::OK);
+    EXPECT_EQ(appendLine(*shard, "front\nback"), LineStoreStatus::IO_ERROR);
+    EXPECT_EQ(appendLine(*shard, "trailing\n"), LineStoreStatus::IO_ERROR);
+    EXPECT_EQ(appendLine(*shard, "clean"), LineStoreStatus::OK);
+    unlockLineStore(*shard);
+
+    const auto [records, readStatus] = readAllLines(*shard, parseLine);
+    EXPECT_EQ(readStatus, LineStoreStatus::OK);
+    ASSERT_EQ(records.size(), 1U)
+        << "a rejected line still reached the file and split into extra records";
+    EXPECT_EQ(records.front(), "clean");
+}
+
 TEST_F(TestLineStore, VersionMismatchOnReadIsADeclineNotAThrow)
 {
     {
@@ -111,6 +140,92 @@ TEST_F(TestLineStore, VersionMismatchOnReadIsADeclineNotAThrow)
 
     EXPECT_FALSE(reopened.first.has_value());
     EXPECT_EQ(reopened.second, LineStoreStatus::VERSION_MISMATCH);
+}
+
+/// A first write interrupted before its newline leaves bytes that hold no complete line.
+/// Stamping the version line after that fragment would make the fragment line 0, so every
+/// later open reports VERSION_MISMATCH with nothing able to repair it.
+///
+/// Falsifying mutation: drop the truncateLineStoreToEmpty() call in openLineStore(). The
+/// below still reports OK; the second one reports VERSION_MISMATCH.
+TEST_F(TestLineStore, ATornFirstWriteIsRepairedNotInheritedForever)
+{
+    {
+        std::ofstream fragment(_shardPath, std::ios::binary);
+        ASSERT_TRUE(fragment.is_open());
+        // The interrupted first write: a partial version line, no newline.
+        fragment << "v";
+    }
+
+    {
+        auto [shard, openStatus] = openLineStore(_shardPath, "v1");
+        ASSERT_EQ(openStatus, LineStoreStatus::OK);
+        ASSERT_TRUE(shard.has_value());
+        ASSERT_EQ(lockLineStore(*shard), LineStoreStatus::OK);
+        EXPECT_EQ(appendLine(*shard, "after-repair"), LineStoreStatus::OK);
+        unlockLineStore(*shard);
+    }
+
+    auto [shard, openStatus] = openLineStore(_shardPath, "v1");
+    EXPECT_EQ(openStatus, LineStoreStatus::OK)
+        << "the torn fragment survived as line 0, so this shard is unreadable for good";
+    ASSERT_TRUE(shard.has_value());
+    const auto [records, readStatus] = readAllLines(*shard, parseLine);
+    EXPECT_EQ(readStatus, LineStoreStatus::OK);
+    ASSERT_EQ(records.size(), 1U);
+    EXPECT_EQ(records.front(), "after-repair");
+}
+
+/// Every reader of a shard shares the registry's single descriptor, and with it one file
+/// offset. Readers must therefore serialize in-process: interleaved seek-then-read pairs
+/// hand each reader a truncated or duplicated view of the file.
+///
+/// Falsifying mutation: make the shared acquisition in `acquireLineStoreLock()` take
+/// `accessMutex` with a shared_mutex's `lock_shared()`. Readers then run concurrently and
+/// the counts below come back short. The shard is sized past the 64 KiB read buffer so a
+/// read takes several syscalls, which widens the window enough to catch reliably.
+TEST_F(TestLineStore, ConcurrentReadersEachSeeTheWholeShard)
+{
+    constexpr int LINE_COUNT = 8000;
+    {
+        auto [shard, openStatus] = openLineStore(_shardPath, "v1");
+        ASSERT_EQ(openStatus, LineStoreStatus::OK);
+        ASSERT_TRUE(shard.has_value());
+        ASSERT_EQ(lockLineStore(*shard), LineStoreStatus::OK);
+        for(int i = 0; i < LINE_COUNT; ++i)
+        {
+            ASSERT_EQ(appendLine(*shard, "line-" + std::to_string(i)), LineStoreStatus::OK);
+        }
+        unlockLineStore(*shard);
+    }
+
+    constexpr int READER_COUNT = 8;
+    std::vector<size_t> counts(READER_COUNT, 0);
+    std::vector<std::thread> readers;
+    readers.reserve(READER_COUNT);
+    for(int t = 0; t < READER_COUNT; ++t)
+    {
+        readers.emplace_back([this, t, &counts]() {
+            auto [shard, openStatus] = openLineStore(_shardPath, "v1");
+            ASSERT_EQ(openStatus, LineStoreStatus::OK);
+            ASSERT_TRUE(shard.has_value());
+            const auto [records, readStatus] = readAllLines(*shard, parseLine);
+            ASSERT_EQ(readStatus, LineStoreStatus::OK);
+            counts[static_cast<size_t>(t)] = records.size();
+        });
+    }
+    for(auto& reader : readers)
+    {
+        reader.join();
+    }
+
+    for(int t = 0; t < READER_COUNT; ++t)
+    {
+        EXPECT_EQ(counts[static_cast<size_t>(t)], static_cast<size_t>(LINE_COUNT))
+            << "reader " << t
+            << " saw a partial shard: concurrent readers shared one "
+               "file offset";
+    }
 }
 
 TEST_F(TestLineStore, MultipleThreadsInOneProcessAppendWithoutCorruption)
@@ -313,26 +428,62 @@ std::optional<LockProbeHandle> spawnLockProbe(const std::filesystem::path& helpe
     return LockProbeHandle{pid, pipeFds[0]};
 }
 
-/// Waits for a spawned probe to finish and returns its reported elapsedMs, or nullopt
-/// on any usage/open/lock failure.
+/// Waits for a spawned probe to finish and returns its reported elapsedMs, or nullopt on
+/// any usage/open/lock failure -- including the probe never finishing.
+///
+/// Every wait here is bounded. A nesting or release regression can leave the probe
+/// blocked on the shard forever, and an unbounded read-to-EOF plus waitpid() would turn
+/// that into a CTest timeout minutes later, naming the clock instead of the invariant.
+/// On the deadline the probe is killed and reaped, and the caller sees a decline.
 std::optional<long long> collectLockProbe(const LockProbeHandle& handle)
 {
+    constexpr auto PROBE_DEADLINE = std::chrono::seconds(30);
+    const auto deadline = std::chrono::steady_clock::now() + PROBE_DEADLINE;
+
     std::string output;
     std::array<char, 256> buffer{};
+    bool timedOut = false;
     for(;;)
     {
+        pollfd waitFor{handle.readFd, POLLIN, 0};
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if(remaining.count() <= 0)
+        {
+            timedOut = true;
+            break;
+        }
+        const int ready = ::poll(&waitFor, 1, static_cast<int>(remaining.count()));
+        if(ready < 0 && errno == EINTR)
+        {
+            continue;
+        }
+        if(ready <= 0)
+        {
+            timedOut = ready == 0;
+            break;
+        }
         const ssize_t count = ::read(handle.readFd, buffer.data(), buffer.size());
+        if(count < 0 && errno == EINTR)
+        {
+            continue;
+        }
         if(count <= 0)
         {
-            break;
+            break; // EOF: the probe closed its stdout, so it is exiting.
         }
         output.append(buffer.data(), static_cast<size_t>(count));
     }
     ::close(handle.readFd);
 
+    if(timedOut)
+    {
+        ::kill(handle.pid, SIGKILL);
+    }
+
     int childStatus = 0;
     ::waitpid(handle.pid, &childStatus, 0);
-    if(!WIFEXITED(childStatus) || WEXITSTATUS(childStatus) != 0)
+    if(timedOut || !WIFEXITED(childStatus) || WEXITSTATUS(childStatus) != 0)
     {
         return std::nullopt;
     }
@@ -569,7 +720,7 @@ TEST_F(TestLineStore, TwoPathsToOneInodeShareOneLock)
 /// the exclusive lock to shared and the nested release drops it outright -- the probe
 /// process's `elapsedMs` collapses to near 0 despite the parent still holding the outer
 /// lock. (Standalone repro: reverting the nesting rule in this exact shape also
-/// self-deadlocks the calling thread on `accessMutex`, since `std::shared_timed_mutex`
+/// self-deadlocks the calling thread on `accessMutex`, since `std::mutex`
 /// is not recursive -- confirmed separately; either failure mode is caught by removing
 /// the nesting rule, this test targets the data-race shape specifically.)
 TEST_F(TestLineStore, NestedReadAllLinesUnderAnExclusiveLockDoesNotReleaseIt)
@@ -609,7 +760,7 @@ TEST_F(TestLineStore, NestedReadAllLinesUnderAnExclusiveLockDoesNotReleaseIt)
 /// apart from "the destructor reset only its own bookkeeping and left the native fcntl
 /// lock held."
 ///
-/// Falsifying mutation: in `releaseLineStoreLock()`, reset `entry.mode`/`entry.depth`
+/// Falsifying mutation: in `releaseLineStoreLock()`, clear this thread's depth entry
 /// and release `accessMutex` but skip the `releaseNativeLineStoreLock()` call --
 /// bookkeeping looks released; the native lock is not. This process's own re-open (the
 /// test above) passes regardless; a fresh second process's `elapsedMs` here does not.

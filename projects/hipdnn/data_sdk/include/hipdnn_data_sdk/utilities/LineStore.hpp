@@ -25,14 +25,21 @@
 // POSIX failure mode, but the same structure is used on both platforms so that the two
 // mean the same thing.
 //
+// The in-process mutex is held exclusively even for a read. The threads of one process
+// share the entry's single descriptor, and with it one file offset, so two concurrent
+// reads would interleave their seek-then-read pairs and each get missing or duplicated
+// bytes. A POSIX read lock is per (process, inode) as well, so the first reader to
+// finish would release the lock every other reader still relies on. Reads are rare and a
+// shard is small, so the mutex serializes them instead of counting them.
+//
 // Nesting is handled by the registry rather than by caller discipline. Both lock modes
 // cover the whole file, so a shared acquisition nested inside an exclusive one is a
 // POSIX lock *conversion* -- the exclusive lock is replaced, and the inner release then
 // drops it outright, mid-critical-section -- and on Win32 a legal same-handle overlap
 // whose first release frees the exclusive lock. Either way the outer writer would lose
-// exclusivity. The entry therefore tracks the mode this process holds and makes an inner
-// shared acquisition a no-op, so readAllLines() is safe to call whether or not the caller
-// already holds the shard exclusively.
+// exclusivity. The registry therefore tracks each THREAD's nesting depth and makes an
+// inner shared acquisition a no-op, so readAllLines() is safe to call whether or not the
+// caller already holds the shard exclusively.
 //
 // Adapted from miopen::LockFile (projects/miopen/src/include/miopen/lock_file.hpp and
 // file_lock.hpp), which solves the same problem, with four deliberate differences: it
@@ -56,7 +63,6 @@
 #include <mutex>
 #include <new>
 #include <optional>
-#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -113,15 +119,6 @@ inline bool isValidLineStoreHandle(NativeLineStoreHandle handle) noexcept
     return handle >= 0;
 }
 #endif
-
-/// Which lock this process currently holds on a shard, tracked so a nested acquisition
-/// can be recognised instead of silently downgrading the outer one.
-enum class LineStoreLockMode
-{
-    NONE,
-    SHARED,
-    EXCLUSIVE,
-};
 
 // Acquires a whole-file lock, blocking until held. POSIX: fcntl() F_SETLKW with F_WRLCK
 // or F_RDLCK. Win32: LockFileEx() over the same range, with LOCKFILE_EXCLUSIVE_LOCK only
@@ -241,12 +238,10 @@ inline std::optional<LineStoreFileId> queryLineStoreFileId(NativeLineStoreHandle
 struct LineStoreRegistryEntry
 {
     NativeLineStoreHandle handle = INVALID_LINE_STORE_HANDLE;
-    /// Serializes this process's threads ahead of the OS file lock. Always taken first.
-    std::shared_timed_mutex accessMutex;
-    /// What the thread currently holding the entry holds, and how deep. Written only by
-    /// that thread, while it owns accessMutex, so it needs no lock of its own.
-    LineStoreLockMode mode = LineStoreLockMode::NONE;
-    size_t depth = 0;
+    /// Serializes this process's threads ahead of the OS file lock. Always taken first,
+    /// and always exclusively -- see the concurrency note at the top of this header for
+    /// why a shared read cannot share this entry's descriptor.
+    std::mutex accessMutex;
 };
 
 /// Per-thread nesting depth for one shard.
@@ -323,52 +318,90 @@ inline std::optional<LineStoreFileId>
 #endif
 }
 
-/// The already-registered entry for @p id, or nullptr.
-inline LineStoreRegistryEntry* findLineStoreEntry(const LineStoreFileId& id) noexcept
+/// Opens the shard file at @p path, creating it if absent.
+///
+/// Win32 asks for write access as well as append access, which POSIX gets from O_RDWR.
+/// Truncating a torn first write (see openLineStore()) has to go through THIS handle: it
+/// is the one holding the shard's lock, and a second handle would be subject to that lock
+/// on Win32 and would drop it outright on POSIX. The cost is that a Win32 write now lands
+/// at the file pointer rather than atomically at end-of-file, so appendRawLineStoreLine()
+/// seeks first. Nothing relies on lock-free append atomicity: every writer holds the
+/// exclusive lock, and every reader holds the shared one.
+inline NativeLineStoreHandle openLineStoreHandle(const std::filesystem::path& path)
 {
-    const std::lock_guard<std::mutex> guard(lineStoreRegistryMutex());
-    auto& entries = lineStoreRegistry();
-    const auto found = entries.find(id);
-    return found == entries.end() ? nullptr : found->second.get();
+#if defined(_WIN32)
+    return CreateFileW(path.wstring().c_str(),
+                       FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE,
+                       nullptr,
+                       OPEN_ALWAYS,
+                       FILE_ATTRIBUTE_NORMAL,
+                       nullptr);
+#else
+    return ::open(path.c_str(), O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+#endif
 }
 
-/// Registers @p handle as the permanent descriptor for the file it refers to.
+/// The registry entry for the shard at @p path, opening and registering the file on its
+/// first use in this process.
 ///
-/// Called only after peekLineStoreFileId() found no existing entry, but the lookup and
-/// this call are not atomic, so a concurrent opener may have registered the same file in
-/// between. That is the one case where a redundant descriptor exists, and it is closed
-/// here -- safely, because it is brand new and no lock has ever been taken through it, so
-/// there is nothing for the close to drop.
+/// Identify, open and register run as ONE critical section under the registry mutex.
+/// Split, two threads racing the same first use both open the file; the loser then closes
+/// its redundant descriptor, and on POSIX closing any descriptor for a file drops every
+/// lock the process holds on it -- including the one the winner is inside. Serialized,
+/// the loser finds the winner's entry before it opens anything.
 ///
-/// @return nullptr if the file's identity could not be determined, in which case
-///     @p handle is closed and the caller must decline.
-inline LineStoreRegistryEntry* adoptLineStoreHandle(NativeLineStoreHandle handle) noexcept
+/// @return nullptr if the file could not be opened or identified, in which case the
+///     caller must decline.
+inline LineStoreRegistryEntry* openOrFindLineStoreEntry(const std::filesystem::path& path) noexcept
 {
-    const auto id = queryLineStoreFileId(handle);
-    if(!id)
-    {
-        closeLineStoreHandle(handle);
-        return nullptr;
-    }
-
+    NativeLineStoreHandle handle = INVALID_LINE_STORE_HANDLE;
     try
     {
         const std::lock_guard<std::mutex> guard(lineStoreRegistryMutex());
         auto& entries = lineStoreRegistry();
-        const auto found = entries.find(*id);
-        if(found != entries.end())
+
+        if(const auto known = peekLineStoreFileId(path))
         {
+            const auto found = entries.find(*known);
+            if(found != entries.end())
+            {
+                return found->second.get();
+            }
+        }
+
+        handle = openLineStoreHandle(path);
+        if(!isValidLineStoreHandle(handle))
+        {
+            return nullptr;
+        }
+
+        const auto id = queryLineStoreFileId(handle);
+        if(!id)
+        {
+            // Nothing has locked through this descriptor, and no registered descriptor
+            // for its file exists -- the registry mutex is held and the lookup above
+            // found none -- so closing it drops no lock.
             closeLineStoreHandle(handle);
-            return found->second.get();
+            return nullptr;
         }
 
         auto entry = std::make_unique<LineStoreRegistryEntry>();
         entry->handle = handle;
-        return entries.emplace(*id, std::move(entry)).first->second.get();
+        LineStoreRegistryEntry* const registered
+            = entries.emplace(*id, std::move(entry)).first->second.get();
+        // Owned by the registry from here on, which never closes a descriptor. Blanked
+        // only now: emplace() can throw bad_alloc, and until it returns this is still the
+        // only reference to the descriptor the catch block below needs to close.
+        handle = INVALID_LINE_STORE_HANDLE;
+        return registered;
     }
     catch(const std::bad_alloc&)
     {
-        closeLineStoreHandle(handle);
+        if(isValidLineStoreHandle(handle))
+        {
+            closeLineStoreHandle(handle);
+        }
         return nullptr;
     }
 }
@@ -385,13 +418,11 @@ inline LineStoreRegistryEntry* adoptLineStoreHandle(NativeLineStoreHandle handle
 class LineStoreShard
 {
 public:
-    LineStoreShard() = delete;
     LineStoreShard(const LineStoreShard&) = delete;
     LineStoreShard& operator=(const LineStoreShard&) = delete;
 
     LineStoreShard(LineStoreShard&& other) noexcept
-        : _path(std::move(other._path))
-        , _entry(other._entry)
+        : _entry(other._entry)
         , _locked(other._locked)
     {
         other._entry = nullptr;
@@ -403,7 +434,6 @@ public:
         if(this != &other)
         {
             releaseIfLocked();
-            _path = std::move(other._path);
             _entry = other._entry;
             _locked = other._locked;
             other._entry = nullptr;
@@ -426,14 +456,10 @@ public:
 private:
     friend class detail::LineStoreAccess;
 
-    explicit LineStoreShard(std::filesystem::path path)
-        : _path(std::move(path))
-    {
-    }
+    LineStoreShard() = default;
 
     void releaseIfLocked() noexcept;
 
-    std::filesystem::path _path;
     detail::LineStoreRegistryEntry* _entry = nullptr;
     bool _locked = false;
 };
@@ -441,9 +467,12 @@ private:
 namespace detail
 {
 
-// Appends @p line plus a trailing '\n' as a single OS-level write, relying on the
-// handle's atomic-append mode (O_APPEND on POSIX, FILE_APPEND_DATA on Win32) so a
-// concurrent lock-free reader never observes a torn line.
+// Appends @p line plus a trailing '\n'.
+//
+// POSIX writes through an O_APPEND descriptor, which places every write at end-of-file
+// atomically. Win32 has no equivalent for a handle that also carries write access (see
+// openLineStoreHandle()), so the file pointer is moved to the end first; the caller's
+// exclusive lock is what makes that pair safe against another writer.
 //
 // Not noexcept: the staging buffer allocates, and a shard is allowed to grow without
 // bound, so a failed allocation must surface as IO_ERROR rather than terminate the host.
@@ -456,6 +485,11 @@ inline bool appendRawLineStoreLine(NativeLineStoreHandle handle, std::string_vie
 
     size_t written = 0;
 #if defined(_WIN32)
+    LARGE_INTEGER end{};
+    if(SetFilePointerEx(handle, end, nullptr, FILE_END) == 0)
+    {
+        return false;
+    }
     while(written < buffer.size())
     {
         DWORD chunk = 0;
@@ -491,6 +525,24 @@ inline bool appendRawLineStoreLine(NativeLineStoreHandle handle, std::string_vie
     }
 #endif
     return true;
+}
+
+// Discards a shard's entire contents through @p handle, which must already hold the
+// shard's exclusive lock. Truncating by path instead would need a second handle: on Win32
+// that handle is subject to the lock this one holds, and on POSIX opening and closing one
+// drops every lock this process holds on the file.
+inline bool truncateLineStoreToEmpty(NativeLineStoreHandle handle) noexcept
+{
+#if defined(_WIN32)
+    LARGE_INTEGER origin{};
+    if(SetFilePointerEx(handle, origin, nullptr, FILE_BEGIN) == 0)
+    {
+        return false;
+    }
+    return SetEndOfFile(handle) != 0;
+#else
+    return ::ftruncate(handle, 0) == 0;
+#endif
 }
 
 // Reads the entire contents of @p handle from offset zero; used for both the version-line
@@ -578,9 +630,9 @@ inline std::vector<std::string> splitLineStoreLines(const std::string& content)
 class LineStoreAccess
 {
 public:
-    static LineStoreShard make(std::filesystem::path path)
+    static LineStoreShard make()
     {
-        return LineStoreShard(std::move(path));
+        return {};
     }
 
     static LineStoreRegistryEntry* entry(const LineStoreShard& shard) noexcept
@@ -610,7 +662,7 @@ public:
 };
 
 /// Takes the shard's in-process mutex and then its file lock, in that order, and records
-/// the mode on the entry.
+/// this thread's nesting depth.
 ///
 /// A shared request made by a thread that already holds the shard exclusively is
 /// satisfied by the exclusive lock and recorded as extra depth: re-acquiring at the OS
@@ -640,33 +692,19 @@ inline LineStoreStatus acquireLineStoreLock(LineStoreRegistryEntry& entry, bool 
         return LineStoreStatus::LOCK_FAILED;
     }
 
-    if(exclusive)
-    {
-        entry.accessMutex.lock();
-    }
-    else
-    {
-        entry.accessMutex.lock_shared();
-    }
+    // Exclusive for both modes; see accessMutex's declaration. The native lock still
+    // distinguishes them, so other PROCESSES may read this shard concurrently.
+    entry.accessMutex.lock();
 
     const auto status = acquireNativeLineStoreLock(entry.handle, exclusive);
     if(status != LineStoreStatus::OK)
     {
         // Release the mutex on the failure path; leaving it held would wedge every later
         // acquisition on this shard.
-        if(exclusive)
-        {
-            entry.accessMutex.unlock();
-        }
-        else
-        {
-            entry.accessMutex.unlock_shared();
-        }
+        entry.accessMutex.unlock();
         return status;
     }
 
-    entry.mode = exclusive ? LineStoreLockMode::EXCLUSIVE : LineStoreLockMode::SHARED;
-    entry.depth = 1;
     lineStoreThreadDepth(&entry) = 1;
     return LineStoreStatus::OK;
 }
@@ -694,20 +732,36 @@ inline void releaseLineStoreLock(LineStoreRegistryEntry& entry) noexcept
         return;
     }
 
-    const bool exclusive = entry.mode == LineStoreLockMode::EXCLUSIVE;
-    entry.mode = LineStoreLockMode::NONE;
-    entry.depth = 0;
-
     releaseNativeLineStoreLock(entry.handle);
-    if(exclusive)
-    {
-        entry.accessMutex.unlock();
-    }
-    else
-    {
-        entry.accessMutex.unlock_shared();
-    }
+    entry.accessMutex.unlock();
 }
+
+/// Releases one acquisition when it goes out of scope, however the scope is left.
+///
+/// readAllLines() hands each line to a caller-supplied callback, which may throw anything
+/// at all -- including a type no catch clause here names. A leaked shard lock is not a
+/// local failure: the in-process mutex and the OS file lock both stay held for the life
+/// of the process, wedging every later reader and writer, in this process and others.
+class LineStoreLockScope
+{
+public:
+    explicit LineStoreLockScope(LineStoreRegistryEntry& entry) noexcept
+        : _entry(&entry)
+    {
+    }
+    LineStoreLockScope(const LineStoreLockScope&) = delete;
+    LineStoreLockScope& operator=(const LineStoreLockScope&) = delete;
+    LineStoreLockScope(LineStoreLockScope&&) = delete;
+    LineStoreLockScope& operator=(LineStoreLockScope&&) = delete;
+
+    ~LineStoreLockScope()
+    {
+        releaseLineStoreLock(*_entry);
+    }
+
+private:
+    LineStoreRegistryEntry* _entry;
+};
 
 } // namespace detail
 
@@ -726,56 +780,22 @@ inline void LineStoreShard::releaseIfLocked() noexcept
 /// never crashes an older reader of the same cache directory.
 ///
 /// A file that is non-empty but holds no complete line is a first write that was
-/// interrupted; it is re-stamped here rather than declined, since otherwise that shard
-/// would report VERSION_MISMATCH forever with nothing able to repair it.
+/// interrupted. The fragment is truncated away before the version line is stamped, since
+/// stamping after it would leave the fragment as line 0 and report VERSION_MISMATCH
+/// forever with nothing able to repair it. A truncation the platform refuses reports
+/// IO_ERROR rather than producing that unrepairable shard.
 ///
 /// @return The open shard and OK on success; nullopt and a non-OK status otherwise.
 inline std::pair<std::optional<LineStoreShard>, LineStoreStatus>
     openLineStore(const std::filesystem::path& path, std::string_view expectedVersion)
 {
-    detail::LineStoreRegistryEntry* entry = nullptr;
-
-    // Reuse this process's existing descriptor when the shard is already known. This is
-    // not an optimization: opening a second descriptor for a file already locked by this
-    // process, and later closing it, would release that lock (POSIX fcntl locks belong
-    // to the process and the inode, not to the descriptor).
-    if(const auto known = detail::peekLineStoreFileId(path))
-    {
-        entry = detail::findLineStoreEntry(*known);
-    }
-
+    detail::LineStoreRegistryEntry* const entry = detail::openOrFindLineStoreEntry(path);
     if(entry == nullptr)
     {
-#if defined(_WIN32)
-        const HANDLE nativeHandle = CreateFileW(path.wstring().c_str(),
-                                                FILE_GENERIC_READ | FILE_APPEND_DATA,
-                                                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                                nullptr,
-                                                OPEN_ALWAYS,
-                                                FILE_ATTRIBUTE_NORMAL,
-                                                nullptr);
-        if(nativeHandle == INVALID_HANDLE_VALUE)
-        {
-            return {std::nullopt, LineStoreStatus::OPEN_FAILED};
-        }
-#else
-        const int nativeHandle
-            = ::open(path.c_str(), O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
-        if(nativeHandle < 0)
-        {
-            return {std::nullopt, LineStoreStatus::OPEN_FAILED};
-        }
-#endif
-
-        // Hands the descriptor to the registry, which owns it from here on.
-        entry = detail::adoptLineStoreHandle(nativeHandle);
-        if(entry == nullptr)
-        {
-            return {std::nullopt, LineStoreStatus::OPEN_FAILED};
-        }
+        return {std::nullopt, LineStoreStatus::OPEN_FAILED};
     }
 
-    LineStoreShard shard = detail::LineStoreAccess::make(path);
+    LineStoreShard shard = detail::LineStoreAccess::make();
     detail::LineStoreAccess::setEntry(shard, entry);
 
     // Locked only long enough to check/write the version line, so two racing creators
@@ -784,43 +804,42 @@ inline std::pair<std::optional<LineStoreShard>, LineStoreStatus>
     {
         return {std::nullopt, LineStoreStatus::LOCK_FAILED};
     }
+    const detail::LineStoreLockScope held(*entry);
 
-    // Everything between here and the release allocates against a shard with no size
-    // bound, so it is wrapped: an escaping bad_alloc would leave the exclusive lock held
-    // for the life of the process, wedging every later writer, including other processes.
+    // Everything below allocates against a shard with no size bound, so it is wrapped: an
+    // escaping bad_alloc would abandon the open, and the exclusive lock with it.
     try
     {
         const auto content = detail::readAllLineStoreBytes(entry->handle);
         if(!content)
         {
-            detail::releaseLineStoreLock(*entry);
             return {std::nullopt, LineStoreStatus::IO_ERROR};
         }
 
         const auto lines = detail::splitLineStoreLines(*content);
         if(lines.empty())
         {
-            // Empty, or a torn first write that never reached its newline. Either way
-            // there is no readable version line yet, so stamp one.
+            // Empty, or a torn first write that never reached its newline. Clear the
+            // fragment before stamping, through the same handle that holds the lock.
+            if(!content->empty() && !detail::truncateLineStoreToEmpty(entry->handle))
+            {
+                return {std::nullopt, LineStoreStatus::IO_ERROR};
+            }
             if(!detail::appendRawLineStoreLine(entry->handle, expectedVersion))
             {
-                detail::releaseLineStoreLock(*entry);
                 return {std::nullopt, LineStoreStatus::IO_ERROR};
             }
         }
         else if(lines.front() != expectedVersion)
         {
-            detail::releaseLineStoreLock(*entry);
             return {std::nullopt, LineStoreStatus::VERSION_MISMATCH};
         }
     }
-    catch(const std::exception&)
+    catch(...)
     {
-        detail::releaseLineStoreLock(*entry);
         return {std::nullopt, LineStoreStatus::IO_ERROR};
     }
 
-    detail::releaseLineStoreLock(*entry);
     return {std::optional<LineStoreShard>(std::move(shard)), LineStoreStatus::OK};
 }
 
@@ -892,10 +911,12 @@ inline LineStoreStatus appendLine(LineStoreShard& shard, std::string_view line)
 ///
 /// @tparam ParseLine Caller callback type, deduced from the argument (std::function is a
 ///     non-deduced context that would force naming Record explicitly).
-/// @param shard Takes the shard's shared lock for the duration of the read, which is what
-///     makes the read legal on Win32, where the file lock is mandatory rather than
-///     advisory. Safe to call while already holding the shard exclusively: the
-///     acquisition is recognised as nested and the outer lock is left intact.
+/// @param shard Takes the shard's shared FILE lock for the duration of the read, which is
+///     what makes the read legal on Win32, where the file lock is mandatory rather than
+///     advisory. Other processes may read concurrently; the threads of this one may not,
+///     since they share the descriptor. Safe to call while already holding the shard
+///     exclusively: the acquisition is recognised as nested and the outer lock is left
+///     intact.
 /// @return Parsed records in file order and OK; an empty vector and non-OK status if the
 ///     shard could not be read. Never throws.
 template <typename ParseLine,
@@ -913,13 +934,13 @@ std::pair<std::vector<Record>, LineStoreStatus> readAllLines(const LineStoreShar
     {
         return {{}, LineStoreStatus::LOCK_FAILED};
     }
+    const detail::LineStoreLockScope held(*entry);
 
     try
     {
         const auto content = detail::readAllLineStoreBytes(entry->handle);
         if(!content)
         {
-            detail::releaseLineStoreLock(*entry);
             return {{}, LineStoreStatus::IO_ERROR};
         }
 
@@ -933,14 +954,13 @@ std::pair<std::vector<Record>, LineStoreStatus> readAllLines(const LineStoreShar
                 records.push_back(std::move(*parsed));
             }
         }
-        detail::releaseLineStoreLock(*entry);
         return {std::move(records), LineStoreStatus::OK};
     }
-    catch(const std::exception&)
+    catch(...)
     {
-        // A shard may grow without bound, so reading one can exhaust memory. That is a
-        // decline like any other, not a reason to terminate the host process.
-        detail::releaseLineStoreLock(*entry);
+        // A shard may grow without bound, so reading one can exhaust memory, and
+        // @p parseLine is caller code that may throw anything. Both are declines like any
+        // other, not a reason to terminate the host process.
         return {{}, LineStoreStatus::IO_ERROR};
     }
 }
