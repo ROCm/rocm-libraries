@@ -292,6 +292,21 @@ class WgradConvSpec:
     epilogue: str = "default"
     async_dma: bool = False
     unroll_k: bool = False
+    # Runtime-loop (scf.for) register-staged double buffer: prefetch the next
+    # K-tile's coalesced DRAM reads into VGPRs while the current tile's MFMA
+    # runs, hiding global-load latency WITHOUT Python-unrolling the (typically
+    # thousands of) K-iterations the way unroll_k / async_dma do — the only
+    # overlapped path that stays a genuine runtime loop for wgrad's huge
+    # K_wg = N*Ho*Wo reduction.  Mutually exclusive with async_dma / unroll_k.
+    k_prefetch: bool = False
+    # gfx950 HW LDS transpose-read path: stage each 16x16 (K x M/N) tile block
+    # CONTIGUOUSLY in LDS via one wide ds_write, then feed the MFMA A/B fragments
+    # with ds_read_b64_tr_b16 (HW transpose on read).  Replaces the store-side
+    # corner-turn (8x narrow bank-conflicted ds_write_b16 per operand per K-iter)
+    # that is the measured wgrad bottleneck on gfx950.  Requires the 16x16x16
+    # MFMA atom (warp_tile_m==warp_tile_n==16, warp_tile_k==16), wave64/MFMA, and
+    # a free-axis load vector of 8.  Mutually exclusive with async_dma / unroll_k.
+    lds_transpose_read: bool = False
     lds_k_pad: Optional[int] = None
 
     vector_size_a: Optional[int] = None
@@ -378,6 +393,8 @@ class WgradConvSpec:
             self.acc_epilogue.tag(),
             flags={
                 "async": self.async_dma,
+                "kpf": self.k_prefetch,
+                "tr": self.lds_transpose_read,
                 f"spk{self.split_k}": self.split_k > 1,
                 "spkauto": self.split_k == -1,
             },
@@ -422,6 +439,29 @@ class WgradConvSpec:
                 "WgradConvSpec: grouped convolution (groups > 1) is not yet supported "
                 "for the wgrad direction"
             )
+        if self.k_prefetch and (self.async_dma or self.unroll_k):
+            raise ValueError(
+                "k_prefetch is mutually exclusive with async_dma / unroll_k "
+                "(it is the runtime-loop register-staged double-buffer path)"
+            )
+        if self.lds_transpose_read:
+            if self.async_dma or self.unroll_k:
+                raise ValueError(
+                    "lds_transpose_read is mutually exclusive with async_dma / unroll_k"
+                )
+            if not (self.warp_tile_m == 16 and self.warp_tile_n == 16):
+                raise ValueError(
+                    "lds_transpose_read requires the 16x16 MFMA atom "
+                    f"(got warp_tile_m={self.warp_tile_m}, warp_tile_n={self.warp_tile_n})"
+                )
+            if self.warp_tile_k not in (16, 32):
+                raise ValueError(
+                    "lds_transpose_read requires warp_tile_k in (16, 32) "
+                    "(1 or 2 ds_read_b64_tr_b16 reads per atom); got warp_tile_k=%d"
+                    % self.warp_tile_k
+                )
+            if self.tile_m % 16 or self.tile_n % 16 or self.tile_k % 16:
+                raise ValueError("lds_transpose_read requires 16-multiple tiles")
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -793,12 +833,27 @@ def build_implicit_gemm_conv_wgrad(
     lds_layout = spec.effective_lds_layout()
     if spec.async_dma:
         lds_layout.validate_for_async()
-    A_smem = b.smem_alloc(
-        ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem"
-    )
-    B_smem = b.smem_alloc(
-        ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem"
-    )
+    if spec.lds_transpose_read:
+        # Block-contiguous LDS: a sequence of 16x16 (K x M/N) tiles, each laid
+        # out row-major (16 K-rows x 16 M/N-cols = 256 elems) so a single
+        # ds_read_b64_tr_b16 with a uniform per-block base transposes it into
+        # the MFMA operand.  block id = (k//16)*n_mn_blk + (mn//16).
+        _n_m_blk = block_m // 16
+        _n_n_blk = block_n // 16
+        _n_k_blk = block_k // 16
+        A_smem = b.smem_alloc(
+            ir_dtype_a, [_n_k_blk * _n_m_blk, 256], name_hint="A_smem"
+        )
+        B_smem = b.smem_alloc(
+            ir_dtype_b, [_n_k_blk * _n_n_blk, 256], name_hint="B_smem"
+        )
+    else:
+        A_smem = b.smem_alloc(
+            ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem"
+        )
+        B_smem = b.smem_alloc(
+            ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem"
+        )
     double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
     if double_buffer:
         A_smem2 = b.smem_alloc(
@@ -1096,6 +1151,99 @@ def build_implicit_gemm_conv_wgrad(
 
         return new_accs
 
+    # ---- transpose-read (gfx950 ds_read_b64_tr_b16) store + MFMA feed ----
+    if spec.lds_transpose_read:
+        _n_m_blk_tr = block_m // 16
+        _n_n_blk_tr = block_n // 16
+        _c16 = b.const_i32(16)
+
+        def _store_blocks(loader, smem_dst, staged, n_mn_blk, load_vec):
+            # Each 16x16 block holds tile[k, mn] row-major (K rows, M/N cols) so
+            # the MN-contiguous loaded vector lands in one wide ds_write_b128, and
+            # ds_read_b64_tr_b16 (TransposeLdsReader lane map) transposes it into
+            # the MFMA operand on read.
+            for mn_row, k_col, v in staged:
+                blk_k = b.div(k_col, _c16)
+                ik = b.mod(k_col, _c16)
+                blk_mn = b.div(mn_row, _c16)
+                imn = b.mod(mn_row, _c16)
+                block_id = b.add(b.mul(blk_k, b.const_i32(n_mn_blk)), blk_mn)
+                intra = b.add(b.mul(ik, _c16), imn)
+                b.smem_store_vN(smem_dst, [block_id, intra], v, load_vec)
+
+        def emit_store_tr(k_off: Value) -> None:
+            k_off_capture[0] = k_off
+            a_staged = a_sync_loader.load_global(
+                b, tid=tid, descriptor=dy_descriptor, rsrc=dy_rsrc
+            )
+            b_staged = b_sync_loader.load_global(
+                b, tid=tid, descriptor=x_descriptor, rsrc=x_rsrc
+            )
+            _store_blocks(a_sync_loader, A_smem, a_staged, _n_m_blk_tr, load_vec_a)
+            _store_blocks(b_sync_loader, B_smem, b_staged, _n_n_blk_tr, load_vec_b)
+
+        from ...helpers.layouts import TransposeLdsReader
+
+        _tr_reader = TransposeLdsReader(K=16, M=16).bind(b, lane)
+        # Per-lane intra-block address for ds_read_b64_tr_b16 on a row-major
+        # 16(K) x 16(M/N) block (leading dim 16): intra = row(lane)*16 + col.
+        _tr_intra = b.add(
+            b.mul(_tr_reader.row(b, k_offset=0, read=0), _c16), _tr_reader.col
+        )
+
+        # Number of 16-K transpose sub-reads per MFMA atom (1 for 16x16x16,
+        # 2 concatenated <4x>->  <8x> for the full-rate 16x16x32 atom).
+        _kb_per_atom = spec.warp_tile_k // 16
+
+        def _read_frag(smem_dst, blk_base_k, mn_blk, n_mn_blk):
+            reads = []
+            for sub in range(_kb_per_atom):
+                blk_k = b.add(blk_base_k, b.const_i32(sub))
+                block_id = b.add(b.mul(blk_k, b.const_i32(n_mn_blk)), mn_blk)
+                reads.append(
+                    b.ds_read_tr16_b64(
+                        smem_dst, block_id, _tr_intra,
+                        dtype=ir_dtype_a if smem_dst is A_smem else ir_dtype_b,
+                    )
+                )
+            return reads[0] if _kb_per_atom == 1 else b.vec_concat(*reads)
+
+        def emit_mfma_tr(iter_vars: Sequence[Value]) -> List[Value]:
+            warp_m_blk = b.div(grid.warp_m_off(b), _c16)
+            warp_n_blk = b.div(grid.warp_n_off(b), _c16)
+            new_accs: List[Value] = list(iter_vars)
+            for kk in range(k_atoms):
+                base_k = b.const_i32(kk * _kb_per_atom)
+                a_rows = []
+                for mi in range(mfmas_m):
+                    a_rows.append(
+                        _read_frag(
+                            A_smem, base_k,
+                            b.add(warp_m_blk, b.const_i32(mi)), _n_m_blk_tr,
+                        )
+                    )
+                b_cols = []
+                for ni in range(mfmas_n):
+                    b_cols.append(
+                        _read_frag(
+                            B_smem, base_k,
+                            b.add(warp_n_blk, b.const_i32(ni)), _n_n_blk_tr,
+                        )
+                    )
+                flat = 0
+                for mi in range(mfmas_m):
+                    for ni in range(mfmas_n):
+                        new_accs[flat] = _emit_mfma(
+                            b, atom, a_rows[mi], b_cols[ni], new_accs[flat]
+                        )
+                        flat += 1
+                schedule.emit_after_mfma_step(
+                    b,
+                    ds_read_count=mfmas_m + mfmas_n,
+                    mfma_count=mfmas_m * mfmas_n,
+                )
+            return new_accs
+
     # ---- K loop ----
     # k_lo / k_hi select the slice this CTA processes:
     #   split_k == 1: k_lo=0, k_hi=None → full [0, wg_K)
@@ -1123,6 +1271,85 @@ def build_implicit_gemm_conv_wgrad(
             b.sync()
 
         final_accs = current_accs
+    elif spec.k_prefetch and not spec.async_dma:
+        # Runtime-loop register-staged double buffer (CK pipeline_basic-style).
+        #
+        # Per iter: store the current tile (already in VGPRs) -> LDS, barrier,
+        # ISSUE the next tile's coalesced DRAM reads into fresh VGPRs, then run
+        # the current tile's MFMA out of LDS.  The next-tile global loads are
+        # in flight while the MFMA executes; the backend places their vmcnt wait
+        # at the *next* iter's store_lds, so the (large) DRAM->reg latency is
+        # hidden behind the current MFMA instead of sitting on the critical path
+        # as it does in the single-buffered default loop.  Loop-carried state is
+        # the accumulators plus the prefetched (small) VGPR fragments — no Python
+        # unroll, so it scales to wgrad's ~thousands of K-tiles.
+        #
+        # (row, col) tile-local coords depend only on tid -> loop-invariant;
+        # capture them once from the prologue's load_global and re-pair with the
+        # loop-carried loaded values each iter.
+        k_off_capture[0] = k_lo
+        a_staged0 = a_sync_loader.load_global(
+            b, tid=tid, descriptor=dy_descriptor, rsrc=dy_rsrc
+        )
+        b_staged0 = b_sync_loader.load_global(
+            b, tid=tid, descriptor=x_descriptor, rsrc=x_rsrc
+        )
+        a_coords = [(r, c) for (r, c, _) in a_staged0]
+        b_coords = [(r, c) for (r, c, _) in b_staged0]
+        na, nb = len(a_staged0), len(b_staged0)
+        n_acc = len(accs)
+
+        iter_args = list(accs)
+        iter_args += [(f"a_pf{i}", v) for i, (_, _, v) in enumerate(a_staged0)]
+        iter_args += [(f"b_pf{i}", v) for i, (_, _, v) in enumerate(b_staged0)]
+
+        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, iter_args, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            acc_vars = list(iter_vars[:n_acc])
+            a_vs = iter_vars[n_acc : n_acc + na]
+            b_vs = iter_vars[n_acc + na : n_acc + na + nb]
+
+            # 1. current tile (in regs) -> LDS
+            a_sync_loader.store_lds(
+                b,
+                smem_dst=A_smem,
+                staged=[(a_coords[i][0], a_coords[i][1], a_vs[i]) for i in range(na)],
+            )
+            b_sync_loader.store_lds(
+                b,
+                smem_dst=B_smem,
+                staged=[(b_coords[i][0], b_coords[i][1], b_vs[i]) for i in range(nb)],
+            )
+            b.sync()
+
+            # 2. issue next tile's DRAM reads into fresh regs (overlaps MFMA)
+            k_off_capture[0] = b.add(k0, c_block_k)
+            a_next = a_sync_loader.load_global(
+                b, tid=tid, descriptor=dy_descriptor, rsrc=dy_rsrc
+            )
+            b_next = b_sync_loader.load_global(
+                b, tid=tid, descriptor=x_descriptor, rsrc=x_rsrc
+            )
+
+            # 3. current tile MFMA out of LDS
+            new_accs = emit_mfma_phase(A_smem, B_smem, acc_vars)
+            b.sync()
+
+            b.scf_yield(
+                *new_accs,
+                *[v for (_, _, v) in a_next],
+                *[v for (_, _, v) in b_next],
+            )
+        final_accs = list(for_op.results[:n_acc])
+    elif spec.lds_transpose_read and not spec.async_dma:
+        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            emit_store_tr(k0)
+            b.sync()
+            new_accs = emit_mfma_tr(iter_vars)
+            b.sync()
+            b.scf_yield(*new_accs)
+        final_accs = for_op.results
     elif not spec.async_dma:
         for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):

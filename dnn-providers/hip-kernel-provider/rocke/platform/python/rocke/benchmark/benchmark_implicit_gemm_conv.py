@@ -770,6 +770,18 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--wgrad-transpose-read",
+        action="store_true",
+        dest="wgrad_transpose_read",
+        help=(
+            "wgrad only: enable the gfx950 HW LDS transpose-read path "
+            "(WgradConvSpec.lds_transpose_read).  Restricts the sweep to the "
+            "16x16 MFMA atom and replaces the store-side corner-turn with a wide "
+            "ds_write + ds_read_b64_tr_b16.  Large measured win on dense wgrad."
+        ),
+    )
+
+    parser.add_argument(
         "--csv",
         default=None,
         metavar="FILE",
@@ -1286,7 +1298,7 @@ def _build_wgrad_one(args_tuple):
     Returns ``(combo, spec, resolved_split_k, kernel)`` on success, or ``None``.
     Must live at module level for pickle.
     """
-    combo, problem, dtype, arch = args_tuple
+    combo, problem, dtype, arch, transpose_read = args_tuple
     (
         tile_m,
         tile_n,
@@ -1300,6 +1312,11 @@ def _build_wgrad_one(args_tuple):
     ) = combo
 
     if split_k > 1 and epilogue == "cshuffle":
+        return None
+
+    # The gfx950 HW LDS transpose-read path is defined for the 16x16 MFMA atom
+    # only; skip other atoms when it is requested.
+    if transpose_read and warp_tile_mn != 16:
         return None
 
     from rocke.core.arch import ArchTarget
@@ -1353,6 +1370,7 @@ def _build_wgrad_one(args_tuple):
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=resolved_split_k,
+        lds_transpose_read=transpose_read,
     )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
@@ -1913,7 +1931,9 @@ def _run_wgrad_sweep(
     # ---------------------------------------------------------------------------
     if jobs != 1:
         print(f"Building IR for {len(combos)} wgrad combos in parallel ...", flush=True)
-    work = [(combo, problem, dtype, arch) for combo in combos]
+    work = [
+        (combo, problem, dtype, arch, args.wgrad_transpose_read) for combo in combos
+    ]
     pending = _build_ir_parallel(work, _build_wgrad_one, jobs)
     n_skipped = len(combos) - len(pending)
 
