@@ -78,13 +78,16 @@ def swizzlePadPerStrip(tileInfo) -> int:
     swz = selectTLUSwizzle(tileInfo)
     if not swz:
         return 0
-    # One DTL load-block per wavesize K-rows in a DepthU strip; a pad is inserted
-    # above each block boundary except the first.  Derive from DepthU/wavesize so
-    # the value is identical everywhere it is used (numGRPerSubtile can differ
-    # between register-allocation snapshots of the same tile).
-    depthU = int(getattr(tileInfo, "depthU", 0))
+    # A subtile strip spans exactly ONE MFMA K-window (subtileShape[1] MFMA
+    # tiles of instK K-rows), regardless of DepthU: DepthU > instK just stacks
+    # additional K-windows as further strips (sId1 in the emit paths).  One DTL
+    # load-block covers wavesize K-rows and a pad is inserted above each block
+    # boundary except the first, so the block count is per-K-window.  Deriving it
+    # from instK (not DepthU) keeps stripStride correct for DepthU > instK.
+    instK = int(tileInfo.mmaTileShape[1])
+    stackK = int(tileInfo.subtileShape[1])
     waveSize = int(getattr(tileInfo, "waveSize", 0)) or 64
-    numBlocks = max(1, depthU // waveSize) if depthU else max(1, int(getattr(tileInfo, "numGRPerSubtile", 1)))
+    numBlocks = max(1, (instK * stackK) // waveSize)
     return (numBlocks - 1) * int(swz.padBytes)
 
 
