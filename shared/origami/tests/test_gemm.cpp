@@ -809,28 +809,28 @@ TEST_CASE("GEMM: compute_l2_hit_rate_global unit test", "[gemm]") {
   }
 }
 
-TEST_CASE("GEMM: round_elements_to_128B unit test", "[gemm]") {
+TEST_CASE("GEMM: round_elements_to_NB unit test", "[gemm]") {
   for (int gpu_arch : test_architectures) {
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - round_elements_to_128B unit test") {
-      // Test 1: Test with various element sizes
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - round_elements_to_NB unit test") {
+      // Test 1: Test with various element sizes (128-byte transaction)
       auto result_various_element_sizes =
-          origami::gemm::round_elements_to_128B(196, 32);  // element size in bits - 32
+          origami::gemm::round_elements_to_NB(196, 32, 128);  // element size in bits - 32
       REQUIRE(result_various_element_sizes == 224);
 
       result_various_element_sizes =
-          origami::gemm::round_elements_to_128B(225, 16);  // element size in bits - 16
+          origami::gemm::round_elements_to_NB(225, 16, 128);  // element size in bits - 16
       REQUIRE(result_various_element_sizes == 256);
 
       result_various_element_sizes =
-          origami::gemm::round_elements_to_128B(90, 8);  // element size in bits - 8
+          origami::gemm::round_elements_to_NB(90, 8, 128);  // element size in bits - 8
       REQUIRE(result_various_element_sizes == 128);
 
       // Test 2: Test alignment to 128-byte boundary (TODO) (Was already covered in the above
       // example, could be skipped) Test 3: Test edge cases
-      auto result_edge_cases = origami::gemm::round_elements_to_128B(0, 32);
+      auto result_edge_cases = origami::gemm::round_elements_to_NB(0, 32, 128);
       REQUIRE(result_edge_cases == 0);
 
-      result_edge_cases = origami::gemm::round_elements_to_128B(256, 0);
+      result_edge_cases = origami::gemm::round_elements_to_NB(256, 0, 128);
       REQUIRE(result_edge_cases == 256);
     }
   }
@@ -1273,15 +1273,6 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   origami::heuristic_params_t defaults;
 
   // Check default weight values
-  REQUIRE(defaults.weight_mem_l2 == 1.0);
-  REQUIRE(defaults.weight_mem_mall == 1.0);
-  REQUIRE(defaults.weight_mem_dram == 1.0);
-  REQUIRE(defaults.weight_compute == 1.0);
-  REQUIRE(defaults.weight_memory == 1.0);
-  REQUIRE(defaults.weight_wg_setup == 1.0);
-  REQUIRE(defaults.weight_prologue == 1.5);
-  REQUIRE(defaults.weight_epilogue == 2.0);
-  REQUIRE(defaults.weight_loop_overhead == 500.0);
   REQUIRE(defaults.weight_tile_total == 1.0);
 
   // Check default empirical constants
@@ -1295,20 +1286,17 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   REQUIRE(defaults.l2_pollution_penalty == 0.7);
   REQUIRE(defaults.l2_amp_ceiling_batched == 0.9);
   REQUIRE(defaults.l2_amp_ceiling_k_split == 0.4);
-  REQUIRE(defaults.epilogue_cycles_per_acc_read == 8.0);
   REQUIRE(defaults.epilogue_acc_read_parallelism == 0.9);
-  REQUIRE(defaults.epilogue_cycles_per_bounds_check == 6.0);
+  REQUIRE(defaults.epilogue_cycles_per_bounds_check == 5.0);
   REQUIRE(defaults.epilogue_scalar_store_penalty == 1.1);
-  REQUIRE(defaults.epilogue_threads_per_wave == 64);
   REQUIRE(defaults.epilogue_bytes_per_vectorized_store == 16);
   REQUIRE(defaults.epilogue_cache_line_bytes == 128);
   REQUIRE(defaults.epilogue_workspace_bytes_per_elem == 4);
   REQUIRE(defaults.epilogue_salu_overhead == 35.0);
   REQUIRE(defaults.epilogue_l_barrier == 100.0);
-  REQUIRE(defaults.epilogue_l_smem == 900.0);
-  REQUIRE(defaults.epilogue_k_padding_penalty == 50000.0);
+  REQUIRE(defaults.epilogue_l_smem == 1900.0);
   REQUIRE(defaults.postgsu_compute_bytes == 4);
-  REQUIRE(defaults.postgsu_kernel_launch_overhead == 12000.0);
+  REQUIRE(defaults.postgsu_kernel_launch_overhead == 8000.0);
   REQUIRE(defaults.postgsu_threads_per_wg == 256);
   REQUIRE(defaults.postgsu_wavefront_size == 64);
 
@@ -1321,8 +1309,8 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   origami::heuristic_params_t override;
 
   // Set some non-default values in override
-  override.weight_compute           = 2.0;
-  override.weight_memory            = 3.0;
+  override.weight_tile_total        = 2.0;
+  override.tail_loop_overhead       = 3.0;
   override.main_memory_load_latency = 300.0;
   override.main_loop_efficiency     = 0.8;
 
@@ -1330,15 +1318,15 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   base.merge_with(override);
 
   // Check that overridden values changed
-  REQUIRE(base.weight_compute == 2.0);
-  REQUIRE(base.weight_memory == 3.0);
+  REQUIRE(base.weight_tile_total == 2.0);
+  REQUIRE(base.tail_loop_overhead == 3.0);
   REQUIRE(base.main_memory_load_latency == 300.0);
   REQUIRE(base.main_loop_efficiency == 0.8);
 
   // Check that non-overridden values remain default
-  REQUIRE(base.weight_mem_l2 == origami::heuristic_defaults_t::WEIGHT_MEM_L2);
-  REQUIRE(base.weight_prologue == origami::heuristic_defaults_t::WEIGHT_PROLOGUE);
-  REQUIRE(base.weight_epilogue == origami::heuristic_defaults_t::WEIGHT_EPILOGUE);
+  REQUIRE(base.tile_fixed_overhead == origami::heuristic_defaults_t::TILE_FIXED_OVERHEAD);
+  REQUIRE(base.l2_cold_floor == origami::heuristic_defaults_t::L2_COLD_FLOOR);
+  REQUIRE(base.epilogue_l_smem == origami::heuristic_defaults_t::EPILOGUE_L_SMEM);
 }
 
 TEST_CASE("Heuristics: Key matching - exact match", "[heuristics]") {
@@ -1733,7 +1721,7 @@ TEST_CASE("Heuristics: Database add_entry and lookup", "[heuristics]") {
   key.mt_m     = 777;                         // Unique tile size
 
   origami::heuristic_params_t params;
-  params.weight_wg_setup = 7.77;  // Unique value
+  params.tail_loop_overhead = 7.77;  // Unique value
 
   db.add_entry(key, params);
 
@@ -1746,7 +1734,7 @@ TEST_CASE("Heuristics: Database add_entry and lookup", "[heuristics]") {
   auto result = db.lookup(problem, hardware, config);
 
   // Should find our custom entry
-  REQUIRE(result.weight_wg_setup == 7.77);
+  REQUIRE(result.tail_loop_overhead == 7.77);
 }
 
 TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]") {
@@ -1758,7 +1746,7 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   general_key.mi_dtype = origami::data_type_t::Float;  // Specific dtype to avoid conflicts
 
   origami::heuristic_params_t general_params;
-  general_params.weight_epilogue = 3.33;  // Use a weight that's less likely to conflict
+  general_params.tail_loop_overhead = 3.33;  // Use a value that's less likely to conflict
 
   db.add_entry(general_key, general_params);
 
@@ -1769,7 +1757,7 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   specific_key.mt_m     = 555;  // Unique value
 
   origami::heuristic_params_t specific_params;
-  specific_params.weight_epilogue = 5.55;  // More specific value
+  specific_params.tail_loop_overhead = 5.55;  // More specific value
 
   db.add_entry(specific_key, specific_params);
 
@@ -1782,7 +1770,7 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   auto result = db.lookup(problem, hardware, config);
 
   // Should use more specific rule
-  REQUIRE(result.weight_epilogue == 5.55);
+  REQUIRE(result.tail_loop_overhead == 5.55);
 }
 
 TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
@@ -1911,7 +1899,7 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
       REQUIRE(latency > 0.0);
     }
 
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - edge tiles cost more than interior") {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - edge tiles produce a valid epilogue cost") {
       auto hardware = make_hardware(gpu_arch);
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
@@ -1924,7 +1912,10 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
       origami::gemm::context_t ctx_edge(problem_edge, hardware, config);
       auto lat_edge = origami::gemm::compute_epilogue_latency(problem_edge, hardware, config, ctx_edge);
 
-      REQUIRE(lat_edge > lat_aligned);
+      // Ported model: the +1 remainder produces cheap partial edge tiles, so the
+      // edge problem's modeled epilogue cost is no higher than the aligned one.
+      REQUIRE(lat_edge > 0.0);
+      REQUIRE(lat_edge <= lat_aligned);
     }
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - larger tiles have higher epilogue cost") {

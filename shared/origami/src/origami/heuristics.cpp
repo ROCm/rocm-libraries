@@ -40,18 +40,18 @@ struct cms_kernel_entry_t {
 };
 
 // Register new architectures by adding a table here.
-constexpr std::array<cms_kernel_entry_t, 38> gfx950_cms_kernels = {{
+constexpr std::array<cms_kernel_entry_t, 37> gfx950_cms_kernels = {{
     // BF16 NT
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 160, 256, 64,
      cms_speedup::X120},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 192, 256, 64,
      cms_speedup::X110},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 208, 256, 64,
-     cms_speedup::X120},
+     cms_speedup::X105},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 160, 64,
-     cms_speedup::X120},
+     cms_speedup::X105},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 192, 64,
-     cms_speedup::X120},
+     cms_speedup::X105},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 256, 64,
      cms_speedup::X115},
     // BF16 NN
@@ -59,10 +59,8 @@ constexpr std::array<cms_kernel_entry_t, 38> gfx950_cms_kernels = {{
      cms_speedup::X110},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 208, 256, 64,
      cms_speedup::X110},
-    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 256, 192, 64,
-     cms_speedup::X100},
     {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 256, 256, 64,
-     cms_speedup::X105},
+     cms_speedup::X120},
     // BF16 TN
     {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 160, 256, 64,
      cms_speedup::X110},
@@ -75,7 +73,7 @@ constexpr std::array<cms_kernel_entry_t, 38> gfx950_cms_kernels = {{
     {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 224, 64,
      cms_speedup::X105},
     {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 256, 64,
-     cms_speedup::X105},
+     cms_speedup::X115},
     // BF16 TT
     {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::T, 256, 256, 64,
      cms_speedup::X110},
@@ -155,16 +153,9 @@ namespace origami {
 
 void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   // Latency component weights
-  weight_mem_l2        = other.weight_mem_l2;
-  weight_mem_mall      = other.weight_mem_mall;
-  weight_mem_dram      = other.weight_mem_dram;
-  weight_compute       = other.weight_compute;
-  weight_memory        = other.weight_memory;
-  weight_wg_setup      = other.weight_wg_setup;
-  weight_prologue      = other.weight_prologue;
-  weight_epilogue      = other.weight_epilogue;
-  weight_loop_overhead = other.weight_loop_overhead;
   weight_tile_total    = other.weight_tile_total;
+  tail_loop_overhead   = other.tail_loop_overhead;
+  tile_fixed_overhead  = other.tile_fixed_overhead;
 
   // Empirical constants
   main_memory_load_latency            = other.main_memory_load_latency;
@@ -179,18 +170,15 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   l2_amp_ceiling_skinny               = other.l2_amp_ceiling_skinny;
   l2_depth_penalty                    = other.l2_depth_penalty;
   l1_hit_rate_ceiling_skinny          = other.l1_hit_rate_ceiling_skinny;
-  epilogue_cycles_per_acc_read        = other.epilogue_cycles_per_acc_read;
   epilogue_acc_read_parallelism       = other.epilogue_acc_read_parallelism;
   epilogue_cycles_per_bounds_check    = other.epilogue_cycles_per_bounds_check;
   epilogue_scalar_store_penalty       = other.epilogue_scalar_store_penalty;
-  epilogue_threads_per_wave           = other.epilogue_threads_per_wave;
   epilogue_bytes_per_vectorized_store = other.epilogue_bytes_per_vectorized_store;
   epilogue_cache_line_bytes           = other.epilogue_cache_line_bytes;
   epilogue_workspace_bytes_per_elem   = other.epilogue_workspace_bytes_per_elem;
   epilogue_salu_overhead              = other.epilogue_salu_overhead;
   epilogue_l_barrier                  = other.epilogue_l_barrier;
   epilogue_l_smem                     = other.epilogue_l_smem;
-  epilogue_k_padding_penalty          = other.epilogue_k_padding_penalty;
   postgsu_compute_bytes               = other.postgsu_compute_bytes;
   postgsu_kernel_launch_overhead      = other.postgsu_kernel_launch_overhead;
   postgsu_threads_per_wg              = other.postgsu_threads_per_wg;
@@ -332,8 +320,11 @@ static void apply_tf32_heuristics(heuristic_params_t& params,
     }
   }
 
-  // Bias for large K-dimension (depth upscaling)
-  if ((K >= (M * 16) && K >= (N * 16)) && (MT_K >= 128)) { params.weight_tile_total *= 0.5; }
+  // NOTE: a large-K depth-upscaling bias (MT_K>=128 -> weight_tile_total *= 0.5)
+  // was removed here: with the current GEMM model it over-credits small deep-MT_K
+  // tiles (e.g. MT64x128x128) on huge-K xf32 shapes, flipping the pick off the
+  // HW-faster shallow tile (e.g. MT192x160x32) -- a full sweep showed removing it
+  // is a clear net win (26 shapes faster, 2 negligibly slower).
 }
 
 heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,

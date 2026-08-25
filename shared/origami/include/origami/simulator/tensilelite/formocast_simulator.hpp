@@ -123,31 +123,31 @@ namespace origami
          */
          struct MemoryAccessCosts
          {
-             double mem_l1_req;
-             double mem_l2_req;
-             double mem_l3_req;
-             double mem_hbm_req;
-             double mem_loop_l1_req;
-             double mem_loop_l2_req;
-             double mem_loop_l3_req;
-             double mem_loop_hbm_req;
-             double l1_hit;
-             double l2_hit;
-             double l3_hit;
-             double mem_overall;
+             double mem_l1_req      = 0.0;
+             double mem_l2_req      = 0.0;
+             double mem_l3_req      = 0.0;
+             double mem_hbm_req     = 0.0;
+             double mem_loop_l1_req = 0.0;
+             double mem_loop_l2_req = 0.0;
+             double mem_loop_l3_req = 0.0;
+             double mem_loop_hbm_req = 0.0;
+             double l1_hit          = 0.0;
+             double l2_hit          = 0.0;
+             double l3_hit          = 0.0;
+             double mem_overall     = 0.0;
              //for debug
-             double A_mem_l1_req;
-             double B_mem_l1_req;
-             double tcc_ea0_coalscedA;
-             double tcc_ea0_coalscedB;
-             double MT_A_L1_req;
-             double MT_B_L1_req;
-             double MT_A_L2_req;
-             double MT_B_L2_req;
-             double MT_A_L3_req;
-             double MT_B_L3_req;
-             double MT_A_hbm_req;
-             double MT_B_hbm_req;
+             double A_mem_l1_req     = 0.0;
+             double B_mem_l1_req     = 0.0;
+             double tcc_ea0_coalscedA = 0.0;
+             double tcc_ea0_coalscedB = 0.0;
+             double MT_A_L1_req      = 0.0;
+             double MT_B_L1_req      = 0.0;
+             double MT_A_L2_req      = 0.0;
+             double MT_B_L2_req      = 0.0;
+             double MT_A_L3_req      = 0.0;
+             double MT_B_L3_req      = 0.0;
+             double MT_A_hbm_req     = 0.0;
+             double MT_B_hbm_req     = 0.0;
 
              CacheHitRates cache_hits;
 
