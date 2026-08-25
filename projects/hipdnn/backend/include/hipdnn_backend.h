@@ -939,9 +939,27 @@ typedef enum
  * an unfinalized descriptor, an empty ranking, an unkeyable graph, or a disabled cache
  * (`HIPDNN_DISABLE_EXACT_ENGINE_CACHE`) is treated as success-with-no-write.
  *
+ * Because one array serves as both sets, the caller owns two obligations this function
+ * cannot check. A record violating either is declined on every later lookup, and
+ * re-writing an identical record reports UNCHANGED without replacing it, so the record
+ * does not repair itself:
+ *
+ *  - **Each engine id at most once.** The read path filters the stored order to the live
+ *    candidates by set membership, which is non-consuming, so a repeated id survives and
+ *    makes the order longer than the candidate set. Callers holding several results per
+ *    engine (knob variants) must collapse them to one id first.
+ *  - **Every applicable engine present.** The read path's candidate list comes from the
+ *    pre-compile applicability probe, which knows nothing of compile failures, deselect
+ *    filters, or workspace budgets. Omitting an engine that probe reports rejects the
+ *    entry. Engines that were measured and failed, and engines that could not be
+ *    compiled, therefore belong in the array, ranked last. An engine held out by a
+ *    caller-side filter does not: a later run may admit it, so a ranking that never
+ *    measured it must not be written at all.
+ *
  * @param [in]  handle                Supplies the device identity the ranking is scoped to.
  * @param [in]  graphDescriptor       Backend graph descriptor; its buffer derives the cache key.
- * @param [in]  engineIdsInRankOrder  Engine ids in winning rank order (fastest first).
+ * @param [in]  engineIdsInRankOrder  Engine ids in winning rank order (fastest first), each
+ *                                    appearing at most once; see the obligations above.
  * @param [in]  engineIdCount         Number of entries in @p engineIdsInRankOrder.
  * @param [out] outcome               Optional; fail-soft outcome, valid on
  *                                    HIPDNN_STATUS_SUCCESS. See

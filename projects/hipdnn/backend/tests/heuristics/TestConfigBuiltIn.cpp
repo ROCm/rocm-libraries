@@ -1312,13 +1312,48 @@ TEST_F(TestConfigBuiltInExactCache, SimultaneousAddAndRemoveStillRejects)
     EXPECT_FALSE(_plugin->finalize(_desc));
 }
 
-TEST_F(TestConfigBuiltInExactCache, DegenerateSingleCandidateResultDeclines)
+TEST_F(TestConfigBuiltInExactCache, TooFewRemainingCandidatesDeclines)
 {
     const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
     seedExactCache(
         graph, {MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID}, {CUSTOM_ENGINE_ID, MIOPEN_ENGINE_ID});
 
     setEngineIds({MIOPEN_ENGINE_ID});
+    setSerializedGraph(graph);
+
+    EXPECT_FALSE(_plugin->finalize(_desc));
+}
+
+// A record holding an engine id twice. The order filter is non-consuming set membership,
+// so both copies survive it and `order` outgrows the candidate set. Such a record can only
+// come from a writer that did not collapse several plan specs for one engine down to one
+// id; the read path must decline it rather than emit a ranking longer than the candidate
+// list.
+TEST_F(TestConfigBuiltInExactCache, DuplicateIdInStoredOrderDeclines)
+{
+    const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
+    seedExactCache(graph,
+                   {MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID},
+                   {CUSTOM_ENGINE_ID, MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID});
+
+    setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID});
+    setSerializedGraph(graph);
+
+    EXPECT_FALSE(_plugin->finalize(_desc))
+        << "a duplicated engine id makes the stored order un-appliable and must decline";
+}
+
+// The duplicate case must stay declined however many candidates are live: it is a property
+// of the record, not of this run's candidate count. Pins that the malformed branch is
+// reached on its own terms rather than incidentally via the too-few-candidates gate.
+TEST_F(TestConfigBuiltInExactCache, DuplicateIdDeclinesEvenWithManyCandidates)
+{
+    const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
+    seedExactCache(graph,
+                   {MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID},
+                   {CUSTOM_ENGINE_ID, MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID, MIOPEN_ENGINE_ID});
+
+    setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
     setSerializedGraph(graph);
 
     EXPECT_FALSE(_plugin->finalize(_desc));
@@ -1602,7 +1637,7 @@ TEST_F(TestExactCacheLoggingConfigBuiltIn, RejectUnsampledLogLineIsDistinguishab
         << joinCapturedLines(_capturedLines);
 }
 
-TEST_F(TestExactCacheLoggingConfigBuiltIn, RejectDegenerateLogLineIsDistinguishable)
+TEST_F(TestExactCacheLoggingConfigBuiltIn, RejectTooFewLogLineIsDistinguishable)
 {
     const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
     seedExactCache(graph, {MIOPEN_ENGINE_ID}, {MIOPEN_ENGINE_ID});
@@ -1612,6 +1647,33 @@ TEST_F(TestExactCacheLoggingConfigBuiltIn, RejectDegenerateLogLineIsDistinguisha
 
     _plugin->finalize(_desc);
     EXPECT_TRUE(anyCapturedLineContains(_capturedLines, "declined -- fewer than"))
+        << joinCapturedLines(_capturedLines);
+    // The two decline branches are different faults with different remedies; a reader of
+    // the log must not be told the wrong one.
+    EXPECT_FALSE(anyCapturedLineContains(_capturedLines, "malformed"))
+        << joinCapturedLines(_capturedLines);
+}
+
+// A duplicated engine id reaches the malformed branch, whose message must name that fault
+// rather than the too-few-candidates one: this record has more ids than candidates, not
+// fewer.
+TEST_F(TestExactCacheLoggingConfigBuiltIn, RejectMalformedLogLineNamesTheRealFault)
+{
+    const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
+    seedExactCache(graph,
+                   {MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID},
+                   {CUSTOM_ENGINE_ID, MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID});
+
+    setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID});
+    setSerializedGraph(graph);
+
+    _plugin->finalize(_desc);
+    EXPECT_TRUE(anyCapturedLineContains(_capturedLines, "malformed"))
+        << joinCapturedLines(_capturedLines);
+    EXPECT_TRUE(anyCapturedLineContains(_capturedLines, "more than once"))
+        << joinCapturedLines(_capturedLines);
+    EXPECT_FALSE(anyCapturedLineContains(_capturedLines, "fewer than"))
+        << "a duplicated id must not be reported as too few candidates: "
         << joinCapturedLines(_capturedLines);
 }
 

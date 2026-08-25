@@ -580,8 +580,12 @@ enum class ExactCacheOutcome
     HIT_WITH_DROPS,
     /// A candidate was never sampled; the whole entry is declined.
     REJECT_UNSAMPLED,
-    /// Fewer than two ids remain after filtering to live candidates.
-    REJECT_DEGENERATE,
+    /// The stored order does not resolve to a permutation of the live candidates, in
+    /// practice because the record holds an engine id more than once.
+    REJECT_MALFORMED,
+    /// Fewer than two ids remain after filtering to live candidates, so there is no
+    /// ordering left to express.
+    REJECT_TOO_FEW,
 };
 
 struct ExactCacheApplyResult
@@ -630,16 +634,19 @@ ExactCacheApplyResult applyExactCacheEntry(const CachedEntry& entry,
         }
     }
 
-    // A malformed entry (duplicate id) declines rather than aborting.
+    // Every live candidate is in the sampled set (checked above) and this filter keeps
+    // only candidate ids, so the one way to land here is a stored order holding an id
+    // more than once: the membership test is non-consuming, so every copy is kept and
+    // `order` outgrows the candidate set. A defect in the record, not in this run.
     if(order.size() != candidates.size())
     {
-        return ExactCacheApplyResult{ExactCacheOutcome::REJECT_DEGENERATE, {}, {}};
+        return ExactCacheApplyResult{ExactCacheOutcome::REJECT_MALFORMED, {}, {}};
     }
 
     constexpr size_t MIN_MEANINGFUL_ORDER_SIZE = 2;
     if(order.size() < MIN_MEANINGFUL_ORDER_SIZE)
     {
-        return ExactCacheApplyResult{ExactCacheOutcome::REJECT_DEGENERATE, {}, {}};
+        return ExactCacheApplyResult{ExactCacheOutcome::REJECT_TOO_FEW, {}, {}};
     }
 
     const ExactCacheOutcome outcome
@@ -978,7 +985,19 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
                             engineIdsToNames(applied.namedIds).c_str(),
                             entry->version.c_str());
                     }
-                    else if(applied.outcome == ExactCacheOutcome::REJECT_DEGENERATE)
+                    else if(applied.outcome == ExactCacheOutcome::REJECT_MALFORMED)
+                    {
+                        CONFIG_BUILTIN_LOG(
+                            HIPDNN_SEV_WARN,
+                            "policyFinalize: exact-match cache entry declined -- malformed "
+                            "record: the stored order does not resolve to a permutation of "
+                            "the %zu live candidate(s), which means it holds an engine id "
+                            "more than once. Re-run the exhaustive sweep to replace it. "
+                            "record version=%s; consulting fuzzy rules only",
+                            d->candidateEngineIds.size(),
+                            entry->version.c_str());
+                    }
+                    else if(applied.outcome == ExactCacheOutcome::REJECT_TOO_FEW)
                     {
                         CONFIG_BUILTIN_LOG(
                             HIPDNN_SEV_INFO,
