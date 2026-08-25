@@ -196,6 +196,29 @@ Unmasked is if anything *worse*. In both regimes the enumeration says the challe
 (>1) while single-dispatch says it is slower (<1). **The bias is intrinsic to `--algo_method all`,
 not to the emulation — so this does not become correct by moving to real navi32.**
 
+## The lean-100 reduction survives the correct instrument (small sample)
+
+The lean reduction was ALSO selected using `--algo_method all`, so the "298->100 costs a median
+0.44%" figure reported in `COVERAGE_REPORT.md` is from the biased matrix and cannot be trusted
+either. Re-checked against single-dispatch truth on the four shapes measured kernel-by-kernel:
+
+| shape | stratum | by biased enum | by single-dispatch |
+|---|---|---|---|
+| 204x713x606 | med | 94.5% | 97.1% |
+| 23x344x893 | skinny_M | 99.9% | 100.0% |
+| 542x90x414 | skinny_N | 99.4% | 98.3% |
+| 627x5x2074 | gemv | 99.4% | 98.4% |
+| **median** | | **99.4%** | **98.3%** |
+
+**The conclusion holds: the lean 100 still contains a kernel within ~2% of the true best.** The
+honest cost is ~1.7%, not the 0.44% previously claimed. **n=4, so this is weak evidence** -- but it
+is unbiased evidence, and it points the same way as the independent A/B that validated the lean
+catalog at 99.54% wall-clock.
+
+Note *why* this survives while the re-map did not: the reduction only needs the kept set to
+CONTAIN a good kernel, which is robust to a biased ordering. The re-map needs the ordering itself
+to be correct, which it is not. **Coverage questions tolerate the bias; ranking questions do not.**
+
 ## Scope
 
 This affects **ranking** decisions built on `--algo_method all`. It does not automatically
