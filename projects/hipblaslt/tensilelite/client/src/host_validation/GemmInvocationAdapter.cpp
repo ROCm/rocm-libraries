@@ -333,6 +333,7 @@ namespace TensileLite::Client::reference_adapter
                 if(!preQuantizationScaleB)
                     alpha *= detail::scalarFromStorage(alphaType, inputs.scaleB);
             }
+            computeProduct = alpha != std::complex<double>(0.0, 0.0);
 
             if(problem.useScaleCD())
             {
@@ -455,10 +456,10 @@ namespace TensileLite::Client::reference_adapter
             std::optional<Tensor>      bTensor;
             std::optional<Tensor>      cTensor;
             std::optional<Tensor>      dTensor;
-            const bool readA = alpha != std::complex<double>(0.0, 0.0)
+            const bool readA = computeProduct
                                || (problem.useGradient() && problem.useBias()
                                    && problem.biasSrc() == ContractionProblemGemm::A);
-            const bool readB = alpha != std::complex<double>(0.0, 0.0)
+            const bool readB = computeProduct
                                || (problem.useGradient() && problem.useBias()
                                    && problem.biasSrc() == ContractionProblemGemm::B);
             const bool readC = beta != std::complex<double>(0.0, 0.0);
@@ -603,23 +604,25 @@ namespace TensileLite::Client::reference_adapter
             }
 
             const size_t scaleAlphaLength = problem.getParams().factorDim() == 0 ? m : n;
-            if(problem.useScaleAlphaVec())
+            if(computeProduct && problem.useScaleAlphaVec())
             {
                 scaleAlpha = Tensor(
                     alphaType,
                     Layout::contiguous(Shape{scaleAlphaLength}),
                     detail::storageSpan(alphaType, inputs.scaleAlphaVec, scaleAlphaLength));
             }
-            if(problem.useScaleAB() == "Scalar")
+            if(computeProduct && problem.useScaleAB() == "Scalar")
             {
-                scaleA = Tensor(alphaType,
-                                Layout::contiguous(Shape{1}),
-                                detail::storageSpan(alphaType, inputs.scaleA, 1));
-                scaleB = Tensor(alphaType,
-                                Layout::contiguous(Shape{1}),
-                                detail::storageSpan(alphaType, inputs.scaleB, 1));
+                if(preQuantizationScaleA)
+                    scaleA = Tensor(alphaType,
+                                    Layout::contiguous(Shape{1}),
+                                    detail::storageSpan(alphaType, inputs.scaleA, 1));
+                if(preQuantizationScaleB)
+                    scaleB = Tensor(alphaType,
+                                    Layout::contiguous(Shape{1}),
+                                    detail::storageSpan(alphaType, inputs.scaleB, 1));
             }
-            else if(problem.useScaleAB() == "Vector")
+            else if(computeProduct && problem.useScaleAB() == "Vector")
             {
                 scaleA = Tensor(alphaType,
                                 Layout::contiguous(Shape{m}),
@@ -863,6 +866,7 @@ namespace TensileLite::Client::reference_adapter
         double               activationParameter1 = 0.0;
 
         bool useStandaloneEpilogue = false;
+        bool computeProduct        = true;
         bool preQuantizationScaleA = false;
         bool preQuantizationScaleB = false;
         bool aConjugate            = false;
@@ -976,22 +980,26 @@ namespace TensileLite::Client::reference_adapter
             if(m_state->computeTypeB != m_state->typeB)
                 operandB.computeType = m_state->computeTypeB;
 
-            if(m_state->problem.useScaleAB() == "Scalar" && m_state->preQuantizationScaleA)
+            if(m_state->scaleA && m_state->problem.useScaleAB() == "Scalar"
+               && m_state->preQuantizationScaleA)
             {
                 operandA.preQuantizationScales.push_back(
                     VectorBinding{*m_state->scaleA, MatrixAxis::Row});
             }
-            if(m_state->problem.useScaleAB() == "Scalar" && m_state->preQuantizationScaleB)
+            if(m_state->scaleB && m_state->problem.useScaleAB() == "Scalar"
+               && m_state->preQuantizationScaleB)
             {
                 operandB.preQuantizationScales.push_back(
                     VectorBinding{*m_state->scaleB, MatrixAxis::Column});
             }
-            if(m_state->problem.useScaleAB() == "Vector" && m_state->preQuantizationScaleA)
+            if(m_state->scaleA && m_state->problem.useScaleAB() == "Vector"
+               && m_state->preQuantizationScaleA)
             {
                 operandA.preQuantizationScales.push_back(
                     VectorBinding{*m_state->scaleA, MatrixAxis::Row});
             }
-            if(m_state->problem.useScaleAB() == "Vector" && m_state->preQuantizationScaleB)
+            if(m_state->scaleB && m_state->problem.useScaleAB() == "Vector"
+               && m_state->preQuantizationScaleB)
             {
                 operandB.preQuantizationScales.push_back(
                     VectorBinding{*m_state->scaleB, MatrixAxis::Column});
@@ -999,7 +1007,7 @@ namespace TensileLite::Client::reference_adapter
             operandA.conjugate = m_state->aConjugate;
             operandB.conjugate = m_state->bConjugate;
 
-            if(m_state->mxBlockA > 0)
+            if(m_state->computeProduct && m_state->mxBlockA > 0)
             {
                 const size_t blockCountA = m_state->k / m_state->mxBlockA
                                            + (m_state->k % m_state->mxBlockA != 0 ? 1 : 0);
