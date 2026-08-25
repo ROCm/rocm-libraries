@@ -21,7 +21,7 @@ name: TheRock Multi-Arch CI
 # rebased in (see .github/scripts/resolve_therock_ref.py). Other events use the
 # live tip of main. The setup job checks that ref out and re-exports it as
 # needs.setup.outputs.ref; every downstream build/test/summary job consumes that
-# one SHA. The `uses: ROCm/TheRock/...@main` lines below are the
+# one SHA. The `uses: ROCm/TheRock/...@release/bkc/therock-10.1-20260825` lines below are the
 # workflow-definition ref (Actions requires a literal there) and are
 # deliberately separate from the build-source `ref:` inputs.
 
@@ -157,7 +157,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure, resolve_therock_ref]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@release/bkc/therock-10.1-20260825
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
@@ -191,7 +191,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@release/bkc/therock-10.1-20260825
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -219,7 +219,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@release/bkc/therock-10.1-20260825
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
