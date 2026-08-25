@@ -20,18 +20,47 @@
 
 include( ../../../cmake/sqlite.cmake )
 
+# The planning core is compiled into the rocfft shared library rather than an
+# object library, so build those sources here to reach them.  powX.cpp is left
+# out because it carries device code; powx_stub.cpp stands in for it.
+set( rocfft_planning_source
+  ../assignment_policy.cpp
+  ../auxiliary.cpp
+  ../callback_map.cpp
+  ../chirp.cpp
+  ../data_layout.cpp
+  ../enum_printer.cpp
+  ../exec_info.cpp
+  ../fuse_shim.cpp
+  ../kargs.cpp
+  ../node_factory.cpp
+  ../plan.cpp
+  ../rccl_wrapper.cpp
+  ../repo.cpp
+  ../rtc_exports.cpp
+  ../transform.cpp
+  ../tree_node.cpp
+  ../tree_node_1D.cpp
+  ../tree_node_2D.cpp
+  ../tree_node_3D.cpp
+  ../tree_node_bluestein.cpp
+  ../tree_node_real.cpp
+  ../tuning_kernel_tuner.cpp
+  ../tuning_plan_tuner.cpp
+  ../twiddles.cpp
+)
+
 add_executable( rocfft-internal-test
   data_layout_test.cpp
   function_map_key_test.cpp
   function_pool_test.cpp
   kernel_name_test.cpp
+  plan_test.cpp
+  powx_stub.cpp
+  repo_test.cpp
   rtc_test.cpp
   solution_map_test.cpp
-  # data_layout and enum_printer are compiled into the rocfft shared library
-  # rather than an object library, so build them here to reach them.
-  ../data_layout.cpp
-  ../enum_printer.cpp
-  ../rocfft_stub.cpp
+  ${rocfft_planning_source}
 )
 
 # Lets the solution map test find the .dat files that ship with the library.
@@ -56,19 +85,21 @@ set_target_properties( rocfft-internal-test PROPERTIES
 
 target_compile_options( rocfft-internal-test PRIVATE ${WARNING_FLAGS} )
 
-# Link rocfft-function-pool directly, not roc::rocfft, to avoid a duplicate function_pool_data singleton.
+# Link tests directly, not roc::*, to avoid duplication.
 target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-function-pool
   rocfft-rtc-cache
   rocfft-rtc-common
   rocfft-rtc-compile
   rocfft-rtc-gen
+  rocfft-rtc-launch
   rocfft-rtc-subprocess
   rocfft-solution-map
+  rocfft-tuning-helper
   # rocfft-rtc-gen builds kernel source with the code generator, so that has
   # to come along too.
   generator
-  hip::host
+  hip::device
   ${ROCFFT_SQLITE_LIB}
 )
 
