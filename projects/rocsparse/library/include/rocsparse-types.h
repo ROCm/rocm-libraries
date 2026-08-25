@@ -409,9 +409,9 @@ typedef enum rocsparse_fill_mode_
  */
 typedef enum rocsparse_diagonal_mode_
 {
-    rocsparse_diagonal_mode_none     = 0, /**< Regular triangular solve (default). */
-    rocsparse_diagonal_mode_signed   = 1, /**< Diagonal solve \f$y = \alpha \, x / D\f$. */
-    rocsparse_diagonal_mode_absolute = 2 /**< Diagonal solve \f$y = \alpha \, x / |D|\f$. */
+    rocsparse_diagonal_mode_none     = 0, /**< Regular triangular solve \f$op(A) \, y = \alpha \, x\f$ (default). */
+    rocsparse_diagonal_mode_signed   = 1, /**< Diagonal solve \f$D \, y = \alpha \, x\f$. */
+    rocsparse_diagonal_mode_absolute = 2 /**< Diagonal solve \f$|D| \, y = \alpha \, x\f$. */
 } rocsparse_diagonal_mode;
 #endif
 

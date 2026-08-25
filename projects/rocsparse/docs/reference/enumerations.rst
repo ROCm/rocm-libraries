@@ -64,6 +64,13 @@ rocsparse_diag_type
 
 .. doxygenenum:: rocsparse_diag_type
 
+.. _rocsparse_diagonal_mode_:
+
+rocsparse_diagonal_mode
+-----------------------
+
+.. doxygenenum:: rocsparse_diagonal_mode
+
 .. _rocsparse_operation_:
 
 rocsparse_operation
@@ -220,13 +227,6 @@ rocsparse_sptrsm_output
 -----------------------
 
 .. doxygenenum:: rocsparse_sptrsm_output
-
-.. _rocsparse_diagonal_mode_:
-
-rocsparse_diagonal_mode
------------------------
-
-.. doxygenenum:: rocsparse_diagonal_mode
 
 rocsparse_spilu0_alg
 --------------------
