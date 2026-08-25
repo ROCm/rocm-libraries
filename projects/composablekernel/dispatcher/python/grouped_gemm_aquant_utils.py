@@ -498,9 +498,20 @@ def _compile_aquant_kernel(
     """Compile a generated .hpp into a .so via hipcc. Returns True on success."""
     ck_include = _get_ck_include_dir()
 
+    # Arch-specific defines: gfx950 uses OCP fp8 (not FNUZ) and native MX support.
+    # These mirror the CMakeLists.txt definitions that are normally injected by CMake
+    # but are absent in the standalone hipcc build path. Same block as
+    # grouped_gemm_bquant_utils._compile_bquant_kernel.
+    arch_defines = []
+    if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
+        arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+    if "gfx950" in gfx_arch:
+        arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
+
     cmd = [hipcc] + _HIPCC_BASE_FLAGS + [
         f"--offload-arch={gfx_arch}",
         f"-DGFX_ARCH=\"{gfx_arch}\"",
+        *arch_defines,
         "-include", str(hpp_path),
         str(_CTYPES_LIB_SRC),
         "-o", str(so_path),
