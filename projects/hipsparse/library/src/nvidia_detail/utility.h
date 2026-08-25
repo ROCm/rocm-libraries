@@ -42,7 +42,7 @@ namespace hipsparse
 {
     inline hipsparseStatus_t hipCUSPARSEStatusToHIPStatus(cusparseStatus_t cuStatus)
     {
-#if (CUDART_VERSION >= 11003)
+#if(CUDART_VERSION >= 11003)
         switch(cuStatus)
         {
         case CUSPARSE_STATUS_SUCCESS:
@@ -72,7 +72,7 @@ namespace hipsparse
         default:
             throw "Non existent cusparseStatus_t";
         }
-#elif (CUDART_VERSION >= 10010)
+#elif(CUDART_VERSION >= 10010)
         switch(cuStatus)
         {
         case CUSPARSE_STATUS_SUCCESS:
@@ -107,7 +107,7 @@ namespace hipsparse
 
     inline cusparseStatus_t hipSPARSEStatusToCUSPARSEStatus(hipsparseStatus_t hipStatus)
     {
-#if (CUDART_VERSION >= 11003)
+#if(CUDART_VERSION >= 11003)
         switch(hipStatus)
         {
         case HIPSPARSE_STATUS_SUCCESS:
@@ -137,7 +137,7 @@ namespace hipsparse
         default:
             throw "Non existent hipsparseStatus_t";
         }
-#elif (CUDART_VERSION >= 10010)
+#elif(CUDART_VERSION >= 10010)
         switch(hipStatus)
         {
         case HIPSPARSE_STATUS_SUCCESS:
@@ -500,7 +500,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12000)
     inline cusparseCsr2CscAlg_t hipCsr2CscAlgToCudaCsr2CscAlg(hipsparseCsr2CscAlg_t alg)
     {
         switch(alg)
@@ -513,7 +513,7 @@ namespace hipsparse
             throw "Non existant hipsparseCsr2CscAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
     inline cusparseCsr2CscAlg_t hipCsr2CscAlgToCudaCsr2CscAlg(hipsparseCsr2CscAlg_t alg)
     {
         switch(alg)
@@ -529,7 +529,7 @@ namespace hipsparse
 #endif
 
     /* Generic API */
-#if (CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 12011)
     inline cusparseFormat_t hipFormatToCudaFormat(hipsparseFormat_t format)
     {
         switch(format)
@@ -548,7 +548,7 @@ namespace hipsparse
             throw "Non existent hipsparseFormat_t";
         }
     }
-#elif (CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
     inline cusparseFormat_t hipFormatToCudaFormat(hipsparseFormat_t format)
     {
         switch(format)
@@ -565,7 +565,7 @@ namespace hipsparse
             throw "Non existent hipsparseFormat_t";
         }
     }
-#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
     inline cusparseFormat_t hipFormatToCudaFormat(hipsparseFormat_t format)
     {
         switch(format)
@@ -584,7 +584,7 @@ namespace hipsparse
             throw "Non existent hipsparseFormat_t";
         }
     }
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
     inline cusparseFormat_t hipFormatToCudaFormat(hipsparseFormat_t format)
     {
         switch(format)
@@ -601,7 +601,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 12011)
     inline hipsparseFormat_t CudaFormatToHIPFormat(cusparseFormat_t format)
     {
         switch(format)
@@ -620,7 +620,7 @@ namespace hipsparse
             throw "Non existent cusparseFormat_t";
         }
     }
-#elif (CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
     inline hipsparseFormat_t CudaFormatToHIPFormat(cusparseFormat_t format)
     {
         switch(format)
@@ -637,7 +637,7 @@ namespace hipsparse
             throw "Non existent cusparseFormat_t";
         }
     }
-#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
     inline hipsparseFormat_t CudaFormatToHIPFormat(cusparseFormat_t format)
     {
         switch(format)
@@ -656,7 +656,7 @@ namespace hipsparse
             throw "Non existent cusparseFormat_t";
         }
     }
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
     inline hipsparseFormat_t CudaFormatToHIPFormat(cusparseFormat_t format)
     {
         switch(format)
@@ -673,7 +673,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 11000)
+#if(CUDART_VERSION >= 11000)
     inline cusparseOrder_t hipOrderToCudaOrder(hipsparseOrder_t op)
     {
         switch(op)
@@ -699,7 +699,7 @@ namespace hipsparse
             throw "Non existent cusparseOrder_t";
         }
     }
-#elif (CUDART_VERSION >= 10010)
+#elif(CUDART_VERSION >= 10010)
     inline cusparseOrder_t hipOrderToCudaOrder(hipsparseOrder_t op)
     {
         switch(op)
@@ -723,7 +723,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 10010)
+#if(CUDART_VERSION >= 10010)
     inline cusparseIndexType_t hipIndexTypeToCudaIndexType(hipsparseIndexType_t type)
     {
         switch(type)
@@ -755,7 +755,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 13001)
+#if(CUDART_VERSION >= 13001)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)
@@ -778,7 +778,7 @@ namespace hipsparse
             throw "Non existant hipsparseSpMVAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
+#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)
@@ -799,7 +799,7 @@ namespace hipsparse
             throw "Non existant hipsparseSpMVAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12011)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)
@@ -818,7 +818,7 @@ namespace hipsparse
             throw "Non existant hipsparseSpMVAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)
@@ -841,7 +841,7 @@ namespace hipsparse
             throw "Non existant hipsparseSpMVAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)
@@ -860,7 +860,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 12051)
+#if(CUDART_VERSION >= 12051)
     inline cusparseSpMMAlg_t hipSpMMAlgToCudaSpMMAlg(hipsparseSpMMAlg_t alg)
     {
         switch(alg)
@@ -889,7 +889,7 @@ namespace hipsparse
             throw "Non existent hipsparseSpMMAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 12000 && CUDART_VERSION < 12051)
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12051)
     inline cusparseSpMMAlg_t hipSpMMAlgToCudaSpMMAlg(hipsparseSpMMAlg_t alg)
     {
         switch(alg)
@@ -916,7 +916,7 @@ namespace hipsparse
             throw "Non existent hipsparseSpMMAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
     inline cusparseSpMMAlg_t hipSpMMAlgToCudaSpMMAlg(hipsparseSpMMAlg_t alg)
     {
         switch(alg)
@@ -948,7 +948,7 @@ namespace hipsparse
             throw "Non existent hipsparseSpMMAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
+#elif(CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
     inline cusparseSpMMAlg_t hipSpMMAlgToCudaSpMMAlg(hipsparseSpMMAlg_t alg)
     {
         switch(alg)
@@ -978,7 +978,7 @@ namespace hipsparse
             throw "Non existent hipsparseSpMMAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
     inline cusparseSpMMAlg_t hipSpMMAlgToCudaSpMMAlg(hipsparseSpMMAlg_t alg)
     {
         switch(alg)
@@ -999,7 +999,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12000)
     inline cusparseSpGEMMAlg_t hipSpGEMMAlgToCudaSpGEMMAlg(hipsparseSpGEMMAlg_t alg)
     {
         switch(alg)
@@ -1020,7 +1020,7 @@ namespace hipsparse
             throw "Non existant cusparseSpGEMMAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 11031)
+#elif(CUDART_VERSION >= 11031)
     inline cusparseSpGEMMAlg_t hipSpGEMMAlgToCudaSpGEMMAlg(hipsparseSpGEMMAlg_t alg)
     {
         switch(alg)
@@ -1035,7 +1035,7 @@ namespace hipsparse
             throw "Non existant cusparseSpGEMMAlg_t";
         }
     }
-#elif (CUDART_VERSION >= 11000)
+#elif(CUDART_VERSION >= 11000)
     inline cusparseSpGEMMAlg_t hipSpGEMMAlgToCudaSpGEMMAlg(hipsparseSpGEMMAlg_t alg)
     {
         switch(alg)
@@ -1065,7 +1065,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 11020)
+#if(CUDART_VERSION >= 11020)
     inline cusparseSparseToDenseAlg_t hipSpToDnAlgToCudaSpToDnAlg(hipsparseSparseToDenseAlg_t alg)
     {
         switch(alg)
@@ -1089,7 +1089,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 11020)
+#if(CUDART_VERSION >= 11020)
     inline cusparseDenseToSparseAlg_t hipDnToSpAlgToCudaDnToSpAlg(hipsparseDenseToSparseAlg_t alg)
     {
         switch(alg)
@@ -1113,7 +1113,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 11022)
+#if(CUDART_VERSION >= 11022)
     inline cusparseSDDMMAlg_t hipSDDMMAlgToCudaSDDMMAlg(hipsparseSDDMMAlg_t alg)
     {
         switch(alg)
@@ -1126,7 +1126,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 11030)
+#if(CUDART_VERSION >= 11030)
     inline cusparseSpSVAlg_t hipSpSVAlgToCudaSpSVAlg(hipsparseSpSVAlg_t alg)
     {
         switch(alg)
@@ -1139,7 +1139,7 @@ namespace hipsparse
     }
 #endif
 
-#if (CUDART_VERSION >= 11031)
+#if(CUDART_VERSION >= 11031)
     inline cusparseSpSMAlg_t hipSpSMAlgToCudaSpSMAlg(hipsparseSpSMAlg_t alg)
     {
         switch(alg)

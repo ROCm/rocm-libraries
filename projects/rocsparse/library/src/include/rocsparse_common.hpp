@@ -2860,5 +2860,4 @@ namespace rocsparse
                    ? (static_cast<rocsparse_double_complex>(abs_boost) * (value / abs_value))
                    : static_cast<rocsparse_double_complex>(abs_boost);
     }
-
 }
