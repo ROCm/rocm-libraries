@@ -177,13 +177,9 @@ function(hkp_wire_pack_step)
          "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp")
 
     # Editing the tool's own sources must retrigger the pack step, else the
-    # artifacts go stale against the current pipeline code. The fetched
-    # rocm_kpack package counts: kpack_resolver.py imports it and it decides the
-    # archive format. FetchContent's source dir is name-derived, so moving
-    # HIPKERNELPROVIDER_KPACK_GIT_REF does not move this stamp -- without these
-    # inputs a `cmake --fresh` onto a new ref rebuilds the reader while the pack
-    # stamp survives, leaving an archive written by the old packer and read by
-    # the new one. That is the skew the single pin in RocmKpack.cmake prevents.
+    # artifacts go stale against the current pipeline code. The resolved
+    # rocm_kpack package counts too: kpack_resolver.py imports it and it decides
+    # the archive format, so a packer change there must invalidate the stamp.
     file(GLOB _tool_sources CONFIGURE_DEPENDS
          "${HKP_PYTHON_ROOT}/hkp_pack/*.py"
          "${ARG_ROCM_KPACK_DIR}/rocm_kpack/*.py")
@@ -669,9 +665,9 @@ function(hkp_rocke_wheel_python_interp out_interp wheel_stamp)
     set(_library_wheel
         "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
 
-    # rocm_kpack's runtime dependencies. It is reached by putting a FetchContent
-    # SOURCE TREE on sys.path, never by pip-installing it, so nothing ever
-    # resolves the `msgpack>=1.0.0` / `zstandard>=0.20.0` it declares in its own
+    # rocm_kpack's runtime dependencies. The packer reaches rocm_kpack by path on
+    # sys.path rather than by pip-installing it, so nothing resolves the
+    # `msgpack>=1.0.0` / `zstandard>=0.20.0` it declares in its own
     # pyproject.toml -- and `import rocm_kpack.kpack` fails without them. The
     # previous venv used --system-site-packages and inherited whatever the host
     # happened to have; making the venv hermetic removed that accident, so the
