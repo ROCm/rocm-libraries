@@ -214,9 +214,14 @@ namespace TensileLite
                             io, concatenate("solutions_index has a negative field at entry ", i / 3));
                         return false;
                     }
-                    // Checked as int64 before narrowing, so a huge offset+length
-                    // cannot wrap into a value that looks in range.
-                    if(offset + length > static_cast<int64_t>(blobSize))
+                    // Compared unsigned and by subtraction, never as a sum:
+                    // offset + length overflows int64 for large values and wraps
+                    // negative, which passes a sum comparison and leaves a slice
+                    // pointing outside the blob. Both are known non-negative
+                    // here, and the first clause makes the subtraction safe.
+                    const uint64_t blobBytes = static_cast<uint64_t>(blobSize);
+                    if(static_cast<uint64_t>(offset) > blobBytes
+                       || static_cast<uint64_t>(length) > blobBytes - static_cast<uint64_t>(offset))
                     {
                         iot::setError(io,
                                       concatenate("solution ",

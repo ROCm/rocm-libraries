@@ -1125,8 +1125,6 @@ int main(int argc, const char* argv[])
         numProblems = problems.size();
     int lastProblemIdx = firstProblemIdx + numProblems - 1;
 
-    int         firstSolutionIdx = args["solution-start-idx"].as<int>();
-    int         numSolutions     = args["num-solutions"].as<int>();
     bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
     bool        runKernels       = !args["selection-only"].as<bool>();
     bool        exitOnError      = args["exit-on-error"].as<bool>();
@@ -1141,23 +1139,11 @@ int main(int argc, const char* argv[])
         exit(1);
     }
 
-    if(firstSolutionIdx < 0)
-    {
-        // solutions is empty until something is materialized when the library
-        // was loaded in indexed form, and begin() on an empty map would be a
-        // dereference of end(). The client enumerates anyway, so fill it.
-        if(library->blobCache)
-            library->blobCache->materializeAll();
-
-        if(!library->solutions.empty())
-            firstSolutionIdx = library->solutions.begin()->first;
-    }
-
-    if(numSolutions < 0)
-    {
-        auto iter = library->solutions.end();
-        iter--;
-    }
+    // solution-start-idx and num-solutions are resolved by SolutionIterator from
+    // args below; the local copies that used to be computed here were never read
+    // again, and picking the range off library->solutions here both forced an
+    // indexed library to materialize before the Best/Top iterators could measure
+    // a lazy selection, and decremented end() on an empty map.
 
     std::shared_ptr<DataInitialization> dataInit;
     {

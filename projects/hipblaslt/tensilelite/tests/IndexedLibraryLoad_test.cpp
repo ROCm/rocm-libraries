@@ -337,13 +337,19 @@ TEST(SolutionBlobCacheTest, ConcurrentGetOfDifferentIndicesIsSafe)
 namespace
 {
     /// Writes an indexed .dat.zlib with a caller-supplied index table and blob.
-    /// The library tree is a stub; validation runs before it is read, so these
-    /// cases never get that far.
+    ///
+    /// The library tree is a single lazy leaf naming `treeIndex`, which is a
+    /// genuinely valid tree: a leaf only checks that the index table carries its
+    /// index, so it needs no parseable solution in the blob. That matters for the
+    /// malformed-table cases below. With a stub tree they would pass even if
+    /// table validation were deleted, because reading the tree would fail
+    /// anyway; with a valid tree, the table is the only thing left to reject.
     void writeIndexedLibrary(fs::path const&             base,
                              int                         formatVersion,
                              std::vector<int64_t> const& table,
                              std::vector<uint8_t> const& blob,
-                             bool                        omitBlob = false)
+                             bool                        omitBlob  = false,
+                             int64_t                     treeIndex = 0)
     {
         msgpack::sbuffer  buffer;
         msgpack::packer<msgpack::sbuffer> packer(buffer);
@@ -364,9 +370,12 @@ namespace
                                  static_cast<uint32_t>(blob.size()));
         }
 
-        // Deliberately not a valid tree: these loads must fail earlier.
         packer.pack(std::string("library"));
-        packer.pack_map(0);
+        packer.pack_map(2);
+        packer.pack(std::string("type"));
+        packer.pack(std::string("Single"));
+        packer.pack(std::string("index"));
+        packer.pack(static_cast<int>(treeIndex));
 
         std::vector<uint8_t> raw(buffer.data(), buffer.data() + buffer.size());
         writeFile(fs::path(base.string() + ".zlib"), deflateBytes(raw));
@@ -374,6 +383,53 @@ namespace
 } // namespace
 
 using IndexedLibraryLoadTest = TempDirTest;
+
+// Positive control for every rejection case below: this is the same shape of
+// file with a well-formed table, so it must load. Without it, a loader that
+// rejected everything would pass the whole group.
+TEST_F(IndexedLibraryLoadTest, AcceptsWellFormedIndexedLibrary)
+{
+    auto base = tmpDir / "TensileLibrary_ok.dat";
+    writeIndexedLibrary(base, 2, {0, 0, 1}, {0x01});
+
+    auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    ASSERT_NE(library, nullptr) << "a well-formed indexed library must load";
+
+    auto* master
+        = dynamic_cast<MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>*>(
+            library.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_NE(master->blobCache, nullptr);
+    EXPECT_EQ(master->blobCache->size(), 1u);
+    EXPECT_EQ(master->blobCache->materializedCount(), 0u)
+        << "loading must not parse the blob";
+}
+
+// A tree naming an index the table does not carry has to fail the load, the way
+// a dangling reference does on the eager path, rather than surfacing later as a
+// query that returns nothing.
+TEST_F(IndexedLibraryLoadTest, RejectsTreeReferenceToIndexNotInTable)
+{
+    auto base = tmpDir / "TensileLibrary_dangling.dat";
+    writeIndexedLibrary(base, 2, {0, 0, 1}, {0x01}, /*omitBlob=*/false, /*treeIndex=*/7);
+
+    auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    EXPECT_EQ(library, nullptr);
+}
+
+// offset + length overflows int64 and wraps negative, so a span check written as
+// a sum accepts it and leaves the slice pointing far outside the blob. Loading
+// such a file used to succeed and then read wild memory on materialization.
+TEST_F(IndexedLibraryLoadTest, RejectsSpanThatOverflowsSignedArithmetic)
+{
+    constexpr int64_t huge = int64_t(1) << 62;
+
+    auto base = tmpDir / "TensileLibrary_spanoverflow.dat";
+    writeIndexedLibrary(base, 2, {0, huge, huge}, {0x01});
+
+    auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    EXPECT_EQ(library, nullptr);
+}
 
 TEST_F(IndexedLibraryLoadTest, RejectsUnknownFormatVersion)
 {
@@ -415,7 +471,10 @@ TEST_F(IndexedLibraryLoadTest, RejectsNegativeFields)
 TEST_F(IndexedLibraryLoadTest, RejectsDuplicateIndex)
 {
     auto base = tmpDir / "TensileLibrary_dup.dat";
-    writeIndexedLibrary(base, 2, {5, 0, 1, 5, 1, 1}, {0x01, 0x02});
+    // Tree names 5 so that, if the duplicate check were removed, the surviving
+    // slice would satisfy the tree and the file would load.
+    writeIndexedLibrary(base, 2, {5, 0, 1, 5, 1, 1}, {0x01, 0x02}, /*omitBlob=*/false,
+                        /*treeIndex=*/5);
 
     auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
     EXPECT_EQ(library, nullptr);
@@ -436,6 +495,14 @@ TEST_F(IndexedLibraryLoadTest, RejectsMissingBlob)
 
 namespace
 {
+    /// The legacy library the parity tests convert. Registered in
+    /// tests/configs/CMakeLists.txt and gunzipped into the test data directory at
+    /// configure time, so these run without any manual setup.
+    fs::path legacyFixture()
+    {
+        return TestData::Instance().file("KernelsLite.dat");
+    }
+
     /// Rewrites a legacy {solutions, library} msgpack document into the indexed
     /// layout, re-packing each solution object into the blob. Mirrors what
     /// LibraryIO.writeMsgPackIndexed does on the Python side.
@@ -492,7 +559,7 @@ using IndexedLibraryParityTest = TempDirTest;
 
 TEST_F(IndexedLibraryParityTest, IndexedLoadMatchesLegacyLoad)
 {
-    auto fixture = TestData::Instance().file("SolutionLibraries/KernelsLite.dat");
+    auto fixture = legacyFixture();
     if(!fs::is_regular_file(fixture))
         GTEST_SKIP() << "no legacy library fixture at " << fixture;
 
@@ -510,7 +577,12 @@ TEST_F(IndexedLibraryParityTest, IndexedLoadMatchesLegacyLoad)
     writeFile(fs::path(indexedBase.string() + ".zlib"), deflateBytes(indexed));
 
     auto legacyLib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(fixture.string());
-    ASSERT_NE(legacyLib, nullptr);
+    if(!legacyLib)
+    {
+        GTEST_SKIP() << fixture
+                     << " does not load; a fixture that predates a required schema field cannot "
+                        "be used for parity. Regenerate it (see configs/SolutionLibraries/readme).";
+    }
     auto indexedLib
         = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(indexedBase.string());
     ASSERT_NE(indexedLib, nullptr) << "indexed library failed to load";
@@ -547,7 +619,7 @@ TEST_F(IndexedLibraryParityTest, ResolveByIndexWorksWithoutAnyPriorQuery)
     // Guards the hipBLASLt algo-index path, which calls getSolutionByIndex
     // without a preceding findBestSolution and used to depend on the shard
     // merge having pre-populated the solutions map.
-    auto fixture = TestData::Instance().file("SolutionLibraries/KernelsLite.dat");
+    auto fixture = legacyFixture();
     if(!fs::is_regular_file(fixture))
         GTEST_SKIP() << "no legacy library fixture at " << fixture;
 

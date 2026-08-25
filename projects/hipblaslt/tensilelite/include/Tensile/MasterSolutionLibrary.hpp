@@ -70,11 +70,12 @@ namespace TensileLite
         // stays empty for indexed files.
         std::shared_ptr<SolutionBlobCache<MySolution>> blobCache;
 
-        // Points at the owning master's list of shard caches so a placeholder
-        // can publish a shard's indices after loading it. Defaulted because the
-        // existing aggregate initializers in the loaders pass only the first
-        // few fields.
-        std::vector<std::shared_ptr<SolutionBlobCache<MySolution>>>* solutionSources = nullptr;
+        // Points at the owning master's shard caches, keyed by file prefix, so a
+        // placeholder can publish a shard's indices after loading it. Defaulted
+        // because the existing aggregate initializers in the loaders pass only
+        // the first few fields.
+        std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>>* solutionSources
+            = nullptr;
     };
 
     /**
@@ -158,12 +159,15 @@ namespace TensileLite
         mutable std::atomic<bool>                               lastFindTopRetAll = false;
 
         // Indexed-format state. `blobCache` serves this file's own solutions;
-        // `solutionSources` collects the caches of lazily loaded shards. A list
-        // of caches rather than an index->cache map on purpose: registering
-        // every index would rebuild the very table this format exists to avoid,
-        // and only a handful of shards are ever resident.
-        std::shared_ptr<SolutionBlobCache<MySolution>>                      blobCache;
-        mutable std::vector<std::shared_ptr<SolutionBlobCache<MySolution>>> solutionSources;
+        // `solutionSources` collects the caches of lazily loaded shards, keyed by
+        // file prefix. Keyed by shard rather than by solution index on purpose:
+        // registering every index would rebuild the very table this format
+        // exists to avoid, and only a handful of shards are ever resident. The
+        // key also makes registration idempotent per shard, so a shard reached
+        // through both loadLibrary and a placeholder cannot retain two blobs.
+        std::shared_ptr<SolutionBlobCache<MySolution>> blobCache;
+        mutable std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>>
+            solutionSources;
 
         MasterSolutionLibrary() = default;
 
@@ -261,15 +265,10 @@ namespace TensileLite
 
             // Publish the shard's cache so index lookups can reach solutions
             // this shard owns but has not parsed yet. One entry per shard, not
-            // per solution.
+            // per solution; keyed by prefix so this is idempotent even if a
+            // placeholder loads the same shard independently.
             if(mLibrary->blobCache)
-            {
-                if(std::find(begin(solutionSources), end(solutionSources), mLibrary->blobCache)
-                   == end(solutionSources))
-                {
-                    solutionSources.push_back(mLibrary->blobCache);
-                }
-            }
+                solutionSources.emplace(filePrefix, mLibrary->blobCache);
 
             std::transform(begin(mLibrary->solutions),
                            end(mLibrary->solutions),
@@ -312,16 +311,16 @@ namespace TensileLite
             }
             else
             {
-                std::vector<std::shared_ptr<SolutionBlobCache<MySolution>>> sources;
+                std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>> sources;
                 {
                     std::lock_guard<std::mutex> lock(solutionsGuard);
                     sources = solutionSources;
                 }
-                for(auto const& source : sources)
+                for(auto const& entry : sources)
                 {
-                    if(source && source->contains(index))
+                    if(entry.second && entry.second->contains(index))
                     {
-                        solution = source->get(index);
+                        solution = entry.second->get(index);
                         break;
                     }
                 }
@@ -334,6 +333,50 @@ namespace TensileLite
             // later lookups take the map hit.
             std::lock_guard<std::mutex> lock(solutionsGuard);
             return solutions.emplace(index, solution).first->second;
+        }
+
+        /// Parses every solution this library can serve and publishes it into
+        /// `solutions`.
+        ///
+        /// Materializing the caches is not enough on its own: leaf nodes resolve
+        /// through a cache and never touch `solutions`, so for an indexed file
+        /// that map stays empty however much has been parsed. Enumeration
+        /// consumers index it directly, so they need it populated.
+        ///
+        /// For enumeration paths only. Anything measuring selection latency must
+        /// not call this, or it pays the very cost the indexed layout defers.
+        void materializeAllSolutions() const
+        {
+            std::vector<std::shared_ptr<SolutionBlobCache<MySolution>>> sources;
+            if(blobCache)
+                sources.push_back(blobCache);
+            {
+                std::lock_guard<std::mutex> lock(solutionsGuard);
+                for(auto const& entry : solutionSources)
+                    sources.push_back(entry.second);
+            }
+
+            for(auto const& source : sources)
+            {
+                if(!source)
+                    continue;
+
+                source->materializeAll();
+
+                // Collected before taking the map lock: get() takes the cache's
+                // own lock, and no other path nests these two.
+                std::vector<std::pair<int, std::shared_ptr<MySolution>>> parsed;
+                parsed.reserve(source->size());
+                for(int index : source->indices())
+                {
+                    if(auto solution = source->get(index))
+                        parsed.emplace_back(index, solution);
+                }
+
+                std::lock_guard<std::mutex> lock(solutionsGuard);
+                for(auto const& entry : parsed)
+                    solutions.emplace(entry.first, entry.second);
+            }
         }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
