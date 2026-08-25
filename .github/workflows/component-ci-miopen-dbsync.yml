@@ -80,19 +80,21 @@ jobs:
       AMDGPU_FAMILIES: ${{ inputs.family }}
       VENV_DIR: ${{ github.workspace }}/.venv
     steps:
-      # Single source of truth for the family -> (arch, rocjitsu KMD config, real CU count) mapping,
-      # so both callers pass only `family`. cu = the arch's real CU count (= the StaticFDBSync
-      # param); it feeds the CU-correction below.
-      - name: Resolve arch / rocjitsu config / CU from family
+      # Single source of truth for the family -> (arch, rocjitsu KMD config, CU count list) mapping,
+      # so both callers pass only `family`. `cus` is the space-separated list of real CU counts to
+      # validate for this family (each = a StaticFDBSync param and drives one CU-corrected rocjitsu
+      # run below). gfx94X-dcgpu covers BOTH MI300X (304 -> gfx942130 DB) and MI300A (228 ->
+      # gfx942e4 DB); db_sync.cpp's CU-match skip runs only the matching param per CU-corrected run.
+      - name: Resolve arch / rocjitsu config / CU list from family
         id: rj
         run: |
           set -euxo pipefail
           case "${{ inputs.family }}" in
-            gfx94X-dcgpu) arch=gfx942; rj=amdgpu_cdna3_kmd.json; cu=304 ;;
-            gfx950-dcgpu) arch=gfx950; rj=amdgpu_cdna4_kmd.json; cu=256 ;;
+            gfx94X-dcgpu) arch=gfx942; rj=amdgpu_cdna3_kmd.json; cus="304 228" ;;
+            gfx950-dcgpu) arch=gfx950; rj=amdgpu_cdna4_kmd.json; cus="256" ;;
             *) echo "::error::unsupported family '${{ inputs.family }}' -- no rocjitsu KMD config"; exit 1 ;;
           esac
-          { echo "arch=${arch}"; echo "rj_config=${rj}"; echo "cu=${cu}"; } >> "$GITHUB_OUTPUT"
+          { echo "arch=${arch}"; echo "rj_config=${rj}"; echo "cus=${cus}"; } >> "$GITHUB_OUTPUT"
 
       - name: Checkout ROCm/TheRock (build_tools)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -113,18 +115,6 @@ jobs:
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
-
-      # rocjitsu's stock cdna config declares a minimal (~4 CU) device, which makes CK's grouped-wrw
-      # occupancy-based auto-split-k mis-compute and false-flag valid small perf configs. Rewrite the
-      # device-block CU count to the arch's real value so multiProcessorCount matches real hardware
-      # (topology untouched -> no emulation-cost change). See the helper for the full rationale.
-      - name: CU-correct rocjitsu config
-        run: |
-          set -euxo pipefail
-          python3 rocm-libraries/.github/scripts/therock_dbsync_cu_correct_config.py \
-            "rocm-systems/emulation/rocjitsu/configs/${{ steps.rj.outputs.rj_config }}" \
-            "${{ steps.rj.outputs.cu }}" \
-            /tmp/rj_config.json
 
       - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -197,14 +187,33 @@ jobs:
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build -DCMAKE_BUILD_TYPE=Release
           cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j"$(nproc)"
 
+      # One rocjitsu invocation per CU count in the family's list. Each iteration CU-corrects the
+      # rocjitsu config to that CU so the emulated multiProcessorCount matches real hardware -- CK's
+      # grouped-wrw occupancy-based auto-split-k reads it directly (bypassing MIOpen's Handle
+      # override), and rocjitsu's stock cdna config otherwise declares a minimal (~4 CU) device that
+      # false-flags valid perf configs. db_sync.cpp's CU-match skip (GetSysDbSelectionCu vs the real
+      # device CU) then runs exactly the one StaticFDBSync param matching this CU (304 -> gfx942130,
+      # 228 -> gfx942e4 / MI300A, 256 -> gfx950100) and skips the rest -- so no per-run gtest filter
+      # is needed. `set -e` fails the step if any CU's run fails.
       - name: Run StaticFDBSync (rocjitsu, ${{ steps.rj.outputs.arch }})
         env:
           DEVICE_ARCH: ${{ steps.rj.outputs.arch }}
+          RJ_CONFIG_NAME: ${{ steps.rj.outputs.rj_config }}
+          CU_LIST: ${{ steps.rj.outputs.cus }}
         run: |
           set -euxo pipefail
           export ROCM_PATH="$(realpath ./build)"
           export LD_LIBRARY_PATH="$(realpath ./build/lib):${LD_LIBRARY_PATH:-}"
-          export RJ_CONFIG="$(realpath /tmp/rj_config.json)" # CU-corrected, see above
           export MIOPEN_DEVICE_ARCH="${DEVICE_ARCH}"
-          LD_PRELOAD="$(realpath rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so)" \
-            ./build/bin/miopen_gtest --gtest_filter='*StaticFDBSync*' --gtest_color=no
+          kmd="$(realpath rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so)"
+          for cu in ${CU_LIST}; do
+            echo "::group::StaticFDBSync ${DEVICE_ARCH} @ ${cu} CU"
+            python3 rocm-libraries/.github/scripts/therock_dbsync_cu_correct_config.py \
+              "rocm-systems/emulation/rocjitsu/configs/${RJ_CONFIG_NAME}" \
+              "${cu}" \
+              "/tmp/rj_config_${cu}.json"
+            RJ_CONFIG="$(realpath "/tmp/rj_config_${cu}.json")" \
+            LD_PRELOAD="${kmd}" \
+              ./build/bin/miopen_gtest --gtest_filter='*StaticFDBSync*' --gtest_color=no
+            echo "::endgroup::"
+          done
