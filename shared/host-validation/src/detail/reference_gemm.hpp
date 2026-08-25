@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "reference_common.hpp"
+#include "threading.hpp"
 
 namespace roc::host_validation {
 namespace detail {
@@ -199,6 +200,31 @@ inline void validateRuntimeGemmProblem(const GemmProblem& problem) {
         if (complexAccumulator)
             throw std::invalid_argument("Complex reference GEMM does not support block scaling.");
     }
+}
+
+inline bool canParallelizeGemmOutput(const GemmRequest& problem) {
+    if (!hasProvablyIndependentElements(problem.d)) return false;
+    if (storageOverlaps(problem.d, problem.a.values) ||
+        storageOverlaps(problem.d, problem.b.values) || storageOverlaps(problem.d, problem.c))
+        return false;
+    for (const VectorBinding& binding : problem.a.preQuantizationScales)
+        if (storageOverlaps(problem.d, binding.values)) return false;
+    for (const VectorBinding& binding : problem.b.preQuantizationScales)
+        if (storageOverlaps(problem.d, binding.values)) return false;
+    if (problem.a.blockScale && storageOverlaps(problem.d, problem.a.blockScale->values))
+        return false;
+    if (problem.b.blockScale && storageOverlaps(problem.d, problem.b.blockScale->values))
+        return false;
+    if (problem.epilogue.bias && storageOverlaps(problem.d, problem.epilogue.bias->values))
+        return false;
+    if (problem.epilogue.scaleAlpha &&
+        storageOverlaps(problem.d, problem.epilogue.scaleAlpha->values))
+        return false;
+    if (problem.epilogue.scaleA && storageOverlaps(problem.d, *problem.epilogue.scaleA))
+        return false;
+    if (problem.epilogue.scaleB && storageOverlaps(problem.d, *problem.epilogue.scaleB))
+        return false;
+    return true;
 }
 
 inline void validateRuntimeGemm(const GemmRequest& problem) {
@@ -412,21 +438,22 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
 
     const size_t logicalElements = problem.d.shape().elementCount();
     size_t outputElementsWritten = 0;
+    const bool parallelOutput = canParallelizeGemmOutput(problem);
+    const size_t reductionWork = finalizer.alphaIsZero() ? 0 : k;
     if (problem.outputSelection.selectsAll()) {
-        for (size_t row = 0; row < m; ++row) {
-            for (size_t column = 0; column < n; ++column) {
-                computeOutput(row, column);
-                ++outputElementsWritten;
-            }
-        }
+        outputElementsWritten = logicalElements;
+        forEachParallelIndex(logicalElements, saturatedProduct(logicalElements, reductionWork),
+                             parallelOutput, 500'000, [&](size_t logicalIndex) {
+                                 computeOutput(logicalIndex / n, logicalIndex % n);
+                             });
     } else {
         const auto selected = problem.outputSelection.indices(logicalElements);
-        for (size_t logicalIndex : selected) {
-            const size_t row = logicalIndex / n;
-            const size_t column = logicalIndex % n;
-            computeOutput(row, column);
-        }
         outputElementsWritten = selected.size();
+        forEachParallelIndex(selected.size(), saturatedProduct(selected.size(), reductionWork),
+                             parallelOutput, 500'000, [&](size_t selectionIndex) {
+                                 const size_t logicalIndex = selected[selectionIndex];
+                                 computeOutput(logicalIndex / n, logicalIndex % n);
+                             });
     }
 
     return {
