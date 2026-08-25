@@ -50,6 +50,16 @@ struct Multiply
     }
 };
 
+template <typename ComputeType = float>
+struct CompareGreater
+{
+    template <typename X0, typename X1>
+    bool operator()(const X0& x0, const X1& x1) const
+    {
+        return static_cast<ComputeType>(x0) > static_cast<ComputeType>(x1);
+    }
+};
+
 // Backward activation operations: dx = dy * local_gradient
 // Takes upstream gradient dy and forward input x.
 

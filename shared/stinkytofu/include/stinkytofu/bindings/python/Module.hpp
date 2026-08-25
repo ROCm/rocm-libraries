@@ -83,10 +83,12 @@
     X(EnableESM2TrackValuVsrc, bool)              \
     X(VgprMsbMode, int)                           \
     X(RequiresXCntForVolatileVMEM, bool)          \
+    X(EnableXnackReplay, bool)                    \
     X(EnableSwInstructionPrefetchRelStatic, bool) \
     X(EnableSwInstructionPrefetchAbs, bool)       \
     X(SwInstructionPrefetchAbsBaseSgpr, int)      \
     X(ClusterBarrier, bool)                       \
+    X(StreamKMulticast, bool)                     \
     X(TDMLoadWaveSync, bool)                      \
     X(PrefetchGlobalRead, int)                    \
     X(PrefetchLocalRead, int)                     \
