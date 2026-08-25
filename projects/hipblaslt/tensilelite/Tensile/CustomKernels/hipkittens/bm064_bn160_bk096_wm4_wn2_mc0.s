@@ -1200,6 +1200,57 @@ __hip_cuid_37cc8707287e5d4d:
 	.addrsig_sym __hip_cuid_37cc8707287e5d4d
 	.amdgpu_metadata
 ---
+custom.config:
+  Source:
+    Origin: hipkittens
+  Version: 1.0.0
+  Features:
+    SupportsUserArgs: false
+    SupportsBias: false
+    SupportsActivation: false
+    SupportsScaleAlpha: false
+    SupportsGSU: false
+  InternalSupportParams:
+    KernArgsVersion: 0
+  ProblemType:
+    OperationType: GEMM
+    DataType: b
+    DestDataType: b
+    ComputeDataType: s
+    HighPrecisionAccumulate: True
+    TransposeA: True
+    TransposeB: False
+    UseBeta: False
+    Batched: True
+    UseBias: 0
+    Activation: False
+    UseScaleAlphaVec: 0
+  CustomKernel:
+    args: [ { type: address, semantic: AddressA },
+            { type: uint64, semantic: ConstantOne },
+            { type: uint64, semantic: ConstantOne },
+            { type: uint64, semantic: SizeFree0 },
+            { type: uint64, semantic: SizeSum },
+            { type: address, semantic: AddressB },
+            { type: uint64, semantic: ConstantOne },
+            { type: uint64, semantic: ConstantOne },
+            { type: uint64, semantic: SizeFree1 },
+            { type: uint64, semantic: SizeSum },
+            { type: address, semantic: AddressD },
+            { type: uint64, semantic: ConstantOne },
+            { type: uint64, semantic: ConstantOne },
+            { type: uint64, semantic: SizeFree0 },
+            { type: uint64, semantic: SizeFree1 },
+            { type: uint32, semantic: SizeFree0 },
+            { type: uint32, semantic: SizeFree1 },
+            { type: uint32, semantic: SizeSum } ]
+    macrotile: [64, 160, 96]
+    threads: [256, 1, 1]
+    grid: [TilesX, TilesY, One]
+  MatrixInstruction: [16, 16, 32, 1]
+  EnableMatrixInstruction: True
+  MIWaveTile: [2, 2]
+  WavefrontSize: 32
 amdhsa.kernels:
   - .args:
       - .offset:         0

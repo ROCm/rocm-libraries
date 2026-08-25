@@ -75,53 +75,34 @@ PREDICATE_FORK_PARAMETER_KEYS = (
 )
 
 
-def _parse_tensile_yaml(path, kernel_name=None):
-    """Extract ProblemType, CustomKernel, and MatrixInstruction from a Tensile test YAML.
+def _find_custom_kernel_in_fork_params(fork_params, kernel_name=None, available_kernels=None):
+    """Return the CustomKernel dict from ForkParameters if a match is found.
 
-    Args:
-        path: Path to the Tensile test YAML file.
-        kernel_name: If provided, match this kernel name in the ForkParameters.
-                     If None, use the first CustomKernel found.
-
-    Returns:
-        dict with ProblemType, CustomKernel, MatrixInstruction, WavefrontSize (if found).
+    When *kernel_name* is None, returns the first named CustomKernel.
     """
-    import yaml
-    with open(path) as f:
-        try:
-            data = yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            raise RuntimeError(f"Failed to parse Tensile YAML '{path}': {e}") from e
+    for entry in fork_params:
+        if not isinstance(entry, dict) or "CustomKernel" not in entry:
+            continue
+        for ck in entry["CustomKernel"]:
+            if not isinstance(ck, dict) or "name" not in ck:
+                continue
+            if available_kernels is not None:
+                available_kernels.append(ck["name"])
+            if kernel_name is None or ck["name"] == kernel_name:
+                return ck
+    return None
 
-    try:
-        bp = data["BenchmarkProblems"][0]
-        problem_type = bp[0]
-        bench = bp[1]
-    except (KeyError, IndexError, TypeError) as e:
-        raise RuntimeError(
-            f"Tensile YAML '{path}' does not contain BenchmarkProblems[0] "
-            "with ProblemType and ForkParameters"
-        ) from e
 
-    config = {"ProblemType": problem_type}
+def _build_config_from_size_group(problem_type, fork_params, kernel_ck):
+    """Build a config dict from a matched CustomKernel and its size group."""
+    config = {
+        "ProblemType": problem_type,
+        "CustomKernel": {k: v for k, v in kernel_ck.items() if k != "name"},
+    }
 
-    fork_params = bench.get("ForkParameters", [])
-    available_kernels = []
     for entry in fork_params:
         if not isinstance(entry, dict):
             continue
-
-        if "CustomKernel" in entry:
-            for ck in entry["CustomKernel"]:
-                if not isinstance(ck, dict) or "name" not in ck:
-                    continue
-                available_kernels.append(ck["name"])
-                if kernel_name and ck["name"] != kernel_name:
-                    continue
-                config["CustomKernel"] = {
-                    k: v for k, v in ck.items() if k != "name"
-                }
-                break
 
         if "MatrixInstruction" in entry:
             mi_list = entry["MatrixInstruction"]
@@ -146,16 +127,86 @@ def _parse_tensile_yaml(path, kernel_name=None):
             checkParametersAreValid((pred_key, values), validParameters)
             config[pred_key] = values[0]
 
-    if kernel_name and "CustomKernel" not in config:
+    return config
+
+
+def _parse_tensile_yaml(path, kernel_name=None):
+    """Extract ProblemType, CustomKernel, and MatrixInstruction from a Tensile test YAML.
+
+    Searches all BenchmarkProblems entries and their BenchmarkProblemSizeGroups
+    for a CustomKernel matching *kernel_name*.  When *kernel_name* is None, uses
+    the first CustomKernel found.
+
+    Args:
+        path: Path to the Tensile test YAML file.
+        kernel_name: If provided, match this kernel name in the ForkParameters.
+                     If None, use the first CustomKernel found.
+
+    Returns:
+        dict with ProblemType, CustomKernel, MatrixInstruction, WavefrontSize (if found).
+    """
+    import yaml
+    with open(path) as f:
+        try:
+            data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise RuntimeError(f"Failed to parse Tensile YAML '{path}': {e}") from e
+
+    benchmark_problems = data.get("BenchmarkProblems")
+    if not benchmark_problems:
+        raise RuntimeError(
+            f"Tensile YAML '{path}' does not contain BenchmarkProblems "
+            "with ProblemType and ForkParameters"
+        )
+
+    available_kernels = []
+    for bp in benchmark_problems:
+        if not isinstance(bp, list) or len(bp) < 2:
+            continue
+        problem_type = bp[0]
+        for size_group in bp[1:]:
+            if not isinstance(size_group, dict):
+                continue
+            fork_params = size_group.get("ForkParameters", [])
+            kernel_ck = _find_custom_kernel_in_fork_params(
+                fork_params, kernel_name, available_kernels
+            )
+            if kernel_ck is None:
+                continue
+            return _build_config_from_size_group(problem_type, fork_params, kernel_ck)
+
+    if kernel_name:
         raise RuntimeError(
             f"Kernel '{kernel_name}' not found in {path}. "
             f"Available: {available_kernels or 'none'}"
         )
 
-    if "CustomKernel" not in config:
-        raise RuntimeError(f"No CustomKernel entry found in {path}")
+    raise RuntimeError(f"No CustomKernel entry found in {path}")
 
-    return config
+
+def list_custom_kernels_in_yaml(path):
+    """Return sorted CustomKernel names declared in a Tensile test YAML."""
+    import yaml
+    with open(path) as f:
+        try:
+            data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise RuntimeError(f"Failed to parse Tensile YAML '{path}': {e}") from e
+
+    names = []
+    for bp in data.get("BenchmarkProblems", []):
+        if not isinstance(bp, list) or len(bp) < 2:
+            continue
+        for size_group in bp[1:]:
+            if not isinstance(size_group, dict):
+                continue
+            for entry in size_group.get("ForkParameters", []):
+                if not isinstance(entry, dict) or "CustomKernel" not in entry:
+                    continue
+                for ck in entry["CustomKernel"]:
+                    if isinstance(ck, dict) and "name" in ck:
+                        names.append(ck["name"])
+    return sorted(set(names))
 
 
 def _fmt_yaml_scalar(value):
@@ -370,6 +421,77 @@ def inject_custom_config(file_info, filepath, config_yaml, dry_run=False):
     return True
 
 
+def process_asm_file(
+    filepath,
+    yaml_path=None,
+    origin=None,
+    repository=None,
+    version="1.0.0",
+    dry_run=False,
+    skip_existing=False,
+):
+    """Add custom.config metadata to a single .s assembly file.
+
+    Returns:
+        "updated" on success, "skipped" if the file already has custom.config
+        and *skip_existing* is set, or raises RuntimeError on failure.
+    """
+    filepath = os.path.abspath(filepath)
+
+    if not os.path.isfile(filepath):
+        raise RuntimeError(f"File not found: {filepath}")
+
+    file_info = _read_asm_file(filepath)
+
+    if file_info["has_custom_config"]:
+        if skip_existing:
+            return "skipped"
+        raise RuntimeError(
+            f"{filepath} already has a custom.config block; "
+            "remove it first or pass --skip-existing"
+        )
+
+    detected = file_info["detected"]
+    resolved_origin = origin or file_info["origin"]
+    if not resolved_origin:
+        raise RuntimeError(f"Could not detect origin for {filepath}; pass --origin")
+
+    config = None
+    if yaml_path:
+        kernel_name = os.path.basename(filepath)[:-2]
+        config = _parse_tensile_yaml(yaml_path, kernel_name)
+
+    if config:
+        ck = config.get("CustomKernel", {})
+        if "threads" not in ck and "threads" in detected:
+            ck["threads"] = detected["threads"]
+            config["CustomKernel"] = ck
+        if "WavefrontSize" not in config and "wavefront_size" in detected:
+            config["WavefrontSize"] = detected["wavefront_size"]
+
+    auto_info = []
+    if not origin and file_info["origin"]:
+        auto_info.append(f"origin={file_info['origin']}")
+    if "wavefront_size" in detected:
+        auto_info.append(f"wavefront_size={detected['wavefront_size']}")
+    if "threads" in detected:
+        auto_info.append(f"threads={detected['threads']}")
+    if auto_info:
+        print(f"{filepath}: auto-detected {', '.join(auto_info)}")
+
+    config_yaml = build_custom_config_yaml(
+        origin=resolved_origin,
+        config=config,
+        repository=repository,
+        version=version,
+    )
+
+    if not inject_custom_config(file_info, filepath, config_yaml, dry_run=dry_run):
+        raise RuntimeError(f"Failed to inject custom.config into {filepath}")
+
+    return "updated"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Add custom.config metadata to an external custom kernel .s file",
@@ -393,66 +515,20 @@ def main():
     args = parser.parse_args()
 
     filepath = os.path.abspath(args.file)
-    if not os.path.isfile(filepath):
-        print(f"ERROR: File not found: {filepath}", file=sys.stderr)
-        sys.exit(1)
-
     if not filepath.endswith(".s"):
         print(f"WARNING: {filepath} does not end with .s", file=sys.stderr)
 
     try:
-        file_info = _read_asm_file(filepath)
+        process_asm_file(
+            filepath,
+            yaml_path=args.yaml,
+            origin=args.origin,
+            repository=args.repository,
+            version=args.version,
+            dry_run=args.dry_run,
+        )
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    if file_info["has_custom_config"]:
-        print(f"ERROR: {filepath} already has a custom.config block.", file=sys.stderr)
-        print("Remove the existing block first if you want to regenerate it.",
-              file=sys.stderr)
-        sys.exit(1)
-
-    detected = file_info["detected"]
-    origin = args.origin or file_info["origin"]
-    if not origin:
-        print("ERROR: Could not detect origin. Pass --origin explicitly.", file=sys.stderr)
-        sys.exit(1)
-
-    config = None
-    if args.yaml:
-        kernel_name = os.path.basename(filepath)[:-2]
-        try:
-            config = _parse_tensile_yaml(args.yaml, kernel_name)
-        except RuntimeError as e:
-            print(f"ERROR: {e}", file=sys.stderr)
-            sys.exit(1)
-
-    if config:
-        ck = config.get("CustomKernel", {})
-        if "threads" not in ck and "threads" in detected:
-            ck["threads"] = detected["threads"]
-            config["CustomKernel"] = ck
-        if "WavefrontSize" not in config and "wavefront_size" in detected:
-            config["WavefrontSize"] = detected["wavefront_size"]
-
-    auto_info = []
-    if not args.origin and file_info["origin"]:
-        auto_info.append(f"origin={file_info['origin']}")
-    if "wavefront_size" in detected:
-        auto_info.append(f"wavefront_size={detected['wavefront_size']}")
-    if "threads" in detected:
-        auto_info.append(f"threads={detected['threads']}")
-    if auto_info:
-        print(f"Auto-detected: {', '.join(auto_info)}")
-
-    config_yaml = build_custom_config_yaml(
-        origin=origin,
-        config=config,
-        repository=args.repository,
-        version=args.version,
-    )
-
-    if not inject_custom_config(file_info, filepath, config_yaml, dry_run=args.dry_run):
         sys.exit(1)
 
 
