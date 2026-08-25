@@ -25,10 +25,13 @@ namespace hipdnn_data_sdk::utilities
 /// unconditional, so two distinct inputs never produce the same result without needing a
 /// registry of names seen so far.
 ///
-/// The stem handles the colon (illegal on Windows), Windows-reserved names (CON, PRN,
-/// COM1-9, LPT1-9, matched case-insensitively), leading/trailing dots (stripped -- a lone
-/// leading dot makes a Unix dotfile, a trailing one is dropped by some Windows APIs), and
-/// an overall length cap so stem plus hash stay within a filesystem's component limit.
+/// The stem handles control bytes (NUL included -- a NUL would truncate the component at
+/// the C-string boundary and drop the hash suffix with it), the colon (illegal on
+/// Windows), Windows-reserved device names (CON, PRN, COM1-9, LPT1-9, matched
+/// case-insensitively against the part before the first dot, which is where Windows
+/// resolves a device alias), leading/trailing dots (stripped -- a lone leading dot makes
+/// a Unix dotfile, a trailing one is dropped by some Windows APIs), and an overall length
+/// cap so stem plus hash stay within a filesystem's component limit.
 ///
 /// @param raw May be empty; every std::string_view is a valid input.
 /// @return A single, non-empty path component safe on Linux and Windows. Never throws.
@@ -39,6 +42,13 @@ inline std::string sanitizeForPath(std::string_view raw)
     constexpr size_t MAX_STEM_LENGTH = 96;
 
     auto isIllegal = [](char c) {
+        const auto byte = static_cast<unsigned char>(c);
+        // Control bytes are illegal in a path component on both platforms, and a NUL
+        // would silently end the name at the first C-string boundary.
+        if(byte < 0x20 || byte == 0x7f)
+        {
+            return true;
+        }
         switch(c)
         {
         case ':':
@@ -82,12 +92,15 @@ inline std::string sanitizeForPath(std::string_view raw)
         "CON",  "PRN",  "AUX",  "NUL",  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
         "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     };
-    const bool isReserved = [&stem] {
+    // Windows resolves a device alias from the name before the first dot, so "CON.txt" is
+    // the CON device exactly as "CON" is.
+    const size_t baseLength = std::min(stem.find('.'), stem.size());
+    const bool isReserved = [&stem, baseLength] {
         std::string upper;
-        upper.reserve(stem.size());
-        for(const char c : stem)
+        upper.reserve(baseLength);
+        for(size_t i = 0; i < baseLength; ++i)
         {
-            upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+            upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(stem[i]))));
         }
         for(const std::string_view reserved : RESERVED_STEMS)
         {
@@ -99,11 +112,17 @@ inline std::string sanitizeForPath(std::string_view raw)
         return false;
     }();
 
-    if(stem.empty() || isReserved)
+    if(stem.empty())
     {
         // An empty stem (raw was empty, all-illegal, or all dots) still needs a non-empty
         // component; the hash suffix is what actually disambiguates it.
         stem.push_back('_');
+    }
+    else if(isReserved)
+    {
+        // Break the alias where Windows reads it -- immediately before the first dot --
+        // so "CON" becomes "CON_" and "CON.txt" becomes "CON_.txt".
+        stem.insert(baseLength, 1, '_');
     }
 
     std::array<char, 17> hexBuffer{};
