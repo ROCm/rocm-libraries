@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <limits>
 #include <roc/host_validation/tensor.hpp>
 #include <utility>
@@ -48,6 +49,21 @@ inline bool hasProvablyIndependentElements(const Tensor& destination) {
     return true;
 }
 
+inline bool storageOverlaps(const Tensor& left, const Tensor& right) {
+    if (left.storage().empty() || right.storage().empty()) return false;
+    const uintptr_t leftBegin = reinterpret_cast<uintptr_t>(left.storage().data());
+    const uintptr_t rightBegin = reinterpret_cast<uintptr_t>(right.storage().data());
+    const uintptr_t leftEnd = leftBegin + left.storage().size();
+    const uintptr_t rightEnd = rightBegin + right.storage().size();
+    return leftBegin < rightEnd && rightBegin < leftEnd;
+}
+
+inline size_t saturatedProduct(size_t left, size_t right) {
+    if (left != 0 && right > std::numeric_limits<size_t>::max() / left)
+        return std::numeric_limits<size_t>::max();
+    return left * right;
+}
+
 inline int operationThreadCount(size_t workItemCount, size_t minimumWorkItemsPerThread = 4096,
                                 int defaultMaximumThreadCount = 8) {
 #ifdef _OPENMP
@@ -68,5 +84,34 @@ inline int operationThreadCount(size_t workItemCount, size_t minimumWorkItemsPer
     (void)defaultMaximumThreadCount;
     return 1;
 #endif
+}
+
+template <typename Function>
+void forEachParallelIndex(size_t count, size_t workItemCount, bool canParallelize,
+                          size_t minimumWorkItemsPerThread, Function&& function) {
+    const int threadCount = std::min<int>(
+        canParallelize ? operationThreadCount(workItemCount, minimumWorkItemsPerThread) : 1,
+        static_cast<int>(std::min(count, static_cast<size_t>(std::numeric_limits<int>::max()))));
+#ifdef _OPENMP
+    if (threadCount > 1 && count <= static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())) {
+        std::exception_ptr error;
+#pragma omp parallel for schedule(dynamic, 1) num_threads(threadCount)
+        for (ptrdiff_t index = 0; index < static_cast<ptrdiff_t>(count); ++index) {
+            try {
+                function(static_cast<size_t>(index));
+            } catch (...) {
+#pragma omp critical(roc_host_validation_parallel_error)
+                {
+                    if (!error) error = std::current_exception();
+                }
+            }
+        }
+        if (error) std::rethrow_exception(error);
+        return;
+    }
+#else
+    (void)threadCount;
+#endif
+    for (size_t index = 0; index < count; ++index) function(index);
 }
 }  // namespace roc::host_validation::detail
