@@ -213,36 +213,19 @@ std::shared_future<std::unique_ptr<RTCKernel>> RTCKernel::runtime_compile(
                            std::promise<hipModule_wrapper_t>        module_promise,
                            std::shared_future<hipModule_wrapper_t>  module_future,
                            std::promise<std::unique_ptr<RTCKernel>> kernel_promise) {
-        // Set device ID for this new thread
-        if(hipSetDevice(deviceId) != hipSuccess)
+        auto module_promise_fulfilled = !need_compile;
+        try
         {
-            kernel_promise.set_exception(
-                std::make_exception_ptr(std::runtime_error("failed to set device")));
-            return;
-        }
-
-        // Compile the kernel if necessary, creating a new hipModule
-        if(need_compile)
-        {
-            try
+            rocfft_scoped_device rd(deviceId);
+            if(need_compile)
             {
                 std::vector<char> code = RTCCache::cached_compile(
                     kernel_name, gpu_arch, generator.generate_src, generator_sum());
                 hipModule_wrapper_t module;
                 module.alloc(code.data());
                 module_promise.set_value(std::move(module));
+                module_promise_fulfilled = true;
             }
-            catch(const std::exception& e)
-            {
-                if(LOG_RTC_ENABLED())
-                    (*LogSingleton::GetInstance().GetRTCOS()) << e.what() << std::endl;
-                module_promise.set_exception(std::current_exception());
-            }
-        }
-
-        // Create the RTCKernel that we'll return
-        try
-        {
             kernel_promise.set_value(generator.construct_rtckernel(
                 kernel_name, module_future, generator.gridDim, generator.blockDim));
         }
@@ -250,6 +233,17 @@ std::shared_future<std::unique_ptr<RTCKernel>> RTCKernel::runtime_compile(
         {
             if(LOG_RTC_ENABLED())
                 (*LogSingleton::GetInstance().GetRTCOS()) << e.what() << std::endl;
+            if(!module_promise_fulfilled)
+                module_promise.set_exception(std::current_exception());
+            kernel_promise.set_exception(std::current_exception());
+        }
+        catch(...)
+        {
+            if(LOG_RTC_ENABLED())
+                (*LogSingleton::GetInstance().GetRTCOS())
+                    << "Unknown exception in make_kernel" << std::endl;
+            if(!module_promise_fulfilled)
+                module_promise.set_exception(std::current_exception());
             kernel_promise.set_exception(std::current_exception());
         }
     };
