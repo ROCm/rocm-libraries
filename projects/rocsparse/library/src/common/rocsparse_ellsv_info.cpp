@@ -43,20 +43,33 @@ rocsparse::ellsv_info_t::ellsv_info_t(int64_t             num_rows,
 
 hipError_t rocsparse::ellsv_info_t::free_transposed(hipStream_t stream)
 {
-    const hipError_t e0 = rocsparse_hipFreeAsync(this->m_transposed_col_ind, stream);
-    const hipError_t e1 = rocsparse_hipFreeAsync(this->m_transposed_val, stream);
+    hipError_t e0 = hipSuccess;
+    if(this->m_transposed_col_ind != nullptr)
+    {
+        e0 = rocsparse_hipFreeAsync(this->m_transposed_col_ind, stream);
+        this->m_transposed_col_ind = nullptr;
+    }
 
-    this->m_transposed_col_ind = nullptr;
-    this->m_transposed_val     = nullptr;
-    this->m_transposed_width   = 0;
+    hipError_t e1 = hipSuccess;
+    if(this->m_transposed_val != nullptr)
+    {
+        e1 = rocsparse_hipFreeAsync(this->m_transposed_val, stream);
+        this->m_transposed_val = nullptr;
+    }
+
+    this->m_transposed_width = 0;
 
     return (e0 != hipSuccess) ? e0 : e1;
 }
 
 hipError_t rocsparse::ellsv_info_t::free_memory(hipStream_t stream)
 {
-    const hipError_t e0 = rocsparse_hipFreeAsync(this->m_row_map, stream);
-    this->m_row_map     = nullptr;
+    hipError_t e0 = hipSuccess;
+    if(this->m_row_map != nullptr)
+    {
+        e0 = rocsparse_hipFreeAsync(this->m_row_map, stream);
+        this->m_row_map = nullptr;
+    }
     const hipError_t e1 = this->free_transposed(stream);
     return (e0 != hipSuccess) ? e0 : e1;
 }
