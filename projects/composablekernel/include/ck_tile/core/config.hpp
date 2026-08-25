@@ -341,6 +341,13 @@
 #define CK_TILE_FMHA_BWD_TDM_DKDV_STORE 1
 #endif
 
+// Probe: under a causal mask, halve the fmha bwd grid and give each workgroup
+// the mirror tile pair {x, n-1-x} so expensive and cheap tiles are balanced.
+// Batch mode only. Off by default.
+#ifndef CK_TILE_FMHA_BWD_MASK_TILE_PAIRING
+#define CK_TILE_FMHA_BWD_MASK_TILE_PAIRING 1
+#endif
+
 #ifndef CK_TILE_USE_SUBDWORD_TILE_CAST
 #define CK_TILE_USE_SUBDWORD_TILE_CAST 0
 #endif
