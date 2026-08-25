@@ -263,6 +263,7 @@ int runGemm(size_t             m,
             int                mxBlockA      = 0,
             int                mxBlockB      = 0,
             size_t             batchCount    = 1,
+            int                elementsToValidate = -1,
             bool               isTF32        = false)
 {
     if(batchCount == 0)
@@ -409,6 +410,27 @@ int runGemm(size_t             m,
     std::vector<InputBT>     b(storageB);
     std::vector<AccumulateT> c(numC * batchCount);
     std::vector<AccumulateT> d(numC * batchCount);
+
+    const bool partialValidation = elementsToValidate > 0
+                                   && static_cast<size_t>(elementsToValidate) < d.size();
+    std::vector<size_t>              selectedValidationIndices;
+    std::vector<std::vector<size_t>> selectedValidationIndicesByBatch;
+    if(partialValidation)
+    {
+        const auto selection = roc::host_validation::OutputSelection::primeStride(
+            d.size(), d.size(), static_cast<size_t>(elementsToValidate));
+        selectedValidationIndices = selection.indices(d.size());
+        selectedValidationIndicesByBatch.resize(batchCount);
+        for(const size_t globalIndex : selectedValidationIndices)
+        {
+            const size_t batch       = globalIndex / numC;
+            const size_t batchIndex  = globalIndex % numC;
+            const size_t row         = batchIndex % m;
+            const size_t column      = batchIndex / m;
+            const size_t logicalIndex = row * n + column;
+            selectedValidationIndicesByBatch[batch].push_back(logicalIndex);
+        }
+    }
 
     // Initialize inputs with random values. We use ±1 (binary) for A and B by
     // default because it is exactly representable in every supported storage
@@ -639,7 +661,6 @@ int runGemm(size_t             m,
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    constexpr int elementsToValidate = -1;
     const auto execution = tryFastPath
                                ? TensileLite::Client::ReferenceGemmExecution::BlockedRequired
                                : TensileLite::Client::ReferenceGemmExecution::Pointwise;
@@ -762,6 +783,9 @@ int runGemm(size_t             m,
                                                 std::span<const AccumulateT>(cPtr, numC)),
                 outputTensor,
                 nativeScalarType<AccumulateT>);
+            if(partialValidation)
+                problem.outputSelection =
+                    OutputSelection::explicitIndices(selectedValidationIndicesByBatch[batch]);
 
             problem.epilogue.alpha = static_cast<double>(
                 (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha);
@@ -861,15 +885,26 @@ int runGemm(size_t             m,
         const auto comparisonType = toHostValidationScalarType(TypeTraits<AccumulateT>::value);
         const auto comparisonLayout
             = roc::host_validation::Layout::contiguous(roc::host_validation::Shape{d.size()});
+        roc::host_validation::ComparisonOptions comparisonOptions{
+            .absoluteTolerance     = tolerance,
+            .relativeTolerance     = 0.0,
+            .maxReportedMismatches = 10,
+        };
+        if(partialValidation)
+        {
+            comparisonOptions.selection.stride =
+                selectedValidationIndices.size() > 1
+                    ? selectedValidationIndices[1] - selectedValidationIndices[0]
+                    : 1;
+            comparisonOptions.selection.maxElements = selectedValidationIndices.size();
+        }
         const auto comparison = roc::host_validation::compare(
             roc::host_validation::Tensor(
                 comparisonType, comparisonLayout, std::as_bytes(std::span<const AccumulateT>(d))),
             roc::host_validation::Tensor(comparisonType,
                                          comparisonLayout,
                                          std::as_bytes(std::span<const AccumulateT>(dRef))),
-            {.absoluteTolerance     = tolerance,
-             .relativeTolerance     = 0.0,
-             .maxReportedMismatches = 10});
+            comparisonOptions);
 
         for(const auto& mismatch : comparison.reportedMismatches)
         {
@@ -902,8 +937,12 @@ int main(int argc, char* argv[])
         "M", po::value<size_t>()->default_value(128), "Matrix M dimension")(
         "N", po::value<size_t>()->default_value(128), "Matrix N dimension")(
         "K", po::value<size_t>()->default_value(128), "Matrix K dimension")(
-        "transA", po::value<bool>()->default_value(false), "Transpose A")(
-        "transB", po::value<bool>()->default_value(false), "Transpose B")(
+        "transA",
+        po::value<bool>()->default_value(false)->implicit_value(true),
+        "Transpose A")(
+        "transB",
+        po::value<bool>()->default_value(false)->implicit_value(true),
+        "Transpose B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
         "type",
@@ -923,15 +962,23 @@ int main(int argc, char* argv[])
         po::value<std::string>()->default_value(""),
         "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to "
         "mimic kernels that quantize B.")(
-        "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
+        "validate",
+        po::value<bool>()->default_value(true)->implicit_value(true),
+        "Run validation against ref")(
         "injectValidationFailure",
-        po::value<bool>()->default_value(false),
+        po::value<bool>()->default_value(false)->implicit_value(true),
         "Perturb D before validation (negative-test hook)")("tryFastPath",
-                                                            po::value<bool>()->default_value(false),
+                                                            po::value<bool>()
+                                                                ->default_value(false)
+                                                                ->implicit_value(true),
                                                             "Require blocked reference execution")(
-        "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
+        "bias",
+        po::value<bool>()->default_value(false)->implicit_value(true),
+        "Enable bias vector")(
         "activation", po::value<std::string>()->default_value("none"), "Activation (none, relu)")(
-        "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
+        "scaleAlphaVec",
+        po::value<bool>()->default_value(false)->implicit_value(true),
+        "Enable per-row alpha scaling")(
         "factorDim",
         po::value<int>()->default_value(0),
         "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
@@ -946,7 +993,10 @@ int main(int argc, char* argv[])
         po::value<int>()->default_value(0),
         "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and "
         "--mxBlockB must be set together)")(
-        "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)");
+        "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)")(
+        "num-elements-to-validate",
+        po::value<int>()->default_value(-1),
+        "Number of output elements to compute; -1 or 0 computes the complete output");
 
     po::variables_map vm;
     try
@@ -1067,6 +1117,7 @@ int main(int argc, char* argv[])
     int         mxBlockA                = vm["mxBlockA"].as<int>();
     int         mxBlockB                = vm["mxBlockB"].as<int>();
     size_t      batchCount              = vm["batchCount"].as<size_t>();
+    int         elementsToValidate      = vm["num-elements-to-validate"].as<int>();
     const bool  typeAIsTF32             = (typeAStr == "tf32");
     const bool  typeBIsTF32             = (typeBStr == "tf32");
     const bool  isTF32                  = typeAIsTF32 && typeBIsTF32;
@@ -1082,6 +1133,11 @@ int main(int argc, char* argv[])
     if(mxBlockA < 0 || mxBlockB < 0)
     {
         std::cerr << "Error: mxBlockA/mxBlockB must be non-negative" << std::endl;
+        return 1;
+    }
+    if(elementsToValidate < -1)
+    {
+        std::cerr << "Error: num-elements-to-validate must be -1, 0, or positive" << std::endl;
         return 1;
     }
 
@@ -1193,6 +1249,7 @@ int main(int argc, char* argv[])
                                              mxBlockA,
                                              mxBlockB,
                                              batchCount,
+                                             elementsToValidate,
                                              isTF32);
             }
         };

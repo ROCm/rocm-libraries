@@ -114,6 +114,12 @@ int main() {
                 allocatedClone.loadAs<float>({1}) == 9.0f,
             "Allocator-backed Tensor clone mismatch.");
 
+    Tensor uninitialized(ScalarType::Float32, Shape{2}, TensorStorage::allocateUninitialized);
+    uninitialized.storeFrom({0}, 3.0f);
+    uninitialized.storeFrom({1}, 7.0f);
+    require(uninitialized.loadAs<float>({0}) == 3.0f && uninitialized.loadAs<float>({1}) == 7.0f,
+            "Uninitialized Tensor storage did not retain written values.");
+
     Tensor copied = tensor;
     copied.storeFrom({1, 2}, 11.0f);
     require(tensor.loadAs<float>({1, 2}) == 11.0f,
@@ -189,6 +195,33 @@ int main() {
                 packedCopyDestination.loadAs<int32_t>({2}) == 1 &&
                 packedCopyDestination.loadAs<int32_t>({3}) == 7,
             "Selected Tensor copy changed unselected packed elements.");
+
+    std::array<std::byte, 2> packedCopyBytes{
+        static_cast<std::byte>(0x11),
+        static_cast<std::byte>(0x11),
+    };
+    packedCopySource.copyTo(packedCopyBytes, selectedCopyIndices);
+    const Tensor selectedPackedCopy(
+        ScalarType::Int4, Layout::contiguous(Shape{4}),
+        std::span<std::byte>(packedCopyBytes.data(), packedCopyBytes.size()));
+    require(selectedPackedCopy.loadAs<int32_t>({0}) == 1 &&
+                selectedPackedCopy.loadAs<int32_t>({1}) == -3 &&
+                selectedPackedCopy.loadAs<int32_t>({2}) == 1 &&
+                selectedPackedCopy.loadAs<int32_t>({3}) == 7,
+            "Selected Tensor copy-to changed unselected packed elements.");
+
+    std::array<std::byte, 2> fullPackedCopy{};
+    packedCopySource.copyTo(fullPackedCopy);
+    require(std::equal(fullPackedCopy.begin(), fullPackedCopy.end(),
+                       packedCopySource.storage().begin()),
+            "Full Tensor copy-to changed packed storage.");
+
+    std::array<std::byte, 1> undersizedCopyDestination{};
+    requireInvalidArgument([&] { packedCopySource.copyTo(undersizedCopyDestination); },
+                           "Full Tensor copy-to accepted undersized storage.");
+    requireInvalidArgument(
+        [&] { packedCopySource.copyTo(undersizedCopyDestination, selectedCopyIndices); },
+        "Selected Tensor copy-to accepted undersized storage.");
 
     Tensor paddedTensor(ScalarType::Int32, Layout(Shape{2, 2}, std::vector<ptrdiff_t>{1, 3}, 1));
     paddedTensor.storeFrom({0, 0}, 4);

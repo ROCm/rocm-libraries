@@ -355,6 +355,13 @@ class TensorStorage {
         return TensorStorage(owner, std::span<std::byte>(*owner));
     }
 
+    // Callers must write each byte before reading it.
+    static TensorStorage allocateUninitialized(size_t bytes) {
+        std::shared_ptr<void> owner(new std::byte[bytes], std::default_delete<std::byte[]>());
+        return TensorStorage(owner,
+                             std::span<std::byte>(static_cast<std::byte*>(owner.get()), bytes));
+    }
+
     std::span<const std::byte> bytes() const {
         return m_bytes;
     }
@@ -557,6 +564,25 @@ class Tensor {
         return result;
     }
 
+    void copyTo(std::span<std::byte> destination) const {
+        const size_t required = ::roc::host_validation::storageBytesForLayout(m_type, m_layout);
+        if (destination.size() < required)
+            throw std::invalid_argument("Tensor copy destination storage is too small.");
+        std::ranges::copy(storage().first(required), destination.begin());
+    }
+
+    void copyTo(std::span<std::byte> destination, std::span<const size_t> linearIndices) const {
+        const size_t required = ::roc::host_validation::storageBytesForLayout(m_type, m_layout);
+        if (destination.size() < required)
+            throw std::invalid_argument("Tensor copy destination storage is too small.");
+
+        const uint16_t bits = scalarTypeInfo(m_type).storageBits;
+        forEachLinearIndex(linearIndices, [&](std::span<const size_t> indices) {
+            const uint64_t offset = detail::bitOffset(m_type, layout().elementOffset(indices));
+            detail::copyBitRange(storage(), offset, destination, offset, bits);
+        });
+    }
+
     void copyFrom(const Tensor& source) const {
         if (m_type != source.m_type)
             throw std::invalid_argument("Tensor copy requires matching scalar types.");
@@ -576,23 +602,12 @@ class Tensor {
         if (shape() != source.shape())
             throw std::invalid_argument("Tensor copy requires matching shapes.");
 
-        const size_t count = size();
         const uint16_t bits = scalarTypeInfo(m_type).storageBits;
-        std::vector<size_t> indices(shape().rank(), 0);
-        for (const size_t linearIndex : linearIndices) {
-            if (linearIndex >= count)
-                throw std::out_of_range("Tensor copy index exceeds the logical element count.");
-
-            size_t remaining = linearIndex;
-            for (size_t dimension = shape().rank(); dimension > 0; --dimension) {
-                const size_t index = dimension - 1;
-                indices[index] = remaining % shape().extent(index);
-                remaining /= shape().extent(index);
-            }
+        forEachLinearIndex(linearIndices, [&](std::span<const size_t> indices) {
             detail::copyBitRange(
                 source.storage(), detail::bitOffset(m_type, source.layout().elementOffset(indices)),
                 storage(), detail::bitOffset(m_type, layout().elementOffset(indices)), bits);
-        }
+        });
     }
 
     Tensor reshape(Shape shape) const;
@@ -621,6 +636,24 @@ class Tensor {
     static TensorStorage storageFromVector(std::vector<std::byte> storage) {
         auto owner = std::make_shared<std::vector<std::byte>>(std::move(storage));
         return TensorStorage::wrap(owner, std::span<std::byte>(*owner));
+    }
+
+    template <typename Function>
+    void forEachLinearIndex(std::span<const size_t> linearIndices, Function&& function) const {
+        const size_t count = size();
+        std::vector<size_t> indices(shape().rank(), 0);
+        for (const size_t linearIndex : linearIndices) {
+            if (linearIndex >= count)
+                throw std::out_of_range("Tensor copy index exceeds the logical element count.");
+
+            size_t remaining = linearIndex;
+            for (size_t dimension = shape().rank(); dimension > 0; --dimension) {
+                const size_t index = dimension - 1;
+                indices[index] = remaining % shape().extent(index);
+                remaining /= shape().extent(index);
+            }
+            function(std::span<const size_t>(indices));
+        }
     }
 
     void validateStorage() const {
