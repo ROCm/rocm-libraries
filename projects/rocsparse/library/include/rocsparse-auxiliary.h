@@ -55,7 +55,6 @@ extern "C" {
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
 
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 /*! \ingroup aux_module
  *  \brief Create a rocSPARSE handle on a user-defined stream.
  *
@@ -95,7 +94,6 @@ rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
 ROCSPARSE_EXPORT
 rocsparse_status
     rocsparse_handle_create(rocsparse_handle* handle, hipStream_t stream, rocsparse_error* p_error);
-#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE handle.
@@ -114,7 +112,6 @@ rocsparse_status
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
 
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE handle.
  *
@@ -132,7 +129,6 @@ rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_handle_destroy(rocsparse_handle handle, rocsparse_error* p_error);
-#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE error descriptor.
@@ -2082,7 +2078,6 @@ rocsparse_status rocsparse_spilu0_get_output(rocsparse_handle        handle,
                                              size_t                  output_size_in_bytes,
                                              rocsparse_error*        p_error);
 
-#ifdef ROCSPARSE_WITH_ILDLT0
 /*! \ingroup aux_module
 *  \brief Create SpILDLT0 descriptor.
 *
@@ -2196,7 +2191,6 @@ rocsparse_status rocsparse_spildlt0_get_output(rocsparse_handle          handle,
                                                void*                     output,
                                                size_t                    output_size_in_bytes,
                                                rocsparse_error*          p_error);
-#endif /* ROCSPARSE_WITH_ILDLT0 */
 
 /*! \ingroup aux_module
  *  \brief Get the fields of the sparse COO matrix descriptor.

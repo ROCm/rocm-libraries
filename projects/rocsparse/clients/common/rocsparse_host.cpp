@@ -6073,7 +6073,6 @@ void host_bsric0(rocsparse_direction               direction,
 template <typename T>
 static inline T host_assign_ilu0_boost_value(const T& value, const T& boost_val)
 {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
     // Apply the boost magnitude (>= 0) along the direction of the original pivot
     // so its sign (real) or phase (complex) is preserved and a negative boost can
     // never swap the pivot sign, matching the device kernels.
@@ -6081,9 +6080,6 @@ static inline T host_assign_ilu0_boost_value(const T& value, const T& boost_val)
     const auto abs_boost = std::abs(boost_val);
     return (abs_value > 0) ? (static_cast<T>(abs_boost) * (value / abs_value))
                            : static_cast<T>(abs_boost);
-#else
-    return boost_val;
-#endif
 }
 
 template <typename T, typename U>

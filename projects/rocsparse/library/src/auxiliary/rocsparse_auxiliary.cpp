@@ -588,7 +588,6 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 /********************************************************************************
  * \brief rocsparse_handle_create creates the rocsparse library context on a
  * user-defined stream. All device memory allocation and stream-ordered setup
@@ -636,7 +635,6 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 /********************************************************************************
  * \brief destroy handle
