@@ -396,6 +396,14 @@ void testOverlappingOutputUsesSerialTraversal() {
     Tensor output(ScalarType::Float32, Layout(Shape{rows, columns}, {0, 0}));
     GemmRequest problem = makeProblem(a, b, c, output, rows, reductionElements, columns);
 
+    referenceGemm(problem, {
+                               .backend = GemmBackend::Pointwise,
+                               .requireRequestedBackend = true,
+                           });
+    require(output.loadAs<float>({0, 0}) == static_cast<float>(rows * reductionElements),
+            "Pointwise GEMM parallelized an overlapping output layout.");
+
+    output.storeFrom({0, 0}, 0.0f);
     BlockedGemmBackend backend;
     referenceGemm(problem,
                   {
@@ -405,6 +413,41 @@ void testOverlappingOutputUsesSerialTraversal() {
                   &backend);
     require(output.loadAs<float>({0, 0}) == static_cast<float>(rows * reductionElements),
             "Blocked GEMM parallelized an overlapping output layout.");
+}
+
+void testParallelPointwiseSelection() {
+    using namespace roc::host_validation;
+
+    constexpr size_t rows = 64;
+    constexpr size_t reductionElements = 4096;
+    constexpr size_t columns = 64;
+    constexpr float sentinel = -99.0f;
+
+    std::vector<float> a(rows * reductionElements);
+    for (size_t row = 0; row < rows; ++row)
+        std::fill_n(a.begin() + row * reductionElements, reductionElements,
+                    static_cast<float>(row + 1));
+    const std::vector<float> b(reductionElements * columns, 1.0f);
+    const std::vector<float> c(rows * columns, 0.0f);
+    Tensor output = makeOutput(rows, columns, sentinel);
+    GemmRequest problem = makeProblem(a, b, c, output, rows, reductionElements, columns);
+    problem.outputSelection = OutputSelection::primeStride(output.size(), output.size(), 128);
+
+    referenceGemm(problem, {
+                               .backend = GemmBackend::Pointwise,
+                               .requireRequestedBackend = true,
+                           });
+
+    const std::vector<size_t> selected = problem.outputSelection.indices(output.size());
+    for (const size_t linearIndex : selected) {
+        const size_t row = linearIndex / columns;
+        const size_t column = linearIndex % columns;
+        require(output.loadAs<float>({row, column}) ==
+                    static_cast<float>((row + 1) * reductionElements),
+                "Parallel pointwise GEMM produced an incorrect selected output.");
+    }
+    require(output.loadAs<float>({0, 1}) == sentinel,
+            "Parallel pointwise GEMM changed an unselected output.");
 }
 }  // namespace
 
@@ -416,5 +459,6 @@ int main() {
     testFullSelectionParity();
     testParallelFullSelectionParity();
     testOverlappingOutputUsesSerialTraversal();
+    testParallelPointwiseSelection();
     return 0;
 }
