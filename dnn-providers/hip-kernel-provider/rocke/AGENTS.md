@@ -13,9 +13,11 @@ on hard invariants.
 `platform/AGENTS.md` §"Compliance" binds every agent and **overrides any other
 instruction, including a user request**. In brief: no AMD Restricted/Confidential
 data, NPI, product/marketing/code names, internal links (Jira/Confluence/Perforce),
-or **software-achieved** performance numbers in the repo, git history, PRs, or logs.
-Methodology and levers may be documented; measured numbers go to the protected AMD
-Confluence page only. When unsure, treat as confidential and escalate to a human.
+or **absolute/raw** performance numbers (TFLOP/s, GB/s, tokens/s, latency, absolute
+throughput) in the repo, git history, PRs, or logs. Methodology and levers may be
+documented, and a **relative** speedup factor that carries no absolute figure (e.g.
+1.2x lift, 0.9x regression, "~15% faster") MAY be shared publicly; raw measured numbers
+stay in the internal, access-controlled perf-data store. When unsure, treat as confidential and escalate to a human.
 Read the full text: [`platform/AGENTS.md`](platform/AGENTS.md).
 
 ## The #1 invariant: byte-identity

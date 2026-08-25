@@ -66,8 +66,10 @@ shape set, and replay command.
 
 Document every accepted optimization as a public qualitative case study. Describe
 the workload shape class, candidate levers, commands, selected mechanism, rejected
-mechanisms, and target constraints, *never* publishing measured values or comparative
-performance claims.
+mechanisms, and target constraints. Never publish absolute/raw measured values —
+TFLOP/s, GB/s, tokens/s, latency, absolute throughput. A **relative** speedup factor
+that carries no absolute figure (e.g. 1.2x lift, 0.9x regression, "~15% faster") MAY be
+shared and is the preferred way to convey impact publicly.
 
 Promote reusable optimization knowledge into `dsl_docs/optimization/`. If the
 work discovers a general tactic, decision rule, debugging skill, or reusable
