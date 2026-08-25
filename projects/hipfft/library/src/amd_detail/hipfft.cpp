@@ -829,19 +829,17 @@ struct hipfftHandle_t
     rocfft_execution_info_wrapper_t info;
     std::vector<device_context_t>   device_contexts;
 
-    void**      load_callback_ptrs        = nullptr;
-    const char* load_callback_symbol      = nullptr;
-    const void* load_callback_bitcode     = nullptr;
-    size_t      load_callback_bitcode_len = 0;
-    void**      load_callback_data        = nullptr;
-    size_t      load_callback_lds_bytes   = 0;
+    void**            load_callback_ptrs = nullptr;
+    std::string       load_callback_symbol;
+    std::vector<char> load_callback_bitcode;
+    void**            load_callback_data      = nullptr;
+    size_t            load_callback_lds_bytes = 0;
 
-    void**      store_callback_ptrs        = nullptr;
-    const char* store_callback_symbol      = nullptr;
-    const void* store_callback_bitcode     = nullptr;
-    size_t      store_callback_bitcode_len = 0;
-    void**      store_callback_data        = nullptr;
-    size_t      store_callback_lds_bytes   = 0;
+    void**            store_callback_ptrs = nullptr;
+    std::string       store_callback_symbol;
+    std::vector<char> store_callback_bitcode;
+    void**            store_callback_data      = nullptr;
+    size_t            store_callback_lds_bytes = 0;
 
     // Multi-processing communicator
     rocfft_comm_type comm_type   = rocfft_comm_none;
@@ -1224,24 +1222,22 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                 rocfft_plan_description_set_comm(desc, plan->comm_type, plan->comm_handle));
 
         // set JIT callbacks if specified
-        if(plan->load_callback_symbol && plan->load_callback_bitcode
-           && plan->load_callback_bitcode_len)
+        if(!plan->load_callback_symbol.empty() && !plan->load_callback_bitcode.empty())
         {
             ROCFFT_EXPECT_SUCCESS(
                 rocfft_plan_description_set_load_callback(desc,
-                                                          plan->load_callback_symbol,
-                                                          plan->load_callback_bitcode,
-                                                          plan->load_callback_bitcode_len,
+                                                          plan->load_callback_symbol.c_str(),
+                                                          plan->load_callback_bitcode.data(),
+                                                          plan->load_callback_bitcode.size(),
                                                           plan->load_callback_lds_bytes));
         }
-        if(plan->store_callback_symbol && plan->store_callback_bitcode
-           && plan->store_callback_bitcode_len)
+        if(!plan->store_callback_symbol.empty() && !plan->store_callback_bitcode.empty())
         {
             ROCFFT_EXPECT_SUCCESS(
                 rocfft_plan_description_set_store_callback(desc,
-                                                           plan->store_callback_symbol,
-                                                           plan->store_callback_bitcode,
-                                                           plan->store_callback_bitcode_len,
+                                                           plan->store_callback_symbol.c_str(),
+                                                           plan->store_callback_bitcode.data(),
+                                                           plan->store_callback_bitcode.size(),
                                                            plan->store_callback_lds_bytes));
         }
 
@@ -1342,13 +1338,12 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     }
 
     // if JIT callbacks are used, pass the cbdata to the execution info
-    if(plan->load_callback_symbol && plan->load_callback_bitcode && plan->load_callback_bitcode_len)
+    if(!plan->load_callback_symbol.empty() && !plan->load_callback_bitcode.empty())
     {
         ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_load_callback_data(
             plan->info, plan->load_callback_data, plan->device_contexts.size()));
     }
-    if(plan->store_callback_symbol && plan->store_callback_bitcode
-       && plan->store_callback_bitcode_len)
+    if(!plan->store_callback_symbol.empty() && plan->store_callback_bitcode.empty())
     {
         ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_store_callback_data(
             plan->info, plan->store_callback_data, plan->device_contexts.size()));
@@ -2222,10 +2217,11 @@ try
     case HIPFFT_CB_LD_REAL:
     case HIPFFT_CB_LD_REAL_DOUBLE:
     {
-        plan->load_callback_symbol      = symbol_name;
-        plan->load_callback_bitcode     = bitcode_data;
-        plan->load_callback_bitcode_len = bitcode_len_bytes;
-        plan->load_callback_data        = cbdata;
+        plan->load_callback_symbol = symbol_name;
+        plan->load_callback_bitcode.assign(static_cast<const char*>(bitcode_data),
+                                           static_cast<const char*>(bitcode_data)
+                                               + bitcode_len_bytes);
+        plan->load_callback_data = cbdata;
         break;
     }
     case HIPFFT_CB_ST_COMPLEX:
@@ -2233,10 +2229,11 @@ try
     case HIPFFT_CB_ST_REAL:
     case HIPFFT_CB_ST_REAL_DOUBLE:
     {
-        plan->store_callback_symbol      = symbol_name;
-        plan->store_callback_bitcode     = bitcode_data;
-        plan->store_callback_bitcode_len = bitcode_len_bytes;
-        plan->store_callback_data        = cbdata;
+        plan->store_callback_symbol = symbol_name;
+        plan->store_callback_bitcode.assign(static_cast<const char*>(bitcode_data),
+                                            static_cast<const char*>(bitcode_data)
+                                                + bitcode_len_bytes);
+        plan->store_callback_data = cbdata;
         break;
     }
     case HIPFFT_CB_UNDEFINED:
