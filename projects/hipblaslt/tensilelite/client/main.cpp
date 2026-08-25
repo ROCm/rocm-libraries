@@ -235,6 +235,7 @@ namespace TensileLite
                 ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
+                ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -550,6 +551,7 @@ namespace TensileLite
             DUMP_OPT("f32-xdl-math-op", rocisa::DataType);
             DUMP_OPT("swizzle-tensor-a", bool);
             DUMP_OPT("swizzle-tensor-b", bool);
+            DUMP_OPT("fused-gemm-a2a", bool);
             DUMP_OPT("activation-compute-type", rocisa::DataType);
             DUMP_OPT("high-precision-accumulate", bool);
             DUMP_OPT("sparse", int);

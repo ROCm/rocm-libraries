@@ -107,6 +107,14 @@ namespace TensileLite
             }
             std::cout << "[fused-a2a] solution: " << solution->name() << std::endl;
 
+            if(!(*solution->problemPredicate)(*problem))
+            {
+                std::cerr << "[fused-a2a] solution predicate does not match the problem:"
+                          << std::endl;
+                solution->problemPredicate->debugEval(*problem, std::cerr);
+                return 1;
+            }
+
             // Tile sizes must come from THIS solution's macro-tile: the kernel
             // epilogue derives dst_rank and the counter index from MT0/MT1.
             const uint32_t macroTileM = (uint32_t)solution->sizeMapping.macroTile.x;

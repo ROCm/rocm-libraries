@@ -9530,7 +9530,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Persistent copy of the grid-wide WG count for the counter3 last-WG election;
     # latched in graWorkGroup because NumWorkGroups0/1 can be borrowed as temps later.
-    if kernel["FusedGemmA2A"]:
+    if kernel["ProblemType"]["FusedGemmA2A"]:
       self.defineSgpr("FusedTotalWGs", 1)
       # Counter-block base, loaded once in the prologue. Every region is reached
       # from it by immediate offset (FusedA2ACounterSentinel.hpp).

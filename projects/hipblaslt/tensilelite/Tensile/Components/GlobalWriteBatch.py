@@ -439,7 +439,7 @@ class GlobalWriteBatchWriter:
     self._epilog(module)
     # A WG computes its whole tile across all batches, so the last batch is where
     # the tile is done and every PUSH store of this WG has been issued.
-    if self.kernel["FusedGemmA2A"] and self.batchIdx == self.numBatches - 1:
+    if self.kernel["ProblemType"]["FusedGemmA2A"] and self.batchIdx == self.numBatches - 1:
       self._emitFusedA2AHandshake(module)
     # CompactLoopStore CLS countdown tail: emit countdown + branch + s_endpgm at
     # END of the CLS-loop body (= last batch of batchesPerCLSBody). Gated by
@@ -1682,7 +1682,7 @@ class GlobalWriteBatchWriter:
     # move is an SDMA copy issued afterwards, not a CU store.  Those stores must bypass
     # L2 (sc1) because gfx950's L2 is coherent only within one XCD while the SDMA engine
     # reads from HBM -- an L2-resident tile would be copied stale.
-    fusedA2APushPass = bool(self.kernel["FusedGemmA2A"]) and \
+    fusedA2APushPass = bool(self.kernel["ProblemType"]["FusedGemmA2A"]) and \
                        self.parentWriter.states.fusedA2ADispatchMode == "PUSH"
 
     if is16bitSubtile:

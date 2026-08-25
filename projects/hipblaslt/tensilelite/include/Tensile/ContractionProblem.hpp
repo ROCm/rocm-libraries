@@ -1232,6 +1232,16 @@ namespace TensileLite
             m_swizzleTensorB = swizzle;
         }
 
+        bool fusedGemmA2A() const
+        {
+            return m_fusedGemmA2A;
+        }
+
+        void setFusedGemmA2A(bool fusedGemmA2A)
+        {
+            m_fusedGemmA2A = fusedGemmA2A;
+        }
+
         size_t mxBlockA() const
         {
             return m_mxBlockA;
@@ -1500,6 +1510,7 @@ namespace TensileLite
         bool             m_outputAmaxD             = false;
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
+        bool             m_fusedGemmA2A            = false;
         int              m_useBias                 = 0;
         bool             m_useGateResidual         = false;
         rocisa::DataType m_gateType               = rocisa::DataType::None;

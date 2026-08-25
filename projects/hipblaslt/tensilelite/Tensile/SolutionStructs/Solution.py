@@ -1802,7 +1802,7 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Either GSU or StreamK must be enabled")
       return
 
-    if state["FusedGemmA2A"]:
+    if state["ProblemType"]["FusedGemmA2A"]:
       if isa[:2] not in ((9, 4), (9, 5)):
         reject(state, printRejectionReason,
                "FusedGemmA2A requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "

@@ -2824,6 +2824,39 @@ namespace TensileLite
                 }
             };
 
+            struct FusedGemmA2A : public Predicate_CRTP<FusedGemmA2A, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                FusedGemmA2A() = default;
+                FusedGemmA2A(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "FusedGemmA2A";
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.fusedGemmA2A() == value;
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.fusedGemmA2A(), "==", "sol", value);
+                }
+            };
+
             struct F32XdlMathOpEqual
                 : public Predicate_CRTP<F32XdlMathOpEqual, ContractionProblemGemm>
             {

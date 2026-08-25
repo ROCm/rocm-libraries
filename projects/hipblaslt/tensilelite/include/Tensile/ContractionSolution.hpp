@@ -664,6 +664,7 @@ namespace TensileLite
             bool supportDeviceUserArguments = false;
             bool swizzleTensorA             = false;
             bool swizzleTensorB             = false;
+            bool fusedGemmA2A               = false;
             int  metadataLayout             = 0;
             int  mxBlockA                   = 0;
             int  mxBlockB                   = 0;

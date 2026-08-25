@@ -3394,7 +3394,7 @@ class KernelWriterAssembly(KernelWriter):
     # The product counts SURVIVING work-groups: ClusterDim != [1,1] rounds the grid
     # up host-side, but those padded work-groups s_endpgm in the prologue
     # (clusterPadEarlyExit).
-    if kernel["FusedGemmA2A"]:
+    if kernel["ProblemType"]["FusedGemmA2A"]:
       from .Components.GlobalWriteBatch import emitFusedA2ACounterPtrLatch, \
         emitFusedA2ANShardLatch
       module.add(FusedA2AWgRemap(self, kernel))
@@ -16510,7 +16510,7 @@ class KernelWriterAssembly(KernelWriter):
             biasLocalBarrierInit = True
           return m
 
-        if kernel["FusedGemmA2A"]:
+        if kernel["ProblemType"]["FusedGemmA2A"]:
           # Hoist the PUSH/local dispatch gate out of the per-store body: emit ONE
           # runtime gate, then the whole store body twice -- once with only the PUSH
           # version (mode "PUSH"), once with only the local version (mode "LOCAL").

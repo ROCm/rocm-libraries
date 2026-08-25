@@ -38,6 +38,7 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
+      FusedGemmA2A: True
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -55,7 +56,6 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - MIArchVgpr: [False]
         - UseSubtileImpl: [True]
-        - FusedGemmA2A: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
