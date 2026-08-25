@@ -65,21 +65,21 @@ jobs:
       #   3. rocm-systems source for rocjitsu until rocjitsu is packaged as a
       #      complete runnable artifact.
       - name: Checkout TheRock repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: "ROCm/TheRock"
           ref: ${{ inputs.therock_ref }}
 
       - name: Checkout rocm-libraries repository for scripts
         timeout-minutes: 30
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: rocm-libraries
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: true
 
       - name: Checkout rocm-systems for rocjitsu
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/rocm-systems
           # Pin the source used by every target in the workflow run.
@@ -125,7 +125,7 @@ jobs:
       # detector run is usually not actionable from the console log alone.
       - name: Upload race reports
         if: ${{ always() }}
-        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
         with:
           name: rocjitsu-race-reports-${{ inputs.amdgpu_families }}
           path: race-reports/
