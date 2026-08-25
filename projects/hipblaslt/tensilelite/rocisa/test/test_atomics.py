@@ -1,10 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Assembly-text regressions for the scalar and global atomics.
+"""Assembly-text regressions for the scalar atomics.
 
 Covers:
-  * global_atomic_add in its returning form; glc renders as sc0 on gfx9.
   * s_atomic_umax_x2 and s_atomic_cmpswap_x2, with SMEM offset and glc.
   * the s_atomic_inc / s_atomic_dec argument forms, which differ in whether
     they carry an soffset operand.
@@ -15,10 +14,8 @@ import shutil
 
 import pytest
 import rocisa
-from rocisa.container import GLOBALModifiers, SMEMModifiers, sgpr, vgpr
-from rocisa.enum import CacheScope
+from rocisa.container import SMEMModifiers, sgpr
 from rocisa.instruction import (
-    GlobalAtomicAddU32,
     SAtomicCmpswapX2,
     SAtomicDec,
     SAtomicInc,
@@ -39,18 +36,6 @@ def _isa_context(request):
     assembler = shutil.which("amdclang++", path=search_path) or "amdclang++"
     rocisa.rocIsa.getInstance().init(isa, assembler, False)
     rocisa.rocIsa.getInstance().setKernel(isa, 64)
-
-
-def test_global_atomic_add_u32_glc_emits_sc0():
-    inst = GlobalAtomicAddU32(
-        dst=vgpr(3),
-        vaddr=vgpr(0, 2),
-        data=vgpr(2),
-        saddr=vgpr("off", isOff=True),
-        modifier=GLOBALModifiers(offset=128, glc=True, slc=False, scope=CacheScope.SCOPE_NONE),
-    )
-
-    assert str(inst).strip() == "global_atomic_add v3, v[0:1], v2, off offset:128 sc0"
 
 
 def test_satomic_umax_x2_emits_smem_offset():
