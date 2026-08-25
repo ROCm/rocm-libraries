@@ -433,11 +433,18 @@ def _autodetect_rocm_flang(rocm: Path):
     return None
 
 
+def _fortran_on_path(name: str):
+    which = shutil.which(name)
+    if not which:
+        return None
+    return _fortran_file_if_present(Path(which))
+
+
 def _resolve_fortran_compiler(explicit, rocm: Path):
     """Pick CMAKE_Fortran_COMPILER when --clients is set.
 
     Order: --fortran-compiler, FC, CMAKE_Fortran_COMPILER, ROCm flang, PATH
-    flang, then gfortran (bare name, historic default).
+    flang, then a detected gfortran. Exit if none of those exist.
     """
     if explicit and str(explicit).strip():
         return _expand_fortran_spec(str(explicit)), "--fortran-compiler"
@@ -450,12 +457,17 @@ def _resolve_fortran_compiler(explicit, rocm: Path):
     found = _autodetect_rocm_flang(rocm)
     if found:
         return _absolute_fortran(found), "auto-detected ROCm flang"
-    which = shutil.which("flang")
-    if which:
-        found = _fortran_file_if_present(Path(which))
-        if found:
-            return _absolute_fortran(found), "auto-detected flang on PATH"
-    return "gfortran", "fallback gfortran"
+    found = _fortran_on_path("flang")
+    if found:
+        return _absolute_fortran(found), "auto-detected flang on PATH"
+    found = _fortran_on_path("gfortran")
+    if found:
+        return _absolute_fortran(found), "fallback gfortran"
+    print(
+        "No Fortran compiler found for --clients. "
+        "Install ROCm flang or gfortran, or pass --fortran-compiler with a path."
+    )
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -502,7 +514,8 @@ def _resolve_fortran_compiler(explicit, rocm: Path):
             "Fortran compiler for --clients (path or name: flang, gfortran, "
             "/opt/rocm/llvm/bin/flang). Default: FC, else CMAKE_Fortran_COMPILER, "
             "else auto-detect ROCm flang ({rocm}/llvm/bin/flang, {rocm}/bin/amdflang, "
-            "{rocm}/bin/flang, then PATH), else gfortran. Ignored without --clients."
+            "{rocm}/bin/flang, then PATH flang, then PATH gfortran). "
+            "Exits if none of those are found. Ignored without --clients."
         ),
     }
 )

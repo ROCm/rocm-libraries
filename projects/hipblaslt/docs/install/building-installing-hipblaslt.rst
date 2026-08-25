@@ -90,7 +90,8 @@ value to the ``deps`` CMake when ``--install-deps`` is used). The compiler is
 taken from ``--fortran-compiler`` if given, otherwise ``FC``, otherwise
 ``CMAKE_Fortran_COMPILER``, otherwise ROCm ``flang`` under ``--rocm-path`` /
 ``ROCM_PATH`` / ``/opt/rocm`` (``llvm/bin/flang``, ``bin/amdflang``,
-``bin/flang``, then ``flang`` on ``PATH``), otherwise ``gfortran``.
+``bin/flang``, then ``flang`` on ``PATH``), otherwise ``gfortran`` on
+``PATH``. Invoke exits if none of those are found.
 Without ``--clients``, Fortran is not enabled.
 
 Static library

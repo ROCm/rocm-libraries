@@ -133,7 +133,7 @@ inv build --architecture gfx950
 # build with clients
 inv build --architecture gfx950 --clients
 
-# clients with an explicit Fortran compiler (default: ROCm flang if present, else gfortran)
+# clients with an explicit Fortran compiler (default: ROCm flang if present, else detected gfortran)
 inv build --architecture gfx950 --clients --fortran-compiler gfortran
 
 # install system dependencies, build with clients, and install the package
@@ -157,7 +157,8 @@ inv --help build
 > `--fortran-compiler` (path or name), then `FC`, then `CMAKE_Fortran_COMPILER`,
 > then ROCm flang from `--rocm-path` / `ROCM_PATH` / `/opt/rocm`
 > (`llvm/bin/flang`, `bin/amdflang`, `bin/flang`, then `flang` on `PATH`),
-> then `gfortran`. Without `--clients`, Fortran is not enabled.
+> then `gfortran` on `PATH`. Invoke exits if none of those are found.
+> Without `--clients`, Fortran is not enabled.
 
 > [!NOTE]
 > To build hipBLASLt for ROCm <= 6.2, pass `--legacy-hipblas-direct` to `inv build`.
