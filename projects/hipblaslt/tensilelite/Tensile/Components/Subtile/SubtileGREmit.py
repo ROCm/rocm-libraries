@@ -46,6 +46,9 @@ from ...Common import INDEX_CHARS
 from ...Common.DataType import DataType
 
 
+SUBTILE_SWIZZLE_VARIANT = 1
+
+
 ################################################################################
 # 1. Dispatch bases
 ################################################################################
@@ -764,6 +767,8 @@ def _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffse
         module.add(VAndB32(dst=vgpr(rotatedcolId), src0=vgpr(rotatedcolId), src1=hex(3), comment="%s: (K_group+2) %% 4"%tileInfo.tc))
         module.add(VAddU32(dst=vgpr(rotatedcolId), src0=vgpr(rotatedcolId), src1=vgpr(tmpBlock), comment="%s: K_group_rot + block_bit"%tileInfo.tc))
         writer.vgprPool.checkIn(tmpBlock)
+      elif SUBTILE_SWIZZLE_VARIANT == 1:
+        module.add(VMovB32(dst=vgpr(rotatedcolId), src=vgpr(colId), comment="%s: Variant1, no forced rotation"%tileInfo.tc))
       else:  # FP4/FP16: half-block rotation
         blockSize = tileInfo.subIterKBytes // loadWidth
         colRotation = blockSize // 2
@@ -802,6 +807,15 @@ def _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, num
         module.add(VAddU32(dst=vgpr(cId), src0=vgpr(cId), src1=vgpr(tmp), comment="K_group + rotation"))
         module.add(VAndB32(dst=vgpr(cId), src0=vgpr(cId), src1=hex(3), comment="(K_group+rotation) % 4"))
         module.add(VAddU32(dst=vgpr(cId), src0=vgpr(cId), src1=vgpr(waveRotation), comment="K_group_rot + block_bit"))
+  elif SUBTILE_SWIZZLE_VARIANT == 1:  # FP4/FP16 rotation-only, no pair-swap
+    module.addComment0("Variant 1 swizzle (rotation-only)")
+    module.add(VMovB32(dst=vgpr(colIdB), src=vgpr(colIdA), comment="colIdB = colIdA (no pair-swap)"))
+    module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(ldsRowId), comment="ldsRowId * 2"))
+    module.add(VSubU32(dst=vgpr(tmp), src0=hex(blockSize), src1=vgpr(tmp), comment="rotation offset : blockSize - ldsRowId*2"))
+    module.add(VAddU32(dst=vgpr(colIdA), src0=vgpr(tmp), src1=vgpr(colIdA), comment="rotate colIdA"))
+    module.add(VAddU32(dst=vgpr(colIdB), src0=vgpr(tmp), src1=vgpr(colIdB), comment="rotate colIdB"))
+    module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr(colIdA), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
+    module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr(colIdB), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
   else:  # FP4/FP16: pair-swap (even ldsRowId) + intra/inter-wave rotation
     module.add(VCmpXEqU32(dst=VCC(), src0=0, src1=vgpr(tmp), comment="lds row id % 2 == 0 ?"))
     module.add(VMovB32(dst=vgpr(colIdA), src=vgpr(colIdA), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap colId pairs for swizzling"))

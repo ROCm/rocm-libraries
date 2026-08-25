@@ -31,6 +31,8 @@ from .SubtileGeometry import (
 )
 from .SubtileScaleEmit import emitScaleLRLDSSwap
 
+from .SubtileGREmit import SUBTILE_SWIZZLE_VARIANT
+
 
 ################################################################################
 # 1. Dispatch bases
@@ -583,6 +585,28 @@ def _lraTileAssignment_fp8_legacy(writer, kernel, module):
   return module
 
 
+def _lraDeSwizzleColOffset_legacy(module, writer, colOffset, lane16, lane16Group,
+                                 rotation, blockSize, numRows):
+  # De-swizzle the LR colOffset: matched inverse of the GR permutation.
+  if SUBTILE_SWIZZLE_VARIANT == 1:
+    # Variant 1 (rotation-only): inverse of the GR rotation-only swizzle. No
+    # permlane16 pair-swap. colOffset = lane16Group + lds_row_id*coef.
+
+    module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRows.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
+    module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="lds_row_id * 2"))
+    module.add(VAddU32(dst=vgpr(colOffset), src0=vgpr(rotation), src1=vgpr(lane16Group), comment="colOffset = lane16Group + lds_row_id*2"))
+    return
+  # Variant 2 (shipped): index rotate by (lds_row_id//2)*2, then the pair-wise
+  # permlane16 swap.
+  module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRows.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
+  module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
+  module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
+  module.add(VAddU32(dst=vgpr(colOffset), src0=vgpr(rotation), src1=vgpr(lane16Group), comment="colOffset = rotation + lane16Group"))
+  setExecMask(module, writer, 0x33333333, 0x33333333)
+  module.add(VPermlane16SwapB32(dst=vgpr(colOffset), src=vgpr(colOffset), comment="apply swizzling"))
+  setExecMask(module, writer, -1, -1)
+
+
 def _lraTileAssignment_legacy(writer, kernel):
   module = Module()
   module.addComment0("LR Offset Calculation for Subtile Based Tiling")
@@ -608,13 +632,8 @@ def _lraTileAssignment_legacy(writer, kernel):
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId %% 16"))
   module.add(VMovB32(dst=vgpr(colOffset), src=vgpr(lane16Group), comment="colOffset = lane16Group"))
   if writer.states.subtileLdsSwizzle:
-    module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
-    module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
-    module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
-    module.add(VAddU32(dst=vgpr(colOffset), src0=vgpr(rotation), src1=vgpr(lane16Group), comment="colOffset = rotation + lane16Group"))
-    setExecMask(module, writer, 0x33333333, 0x33333333)
-    module.add(VPermlane16SwapB32(dst=vgpr(colOffset), src=vgpr(colOffset), comment="apply swizzling"))
-    setExecMask(module, writer, -1, -1)
+    _lraDeSwizzleColOffset_legacy(module, writer, colOffset, lane16, lane16Group,
+                                 rotation, blockSize, numRowsPerLDSBanks)
   module.add(VAndB32(dst=vgpr(colOffset), src0=vgpr(colOffset), src1=hex(blockSize-1), comment="colOffset = colOffset %% blockSize"))
   # Without swizzling, the LDS M-row stride is depthUBytes (contiguous K row).
   # With swizzling, GR writes individual subtile K-groups, so subIterKBytes applies.
