@@ -107,6 +107,11 @@ public:
     /// field, invalid base64, or content that fails a `flatbuffers::Verifier` recheck
     /// (base64 that decodes cleanly can still not be a valid `Graph`) all return
     /// `std::nullopt` rather than throwing or handing back a mismatched key.
+    ///
+    /// The catch is unrestricted because this is `noexcept`: the payload comes from a
+    /// cache line with no size bound, so decoding one can throw `std::bad_alloc` or
+    /// `std::length_error` as readily as a JSON error, and any of them escaping calls
+    /// `std::terminate` in the host process.
     static std::optional<GraphContentKey> fromJson(const nlohmann::json& json) noexcept
     {
         try
@@ -137,7 +142,7 @@ public:
             return GraphContentKey{
                 std::make_shared<const std::vector<uint8_t>>(std::move(*decoded))};
         }
-        catch(const nlohmann::json::exception&)
+        catch(...)
         {
             return std::nullopt;
         }
