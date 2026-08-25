@@ -172,15 +172,14 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
         workspaceSizeInBytes = std::min<size_t>(workspaceSizeInBytes, algo->max_workspace_bytes);
     }
 
-    void*                  streamSynchronizer = nullptr;
-    const rocblaslt_status syncStatus
-        = handle->synchronizerForStream(stream, 0, &streamSynchronizer);
-    if(syncStatus != rocblaslt_status_success)
+    void*                  streamKFlags = nullptr;
+    const rocblaslt_status skStatus     = handle->streamKFlagsForStream(stream, 0, &streamKFlags);
+    if(skStatus != rocblaslt_status_success)
     {
         log_error(__func__,
-                  "no Stream-K synchronizer slot left: this handle has already handed one to "
-                  "c_syncStreamSlots distinct streams");
-        return syncStatus;
+                  "no Stream-K flag region left: this handle has already handed one to "
+                  "c_syncSkStreamSlots distinct streams");
+        return skStatus;
     }
 
     RocblasltContractionProblem problem{opA,
@@ -242,13 +241,14 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         matmul_descr->act0,
                                         matmul_descr->act1,
                                         stream,
-                                        streamSynchronizer,
+                                        handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
                                         batch_mode,
                                         matmul_descr->bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr)};
+    problem.streamKFlags = streamKFlags;
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 
@@ -736,11 +736,12 @@ rocblaslt_status
                                         matmul_descr[i]->act0,
                                         matmul_descr[i]->act1,
                                         0,
-                                        // Placeholder: the stream is not known
-                                        // until initialize(), so makeArgument()
-                                        // rebinds this to the (stream, i) slot
-                                        // before the kernel arguments are built.
-                                        handle->Synchronizer,
+                                        // GSU region, per problem and shared
+                                        // across streams as it has always been.
+                                        // The Stream-K region is separate and is
+                                        // bound per stream in makeArgument().
+                                        (char*)handle->Synchronizer
+                                            + (i * _rocblaslt_handle::c_syncGsuSlotBytes),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
@@ -1415,9 +1416,10 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        // Placeholder: rebound per (stream, i)
-                                        // by makeArgument(), see above.
-                                        handle->Synchronizer,
+                                        // GSU region, per problem; Stream-K is
+                                        // bound per stream in makeArgument().
+                                        (char*)handle->Synchronizer
+                                            + (i * _rocblaslt_handle::c_syncGsuSlotBytes),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,

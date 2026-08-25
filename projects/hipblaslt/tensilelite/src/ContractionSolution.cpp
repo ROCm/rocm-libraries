@@ -761,7 +761,10 @@ namespace TensileLite
             // For now grouped gemm is not supported and passes nullptr
             TENSILE_ASSERT_EXC(hardware != nullptr);
 
-            // StreamK workspace + flags
+            // StreamK workspace + flags. Synchronizer has already been pointed
+            // at the per-stream Stream-K region by the host for this solution,
+            // which is what keeps two concurrent Stream-K kernels from clearing
+            // each other's flags.
             args.template append<void const*>("ws", inputs.ws);
             if(sk.reduction == origami::reduction_t::parallel)
                 args.template append<void*>("Flags", nullptr);
@@ -1554,16 +1557,14 @@ namespace TensileLite
 
         // SynchronizerSizeCheck
         //
-        // A caller owns exactly one synchronizer slot, picked per stream and per
-        // problem index (_rocblaslt_handle::synchronizerForStream). Bounding
-        // usage by the slot size is what makes a solution unable to run past the
-        // end of its own region.
+        // MBSK owns one GSU region, indexed by problem. Bounding usage by the
+        // region size is what makes a solution unable to run past the end of it.
         if(gsuVal > 1 && sizeMapping.globalAccumulation == 3) // MBSK
         {
             uint32_t synchronizerUsage
                 = sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B;
 
-            gsuVal = synchronizerUsage > SynchronizerSlotElements ? 1 : gsuVal;
+            gsuVal = synchronizerUsage > GsuSynchronizerElements ? 1 : gsuVal;
         }
 
         // Avoid selecting a gsu value that would make launch grid over the limit
@@ -4396,6 +4397,13 @@ namespace TensileLite
                     skGrid = tiles;
                 }
             }
+
+            // The flag region holds one int per Stream-K workgroup, so a grid
+            // wider than it would have workgroups writing past the end of their
+            // own region. Every caller reaches skGrid through here, so this is
+            // the one place the bound has to hold. No current part comes close:
+            // gfx950 has 256 CUs and picks 224.
+            skGrid = std::min(skGrid, static_cast<size_t>(StreamKFlagElements));
 
             return skGrid;
         }

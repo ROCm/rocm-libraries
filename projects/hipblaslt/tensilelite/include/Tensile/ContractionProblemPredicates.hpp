@@ -244,12 +244,12 @@ namespace TensileLite
                                 * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
                                    * value[2] * value[4] * value[3] * problem.d().sizes()[2];
 
-                    // One slot per caller: a slot is owned by one (stream,
-                    // problem index) pair, so the slot size is the real bound.
-                    bool ret = synchronizerUsage <= SynchronizerSlotElements;
-                    // A group wider than one stream's block cannot be given a
-                    // private slot per problem, so it must not run a solution
-                    // that uses the synchronizer at all.
+                    // This guards the GSU (MBSK) region, which is sized per
+                    // problem and unchanged from before.
+                    bool ret = synchronizerUsage <= GsuSynchronizerElements;
+                    // A group wider than the block cannot be given a private
+                    // region per problem, so it must not run a solution that
+                    // uses these flags at all.
                     if(problem.groupedGemm())
                         ret = ret && (problem.groupedGemmCount() <= SynchronizerGroupedSlots);
                     return ret;
@@ -267,7 +267,7 @@ namespace TensileLite
                             * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2],
                         ">=",
                         "limit",
-                        SynchronizerSlotElements);
+                        GsuSynchronizerElements);
                 }
             };
 
