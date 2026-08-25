@@ -76,6 +76,19 @@ _apply_softcap = apply_softcap_log2
 # the unify phase lands it.
 
 
+def _enable_fp8_decode_3d(problem: "UnifiedAttentionProblem") -> bool:
+    # fp8 decode is VALU-bound (per-element dequant); 3D split-KV fans that work
+    # across CTAs (~2x on gfx950, where num_cus resolves to a legacy count that
+    # undersizes the 2D-vs-3D target and mis-routes long-KV decode to 2D). Keep
+    # 2D only where split-KV overhead loses: sliding window and short KV.
+    return (
+        problem.use_fp8
+        and problem.all_decode
+        and problem.sliding_window == 0
+        and problem.max_seqlen_k > 512
+    )
+
+
 @dataclass(frozen=True)
 class UnifiedAttentionProblem:
     total_q: int
@@ -156,6 +169,8 @@ class UnifiedAttentionProblem:
         return self.target_ctas if self.target_ctas > 0 else self.num_cus * 4
 
     def select_path(self) -> str:
+        if _enable_fp8_decode_3d(self):
+            return "3d"
         target = self._effective_target_ctas
         num_2d = self.total_num_q_blocks_upper_bound * self.num_kv_heads
         return (
