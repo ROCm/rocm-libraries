@@ -49,6 +49,13 @@ class TLUSwizzle:
 _SWIZZLE_BY_STACK = {
     # 2x1 fp4: chunk[6] ^= chunk[5], 8B pad per 64-chunk (1024B) load-block.
     2: TLUSwizzle(xorFromBit=5, xorToBit=6, padBytes=8, blockChunkBits=6),
+    # 4x1 fp4: chunk[7] ^= chunk[4], 8B pad per 64-chunk load-block.  Both bits
+    # are pure per-lane (chunk[4]=frow bit3, chunk[7]=kGroup bit1), so the same
+    # per-lane base swizzle the 2x1 stack uses applies unchanged; only the pad
+    # block count grows (a 4x1 strip spans chunksPerK=2 blocks per K row).  This
+    # single-bit choice keeps both swizzle bits out of the per-read mTile/readIdx
+    # field, avoiding a per-read base correction.  Verified 1-way + bijective.
+    4: TLUSwizzle(xorFromBit=4, xorToBit=7, padBytes=8, blockChunkBits=6),
 }
 
 
@@ -81,13 +88,20 @@ def swizzlePadPerStrip(tileInfo) -> int:
     # A subtile strip spans exactly ONE MFMA K-window (subtileShape[1] MFMA
     # tiles of instK K-rows), regardless of DepthU: DepthU > instK just stacks
     # additional K-windows as further strips (sId1 in the emit paths).  One DTL
-    # load-block covers wavesize K-rows and a pad is inserted above each block
+    # load-block covers wavesize chunks and a pad is inserted above each block
     # boundary except the first, so the block count is per-K-window.  Deriving it
-    # from instK (not DepthU) keeps stripStride correct for DepthU > instK.
+    # from instK (not DepthU) keeps stripStride correct for DepthU > instK.  A
+    # taller stack makes each K row chunksPerK = mStripBytes/16 b128 chunks wide,
+    # so a K-window holds instK*stackK*chunksPerK chunks -- the block count must
+    # scale by chunksPerK (2x1: chunksPerK=1, unchanged; 4x1: 2 -> 4 blocks).
     instK = int(tileInfo.mmaTileShape[1])
     stackK = int(tileInfo.subtileShape[1])
     waveSize = int(getattr(tileInfo, "waveSize", 0)) or 64
-    numBlocks = max(1, (instK * stackK) // waveSize)
+    instM = int(tileInfo.mmaTileShape[0])
+    stackM = int(tileInfo.subtileShape[0])
+    mStripBytes = int(stackM * instM * tileInfo.bpe)
+    chunksPerK = max(1, mStripBytes // 16)
+    numBlocks = max(1, (instK * stackK * chunksPerK) // waveSize)
     return (numBlocks - 1) * int(swz.padBytes)
 
 
