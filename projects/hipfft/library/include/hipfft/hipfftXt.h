@@ -190,7 +190,8 @@ typedef void (*hipfftJITCallbackStoreD)(
    * @param[in] symbol_name Name of the symbol in the compiled bitcode.
    * @param[in] bitcode_data Pointer to bitcode data.
    * @param[in] bitcode_len_bytes Number of bytes in the bitcode data.
-   * @param[in] callbackData Array of callback function data pointers.
+   * @param[in] cbtype Type of callback function.
+   * @param[in] cbdata Array of callback function data pointers.
    */
 HIPFFT_EXPORT hipfftResult hipfftXtSetJITCallback(hipfftHandle         plan,
                                                   const char*          symbol_name,
