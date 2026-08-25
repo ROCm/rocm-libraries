@@ -27,6 +27,10 @@
 // not part of the miopen.h contract, the public/private split does not rename
 // them, and with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON they stay exported un-suffixed
 // from libMIOpen_private.so (see test/public_abi/wrapper_excluded_symbols.txt).
+//
+// These have C linkage, so a divergence from the definitions in
+// src/convolution_api.cpp would link cleanly and corrupt arguments at run time.
+// script/check_public_abi.py check-headers compares the two.
 extern "C" {
 miopenStatus_t miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t,
                                                              const miopenTensorDescriptor_t,

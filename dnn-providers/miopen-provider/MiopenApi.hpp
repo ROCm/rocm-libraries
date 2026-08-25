@@ -23,6 +23,11 @@
 // The signatures are copied verbatim from MIOpen, whose no-op top-level `const` on
 // the pointer-typedef parameters trips clang-tidy, so we suppress those checks to
 // keep the prototypes identical.
+//
+// These have C linkage, so a divergence from MIOpen's definitions would link
+// cleanly and corrupt arguments at run time. The copy is therefore machine-checked
+// against them by projects/miopen/script/check_public_abi.py check-headers, which
+// runs in MIOpen CI and as a pre-commit hook on this file.
 // NOLINTBEGIN(misc-misplaced-const,readability-avoid-const-params-in-decls)
 extern "C" {
 miopenStatus_t

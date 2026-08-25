@@ -59,6 +59,14 @@ git confirms the commit under test does not track it -- being absent from a
 sparse working tree is not enough, or CI, which checks out only the subtrees a
 PR touches, would report a green gate on unchecked drift.
 
+``check-headers`` additionally cross-checks the three
+miopenConvolution*GetWorkSpaceSizeRange entry points. These are exported with
+MIOPEN_EXPORT but never declared in miopen.h, so every consumer forward-declares
+them by hand and none of the five artifacts above covers them. Their definitions
+in src/convolution_api.cpp are the reference; the declarations in the gtest that
+exercises them and in the hipDNN provider's MiopenApi.hpp must match it. The
+provider header is located and skipped on the same terms as the mirror.
+
 This is the only check in this script that can see *signature* drift. It matters
 because the _impl entry points have C linkage: the wrapper's stub definitions are
 compiler-checked against miopen.h, and the private library's _impl definitions
@@ -74,7 +82,7 @@ against), symbol addresses/sizes, and dynamic-symbol ordering. ``check`` and
 ``check-wrapper`` additionally do not verify signatures; that is what
 ``check-headers`` is for. Signature comparison is textual after normalisation,
 not semantic: it will not resolve a typedef, so two spellings of the same
-underlying type read as a mismatch. That is the intended bias -- the four files
+underlying type read as a mismatch. That is the intended bias -- these files
 are meant to be copies of one another.
 
 ``compare-pair`` diffs two ``dump`` outputs and reports a content hash for
@@ -311,15 +319,38 @@ Every public entry point must be spelled identically in all five places:
 Update the private files and the provider's mirror to match the public header.
 Do not edit miopen.h to match them -- that changes the public C API.""".rstrip()
 
-# The hipDNN provider's mirror of the rename header, relative to the repository
-# root (the MIOpen source root's grandparent in the monorepo layout).
+RANGE_REMEDY = """
+Each miopenConvolution*GetWorkSpaceSizeRange entry point is spelled by hand in
+three places, because it is exported without being declared in miopen.h:
+  src/convolution_api.cpp                      the definition (the reference)
+  test/gtest/conv_workspace_size_range.cpp     local extern "C" declaration
+  <repo>/dnn-providers/miopen-provider/MiopenApi.hpp
+                                               local extern "C" declaration
+Update the two declarations to match the definition. These have C linkage, so a
+divergence links cleanly and corrupts arguments at run time.""".rstrip()
+
+# The hipDNN provider's copies, relative to the repository root (the MIOpen
+# source root's grandparent in the monorepo layout).
 PROVIDER_RENAME_RELPATH = "dnn-providers/miopen-provider/MiopenApiPrivateRename.hpp"
+PROVIDER_API_RELPATH = "dnn-providers/miopen-provider/MiopenApi.hpp"
+
+# Exported with MIOPEN_EXPORT from src/convolution_api.cpp, absent from
+# miopen.h, and so declared by hand wherever they are called. Listed explicitly
+# rather than discovered from the definitions so that dropping a declaration
+# from a consumer fails the check instead of shrinking the comparison set.
+RANGE_ENTRY_POINTS = frozenset(
+    {
+        "miopenConvolutionForwardGetWorkSpaceSizeRange",
+        "miopenConvolutionBackwardDataGetWorkSpaceSizeRange",
+        "miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange",
+    }
+)
 
 
 # --------------------------------------------------------------------------
 # Minimal C declaration parser.
 #
-# Parsing the four files textually rather than invoking a compiler keeps this
+# Parsing these files textually rather than invoking a compiler keeps this
 # check free of any build, toolchain or GPU dependency, so it can run in a lint
 # lane on every PR. The cost is that the comparison is textual: the parser
 # reduces a prototype to a return type plus a list of parameter types with the
@@ -350,6 +381,23 @@ DECL_RE = re.compile(
     r"(?P<ret>.*?)(?P<name>miopen[A-Za-z0-9_]*)\s*\((?P<params>[^()]*)\)"
 )
 IMPL_CALL_RE = re.compile(r"\b(miopen[A-Za-z0-9_]*_impl)\s*\(")
+# A declarator for one of the range entry points, in either of the two forms it
+# is written in: a declaration ending in ';' and a definition followed by its
+# body's '{'.
+RANGE_DECL_RE = re.compile(
+    r"\b(?P<name>miopen[A-Za-z0-9_]*GetWorkSpaceSizeRange)\s*"
+    r"\((?P<params>[^()]*)\)\s*(?=[;{])"
+)
+# Characters that can precede a declarator's return type at file scope. A call
+# site is preceded by one of these too, but with nothing between it and the
+# name, which is how the two are told apart. '=' is in the set so that an
+# assignment from a call (`auto r = miopenFoo(...)`) leaves nothing before the
+# name either.
+DECLARATOR_STOPS = ";{}(),="
+# Tokens that can end a statement but never a return type. Without these, a
+# call in statement position (`return miopenFoo(...)`) would read as a
+# declaration of miopenFoo returning `return`.
+NON_TYPE_TOKENS = frozenset({"return", "co_return", "auto", "case", "else", "do"})
 
 # An unnamed parameter can end in one of these, so a trailing identifier that is
 # one of them is part of the type rather than a parameter name.
@@ -471,6 +519,34 @@ def parse_declarations(
         name, sig = parse_prototype(decl, what)
         if name in out:
             raise AbiError(f"duplicate declaration of {name} in {what}")
+        out[name] = sig
+    return out
+
+
+def parse_range_prototypes(source: str, what: str) -> dict[str, tuple[str, ...]]:
+    """Collect the range entry points declared or defined in one source file.
+
+    Unlike the five rename artifacts these are not introduced by an anchor that
+    marks a declaration: they appear inside an ``extern "C" { ... }`` block in
+    the consumers and as ``MIOPEN_EXPORT extern "C"`` definitions in the
+    library, and the consumers also *call* them. Matches are therefore found by
+    name, and a call is rejected by the absence of a return type between the
+    name and the punctuation that precedes it.
+    """
+    text = strip_comments(source)
+    out: dict[str, tuple[str, ...]] = {}
+    for match in RANGE_DECL_RE.finditer(text):
+        start = max(text.rfind(ch, 0, match.start()) for ch in DECLARATOR_STOPS)
+        prefix = text[start + 1 : match.start()]
+        prefix = prefix.replace('extern "C"', " ").replace("MIOPEN_EXPORT", " ")
+        tokens = prefix.split()
+        if not tokens or NON_TYPE_TOKENS & set(tokens):
+            continue  # a call, not a declarator
+        name, sig = parse_prototype(
+            f"{prefix} {match.group('name')}({match.group('params')})", what
+        )
+        if name in out and out[name] != sig:
+            raise AbiError(f"conflicting declarations of {name} in {what}")
         out[name] = sig
     return out
 
@@ -662,17 +738,32 @@ def check_entry_point_set(public: set[str], other: set[str], what: str) -> bool:
 
 
 def check_prototypes(
-    public: dict[str, tuple[str, ...]], other: dict[str, tuple[str, ...]], what: str
+    public: dict[str, tuple[str, ...]],
+    other: dict[str, tuple[str, ...]],
+    what: str,
+    reference: str = "miopen.h",
 ) -> bool:
     drifted = [n for n in sorted(public.keys() & other.keys()) if public[n] != other[n]]
     if not drifted:
-        print(f"PASS: {what} prototypes match miopen.h")
+        print(f"PASS: {what} prototypes match {reference}")
         return True
-    print(f"FAIL: {what} prototypes have drifted from miopen.h")
+    print(f"FAIL: {what} prototypes have drifted from {reference}")
     for name in drifted:
         print(f"  {name}")
-        print(f"      miopen.h: {render_signature(public[name])}")
+        print(f"      {reference}: {render_signature(public[name])}")
         print(f"      {what}: {render_signature(other[name])}")
+    return False
+
+
+def check_range_entry_point_set(found: dict[str, tuple[str, ...]], what: str) -> bool:
+    if set(found) == RANGE_ENTRY_POINTS:
+        print(f"PASS: {what} covers all {len(RANGE_ENTRY_POINTS)} range entry points")
+        return True
+    print(f"FAIL: {what} does not cover exactly the range entry points")
+    for sym in sorted(RANGE_ENTRY_POINTS - set(found)):
+        print(f"  - missing from {what}: {sym}")
+    for sym in sorted(set(found) - RANGE_ENTRY_POINTS):
+        print(f"  + present in {what}, not a known range entry point: {sym}")
     return False
 
 
@@ -834,6 +925,12 @@ def cmd_check_headers(args) -> int:
     else:
         provider_rename_path = repo_root / PROVIDER_RENAME_RELPATH
         provider_source = read_sibling_source(provider_rename_path, repo_root)
+    if args.provider_api:
+        provider_api_source = read_source(Path(args.provider_api), "MiopenApi.hpp")
+    else:
+        provider_api_source = read_sibling_source(
+            repo_root / PROVIDER_API_RELPATH, repo_root
+        )
 
     public = parse_declarations(public_path, EXPORT_ANCHOR_RE, "miopen.h")
     if not public:
@@ -867,9 +964,38 @@ def cmd_check_headers(args) -> int:
     else:
         provider_renames = parse_renames_text(provider_source, "provider rename header")
         ok &= check_provider_rename_mirror(renames, provider_renames)
+    headers_ok = ok
 
-    if not ok:
+    # The range entry points are a separate family: exported but undeclared in
+    # miopen.h, so their reference is the definition rather than the header.
+    range_defs_path = Path(args.range_definitions or root / "src/convolution_api.cpp")
+    range_test_path = Path(
+        args.range_test or root / "test/gtest/conv_workspace_size_range.cpp"
+    )
+    definitions = parse_range_prototypes(
+        read_source(range_defs_path, "convolution_api.cpp"), "convolution_api.cpp"
+    )
+    range_ok = check_range_entry_point_set(definitions, "convolution_api.cpp")
+    consumers = [
+        (
+            "conv_workspace_size_range.cpp",
+            read_source(range_test_path, "conv_workspace_size_range.cpp"),
+        )
+    ]
+    if provider_api_source is None:
+        print(f"SKIP: {PROVIDER_API_RELPATH} is not part of this tree")
+    else:
+        consumers.append(("MiopenApi.hpp", provider_api_source))
+    for what, source in consumers:
+        declared = parse_range_prototypes(source, what)
+        range_ok &= check_range_entry_point_set(declared, what)
+        range_ok &= check_prototypes(definitions, declared, what, "convolution_api.cpp")
+
+    if not headers_ok:
         print(HEADERS_REMEDY)
+    if not range_ok:
+        print(RANGE_REMEDY)
+    ok &= range_ok
     print(f"public/private header consistency check: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
@@ -922,12 +1048,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "check-headers",
-        help="cross-check the four hand-maintained split sources (no build needed)",
+        help="cross-check the hand-maintained split sources (no build needed)",
     )
     p.add_argument(
         "--source-root",
         default=str(Path(__file__).resolve().parent.parent),
-        help="MIOpen source root; the four files are located under it by "
+        help="MIOpen source root; the checked files are located under it by "
         "convention (default: the tree containing this script)",
     )
     p.add_argument("--public-header", help="override path to include/miopen/miopen.h")
@@ -942,6 +1068,20 @@ def build_parser() -> argparse.ArgumentParser:
         "which must then exist; by default it is located relative to the "
         "repository root, read from HEAD when the checkout is sparse, and "
         "skipped only when git confirms the commit does not track it",
+    )
+    p.add_argument(
+        "--provider-api",
+        help="override path to the hipDNN provider's MiopenApi.hpp, which must "
+        "then exist; located and skipped on the same terms as --provider-rename",
+    )
+    p.add_argument(
+        "--range-definitions",
+        help="override path to src/convolution_api.cpp, which defines the "
+        "miopenConvolution*GetWorkSpaceSizeRange entry points",
+    )
+    p.add_argument(
+        "--range-test",
+        help="override path to test/gtest/conv_workspace_size_range.cpp",
     )
     p.set_defaults(func=cmd_check_headers)
 

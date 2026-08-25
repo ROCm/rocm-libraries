@@ -155,7 +155,7 @@ repos:
         name: MIOpen public/private header consistency
         entry: python projects/miopen/script/check_public_abi.py check-headers
         language: python
-        files: ^(projects/miopen/(include/miopen/miopen\.h|src/private/(miopen_impl\.h|miopen_private_rename\.h|wrapper\.cpp))|dnn-providers/miopen-provider/MiopenApiPrivateRename\.hpp)$
+        files: ^(projects/miopen/(include/miopen/miopen\.h|src/private/(miopen_impl\.h|miopen_private_rename\.h|wrapper\.cpp)|src/convolution_api\.cpp|test/gtest/conv_workspace_size_range\.cpp)|dnn-providers/miopen-provider/MiopenApi(PrivateRename)?\.hpp)$
         pass_filenames: false
 
   - repo: https://github.com/cheshirekow/cmake-format-precommit
