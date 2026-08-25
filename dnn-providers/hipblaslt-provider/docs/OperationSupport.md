@@ -43,6 +43,10 @@ Matmul(a, b) → d
 - Output: `FP32`, `FP16`, or `BF16`
 - Compute type: `FP32`
 
+> **Known issue (#10811):** FP8 OCP on operand A paired with FP6 OCP on operand
+> B currently returns incorrect results and is rejected as unsupported
+> (originally observed on gfx950; not yet arch-gated pending further testing).
+
 **Hardware support:** Supported on **gfx950** and **gfx1250** only.
 
 **Graph requirements:** the plugin validates the hipDNN graph
