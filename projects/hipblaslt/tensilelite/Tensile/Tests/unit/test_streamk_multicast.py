@@ -14,7 +14,9 @@
 #   * internalization (the multicast is derived from ClusterDim, never a
 #     user-settable StreamKMulticast parameter);
 #   * the validation matrix (accepted only for SK3 + a pow2 [Cs, Ck] with
-#     Cs*Ck in 2..16 + gfx1250 HasTDM/TDMInst + XCC=0 + not atomic); and
+#     Cs*Ck in 2..16 + gfx1250 HasTDM/TDMInst + XCC=0 + not atomic);
+#   * ForceDPOnly=0 multicast (ordinary Stream-K after the DP window);
+#   * [1, Ck] accepted (A-only; same DP section as [Cs, Ck]); and
 #   * the mask arithmetic on a Ck == 1 cluster: B carries the (1<<Cs)-1
 #     broadcast mask while A collapses to the self-only bit.
 #
@@ -31,8 +33,8 @@ import pytest
 pytestmark = pytest.mark.unit
 
 # The cluster multicast is derived from ClusterDim (StreamK==3 and
-# ClusterDim[0] > 1) via this helper rather than stored as a state key.
-from Tensile.Common import streamKMulticast
+# ClusterDim not [1, 1]) via this helper rather than stored as a state key.
+from Tensile.Common import streamKClusterFactors, streamKMulticast
 
 _DESIGNED = os.path.join(
     os.path.dirname(__file__), "characterization",
@@ -119,21 +121,28 @@ def _isa_map(has_tdm=True, has_cluster_barrier=True):
 # --- validation matrix -----------------------------------------------------
 
 class TestValidation:
-    def test_accepted_baseline(self, tmp_path):
-        """The designed SK3 cluster config (ClusterDim=[4,1]) derives valid
-        solutions with the internal StreamKMulticast auto-derived to 1 and
-        Multicast on."""
-        cfg = _write_variant(tmp_path, "ok.yaml",
-                             fork_overrides={"ClusterDim": [[4, 1]]})
+    @pytest.mark.parametrize("fdpo,cluster_dim", [
+        (1, [4, 1]),
+        (1, [2, 2]),
+        (1, [1, 2]),
+        (0, [4, 1]),
+        (0, [2, 2]),
+        (0, [1, 2]),
+    ], ids=["fdpo1_cs", "fdpo1_cd", "fdpo1_ck", "fdpo0_cs", "fdpo0_cd", "fdpo0_ck"])
+    def test_accepted_multicast(self, tmp_path, fdpo, cluster_dim):
+        cfg = _write_variant(
+            tmp_path, "ok.yaml",
+            fork_overrides={
+                "StreamKForceDPOnly": [fdpo],
+                "ClusterDim": [cluster_dim],
+            })
         states = _derive_states(cfg)
-        assert states, "expected >=1 derived solution for the valid config"
+        assert states, f"ForceDPOnly={fdpo} {cluster_dim} must derive as cluster multicast"
         for st in states:
             assert streamKMulticast(st)
-            assert st["Multicast"] is True, st["Multicast"]
-            assert st["ClusterDim"] == [4, 1]
-            # The cooperative multicast pairs the B-broadcast masks with the
-            # cluster-scope barrier handshake, so ClusterBarrier is derived on.
-            assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
+            assert st["Multicast"] is True
+            assert list(st["ClusterDim"]) == cluster_dim
+            assert st["ClusterBarrier"] is True
 
     def test_reject_atomic(self, tmp_path):
         cfg = _write_variant(tmp_path, "atomic.yaml",
@@ -174,19 +183,17 @@ class TestValidation:
             assert streamKMulticast(st)
             assert st["StreamKXCCMapping"] == 0, st["StreamKXCCMapping"]
 
-    def test_ck_greater_than_one_also_multicasts_a(self, tmp_path):
-        # ClusterDim = [2, 2] adds Ck = 2 N-axis peers on top of the Cs = 2 M-axis
-        # peers, so A is multicast as well as B. It is the same cluster shape with
-        # Ck > 1, accepted by the same validator.
-        from Tensile.Common import streamK2DMulticast
-        cfg = _write_variant(tmp_path, "cd22.yaml",
-                             fork_overrides={"ClusterDim": [[2, 2]]})
-        states = _derive_states(cfg)
-        assert states, "[2,2] must derive as a cluster multicast solution"
-        for st in states:
-            assert st["ClusterDim"] == [2, 2]
-            assert streamKMulticast(st)
-            assert streamK2DMulticast(st)
+    def test_cluster_factors(self):
+        assert streamKClusterFactors({"ClusterDim": [4, 1]}) == (4, 1, 4, False)
+        assert streamKClusterFactors({"ClusterDim": [1, 4]}) == (1, 4, 4, True)
+        assert streamKClusterFactors({"ClusterDim": [2, 2]}) == (2, 2, 4, True)
+
+    def test_multicast_predicate(self):
+        assert streamKMulticast({"StreamK": 3, "ClusterDim": [2, 1]})
+        assert streamKMulticast({"StreamK": 3, "ClusterDim": [2, 2]})
+        assert streamKMulticast({"StreamK": 3, "ClusterDim": [1, 2]})
+        assert not streamKMulticast({"StreamK": 3, "ClusterDim": [1, 1]})
+        assert not streamKMulticast({"StreamK": 0, "ClusterDim": [2, 2]})
 
     def test_reject_non_pow2_cluster(self, tmp_path):
         cfg = _write_variant(tmp_path, "cd3.yaml",
@@ -204,11 +211,11 @@ class TestValidation:
     # caps), so drive them directly with the module-level hand-built state
     # (_mc_state / _isa_map) -- the same pattern test_accept_pgr2 uses.
     def test_streamk_not_3_is_not_multicast_path(self):
-        # The multicast fast path is now DERIVED (StreamK==3 and ClusterDim[0] > 1),
-        # so a non-SK3 state is simply not the multicast path: the helper is False
-        # and _validateStreamKMulticast is a no-op (returns True) there. SK4/SK5 +
-        # ClusterDim is rejected by the general Stream-K reconciliation (cluster
-        # support is SK3-only), not by this validator.
+        # The multicast fast path is now DERIVED (StreamK==3 and ClusterDim
+        # not [1, 1]), so a non-SK3 state is simply not the multicast path: the
+        # helper is False and _validateStreamKMulticast is a no-op (returns True)
+        # there. SK4/SK5 + ClusterDim is rejected by the general Stream-K
+        # reconciliation (cluster support is SK3-only), not by this validator.
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
         st = _mc_state(StreamK=4)
         assert streamKMulticast(st) is False
@@ -261,7 +268,8 @@ class TestEmit:
     # The byte-exact emitted assembly is pinned by the characterization golden
     # test_streamk_cluster_multicast_gfx1250_char.py (+ its .ambr snapshot). Only
     # the two checks that golden does not express as a single readable assertion
-    # are kept here: the Cs=4 mask arithmetic and the combined-mask-leak scan.
+    # are kept here: the Cs=4 mask, the [1, 2] A-only mask, and the
+    # combined-mask-leak scan.
     def _emit(self, cfg=_STREAMK_MULTICAST):
         from config_harness import emit_kernels_from_config
         return emit_kernels_from_config(cfg, limit=8, arch=_ARCH,
@@ -274,6 +282,19 @@ class TestEmit:
             "B broadcast mask must be (1<<Cs)-1 = 0xf for Cs=4"
         assert "s[sgprMulticastMaskA], 0x1" in src, \
             "A self mask must be 0x1 (self bit only)"
+
+    def test_broadcast_mask_ck_only(self, tmp_path):
+        """maskA = (1<<Ck)-1 = 0x3 for [1, 2]; maskB collapses to the self bit."""
+        from config_harness import emit_kernels_from_config
+        cfg = _write_variant(
+            tmp_path, "ck_only.yaml",
+            fork_overrides={"ClusterDim": [[1, 2]]})
+        _b, src, _e = emit_kernels_from_config(
+            cfg, limit=8, arch=_ARCH, cluster_dim=[1, 2])[0]
+        assert "s[sgprMulticastMaskA], 0x3" in src, \
+            "A broadcast mask must be (1<<Ck)-1 = 0x3 for ClusterDim=[1, 2]"
+        assert "s[sgprMulticastMaskB], 0x1" in src, \
+            "B self mask must be 0x1 (self bit only)"
 
     def test_no_combined_mask_leak(self):
         """Negative guard: the combined single-parity MulticastMask SGPR must

@@ -90,12 +90,11 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        # 2-D shapes are the reason this file exists alongside the 1-D set: with
-        # Ck > 1 the PAP mask refresh keeps both MulticastMaskA and MulticastMaskB
-        # live (papDropsSelfOnlyMaskA only drops the self-only maskA on 1-D), so
-        # PAP + 2-D is the tightest SGPR case in the PR and needs numerical, not
-        # just codegen, coverage.
-        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2]]
+        # Cs==1 drops self-only MaskB, Ck==1 drops self-only MaskA, under PAP
+        # (papDropsSelfOnlyMaskA / papDropsSelfOnlyMaskB). Cs>1 and Ck>1 keep
+        # the matching mask live, so this is the tightest SGPR case and needs
+        # numerical coverage.
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [1, 2], [1, 4], [1, 8], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

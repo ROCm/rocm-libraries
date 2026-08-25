@@ -1,0 +1,18 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Drain tlcnt before s_add/s_xor of an in-flight tensor_load descriptor.
+# CHECK-LABEL: @waitcnt_insertion_tensor_descriptor_war
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_xor_b32
+
+st.func @waitcnt_insertion_tensor_descriptor_war() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  s2 = "st.s_add_u32"(s2, s20) { issueCycles = 1, latencyCycles = 1 }
+  s1 = "st.s_xor_b32"(s1, 32768) { issueCycles = 1, latencyCycles = 1 }
+}
