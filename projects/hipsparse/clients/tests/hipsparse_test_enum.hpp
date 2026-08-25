@@ -30,11 +30,7 @@ static constexpr std::size_t countof2(T (&)[N])
     return N;
 }
 
-#ifdef HIPSPARSE_WITH_SPMV_BSR
 #define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_SPMV_BSR(enum) TRANSFORM_HIPSPARSE_TEST_ENUM(enum)
-#else
-#define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_SPMV_BSR(enum)
-#endif
 
 #define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSV(enum) TRANSFORM_HIPSPARSE_TEST_ENUM(enum)
 

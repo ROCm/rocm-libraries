@@ -213,10 +213,8 @@ typedef enum
     HIPSPARSE_FORMAT_COO_AOS     = 4, /**< Coordinate - array of structures */
     HIPSPARSE_FORMAT_BLOCKED_ELL = 5, /**< Blocked ELL */
     HIPSPARSE_FORMAT_SLICED_ELL  = 6 /**< Sliced ELL */
-#ifdef HIPSPARSE_WITH_SPMV_BSR
     ,
     HIPSPARSE_FORMAT_BSR = 7 /**< Block sparse row */
-#endif
 } hipsparseFormat_t;
 #else
 #if(CUDART_VERSION >= 12011)
@@ -326,10 +324,8 @@ typedef enum
     HIPSPARSE_SPMV_COO_ALG2    = 4,
     HIPSPARSE_SPMV_SELL_ALG1   = 5,
     HIPSPARSE_SPMV_CSR_ALG3    = 7
-#ifdef HIPSPARSE_WITH_SPMV_BSR
     ,
     HIPSPARSE_SPMV_BSR_ALG1 = 6
-#endif
 } hipsparseSpMVAlg_t;
 #else
 #if(CUDART_VERSION >= 13001)
@@ -341,10 +337,8 @@ typedef enum
     HIPSPARSE_SPMV_CSR_ALG2    = 3,
     HIPSPARSE_SPMV_COO_ALG2    = 4,
     HIPSPARSE_SPMV_SELL_ALG1   = 5
-#ifdef HIPSPARSE_WITH_SPMV_BSR
     ,
     HIPSPARSE_SPMV_BSR_ALG1 = 6
-#endif
 } hipsparseSpMVAlg_t;
 #elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
 typedef enum

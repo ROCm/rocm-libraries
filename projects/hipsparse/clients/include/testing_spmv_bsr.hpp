@@ -25,10 +25,6 @@
 #ifndef TESTING_SPMV_BSR_HPP
 #define TESTING_SPMV_BSR_HPP
 
-#include <hipsparse/hipsparse-config.h>
-
-#ifdef HIPSPARSE_WITH_SPMV_BSR
-
 #include "display.hpp"
 #include "flops.hpp"
 #include "gbyte.hpp"
@@ -181,7 +177,6 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
     verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "success");
-#endif
 }
 
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
@@ -455,7 +450,5 @@ void testing_spmv_bsr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
 }
-
-#endif // HIPSPARSE_WITH_SPMV_BSR
 
 #endif // TESTING_SPMV_BSR_HPP

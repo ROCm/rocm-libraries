@@ -68,7 +68,6 @@ if(HIPSPARSE_ENABLE_CLIENT)
 endif()
 
 option(HIPSPARSE_BUILD_TESTING "Build test client." OFF)
-option(HIPSPARSE_ENABLE_SPMV_BSR "Build hipSPARSE with BSR format support in hipsparseSpMV." ON)
 option(HIPSPARSE_ENABLE_SPGEAM "Build hipSPARSE with the generic SpGEAM (sparse matrix sparse matrix addition) API." ON)
 option(HIPSPARSE_ENABLE_COVERAGE "Build with code coverage enabled." OFF)
 option(HIPSPARSE_ENABLE_ASAN "Build with address sanitizer enabled." OFF)

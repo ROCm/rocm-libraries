@@ -6,7 +6,6 @@ include(GenerateExportHeader)
 # Configure the version header (version numbers only) and the config header
 # (build-time feature flags). Variables consumed by #cmakedefine in the .h.in
 # templates must be set (or unset) prior to the configure_file() calls.
-set(HIPSPARSE_WITH_SPMV_BSR ${HIPSPARSE_ENABLE_SPMV_BSR})
 set(HIPSPARSE_WITH_SPGEAM ${HIPSPARSE_ENABLE_SPGEAM})
 
 configure_file(

@@ -137,13 +137,8 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csc.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
 )
-
-if(HIPSPARSE_ENABLE_SPMV_BSR)
-    target_sources(hipsparse-test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
-    )
-endif()
 
 if(HIPSPARSE_ENABLE_HIP)
     target_sources(hipsparse-test PRIVATE
