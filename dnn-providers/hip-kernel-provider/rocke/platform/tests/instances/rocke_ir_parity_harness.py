@@ -1192,6 +1192,25 @@ def cases():
             tile_k=32,
         ),
     )
+    # gfx1250 WMMA grouped (wave32, 16x16x32 -- its only fp16/bf16 atom). Gm=1
+    # only: group merging is MFMA-only on the WMMA path.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1250/n1h8c64k64r3_g4",
+        "gfx1250",
+        build_conv_wgrad(
+            "irhash_wgrad_1250_g4",
+            "gfx1250",
+            wgrad_g4,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+        ),
+    )
     add(
         "conv_wgrad",
         "conv_wgrad/gfx942/n1h8c64k64r3_g4_gm2",

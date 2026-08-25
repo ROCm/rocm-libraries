@@ -94,6 +94,22 @@ class TestGroupedWgradDispatch(unittest.TestCase):
                 self.assertEqual(r.grid[2], exp_z)
                 self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
 
+    def test_gfx1250_grouped_admitted_wmma(self):
+        # gfx1250 (wave32 WMMA 16x16x32): grouped Gm=1 admitted, grid-per-group,
+        # split_k forced to 1 (WMMA has no split_k), direct-store epilogue.
+        r = dispatch_conv_grouped(_wgrad("gfx1250", G=4))
+        self.assertEqual(r.spec.direction, "wgrad")
+        self.assertEqual(r.spec.epilogue, "default")
+        self.assertEqual(r.spec.split_k, 1, "WMMA wgrad must use split_k=1")
+        self.assertEqual(r.spec.num_groups_to_merge, 1)
+        self.assertEqual(r.grid[2], 4, "z must be one index per group")
+        self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
+
+    def test_gfx1250_rejects_merge_wmma_only(self):
+        # Group merging (Gm>1) is MFMA-only; gfx1250 (WMMA) must reject it.
+        with self.assertRaises(ValueError):
+            dispatch_conv_grouped(_wgrad("gfx1250", G=4, num_groups_to_merge=2))
+
     def test_ungrouped_grid_unchanged(self):
         # groups=1: Gm stays 1 (auto split_k). With one group-batch the grid must
         # reduce to the pre-grouped (gx, gy, split_k) form: gx/gy from the DENSE
