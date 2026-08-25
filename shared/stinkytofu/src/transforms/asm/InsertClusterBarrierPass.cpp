@@ -1155,7 +1155,7 @@ bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string&
         // carries the label prefix already.
         const std::string bypassLabel = exitLabelName + kDrainBypassLabelSuffix;
         static const HwInstDesc labelMCID{
-            GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
         StinkyInstruction* bypassLbl = exitBuilder.create(&labelMCID, waitAnchor);
         bypassLbl->addModifier<LabelData>(LabelData{bypassLabel, /*alignment=*/1});
         for (StinkyInstruction* branch : bypassBranches) retargetBranch(*branch, bypassLabel);
