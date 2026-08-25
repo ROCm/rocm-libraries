@@ -64,3 +64,36 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 256]
           - Exact: [64, 64, 1, 256]
           - Exact: [256, 256, 1, 512]
+
+  -
+    - # ProblemType (larger MT: combine multiple 32x128 subtiles along M/N)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  1, 1]   # MT 64x64  (2x2 strips)
+          - [16, 16, 128, 1,  1, 8, 8,  1, 1]   # MT 128x128 (4x4 strips)
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]

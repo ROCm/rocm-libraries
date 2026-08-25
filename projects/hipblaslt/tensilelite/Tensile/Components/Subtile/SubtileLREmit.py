@@ -31,7 +31,7 @@ from .SubtileGeometry import (
     LRTag_1x1, LRTag_1x2, LRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleLRLDSSwap
-from .SubtileTLUSwizzle import selectTLUSwizzle
+from .SubtileTLUSwizzle import selectTLUSwizzle, stripStrideBytes
 
 
 ################################################################################
@@ -783,6 +783,13 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     mStripBytes = int(subtileM * bpe)     # LDS bytes per K row (free-dim strip width)
     mTileBytes = int(instM * bpe)         # sId0 M-tile block stride within the strip
     kReadStrideBytes = int(16 * mStripBytes)  # second read steps 16 K cols
+    # sId0 is a global MMA-row index. Split it into which subtile strip and
+    # which instM-row M-tile within that strip.  Adjacent strips are stripStride
+    # bytes apart in LDS (pad-aware); within a strip, M-tiles step mTileBytes.
+    stackM = int(tileInfo.subtileShape[0])
+    subtileRow = sId0 // stackM
+    mTileInStrip = sId0 % stackM
+    stripStride = stripStrideBytes(tileInfo)
     addrVgpr = tileInfo.sharedVgprLROffset[0]
     dstVgpr = dstTile.regList.indices[0]
     numRegs = len(dstTile.regList.indices)
@@ -790,7 +797,7 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     numReads = numRegs // REGS_PER_TR
     module = Module()
     for readIdx in range(numReads):
-      offset = sId0 * mTileBytes + readIdx * kReadStrideBytes
+      offset = subtileRow * stripStride + mTileInStrip * mTileBytes + readIdx * kReadStrideBytes
       module.add(DSLoadB64TrB4(
           dst=vgpr(dstVgpr + readIdx * REGS_PER_TR, REGS_PER_TR),
           src=vgpr(addrVgpr),
