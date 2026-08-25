@@ -237,6 +237,15 @@ GPU node.
   format, the downstream packager), so it forces a per-arch file format; the
   breakage surfaces months later, downstream. Enforced for `library/kernels` by
   [`library/tests/test_builder_signature_contract.py`](../library/tests/test_builder_signature_contract.py).
+- **A new spec field is defaulted**: only the problem shape may be required. The
+  descriptor stores a spec's fields and the packager hydrates the spec back out of
+  them, so a field added without a default turns every descriptor and AOT pack
+  written before it into `TypeError: missing required argument`. Default it to the
+  currently-shipped value - or to `None` where a policy function resolves it, which
+  lets an old descriptor auto-track what ships instead of freezing whatever the
+  default was the day it was written. Same test freezes the required set per spec
+  class; Python's "no non-defaulted field after a defaulted one" catches only the
+  append case, not an insert.
 - **Cross-platform**: do not add bash/Linux-specific helper scripts. Scripts
   under `rocke/platform/` are Python, not `.sh`; use `tempfile`, `os.cpu_count()`,
   `pathlib`, `shutil.which` - no `/tmp`, `nproc`, `sudo`, or shell-only flows.

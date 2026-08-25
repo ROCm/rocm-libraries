@@ -214,8 +214,22 @@ descriptor format per arch, and the breakage surfaces far from the commit that
 caused it. Keeping one signature everywhere means the specs may differ freely in
 *content* between arches while staying identical in *shape*.
 
+The spec's *shape* is a compatibility surface for the same reason. "Hydrate" above
+is literal: the packager reads the fields out of the descriptor file and calls
+`MyOpSpec(**fields_from_the_file)`. A descriptor written today lists only today's
+fields, so **a spec field added later must carry a default** — the value that ships
+today, or `None` where a policy function resolves it. `None` is the stronger choice:
+a descriptor that omits the field then auto-tracks whatever ships, instead of
+freezing the value that happened to be the default the day it was written. Only the
+problem shape — the fields without which there is no kernel to describe — may be
+required. Note that Python catches just one corner of this by accident: a dataclass
+rejects a non-defaulted field declared *after* a defaulted one, so appending breaks
+loudly, while inserting the same field higher up is legal and breaks every existing
+descriptor silently.
+
 [`library/tests/test_builder_signature_contract.py`](../../../library/tests/test_builder_signature_contract.py)
-enforces this for `library/kernels`.
+enforces both for `library/kernels`: the signature, and a frozen required-field set
+per spec class.
 
 ```python
 def build_my_op(spec: MyOpSpec, *, arch: str = "gfx950") -> KernelDef:

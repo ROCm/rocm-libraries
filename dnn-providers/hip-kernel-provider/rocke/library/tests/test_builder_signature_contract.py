@@ -32,17 +32,207 @@
 # contract today, including the arch-neutral `attention_unified` ones: a builder
 # that ignores `arch` still takes it, so a descriptor can name a target without
 # calling the builder.
+#
+# The second half of this file guards the OTHER way a descriptor breaks. Holding
+# the signature fixed is only half the contract: the descriptor stores the spec's
+# fields, and the packager hydrates the spec back out of them --
+# `Gfx942AttentionDenseSpec(**fields_from_the_file)`. A descriptor written today
+# lists only the fields that existed the day it was written, so a spec field
+# added later without a default makes that call raise `TypeError: missing
+# required argument` for every descriptor already in the wild. `REQUIRED_FIELDS`
+# freezes the set that is allowed to be mandatory -- the problem shape -- so a
+# new tuning knob has to arrive defaulted.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import inspect
 import pkgutil
+import typing
 
 import kernels
 import pytest
 
 ALLOWED_PARAMS = {"spec", "arch"}
+
+# Fields a spec is allowed to demand at construction time, frozen per class.
+#
+# These are problem-shape fields: a descriptor cannot omit them, because without
+# them there is no kernel to describe. Everything else must carry a default, so
+# that a descriptor written before the field existed still hydrates.
+#
+# Adding a required field here is not a rubber stamp -- it invalidates every
+# descriptor and AOT pack already produced for that spec. Prefer a default. A
+# default of `None` meaning "resolve through the shipping policy" is the strongest
+# form: a descriptor that omits the field then auto-tracks whatever ships, rather
+# than freezing the value that happened to be the default the day it was written.
+REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "kernels.common._fmha_common.FmhaCommonSpec": ("shape",),
+    "kernels.common._fmha_common.FmhaShape": (
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+    ),
+    "kernels.common.attention_unified.UnifiedAttention2DSpec": ("problem",),
+    "kernels.common.attention_unified.UnifiedAttention3DSpec": ("problem",),
+    "kernels.common.attention_unified.UnifiedAttentionProblem": (
+        "block_size",
+        "dtype",
+        "head_size",
+        "max_seqlen_k",
+        "max_seqlen_q",
+        "num_kv_heads",
+        "num_query_heads",
+        "num_seqs",
+        "total_q",
+    ),
+    "kernels.common.attention_unified.UnifiedAttentionReduceSpec": (
+        "num_segments",
+        "problem",
+    ),
+    "kernels.common.fmha_appendkv.FmhaAppendKvSpec": ("batch", "common"),
+    "kernels.common.fmha_bwd.FmhaBwdSpec": ("common", "seqlen_k", "seqlen_q"),
+    "kernels.common.fmha_fwd_fp8.FmhaFwdFp8Spec": ("common",),
+    "kernels.common.fmha_head_grouping.FmhaFwdHeadGroupingSpec": (
+        "common",
+        "seqlen_k",
+        "seqlen_q",
+    ),
+    "kernels.common.fmha_mfma.FmhaMfmaSpec": ("common", "seqlen_k", "seqlen_q"),
+    "kernels.common.fmha_paged_prefill.FmhaFwdPagedPrefillSpec": (
+        "batch",
+        "common",
+        "max_blocks_per_seq",
+        "page_block_size",
+    ),
+    "kernels.common.fmha_splitkv_decode.FmhaFwdSplitKvDecodeSpec": (
+        "batch",
+        "common",
+        "num_segments",
+    ),
+    "kernels.common.fmha_varlen.FmhaFwdVarlenSpec": (
+        "batch",
+        "common",
+        "max_seqlen_k",
+        "max_seqlen_q",
+    ),
+    "kernels.common.sage_attention.SageAttentionSpec": (
+        "common",
+        "k_scale",
+        "q_scale",
+        "quant_mode",
+        "seqlen_k",
+        "seqlen_q",
+    ),
+    "kernels.common.sparse_attention.JengaSparseSpec": (
+        "common",
+        "seqlen_k",
+        "seqlen_q",
+    ),
+    "kernels.common.sparse_attention.VsaSparseSpec": ("common", "seqlen_k", "seqlen_q"),
+    "kernels.gfx1151.wmma_fmha_fwd.WmmaFmhaFwdSpec": ("head_size", "num_query_heads"),
+    "kernels.gfx1250.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
+        "block_size",
+        "dtype",
+        "has_softcap",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "sliding_window",
+        "use_sinks",
+    ),
+    "kernels.gfx1250.attention_tiled_3d.UnifiedAttention3DTiledSpec": (
+        "block_size",
+        "dtype",
+        "has_softcap",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "num_segments",
+        "sliding_window",
+        "use_sinks",
+    ),
+    "kernels.gfx1250.attention_tiled_3d.UnifiedAttentionReduceTiledSpec": (
+        "dtype",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "num_segments",
+    ),
+    "kernels.gfx1250.wmma_attention_fwd.WmmaAttentionFwdSpec": (
+        "head_size",
+        "num_query_heads",
+    ),
+    "kernels.gfx942.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
+        "block_size",
+        "dtype",
+        "has_softcap",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "sliding_window",
+        "use_sinks",
+    ),
+    "kernels.gfx942.attention_tiled_3d.UnifiedAttention3DTiledSpec": (
+        "block_size",
+        "dtype",
+        "has_softcap",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "num_segments",
+        "sliding_window",
+        "use_sinks",
+    ),
+    "kernels.gfx942.attention_tiled_3d.UnifiedAttentionReduceTiledSpec": (
+        "dtype",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "num_segments",
+    ),
+    # gfx942's dense spec is a subclass of gfx950's and inherits its required set;
+    # every gfx942-only knob it adds is defaulted, four of them to `None`.
+    "kernels.gfx950.attention_dense.AttentionDenseSpec": (
+        "batch",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "seqlen_kv",
+        "seqlen_q",
+    ),
+    "kernels.gfx950.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
+        "block_size",
+        "dtype",
+        "has_softcap",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "sliding_window",
+        "use_sinks",
+    ),
+    "kernels.gfx950.attention_tiled_3d.UnifiedAttention3DTiledSpec": (
+        "block_size",
+        "dtype",
+        "has_softcap",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "num_segments",
+        "sliding_window",
+        "use_sinks",
+    ),
+    "kernels.gfx950.attention_tiled_3d.UnifiedAttentionReduceTiledSpec": (
+        "dtype",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "num_segments",
+    ),
+    # Reached through a spec field, so a descriptor has to express it too.
+    "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
+}
 
 
 def _discover():
@@ -66,6 +256,61 @@ def _discover():
                 continue
             builders[f"{mod.__name__}.{name}"] = inspect.signature(obj)
     return builders, errors
+
+
+def _discover_specs():
+    """Return {qualname: class} for every spec class a descriptor has to express.
+
+    Roots are the `spec` annotations of the discovered builders; from there the
+    walk follows dataclass-typed fields, because a nested spec (`FmhaCommonSpec`
+    under `common`, `UnifiedAttentionProblem` under `problem`) is just as much a
+    thing the descriptor stores and the packager hydrates.
+
+    Annotations are resolved with `get_type_hints` rather than read raw: most
+    modules use `from __future__ import annotations`, so `f.type` is a string,
+    and the same string (`"UnifiedAttention2DTiledSpec"`) names a DIFFERENT class
+    per arch. Resolving against the owning module is what keeps those distinct.
+
+    Names starting with `_` are skipped: those are internal resolved-config
+    structs (`_ResolvedTiled3D` and friends) built by the builder after it has
+    the spec. No descriptor ever names one, so their fields are not a
+    compatibility surface.
+    """
+    builders, _ = _discover()
+    pending = []
+    for qualname in builders:
+        mod_name, _, fn_name = qualname.rpartition(".")
+        fn = getattr(importlib.import_module(mod_name), fn_name)
+        spec_cls = typing.get_type_hints(fn).get("spec")
+        if dataclasses.is_dataclass(spec_cls):
+            pending.append(spec_cls)
+
+    found = {}
+    while pending:
+        cls = pending.pop()
+        if cls.__qualname__.startswith("_"):
+            continue
+        key = f"{cls.__module__}.{cls.__qualname__}"
+        if key in found:
+            continue
+        found[key] = cls
+        hints = typing.get_type_hints(cls)
+        for field in dataclasses.fields(cls):
+            nested = hints.get(field.name)
+            if isinstance(nested, type) and dataclasses.is_dataclass(nested):
+                pending.append(nested)
+    return found
+
+
+def _required_fields(cls) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            f.name
+            for f in dataclasses.fields(cls)
+            if f.default is dataclasses.MISSING
+            and f.default_factory is dataclasses.MISSING
+        )
+    )
 
 
 def test_every_kernels_submodule_imports() -> None:
@@ -148,3 +393,65 @@ def test_dense_builders_share_one_signature(arch: str) -> None:
     assert (
         sig.parameters["arch"].kind is inspect.Parameter.KEYWORD_ONLY
     ), f"'arch' must be keyword-only on the dense builders, got {sig}"
+
+
+def test_specs_were_discovered() -> None:
+    """Guard against the annotation walk silently finding nothing."""
+    specs = _discover_specs()
+    assert specs, "no spec classes reached from builder annotations -- walk is broken"
+
+
+def test_every_spec_class_is_listed() -> None:
+    """A new spec class has to declare its required set, not inherit silence."""
+    found = set(_discover_specs())
+    listed = set(REQUIRED_FIELDS)
+    assert found == listed, (
+        "REQUIRED_FIELDS is out of sync with the specs reachable from builders.\n"
+        f"  not listed: {sorted(found - listed)}\n"
+        f"  listed but gone: {sorted(listed - found)}\n"
+        "Add the new spec with its required (non-defaulted) fields, keeping that\n"
+        "set to the problem shape."
+    )
+
+
+def test_spec_required_fields_are_frozen() -> None:
+    """New spec fields must be defaulted, so old descriptors still hydrate.
+
+    The descriptor stores a spec's fields and the packager hydrates the spec back
+    out of them. A descriptor written today lists only today's fields, so adding
+    a field WITHOUT a default turns every existing descriptor into a `TypeError:
+    missing required argument`.
+
+    Python only catches part of this by accident: a dataclass rejects a
+    non-defaulted field declared AFTER a defaulted one, so appending a required
+    field to a spec whose tail is defaulted fails at import. Inserting one before
+    the defaulted block is perfectly legal Python -- and breaks every descriptor
+    in the wild. This test does not depend on field order.
+    """
+    drift = []
+    for qualname, cls in sorted(_discover_specs().items()):
+        expected = REQUIRED_FIELDS.get(qualname)
+        if expected is None:
+            continue  # reported by test_every_spec_class_is_listed
+        actual = _required_fields(cls)
+        if actual == expected:
+            continue
+        added = sorted(set(actual) - set(expected))
+        removed = sorted(set(expected) - set(actual))
+        detail = []
+        if added:
+            detail.append(f"newly required {added}")
+        if removed:
+            detail.append(f"no longer required {removed}")
+        drift.append(f"  {qualname}: {'; '.join(detail)}")
+
+    assert not drift, (
+        "spec required-field set(s) changed.\n"
+        "A field with no default cannot be omitted, so every kernel descriptor and\n"
+        "AOT pack written before it existed now fails to hydrate the spec. Give the\n"
+        "field a default -- the currently-shipped value, or `None` where a policy\n"
+        "function resolves it, which lets an old descriptor auto-track what ships.\n"
+        "If the field genuinely belongs to the problem shape, update REQUIRED_FIELDS\n"
+        "in this file and say in the PR that existing descriptors are invalidated.\n"
+        + "\n".join(drift)
+    )
