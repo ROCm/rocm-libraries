@@ -78,7 +78,13 @@ def swizzlePadPerStrip(tileInfo) -> int:
     swz = selectTLUSwizzle(tileInfo)
     if not swz:
         return 0
-    numBlocks = max(1, int(getattr(tileInfo, "numGRPerSubtile", 1)))
+    # One DTL load-block per wavesize K-rows in a DepthU strip; a pad is inserted
+    # above each block boundary except the first.  Derive from DepthU/wavesize so
+    # the value is identical everywhere it is used (numGRPerSubtile can differ
+    # between register-allocation snapshots of the same tile).
+    depthU = int(getattr(tileInfo, "depthU", 0))
+    waveSize = int(getattr(tileInfo, "waveSize", 0)) or 64
+    numBlocks = max(1, depthU // waveSize) if depthU else max(1, int(getattr(tileInfo, "numGRPerSubtile", 1)))
     return (numBlocks - 1) * int(swz.padBytes)
 
 

@@ -84,6 +84,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 4, 4,  1, 1]   # MT 64x64  (2x2 strips)
           - [16, 16, 128, 1,  1, 8, 8,  1, 1]   # MT 128x128 (4x4 strips)
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT 128x128 wg2x2 (4 waves)
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [128]
