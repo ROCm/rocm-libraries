@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -273,11 +274,13 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
             if (blockScaleA) {
                 const size_t blockA = reductionBase / problem.a.blockScale->blockSize;
                 const size_t blockB = reductionBase / problem.b.blockScale->blockSize;
+                std::array<Accumulator, outputBlockColumns> bScales;
+                for (size_t column = 0; column < columns; ++column)
+                    bScales[column] = (*blockScaleB)(columnBase + column, blockB);
                 for (size_t row = 0; row < rows; ++row) {
                     const Accumulator aScale = (*blockScaleA)(rowBase + row, blockA);
                     for (size_t column = 0; column < columns; ++column) {
-                        const Accumulator scale =
-                            aScale * (*blockScaleB)(columnBase + column, blockB);
+                        const Accumulator scale = aScale * bScales[column];
                         accumulator[row * columns + column] +=
                             partial[row * columns + column] * scale;
                     }
