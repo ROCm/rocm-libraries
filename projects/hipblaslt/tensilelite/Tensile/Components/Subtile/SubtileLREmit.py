@@ -31,6 +31,7 @@ from .SubtileGeometry import (
     LRTag_1x1, LRTag_1x2, LRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleLRLDSSwap
+from .SubtileTLUSwizzle import selectTLUSwizzle
 
 
 ################################################################################
@@ -638,6 +639,41 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
              comment="%s: kGroup*%u + frow" % (tc, groupKStride)))
   module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=hex(mStripBytes.bit_length() - 1),
              src=vgpr(base), comment="%s: * %u (mStripBytes)" % (tc, mStripBytes)))
+  # Bank-conflict swizzle: apply the same chunk XOR + load-block pad the GR
+  # write used, so the transpose read addresses the permuted physical chunk.
+  # fswz is an involution; chunk bits >= log2(groupKStride) live in kGroup, so
+  # the flip and the pad both derive from kGroup (frow only touches low bits).
+  # See SubtileTLUSwizzle and format.md.
+  swz = selectTLUSwizzle(tileInfo)
+  if swz:
+    gksBits = groupKStride.bit_length() - 1
+    assert swz.xorFromBit >= gksBits and swz.xorToBit >= gksBits, \
+        "TLU swizzle bits must lie in the kGroup (K-row) field"
+    swzTmp = writer.vgprPool.checkOut(1, tag="_lraTileAssignment_tlu_swz")
+    # base currently holds chunk*mStripBytes; flip chunk bit xorToBit ->
+    # byte bit (xorToBit + log2(mStripBytes)).
+    byteFlipBit = swz.xorToBit + (mStripBytes.bit_length() - 1)
+    module.add(VLShiftRightB32(dst=vgpr(swzTmp), shiftHex=hex(swz.xorFromBit - gksBits),
+               src=vgpr(kGroup), comment="%s: kGroup bit for chunk[%u]" % (tc, swz.xorFromBit)))
+    # kGroup still holds kGroup<<gksBits (scaled); shift already accounts for it.
+    module.add(VAndB32(dst=vgpr(swzTmp), src0=vgpr(swzTmp), src1=hex(1 << gksBits),
+               comment="%s: isolate chunk[%u]" % (tc, swz.xorFromBit)))
+    module.add(VLShiftLeftB32(dst=vgpr(swzTmp),
+               shiftHex=hex(byteFlipBit - gksBits), src=vgpr(swzTmp),
+               comment="%s: -> LDS byte bit %u" % (tc, byteFlipBit)))
+    module.add(VXorB32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(swzTmp),
+               comment="%s: swizzle chunk[%u]^=chunk[%u]" % (tc, swz.xorToBit, swz.xorFromBit)))
+    # Pad: add padBytes once per load-block above the swizzled chunk bit.
+    # For the 2x1 fp4 layout the block boundary coincides with the flipped bit,
+    # so the padded block index is (chunk >> blockChunkBits) post-swizzle.
+    module.add(VLShiftRightB32(dst=vgpr(swzTmp),
+               shiftHex=hex(swz.blockChunkBits + (mStripBytes.bit_length() - 1)),
+               src=vgpr(base), comment="%s: load-block index" % tc))
+    module.add(VMulLOU32(dst=vgpr(swzTmp), src0=hex(swz.padBytes), src1=vgpr(swzTmp),
+               comment="%s: * padBytes" % tc))
+    module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(swzTmp),
+               comment="%s: + load-block pad" % tc))
+    writer.vgprPool.checkIn(swzTmp)
   ldsStartOffset = getattr(writer, "ldsStartOffset%s" % tc, 0)
   if ldsStartOffset:
     module.add(VAddU32(dst=vgpr(base), src0=hex(ldsStartOffset), src1=vgpr(base),
