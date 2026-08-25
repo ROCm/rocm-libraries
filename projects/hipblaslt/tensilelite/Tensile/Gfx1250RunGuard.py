@@ -1,18 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Execute-time guard: do not *run* gfx1250 revision-1 YAML on revision-0 hardware.
+"""Abort Tensile.py execute of a gfx1250 RevisionID 1 / skip-gfx1250v0 YAML on rev0.
 
-A YAML opts into revision 1 with ``TestParameters.RevisionID: 1`` (default 0)
-or with ``skip-gfx1250v0`` in ``TestParameters.marks``. That is test metadata,
-not a codegen fork. StreamK tests that set either abort when Tensile.py
-executes the YAML on gfx1250 revision 0.
-
-The check is a no-op unless this invocation is gfx1250. pytest/tox collection
-uses the same helpers so skip and launch agree.
+Default RevisionID is 0. That field is test metadata, not a codegen fork.
+``--build-only`` / ``--cpu-only`` still cross-compile.
 """
 
-import os
 import sys
 
 from Tensile.GpuRevisionTarget import (
@@ -21,11 +15,6 @@ from Tensile.GpuRevisionTarget import (
     argv_selects_gfx1250v0,
     detect_gpu_revision_target,
 )
-
-# Matches Tensile.Common.Architectures.baseArchName without importing rocisa.
-def _bare_arch_name(spec):
-    return spec.split("[")[0].split(":")[0].strip()
-
 
 GFX1250_ISA = (12, 5, 0)
 DEFAULT_ASIC_REVISION = 0
@@ -48,7 +37,7 @@ def _is_gfx1250_family_name(name):
 
 def is_gfx1250_family_compile(arch_names, isa_info_map):
     """True when this invocation targets the gfx1250 ISA (revision 0 or 1)."""
-    names = {_bare_arch_name(a) for a in (arch_names or []) if a}
+    names = {arch_skip_token(a) for a in (arch_names or []) if a}
     if any(_is_gfx1250_family_name(n) for n in names):
         return True
     if names:
@@ -70,11 +59,7 @@ def _parse_asic_revision(value):
 
 
 def config_required_asic_revision(config):
-    """YAML-required RevisionID. Default 0. Not inferred from codegen knobs.
-
-    ``TestParameters.RevisionID`` wins. ``skip-gfx1250v0`` in marks means 1.
-    ``GlobalParameters.RevisionID`` is a fallback.
-    """
+    """TestParameters.RevisionID, else skip-gfx1250v0 -> 1, else 0."""
     if not isinstance(config, dict):
         return DEFAULT_ASIC_REVISION
     test_params = config.get("TestParameters")
@@ -84,57 +69,38 @@ def config_required_asic_revision(config):
         marks = test_params.get("marks") or []
         if SKIP_GFX1250V0_MARK in marks:
             return 1
-    global_params = config.get("GlobalParameters")
-    if isinstance(global_params, dict) and "RevisionID" in global_params:
-        return _parse_asic_revision(global_params["RevisionID"])
     return DEFAULT_ASIC_REVISION
 
 
-def config_targets_gfx1250(config, filepath=None):
-    """True when this YAML is a gfx1250 test.
-
-    Used so pytest/tox revision skips do not fire on other architectures.
-    """
+def config_targets_gfx1250(config):
+    """True when this YAML is a gfx1250 test."""
     if not isinstance(config, dict):
         return False
     global_params = config.get("GlobalParameters")
     if isinstance(global_params, dict):
         arch = global_params.get("Architecture")
-        if arch and _is_gfx1250_family_name(_bare_arch_name(str(arch))):
+        if arch and _is_gfx1250_family_name(arch_skip_token(str(arch))):
             return True
     test_params = config.get("TestParameters")
     if isinstance(test_params, dict):
         marks = test_params.get("marks") or []
         if SKIP_GFX1250V0_MARK in marks:
             return True
-    if filepath:
-        parts = os.path.normpath(str(filepath)).split(os.sep)
-        name = os.path.basename(str(filepath))
-        if any(_is_gfx1250_family_name(p) for p in parts):
-            return True
-        if "gfx1250" in name:
-            return True
     return False
 
 
-def requires_gfx1250_rev1(config, filepath=None):
+def requires_gfx1250_rev1(config):
     """True when this gfx1250 YAML is revision-1 and must not run on rev0."""
-    if not config_targets_gfx1250(config, filepath):
+    if not config_targets_gfx1250(config):
         return False
     return config_required_asic_revision(config) >= 1
 
 
 def should_skip_gfx1250_rev1_on_rev0(
-    config, filepath=None, tensile_argv=None, hardware_target=None
+    config, tensile_argv=None, hardware_target=None
 ):
-    """True when pytest/tox should skip this YAML on gfx1250 revision 0.
-
-    Pytest ``test_config`` always builds with Tensile ``--build-only``, which
-    disables the execute abort. Skip here (and at collection) so those tests
-    are SKIPPED instead of compile-reject FAIL. ``hardware_target`` is
-    injectable for tests; when omitted, probes the selected GPU.
-    """
-    if not requires_gfx1250_rev1(config, filepath):
+    """True when pytest/tox should skip this YAML on gfx1250 revision 0."""
+    if not requires_gfx1250_rev1(config):
         return False
     if argv_selects_gfx1250v0(tensile_argv):
         return True
@@ -154,7 +120,7 @@ def guard_gfx1250_v1_run_on_v0(
     config=None,
     solutions=None,  # unused; kept so older call sites still type-check
 ):
-    """Abort before a client/benchmark *run* of a gfx1250 rev1 YAML on rev0 HW.
+    """Abort a gfx1250 rev1 YAML *run* on rev0 HW.
 
     No-ops for ``--build-only``, ``--cpu-only``, non-gfx1250 compiles, YAMLs
     that default to RevisionID 0, and hardware that is not gfx1250v0.

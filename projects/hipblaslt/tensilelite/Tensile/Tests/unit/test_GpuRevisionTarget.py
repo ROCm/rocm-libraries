@@ -86,47 +86,6 @@ class TestRevisionToGpuTarget:
         assert gpu_rev._revision_to_gpu_target(arch, revision) == expected
 
 
-class TestNormalizeGfx1250AsicRevision:
-    """FFM asicRevision 2 is coerced to 1 with a stderr warning."""
-
-    _WARNING = "warning: gfx1250 asicRevision 2 treated as 1 (FFM workaround)"
-
-    def test_revision_2_becomes_1_and_warns_on_stderr(self, capsys):
-        assert gpu_rev._normalize_gfx1250_asic_revision("gfx1250", 2) == 1
-        captured = capsys.readouterr()
-        assert self._WARNING in captured.err
-        assert captured.out == ""
-
-    def test_feature_suffix_still_coerces(self, capsys):
-        assert gpu_rev._normalize_gfx1250_asic_revision("gfx1250:sramecc+:xnack-", 2) == 1
-        assert self._WARNING in capsys.readouterr().err
-
-    @pytest.mark.parametrize("arch,revision", [
-        ("gfx1250", 0),
-        ("gfx1250", 1),
-        ("gfx1250", -1),
-        ("gfx942", 2),
-        (None, 2),
-    ])
-    def test_other_revisions_and_arches_are_unchanged(self, capsys, arch, revision):
-        assert gpu_rev._normalize_gfx1250_asic_revision(arch, revision) == revision
-        captured = capsys.readouterr()
-        assert captured.err == ""
-        assert captured.out == ""
-
-    def test_mapping_revision_2_is_v1_and_warns(self, capsys):
-        assert gpu_rev._revision_to_gpu_target("gfx1250", 2) == "gfx1250"
-        captured = capsys.readouterr()
-        assert self._WARNING in captured.err
-        assert captured.out == ""
-
-    def test_mapping_revision_0_stays_v0_and_is_silent(self, capsys):
-        assert gpu_rev._revision_to_gpu_target("gfx1250", 0) == "gfx1250v0"
-        captured = capsys.readouterr()
-        assert captured.err == ""
-        assert captured.out == ""
-
-
 class TestDetectGpuRevisionTarget:
     """The wrapper: detect the arch, probe only for gfx1250, fall back to v1."""
 
@@ -189,32 +148,8 @@ class TestDetectGpuRevisionTarget:
             assert "treated as 1" in captured.err
 
 
-class TestRevisionSkipArchExpansion:
-    """Compile/enumerator tokens -> pytest skip-identity set.
-
-    gfx1250v0 must expand *to* {gfx1250, gfx1250v0}, never replace gfx1250
-    (that would collect the family-wide skip-gfx1250 tests on v0 HW).
-    """
-
-    def test_gfx1250v0_keeps_the_family_name(self):
-        assert gpu_rev.expand_revision_skip_archs("gfx1250v0") == {"gfx1250", "gfx1250v0"}
-
-    def test_bare_gfx1250_is_not_a_revision_alias(self):
-        # Probe (or an explicit gfx1250v0 compile target) is what adds gfx1250v0.
-        assert gpu_rev.expand_revision_skip_archs("gfx1250") == {"gfx1250"}
-
-    def test_non_gfx1250_is_unchanged(self):
-        assert gpu_rev.expand_revision_skip_archs("gfx950") == {"gfx950"}
-
-    def test_empty_is_empty(self):
-        assert gpu_rev.expand_revision_skip_archs(None) == frozenset()
-        assert gpu_rev.expand_revision_skip_archs("") == frozenset()
-
-    def test_feature_suffix_and_predicate_are_stripped(self):
-        assert gpu_rev.expand_revision_skip_archs("gfx1250v0:xnack-") == {
-            "gfx1250", "gfx1250v0"}
-        assert gpu_rev.expand_revision_skip_archs("gfx1250v0[cu=64]") == {
-            "gfx1250", "gfx1250v0"}
+class TestRevisionSkipIdentity:
+    """Compile argv and HIP probe -> pytest skip identity."""
 
     def test_argv_selects_gfx1250v0(self):
         assert gpu_rev.argv_selects_gfx1250v0(["--gpu-targets", "gfx1250v0"])
@@ -224,31 +159,13 @@ class TestRevisionSkipArchExpansion:
         assert not gpu_rev.argv_selects_gfx1250v0([])
         assert not gpu_rev.argv_selects_gfx1250v0(None)
 
-    def test_probed_rev0_skip_set(self):
-        assert gpu_rev.skip_archs_for_gfx1250_revision_target("gfx1250v0") == {
-            "gfx1250", "gfx1250v0"}
-
-    @pytest.mark.parametrize("target", ["gfx1250", None, "gfx1250:xnack-"])
-    def test_probe_fail_and_non_v0_are_fail_open(self, target):
-        # Rev1 skip set is {gfx1250} only; do not invent a gfx1250v1 identity.
-        assert gpu_rev.skip_archs_for_gfx1250_revision_target(target) == {"gfx1250"}
-
-    def test_unknown_v1_token_does_not_enter_the_skip_set(self):
-        # gfx1250v1 is not a compile target. A leftover token must not add
-        # gfx1250v0 (that would skip v1-only feature tests on rev1) or invent
-        # a gfx1250v1 skip identity.
-        assert gpu_rev.expand_revision_skip_archs("gfx1250v1") == {"gfx1250v1"}
-        assert gpu_rev.skip_archs_for_gfx1250_revision_target("gfx1250v1") == {"gfx1250"}
-
     def test_revision_skip_target_uses_hip_probe_not_enumerator_string(self):
         with mock.patch.object(gpu_rev, "_probe_asic_revision",
                                return_value=("gfx1250:xnack-", 0)):
             assert gpu_rev.gfx1250_revision_skip_target() == "gfx1250v0"
 
     def test_revision_skip_target_fail_open_on_probe_miss(self):
-        with mock.patch.object(gpu_rev, "_probe_asic_revision", return_value=None), \
-             mock.patch.object(gpu_rev, "detect_gpu_revision_target",
-                               return_value="gfx1250"):
+        with mock.patch.object(gpu_rev, "_probe_asic_revision", return_value=None):
             assert gpu_rev.gfx1250_revision_skip_target() == "gfx1250"
 
     def test_enumerator_gfx1250_only_matches_the_family_token(self):

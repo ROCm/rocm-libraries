@@ -27,7 +27,6 @@ GPU architecture detection for TensileLite unit and common tests.
 """
 
 import os
-import re
 import subprocess
 
 
@@ -65,50 +64,19 @@ def has_arch(target: str) -> bool:
     return any(target in arch for arch in get_available_archs())
 
 
-# Filename arch tokens: match gfx1250v0 before gfx\\d+ so *gfx1250v0.yaml is
-# not captured as gfx1250.
-_ARCH_IN_FILENAME = re.compile(r"(gfx1250v0|gfx\d+)")
-
-
-def filename_arch_token(filename: str):
-    """Architecture token encoded in a YAML filename, or None."""
-    if not filename:
-        return None
-    match = _ARCH_IN_FILENAME.search(filename)
-    return match.group(1) if match else None
-
-
 def gpu_targets_from_tensile_options(tensile_options):
-    """Parse pytest ``--tensile-options=--gpu-targets,gfx1250v0`` into arch names.
-
-    ``--tensile-options`` is comma-split into Tensile argv. That path used to
-    retarget compile without expanding the pytest skip set, so
-    ``skip-gfx1250v0`` never became ``pytest.mark.skip``.
-    """
+    """Parse pytest ``--tensile-options=--gpu-targets,gfx1250v0`` (comma-split argv)."""
     if not tensile_options:
         return []
-    parts = [p.strip() for p in str(tensile_options).split(",") if p.strip()]
-    targets = []
-    i = 0
-    while i < len(parts):
-        if parts[i] in ("--gpu-targets", "--gpu-target") and i + 1 < len(parts):
-            targets.extend(
-                t.strip()
-                for t in parts[i + 1].replace(",", ";").split(";")
-                if t.strip()
-            )
-            i += 2
-            continue
-        i += 1
-    return targets
+    from Tensile.GpuRevisionTarget import gpu_targets_from_argv
+    return gpu_targets_from_argv(str(tensile_options).split(","))
 
 
 def merge_pytest_compile_archs(gpu_targets=None, tensile_options=None):
-    """Compile/skip archs from pytest ``--gpu-targets`` and ``--tensile-options``.
+    """Union pytest ``--gpu-targets`` with ``--tensile-options`` ``--gpu-targets``.
 
-    When ``--gpu-targets`` is unset, enumerator names are used, then any
-    ``--tensile-options`` ``--gpu-targets`` values are appended so tox's
-    ``--tensile-options=--gpu-targets,gfx1250v0`` still expands skip-gfx1250v0.
+    Legacy tox passed gfx1250v0 only via tensile-options; that must still
+    expand skip-gfx1250v0.
     """
     if gpu_targets:
         archs = [t.strip() for t in gpu_targets.split(";") if t.strip()]
@@ -123,14 +91,9 @@ def merge_pytest_compile_archs(gpu_targets=None, tensile_options=None):
 def resolve_skip_archs(compile_archs, enumerated_archs=None, revision_target=None):
     """Pytest skip/xfail matching set. Compile targets are not skip identity.
 
-    gfx1250v0 expands (gfx1250v0 -> {gfx1250, gfx1250v0}) so
-    skip-gfx1250 still matches; --gpu-targets gfx1250v0 must never *replace*
-    gfx1250 in this set. When a real gfx1250 GPU is present, asicRevision is
-    always probed even if --gpu-targets says gfx1250. The HIP probe is applied
-    only when the enumerator listed gfx1250. Probe failure is
-    fail-open (skip set stays {gfx1250} so skip-gfx1250v0 does not fire).
-
-    enumerated_archs / revision_target are injectable for tests.
+    gfx1250v0 expands to {gfx1250, gfx1250v0} (never drop the family name).
+    HIP asicRevision is applied only when the enumerator listed gfx1250.
+    Probe failure is fail-open: skip set stays {gfx1250}.
     """
     from Tensile import GpuRevisionTarget as gpu_rev
 
@@ -144,6 +107,10 @@ def resolve_skip_archs(compile_archs, enumerated_archs=None, revision_target=Non
     if gpu_rev.enumerator_reports_gfx1250(enumerated_archs):
         if revision_target is None:
             revision_target = gpu_rev.gfx1250_revision_skip_target()
-        skip |= gpu_rev.skip_archs_for_gfx1250_revision_target(revision_target)
+        token = gpu_rev.arch_skip_token(revision_target)
+        if token == gpu_rev.GFX1250_V0:
+            skip |= {gpu_rev.GFX1250_ARCH, gpu_rev.GFX1250_V0}
+        else:
+            skip |= {gpu_rev.GFX1250_ARCH}
 
     return sorted(skip)

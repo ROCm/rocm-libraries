@@ -65,10 +65,9 @@ int main(int argc, char** argv)
     int asicRevision = -1;
 #endif
 
-    // FFM reports asicRevision 2 for gfx1250; that is not a shipping stepping.
-    // Treat it as v1 (1) so library/target selection matches rev1. Real rev0
-    // (asicRevision 0) is left alone. Match the family token only, so feature
-    // suffixes on gcnArchName still coerce.
+    // FFM reports asicRevision 2 for gfx1250; coerce to 1 so target selection
+    // matches revision 1. Real rev0 (asicRevision 0) is unchanged. Match the
+    // family token only so feature suffixes on gcnArchName still coerce.
     {
         const char*  arch  = properties.gcnArchName;
         const char*  colon = std::strchr(arch, ':');

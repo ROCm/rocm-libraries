@@ -113,9 +113,6 @@ def executeStepsInConfig(
 
     buildTmpPath = outputPath / "build_tmp"
 
-    # Execute path only: --build-only / --cpu-only still cross-compile. Abort
-    # a gfx1250 StreamK YAML with skip-gfx1250v0 or RevisionID 1 on rev0
-    # hardware. Default RevisionID is 0. Non-gfx1250 compiles are not checked.
     guard_gfx1250_v1_run_on_v0(
         build_only=buildOnly,
         cpu_only=bool(globalParameters.get("CpuOnly")),

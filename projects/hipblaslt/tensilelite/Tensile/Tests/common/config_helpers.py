@@ -29,6 +29,7 @@ see artifact_helpers.py.
 """
 
 import os
+import re
 
 import pytest
 import yaml
@@ -96,8 +97,7 @@ def configMarks(filepath, rootDir, availableArchs):
      - Anything in yaml["TestParameters"]["marks"]
      - TestParameters.RevisionID (gfx1250 only: 1 -> skip-gfx1250v0)
      - Architecture from GlobalParameters.Architecture (e.g. gfx1250)
-     - Architecture from filename (e.g. bf16_gfx1250.yaml -> gfx1250;
-       gfx1250v0 wins over gfx\\d+)
+     - Architecture from filename (e.g. bf16_gfx1250.yaml -> gfx1250)
      - validate / validateAll - whether the test validates (all?) results.
      - Data type(s) used in the YAML
      - Problem type(s) used in the YAML
@@ -135,10 +135,8 @@ def configMarks(filepath, rootDir, availableArchs):
         if "marks" in doc["TestParameters"]:
             marks += [markNamed(m) for m in doc["TestParameters"]["marks"]]
 
-    # gfx1250 RevisionID 1 (default 0) is the same skip as skip-gfx1250v0.
-    # StreamK tests that set either are skipped on gfx1250 rev0 only.
     from Tensile.Gfx1250RunGuard import requires_gfx1250_rev1
-    if requires_gfx1250_rev1(doc, filepath):
+    if requires_gfx1250_rev1(doc):
         skip_v0 = markNamed("skip-gfx1250v0")
         if skip_v0 not in marks:
             marks.append(skip_v0)
@@ -147,15 +145,11 @@ def configMarks(filepath, rootDir, availableArchs):
     if arch_val and markNamed(arch_val) not in marks:
         marks.append(markNamed(arch_val))
 
-    from Tensile.Tests.gpu_detection import filename_arch_token
+    arch_in_name = re.search(r'(gfx\d+)', components[-1])
+    if arch_in_name and markNamed(arch_in_name.group(1)) not in marks:
+        marks.append(markNamed(arch_in_name.group(1)))
 
-    arch_in_name = filename_arch_token(components[-1])
-    if arch_in_name and markNamed(arch_in_name) not in marks:
-        marks.append(markNamed(arch_in_name))
-
-    # Architecture specific xfail / skip marks. skip-gfx1250v0 becomes a real
-    # pytest skip only when gfx1250v0 is in the skip set (revision-0 hardware
-    # or --gpu-targets gfx1250v0). The YAML string alone is a selection marker.
+    # skip-gfx1250v0 becomes pytest.mark.skip only when gfx1250v0 is in the skip set.
     skip_archs = set(availableArchs or [])
     for arch in skip_archs:
         ArchFail = "xfail-%s" % arch
@@ -238,7 +232,7 @@ def skip_gfx1250_rev1_yaml_on_rev0(filepath, tensile_args=None, pytestconfig=Non
         extra = pytestconfig.getoption("--tensile-options")
         if extra:
             argv.extend(str(extra).split(","))
-    if should_skip_gfx1250_rev1_on_rev0(doc, filepath, tensile_argv=argv):
+    if should_skip_gfx1250_rev1_on_rev0(doc, tensile_argv=argv):
         pytest.skip(GFX1250_REV1_ON_REV0_REASON)
 
 
@@ -268,9 +262,8 @@ def findConfigs(rootDir=None, availableArchs=None, skipArchs=None):
         rootDir: Directory to walk for YAML configs. Defaults to Tensile/Tests.
         availableArchs: Pre-resolved compile/build GPU architectures
             (PyTestBuildArchNames). When None, calls findAvailableArchs().
-        skipArchs: Architectures used for skip-*/xfail-* matching. Compile
-            targets are not the skip identity; when None, derived from
-            availableArchs plus hardware revision probing.
+        skipArchs: Architectures used for skip-*/xfail-* matching. When None,
+            derived from availableArchs plus hardware revision probing.
     """
     if rootDir is None:
         rootDir = _TESTS_ROOT_DIR

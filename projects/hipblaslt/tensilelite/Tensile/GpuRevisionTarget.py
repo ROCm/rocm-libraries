@@ -26,6 +26,21 @@ import tempfile
 _TENSILELITE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 _REVISION_PROBE_SRC = _TENSILELITE_ROOT / "tools" / "gpu_revision_probe.cpp"
 
+# Skip identity: gfx1250 is the family name for both revisions; gfx1250v0 is
+# the only extra token (rev0). Expand gfx1250v0 *to* {gfx1250, gfx1250v0}.
+# Apply HIP revision only when the enumerator listed gfx1250 — the string
+# "gfx1250" from probe-fail is not "this machine is gfx1250" on a gfx950.
+GFX1250_ARCH = "gfx1250"
+GFX1250_V0 = "gfx1250v0"
+
+
+def arch_skip_token(arch):
+    """Bare gfx token for pytest skip/xfail matching (no feature suffix / predicate)."""
+    if not arch:
+        return ""
+    token = str(arch).strip().split(":")[0]
+    return token.split("[", 1)[0]
+
 
 def _rocm_agent_enumerator():
     """Prefer $ROCM_PATH/bin, then PATH. Same lookup as pytest get_available_archs()."""
@@ -46,7 +61,7 @@ def detect_gpu_arch():
     so pytest skip identity and invoke get-gpu-arch see the same enumerator.
     """
     enumerator = _rocm_agent_enumerator()
-    for args in ([enumerator, "-t", "GPU"], [enumerator, "-v"], [enumerator]):
+    for args in ([enumerator, "-t", "GPU"], [enumerator, "-v"]):
         try:
             result = subprocess.run(
                 args, capture_output=True, text=True, timeout=5, check=True
@@ -76,16 +91,7 @@ def detect_gpu_arch():
 
 
 def _normalize_gfx1250_asic_revision(base_arch, asic_revision):
-    """Coerce FFM's gfx1250 asicRevision 2 to the shipping v1 value 1.
-
-    FFM functional-model parts report asicRevision 2, which is not a
-    shipping revision. Treat it as revision 1 so library / skip-set /
-    --gpu-targets selection match revision 1. Warn on stderr, never stdout:
-    callers capture stdout as TENSILE_TARGET=$(invoke get-gpu-revision-target).
-
-    Real rev0 (asicRevision 0) and every non-gfx1250 arch are unchanged.
-    Feature suffixes on gcnArchName (e.g. gfx1250:sramecc+:xnack-) still match.
-    """
+    """Coerce gfx1250 asicRevision 2 to 1. Warn on stderr only (stdout is TENSILE_TARGET)."""
     token = str(base_arch).strip().split(":")[0] if base_arch else ""
     if token == "gfx1250" and asic_revision == 2:
         print("warning: gfx1250 asicRevision 2 treated as 1 (FFM workaround)",
@@ -97,11 +103,7 @@ def _normalize_gfx1250_asic_revision(base_arch, asic_revision):
 def _revision_to_gpu_target(base_arch, asic_revision):
     """Map a detected base arch + ASIC revision to a Tensile --gpu-targets value.
 
-    Only gfx1250 revision 0 is the pre-production v0. Everything else -- the
-    v1 (revision 1), FFM's revision 2 after it is coerced to 1, an unknown
-    revision (-1 when HIP is too old to expose the field), any future/
-    unexpected value, and every non-gfx1250 arch -- is returned unchanged
-    so tests default to revision 1.
+    Only gfx1250 revision 0 is v0. Everything else defaults to revision 1.
     """
     asic_revision = _normalize_gfx1250_asic_revision(base_arch, asic_revision)
     if base_arch == "gfx1250" and asic_revision == 0:
@@ -188,9 +190,6 @@ def detect_gpu_revision_target(build_dir=None, device_id=0):
     Non-gfx1250 arches are returned unchanged without probing. For gfx1250, the
     ASIC revision is probed via HIP: revision 0 -> gfx1250v0, otherwise (and on
     any probe failure or arch mismatch) -> gfx1250 (the v1 default).
-
-    Enumerator names may carry feature suffixes (``gfx1250:sramecc+:xnack-``);
-    those still count as gfx1250 and still get an asicRevision probe.
     """
     base_arch = detect_gpu_arch()
     if arch_skip_token(base_arch) != GFX1250_ARCH:
@@ -217,45 +216,13 @@ def detect_gpu_revision_target(build_dir=None, device_id=0):
     return target
 
 
-# --------------------------------------------------------------------------- #
-# Pytest collection skip identity. Compile targets (--gpu-targets) are not the
-# skip set. gfx1250 is the common ISA name for both ASIC revisions; gfx1250v0
-# is the only extra skip identity (rev0 hardware). skip-gfx1250 still matches
-# the whole family because gfx1250v0 expands *to* {gfx1250, gfx1250v0} rather
-# than replacing gfx1250. Callers must only apply the probed-revision helper
-# when the enumerator actually listed gfx1250 -- detect_gpu_revision_target()
-# returns the string "gfx1250" for probe-fail / non-v0, which is not "this
-# machine is gfx1250" on a gfx950.
-# --------------------------------------------------------------------------- #
-GFX1250_ARCH = "gfx1250"
-GFX1250_V0 = "gfx1250v0"
-
-
-def arch_skip_token(arch):
-    """Bare gfx token for pytest skip/xfail matching (no feature suffix / predicate)."""
-    if not arch:
-        return ""
-    token = str(arch).strip().split(":")[0]
-    return token.split("[", 1)[0]
-
-
 def enumerator_reports_gfx1250(enumerated_archs):
-    """True when rocm_agent_enumerator listed a gfx1250 device.
-
-    gfx1250v0 is a Tensile compile target, not an enumerator name. Do not treat
-    detect_gpu_revision_target()'s "gfx1250" default as proof the device is
-    gfx1250.
-    """
+    """True when rocm_agent_enumerator listed a gfx1250 device, not gfx1250v0."""
     return any(arch_skip_token(arch) == GFX1250_ARCH for arch in (enumerated_archs or ()))
 
 
 def expand_revision_skip_archs(arch):
-    """Expand one compile/enumerator token into the pytest skip-identity set.
-
-    gfx1250v0 -> {gfx1250, gfx1250v0}. Bare gfx1250 is left unexpanded: a
-    probed revision (or an explicit gfx1250v0 compile target) is what adds
-    gfx1250v0. Never replace gfx1250 with an alias.
-    """
+    """gfx1250v0 -> {gfx1250, gfx1250v0}; never drop the family name."""
     token = arch_skip_token(arch)
     if not token:
         return frozenset()
@@ -264,48 +231,36 @@ def expand_revision_skip_archs(arch):
     return frozenset({token})
 
 
-def skip_archs_for_gfx1250_revision_target(revision_target):
-    """Skip set for a detect_gpu_revision_target() result on real gfx1250 HW.
-
-    Rev0 -> {gfx1250, gfx1250v0}. Anything else -- including the v1 default
-    string "gfx1250" and probe failure -- is fail-open: {gfx1250} so
-    skip-gfx1250v0 does not fire. Only call this when
-    enumerator_reports_gfx1250() is true.
-    """
-    token = arch_skip_token(revision_target)
-    if token == GFX1250_V0:
-        return frozenset({GFX1250_ARCH, GFX1250_V0})
-    return frozenset({GFX1250_ARCH})
+def gpu_targets_from_argv(argv):
+    """``--gpu-targets`` / ``--gpu-target`` values from Tensile or pytest argv."""
+    if not argv:
+        return []
+    args = [str(a).strip() for a in argv if str(a).strip()]
+    targets = []
+    i = 0
+    while i < len(args):
+        if args[i] in ("--gpu-targets", "--gpu-target") and i + 1 < len(args):
+            targets.extend(
+                t.strip()
+                for t in args[i + 1].replace(",", ";").split(";")
+                if t.strip()
+            )
+            i += 2
+            continue
+        i += 1
+    return targets
 
 
 def argv_selects_gfx1250v0(argv):
-    """True when Tensile/pytest argv selects compile target gfx1250v0.
-
-    Matches pytest ``--gpu-targets gfx1250v0`` and tox's older
-    ``--tensile-options=--gpu-targets,gfx1250v0`` (comma-split into argv).
-    """
-    if not argv:
-        return False
-    args = [str(a) for a in argv]
-    for i, a in enumerate(args):
-        if a in ("--gpu-targets", "--gpu-target") and i + 1 < len(args):
-            for spec in args[i + 1].replace(",", ";").split(";"):
-                if arch_skip_token(spec) == GFX1250_V0:
-                    return True
-    return False
+    """True for pytest ``--gpu-targets gfx1250v0`` or comma-split tensile-options."""
+    return any(arch_skip_token(t) == GFX1250_V0 for t in gpu_targets_from_argv(argv))
 
 
 def gfx1250_revision_skip_target(device_id=0):
-    """HIP asicRevision -> pytest skip identity on a known gfx1250 machine.
-
-    Used when the enumerator already listed gfx1250. Probes HIP directly so a
-    verbose/suffixed enumerator name cannot skip the probe and leave
-    skip-gfx1250v0 inert on revision 0.
-    """
+    """HIP asicRevision -> skip identity on a machine the enumerator listed as gfx1250."""
     probed = _probe_asic_revision(device_id=device_id)
     if probed is not None:
         probe_arch, revision = probed
         if arch_skip_token(probe_arch) == GFX1250_ARCH:
             return _revision_to_gpu_target("gfx1250", revision)
-    target = detect_gpu_revision_target(device_id=device_id)
-    return GFX1250_V0 if arch_skip_token(target) == GFX1250_V0 else GFX1250_ARCH
+    return GFX1250_ARCH
