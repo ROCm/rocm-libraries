@@ -118,6 +118,34 @@ def test_the_removed_alignment_guard_was_unreachable():
     assert checked
 
 
+@pytest.mark.parametrize("sq, skv", [(197, 400), (300, 1234), (512, 4097), (100, 8000)])
+def test_ragged_accepts_arbitrary_chunk_lengths(sq, skv):
+    """Ragged + bottom-right is the combination a real chunked-prefill request needs:
+    a short query block against a cache of whatever length it happens to be, neither a
+    multiple of the tile geometry.
+
+    Ragged is otherwise self-attention only. That restriction is lifted here because the
+    padded-key argument still holds -- the last real query reaches exactly S_kv-1, so the
+    partial final tile's padding stays excluded. These lengths are numerically verified
+    on gfx950 by the AOT parity suite; this test guards the spec-level contract.
+    """
+    spec = _spec(
+        seqlen_q=sq, seqlen_kv=skv, num_query_heads=4, num_kv_heads=1,
+        ragged=True, causal_bottom_right=True,
+    )
+    ok, why = supports_attention_dense(spec, arch="gfx950")
+    assert ok, why
+    assert "_br" in spec.kernel_name() and "ragged" in spec.kernel_name()
+
+
+def test_ragged_without_bottom_right_is_still_self_attention_only():
+    """The relaxation is scoped to bottom-right. Plain ragged cross-attention has no
+    diagonal to place the queries on, so it stays rejected."""
+    with pytest.raises(ValueError, match="self-attention only"):
+        _spec(seqlen_q=197, seqlen_kv=400, num_query_heads=4, num_kv_heads=1,
+              ragged=True, causal=False)
+
+
 def test_gfx942_refuses_the_field_it_does_not_implement():
     """The spec class is shared with gfx942, whose builder never reads this field. If
     its support gate let the spec through, the build would emit a top-left mask under a
@@ -157,9 +185,7 @@ def test_top_left_and_bottom_right_actually_differ():
     """Guards the whole feature. Names are anonymized first, so this fails if the offset
     is dropped from the mask -- leaving only a renamed copy of the top-left kernel."""
     tl = _ll(_spec(seqlen_q=256, seqlen_kv=512), anonymize=True)
-    br = _ll(
-        _spec(seqlen_q=256, seqlen_kv=512, causal_bottom_right=True), anonymize=True
-    )
+    br = _ll(_spec(seqlen_q=256, seqlen_kv=512, causal_bottom_right=True), anonymize=True)
     assert tl != br
 
 
@@ -240,6 +266,86 @@ def _gpu_ready() -> bool:
         return False
 
 
+def _run_and_reference(spec, *, top_left=False, seed=0):
+    """Launch the kernel and build the matching CPU-side oracle.
+
+    Layout matters here and is easy to get wrong: the launcher takes q/out as
+    ``[B, S, H, D]`` and k/v as ``[B, Skv, Hkv, D]``, while SDPA wants heads second --
+    hence the transposes on the reference side only. ``out`` and ``scale`` are required
+    keyword arguments, not optional.
+    """
+    import math
+
+    import torch
+
+    from kernels.gfx950.attention_dense import run_attention_dense_torch
+
+    dev = "cuda"
+    torch.manual_seed(seed)
+    bsz, sq, skv = spec.batch, spec.seqlen_q, spec.seqlen_kv
+    hq, hkv, d = spec.num_query_heads, spec.num_kv_heads, spec.head_size
+    scale = 1.0 / math.sqrt(d)
+
+    q = torch.randn(bsz, sq, hq, d, device=dev, dtype=torch.bfloat16)
+    k = torch.randn(bsz, skv, hkv, d, device=dev, dtype=torch.bfloat16)
+    v = torch.randn(bsz, skv, hkv, d, device=dev, dtype=torch.bfloat16)
+    out = torch.empty(bsz, sq, hq, d, device=dev, dtype=torch.bfloat16)
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+
+    rep = hq // hkv
+    qh = q.transpose(1, 2).float()
+    kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
+    vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
+    if top_left:
+        mask = torch.arange(skv, device=dev).view(1, -1) <= torch.arange(
+            sq, device=dev
+        ).view(-1, 1)
+    else:
+        qi = torch.arange(sq, device=dev).view(-1, 1)
+        ki = torch.arange(skv, device=dev).view(1, -1)
+        mask = ki <= qi + (skv - sq)
+    ref = torch.nn.functional.scaled_dot_product_attention(
+        qh, kh, vh, attn_mask=mask, scale=scale
+    ).transpose(1, 2)
+    return out, ref
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not _gpu_ready(), reason="needs a gfx950 GPU")
+@pytest.mark.parametrize(
+    "sq, skv",
+    [
+        # Arbitrary lengths, which is what a real chunked-prefill request looks like:
+        # neither a multiple of the 256 query tile nor of block_n, and an offset that
+        # lands mid-tile. Reaching these at all depends on the KV-tile bound being a
+        # ceil; getting them RIGHT depends on the partial last tile still being masked.
+        (197, 400),
+        (300, 1234),
+        (512, 4097),
+        (100, 8000),
+    ],
+)
+def test_ragged_bottom_right_matches_shifted_mask_oracle(sq, skv):
+    """Bottom-right on the ragged path, where the lengths are arbitrary.
+
+    The interesting risk here is the partial last KV tile. Ragged visits it (the tile
+    count ceils) and its out-of-range keys load as zeros, and plain causal gets away
+    without an explicit key mask because every real query stops before them. Bottom-right
+    shifts every query's reach to the right, so this checks that argument still holds:
+    the last real query reaches key seqlen_kv-1 exactly, and no further.
+    """
+    spec = _spec(
+        seqlen_q=sq,
+        seqlen_kv=skv,
+        num_query_heads=4,
+        num_kv_heads=1,
+        ragged=True,
+        causal_bottom_right=True,
+    )
+    out, ref = _run_and_reference(spec)
+    assert (out.float() - ref).abs().max().item() < 2e-2
+
+
 @pytest.mark.gpu
 @pytest.mark.skipif(not _gpu_ready(), reason="needs a gfx950 GPU")
 @pytest.mark.parametrize("sq, skv", [(256, 512), (512, 1024)])
@@ -251,31 +357,10 @@ def test_bottom_right_matches_shifted_mask_oracle(sq, skv):
     """
     import torch
 
-    from kernels.gfx950.attention_dense import run_attention_dense_torch
-
     spec = _spec(seqlen_q=sq, seqlen_kv=skv, causal_bottom_right=True)
-    dev = "cuda"
-    torch.manual_seed(0)
-    b, hq, hkv, d = spec.batch, spec.num_query_heads, spec.num_kv_heads, spec.head_size
-    q = torch.randn(b, hq, sq, d, device=dev, dtype=torch.bfloat16)
-    k = torch.randn(b, hkv, skv, d, device=dev, dtype=torch.bfloat16)
-    v = torch.randn(b, hkv, skv, d, device=dev, dtype=torch.bfloat16)
-
-    out = run_attention_dense_torch(spec=spec, q=q, k=k, v=v)
-
-    rep = hq // hkv
-    qh = q.float()
-    kh = k.repeat_interleave(rep, 1).float()
-    vh = v.repeat_interleave(rep, 1).float()
-    qi = torch.arange(sq, device=dev).view(-1, 1)
-    ki = torch.arange(skv, device=dev).view(1, -1)
-    ref = torch.nn.functional.scaled_dot_product_attention(
-        qh, kh, vh, attn_mask=(ki <= qi + (skv - sq))
-    )
+    out, ref = _run_and_reference(spec)
     assert (out.float() - ref).abs().max().item() < 2e-2
 
     # And it must NOT match the top-left oracle, or the offset is not doing anything.
-    ref_tl = torch.nn.functional.scaled_dot_product_attention(
-        qh, kh, vh, is_causal=True
-    )
+    _, ref_tl = _run_and_reference(spec, top_left=True)
     assert (out.float() - ref_tl).abs().max().item() > 1e-3
