@@ -183,8 +183,15 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         local_col_data        = csrsv->get_transposed_col_ind();
         local_val_data        = csrt_val;
         local_val_data_stride = (A->batch_count > 1) ? A->nnz : 0;
-        fill_mode             = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                         : rocsparse_fill_mode_lower;
+        switch(fill_mode)
+        {
+        case rocsparse_fill_mode_lower:
+            fill_mode = rocsparse_fill_mode_upper;
+            break;
+        case rocsparse_fill_mode_upper:
+            fill_mode = rocsparse_fill_mode_lower;
+            break;
+        }
     }
     else if(force_conj)
     {
@@ -207,7 +214,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
 
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
     const int         asicRev       = handle->asic_rev;
-    const bool        sleep_  = (gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2);
+    const bool        sleep_  = (gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2);
     const uint32_t    wfsize_ = sleep_ ? 64 : handle->wavefront_size;
     rocsparse::csrsv_launch_kernel_t csrsv_launch_kernel{};
     RETURN_IF_ROCSPARSE_ERROR(csrsv_launch_kernel_find(

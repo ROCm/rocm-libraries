@@ -31,6 +31,8 @@ import threading
 import time
 import warnings
 
+import rocisa
+
 from pathlib import Path
 from typing import FrozenSet, List, Dict, NamedTuple, Tuple
 
@@ -38,6 +40,7 @@ from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, se
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, defaultSolution
+from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
 from Tensile.LibraryIO import readYAML
 from Tensile.Toolchain.Validators import validateToolchain
 
@@ -66,6 +69,7 @@ def _runChecks(
     check: Check,
     known_bugs: FrozenSet[KnownBugKey],
     files: List[Path],
+    rocIsaData=None,
 ) -> Tuple[int, int, int, int, int]:
     """
     Run checks on the given logic files.
@@ -75,6 +79,8 @@ def _runChecks(
         isaInfoMap: Map of IsaVersion to IsaInfo.
         check: Object containing flags for checking.
         files: List of logic files to check.
+        rocIsaData: Capabilities snapshot from the parent's rocIsa singleton, or
+            None to leave this process's singleton as it is.
 
     Returns:
         Tuple of (keep, total, known_bug_skips, chip_id_failures, stale_known_bugs)
@@ -86,6 +92,13 @@ def _runChecks(
         whose solution now passes validation (a landed fix; the entry can be
         removed).
     """
+    # ParallelMap2 hands a worker globalParameters and nothing else, so the rocIsa
+    # singleton in this process has never been init'd and every capability lookup
+    # would read a default. Validators that ask the assembly backend what a solution
+    # emits need the parent's capabilities to answer the same way the emitter will.
+    if rocIsaData is not None:
+        rocisa.rocIsa.getInstance().setData(rocIsaData)
+
     keep, total, known_bug_skips, chip_id_failures = 0, 0, 0, 0
     stale_known_bugs = 0
     for file in files:
@@ -207,6 +220,13 @@ def _setup():
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)
+
+    archs = args.Architecture.split(";")
+    if "all" not in archs:
+        files = [f for f in files if archMatch(load_logic_gfx_arch(f), archs)]
+        if len(files) == 0:
+            print1(f"No files found in {logicPath} for architectures: {', '.join(archs)}")
+            exit(1)
     print2(f"Found {len(files)} files")
 
     isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, str(cxxCompiler))
@@ -255,7 +275,10 @@ def main():
         files[i : i + batchSize] for i in range(0, len(files), batchSize)
     )
 
-    fn = functools.partial(_runChecks, logicPath, isaInfoMap, check, known_bugs)
+    fn = functools.partial(
+        _runChecks, logicPath, isaInfoMap, check, known_bugs,
+        rocIsaData=rocisa.rocIsa.getInstance().getData(),
+    )
     keep, total = 0, 0
     known_bug_skips = 0
     chip_id_failures = 0

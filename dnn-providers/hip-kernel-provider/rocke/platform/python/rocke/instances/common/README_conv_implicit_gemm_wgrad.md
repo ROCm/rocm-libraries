@@ -88,26 +88,55 @@ parameters are required.
 build time using `select_split_k_wgrad` (the CK formula:
 `floor((waves_per_cu × num_cus) / base_grid)`, clamped to `[1, wg_K]`).
 
+### Pointwise explicit-GEMM fast path
+
+For **pointwise convolutions** (`Y=X=1`, `sH=sW=1`, `pH=pW=0` — and for 3-D: `Z=1`, `sD=1`, `pD=0`) the wgrad kernel automatically bypasses the coordinate-transform descriptor DAG and replaces all three operand address computations with flat multiply-add arithmetic.
+
+**Detection:** `ConvProblem.is_pointwise` returns `True`; no user-facing flag is needed.
+
+**Address arithmetic (pointwise path):**
+
+| Operand | Formula | Replaces |
+|---------|---------|---------|
+| dY (A) | `offset = k_wg_red * K + k_out` | `make_dy_descriptor` + `unmerge_magic` on K_wg |
+| X  (B) | `offset = k_wg_red * C + n_wg`  | `make_x_wgrad_descriptor` + full conv DAG |
+| dW (D) | `offset = k_out * C + n_wg`     | `make_dw_descriptor` + `unmerge_magic` + pads |
+
+**Why this is faster:** For 1×1/s1/p0 the spatial affine map (embed), the filter-unmerge (unmerge_magic on y, x, c), and the boundary pads (pad on y, x) all collapse to identity. The implicit descriptor computes the same address but generates extra VALU instructions (multiplications, additions, comparisons) that the compiler cannot always eliminate. Flat arithmetic emits exactly one `mul` and one `add` per operand.
+
+The split-K epilogue (`global_atomic_add` / `global_atomic_add_pk_*`) already used flat arithmetic (`c_m * wg_N + c_n`) and required no change.
+
 ---
 
-## Next steps
+## Changelog (continued)
 
-### Enable vector loads for A and B
+### Free-axis vector loads for A and B
 
-Currently `load_vec_a` and `load_vec_b` are hard-coded to 1
-(`conv_implicit_gemm_wgrad.py:822`). The root cause is that the K_wg reduction
-axis is not the innermost dimension of either tensor:
+The K_wg reduction axis is not the innermost dimension of either input tensor:
 
 - **A (dY, NHWK):** consecutive K_wg positions are separated by stride K
-  (output channels).
-- **B (X, NHWC):** consecutive K_wg positions are separated by stride C
-  (input channels).
+  (output channels); the stride-1 axis is `k_out` (= GEMM **M**, the free axis).
+- **B (X, NHWC):** consecutive K_wg positions are separated by stride C (input
+  channels); the stride-1 axis is the inner C of `N_wg` (the free axis).
 
-`buffer_load_vN` with `N > 1` would read N consecutive *channel* values at the
-same spatial position instead of the intended N consecutive spatial positions.
-Enabling wider loads requires either rearranging the load tile so that the fast
-axis aligns with the last tensor dimension, or introducing a transposing LDS
-stage so the data lands in LDS in the order the MFMA atoms expect it.
+A `buffer_load_vN` along K_wg would read N consecutive *channel* values at one
+spatial position — wrong data — which is why the loads were historically scalar.
+The fix rearranges the load tile so the vector runs along the **free** axis
+(the last tensor dimension) instead of the reduction axis: the loader's new
+`vector_axis="row"` mode (`helpers/loads.py`) issues one coalesced
+`buffer_load_dwordx4` (V=8 fp16/bf16) along the stride-1 free axis, then
+*transposes on store* — scattering the V elements into `[row+i, col]` of the
+existing row-major `(M/N, K)` LDS tile. The MFMA consumer still reads that tile
+K-contiguously, unchanged (no new LDS layout, no consumer-read change).
+
+Enabled for the **sync CDNA-MFMA** path (`op.family == "mma"`): the width is
+`vec_a | K` (A) and `vec_b | C` (B, so a vector never crosses a `(y,x)` filter
+boundary), falling back to the scalar `vector_axis="col"` path (byte-identical)
+when a width > 1 is not admissible. The async-DMA and WMMA paths are follow-ons
+(see below). The optional `K0-M-K1` LDS layout below is an *additional*
+bank-conflict/wider-`ds_read` optimization, independent of this vectorised load.
+
+## Next steps
 
 ### Async DMA for all pipelines
 

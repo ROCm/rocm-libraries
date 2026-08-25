@@ -19,11 +19,15 @@ target_sources(stinkytofu_objs PRIVATE
     LegalizationUtils.cpp
     ExecMaskGrouping.cpp
     StinkyDAGSchedulerPass.cpp
+    dag/RegionDAG.cpp
+    WaitAwareScheduleRepairPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
+    Gfx1250HazardPass.cpp
     waitcnt/WaitDataflow.cpp
     waitcnt/ShallowPredPromotion.cpp
     StinkyRemoveWaitCntPass.cpp
+    RemoveDscntPass.cpp
     StinkyRemoveNopPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
     RegionClonePass.cpp
@@ -31,6 +35,7 @@ target_sources(stinkytofu_objs PRIVATE
     InsertVgprMsbPass.cpp
     InsertInitialUnclausedVmemPass.cpp
     InsertClusterBarrierPass.cpp
+    TDMLoadWaveSyncPass.cpp
     RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp
     RemoveInstructionPass.cpp

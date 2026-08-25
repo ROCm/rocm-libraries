@@ -256,6 +256,16 @@ class LraTileAssignmentTransposedMFMAFP32(LraTileAssignmentTransposedMFMA):
                   "DataType": DataType("s")
               }}
 
+class LraTileAssignmentTransposedMFMAFP32C(LraTileAssignmentTransposedMFMA):
+    # complex has no LDS-transpose path (numBytes=8); __call__ delegates to
+    # LraTileAssignmentMFMA, matching the non-LDSTr arch (e.g. gfx950) complex path.
+    kernel = {"EnableMatrixInstruction": True,
+              "DirectToVgprA": False,
+              "DirectToVgprB": False,
+              "ProblemType": {
+                  "DataType": DataType("c")
+              }}
+
 class LraTileAssignmentTransposedMFMAFP16(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
