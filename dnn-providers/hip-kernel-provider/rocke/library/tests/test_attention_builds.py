@@ -1960,6 +1960,30 @@ class TestAttentionHelpers(unittest.TestCase):
                 au._select_gfx942_flash_num_warps(p),
             )
 
+    def test_fp8_long_kv_decode_routes_3d(self):
+        """fp8 long-KV decode routes to 3D split-KV (VALU-bound; 3D fans the
+        per-element dequant across CTAs, ~2x on gfx950 where the 2D-vs-3D target
+        is undersized). 2D is preserved where split-KV loses: short KV and SWA;
+        prefill and bf16 are untouched by the gate.
+        """
+        def _p(**kw):
+            base = dict(
+                total_q=64, num_seqs=64, num_query_heads=64, num_kv_heads=8,
+                head_size=64, block_size=16, max_seqlen_q=1, max_seqlen_k=8192,
+                dtype="bf16",
+            )
+            base.update(kw)
+            return UnifiedAttentionProblem(**base)
+
+        self.assertEqual(_p(use_fp8=True).select_path(), "3d")  # the fix
+        self.assertEqual(_p(use_fp8=True, max_seqlen_k=512).select_path(), "2d")
+        self.assertEqual(_p(use_fp8=True, sliding_window=128).select_path(), "2d")
+        # prefill (not all_decode) and bf16 decode are unaffected by the gate.
+        self.assertEqual(
+            _p(use_fp8=True, max_seqlen_q=512, total_q=512).select_path(), "2d"
+        )
+        self.assertEqual(_p(use_fp8=False).select_path(), "2d")
+
     def test_gfx942_d64_decode_num_warps(self):
         """gfx942 D64 decode picks num_warps=1.
 
