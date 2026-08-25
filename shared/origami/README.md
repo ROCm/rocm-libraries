@@ -16,6 +16,13 @@
   - [C++](#build-and-install-origami-c)
   - [CMake Options](#cmake-options)
   - [Origami Tests](#origami-tests)
+  - [Neural Network (NN) Backend](#neural-network-nn-backend)
+    - [Supported Backends](#supported-backends)
+    - [Building with NN On or Off](#building-with-nn-on-or-off)
+    - [Model Weights](#model-weights)
+    - [Runtime Configuration](#runtime-configuration)
+    - [hipBLASLt Integration](#hipblaslt-integration)
+    - [NN Tests](#nn-tests)
 - [Debug Logging](#debug-logging)
   - [Text Log](#text-log)
   - [CSV Log](#csv-log)
@@ -254,7 +261,7 @@ cmake --install build/
 | `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
 | `ORIGAMI_BUILD_TESTING` | Enable Python binding tests | `OFF` |
 | `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
-
+| `ORIGAMI_ENABLE_NN` | Build NN inference stack (`origami::nn`, TWREC loader, tilewright ranking in `rank_configs`). | `OFF` |
 
 ## Origami Tests
 
@@ -312,6 +319,174 @@ Run selector tests (requires torch):
 ```bash
 python -m pytest tests/test_selector.py -v
 ```
+
+## Neural Network (NN) Backend
+
+Origami can rank GEMM kernel candidates with an optional **neural-network backend** in addition to the default analytical roofline model. NN inference is wired through `origami::rank_configs` via `rank_options_t`: callers choose **analytical**, **NN-only**, or **NN with analytical fallback**.
+
+When `ORIGAMI_ENABLE_NN=OFF`, all NN code is compiled out and `rank_configs` always uses the analytical path (`inference_mode_t::nn` throws at runtime).
+
+### Supported Backends
+
+| Backend | `nn_backend_t` | Status | Weights format |
+|---------|----------------|--------|----------------|
+| **tilewright** | `tilewright` | Implemented (TWREC loader + in-tree inference) | TWREC YAML manifest (`.tilewright.yaml`) + int4 sidecar (`.tilewright.wts.yaml`) |
+| **embedding_similarity** | `embedding_similarity` | API stub only (not yet loadable) | — |
+
+**tilewright** is a split-tree, per-cell two-tower MLP recommender. Models are keyed by Tensile logic-library stem (dtype + transpose) and discovered from `origami_nn_index` colocated with the kernel library.
+
+**gfx950 weights shipped in-tree** (`data/nn/tilewright/gfx950/`):
+
+| Dtype family | Tensile type | Transpose layouts |
+|------------|--------------|-------------------|
+| bf16 BBS (`bf16_r`) | `BB_BB` | TN, NN, TT, NT (all four) |
+| fp8 F8BS | `F8F8_BF8` | NN only |
+| mxfp8 S_MX_B | `SS_SS` | TN, NN, TT, NT (all four) |
+
+If no model exists for a given logic stem, `load_models_for_logic` returns `invalid_handle` (`-1`) and `rank_configs` falls back to analytical when `ORIGAMI_INFERENCE_MODE=nn_fallback`.
+
+### Building with NN On or Off
+
+**Default (analytical-only)** — `ORIGAMI_ENABLE_NN` is `OFF` unless explicitly enabled:
+
+```bash
+cd shared/origami
+
+cmake -S . -B build/ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DORIGAMI_BUILD_TESTING=ON
+
+cmake --build build/ --parallel
+```
+
+**NN enabled** — opt in to the TWREC loader, tilewright inference, and filter stack:
+
+```bash
+cmake -S . -B build/ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DORIGAMI_ENABLE_NN=ON \
+  -DORIGAMI_BUILD_TESTING=ON
+
+cmake --build build/ --parallel
+```
+
+With `ORIGAMI_ENABLE_NN=ON`, YAML weights under `data/nn/tilewright/` ship in-tree; when `hint_dir` is empty, `load_models_for_logic` falls back to the bundled gfx950 directory at build time.
+
+**hipBLASLt** uses the same `ORIGAMI_ENABLE_NN` option (default **OFF**). Enable NN when configuring hipBLASLt:
+
+```bash
+cmake -S projects/hipblaslt -B build/ -DORIGAMI_ENABLE_NN=ON
+```
+
+After a hipBLASLt build, YAML weights are copied next to each arch's Tensile library under `Tensile/library/<arch>/`.
+
+Check whether NN was built:
+
+```bash
+grep ORIGAMI_ENABLE_NN build/origami-config.cmake
+# or inspect compile definitions on the origami target
+```
+
+### Model Weights
+
+Weights live under:
+
+```
+shared/origami/data/nn/tilewright/<arch>/
+  origami_nn_index          # maps logic_stem → backend → manifest
+  *.tilewright.yaml         # TWREC manifest (routing + cell metadata)
+  *.tilewright.wts.yaml     # int4_b64 weight sidecar
+```
+
+Index format (tab-separated):
+
+```
+<logic_stem>  tilewright  <manifest.yaml>
+```
+
+Load programmatically:
+
+```cpp
+#include "origami/nn/nn.hpp"
+
+auto models = origami::nn::load_models_for_logic(logic_stem, library_dir);
+// models.tilewright >= 0 on success; -1 if stem not in index
+```
+
+For tests, override the manifest path with `ORIGAMI_NN_WEIGHTS` when tilewright integration tests are added.
+
+
+### Runtime Configuration
+
+NN routing is controlled by `rank_options_t` fields and environment variables. Explicit `rank_options_t` values take precedence over environment defaults.
+
+#### Inference mode
+
+| `ORIGAMI_INFERENCE_MODE` | Behavior |
+|--------------------------|----------|
+| *(unset)* or `analytical` | Analytical roofline model (default) |
+| `nn` | ML ranking only; throws if no model resolves or inference fails |
+| `nn_fallback` | ML when a model is available; otherwise analytical |
+
+#### Backend selection
+
+| `ORIGAMI_NN_BACKEND` | Behavior |
+|----------------------|----------|
+| *(unset)* or `auto` | Prefer tilewright handle from `library_models`, then session default |
+| `tilewright` | Force tilewright backend |
+| `embedding_similarity` | Force embedding-similarity backend (not yet implemented) |
+
+#### Diagnostics
+
+| Variable | Description |
+|----------|-------------|
+| `ORIGAMI_NN_DIAG` | Print model-load diagnostics when a TWREC manifest is loaded (`arch`, feature dims, cell/split counts) |
+| `ORIGAMI_NN_WEIGHTS` | Tests: override path to a `.tilewright.yaml` manifest |
+| `ORIGAMI_TW_LOG` | Log top-1 tilewright pick per `rank_configs` call (`[TW_PICK]` line on stderr) |
+| `ORIGAMI_TW_CELL` | Debug: force TWREC cell index (overrides routing); also via `rank_options.nn.force_cell` |
+
+#### hipBLASLt row filter
+
+| Variable | Description |
+|----------|-------------|
+| `TENSILE_PREDICTION_LIB=1` | Use `PredictionMatching` rows in `ExactLogicLibrary` (required for NN path in hipBLASLt bench) |
+
+### hipBLASLt Integration
+
+Example: run hipblaslt-bench with tilewright NN fallback on gfx950 bf16 TN layout:
+
+```bash
+export TENSILE_PREDICTION_LIB=1
+export ORIGAMI_INFERENCE_MODE=nn_fallback
+export ORIGAMI_NN_BACKEND=tilewright
+export HIPBLASLT_TENSILE_LIBPATH=/path/to/build/Tensile/library/gfx950
+
+hipblaslt-bench -m 3405 -n 4000 -k 5000 -r bf16_r \
+  --transA T --transB N --bias_vector
+```
+
+Use `ORIGAMI_INFERENCE_MODE=nn` to require ML ranking (no silent analytical fallback). Set `ORIGAMI_NN_DIAG=1` to verify model load for the active logic stem.
+
+### NN Tests
+
+Build with `ORIGAMI_ENABLE_NN=ON` and testing enabled, then run NN-specific Catch2 tags:
+
+```bash
+cd shared/origami
+
+cmake -S . -B build/ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DORIGAMI_ENABLE_NN=ON \
+  -DORIGAMI_BUILD_TESTING=ON
+
+cmake --build build/ --parallel
+./build/tests/origami-tests "[nn]"
+```
+
+When `ORIGAMI_ENABLE_NN=OFF` (the default), `[nn]` filter tests are compiled out.
 
 ## Debug Logging
 
