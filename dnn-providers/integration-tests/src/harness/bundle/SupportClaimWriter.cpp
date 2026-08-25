@@ -265,7 +265,16 @@ WriteSummary writeObservedSupportClaims(const std::vector<SupportObservation>& o
                                                  + sidecarPath.string());
                         continue;
                     }
-                    existing = parseSupportClaimsJson(json, sidecarPath.string());
+                    try
+                    {
+                        existing = parseSupportClaimsJson(json, sidecarPath.string());
+                    }
+                    catch(const std::exception& e)
+                    {
+                        summary.errors.push_back("refusing to overwrite unparseable sidecar: "
+                                                 + sidecarPath.string() + ": " + e.what());
+                        continue;
+                    }
                 }
             }
 

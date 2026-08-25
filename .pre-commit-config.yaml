@@ -148,8 +148,12 @@ repos:
         name: Verify support-claim sidecars (RFC 0015)
         entry: python dnn-providers/integration-tests/scripts/verify_support_claims.py
         language: python
+        # always_run: true + pass_filenames: false — runs on every commit.
+        # The script walks integration-test-bundles/ itself; the top-level
+        # exclude hides that directory so pre-commit's file filtering
+        # does not work here.
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*\.json|scripts/verify_support_claims\.py)$
+        always_run: true
 
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)
