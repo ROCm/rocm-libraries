@@ -61,13 +61,18 @@ static bool isWorkgroupBarrier(const StinkyInstruction& inst) {
     return true;
 }
 
+// SCC is spelled two ways: as a descriptor flag, and as an ordinary operand once
+// legalizeImplicitSpecialRegisters has materialized it. Ask about both, so the answer does
+// not depend on where this pass sits relative to that one.
 static bool writesScc(const StinkyInstruction& inst) {
+    if (inst.is(InstFlag::IF_ImplicitWriteSCC)) return true;
     for (const StinkyRegister& reg : inst.getDestRegs())
         if (reg.isRegister() && reg.reg.type == RegType::SCC) return true;
     return false;
 }
 
 static bool readsScc(const StinkyInstruction& inst) {
+    if (inst.is(InstFlag::IF_ImplicitReadSCC)) return true;
     for (const StinkyRegister& reg : inst.getSrcRegs())
         if (reg.isRegister() && reg.reg.type == RegType::SCC) return true;
     return false;
@@ -708,10 +713,16 @@ std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx) {
     if (passCtx.getGemmTileConfig().arch[0] == 12 && passCtx.getGemmTileConfig().arch[1] == 5) {
         PASS_DEBUG(std::cerr << "Using CDNA5ReadyQueue for scheduling\n");
         return std::make_unique<CDNA5ReadyQueue>(passCtx);
-    } else {
-        PASS_DEBUG(std::cerr << "Using Default ReadyQueue for scheduling\n");
-        return std::make_unique<ReadyQueueByDAGid>(passCtx);
     }
+    // The SCC chain lock applyClusterBarrierSccRule sets up is carried in the node fields and
+    // honoured only by CDNA5ReadyQueue's pick loop. ReadyQueueByDAGid pops by id and reads
+    // none of them, so it would issue a handshake barrier straight through an open chain --
+    // the clobber this rule exists to prevent, and silently.
+    if (passCtx.getPassFeatureConfig().dagFeatures.clusterBarrier) {
+        STINKY_UNREACHABLE("ClusterBarrier scheduling requires CDNA5ReadyQueue");
+    }
+    PASS_DEBUG(std::cerr << "Using Default ReadyQueue for scheduling\n");
+    return std::make_unique<ReadyQueueByDAGid>(passCtx);
 }
 
 class StinkyDAGSchedulerPass : public StinkyInstPass {
