@@ -1305,12 +1305,8 @@ private:
         }
 
         check_jit_callback_state();
-        load_jit_cb_data_ptrs.resize(load_jit_cb_state->data.size());
-        std::transform(load_jit_cb_state->data.begin(),
-                       load_jit_cb_state->data.end(),
-                       load_jit_cb_data_ptrs.begin(),
-                       [](gpubuf& buf) { return buf.data(); });
-        ret = hipfftXtSetJITCallback(plan,
+        load_jit_cb_data_ptrs = load_jit_cb_state->get_raw_data_ptrs();
+        ret                   = hipfftXtSetJITCallback(plan,
                                      load_jit_cb_state->symbol,
                                      load_jit_cb_state->func.data(),
                                      load_jit_cb_state->func.size(),
@@ -1359,12 +1355,8 @@ private:
             throw std::runtime_error("unsupported data type for store callback");
         }
         }
-        store_jit_cb_data_ptrs.resize(store_jit_cb_state->data.size());
-        std::transform(store_jit_cb_state->data.begin(),
-                       store_jit_cb_state->data.end(),
-                       store_jit_cb_data_ptrs.begin(),
-                       [](gpubuf& buf) { return buf.data(); });
-        ret = hipfftXtSetJITCallback(plan,
+        store_jit_cb_data_ptrs = store_jit_cb_state->get_raw_data_ptrs();
+        ret                    = hipfftXtSetJITCallback(plan,
                                      store_jit_cb_state->symbol,
                                      store_jit_cb_state->func.data(),
                                      store_jit_cb_state->func.size(),
