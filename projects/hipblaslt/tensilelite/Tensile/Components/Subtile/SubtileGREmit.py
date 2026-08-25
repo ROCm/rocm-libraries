@@ -1054,7 +1054,7 @@ def _grComputeSubtileOffsets_tlu(writer, module, tileInfo):
 ##################################################
 # Subroutine to generate GR load code
 #
-def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
+def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   """Emit buffer_load instructions for a single subtile (sId0, sId1).
 
   When loadRatioGR > 1, multiple local subtiles share the same global read.
@@ -1064,6 +1064,8 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       tileInfo: TileInfo or TileInfo for the tensor component
       sId0:     Subtile row index
       sId1:     Subtile column index (K-dimension)
+      writer:   KernelWriter (needed on the TLU=1 path to look up the runtime
+                K stride for K-window (sId1>0) global-address advances).
   """
   module = Module()
 
@@ -1111,6 +1113,33 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   swz = selectTLUSwizzle(tileInfo)
   # Pad-aware LDS stride between subtile strips (M/N direction).
   stripStride = stripStrideBytes(tileInfo) if isTLU1 else int(tileInfo.subtileSize)
+  # K-window (sId1) global-address advance for TLU=1.
+  #
+  # For NT the free (M/N) dim is unit-stride and the K (unroll) dim is strided,
+  # so stepping to K-window sId1 must move the GLOBAL read address by
+  # sId1*instK*stackK*strideK*bpe bytes.  The unit-stride byte count for that
+  # step is exactly offsetK; scaling it by the runtime K stride gives the
+  # strided global offset.  This CANNOT be encoded via the DTL offset12
+  # immediate (that shifts the LDS m0 write, not the global fetch), so it is
+  # folded into soffset instead.  The LDS placement of the window is already
+  # carried by the (sId1 * globalSubtileGrid[0]) * stripStride term in m0Offset.
+  baseSoffset = regList.ref(0) if len(regList) > 0 and useSgpr else 0
+  kWindowSoffset = None
+  if isTLU1 and sId1 > 0:
+    assert writer is not None, "TLU=1 K-window GR load needs writer for strideK"
+    unrollIdx = kernel["ProblemType"]["IndexUnroll"]
+    strideK = writer.strideRef(tc, unrollIdx)
+    kWindowSoffset = writer.sgprPool.checkOut(1, tag="grKWindowSoffset%s" % tc,
+                                              preventOverflow=False)
+    if writer.isConstUnitStride(strideK):
+      module.add(SMovB32(dst=sgpr(kWindowSoffset), src=hex(offsetK),
+                 comment="%s: K-window %u global byte offset (unit stride)" % (tc, sId1)))
+    else:
+      module.add(SMulI32(dst=sgpr(kWindowSoffset), src0=offsetK, src1=strideK,
+                 comment="%s: K-window %u global offset = offsetK*strideK" % (tc, sId1)))
+    if baseSoffset != 0:
+      module.add(SAddU32(dst=sgpr(kWindowSoffset), src0=sgpr(kWindowSoffset),
+                 src1=baseSoffset, comment="%s: + subtile-row M soffset" % tc))
   for i in range(tileInfo.numGRPerSubtile):
     if isTLU1:
       m0Offset = int(i * subtileOffset
@@ -1123,19 +1152,28 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
     # LR read applies the same pad. See SubtileTLUSwizzle.
     if swz:
       m0Offset += i * swz.padBytes
-    module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset - offsetK)))
-    mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
-
-    soffset = regList.ref(0) if len(regList) > 0 and useSgpr else 0
+    if isTLU1:
+      # LDS m0 already carries the window placement; the K-window global step
+      # rides on soffset, so no offset12 immediate is needed here.
+      module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=m0Offset))
+      mubuf = MUBUFModifiers(offen=True, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
+      soffset = sgpr(kWindowSoffset) if kWindowSoffset is not None else baseSoffset
+    else:
+      module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset - offsetK)))
+      mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
+      soffset = baseSoffset
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.indices[i]
     module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i)))
+
+  if kWindowSoffset is not None:
+    writer.sgprPool.checkIn(kWindowSoffset)
 
   return module
 
 
 def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  return emitSingleBufferLoad(tileInfo, kernel, subtileId[0], subtileId[1])
+  return emitSingleBufferLoad(tileInfo, kernel, subtileId[0], subtileId[1], writer=writer)
 
 ##################################################
 # Subroutine to generate GR load code
