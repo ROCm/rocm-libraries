@@ -265,8 +265,7 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
     // execute computations
     // Set Q = Identity, then generate Q = Q*I or I*Q. (Works for either side.)
     // ungtr would be more efficient, but that isn't implemented.
-    CHECK_ROCBLAS_ERROR(rocsolver_laset(handle, rocblas_fill_full, nq, nq, zero, one,
-                                        dQ.data(), ldq));
+    CHECK_ROCBLAS_ERROR(rocsolver_laset(handle, rocblas_fill_full, nq, nq, zero, one, dQ.data(), ldq));
 
     CHECK_ROCBLAS_ERROR(rocsolver_ormtr_unmtr_hb2st(handle, side, rocblas_operation_none, nq, nq, kd,
                                                     dV.data(), ldv, dTau.data(), dQ.data(), ldq));
@@ -274,8 +273,7 @@ void ormtr_unmtr_hb2st_getError(const rocblas_handle handle,
     //--------------------
     // Check 0: || I - Q^H Q ||_1 / nq
     // Set R = Identity.
-    CHECK_ROCBLAS_ERROR(rocsolver_laset(handle, rocblas_fill_full, nq, nq, zero, one,
-                                        dR.data(), ldr));
+    CHECK_ROCBLAS_ERROR(rocsolver_laset(handle, rocblas_fill_full, nq, nq, zero, one, dR.data(), ldr));
 
     // Residual R = I - Q^H Q.
     CHECK_ROCBLAS_ERROR(rocsolver_gemm(false, handle, rocblas_operation_conjugate_transpose,

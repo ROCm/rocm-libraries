@@ -76,7 +76,6 @@ void zlaset_(char* uplo,
              rocblas_double_complex* A,
              int* lda);
 
-
 float slange_(const char* norm, const int* m, const int* n, const float* A, const int* lda, float* rwork);
 double dlange_(const char* norm,
                const int* m,
