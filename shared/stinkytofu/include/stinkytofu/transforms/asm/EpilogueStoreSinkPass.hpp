@@ -18,14 +18,15 @@ class Pass;
 /// targetValu (typical 4-16, 0 = disabled): max VALU a store sinks past. Bounded
 /// by block size; out-of-range values just no-op, they do not misbehave.
 ///
-/// clusterSize (0/1 = off, else 2-8): pack up to N stores adjacent so one
-/// s_wait_xcnt drain covers a group instead of one per store.
+/// maxStoreGroupSize (0/1 = off, else 2-8): pack up to N adjacent stores so one
+/// s_wait_xcnt drain covers a group instead of one per store. An upper bound —
+/// a group ends early when the next store cannot hop what separates it.
 ///
 /// avoidMsbXcntDrain: stop a store before it straddles an s_set_vgpr_msb flip.
 /// Only active when xnack replay is on; without it no drain is emitted.
 struct EpilogueStoreSinkOptions {
     unsigned targetValu = 10;
-    unsigned clusterSize = 4;
+    unsigned maxStoreGroupSize = 4;
     bool avoidMsbXcntDrain = true;
 };
 

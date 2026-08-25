@@ -163,12 +163,12 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) {
          return createDumpMemTokenIRStructurePass({.path = "dump_memtoken_ir_structure.txt"});
      }},
-    // EpilogueStoreSinkPass accepts: noCluster (clusterSize=0),
+    // EpilogueStoreSinkPass accepts: noStoreGroup (maxStoreGroupSize=0),
     // noGuard (avoidMsbXcntDrain=false)
     {"EpilogueStoreSinkPass",
      [](const std::vector<std::string>& args) {
          EpilogueStoreSinkOptions options;
-         if (hasPassArg(args, "noCluster")) options.clusterSize = 0;
+         if (hasPassArg(args, "noStoreGroup")) options.maxStoreGroupSize = 0;
          if (hasPassArg(args, "noGuard")) options.avoidMsbXcntDrain = false;
          return createEpilogueStoreSinkPass(options);
      }},

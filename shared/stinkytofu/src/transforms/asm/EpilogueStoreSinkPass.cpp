@@ -136,8 +136,8 @@ size_t sinkStoresInBlock(BasicBlock& bb, unsigned targetValu, bool crossLoadcnt,
 }
 
 // Pull `store` up to sit right after `anchor` if every inst between is hoppable.
-static bool clusterOneStore(BasicBlock& bb, BasicBlock::iterator anchorIt,
-                            BasicBlock::iterator storeIt, bool crossLoadcnt, bool crossAsyncCnt) {
+static bool groupOneStore(BasicBlock& bb, BasicBlock::iterator anchorIt,
+                          BasicBlock::iterator storeIt, bool crossLoadcnt, bool crossAsyncCnt) {
     StinkyInstruction& store = getStinkyInst(storeIt);
     RegKeySet readUnits;
     addSources(readUnits, store);
@@ -161,24 +161,24 @@ static bool clusterOneStore(BasicBlock& bb, BasicBlock::iterator anchorIt,
     return true;
 }
 
-// Pack stores into groups of up to `clusterSize` so one xcnt drain covers each group.
-static size_t clusterStoresInBlock(BasicBlock& bb, unsigned clusterSize, bool crossLoadcnt,
-                                   bool crossAsyncCnt) {
-    if (clusterSize < 2) return 0;
+// Pack stores into groups of up to `maxStoreGroupSize` so one xcnt drain covers each group.
+static size_t groupStoresInBlock(BasicBlock& bb, unsigned maxStoreGroupSize, bool crossLoadcnt,
+                                 bool crossAsyncCnt) {
+    if (maxStoreGroupSize < 2) return 0;
     std::vector<BasicBlock::iterator> stores;
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst && isGlobalMemStore(*inst)) stores.push_back(it);
     }
-    const size_t clusterCount = stores.size();
+    const size_t storeCount = stores.size();
     size_t moved = 0;
     size_t i = 0;
-    while (i < clusterCount) {
-        // stores[i] anchors a group; pull the next (clusterSize-1) up behind it.
+    while (i < storeCount) {
+        // stores[i] anchors a group; pull the next (maxStoreGroupSize-1) up behind it.
         BasicBlock::iterator anchor = stores[i];
         size_t g = 1;
-        for (; g < clusterSize && (i + g) < clusterCount; ++g) {
-            if (!clusterOneStore(bb, anchor, stores[i + g], crossLoadcnt, crossAsyncCnt)) break;
+        for (; g < maxStoreGroupSize && (i + g) < storeCount; ++g) {
+            if (!groupOneStore(bb, anchor, stores[i + g], crossLoadcnt, crossAsyncCnt)) break;
             anchor = stores[i + g];  // chain: next store packs behind the one just moved
             ++moved;
         }
@@ -211,14 +211,14 @@ class EpilogueStoreSinkPass : public StinkyInstPass {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
             const size_t moved =
                 sinkStoresInBlock(bb, options_.targetValu, crossLoadcnt, crossAsyncCnt, msbGuard);
-            const size_t clustered =
-                clusterStoresInBlock(bb, options_.clusterSize, crossLoadcnt, crossAsyncCnt);
+            const size_t grouped =
+                groupStoresInBlock(bb, options_.maxStoreGroupSize, crossLoadcnt, crossAsyncCnt);
             PASS_DEBUG(std::cerr << "[EpilogueStoreSinkPass] bb=\"" << bb.getLabel()
-                                 << "\" sunk_stores=" << moved << " clustered=" << clustered
+                                 << "\" sunk_stores=" << moved << " grouped=" << grouped
                                  << " target=" << options_.targetValu
                                  << " crossLoadcnt=" << crossLoadcnt
                                  << " crossAsyncCnt=" << crossAsyncCnt << " msbGuard=" << msbGuard
-                                 << " clusterSize=" << options_.clusterSize << "\n");
+                                 << " maxStoreGroupSize=" << options_.maxStoreGroupSize << "\n");
         }
         return preserveCFGAnalyses();
     }
