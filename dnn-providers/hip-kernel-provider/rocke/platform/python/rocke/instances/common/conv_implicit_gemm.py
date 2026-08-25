@@ -447,12 +447,12 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         )
 
     # Check global store vector size and disable default epilogue for
-    # vec_size_c > 1 — whether set explicitly or auto-derived from K.
+    # vec_size_c > 1 — whether set explicitly or auto-derived from kpg.
     _eff_vec_c = (
         spec.vector_size_c
         if spec.vector_size_c is not None
         else ImplicitGemmConvSpec.default_vector_sizes(
-            spec.problem.C, spec.problem.K, spec.data.dtype_d
+            spec.problem.cpg, spec.problem.kpg, spec.data.dtype_d
         )[2]
     )
     _is_wmma_arch = target.wave_size == 32
@@ -970,7 +970,7 @@ def build_implicit_gemm_conv(
 
     threads = spec.block_size
     _def_vec_a, _def_vec_b, _ = ImplicitGemmConvSpec.default_vector_sizes(
-        p.C, p.K, spec.data.dtype_a
+        p.cpg, p.kpg, spec.data.dtype_a
     )
     # Clamp the C/K-derived default by the tile-geometry safe maximum so that the
     # CoalescedTileLoader's (tile_rows * tile_cols / vec) % block_size == 0 invariant
@@ -1999,7 +1999,7 @@ def _emit_cshuffle_epilogue(
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
     else:
         _, __, vec_c = ImplicitGemmConvSpec.default_vector_sizes(
-            p.C, p.K, spec.data.dtype_d
+            p.cpg, p.kpg, spec.data.dtype_d
         )
         _cshuffle_kwargs["max_store_vec"] = vec_c
     _war_barriers = 2 if spec.pipeline == "wavelet" else 1

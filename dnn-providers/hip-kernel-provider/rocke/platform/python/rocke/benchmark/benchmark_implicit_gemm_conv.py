@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Tile/pipeline sweep benchmark for implicit-GEMM convolution (gfx950, gfx1250).
 
-Supports both the forward pass (NHWC × KYXC → NHWK) and the backward-weight
-(wgrad) pass (dY × X → dW).  Select with ``--direction fwd`` (default) or
-``--direction wgrad``.
+Supports forward (NHWC × KYXC → NHWK), backward-weight (wgrad, dY × X → dW),
+and backward-data (dgrad, dY × W → dX) directions.  Select with
+``--direction fwd`` (default), ``--direction wgrad``, or ``--direction dgrad``.
 
 Builds every valid combination of tile / warp / pipeline / epilogue parameters,
 runs each on GPU, and reports the best configuration ranked by TFLOPS.
@@ -415,10 +415,11 @@ def parse_miopen_cmd(cmd: str):
             -y 11 -x 11 -p 2 -q 2 -u 4 -v 4 -l 1 -j 1 -m conv -g 1 -F 1 \\
             -t 1 -in_layout=NHWC
 
-    Only forward-pass (2-D NHWC) convolutions are supported; the function
-    raises ``ValueError`` for unsupported cases (3-D, NCHW).
-    Returns ``(problem, dtype)`` where ``dtype`` is ``"fp16"``, ``"bf16"``,
-    or ``"fp32"``.
+    Only 2-D NHWC convolutions are supported; the function raises
+    ``ValueError`` for unsupported cases (3-D, NCHW).
+    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``,
+    ``"bf16"``, or ``"fp32"`` and ``forw`` is the raw MIOpenDriver ``-F``
+    value (1=fwd, 2=bwd_data, 4=bwd_weight, 0=all).
     """
     import shlex
 
@@ -497,7 +498,7 @@ def parse_miopen_cmd(cmd: str):
         dW=miopen_args.dW,
         groups=miopen_args.groups,
     )
-    return problem, dtype
+    return problem, dtype, miopen_args.forw
 
 
 # ---------------------------------------------------------------------------
@@ -505,6 +506,18 @@ def parse_miopen_cmd(cmd: str):
 # ---------------------------------------------------------------------------
 
 _CK_DTYPE_STR = {"fp32": "fp32", "fp16": "fp16", "bf16": "bfp16"}
+
+# MIOpenDriver -F flag → rocke direction string.  Values 0/3/5/6 run multiple
+# passes; we expand them at the call site.
+_FORW_TO_DIRECTIONS: dict[int, list[str]] = {
+    0: ["fwd", "dgrad", "wgrad"],
+    1: ["fwd"],
+    2: ["dgrad"],
+    3: ["fwd", "dgrad"],
+    4: ["wgrad"],
+    5: ["fwd", "wgrad"],
+    6: ["dgrad", "wgrad"],
+}
 
 
 def _run_ckprofiler(
@@ -656,8 +669,8 @@ def main() -> int:
     parser.add_argument(
         "--direction",
         default="fwd",
-        choices=["fwd", "wgrad"],
-        help="convolution direction: forward (fwd) or backward-weight (wgrad) (default: fwd)",
+        choices=["fwd", "wgrad", "dgrad"],
+        help="convolution direction: forward (fwd), backward-weight (wgrad), or backward-data (dgrad) (default: fwd)",
     )
     parser.add_argument(
         "--arch",
@@ -902,6 +915,11 @@ def main() -> int:
         build_implicit_gemm_conv_wgrad,
         is_valid_wgrad_spec,
     )
+    from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        DgradConvSpec,
+        build_implicit_gemm_conv_dgrad,
+        is_valid_dgrad_spec,
+    )
     from rocke.runtime import synchronize_and_release, time_launches
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
@@ -960,13 +978,14 @@ def main() -> int:
             if not line or line.startswith("#"):
                 continue
             try:
-                prob, dt = parse_miopen_cmd(line)
-                cases.append((prob, dt))
+                prob, dt, forw = parse_miopen_cmd(line)
+                for _dir in _FORW_TO_DIRECTIONS.get(forw, ["fwd"]):
+                    cases.append((prob, dt, _dir))
             except ValueError as e:
                 print(f"[warn] {path}:{lineno}: skipping — {e}", file=sys.stderr)
     elif args.miopen_cmd is not None:
-        prob, dt = parse_miopen_cmd(args.miopen_cmd)
-        cases = [(prob, dt)]
+        prob, dt, forw = parse_miopen_cmd(args.miopen_cmd)
+        cases = [(prob, dt, _dir) for _dir in _FORW_TO_DIRECTIONS.get(forw, ["fwd"])]
     else:
         problem = ConvProblem(
             N=args.N,
@@ -989,7 +1008,7 @@ def main() -> int:
             dW=args.dW,
             groups=args.groups,
         )
-        cases = [(problem, args.dtype)]
+        cases = [(problem, args.dtype, args.direction)]
 
     _csv_fields = [
         "rank",
@@ -1041,7 +1060,7 @@ def main() -> int:
 
     n_csv_rows = 0
     try:
-        for case_idx, (problem, dtype) in enumerate(cases):
+        for case_idx, (problem, dtype, direction) in enumerate(cases):
             _elem_bytes = 4 if dtype == "fp32" else 2
             _A_bytes = (
                 problem.N
@@ -1072,13 +1091,13 @@ def main() -> int:
                 print(f"\n{'#'*72}", flush=True)
                 print(
                     f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} "
-                    f"dtype={dtype} direction={args.direction}",
+                    f"dtype={dtype} direction={direction}",
                     flush=True,
                 )
                 print(f"{'#'*72}", flush=True)
 
             if args.ckprofiler is not None:
-                _ck_forw = {"fwd": 1, "wgrad": 4}[args.direction]
+                _ck_forw = {"fwd": 1, "dgrad": 2, "wgrad": 4}[direction]
                 ck_rows = _run_ckprofiler(
                     problem=problem,
                     dtype=dtype,
@@ -1088,9 +1107,9 @@ def main() -> int:
                     verify=int(args.verify),
                 )
                 # Keep the best (highest tflops) CK result for this case.
-                _key = (problem.short(), dtype, args.direction)
+                _key = (problem.short(), dtype, direction)
                 for row in ck_rows:
-                    if row["direction"] == args.direction:
+                    if row["direction"] == direction:
                         prev = ck_best.get(_key)
                         if prev is None or row["tflops"] > prev["tflops"]:
                             ck_best[_key] = row
@@ -1113,13 +1132,21 @@ def main() -> int:
                 case_idx=case_idx,
             )
 
-            if args.direction == "wgrad":
+            if direction == "wgrad":
                 rc, rocke_results = _run_wgrad_sweep(
                     **_common,
                     WgradConvSpec=WgradConvSpec,
                     build_implicit_gemm_conv_wgrad=build_implicit_gemm_conv_wgrad,
                     is_valid_wgrad_spec=is_valid_wgrad_spec,
                 )
+            elif direction == "dgrad":
+                rc = _run_dgrad_sweep(
+                    **_common,
+                    DgradConvSpec=DgradConvSpec,
+                    build_implicit_gemm_conv_dgrad=build_implicit_gemm_conv_dgrad,
+                    is_valid_dgrad_spec=is_valid_dgrad_spec,
+                )
+                rocke_results = None
             else:
                 rc, rocke_results = _run_sweep(
                     **_common,
@@ -1131,7 +1158,7 @@ def main() -> int:
 
             if _csv_writer is not None and rocke_results:
                 _shape = problem.short()
-                _key = (_shape, dtype, args.direction)
+                _key = (_shape, dtype, direction)
                 _ck = ck_best.get(_key)
                 for rank, r in enumerate(rocke_results[:5], 1):
                     speedup = (r.tflops / _ck["tflops"]) if _ck else None
@@ -1147,7 +1174,7 @@ def main() -> int:
                             "dW": problem.dW,
                             "groups": problem.groups,
                             "dtype": dtype,
-                            "direction": args.direction,
+                            "direction": direction,
                             "tile_m": r.tile_m,
                             "tile_n": r.tile_n,
                             "tile_k": r.tile_k,
@@ -2076,6 +2103,386 @@ def _run_wgrad_sweep(
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
     return 0, results
+
+
+def _run_dgrad_sweep(
+    *,
+    args,
+    problem,
+    dtype: str,
+    arch: str,
+    target,
+    compile_kernel,
+    jobs: int = 1,
+    ConvDataSpec,
+    DgradConvSpec,
+    build_implicit_gemm_conv_dgrad,
+    is_valid_dgrad_spec,
+    synchronize_and_release,
+    time_launches,
+    Runtime,
+    KernelLauncher,
+    LaunchConfig,
+    u8,
+    **_ignored,
+) -> int:
+    """Sweep dgrad configurations and rank by TFLOPS.
+
+    Dgrad GEMM dims:
+        M    = N*Hi*Wi      (input spatial positions)
+        N_dg = C            (input channels)
+        K_dg = Y*X*K        (filter spatial x output channels -- reduction)
+
+    Operands:
+        A (dY): output gradient, shape (N, Ho, Wo, K)
+        B (W):  weights, shape (K, Y, X, C)
+        D (dX): input gradient, shape (N, Hi, Wi, C)
+
+    Split-K (``--split-k``):
+        1        -- disabled (normal epilogue, z-grid = 1).
+        >1       -- fixed degree; dX is zero-initialised before each launch,
+                   kernel atomic-adds partials, result is final dX.
+        0 (auto) -- sweep all degrees in _SPLIT_K_AUTO.
+    """
+    import ctypes
+    import torch
+    from rocke.helpers.manifest import conv_args_signature
+
+    _u8 = u8
+    p = problem
+
+    _torch_dtype = {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "fp32": torch.float32,
+    }[dtype]
+    torch.manual_seed(42)
+
+    def _make(*shape):
+        return (
+            torch.full(shape, args.debug_init)
+            if args.debug_init is not None
+            else torch.empty(*shape).uniform_(-1.0, 1.0)
+        )
+
+    _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
+    _W_f32 = _make(p.K, p.Y, p.X, p.C)
+    dX_t = torch.empty(p.N, p.Hi, p.Wi, p.C, dtype=_torch_dtype)
+
+    dY_t = _dY_f32.to(_torch_dtype)
+    W_t = _W_f32.to(_torch_dtype)
+
+    bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
+    flop = float(p.flops)
+
+    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.C, p.K, dtype)
+    base_sig = conv_args_signature(dtype)
+    ext_sig = base_sig + [
+        {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
+        {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
+    ]
+
+    split_k_values = _SPLIT_K_AUTO if args.split_k == 0 else (args.split_k,)
+
+    combos = list(
+        itertools.product(
+            _TILE_MN,
+            _TILE_MN,
+            _TILE_K,
+            _WARP_MN,
+            _WARP_MN,
+            _WARP_TILE_MN,
+            _PIPELINES,
+            _EPILOGUES,
+            split_k_values,
+        )
+    )
+
+    if args.sample is not None:
+        total = len(combos)
+        combos = _sample_combos(combos, args.sample, args.seed)
+        print(
+            f"Sampling {len(combos)}/{total} dgrad combinations "
+            f"({args.sample*100:.0f}%, seed={args.seed}).",
+            flush=True,
+        )
+
+    _spk_label = {0: "sweep", -1: "auto(CK)"}.get(args.split_k, str(args.split_k))
+    print(
+        f"Sweeping {len(combos)} dgrad combinations for {arch} {dtype} {p.short()} "
+        f"(split_k={_spk_label}) ...",
+        flush=True,
+    )
+
+    from rocke.instances.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
+    import struct as _struct
+
+    # ---- Phase 1: build + validate all specs, collect kernels ----
+    pending = []  # (spec, resolved_split_k) tuples with their kernels
+    n_skipped = 0
+
+    for (
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_tile_mn,
+        pipeline,
+        epilogue,
+        split_k,
+    ) in combos:
+        if split_k > 1 and epilogue == "cshuffle":
+            n_skipped += 1
+            continue
+
+        atom = target.mma.select_largest_k(
+            a_dtype=dtype,
+            b_dtype=dtype,
+            c_dtype="fp32",
+            m=warp_tile_mn,
+            n=warp_tile_mn,
+            k_max=tile_k,
+        )
+        if atom is None:
+            n_skipped += 1
+            continue
+
+        warp_tile_k = atom.k
+        if split_k == -1:
+            from rocke.helpers.split_k import select_split_k_wgrad
+
+            resolved_split_k = select_split_k_wgrad(
+                wg_M=p.N * p.Hi * p.Wi,
+                wg_N=p.cpg,
+                wg_K=p.Y * p.X * p.kpg,
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                arch=arch,
+            ).split_k
+        else:
+            resolved_split_k = split_k
+
+        spec = DgradConvSpec(
+            problem=problem,
+            name="rocke_bench_igemm_dgrad",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_tile_m=warp_tile_mn,
+            warp_tile_n=warp_tile_mn,
+            warp_tile_k=warp_tile_k,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            split_k=resolved_split_k,
+            vector_size_a=vec_a,
+            vector_size_b=vec_b,
+            vector_size_c=vec_c,
+        )
+
+        ok, reason = is_valid_dgrad_spec(spec, arch)
+        if not ok:
+            n_skipped += 1
+            continue
+
+        try:
+            kernel = build_implicit_gemm_conv_dgrad(spec, arch=arch)
+        except ValueError:
+            n_skipped += 1
+            continue
+
+        pending.append((spec, resolved_split_k, kernel))
+
+    # ---- Phase 2: compile in parallel ----
+    artifact_map = _compile_kernels_parallel(
+        [k for _, _, k in pending], compile_kernel, arch, jobs
+    )
+    n_built = len(artifact_map)
+    n_skipped += len(pending) - n_built
+
+    print(
+        f"Compiled {n_built}/{len(pending)} dgrad kernels "
+        f"({n_skipped} skipped total).",
+        flush=True,
+    )
+
+    # ---- Phase 3: allocate GPU buffers, verify, benchmark ----
+    rt = Runtime()
+    results: List[Result] = []
+
+    dY_dev = rt.alloc(dY_t.nbytes)
+    W_dev = rt.alloc(W_t.nbytes)
+    dX_dev = rt.alloc(dX_t.nbytes)
+    rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
+    rt.memcpy_h2d(W_dev, _u8(W_t), W_t.nbytes)
+    rt.memset(dX_dev, 0, dX_t.nbytes)
+
+    ref_out: torch.Tensor | None = None
+    if args.verify or args.dump_fail:
+        from rocke.benchmark.conv_reference import dgrad_reference
+
+        ref_out = dgrad_reference(_dY_f32, _W_f32, p)
+        print(
+            f"Dgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+            flush=True,
+        )
+
+    n_measured = 0
+    for spec, resolved_split_k, kernel in pending:
+        artifact = artifact_map.get(kernel.name)
+        if artifact is None:
+            continue
+
+        sub_gemms = spec.compute_sub_gemms()
+        buf_i32 = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n)
+        buf_bytes = _struct.pack(f"{len(buf_i32)}i", *buf_i32)
+        sgbuf_dev = rt.alloc(len(buf_bytes))
+        rt.memcpy_h2d(
+            sgbuf_dev,
+            (ctypes.c_uint8 * len(buf_bytes)).from_buffer_copy(buf_bytes),
+            len(buf_bytes),
+        )
+        flat_tiles = sub_gemms[-1].block_end
+        grid = (flat_tiles, 1, resolved_split_k)
+        values = {
+            "A": dY_dev,
+            "B": W_dev,
+            "D": dX_dev,
+            "A_bytes": dY_t.nbytes,
+            "B_bytes": W_t.nbytes,
+            "D_bytes": dX_t.nbytes,
+            "sub_gemm_buf": sgbuf_dev,
+            "num_sub_gemms": len(sub_gemms),
+        }
+
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=ext_sig,
+        )
+        block = (spec.block_size, 1, 1)
+        stream = 0
+        cfg = LaunchConfig(grid=grid, block=block, stream=stream)
+
+        _zero_init = spec.needs_atomic
+
+        if args.verify or args.dump_fail:
+            stopped, _ = _verify_kernel(
+                rt=rt,
+                launcher=launcher,
+                values=values,
+                grid=grid,
+                block=block,
+                out_dev=dX_dev,
+                out_t=dX_t,
+                zero_init_out=_zero_init,
+                ref_out=ref_out,
+                kernel_name=artifact.kernel_name,
+                dump_fail=args.dump_fail,
+                extra_tensors={"dY": dY_t, "W": W_t},
+                u8=_u8,
+                arch=arch,
+            )
+            if stopped:
+                rt.free(sgbuf_dev)
+                rt.free(dY_dev)
+                rt.free(W_dev)
+                rt.free(dX_dev)
+                return 1
+
+        if _zero_init:
+
+            def _launch_atomic():
+                rt.memset(dX_dev, 0, dX_t.nbytes)
+                launcher(values, config=cfg)
+
+            timed_fn = _launch_atomic
+        else:
+            timed_fn = lambda: launcher(values, config=cfg)
+
+        ms = time_launches(
+            timed_fn, warmup=args.warmup, iters=args.iters, stream=stream
+        )
+        synchronize_and_release(stream)
+
+        cur_tflops = (flop / ms) * 1e-9
+        cur_gbps = (bytes_xfer / ms) * 1e-6
+        n_measured += 1
+
+        results.append(
+            Result(
+                kernel_name=artifact.kernel_name,
+                tile_m=spec.tile_m,
+                tile_n=spec.tile_n,
+                tile_k=spec.tile_k,
+                warp_m=spec.warp_m,
+                warp_n=spec.warp_n,
+                warp_tile_mn=spec.warp_tile_m,
+                warp_tile_k=spec.warp_tile_k,
+                pipeline=spec.pipeline,
+                epilogue=spec.epilogue,
+                split_k=resolved_split_k,
+                ms=ms,
+                tflops=cur_tflops,
+                gbps=cur_gbps,
+                vec_a=vec_a,
+                vec_b=vec_b,
+                vec_c=vec_c,
+            )
+        )
+
+        _lva = vec_a if resolved_split_k <= 1 else 1
+        print(
+            f"[{n_measured:4d}] tile={spec.tile_m}x{spec.tile_n}x{spec.tile_k} "
+            f"warp={spec.warp_m}x{spec.warp_n} "
+            f"atom={spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k} "
+            f"{spec.pipeline}/{spec.epilogue:9s} spk{resolved_split_k:<3d} "
+            f"vec={_lva}/{vec_b}/{vec_c} "
+            f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
+            flush=True,
+        )
+
+        rt.free(sgbuf_dev)
+
+    rt.free(dY_dev)
+    rt.free(W_dev)
+    rt.free(dX_dev)
+
+    print(
+        f"\nDgrad sweep done: {n_measured} measured, {n_skipped} skipped.", flush=True
+    )
+
+    if not results:
+        print("No valid dgrad configurations found.", file=sys.stderr)
+        return 1
+
+    results.sort(key=lambda r: r.tflops, reverse=True)
+    top_n = min(args.top, len(results))
+
+    print(f"\n{'='*80}")
+    print(f"Top {top_n} dgrad configurations for {arch} {dtype} {p.short()}")
+    print(f"{'='*80}")
+    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
+    print(hdr)
+    print("-" * 80)
+    for rank, r in enumerate(results[:top_n], 1):
+        _lva_r = r.vec_a if r.split_k <= 1 else 1
+        cfg_str = (
+            f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
+            f"warp={r.warp_m}x{r.warp_n} "
+            f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
+            f"{r.pipeline}/{r.epilogue} spk{r.split_k} "
+            f"vec={_lva_r}/{r.vec_b}/{r.vec_c}"
+        )
+        print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
+
+    best = results[0]
+    print(f"\nBest: {best.tflops:.1f} TFLOPS -- {best.kernel_name}")
+    return 0
 
 
 if __name__ == "__main__":
