@@ -34,8 +34,8 @@
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 
-namespace {
-using namespace stinkytofu;
+namespace stinkytofu {
+namespace dag {
 
 // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
 // from BuildDefUseChain.hpp. All callers now use the shared implementation.
@@ -100,18 +100,6 @@ struct CompareByDAGid {
         return a->id < b->id;  // smaller id has higher priority
     }
 };
-
-using DAGNodeList = std::vector<DAGNode>;
-
-static void addEdgeById(DAGNode* from, DAGNode* to,
-                        std::vector<std::unordered_set<unsigned>>& dagGraph) {
-    // Don't add duplicate edges, or self-loops.
-    if (from->id == to->id || dagGraph[from->id].count(to->id) > 0) return;
-
-    // Add edge from 'from' to 'to'
-    dagGraph[from->id].insert(to->id);
-    to->inDegree++;
-}
 
 // Cross-BB scheduling state: outstanding memory op latencies carried
 // from one BB to the next via CFG predecessor lookup.
@@ -279,7 +267,7 @@ class ReadyQueueByDAGid : public ReadyQueue {
     }
 };
 
-DAGNode* ReadyQueueByDAGid::pickOne() {
+inline DAGNode* ReadyQueueByDAGid::pickOne() {
     assert(!queue.empty() && "Ready queue must not be empty");
     DAGNode* node = queue.top();
     queue.pop();
@@ -299,4 +287,5 @@ struct WMMAIssueConfig {
     int issueCycles = 1;  // single-WMMA issue cycles
     int issuedCount = 0;  // WMMA count in region (for barrier threshold math)
 };
-}  // namespace
+}  // namespace dag
+}  // namespace stinkytofu
