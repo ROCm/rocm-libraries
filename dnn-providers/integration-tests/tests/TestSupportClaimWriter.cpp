@@ -402,6 +402,26 @@ TEST(TestSupportClaimWriter, UnparseableSingleGraphSidecarReportsErrorAndSurvive
     EXPECT_EQ(readFile(sidecarPath), "not valid json {{{");
 }
 
+TEST(TestSupportClaimWriter, SchemaInvalidSingleGraphSidecarReportsErrorAndSurvives)
+{
+    const ScopedDirectory dir = makeScopedTestDir("test_writer");
+    const auto bundlePath = dir.path() / "BadSchema.json";
+    const auto sidecarPath = dir.path() / "BadSchema.support.json";
+
+    // Valid JSON but unsupported schema version — parseSupportClaimsJson throws
+    std::ofstream(sidecarPath) << R"({"version": 999, "claims": {}})";
+
+    const std::vector<SupportObservation> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    const auto summary = writeObservedSupportClaims(observations);
+
+    EXPECT_EQ(summary.errors.size(), 1u);
+    EXPECT_NE(summary.errors[0].find("unparseable"), std::string::npos);
+    EXPECT_EQ(readFile(sidecarPath), R"({"version": 999, "claims": {}})");
+}
+
 TEST(TestSupportClaimWriter, UnparseableSweepSidecarReportsErrorAndSurvives)
 {
     const ScopedDirectory dir = makeScopedTestDir("test_writer");
