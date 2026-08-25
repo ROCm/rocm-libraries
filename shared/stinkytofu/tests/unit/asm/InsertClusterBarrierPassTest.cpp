@@ -422,6 +422,16 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return createBranchReadingScc(opcode, target);
     }
 
+    // `s_branch <target>` -- a back edge that reads no SCC of its own, so what the climb
+    // carries across it came from the body rather than from the branch.
+    StinkyInstruction* createUnconditionalBranch(const char* target) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_branch, arch));
+        inst->addSrcReg(StinkyRegister(std::string(target)));
+        inst->addModifier<LabelData>(LabelData{target});
+        return inst;
+    }
+
     // A branch with no compare of its own: it reads whatever SCC value is already live, which
     // is what lets a live range reach across a segment boundary.
     StinkyInstruction* createBranchReadingScc(GFX opcode, const char* target) {
@@ -2373,3 +2383,97 @@ IF_RULE3_CROSS_LOOP(TEST_F(InsertClusterBarrierPassTest,
 
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
 })
+
+// The climb carries an SCC flag of its own while `clearScc` reads liveness off the code
+// below the anchor, and everywhere the climb walks the text the two agree. This is the shape
+// that separates them, and the only kind that can: a range the loop closes on the next trip.
+//
+//     label_TestLoop:
+//     s_cselect_b32 s91, s92, 0        <- reads what the previous trip's tail computed
+//     v_wmma ... (x40)                 <- too short to hold the lead
+//     s_barrier_signal -1              <- the wait
+//     s_cmp_eq_u32 / s_cbranch_scc1    <- the body's way out
+//     v_wmma ... (x20)
+//     s_sub_u32 s90, s90, 1            <- the def, read only after the back edge
+//     v_wmma ... (x55)                 <- where the lead is met, inside the range
+//     s_branch label_TestLoop          <- unconditional, so it contributes no read of its own
+//
+// The wait's segment cannot hold the lead, so the climb follows the latch and keeps going up
+// the tail. The lead falls among the wmma below the def -- and a forward scan from there sees
+// SCC written by nobody and read by nobody, because the reader is not below that spot, it is
+// beyond the back edge. Only the flag the climb carried around the loop knows the range is
+// still open. Planting the handshake at the lead point would put its `s_cmp_eq_u32 waveIdx, 0`
+// between the def and its reader, and nothing puts SCC back: the signal block is the compare,
+// its branch, `s_barrier_signal -3`, and the skip label.
+//
+// The latch has to be unconditional. An `s_cbranch_scc*` back edge reads SCC by construction,
+// which sets the flag whatever the body did with it, and then the flag agreeing is no evidence.
+//
+// This also depends on the climb being allowed to cross with SCC live, which it is: the
+// `!targetMet` arm of the boundary logic asks about hops and the kind of boundary, never about
+// SCC. A rule that stopped a live climb from crossing would take this shape away.
+TEST_F(InsertClusterBarrierPassTest, WrappedClimbClearsARangeOnlyTheBackEdgeReaches) {
+    appendGsu1Preheader();
+    // Gives the preheader an SCC-dead spot, without which the climb refuses to cross at all.
+    createSCmpWritingScc(/*srcSgpr=*/94);
+    openLoop();
+    StinkyInstruction* sccReader = createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    for (int i = 0; i < 40; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/93, "label_TestLoopEnd");
+    for (int i = 0; i < 20; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* sccDef = createSSubWritingSgprAndScc(/*sgpr=*/90);
+    for (int i = 0; i < 55; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* latch = createUnconditionalBranch("label_TestLoop");
+    createLabel("label_TestLoopEnd");
+    createWMMA(8, 0, 8);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    StinkyInstruction* belowDef = firstRealInstAfter(sccDef);
+    ASSERT_NE(belowDef, nullptr);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    const auto cyclesAt = [&](const StinkyInstruction* inst) -> int64_t {
+        auto it = cycleMap.find(inst);
+        return (it == cycleMap.end()) ? -1 : static_cast<int64_t>(it->second);
+    };
+    constexpr int kLead = 500;
+    constexpr int kMaxLead = 900;
+    ASSERT_GE(cyclesAt(trigger), 0);
+    ASSERT_GE(cyclesAt(latch), 0);
+    ASSERT_GE(cyclesAt(sccDef), 0);
+    ASSERT_GE(cyclesAt(belowDef), 0);
+    const int64_t headPart = cyclesAt(trigger) - cyclesAt(sccReader);
+    const int64_t tailPart = cyclesAt(latch) - cyclesAt(sccDef);
+    const int64_t atBelowDef = headPart + (cyclesAt(latch) - cyclesAt(belowDef));
+
+    // The premise, in three parts: the wait's own segment cannot hold the lead, so the climb
+    // has to wrap; the lead is then met below the def, so the two notions of liveness are
+    // asked about a spot they disagree on; and the answer stays inside the ceiling, so what
+    // turns the climb around is the flag rather than maxLeadCycles.
+    ASSERT_LT(headPart, kLead) << "the wait segment must be too short to hold the lead:"
+                               << blockListing(*bb);
+    ASSERT_GE(atBelowDef, kLead) << "the lead has to be met below the def, or the climb never "
+                                    "stands anywhere the two disagree:"
+                                 << blockListing(*bb);
+    ASSERT_LT(headPart + tailPart, kMaxLead)
+        << "the ceiling must not be what turns the climb around:" << blockListing(*bb);
+
+    const auto found = cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+        trigger, segBeginAfter(loopHead), trigger, cycleMap, kLead, kMaxLead,
+        /*priorWaitAnchors=*/{}, /*maxHops=*/1, loopHead);
+    const auto* anchorInst = dyn_cast<StinkyInstruction>(found.anchor);
+    ASSERT_NE(anchorInst, nullptr) << blockListing(*bb);
+
+    EXPECT_LE(indexOf(anchorInst), indexOf(sccDef))
+        << "the anchor has to stand at or above the def; below it is inside the range the next "
+           "trip reads, which a forward scan from there cannot see:"
+        << blockListing(*bb);
+    EXPECT_EQ(found.hops, 1) << "the climb left the wait's segment and has to be billed for it:"
+                             << blockListing(*bb);
+    EXPECT_TRUE(found.crossedLoopHead)
+        << "it left by the back edge, so the first trip is owed a signal:" << blockListing(*bb);
+}
