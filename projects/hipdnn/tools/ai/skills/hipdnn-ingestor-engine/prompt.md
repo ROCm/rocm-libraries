@@ -116,6 +116,22 @@ Run it from the `IngestorGenerator` directory with the rocKE library on `PYTHONP
   predicate shapes cannot be called generically at all. Ask the user rather than
   inferring absence.
 
+**Introspection gives you fields. It does not give you RULES.** The kernel's
+applicability constraints — which layouts it can read, which shapes it faults on, which
+feature combinations are unimplemented — live only in the Python source, and nothing
+carries them into hipDNN. Extracting them is a required part of this step, not optional
+background.
+
+**Read `rocke-mining.md` and produce its five deliverables** before moving on:
+the constraint table (with a graph-derivable column on *every* row), the layout statement
+with the arithmetic that proves it, the grid/block formulas with constants resolved, the
+ABI list with conditionals in order, and the rejection checklist ordered by failure
+severity. Those become your matcher, your dispatch, and half of your Step 3 questions.
+
+Skipping this produces an engine that advertises a kernel it cannot correctly serve —
+and because a wrong layout is read in-bounds rather than faulting, the result is wrong
+numbers with every check green.
+
 For a **non-rocKE** source, read every file the user pointed at. Derive, in order:
 
 1. **Entry points and signatures.** Each kernel function (`__global__`, or whatever the
@@ -164,8 +180,8 @@ authoring from scratch:
   field or drop it from the knob list.
 - **Dispatch and workspace policy.** Whether this engine's `IKernelDispatchHandler`
   needs a workspace at all (`none`), a fixed size, or a size derived from the bound
-  tokens/kernel metadata (`derived`) — this drives the stub's `workspaceBytes` shape,
-  even though the body itself is left `// TODO`.
+  tokens/kernel metadata (`derived`). You will implement `workspaceBytes` in Step 6, so
+  ask for the real answer, not a placeholder.
 - **UMD-or-`graph_match`.** Whether a distinction between packs is genuine per-pack
   narrowing (→ a UMD) or a property of the graph's topology/shape/dtype (→ belongs in
   the UED's `graph_match`, evaluated once for the whole engine). Get this right before
@@ -173,6 +189,20 @@ authoring from scratch:
   the user's answer implies one, point out the shipped convention
   (`TestConvFwdPack.cpp` asserts a single-pack engine has none) and ask them to
   reconsider, rather than silently emitting a redundant UMD.
+
+**For a rocKE kernel, also put these in front of the human — they are the ones you
+cannot settle alone:**
+
+- **The layout you derived**, with the arithmetic. "I read `stride_q_tok = Hq * D`, so
+  Q/O are `[B, S, H, D]` and the matcher will reject anything else — confirm?" A wrong
+  answer here yields wrong numbers, silently, so it is worth one explicit question.
+- **The rejection checklist**, especially any restriction you could NOT derive from a
+  graph. Ask whether each is genuinely unreachable in their intended use, or whether the
+  matcher must guard it some other way.
+- **Hard-fault conditions that might want a different variant.** If the kernel faults on
+  `seqlen_q % 256 != 0` but a `ragged` variant handles exactly that, ask whether to
+  select that variant rather than decline the graph.
+- **Knobs you had to fix** (tile size, persistent-CTA count) and what you chose.
 
 Wait for the user's answers before proceeding — this is the one blocking prompt in the
 create flow.
@@ -182,12 +212,27 @@ create flow.
 Assemble the YAML config from Steps 0–3: `dialect`, engine name, KMD fields, knobs,
 packs with their kernels and `arch`, `heuristic` choice, `graph_match`/UMD decisions,
 workspace policy, and `kernel_source_kind` (`embedded_source` for `direct_load`;
-`rocke` or `hip` for `packaged`). A packaged config also names `authored_subpath` —
-where the descriptors sit under the packager's ONE source root, preserved verbatim into
-the staged and installed trees. `configs/gfx950_attention_dense.yaml` is a working
-rocKE example. Pick an output directory (a scratch
-location unless the user names one) and run:
+`rocke` or `hip` for `packaged`).
 
+A packaged config also names `authored_subpath` — the path **under the packager's one
+source root** where these descriptors live, preserved verbatim into the staged and
+installed trees. In this repository that root is:
+
+```
+dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/
+```
+
+so `authored_subpath: rocKE/gfx950_attention_dense` lands the bundle at
+`.../examples/descriptors/rocKE/gfx950_attention_dense/`. That is the tree the build
+actually packs — confirm with `HKP_TESTFIXTURE_SOURCE_ROOT` /
+`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` in
+`descriptor-packaging/cmake/HkpPackaging.cmake`, and read
+`examples/descriptors/README.md` for the layout rules that root imposes. There is
+normally **no** production root configured in a dev tree, so the examples root is the
+one that is wired.
+
+`configs/gfx950_attention_dense.yaml` is a working rocKE example. Pick an output
+directory (a scratch location unless the user names one) and run:
 ```
 python3 <path-to>/IngestorGenerator/generate.py \
     --config <config.yaml> --output-dir <output-dir>
@@ -284,21 +329,158 @@ and the native-source cross-check is clean.
   `descriptor_symbols_no_source_declares` means the two sources of truth (pack `.cpp`
   constants vs. descriptor JSON) have diverged — fix whichever side is wrong.
 
-### Step 6 — Report
+### Step 6 — Implement the native pack (THIS IS THE WORK)
 
-See **Output contract** in `SKILL.md` — restated here as the concrete report shape for
-create flow:
+The generator wrote `packs/<Name>Native.cpp` with correct symbol constants, correct
+registration, and **every body `// TODO - FILL THIS OUT`**. An engine in that state
+parses, cross-references, resolves symbols, constructs, enumerates in
+`hipdnn_list_engines` — and serves zero graphs. Every mechanical check is green. This is
+the state agents mistake for done.
 
-1. What was generated (descriptor files, the native stub, the fragments) and where.
-2. The validator invocation used, and its verdict (from the parsed `--json`, not raw
-   text) — or, if the validator could not be located, say so explicitly (see below)
-   and state that structural validation did not happen this run.
-3. The five CMake splice points still pending, with the exact fragment file that
-   covers each (see **The CMake splice** below) — never imply the bundle is wired into
-   the provider just because it generated and validated.
-4. The matching-correctness gap: name the arch(es) this engine targets and the GPU
-   test/suite that would need to run there to prove matching, separate from what the
-   validator already proved.
+**Read `native-pack.md` now** and implement all five hooks. Its §Traps lists the
+silent-failure modes; the rocKE rejection checklist from Step 2 is your `graph_match`
+body, implemented in its severity order (silent-wrong-answer checks first).
+
+Minimum bar per hook, and what an honest placeholder looks like:
+
+| Hook | Minimum | Legitimate placeholder |
+|---|---|---|
+| `graph_match` | Node shape, operand validity, **layout**, cross-tensor consistency, explicit rejection of every unsupported mode | none — this one must be real, it is the correctness gate |
+| `kernel_match` | Equality against every KMD field the kernel bakes in | none — it is a handful of comparisons |
+| `score` | Rank on the free axis (usually the UED's knob) | a single-knob heuristic, **stated as such** |
+| `workspaceBytes` | The real number | `0` when the kernel genuinely needs no scratch — that is an answer |
+| `prepare`/`launch` | Code object via `buildIngestorKernelCode`, geometry from the builder's own formula, exact ABI order | none — a wrong ABI corrupts memory |
+
+Leaving a `// TODO` in a path the engine reaches is not a placeholder; it is an
+unfinished integration. If you genuinely cannot decide something, implement the
+conservative choice, mark it, and raise it in Step 9.
+
+### Step 7 — Splice, build, and confirm the engine loads
+
+Apply the fragments (see **The CMake splice**) — *apply* them, do not merely describe
+them. Then build and confirm:
+
+```
+cmake --build <build-dir> --target hip_kernel_provider
+<build-dir>/bin/hipdnn_list_engines | grep <engine-name>
+```
+
+A missing engine here is usually splice point 4 (the `ingestorPacks()` table row) or a
+symbol-string mismatch between the pack `.cpp` and the descriptors. Re-run
+`hipdnn_validate_descriptors --native-source <pack.cpp>` to isolate which.
+
+### Step 8 — Contribute integration tests, and dispatch on device
+
+Enumeration proves construction, not matching. Only a real graph on the target arch
+proves the engine serves anything.
+
+**Adding to the shared integration-test project is a required deliverable of this
+step, not an optional extra.** An integration whose only evidence is a one-off script
+leaves nothing behind: the next change to the matcher, the kernel, or the packager has
+no way to notice it broke. The suite at `dnn-providers/integration-tests/` is where that
+evidence lives, and one graph test there runs against **every** engine.
+
+#### Two tiers, and you owe both
+
+The split is **functional breadth vs. numeric depth**, not "one case vs. many".
+
+| Tier | Question it answers | Content | Where |
+|---|---|---|---|
+| **quick** | "Is every supported feature actually wired up and matching as expected?" | Many tiny graphs, one per meaningful support combination, each at the smallest legal shape. Fast enough to run on every change. | `integration-test-bundles/quick/<Op>/` |
+| **standard** (and `full`) | "Is it numerically right, at sizes people actually use?" | Realistic shapes, deeper numeric verification, real workload geometries, and combinations too expensive per-commit. | `integration-test-bundles/standard/<Op>/`, `full/<Op>/` |
+
+**Quick's job is functional signal, not numeric confidence.** If a supported option is
+never exercised there, the commit that silently unwires it ships green. So aim for a
+quick case per *distinguishable* feature the op supports — and keep each one minimal so
+breadth stays affordable.
+
+#### Deciding YOUR op's matrix
+
+**Every op is different, and this is a real design decision — make it deliberately.**
+There is no universal axis list: a normalization op's interesting axes are nothing like
+an attention op's, and a matmul's are different again. Derive yours from the Step 2
+constraint table: the axes a *graph* can vary, and that your matcher claims to support.
+Typical families of axis — dtype, a shape parameter the kernel specializes on, an
+optional mode flag, memory layout, a fused epilogue, a degenerate/boundary shape — but
+which of those exist, and which are independent, is yours to work out.
+
+Then prune against a **time budget**, and prune deliberately:
+
+- Cover each supported feature **at least once**. A feature with zero quick coverage is a
+  feature nobody notices breaking.
+- Prefer combinations that are *independent* over a full cross-product. If dtype and
+  masking do not interact in the kernel's code paths, you do not need every pairing.
+- Weight toward the paths your Step 2 mining flagged as fragile — layout handling,
+  boundary shapes, anything whose failure mode is silent.
+- **When the budget binds, drop coverage rather than slow the tier down.** A quick tier
+  that takes minutes gets disabled, and then it protects nothing. Move what you dropped
+  to standard and say so in your report.
+
+For scale calibration, the shipped ops sit at roughly 2–15 quick bundles each
+(`quick/SdpaFwd` 15, `quick/RMSNorm` 8, `quick/ConvolutionFwd` 2) — sized to each op's
+support surface, not to a template. Read the neighbours of the op you are adding before
+choosing.
+
+**The rejection checklist is a coverage list too.** Each "must decline" row deserves a
+negative case — cheap, and exactly the assertion that catches an over-broad matcher
+before it returns wrong numbers.
+
+#### Mechanics
+
+Layout is **data**, not code: a bundle's tensor `strides` live in its JSON, and the C++
+matrix already carries a `TensorLayout::BSHD` stride-order flag
+(`IntegrationGpuSdpaFwdInference.cpp` has a `bshdLayout` case). A non-contiguous layout
+needs no new machinery.
+
+Two mechanisms, and the project has a stated preference:
+
+- **Bundles + sweeps (default).** Graph as JSON + a case matrix; golden tensors are
+  DVC-tracked and regenerated by the per-op script in
+  `reference-data-scripts/`. Adding a case is data, not a recompile. Use this for
+  "does this graph run and match a reference".
+- **C++ integration tests (special cases).** Reserved for what is *not* just running a
+  graph: error paths, API-contract behavior, applicability negatives. Your "declines a
+  graph it cannot serve" cases usually belong here.
+
+Read `dnn-providers/integration-tests/README.md` before adding either — it states the
+choice and the authoring rules.
+
+Where the engine also needs a provider-local on-device test, model it on
+`src/integration_tests/kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp`,
+which loads a real `.kpack` and verifies against a CPU reference.
+
+#### What the tests must assert
+
+1. **Enumerate** — the engine offers itself for a graph its descriptor claims.
+2. **Decline** — it rejects each graph it cannot serve. Wrong layout is the sharpest
+   case: the one that returns wrong numbers rather than failing.
+3. **Dispatch with numeric verification** — against a reference, with a dtype-appropriate
+   tolerance (bf16 is ~2e-2, not fp32's ~1e-5).
+
+Run them on the arch the engine targets. `skill://alola-gpu-test` dispatches to a
+specific GPU. **Do not substitute another arch**: packs arch-prune before the matcher
+runs, so a clean run on the wrong arch reads as success while proving nothing — exactly
+how PR #10839's SDPA defect passed on gfx90a and failed 27/27 on gfx942.
+
+**Zero-filled inputs are not verification.** `softmax(0)·0 = 0`, and so is the output of a
+kernel that never wrote a byte. Use real values and compare against a reference.
+
+### Step 9 — Report and hand back the judgment calls
+
+Report against the nine stages in `SKILL.md`'s completion contract. Name the stage you
+reached. If it is not 8, say which stage stopped you and why.
+
+Then surface, with a recommendation for each:
+
+- Every placeholder you left, and what would replace it.
+- Every rocKE restriction you found but could **not** check from a graph — these are the
+  ones a human must confirm are unreachable, and they are where silent wrong answers live.
+- Knobs you fixed that could be searched (tile size, persistent-CTA count).
+- Coverage the device test does not have: other shapes, dtypes, arches.
+
+This is a conversation, not a disclaimer. The human knows things about the kernel that are
+in no source file; your job is to have narrowed the question down to what actually needs
+their judgment.
 
 ---
 
