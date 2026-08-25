@@ -86,12 +86,7 @@ def _emitGRPtrUpdate(tag, tile, ti, writer, kernel):
 # Stubs for tags not yet implemented.
 _stub = lambda tag, tile, ti, writer, kernel: None
 _emitGlobalReadOffset.register(GRTag_TLU1)(_stub)
-_allocGROffsetRegisters.register(GRTag_TLU1)(_stub)
-_deallocGROffsetRegisters.register(GRTag_TLU1)(_stub)
 _emitGlobalRead.register(GRTag_TLU1)(_stub)
-_emitDTLInit.register(GRTag_TLU1)(_stub)
-_emitGRLDSBufferSwap.register(GRTag_TLU1)(_stub)
-_emitGRPtrUpdate.register(GRTag_TLU1)(_stub)
 for _tag in (GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1):
   _emitLocalWrite.register(_tag)(_stub)
 
@@ -276,6 +271,7 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
 @_allocGROffsetRegisters.register(GRTag_1x1)
 @_allocGROffsetRegisters.register(GRTag_1x2)
 @_allocGROffsetRegisters.register(GRTag_2x2)
+@_allocGROffsetRegisters.register(GRTag_TLU1)
 def _allocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
   """Allocate GR offset registers for TLU=0 shapes.
 
@@ -345,6 +341,7 @@ def _allocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
 @_deallocGROffsetRegisters.register(GRTag_1x1)
 @_deallocGROffsetRegisters.register(GRTag_1x2)
 @_deallocGROffsetRegisters.register(GRTag_2x2)
+@_deallocGROffsetRegisters.register(GRTag_TLU1)
 def _deallocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
   """Deallocate GR offset registers for TLU=0 shapes."""
   if isinstance(tile.sharedVgprGROffset, list):
@@ -433,6 +430,7 @@ def _emitGR_TLU0(tag, tile, ti, writer, kernel):
 @_emitDTLInit.register(GRTag_1x1)
 @_emitDTLInit.register(GRTag_1x2)
 @_emitDTLInit.register(GRTag_2x2)
+@_emitDTLInit.register(GRTag_TLU1)
 def _emitDTLInit_TLU0(tag, tile, ti, writer, kernel):
   return Module(f"DTL Init ({ti.tc})")  # STUB — legacy path in globalReadDTLInitCommonSgpr
   """Compute LocalWriteBaseAddr and Swap SGPR for one tensor component.
@@ -503,6 +501,7 @@ def _emitDTLInit_TLU0(tag, tile, ti, writer, kernel):
 @_emitGRLDSBufferSwap.register(GRTag_1x1)
 @_emitGRLDSBufferSwap.register(GRTag_1x2)
 @_emitGRLDSBufferSwap.register(GRTag_2x2)
+@_emitGRLDSBufferSwap.register(GRTag_TLU1)
 def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
   """Toggle GR DTL write target between double-buffer halves.
 
@@ -522,6 +521,7 @@ def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
 @_emitGRPtrUpdate.register(GRTag_1x1)
 @_emitGRPtrUpdate.register(GRTag_1x2)
 @_emitGRPtrUpdate.register(GRTag_2x2)
+@_emitGRPtrUpdate.register(GRTag_TLU1)
 def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
   """Advance SRD base pointer by one depthU iteration (depthU * bpe bytes)."""
   tc = ti.tc
@@ -830,6 +830,14 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   module.addComment0("GR Offset Calculation for Subtile Based Tiling")
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
+  # TLU=1 (NT / free-dim contiguous): each lane's 128-bit buffer_load grabs a
+  # full free-dim strip (M for A, N for B) at one K row; lanes walk K. Offset
+  # addressing is a pure K-stride ramp, so it does not use the row-major
+  # colId/rowId/bank-swizzle machinery below.
+  if tileInfoA.gr and isinstance(tileInfoA.gr.config.tag, GRTag_TLU1):
+    module.add(_graTileAssignment_tlu(writer, kernel, tileInfoA))
+    module.add(_graTileAssignment_tlu(writer, kernel, tileInfoB))
+    return module
   subIterKBytes = tileInfoA.subIterKBytes
   wavesize = kernel["WavefrontSize"]
   ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
@@ -859,6 +867,54 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   writer.vgprPool.checkIn(tmpVgpr)
   _grComputeSubtileOffsets_legacy(writer, module, tileInfoA)
   _grComputeSubtileOffsets_legacy(writer, module, tileInfoB)
+  return module
+
+
+def _graTileAssignment_tlu(writer, kernel, tileInfo):
+  """GR per-lane offset for TLU=1 (NT / free-dim contiguous) subtile tiles.
+
+  For NT the free dimension (M for A, N for B) is contiguous in global memory,
+  so a single 128-bit buffer_load covers a full free-dim strip at one K row.
+  The wave's 64 lanes span 64 K rows; numGRPerSubtile loads cover the remaining
+  K.  The per-lane global byte offset is therefore a pure K ramp:
+
+      offset(lane, i) = (laneId + i * wavesize) * strideK * bpe
+
+  where strideK is the tensor's unroll (K) stride in elements.  One VGPR is
+  produced per GR load into sharedVgprGROffset[]; the M/N position lives inside
+  the load width, so no per-lane free-dim term and no bank-swizzle is needed.
+  """
+  module = Module()
+  tc = tileInfo.tc
+  tile = tileInfo.gr
+  wavesize = kernel["WavefrontSize"]
+  bpeBits = int(8 * tileInfo.bpe)
+  unrollIdx = kernel["ProblemType"]["IndexUnroll"]
+  # strideRef returns an sgpr(...) container, or a "constStride.." string when
+  # the index is the packed unit-stride dim (not the case for the K index here).
+  strideK = writer.strideRef(tc, unrollIdx)
+
+  module.addComment0("%s: TLU=1 GR offset (K ramp)" % tc)
+  laneId = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_laneId")
+  module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize - 1,
+             comment="%s: laneId" % tc))
+
+  tmpVgpr = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_tmpVgpr")
+  for i in range(tileInfo.numGRPerSubtile):
+    out = tile.sharedVgprGROffset[i]
+    # K row handled by this lane in load i: laneId + i*wavesize
+    module.add(VAddU32(dst=vgpr(tmpVgpr), src0=hex(i * wavesize), src1=vgpr(laneId),
+               comment="%s: K row = laneId + %u" % (tc, i * wavesize)))
+    # * strideK (elements)
+    module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=strideK,
+               src1=vgpr(tmpVgpr), comment="%s: * strideK" % tc))
+    # * bpe (sub-byte safe: <<(bpeBits.bit_length()-1) then >>3)
+    module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpeBits.bit_length() - 1),
+               src=vgpr(tmpVgpr), comment="%s: K*stride*bpe" % tc))
+    module.add(VLShiftRightB32(dst=vgpr(out), shiftHex=hex(3), src=vgpr(tmpVgpr),
+               comment="%s: to bytes" % tc))
+  writer.vgprPool.checkIn(tmpVgpr)
+  writer.vgprPool.checkIn(laneId)
   return module
 
 ##################################################
