@@ -66,6 +66,7 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
+#include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -87,10 +88,11 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
-        // TODO: remove this temporary SIA4/SIA0 split once a dedicated hazard pass
-        // handles xcnt placement.
-        pm.addPass(createStinkyRemoveWaitCntPass(/*removeTensorWaitCnt=*/true,
-                                                 /*removeXcntWaitCnt=*/optLevel == OptLevel::O3));
+        // Only O3 has the hazard pass that re-places xcnt. kmcnt and tensor keep
+        // the defaults; RemoveWaitCntOptions documents why each is exempt.
+        RemoveWaitCntOptions removeOptions;
+        removeOptions.removeXcnt = (optLevel == OptLevel::O3);
+        pm.addPass(createStinkyRemoveWaitCntPass(removeOptions));
         pm.addPass(createStinkyRemoveNopPass());
     }
 
@@ -182,6 +184,16 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
                 if (runScheduler) innerPM.addPass(createRemoveDscntPass());
             }
+
+            // The wait insertion above leaves each final wait immediately before the
+            // WMMA that consumes its loads, so that WMMA has nothing to issue behind
+            // it. Repair moves this many non-WMMA instructions past each anchor to
+            // refill those slots, without changing any wait immediate.
+            const int waitRepairSlotsAfterAnchor = 1;
+            if (runScheduler && waitRepairSlotsAfterAnchor > 0) {
+                innerPM.addPass(createWaitAwareScheduleRepairPass(waitRepairSlotsAfterAnchor));
+            }
+
             pm.addPass(createKernelToRegionsPassAdaptor(
                 module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));
         }
