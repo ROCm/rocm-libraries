@@ -216,6 +216,25 @@ int main() {
                        packedCopySource.storage().begin()),
             "Full Tensor copy-to changed packed storage.");
 
+    const Layout offsetLayout(Shape{2}, {1}, 2);
+    Tensor offsetCopySource(ScalarType::Int32, offsetLayout);
+    std::fill(offsetCopySource.storage().begin(), offsetCopySource.storage().end(),
+              static_cast<std::byte>(0x7f));
+    offsetCopySource.storeFrom({0}, 3);
+    offsetCopySource.storeFrom({1}, 5);
+    std::array<std::byte, 4 * sizeof(int32_t)> offsetCopyDestination{};
+    offsetCopySource.copyTo(offsetCopyDestination);
+    require(std::all_of(offsetCopyDestination.begin(),
+                        offsetCopyDestination.begin() + 2 * sizeof(int32_t),
+                        [](std::byte value) { return value == std::byte{0}; }),
+            "Tensor copy-to changed storage before the layout's first element.");
+    const Tensor offsetCopyResult(
+        ScalarType::Int32, offsetLayout,
+        std::span<std::byte>(offsetCopyDestination.data(), offsetCopyDestination.size()));
+    require(
+        offsetCopyResult.loadAs<int32_t>({0}) == 3 && offsetCopyResult.loadAs<int32_t>({1}) == 5,
+        "Tensor copy-to missed an offset layout value.");
+
     std::array<std::byte, 1> undersizedCopyDestination{};
     requireInvalidArgument([&] { packedCopySource.copyTo(undersizedCopyDestination); },
                            "Full Tensor copy-to accepted undersized storage.");

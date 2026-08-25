@@ -568,7 +568,12 @@ class Tensor {
         const size_t required = ::roc::host_validation::storageBytesForLayout(m_type, m_layout);
         if (destination.size() < required)
             throw std::invalid_argument("Tensor copy destination storage is too small.");
-        std::ranges::copy(storage().first(required), destination.begin());
+        const auto [lower, upper] = detail::elementBounds(m_layout);
+        if (upper < lower) return;
+
+        const size_t firstByte = static_cast<size_t>(detail::bitOffset(m_type, lower) / 8);
+        std::ranges::copy(storage().subspan(firstByte, required - firstByte),
+                          destination.subspan(firstByte).begin());
     }
 
     void copyTo(std::span<std::byte> destination, std::span<const size_t> linearIndices) const {
