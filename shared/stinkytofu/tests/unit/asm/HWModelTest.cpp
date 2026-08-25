@@ -42,8 +42,7 @@ TEST(HWModel, Gfx1250KnownDefaults) {
     const HWModel& hw = hwModelForArch(kGfx1250);
 
     EXPECT_EQ(hw.lds.readQueueDepth, 16);
-    // 0 means "use dynamic drain latency model", not a fixed drain value.
-    EXPECT_EQ(hw.lds.readDrainLatency, 0);
+    EXPECT_EQ(hw.lds.readDrainLatency, 72);
     EXPECT_EQ(hw.lds.readThrottleLatency, 72);
 
     EXPECT_EQ(hw.barrier.signalToWaitLatency, 11);
@@ -51,6 +50,48 @@ TEST(HWModel, Gfx1250KnownDefaults) {
 
     EXPECT_EQ(hw.coexec.transToNonCoreSide, 1);
     EXPECT_EQ(hw.coexec.maxSlotBudget, 18);
+}
+
+// Barrier drain latency, exercised with the gfx1250 figures: a 16-deep queue that
+// drains in 72 cycles, fed by ds_load_b128 (56 cycles).
+namespace {
+constexpr int kDepth = 16;
+constexpr int kFullQueueDrain = 72;
+constexpr int kDsLoad = 56;
+
+int barrierDrain(int matchingDsLoadCount) {
+    return computeBarrierDrainLatency(kDepth, kFullQueueDrain, matchingDsLoadCount, kDsLoad);
+}
+}  // namespace
+
+TEST(HWModel, BarrierDrainLatencyRampsBetweenOneLoadAndAFullQueue) {
+    // Nothing is queued behind a lone load, so it costs only its own return.
+    EXPECT_EQ(barrierDrain(1), kDsLoad);
+    EXPECT_EQ(barrierDrain(kDepth), kFullQueueDrain);
+
+    // Monotone in between, and never outside those two endpoints.
+    for (int count = 2; count < kDepth; ++count) {
+        EXPECT_GE(barrierDrain(count), barrierDrain(count - 1)) << "count=" << count;
+        EXPECT_LE(barrierDrain(count), kFullQueueDrain) << "count=" << count;
+    }
+    // A count-aware ramp, not a flat budget: 1 and depth must not agree.
+    EXPECT_GT(barrierDrain(kDepth), barrierDrain(1));
+}
+
+// Regression guard: only a queue's worth of loads can still be outstanding when the
+// barrier is reached, so a large matching count must not scale the wait past a full
+// drain. Letting it scale pushed the barrier past the end of its region, which cost
+// the TDM prefetch all of its overlap with the WMMA stream.
+TEST(HWModel, BarrierDrainLatencySaturatesAtQueueDepth) {
+    EXPECT_EQ(barrierDrain(kDepth + 1), kFullQueueDrain);
+    EXPECT_EQ(barrierDrain(126), kFullQueueDrain);
+    EXPECT_EQ(barrierDrain(10000), kFullQueueDrain);
+}
+
+// An arch with no modeled LDS return queue has no drain to wait on.
+TEST(HWModel, BarrierDrainLatencyWithoutAQueueIsJustTheLoadLatency) {
+    EXPECT_EQ(computeBarrierDrainLatency(/*queueDepth=*/0, kFullQueueDrain, /*count=*/8, kDsLoad),
+              kDsLoad);
 }
 
 TEST(HWModel, Gfx1250HazardRules) {
