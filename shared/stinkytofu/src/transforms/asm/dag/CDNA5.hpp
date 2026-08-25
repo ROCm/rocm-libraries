@@ -49,6 +49,7 @@
 
 namespace {
 using namespace stinkytofu;
+using namespace stinkytofu::dag;
 
 enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 
