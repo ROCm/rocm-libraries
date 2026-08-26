@@ -115,6 +115,52 @@ inline IngestorKernelCode
                     + "', which is outside the descriptor tree '" + boundary.string() + "'");
         }
 
+        // Reject a `library` that reaches its archive through a link -- a POSIX symlink or
+        // a Windows junction -- inside the tree.
+        //
+        // Walked over the UN-canonicalised join: weakly_canonical has already resolved the
+        // symlinks in whatever prefix exists, so testing `resolved` would find none. Scoped
+        // strictly below `boundary` because a tree under a symlinked prefix is ordinary.
+        //
+        // Each component must BE an ordinary file or directory rather than merely not be one
+        // named kind. MSVC reports a junction as file_type::junction, so is_symlink answers
+        // false for one -- and mklink /J needs no privilege, unlike a symlink.
+        //
+        // This refuses a path that IS a link at validation time and does not close the
+        // time-of-check/time-of-use race: kpack_open is path-only, with no fd or handle
+        // overload anywhere in the kpack C API.
+        std::filesystem::path prefix;
+        for(const auto& component : origin / kernel.source.library)
+        {
+            prefix /= component;
+            if(component == "." || component == "..")
+            {
+                continue;
+            }
+            const std::string below = prefix.lexically_relative(boundary).generic_string();
+            if(below.empty() || below == "." || below.rfind("..", 0) == 0)
+            {
+                continue;
+            }
+            // symlink_status, not status: the latter follows the link and reports the
+            // target's kind, which is exactly the answer that must not be trusted here.
+            const std::filesystem::file_type kind
+                = std::filesystem::symlink_status(prefix, ignored).type();
+
+            // not_found is allowed through so the archive's own absence is reported by the
+            // loader, which names it, rather than as a link that is not there either.
+            if(kind != std::filesystem::file_type::regular
+               && kind != std::filesystem::file_type::directory
+               && kind != std::filesystem::file_type::not_found)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                    "kpack kernel source for " + label + ": library '" + kernel.source.library
+                        + "' reaches its archive through the link '" + prefix.string()
+                        + "' inside the descriptor tree '" + boundary.string() + "'");
+            }
+        }
+
         auto program = kpackLoader.load(resolved,
                                         kernel.source.tocKey,
                                         context.deviceProperties.gcnArchName,

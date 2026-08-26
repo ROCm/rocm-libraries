@@ -1,0 +1,373 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+
+#include "compilation/ICompiledProgram.hpp"
+#include "compilation/IKernelCompiler.hpp"
+#include "compilation/KernelCompileOptions.hpp"
+#include "compilation/KpackKernelLoader.hpp"
+#include "compilation/KpackModuleCache.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+#include "tests/utilities/ScratchDirectory.hpp"
+
+/**
+ * @file TestIngestorKernelCode.cpp
+ * @brief The path-confinement guard in buildIngestorKernelCode, called rather than copied.
+ *
+ * TestPackedDescriptorLoad.cpp reproduces the rule inline, so deleting the guard leaves
+ * that suite green; these cases turn red. No device and no archive on disk are needed --
+ * the guard throws before the first HIP call and before kpackLoader.load.
+ */
+namespace hip_kernel_provider::kernel_ingestor_engine
+{
+namespace
+{
+
+using namespace hipdnn_plugin_sdk::ingestor;
+using hip_kernel_provider::kernel_ingestor_engine::testing::buildPointwiseGraph;
+using hip_kernel_provider::kernel_ingestor_engine::testing::GraphFixture;
+using hip_kernel_provider::tests::claimScratchDirectory;
+using hipdnn_plugin_sdk::HipdnnPluginException;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+constexpr const char* SCRATCH_LABEL = "ingestorkernelcode";
+
+/// buildIngestorKernelCode takes an IKernelCompiler by reference, so the KPACK path needs
+/// an object for a compiler it never reaches. A call to it means the kind switch took the
+/// wrong arm, so it throws rather than returning a silently empty program.
+class UnreachableCompiler : public compilation::IKernelCompiler
+{
+public:
+    std::unique_ptr<compilation::ICompiledProgram>
+        compile(const std::string& kernelFileName,
+                const std::vector<std::string>& /*options*/) const override
+    {
+        throw std::runtime_error("the KPACK path must not reach the source compiler; asked for '"
+                                 + kernelFileName + "'");
+    }
+};
+
+/// Nothing it names has to exist on disk.
+KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
+                                 const std::filesystem::path& treeRoot,
+                                 const std::string& library)
+{
+    KernelDefinition kernel;
+    kernel.kernelId.fill(0x21);
+    kernel.packId.fill(0x22);
+    kernel.dispatchId.fill(0x23);
+    kernel.name = "pointwise_add_f32_kpack";
+    kernel.source.kind = KernelSourceKind::KPACK;
+    kernel.source.library = library;
+    kernel.source.tocKey = "PointwiseAdd/block64";
+    kernel.source.symbol = "PointwiseAdd";
+    kernel.originDirectory = originDirectory;
+    kernel.treeRoot = treeRoot;
+    return kernel;
+}
+
+/// Everything buildIngestorKernelCode needs except the kernel, held together so each case
+/// is the one KernelDefinition it is about.
+class GuardHarness
+{
+public:
+    /// KernelCompileOptions has no default constructor and reads its tensor argument
+    /// eagerly, so it is built from the fixture's graph rather than stubbed. The KPACK path
+    /// never consults it, but the parameter is by reference.
+    GuardHarness()
+        : _options(&firstTensorOf(_fixture), _fixture.deviceProperties().gcnArchName)
+    {
+    }
+
+    IngestorKernelCode build(const KernelDefinition& kernel)
+    {
+        return buildIngestorKernelCode(_compiler, _loader, _fixture.context(), kernel, _options);
+    }
+
+private:
+    static const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes&
+        firstTensorOf(const GraphFixture& fixture)
+    {
+        const auto& tensors = fixture.context().graph.getTensorMap();
+        for(const auto& [uid, attributes] : tensors)
+        {
+            static_cast<void>(uid);
+            if(attributes != nullptr)
+            {
+                return *attributes;
+            }
+        }
+        throw std::runtime_error("the pointwise fixture graph carries no tensor to compile for");
+    }
+
+    UnreachableCompiler _compiler;
+    compilation::KpackModuleCache _cache;
+    compilation::KpackKernelLoader _loader{_cache};
+    GraphFixture _fixture{buildPointwiseGraph()};
+    compilation::KernelCompileOptions _options;
+};
+
+constexpr const char* OUTSIDE_THE_TREE = "outside the descriptor tree";
+
+// ---------------------------------------------------------------------------
+// Path confinement -- the guard is called, not reproduced
+// ---------------------------------------------------------------------------
+
+/// The escape the guard exists to stop. Both halves of the message are asserted: the
+/// resolved path says what was asked for and the boundary says what it was measured
+/// against, and a reader needs the pair to tell a bad descriptor from a bad tree root.
+TEST(TestIngestorKernelCode, RejectsALibraryThatEscapesTheDescriptorTree)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path tree = scratch.path() / "tree";
+    ASSERT_TRUE(std::filesystem::create_directory(tree));
+
+    GuardHarness harness;
+    const auto kernel = makeKpackKernel(tree, tree, "../outside/x.kpack");
+
+    try
+    {
+        harness.build(kernel);
+        FAIL() << "expected a library outside the descriptor tree to be rejected";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        const std::string what = error.what();
+        EXPECT_NE(what.find(OUTSIDE_THE_TREE), std::string::npos) << what;
+        EXPECT_NE(what.find("x.kpack"), std::string::npos) << what;
+        EXPECT_NE(what.find(tree.filename().string()), std::string::npos) << what;
+    }
+}
+
+/// `..` is not the only way out. An absolute path bypasses originDirectory entirely, and
+/// weakly_canonical normalises it rather than rejecting it, so without the guard any
+/// readable file on the machine could be handed to the loader as executable code.
+TEST(TestIngestorKernelCode, RejectsAnAbsoluteLibraryOutsideTheTree)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path tree = scratch.path() / "tree";
+    const std::filesystem::path elsewhere = scratch.path() / "elsewhere";
+    ASSERT_TRUE(std::filesystem::create_directory(tree));
+    ASSERT_TRUE(std::filesystem::create_directory(elsewhere));
+
+    GuardHarness harness;
+    const auto kernel = makeKpackKernel(tree, tree, (elsewhere / "x.kpack").generic_string());
+
+    try
+    {
+        harness.build(kernel);
+        FAIL() << "expected an absolute library outside the tree to be rejected";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find(OUTSIDE_THE_TREE), std::string::npos)
+            << error.what();
+    }
+}
+
+/// The over-rejection case. Packing preserves the authored subpath, so a descriptor sits
+/// in a child folder while the archive sits at the shard root above it, and a boundary at
+/// originDirectory would reject exactly that while flat fixture trees stayed green.
+///
+/// Asserts on which failure arrives, not that none does: the archive is absent, so the
+/// call fails at archive-open. What must not happen is failing at the guard.
+TEST(TestIngestorKernelCode, AcceptsALibraryThatClimbsOutOfItsOwnDirectoryButStaysInTheTree)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path tree = scratch.path() / "tree";
+    const std::filesystem::path nested = tree / "pointwise";
+    ASSERT_TRUE(std::filesystem::create_directory(tree));
+    ASSERT_TRUE(std::filesystem::create_directory(nested));
+
+    GuardHarness harness;
+    const auto kernel = makeKpackKernel(nested, tree, "../absent.kpack");
+
+    try
+    {
+        harness.build(kernel);
+        FAIL() << "expected the absent archive to be reported";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        const std::string what = error.what();
+        EXPECT_EQ(what.find(OUTSIDE_THE_TREE), std::string::npos)
+            << "the guard rejected a path that stays inside the tree: " << what;
+        EXPECT_NE(what.find("does not exist"), std::string::npos) << what;
+    }
+}
+
+/// A string-prefix containment test would read `/base-evil` as inside `/base`.
+/// lexically_relative walks components instead, which is why the guard is written on it;
+/// this case is what would notice if it were ever rewritten as a prefix compare.
+TEST(TestIngestorKernelCode, DoesNotConfuseASiblingPrefixWithTheTree)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path tree = scratch.path() / "base";
+    const std::filesystem::path sibling = scratch.path() / "base-evil";
+    ASSERT_TRUE(std::filesystem::create_directory(tree));
+    ASSERT_TRUE(std::filesystem::create_directory(sibling));
+
+    GuardHarness harness;
+    const auto kernel = makeKpackKernel(tree, tree, "../base-evil/x.kpack");
+
+    try
+    {
+        harness.build(kernel);
+        FAIL() << "expected a sibling directory sharing the tree's prefix to be rejected";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find(OUTSIDE_THE_TREE), std::string::npos)
+            << error.what();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Link substitution -- a symlink or junction inside the tree
+// ---------------------------------------------------------------------------
+
+/// Creates a real directory symlink at `link` pointing at `target`, and reports whether the
+/// platform let it. One mechanism everywhere: Windows needs Developer Mode or
+/// SeCreateSymbolicLinkPrivilege, and without either the case skips rather than silently
+/// falling back to a junction.
+bool createDirectoryLink(const std::filesystem::path& link,
+                         const std::filesystem::path& target,
+                         std::string& failure)
+{
+    std::error_code error;
+    std::filesystem::create_directory_symlink(target, link, error);
+    if(error)
+    {
+        failure = "create_directory_symlink: " + error.message();
+        return false;
+    }
+
+    // Confirmed rather than inferred from the absent error_code: a creation that silently
+    // did nothing and a platform that cannot see links both leave is_symlink(link) false
+    // below, and those two want opposite responses.
+    if(!std::filesystem::exists(std::filesystem::symlink_status(link)))
+    {
+        failure
+            = "create_directory_symlink reported success but created nothing at " + link.string();
+        return false;
+    }
+    return true;
+}
+
+/// The substitution the guard mitigates: the descriptor's own directory holds a component that
+/// is a link, so the path the guard measured and the file the loader opens can be
+/// different objects.
+///
+/// Both paths stay inside the tree, so the containment check above passes and this can
+/// only be the symlink walk.
+TEST(TestIngestorKernelCode, RejectsALibraryReachedThroughALinkInsideTheTree)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path tree = scratch.path() / "tree";
+    const std::filesystem::path real = tree / "real";
+    const std::filesystem::path link = tree / "link";
+    ASSERT_TRUE(std::filesystem::create_directory(tree));
+    ASSERT_TRUE(std::filesystem::create_directory(real));
+
+    std::string failure;
+    if(!createDirectoryLink(link, real, failure))
+    {
+        GTEST_SKIP() << "could not create a directory link, so I5 has no executed evidence "
+                        "on this machine: "
+                     << failure;
+    }
+
+    // Asserted rather than skipped on: the guard reads the same standard library's
+    // symlink_status, so a link this does not see is a link the guard cannot see either --
+    // a real gap in the mitigation. Creation is confirmed above, so that is all this can
+    // mean.
+    ASSERT_TRUE(std::filesystem::is_symlink(link))
+        << "the platform does not report the created component as a link, which means the "
+           "production guard cannot see it either: "
+        << link;
+
+    GuardHarness harness;
+    const auto kernel = makeKpackKernel(tree, tree, "link/x.kpack");
+
+    try
+    {
+        harness.build(kernel);
+        FAIL() << "expected a library reached through a link inside the tree to be rejected";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        const std::string what = error.what();
+        EXPECT_NE(what.find("through the link"), std::string::npos) << what;
+        EXPECT_NE(what.find("link"), std::string::npos) << what;
+    }
+}
+
+#ifdef _WIN32
+/// Why the guard tests the kind rather than asking is_symlink. MSVC gives a junction its own
+/// file_type, so is_symlink answers false, and mklink /J needs no privilege -- the
+/// substitution a Windows caller can actually perform, on the machines where the symlink
+/// case above skips. mklink is a cmd builtin, so this shells out.
+TEST(TestIngestorKernelCode, RejectsALibraryReachedThroughAJunctionInsideTheTree)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path tree = scratch.path() / "tree";
+    const std::filesystem::path real = tree / "real";
+    const std::filesystem::path junction = tree / "junction";
+    ASSERT_TRUE(std::filesystem::create_directory(tree));
+    ASSERT_TRUE(std::filesystem::create_directory(real));
+
+    const std::string command
+        = "mklink /J \"" + junction.string() + "\" \"" + real.string() + "\" >nul 2>&1";
+    if(std::system(command.c_str()) != 0)
+    {
+        GTEST_SKIP() << "mklink /J failed, so the junction half of the guard has no executed "
+                        "evidence on this machine";
+    }
+
+    const std::filesystem::file_type kind = std::filesystem::symlink_status(junction).type();
+    ASSERT_EQ(kind, std::filesystem::file_type::junction) << junction;
+    ASSERT_FALSE(std::filesystem::is_symlink(junction)) << junction;
+
+    GuardHarness harness;
+    const auto kernel = makeKpackKernel(tree, tree, "junction/x.kpack");
+
+    try
+    {
+        harness.build(kernel);
+        FAIL() << "expected a library reached through a junction inside the tree to be rejected";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        const std::string what = error.what();
+        EXPECT_NE(what.find("through the link"), std::string::npos) << what;
+    }
+}
+#endif // _WIN32
+
+} // namespace
+} // namespace hip_kernel_provider::kernel_ingestor_engine
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
