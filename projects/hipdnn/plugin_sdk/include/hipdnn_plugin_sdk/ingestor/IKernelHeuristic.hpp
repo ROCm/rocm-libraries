@@ -131,34 +131,6 @@ public:
     }
 };
 
-/// @param describedBy Engine named in the warning when @p descriptor is nullopt.
-/// @throws std::invalid_argument if @p descriptor names a kind with no adapter yet.
-inline std::shared_ptr<IKernelHeuristic>
-    makeKernelHeuristic(const std::optional<HeuristicDescriptor>& descriptor,
-                        const std::string& describedBy = {})
-{
-    if(!descriptor.has_value())
-    {
-        // Warn, not fail: an engine with no model still selects deterministically. The
-        // warning is the point -- it separates an engine that declares its order from
-        // one still waiting on a UHD, which otherwise look identical from the outside.
-        HIPDNN_PLUGIN_LOG_WARN("ingestor: " << (describedBy.empty() ? "engine" : describedBy)
-                                            << " ships no heuristic; kernels rank by priority, "
-                                               "then descriptor id");
-        return std::make_shared<UnrankedKernelHeuristic>();
-    }
-
-    switch(descriptor->kind)
-    {
-    case HeuristicKind::NATIVE:
-        return std::make_shared<NativeKernelHeuristic>(
-            descriptor->payload, describeDescriptor("heuristic", descriptor->name, descriptor->id));
-    default:
-        throw std::invalid_argument("heuristic '" + toString(descriptor->id)
-                                    + "' names a kind with no adapter yet");
-    }
-}
-
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

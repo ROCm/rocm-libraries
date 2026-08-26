@@ -15,7 +15,7 @@
 
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelHeuristicFactory.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
@@ -324,16 +324,36 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     EXPECT_EQ(heuristic->score(context, BoundTokens{}, makeDefinition(testId(0x01), 128)), 128.0);
 }
 
-TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicThrowsForAKindWithNoAdapter)
+TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicDegradesWhenAModelCannotBeBroughtUp)
 {
-    // HeuristicKind::MODEL has no adapter yet; fails at assembly time, not first rank().
+    // A MODEL naming an artifact that is not there degrades rather than throwing, which is
+    // the difference between it and NATIVE: an unregistered symbol is a build fact and the
+    // engine could never score, while a missing artifact is a deployment fact and the
+    // engine still selects, by declared order (RFC 0019 §5).
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "model heuristic";
     descriptor.kind = HeuristicKind::MODEL;
     descriptor.payload = "some/model/artifact.bin";
 
-    EXPECT_THROW(makeKernelHeuristic(descriptor), std::invalid_argument);
+    std::shared_ptr<IKernelHeuristic> heuristic;
+    ASSERT_NO_THROW(heuristic = makeKernelHeuristic(descriptor));
+    ASSERT_NE(heuristic, nullptr);
+
+    // Ranking still works, and gives the order an engine with no model would give.
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    const auto lowPriorityId = testId(0x01);
+    const auto highPriorityId = testId(0x02);
+    catalog.entries = {makeDefinition(lowPriorityId, 64, 1), makeDefinition(highPriorityId, 64, 5)};
+
+    const auto ranked = heuristic->rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, highPriorityId);
 }
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicFallsBackWhenNoDescriptorIsSupplied)
