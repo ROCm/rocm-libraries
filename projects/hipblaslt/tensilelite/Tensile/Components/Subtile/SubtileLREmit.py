@@ -758,11 +758,12 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
     localSub0 = int(tileInfo.localSubtileGrid[0])
     wavesPerStrip = int(getattr(tileInfo, "grWavesPerStrip", 1))
     if wavesPerStrip > 1:
-      # SubtileWideGR: one strip holds every axis-wave's M tiles side by side,
-      # so a wave steps WITHIN the strip by its own M-tile window instead of by
-      # whole strips.  Window = lrSubtileShape[0] tiles of instM elements.
-      lrStackM = int(tileInfo.lrSubtileShape[0])
-      perWaveBytes = int(lrStackM * tileInfo.mmaTileShape[0] * tileInfo.bpe)
+      # Shared strip: it holds every axis-wave's M tiles side by side, so a wave
+      # steps WITHIN the strip by its own M-tile window rather than by whole
+      # strips.  The window is the wave's M extent (localMMATileGrid[0]), not the
+      # strip height -- those differ exactly by wavesPerStrip.
+      perWaveMTiles = int(tileInfo.localMMATileGrid[0])
+      perWaveBytes = int(perWaveMTiles * tileInfo.mmaTileShape[0] * tileInfo.bpe)
     else:
       perWaveBytes = int(localSub0 * stripStrideBytes(tileInfo))
     wv = writer.vgprPool.checkOut(1, tag="_lraTileAssignment_tlu_wave")

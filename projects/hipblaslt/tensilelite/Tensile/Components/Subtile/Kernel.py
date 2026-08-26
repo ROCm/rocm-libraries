@@ -346,27 +346,6 @@ AB_B4_TLU1_16x1 = ABTilePair(
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=32, k=1)),
 )
 
-# SubtileWideGR: GR strip spans the FULL macro-tile free dim (G = L * waveGroup)
-# while the LR strip stays at the per-wave extent L.  One buffer_load then covers
-# G*16 contiguous fp4 elements along the unit-stride free dim instead of L*16, so
-# a big enough macro tile reaches a whole 128B cacheline per K row.  The waves
-# that share the strip split its K rows (see _tluWaveAxisGlobalOffset_tlu); the
-# LDS strip width, swizzle and pad all stay GR-determined, and LR just indexes
-# its own M-tile window inside the wider strip.
-def _wideGR(g, l):
-  return ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(g, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),
-    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(l, 1), loadShape=LoadShape(m=32, k=1)),
-  )
-
-# GR spans the full macro-tile free dim (G = MacroTile/instM); LR is the
-# per-wave stack (L = MIWaveTile[0]), so G = L * waveGroup.  Register every
-# (G, L) pair the wave groups 1/2/4/8 can produce.
-_WIDE_GR_PAIRS = [(g, l) for g in (2, 4, 8, 16, 32)
-                         for l in (1, 2, 4, 8, 16)
-                         if l <= g and (g // l) in (1, 2, 4, 8)]
-_WIDE_GR_GEOMETRIES = {f"AB_B4_TLU1_GR{g}_LR{l}": _wideGR(g, l) for g, l in _WIDE_GR_PAIRS}
-globals().update(_WIDE_GR_GEOMETRIES)
 
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
@@ -409,7 +388,6 @@ AB_GEOMETRY_MAP = {
   "AB_B4_TLU1_8x1": AB_B4_TLU1_8x1,
   "AB_B4_TLU1_16x1": AB_B4_TLU1_16x1,
 }
-AB_GEOMETRY_MAP.update(_WIDE_GR_GEOMETRIES)
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
   """Return the ABTilePair selected by Solution.py for tc ('A' or 'B')."""
@@ -495,7 +473,7 @@ class TileInfo:
       self.subtileStride       = gr_cfg.subtileStride
       self.globalSubtileGrid = list(gr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
       # Waves per GR strip along the free dim.  Normally 1: the GR strip is one
-      # wave's M extent, so each wave owns whole strips.  With SubtileWideGR the
+      # wave's M extent, so each wave owns whole strips.  When the strip spans
       # GR strip spans several waves' extents, so localMMATileGrid[0] (per wave)
       # is smaller than subtileShape[0] and the plain ratio would floor to 0.
       # Those waves cooperate on one strip instead, splitting its K rows.
@@ -514,7 +492,7 @@ class TileInfo:
       # the per-strip load ratio is a single-wave quantity -- folding numWaves in
       # would undercount the K loads per strip (numGRPerSubtile).  TLU=0 keeps the
       # cooperative-K behaviour where multiple waves share one strip.
-      # SubtileWideGR is the exception: grWavesPerStrip waves DO share one
+      # Shared strips are the exception: grWavesPerStrip waves DO share one
       # strip's K rows, so its load math is cooperative over exactly that many
       # waves (not all numWaves -- the other axis' waves need the same data).
       _isTLU1 = isinstance(getattr(gr_cfg, "tag", None), GRTag_TLU1)

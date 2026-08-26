@@ -235,7 +235,7 @@ BenchmarkProblems:
           - Exact: [512, 64, 1, 1024]
 
   -
-    - # ProblemType (SubtileWideGR: GR spans the whole macro tile, LR per-wave)
+    - # ProblemType (strip spans the whole macro tile; waves share it)
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -262,7 +262,6 @@ BenchmarkProblems:
         - StreamK: [0]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
-        - SubtileWideGR: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
