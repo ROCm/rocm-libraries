@@ -3,32 +3,26 @@
 
 """Winograd convolution kernel instances (NHWC × KYXC -> NHWK, stride=1, 3x3 filter).
 
-Multi-pass Winograd pipeline — three separate kernels compiled at runtime via
-the rocke IR:
+Full GPU Winograd pipeline:
 
   1. **Data transform**   — B^T * input_patch * B   per (n, tile_h, tile_w, c)
   2. **Filter transform** — G * filter_patch * G^T  per (k, c)   [done once]
-  3. **GEMM**             — batched element-wise multiply across xform domain,
-                           one batched GEMM per (xform_h, xform_w) position;
-                           use the existing ``gemm_universal`` infrastructure.
+  3. **GEMM**             — strided-batched MFMA/WMMA GEMM across the xs² xform
+                           positions; reuses ``build_universal_gemm(batched=True)``.
+                           M = N*tiles, N = K, K_gemm = C, batch = xs².
   4. **Output transform** — A^T * acc_tile * A      per (n, tile_h, tile_w, k)
-
-Only the data-transform kernel, the filter-transform kernel, and the
-output-transform kernel are authored here.  The GEMM step uses
-``build_implicit_gemm_conv`` (or any batched GEMM provider) externally — the
-spec exposes the required workspace shapes so the caller can wire them up.
 
 Authoring style::
 
     spec = WinogradConvSpec(
         problem=WinogradProblem(N=8, Hi=56, Wi=56, C=64, K=64, pH=1, pW=1),
-        out_tile=4,           # F(4,3): 4-output × 3-filter, 6×6 transform domain
-        block_c=64,           # channels per block in data/filter transforms
-        block_k=64,           # output channels per block in filter/output transforms
-        block_nhw=4,          # (n, tile_h, tile_w) triples per block
+        out_tile=4,
+        block_c=32, block_k=32, block_nhw=4,
+        gemm_tile_m=32, gemm_tile_n=32, gemm_tile_k=32,  # GEMM tile
     )
     data_kdef   = build_winograd_data_transform(spec)
     filter_kdef = build_winograd_filter_transform(spec)
+    gemm_kdef   = build_winograd_gemm(spec, arch="gfx950")
     out_kdef    = build_winograd_output_transform(spec)
 
 Shared internal helpers live in
@@ -100,6 +94,20 @@ class WinogradConvSpec:
     block_c: int = 32
     block_k: int = 32
     block_nhw: int = 4
+
+    # GEMM tile parameters (step 3 — strided-batched MFMA GEMM).
+    # M = N*tiles_h*tiles_w,  N_gemm = K,  K_gemm = C,  batch = xs².
+    # Defaults target gfx950 fp16 with the 32×32×16 atom.
+    gemm_tile_m: int = 32
+    gemm_tile_n: int = 32
+    gemm_tile_k: int = 32
+    gemm_warp_m: int = 2
+    gemm_warp_n: int = 2
+    gemm_warp_tile_m: int = 16
+    gemm_warp_tile_n: int = 16
+    gemm_warp_tile_k: int = 16
+    gemm_pipeline: str = "mem"
+    gemm_epilogue: str = "default"
 
     def __post_init__(self) -> None:
         self.validate()
@@ -222,6 +230,103 @@ def winograd_output_transform_grid(spec: WinogradConvSpec) -> Tuple[int, int, in
     return (math.ceil(total_nhw / spec.block_nhw), math.ceil(p.K / spec.block_k), 1)
 
 
+def winograd_gemm_grid(spec: WinogradConvSpec) -> Tuple[int, int, int]:
+    """Launch grid for the strided-batched GEMM: (N_tiles, M_tiles, xs²).
+
+    GEMM dims: M = N*tiles, N_gemm = K (output channels), K_gemm = C.
+    batch_count = xs^2  (one GEMM per xform-domain position).
+    Grid follows ``build_universal_gemm(batched=True)`` convention:
+    x = ceil(N_gemm / tile_n), y = ceil(M / tile_m), z = batch_count.
+    """
+    p = spec.problem
+    ntotal = p.N * spec.num_tiles  # M dimension
+    n_gemm = p.K  # N dimension
+    xs2 = spec.xform_size**2  # batch count
+    gx = math.ceil(n_gemm / spec.gemm_tile_n)
+    gy = math.ceil(ntotal / spec.gemm_tile_m)
+    return (gx, gy, xs2)
+
+
+# ---------------------------------------------------------------------------
+# GEMM kernel: strided-batched MFMA/WMMA via build_universal_gemm
+# ---------------------------------------------------------------------------
+
+
+def build_winograd_gemm(
+    spec: WinogradConvSpec,
+    arch: str = "gfx950",
+) -> KernelDef:
+    """Build the strided-batched GEMM kernel for the Winograd xform domain.
+
+    Wraps ``build_universal_gemm(batched=True)`` with the Winograd workspace
+    layout:
+
+      A (DataWs)   : f16 [xs², ntotal, C]  — data-transform output
+      B (FilterWs) : f16 [xs², K, C]       — filter-transform output
+      C (GemmWs)   : f16 [xs², ntotal, K]  — GEMM output
+
+    Each of the xs² batches is one xform-domain position (xh, xw).
+    Strides (in elements):
+      stride_a = ntotal * C,   stride_b = K * C,   stride_c = ntotal * K.
+
+    Workspaces are f16; GEMM accumulates in f32 internally via MFMA/WMMA
+    and truncates output to f16 (standard ``build_universal_gemm`` behaviour).
+    """
+    from .gemm_universal import (
+        DataSpec,
+        TileSpec,
+        TraitSpec,
+        UniversalGemmSpec,
+        build_universal_gemm,
+        is_valid_spec as gemm_is_valid,
+    )
+
+    p = spec.problem
+    gemm_spec = UniversalGemmSpec(
+        name=spec.kernel_name("gemm"),
+        tile=TileSpec(
+            tile_m=spec.gemm_tile_m,
+            tile_n=spec.gemm_tile_n,
+            tile_k=spec.gemm_tile_k,
+            warp_m=spec.gemm_warp_m,
+            warp_n=spec.gemm_warp_n,
+            warp_k=1,
+            warp_tile_m=spec.gemm_warp_tile_m,
+            warp_tile_n=spec.gemm_warp_tile_n,
+            warp_tile_k=spec.gemm_warp_tile_k,
+        ),
+        trait=TraitSpec(
+            pipeline=spec.gemm_pipeline,
+            scheduler="intrawave",
+            epilogue=spec.gemm_epilogue,
+            pad_m=True,
+            pad_n=True,
+            pad_k=True,
+        ),
+        data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+        wave_size=64,
+        batched=True,
+    )
+
+    ok, reason = gemm_is_valid(gemm_spec, arch)
+    if not ok:
+        raise ValueError(f"invalid Winograd GEMM spec for {arch}: {reason}")
+
+    return build_universal_gemm(gemm_spec, arch=arch)
+
+
+# ---------------------------------------------------------------------------
+# Workspace dtype note
+# ---------------------------------------------------------------------------
+#
+# DataWs / FilterWs / GemmWs are stored as **f16** so the GEMM step can use
+# build_universal_gemm directly (f16 I/O, f32 acc internally).  The transform
+# kernels convert f32 SSA results to f16 before storing to workspace.
+# Output transform reads f16 from GemmWs, accumulates in f32, writes f16 D.
+#
+# This matches MIOpen Winograd Fury/Rage which also uses fp16 throughout.
+
+
 # ---------------------------------------------------------------------------
 # Internal: OOB-safe offset helper
 # ---------------------------------------------------------------------------
@@ -254,7 +359,7 @@ def build_winograd_data_transform(
 
         A            : ptr<f16> global  — NHWC input  [N, Hi, Wi, C]
         A_bytes      : i32
-        DataWs       : ptr<f32> global  — data workspace [xs*xs * N*tiles * C]
+        DataWs       : ptr<f16> global  — data workspace [xs*xs * N*tiles * C]
         DataWs_bytes : i32
     """
     ok, why = is_valid_spec(spec, arch)
@@ -274,7 +379,7 @@ def build_winograd_data_transform(
     A_ptr = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     A_bytes = b.param("A_bytes", I32)
     DataWs = b.param(
-        "DataWs", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
+        "DataWs", PtrType(F16, "global"), noalias=True, writeonly=True, align=16
     )
     DataWs_bytes = b.param("DataWs_bytes", I32)
 
@@ -360,8 +465,10 @@ def build_winograd_data_transform(
                 xpos = b.const_i32(xh * xs + xw)
                 nhw_layer = b.add(b.mul(xpos, c_ntiles_total), nhw_idx)
                 ws_off = b.add(b.mul(nhw_layer, c_C), c_idx)
-                ws_byte = b.mul(ws_off, c4)
-                b.buffer_store_f32(dws_rsrc, ws_byte, c0, xformed[xh][xw])
+                ws_byte = b.mul(ws_off, c2)  # f16 = 2 bytes
+                b.buffer_store_f16(
+                    dws_rsrc, ws_byte, c0, b.trunc_f32_to_f16(xformed[xh][xw])
+                )
 
     return b.kernel
 
@@ -385,7 +492,7 @@ def build_winograd_filter_transform(
 
         W              : ptr<f16> global  — KYXC filter  [K, 3, 3, C]
         W_bytes        : i32
-        FilterWs       : ptr<f32> global  — filter workspace [xs*xs * K * C]
+        FilterWs       : ptr<f16> global  — filter workspace [xs*xs * K * C]
         FilterWs_bytes : i32
     """
     ok, why = is_valid_spec(spec, arch)
@@ -405,7 +512,7 @@ def build_winograd_filter_transform(
     W_ptr = b.param("W", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     W_bytes = b.param("W_bytes", I32)
     FilterWs = b.param(
-        "FilterWs", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
+        "FilterWs", PtrType(F16, "global"), noalias=True, writeonly=True, align=16
     )
     FilterWs_bytes = b.param("FilterWs_bytes", I32)
 
@@ -457,8 +564,10 @@ def build_winograd_filter_transform(
                 xpos = b.const_i32(xh * xs + xw)
                 kc_layer = b.add(b.mul(xpos, c_K), k_idx)
                 ws_off = b.add(b.mul(kc_layer, c_C), c_idx)
-                ws_byte = b.mul(ws_off, c4)
-                b.buffer_store_f32(fws_rsrc, ws_byte, c0, xformed[xh][xw])
+                ws_byte = b.mul(ws_off, c2)  # f16 = 2 bytes
+                b.buffer_store_f16(
+                    fws_rsrc, ws_byte, c0, b.trunc_f32_to_f16(xformed[xh][xw])
+                )
 
     return b.kernel
 
@@ -481,7 +590,7 @@ def build_winograd_output_transform(
 
     Kernel parameters::
 
-        GemmWs       : ptr<f32> global  — GEMM result workspace [xs*xs * N*tiles * K]
+        GemmWs       : ptr<f16> global  — GEMM result workspace [xs*xs * N*tiles * K]
         GemmWs_bytes : i32
         D            : ptr<f16> global  — NHWK output  [N, Ho, Wo, K]
         D_bytes      : i32
@@ -501,7 +610,7 @@ def build_winograd_output_transform(
     b.kernel.attrs["max_workgroup_size"] = block_nhw * block_k
 
     GemmWs = b.param(
-        "GemmWs", PtrType(F32, "global"), noalias=True, readonly=True, align=16
+        "GemmWs", PtrType(F16, "global"), noalias=True, readonly=True, align=16
     )
     GemmWs_bytes = b.param("GemmWs_bytes", I32)
     D_ptr = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
@@ -553,8 +662,10 @@ def build_winograd_output_transform(
                 xpos = b.const_i32(xh * xs + xw)
                 nhw_layer = b.add(b.mul(xpos, c_ntiles_total), nhw_idx)
                 ws_off = b.add(b.mul(nhw_layer, c_K), k_idx)
-                ws_byte = b.mul(ws_off, c4)
-                acc_tile[xh][xw] = b.buffer_load(gws_rsrc, ws_byte, c0, F32)
+                ws_byte = b.mul(ws_off, c2)  # f16 = 2 bytes
+                acc_tile[xh][xw] = b.cast_to_f32(
+                    b.buffer_load_f16(gws_rsrc, ws_byte, c0)
+                )
 
         # Apply A^T * acc * A  -> (out_tile x out_tile) result
         out_vals = emit_output_transform(b, tile, acc_tile)
