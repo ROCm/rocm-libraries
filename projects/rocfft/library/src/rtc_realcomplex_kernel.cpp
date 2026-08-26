@@ -52,7 +52,9 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
            1};
     generator.blockDim = {LAUNCH_BOUNDS_R2C_C2R_KERNEL, 1, 1};
 
-    RealComplexSpecs specs{node.GetKernelIndexType(),
+    const IndexType itype = node.GetKernelIndexType();
+
+    RealComplexSpecs specs{itype,
                            node.scheme,
                            node.dimension,
                            node.length.size(),
@@ -73,7 +75,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelRealComplex(kernel_name, module, gridDim, blockDim));
+            new RTCKernelRealComplex(kernel_name, itype, module, gridDim, blockDim));
     };
     return generator;
 }
@@ -92,7 +94,7 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
     std::copy(data.node->outStride.begin(), data.node->outStride.end(), kern_stride_out.begin());
     kern_stride_out[lensz] = data.node->oDist;
 
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs(itype);
     if(data.node->scheme == CS_KERNEL_COPY_HERM_TO_CMPLX)
     {
         // dim_0 is the innermost dimension
@@ -166,7 +168,9 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
 
     generator.blockDim = {LAUNCH_BOUNDS_R2C_C2R_KERNEL, 1, 1};
 
-    RealComplexEvenSpecs specs{{node.GetKernelIndexType(),
+    const IndexType itype = node.GetKernelIndexType();
+
+    RealComplexEvenSpecs specs{{itype,
                                 node.scheme,
                                 node.dimension,
                                 node.length.size(),
@@ -188,14 +192,14 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelRealComplexEven(kernel_name, half_N, module, gridDim, blockDim));
+            new RTCKernelRealComplexEven(kernel_name, itype, half_N, module, gridDim, blockDim));
     };
     return generator;
 }
 
 RTCKernelArgs RTCKernelRealComplexEven::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs(itype);
 
     kargs.append_index(half_N);
     // lengths + strides are exploded out into separate params
@@ -292,7 +296,9 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
     generator.blockDim = {tileX, tileY, 1};
 
-    RealComplexEvenTransposeSpecs specs{{node.GetKernelIndexType(),
+    const IndexType itype = node.GetKernelIndexType();
+
+    RealComplexEvenTransposeSpecs specs{{itype,
                                          node.scheme,
                                          node.dimension,
                                          node.length.size(),
@@ -315,7 +321,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelRealComplexEvenTranspose(kernel_name, module, gridDim, blockDim));
+            new RTCKernelRealComplexEvenTranspose(kernel_name, itype, module, gridDim, blockDim));
     };
 
     return generator;
@@ -323,7 +329,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
 RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs(itype);
 
     kargs.append_index(data.node->dimension, IndexType::U32);
     kargs.append_ptr(data.bufIn[0]);

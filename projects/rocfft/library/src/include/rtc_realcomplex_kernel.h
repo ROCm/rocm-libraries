@@ -26,10 +26,12 @@
 struct RTCKernelRealComplex : public RTCKernel
 {
     RTCKernelRealComplex(const std::string&                       kernel_name,
+                         IndexType                                itype,
                          std::shared_future<hipModule_wrapper_t>& module,
                          dim3                                     gridDim,
                          dim3                                     blockDim)
         : RTCKernel(kernel_name, module, gridDim, blockDim)
+        , itype(itype)
     {
     }
 
@@ -37,16 +39,22 @@ struct RTCKernelRealComplex : public RTCKernel
         generate_from_node(const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype);
 
     virtual RTCKernelArgs get_launch_args(DeviceCallIn& data) override;
+
+    // width the kernel was generated with, so that arguments declared
+    // as "index_type" are packed at the matching width
+    IndexType itype;
 };
 
 struct RTCKernelRealComplexEven : public RTCKernel
 {
     RTCKernelRealComplexEven(const std::string&                       kernel_name,
+                             IndexType                                itype,
                              size_t                                   half_N,
                              std::shared_future<hipModule_wrapper_t>& module,
                              dim3                                     gridDim,
                              dim3                                     blockDim)
         : RTCKernel(kernel_name, module, gridDim, blockDim)
+        , itype(itype)
         , half_N(half_N)
     {
     }
@@ -55,16 +63,22 @@ struct RTCKernelRealComplexEven : public RTCKernel
         generate_from_node(const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype);
 
     virtual RTCKernelArgs get_launch_args(DeviceCallIn& data) override;
-    size_t                half_N;
+
+    // width the kernel was generated with, so that arguments declared
+    // as "index_type" are packed at the matching width
+    IndexType itype;
+    size_t    half_N;
 };
 
 struct RTCKernelRealComplexEvenTranspose : public RTCKernel
 {
     RTCKernelRealComplexEvenTranspose(const std::string&                       kernel_name,
+                                      IndexType                                itype,
                                       std::shared_future<hipModule_wrapper_t>& module,
                                       dim3                                     gridDim,
                                       dim3                                     blockDim)
         : RTCKernel(kernel_name, module, gridDim, blockDim)
+        , itype(itype)
     {
     }
 
@@ -72,6 +86,10 @@ struct RTCKernelRealComplexEvenTranspose : public RTCKernel
         generate_from_node(const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype);
 
     virtual RTCKernelArgs get_launch_args(DeviceCallIn& data) override;
+
+    // width the kernel was generated with, so that arguments declared
+    // as "index_type" are packed at the matching width
+    IndexType itype;
 };
 
 #endif
