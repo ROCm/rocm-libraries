@@ -68,10 +68,12 @@ log = logging.getLogger("streamk_gpu")
 PASS, FAIL = "PASS", "FAIL"
 SKIP_EXIT = 77
 
-# gfx942 only. gfx90a has no fp8/bf8 MFMA, and on gfx950 the fp8/bf8 host codecs
-# in gemm_utils (FNUZ) disagree with the arch's OCP encoding — either arch would
-# make half the matrix red for reasons unrelated to Stream-K.
-SUPPORTED_ARCHS = ("gfx942",)
+# gfx90a stays out: it has no fp8/bf8 MFMA, so half the matrix below is
+# unrunnable there. gfx950 used to be excluded for a different reason -- the
+# gemm_utils host codec was FNUZ-only while the arch encodes fp8 as OCP -- which
+# had nothing to do with Stream-K. That codec now follows the arch (see
+# dispatcher_common.fp8_uses_ocp), so gfx950 is back in.
+SUPPORTED_ARCHS = ("gfx942", "gfx950")
 
 STRATEGIES = ("atomic", "linear", "tree")
 ALL_DTYPES = ("fp16", "bf16", "fp8", "bf8")

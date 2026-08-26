@@ -1577,10 +1577,16 @@ def runDispatcherPerfTests(String compiler, String gpuTarget = "gfx942") {
     }
 }
 
-// Which GEMM variants of test_gemm_search_space.py each arch can run. Bounded by
-// the tile_engine CMake arch guards -- the dispatcher cannot cover more archs
-// than the kernels it selects are built for. stream_k is gfx942-only until the
-// "TODO: add gfx950" in the stream-K CMakeLists is resolved.
+// Which GEMM variants of test_gemm_search_space.py each arch can run.
+//
+// stream_k used to be gfx942-only here, attributed to the "TODO: add gfx950" in
+// tile_engine/ops/gemm_streamk/CMakeLists.txt. That was the wrong cause: this
+// path never touches those AOT targets -- test_gemm_search_space drives
+// gemm_utils, which JIT-builds each config with hipcc and --offload-arch, and
+// neither gemm_utils nor the sweep tables carry any stream_k arch guard. The
+// real blocker was the fp8/bf8 encoding mismatch on gfx950, which is fixed (see
+// dispatcherSweepDtypesFor below). The CMake TODO is still worth resolving, but
+// as AOT hygiene, not as a gate on this lane.
 //
 // gfx1201 is absent on purpose, and the Jenkinsfile has no gfx1201 dispatcher
 // stage for the same reason: gemm_utils._SUPPORTED_ARCHES is
@@ -1594,7 +1600,7 @@ def runDispatcherPerfTests(String compiler, String gpuTarget = "gfx942") {
 def dispatcherGemmVariantsFor(String arch) {
     switch (arch) {
         case "gfx942":  return ["grouped", "multi_d", "multi_abd", "stream_k"]
-        case "gfx950":  return ["grouped", "multi_d", "multi_abd"]
+        case "gfx950":  return ["grouped", "multi_d", "multi_abd", "stream_k"]
         default:        return []
     }
 }
@@ -1788,8 +1794,13 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
     // shared sweep above only ever builds the atomic reduction strategy
     // (default_ci_config.json has no streamk_config, so expand_sweep falls
     // back to ["atomic"]), leaving linear/tree unverified through ctypes.
-    // It takes --gfx and self-gates to gfx942.
-    if (arch == "gfx942") {
+    // It takes --gfx and self-gates via SUPPORTED_ARCHS, now (gfx942, gfx950).
+    //
+    // Both are keyed off the variant list rather than a hardcoded arch == "gfx942"
+    // branch, so the sweep and its companions can never disagree about which
+    // archs run Stream-K. test_streamk_registry.py has no arch allow-list of its
+    // own, which is precisely why it needs the gate here.
+    if (dispatcherGemmVariantsFor(arch).contains("stream_k")) {
         execute_cmd += """ && \
         run_ok python3 ../dispatcher/tests/test_streamk_registry.py --arch ${arch} --datatypes fp16 --layouts rcr && \
         run_ok python3 ../dispatcher/tests/test_streamk_gpu_correctness.py --gfx ${arch}"""
