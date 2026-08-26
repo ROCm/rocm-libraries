@@ -141,13 +141,13 @@ from dataclasses import asdict, dataclass
 from typing import Optional, Sequence, Tuple
 
 from rocke.core.arch import ArchTarget
-from rocke.instances.common.conv_implicit_gemm import (
+from kernels.common.conv_implicit_gemm import (
     ConvDataSpec,
     ConvProblem,
     ImplicitGemmConvSpec,
     is_valid_spec as _fwd_is_valid_spec,
 )
-from rocke.instances.common.conv_implicit_gemm_wgrad import (
+from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     is_valid_wgrad_spec as _wgrad_is_valid_spec,
 )
