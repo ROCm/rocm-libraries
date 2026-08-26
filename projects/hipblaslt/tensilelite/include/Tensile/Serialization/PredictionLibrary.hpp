@@ -32,11 +32,13 @@
 
 #include <Tensile/Debug.hpp>
 #if ORIGAMI_ENABLE_NN
-#  include <origami/nn/nn.hpp>
+#include <origami/nn/nn.hpp>
 #endif
-#include <tensilelitehost/export.h>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -52,7 +54,7 @@ namespace TensileLite
 #if ORIGAMI_ENABLE_NN
             static std::string logic_stem_from_path(const std::string& path)
             {
-                std::string stem = path;
+                std::string stem     = path;
                 const auto  slashPos = stem.find_last_of("/\\");
                 if(slashPos != std::string::npos)
                     stem = stem.substr(slashPos + 1);
@@ -98,9 +100,10 @@ namespace TensileLite
                                       "ProblemPredictionLibrary requires non empty "
                                       "mapping index set.");
 
-                    for(std::size_t local_index = 0; local_index < mappingIndices.size(); local_index++)
+                    for(std::size_t local_index = 0; local_index < mappingIndices.size();
+                        local_index++)
                     {
-                        int index = mappingIndices[local_index];
+                        int  index   = mappingIndices[local_index];
                         auto slnIter = ctx->solutions->find(index);
                         if(slnIter == ctx->solutions->end())
                         {
@@ -147,7 +150,7 @@ namespace TensileLite
                                 .hand_optimized_main_loop
                                 = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
                                                                                        : false,
-                                .subtile                   = solution->sizeMapping.useSubtileImpl,
+                                .subtile = solution->sizeMapping.useSubtileImpl,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
@@ -166,7 +169,7 @@ namespace TensileLite
 #if ORIGAMI_ENABLE_NN
                     const std::string logicStem = logic_stem_from_path(ctx->filename);
                     const std::string dataDir   = directory_from_path(ctx->filename);
-                    lib.nn_models               = origami::nn::load_models_for_logic(logicStem, dataDir);
+                    lib.nn_models = origami::nn::load_models_for_logic(logicStem, dataDir);
                     if(const char* diag = std::getenv("ORIGAMI_NN_DIAG"))
                     {
                         if(diag[0] != '\0' && std::strcmp(diag, "0") != 0)
@@ -187,4 +190,3 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
-

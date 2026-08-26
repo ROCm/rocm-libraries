@@ -27,9 +27,7 @@ std::string join_path(const std::string& dir, const std::string& file) {
   return (std::filesystem::path(dir) / file).string();
 }
 
-bool read_float_vector(const YAML::Node& node,
-                       std::size_t expected,
-                       std::vector<float>* out) {
+bool read_float_vector(const YAML::Node& node, std::size_t expected, std::vector<float>* out) {
   if (!node || !node.IsSequence()) return false;
   if (node.size() != expected) return false;
   out->resize(expected);
@@ -118,7 +116,7 @@ bool parse_manifest(const YAML::Node& root,
   if (splits.size() > detail::kMaxSplits) return false;
   for (const auto& s : splits) {
     detail::SplitRule r;
-    r.cell      = s["parent"].as<std::string>();
+    r.cell        = s["parent"].as<std::string>();
     const auto ax = s["axis"].as<std::string>();
     if (ax.size() != 1) return false;
     r.axis      = ax[0];
@@ -137,9 +135,7 @@ bool parse_manifest(const YAML::Node& root,
   YAML::Node wts;
   try {
     wts = YAML::LoadFile(sidecar_path);
-  } catch (...) {
-    return false;
-  }
+  } catch (...) { return false; }
   if (!wts.IsMap()) return false;
   if (wts["schema_version"].as<std::uint32_t>() != detail::kTwrecSchemaVersion) return false;
   if (wts["format"].as<std::string>() != "TWREC_WTS_v1") return false;
@@ -201,13 +197,16 @@ bool load_twrec_yaml(const std::string& manifest_path, detail::LoadedModel* out)
   YAML::Node root;
   try {
     root = YAML::LoadFile(manifest_path);
-  } catch (...) {
-    return false;
-  }
+  } catch (...) { return false; }
 
   const std::string dir = parent_dir(manifest_path);
-  if (!parse_manifest(root, dir, out)) return false;
-  return detail::finalize_loaded_model(out);
+  try {
+    if (!parse_manifest(root, dir, out)) return false;
+    return detail::finalize_loaded_model(out);
+  } catch (const YAML::Exception& e) {
+    std::cerr << "Failed to load YAML config from " << manifest_path << ": " << e.what() << '\n';
+    return false;
+  }
 }
 
 }  // namespace origami::nn::twrec
