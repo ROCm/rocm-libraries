@@ -83,7 +83,22 @@ TEST(MatmulOrchestration, MapsScaleModes)
     };
 
     for(const auto& [format, expected] : mappings)
-        EXPECT_EQ(matmulScaleMode(format), expected);
+        EXPECT_EQ(hipblaslt::client::matmulScaleMode(format), expected);
+}
+
+TEST(MatmulOrchestration, MapsSwizzledMatrixLayouts)
+{
+    EXPECT_TRUE(hipblaslt::client::supportsMatmulSwizzle(HIP_R_16F));
+    EXPECT_TRUE(hipblaslt::client::supportsMatmulSwizzle(HIP_R_16BF));
+    EXPECT_FALSE(hipblaslt::client::supportsMatmulSwizzle(HIP_R_32F));
+
+    EXPECT_EQ(hipblaslt::client::matmulOrderForDataType(HIP_R_16F),
+              HIPBLASLT_ORDER_COL16_4R8);
+    EXPECT_EQ(hipblaslt::client::matmulOrderForDataType(HIP_R_8F_E4M3_FNUZ),
+              HIPBLASLT_ORDER_COL16_4R16);
+    EXPECT_EQ(hipblaslt::client::matmulOrderForDataType(HIP_R_4F_E2M1),
+              HIPBLASLT_ORDER_COL16_4R32);
+    EXPECT_THROW(hipblaslt::client::matmulOrderForDataType(HIP_R_32F), std::runtime_error);
 }
 
 TEST(MatmulOrchestration, MapsEpiloguePolicy)
