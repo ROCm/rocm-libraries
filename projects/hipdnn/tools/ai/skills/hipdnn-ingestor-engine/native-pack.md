@@ -47,10 +47,30 @@ Structure, in order:
 5. **Cross-tensor consistency.** K/V agree with Q on head size, batch, dtype; GQA
    divisibility (`numQueryHeads % numKvHeads == 0`) — the kernel derives its group size by
    integer division, so a non-divisible pair silently drops the remainder heads.
-6. **Reject every unsupported optional attribute, explicitly.** Masks, bias, paged KV,
-   varlen, dropout, aux outputs, quantization scales. *An unchecked mode is accepted and
-   then silently not performed* — the graph asked for dropout, you ignored it, the numbers
-   are wrong and nothing errored.
+6. **Reject every unsupported optional attribute, explicitly.** *An unchecked mode is
+   accepted and then silently not performed* — the graph asked for dropout, you ignored
+   it, the numbers are wrong and nothing errored.
+
+   **This is an exhaustive audit of the graph schema, not a check of the modes you
+   happen to remember.** The attributes table for an op carries roughly two dozen
+   optional fields, several of which are the *same* feature under different spellings —
+   dropout alone appears as `dropout_probability`, `dropout_mask_tensor_uid`,
+   `dropout_scale_tensor_uid`, `seed_tensor_uid` and `offset_tensor_uid`, and a check
+   covering only the first admits graphs carrying the rest. Aux outputs and quantization
+   fan out the same way.
+
+   So work from the schema, not from memory: open the op's `.fbs` table (e.g.
+   `SdpaAttributes` in `projects/hipdnn/**/*.fbs`), list **every** optional field, and
+   account for each one — implemented, or explicitly rejected. Two of them are easy to
+   miss because they are hipDNN-graph concepts with no rocKE counterpart, so
+   `rocke-mining.md`'s Python-scoped checklist will never surface them:
+
+   - `scale_tensor_uid` — a *device-resident* scale. A kernel taking `scale` as a launch
+     scalar cannot accept it, and nothing about the Python spec says so.
+   - `mma_core_mode` and the quantization scale UIDs — likewise absent from the spec.
+
+   The mining checklist tells you what the *kernel* cannot do. This audit tells you what
+   the *graph* can ask for. Both are required; neither substitutes for the other.
 7. **Bind the tokens** and return them.
 
 ### The layout check
@@ -126,6 +146,18 @@ candidate, read the metadata.
 ```cpp
 auto code = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
 ```
+
+**The `options` argument throws on a BSHD tensor — do not pass the real one.**
+`KernelCompileOptions` classifies whatever tensor it is handed as NCHW or NHWC, and a
+BSHD attention tensor is neither, so constructing it from your actual query tensor
+throws at `prepare()` time. `PointwiseNative.cpp` passes its real tensor and is the
+natural thing to copy — it works there only because a pointwise tensor *is* classifiable.
+
+For a KPACK attention kernel, pass a layout-neutral stand-in (a minimal tensor whose
+classification is irrelevant), and say in a comment why it is safe: the KPACK path
+loads a prebuilt code object and never reads these options. An `EMBEDDED_SOURCE` kernel
+in a BSHD pack does *not* get that escape — the options reach a real compile, so it
+needs a genuine answer.
 
 `buildIngestorKernelCode` (`IngestorKernelCode.hpp`) switches on `kernel.source.kind`:
 `EMBEDDED_SOURCE` compiles the named source; `KPACK` resolves `source.library` relative to

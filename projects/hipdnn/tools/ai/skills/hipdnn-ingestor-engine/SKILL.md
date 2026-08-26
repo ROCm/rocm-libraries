@@ -44,6 +44,13 @@ The nine stages, in order. A run is **incomplete** until stage 8:
 | 8 | **Tested on device** | Quick-tier cases covering every supported feature of THIS op (many tiny graphs, budget-bounded) plus standard-tier cases at realistic sizes, added to `dnn-providers/integration-tests/`; a real graph dispatches on the target arch, verified against a reference |
 | 9 | Handed back | Residual judgment calls surfaced to the human with a recommendation |
 
+**Each stage leaves an artifact on disk, and you commit it before starting the next.**
+`prompt.md` § *What each step must produce* has the per-step table. Two stages are where
+runs die and both have a mechanical check: stage 2 is done when `mining.md` exists, and
+stage 5 is done when `grep -c "FILL THIS OUT"` on the pack returns 0. Research that
+produced no file is not a completed stage — it is a stall, and the cure is to write down
+what you have, mark the uncertain rows, and move.
+
 **Stage 5 is where agents quit, and it is the stage that matters most.** The generator
 emits a native stub whose every body is `// TODO - FILL THIS OUT` because those bodies
 need kernel knowledge no tool can infer. *You* are the one expected to supply it — from

@@ -39,6 +39,36 @@ distinction is a UMD or lives in the engine's `graph_match` — are yours.
 
 ## Create flow
 
+### What each step must produce before the next one starts
+
+Every step below has a **required output** and a **gate**. The output is a concrete
+artifact — a file on disk, a command's exit code, a message sent. The gate is the
+condition that lets you start the next step. **Do not advance on a step whose output
+does not exist yet.**
+
+Research is not an output. Reading source, introspecting a builder, and cross-checking
+a peer's findings all feel like progress and leave nothing behind. If your last hour
+produced no file, no exit code, and no message, you are not on a step — you are stalled,
+and the fix is to write down what you have and move.
+
+| Step | Required output | Gate to advance |
+|---|---|---|
+| 0 | The dialect, stated in one line with the reason | Stated |
+| 1 | Source paths (or builder module + function) in hand | You can name the files |
+| 2 | **`mining.md` written to disk** — the five deliverables in full | The file exists and every row of the constraint table has a graph-derivable verdict |
+| 3 | Batch message sent to the human, with your proposals | Sent. Then wait — this is the one blocking prompt |
+| 4 | `config.yaml` + `generate.py` exit 0 | Exit 0 and the output tree exists |
+| 5 | Validator exit 0, or the reason it could not run | Ran, or its absence stated by flag name |
+| 6 | **Native pack `.cpp` with zero `FILL THIS OUT`** | `grep -c "FILL THIS OUT"` returns 0 |
+| 7 | Build succeeded; engine in `hipdnn_list_engines` | The grep finds your engine name |
+| 8 | Tests added under `dnn-providers/integration-tests/`, run on device | A real graph dispatched and matched a reference |
+| 9 | Completion report against all nine stages | — |
+
+**Commit each artifact as you produce it.** A step's output that exists only in your
+context is lost the moment you stop, and a partial `mining.md` committed beats a perfect
+one that never lands. If you stop for any reason, what you committed is the deliverable.
+
+
 ### Step 0 — Settle the dialect first
 
 **Two authored dialects exist and they are not interchangeable.** Everything after this
@@ -127,6 +157,16 @@ the constraint table (with a graph-derivable column on *every* row), the layout 
 with the arithmetic that proves it, the grid/block formulas with constants resolved, the
 ABI list with conditionals in order, and the rejection checklist ordered by failure
 severity. Those become your matcher, your dispatch, and half of your Step 3 questions.
+
+**Write them to `mining.md` and commit it before starting Step 3.** This is the step's
+output, and it is the step agents stall on: the reading is open-ended, every additional
+source feels like it might matter, and nothing forces a stop. The file is the stop. When
+the five deliverables are on disk, the step is over — go to Step 3 even if you could
+keep reading.
+
+A row you are unsure about goes in the table marked `UNSURE`, and becomes a Step 3
+question. That is what Step 3 is for. Withholding the file until you are confident is
+how a two-hour mining step produces nothing at all.
 
 Skipping this produces an engine that advertises a kernel it cannot correctly serve —
 and because a wrong layout is read in-bounds rather than faulting, the result is wrong
@@ -259,6 +299,25 @@ separately compiled code object — it costs build time, archive size, and insta
 footprint. A full cross-product of every axis blows past that immediately, so choose:
 cover each capability once, then spend the remaining budget on tuning variants for the
 configurations that actually matter. Say what you pruned and why.
+
+**When the axes are not orthogonal — and for attention they are not.** The guidance
+above assumes a `pointwise_add` shape, where block size and dtype cross freely. Many
+kernels are not like that. `attention_dense`'s features are *mutually exclusive* in
+non-obvious ways: `paged` excludes `varlen` and `persistent` and requires `batch == 1`
+and `head_size == 128` and `sliding_window > 0`; `varlen` excludes `persistent` and
+requires `causal`; `use_sinks` excludes both `paged` and `varlen`. A cross-product here
+is not merely large, it is mostly *illegal* — most cells fail `__post_init__`.
+
+For a kernel like that, the honest first integration is usually **narrow and explicit**:
+ship the dense core (say causal × non-causal × dtype × a tuning knob), and have
+`graph_match` explicitly decline `paged`, `varlen`, `sinks` and `sliding_window`. That
+is a *stated scope limit*, not a gap — the engine serves what it ships and loudly
+declines the rest, which is the correct, debuggable failure.
+
+What makes this legitimate rather than lazy is saying it. Name the declined features in
+the Step 3 batch, give each one a negative test in Step 8, and list them in Step 9 as
+the obvious follow-on work. What is *not* acceptable is advertising a feature with no
+variant behind it — that is the applicability defect, arriving as wrong numbers.
 
 **Bring a proposal, not a question.** Enumerate the concrete variant list with its KMD
 tuples, note which axes are capability and which are tuning, and give the total count.

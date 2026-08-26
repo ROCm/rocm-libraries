@@ -40,7 +40,7 @@ Then read the source. Introspection gives you *fields*; only the source gives yo
 
 ## The classification that matters
 
-Every rule in `__post_init__` is one of two kinds, and only one of them belongs in a
+Every rule in `__post_init__` is one of three kinds, and only some of them belong in a
 matcher:
 
 - **Graph-derivable** — checkable from tensor dims/strides/dtype or node attributes.
@@ -50,6 +50,8 @@ matcher:
   occupancy hints, padding, persistent-CTA counts). These are not graph properties. They
   belong to whatever code builds the spec, and putting them in a matcher makes it reject
   graphs it could serve.
+- **Knob-selection** — one side is a graph fact, the other is a knob *you* choose. These
+  are neither, and they are the ones that break a two-bucket sort. See below.
 
 Build a table with a graph-derivable column filled for **every** rule. Example, from the
 gfx950 dense-attention kernel:
@@ -61,6 +63,7 @@ gfx950 dense-attention kernel:
 | `num_query_heads % num_kv_heads == 0` | YES — both are dims | `graph_match` (GQA) |
 | `sliding_window > 0 requires causal` | YES — node attributes | `graph_match` |
 | `paged` requires `head_size == 128`, `batch == 1`, `sliding_window > 0` | YES | `graph_match` |
+| `seqlen_kv % block_n == 0` | PARTIAL — graph fact vs. a knob | `kernel_match`, against `$kernel.block_n` (KNOB-SEL) |
 | `block_n % 32 == 0` | NO — a knob you pick | spec construction |
 | `waves_per_eu` in `[1,8]`, `lds_k_group_pad % 8 == 0` | NO — tuning knobs | spec construction |
 | `persist_decode` enum, `num_persistent > 0` | NO — launch strategy | spec construction |
@@ -68,7 +71,33 @@ gfx950 dense-attention kernel:
 **Over-rejecting is a real bug too.** A knob that does not fit is a reason to pick a
 different knob, not to decline the graph.
 
+### A third kind: the knob-selection constraint
+
+A rule that compares a graph fact against a knob you choose belongs in **neither**
+bucket, and forcing it into one produces a bug either way. From the gfx950 dense kernel:
+
+```python
+seqlen_kv % block_n == 0
+sliding_window % block_n == 0
+```
+
+`seqlen_kv` and `sliding_window` come from the graph. `block_n` is a tuning knob the
+integration picks. Sort this "graph-derivable" and the matcher declines graphs a
+different `block_n` would serve; sort it "spec-internal" and the matcher admits graphs
+the shipped variant faults on.
+
+**The correct handling is selection, not rejection.** The matcher's job is to pick a
+variant whose `block_n` divides this graph's `seqlen_kv`, and to decline only when *no*
+shipped variant does. Concretely: `kernel_match` tests `seqlen_kv % $kernel.block_n == 0`
+against the candidate kernel rather than a fixed constant, so each variant answers for
+itself and `score` ranks whichever survive.
+
+Mark these rows `KNOB-SEL` in the table with both operands named. They are also a
+variant-set input: the set of `block_n` values you ship determines which sequence lengths
+the engine can serve at all.
+
 ### Two more buckets you will hit
+
 
 **Unrepresentable — a real capability with no hipDNN attribute to carry it.** Some rocKE
 features change *semantics* (so they are not tuning knobs) yet have no corresponding
@@ -224,10 +253,25 @@ Two independent mistakes produced it, and both are avoidable here:
    Once applicability is honest, the narrow variant set becomes visible as *declining
    graphs* — the correct, loud failure, and the signal to widen the set.
 
-**The check to run:** for every field in your descriptor's `spec` block, ask "is this
-value pinned, and if so does the matcher enforce it?" A pinned value with no matcher
-check is this defect. Put it in your rejection checklist at Tier 1 — silent wrong
-answers — because the engine will accept work it cannot do.
+**The check to run — and it is exhaustive, not a hunt for one sneaky field.** `batch` is
+the example because it shipped, not because it is special. The rule is: **every field a
+variant pins needs a matcher check.** For the gfx950 dense kernel that is eight of them
+— `batch`, `seqlen_q`, `seqlen_kv`, `num_query_heads`, `num_kv_heads`, `head_size`,
+`causal`, `block_n` — not one.
+
+So enumerate mechanically rather than by eye. Walk your descriptor's `spec` block field
+by field, and for each one write down the matcher check that enforces it and where it
+lives. A field with no check is this defect. Do it as a table in `mining.md`:
+
+| Spec field | Pinned to | Enforced by | Hook |
+|---|---|---|---|
+| `head_size` | 128 | `attrs.head_size == $kernel.head_size` | `kernel_match` |
+| `batch` | 1 | `problem.batch == 1` | `kernel_match` |
+| ... | ... | **MISSING** ← the defect | |
+
+Reading the list and thinking "those look fine" is exactly how the shipped bug shipped.
+Put every unenforced row in your rejection checklist at Tier 1 — silent wrong answers —
+because the engine will accept work it cannot do.
 
 ### When verification fails, suspect applicability first
 
