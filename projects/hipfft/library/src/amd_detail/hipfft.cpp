@@ -1272,8 +1272,13 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 
         // JIT callbacks cannot currently be combined with multi-GPU
         // transforms.
+        const bool is_multi_gpu_transform = plan->device_contexts.size() > 1
+#ifdef HIPFFT_MPI_ENABLE
+                                            || plan->mp_input_brick || plan->mp_output_brick
+#endif
+            ;
         if((plan->load_callback.jit_enabled() || plan->store_callback.jit_enabled())
-           && plan->device_contexts.size() > 1)
+           && is_multi_gpu_transform)
             return HIPFFT_NOT_IMPLEMENTED;
         if(plan->load_callback.jit_enabled())
         {
