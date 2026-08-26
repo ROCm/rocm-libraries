@@ -212,8 +212,14 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
         endif()
 
-        # Force GENERIC target to ensure binaries work on all CPUs
-        list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+        # Force GENERIC target to ensure binaries work on all CPUs.
+        # OpenBLAS lacks a KERNEL.generic file for POWER, so fall back
+        # to the base POWER target on ppc64le (see OpenBLAS#5987).
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
+            list(APPEND LAPACK_CMAKE_ARGS -DTARGET=POWER8)
+        else()
+            list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+        endif()
 
         # Downgrade incompatible-pointer-types errors to warnings when using Clang
         if(CMAKE_C_COMPILER_ID MATCHES "Clang")
