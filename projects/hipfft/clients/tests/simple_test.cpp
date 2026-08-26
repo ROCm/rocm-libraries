@@ -153,8 +153,8 @@ TEST(hipfftTest, ZeroSizePlan)
     hipDataType const xt_type     = HIP_C_32F;
     size_t            workSize;
 
-    auto expect_rejected = [](hipfftResult ret, hipfftResult expected = HIPFFT_INVALID_VALUE) {
-        EXPECT_EQ(ret, expected) << "not rejected: " << hipfftResult_string(ret);
+    auto expect_rejected = [](hipfftResult ret) {
+        EXPECT_EQ(ret, HIPFFT_INVALID_SIZE) << "not rejected: " << hipfftResult_string(ret);
     };
 
     {
@@ -186,8 +186,7 @@ TEST(hipfftTest, ZeroSizePlan)
     {
         hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
         expect_rejected(
-            hipfftPlanMany(&plan, rank, n, nullptr, stride, dist, nullptr, stride, dist, type, 0),
-            HIPFFT_INVALID_SIZE);
+            hipfftPlanMany(&plan, rank, n, nullptr, stride, dist, nullptr, stride, dist, type, 0));
         ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
     }
 
@@ -207,10 +206,8 @@ TEST(hipfftTest, ZeroSizePlan)
 
         expect_rejected(hipfftMakePlanMany(
             plan, rank, n_zero, nullptr, stride, dist, nullptr, stride, dist, type, 1, &workSize));
-        expect_rejected(
-            hipfftMakePlanMany(
-                plan, rank, n, nullptr, stride, dist, nullptr, stride, dist, type, 0, &workSize),
-            HIPFFT_INVALID_SIZE);
+        expect_rejected(hipfftMakePlanMany(
+            plan, rank, n, nullptr, stride, dist, nullptr, stride, dist, type, 0, &workSize));
 
         expect_rejected(hipfftMakePlanMany64(plan,
                                              rank,
@@ -224,10 +221,8 @@ TEST(hipfftTest, ZeroSizePlan)
                                              type,
                                              1,
                                              &workSize));
-        expect_rejected(
-            hipfftMakePlanMany64(
-                plan, rank, n64, nullptr, stride, dist, nullptr, stride, dist, type, 0, &workSize),
-            HIPFFT_INVALID_SIZE);
+        expect_rejected(hipfftMakePlanMany64(
+            plan, rank, n64, nullptr, stride, dist, nullptr, stride, dist, type, 0, &workSize));
 
         expect_rejected(hipfftXtMakePlanMany(plan,
                                              rank,
@@ -256,8 +251,7 @@ TEST(hipfftTest, ZeroSizePlan)
                                              xt_type,
                                              0,
                                              &workSize,
-                                             xt_type),
-                        HIPFFT_INVALID_SIZE);
+                                             xt_type));
 
         // hipfftGetSize* and hipfftEstimate* plan internally, so they reject too.
         expect_rejected(hipfftGetSize1d(plan, 0, type, 1, &workSize));
