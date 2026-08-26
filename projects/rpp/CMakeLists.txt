@@ -184,54 +184,58 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 # Half (HALF::half carries INTERFACE include dirs for transitive use via rpp::rpp)
 find_package(HALF REQUIRED)
 
-# Check for FFT libraries based on backend
+# Audio support and FFT backend selection.
+# CPU: FFTS library (RPP_USE_FFTS_LIB=1) or in-house FFT (RPP_USE_FFTS_LIB=0)
+# HIP: rocFFT library (RPP_USE_ROCFFT_LIB=1) or manual DFT (RPP_USE_ROCFFT_LIB=0)
 find_package(FFTS QUIET)
+if(FFTS_FOUND)
+    set(RPP_USE_FFTS_LIB 1)
+    set(RPP_AUDIO_SUPPORT ON)
+else()
+    set(RPP_USE_FFTS_LIB 0)  # fall back to the in-house CPU FFT
+endif()
 
 # For HIP backend, also check for rocFFT
 if("${BACKEND}" STREQUAL "HIP")
     find_package(ROCFFT QUIET)
+    if(ROCFFT_FOUND)
+        set(RPP_USE_ROCFFT_LIB 1)
+        set(RPP_AUDIO_SUPPORT ON)
+    endif()
 endif()
 
-# Enable audio support if we have the required FFT library for the backend
-if(FFTS_FOUND OR ("${BACKEND}" STREQUAL "HIP" AND ROCFFT_FOUND))
-    set(RPP_AUDIO_SUPPORT ON)
-    add_definitions(-DAUDIO_SUPPORT)        # For compile flags in RPP
-    set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)  # For cmakedefine01 in rpp_audio_augmentations_support.h.in
+if(RPP_AUDIO_SUPPORT)
+    add_definitions(-DAUDIO_SUPPORT)                          # For compile flags in RPP
+    add_definitions(-DRPP_USE_FFTS_LIB=${RPP_USE_FFTS_LIB})   # CPU: 1 = FFTS, 0 = in-house FFT
+    set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)                    # For cmakedefine01 in rpp_audio_augmentations_support.h.in
 
-    if(FFTS_FOUND)
-        message("-- ${Green}${PROJECT_NAME} found FFTS - CPU audio support enabled${ColourReset}")
-    endif()
-
-    if("${BACKEND}" STREQUAL "HIP" AND ROCFFT_FOUND)
-        add_definitions(-DRPP_USE_ROCFFT)
-        set(RPP_USE_ROCFFT_LIB 1)
-        message("-- ${Green}${PROJECT_NAME} found rocFFT - GPU FFT acceleration enabled${ColourReset}")
+    # CPU backend messages
+    if(RPP_USE_FFTS_LIB)
+        message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT (FFTS)${ColourReset}")
     else()
-        set(RPP_USE_ROCFFT_LIB 0)
-        if("${BACKEND}" STREQUAL "HIP")
-            message("-- ${Yellow}rocFFT not found${ColourReset}")
-        endif()
+        message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT (in-house CPU FFT)${ColourReset}")
     endif()
 
-    message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT${ColourReset}")
-else()
-    if(RPP_AUDIO_SUPPORT)
-        if("${BACKEND}" STREQUAL "CPU")
-            message(FATAL_ERROR "${Red}RPP_AUDIO_SUPPORT=ON but FFTS was not found for CPU backend. Please ensure FFTS is available or set -DRPP_AUDIO_SUPPORT=OFF${ColourReset}")
+    # HIP backend messages
+    if("${BACKEND}" STREQUAL "HIP")
+        if(RPP_USE_ROCFFT_LIB)
+            add_definitions(-DRPP_USE_ROCFFT)
+            message("-- ${Green}${PROJECT_NAME} found rocFFT - GPU FFT acceleration enabled${ColourReset}")
         else()
-            message(FATAL_ERROR "${Red}RPP_AUDIO_SUPPORT=ON but neither FFTS nor rocFFT was found. Please ensure rocFFT is available for HIP backend or set -DRPP_AUDIO_SUPPORT=OFF${ColourReset}")
+            message("-- ${Yellow}rocFFT not found - GPU will use manual DFT${ColourReset}")
         endif()
-    else()
-        message("-- ${Yellow}FFT libraries not found. ${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT${ColourReset}")
     endif()
+else()
+    message("-- ${Yellow}FFT libraries not found. ${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT (set -DRPP_AUDIO_SUPPORT=ON to build audio support using the in-house CPU FFT)${ColourReset}")
 endif()
 
 message("-- ${Cyan}RPP Developer Options${ColourReset}")
 message("-- ${Cyan}     -D BACKEND=${BACKEND} [Select RPP Backend [options:CPU/HIP](default:HIP)]${ColourReset}")
 message("-- ${Cyan}     -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} [Select RPP build type [options:Debug/Release](default:Release)]${ColourReset}")
 message("-- ${Cyan}     -D RPP_AUDIO_SUPPORT=${RPP_AUDIO_SUPPORT} [Select RPP audio support [options:ON/OFF](default:ON)]${ColourReset}")
-if("${BACKEND}" STREQUAL "HIP")
-    message("-- ${Cyan}     RPP_USE_ROCFFT_LIB=${RPP_USE_ROCFFT_LIB} [GPU FFT backend (auto-detected)]${ColourReset}")
+message("-- ${Cyan}     RPP_USE_FFTS_LIB=${RPP_USE_FFTS_LIB} [CPU FFT backend: 1 = FFTS library, 0 = in-house FFT (auto-detected)]${ColourReset}")
+if("${BACKEND}" STREQUAL "HIP" AND DEFINED RPP_USE_ROCFFT_LIB)
+    message("-- ${Cyan}     RPP_USE_ROCFFT_LIB=${RPP_USE_ROCFFT_LIB} [HIP FFT backend: 1 = rocFFT library (auto-detected)]${ColourReset}")
 endif()
 message("-- ${Cyan}     -D CODE_COVERAGE=${CODE_COVERAGE} [Select RPP code coverage instrumentation [options:ON/OFF](default:OFF)]${ColourReset}")
 
@@ -408,7 +412,7 @@ endif()
 
 if(RPP_AUDIO_SUPPORT)
     # Link FFTS for CPU backend
-    if("${BACKEND}" STREQUAL "CPU" AND FFTS_FOUND)
+    if(RPP_USE_FFTS_LIB)
         target_link_libraries(${PROJECT_NAME} PRIVATE FFTS::FFTS)
         message("-- ${Green}${PROJECT_NAME} linked with FFTS library (CPU)${ColourReset}")
     endif()
@@ -492,7 +496,7 @@ endif()
 set(CPACK_RESOURCE_FILE_LICENSE  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
 install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan)
-if(RPP_AUDIO_SUPPORT AND FFTS_FOUND)
+if(RPP_AUDIO_SUPPORT AND RPP_USE_FFTS_LIB)
     set(CPACK_RESOURCE_FILE_FFTS_LICENSE  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffts/COPYRIGHT")
     if(EXISTS ${CPACK_RESOURCE_FILE_FFTS_LICENSE})
         install(FILES ${CPACK_RESOURCE_FILE_FFTS_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
