@@ -51,6 +51,14 @@ stage 5 is done when `grep -c "FILL THIS OUT"` on the pack returns 0. Research t
 produced no file is not a completed stage — it is a stall, and the cure is to write down
 what you have, mark the uncertain rows, and move.
 
+**Check at stage 1 that stage 8 is reachable.** The shared CPU and GPU reference
+executors are dense and stride-based; both decline paged KV, varlen, ragged tensors and
+block-sparse/sinks outright. A kernel that requires one of those has no reference to be
+verified against, and you will not discover that until stage 8 — after the descriptors,
+the hooks and the build are already done. `prompt.md` § *Before you commit to a kernel*
+has the decline table and the options. For a first integration, pick a kernel the shared
+references already cover.
+
 **Stage 5 is where agents quit, and it is the stage that matters most.** The generator
 emits a native stub whose every body is `// TODO - FILL THIS OUT` because those bodies
 need kernel knowledge no tool can infer. *You* are the one expected to supply it — from

@@ -54,7 +54,7 @@ and the fix is to write down what you have and move.
 | Step | Required output | Gate to advance |
 |---|---|---|
 | 0 | The dialect, stated in one line with the reason | Stated |
-| 1 | Source paths (or builder module + function) in hand | You can name the files |
+| 1 | Source paths (or builder module + function) in hand | You can name the files **and** you have confirmed a stage-8 reference can reach this kernel |
 | 2 | **`mining.md` written to disk** — the five deliverables in full | The file exists and every row has a verdict. Draft it before your third source; five sources beyond the kernel module, max |
 | 3 | Batch message sent to the human, with your proposals | Sent. Then wait — this is the one blocking prompt |
 | 4 | `config.yaml` + `generate.py` exit 0 | Exit 0 and the output tree exists |
@@ -111,6 +111,52 @@ sources at all, which is the format's sharpest trap.
 
 If the user has already pasted or referenced the source in their request, skip the
 prompt and go straight to Step 2.
+
+#### Before you commit to a kernel, check it can be verified
+
+Stage 8 needs a **reference** to compare against, and the shared executors only reference
+what they can express. Both are dense and stride-based, and both decline anything else
+up front:
+
+| Graph feature | Attribute | CPU exec | GPU exec |
+|---|---|---|---|
+| paged KV | `page_table_k/v_tensor_uid` (node) | declines | declines |
+| varlen | `seq_len_q/kv_tensor_uid` (node) | declines | declines |
+| ragged | `ragged_offset_tensor_uid` (**tensor**) | declines | declines |
+| block-sparse / sinks | `block_mask_/sink_token_tensor_uid` | declines | declines |
+
+(`test_sdk/.../cpu_graph_executor/detail/SdpaFwdPlan.hpp` and `PlanUtils.hpp`'s
+`CHECK_NO_RAGGED_TENSORS`; `integration-tests/src/harness/gpu-graph-executor/detail/
+GpuSdpaFwdPlan.hpp`.)
+
+**These three are different things, and conflating them produces a wrong matcher.**
+Paged is a block-table indirection into a physical cache. Varlen is per-batch valid
+lengths inside a *padded* buffer. Ragged is one contiguous buffer where batch `b` lives
+at `[off[b], off[b+1])` with *no* padding — a property of the TENSOR, not the node, and
+gated on plugin API version (`K_RAGGED_TENSOR_MIN_API_VERSION`). A kernel parameter named
+`seq_lens_ptr` could be any of them; settle it from the address arithmetic, never the
+name.
+
+So, before mining anything, ask: **does this kernel have a dense path at all?** Grep its
+builder for the feature's plumbing and check whether an `if` guards it. If every K/V
+access routes through a block table with no branch, the kernel is paged-*only* and there
+is no dense subset to ship.
+
+If it is dense-only-capable, proceed normally. If not, say so **now**, before Step 2, and
+get a decision — because the options are all expensive:
+
+- Write a gather/expand adapter (paged→dense via the block table, ragged→padded via the
+  offset table) so the existing reference can be reached. Pure address remapping, no new
+  math, and it unblocks every later engine of that shape. The right fix, but it is a
+  change to the shared harness, not to your engine.
+- Hand-roll a reference. **Weakest option** — a reference you write from the same kernel
+  you are integrating proves self-consistency, not correctness, and a shared
+  misunderstanding cancels out silently.
+- Pick a different kernel.
+
+**For a first integration, prefer a kernel the shared references already cover.** Reaching
+stage 8 on a dense kernel teaches the whole flow; a kernel needing harness work teaches
+the flow *plus* an unrelated problem, and the second one dominates.
 
 ### Step 2 — Infer aggressively from the source
 
