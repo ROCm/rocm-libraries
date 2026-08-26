@@ -270,12 +270,12 @@ def _rowcolquant_descriptor() -> BridgeDescriptor:
         default_fp8_config,
         default_bf8_config,
     )
-    from codegen_common import make_rowcolquant_kernel_name
+    from codegen_common import make_gemm_rowcolquant_kernel_name
 
     cases = [("fp8", default_fp8_config), ("bf8", default_bf8_config)]
 
     def name_contract(cfg):
-        return make_rowcolquant_kernel_name(
+        return make_gemm_rowcolquant_kernel_name(
             variant_key=cfg.variant_key,
             layout=cfg.layout,
             pipeline=cfg.pipeline,

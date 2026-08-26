@@ -37,7 +37,7 @@ from codegen_common import (  # noqa: E402
     abquant_effective_epilogue,
     gemm_aquant_effective_epilogue,
     make_bquant_kernel_name,
-    make_rowcolquant_kernel_name,
+    make_gemm_rowcolquant_kernel_name,
     make_aquant_kernel_name,
     # Shared quant spec-sweep plumbing (see TestQuantSpecSweepHelpers).
     fp8_warp_tile_k_for_arch,
@@ -358,7 +358,7 @@ class TestQuantKernelNames(unittest.TestCase):
         # RowColQuant has no quant-group segment: scales are per-row / per-col
         # vectors, not blocks.
         self.assertEqual(
-            make_rowcolquant_kernel_name(*_ARGS, **_TILE),
+            make_gemm_rowcolquant_kernel_name(*_ARGS, **_TILE),
             "gemm_rowcolquant_fp8_rcr_compv3_cshuffle_intrawave"
             "_128x128x128_1x4x1_16x16x32",
         )
@@ -475,7 +475,7 @@ class TestQuantKernelNameInvariants(unittest.TestCase):
     def _all_builders(self):
         return [
             ("tensor_quant", lambda **t: make_tensor_quant_kernel_name(*_ARGS, **t)),
-            ("rowcolquant", lambda **t: make_rowcolquant_kernel_name(*_ARGS, **t)),
+            ("rowcolquant", lambda **t: make_gemm_rowcolquant_kernel_name(*_ARGS, **t)),
             ("gemm_aquant", lambda **t: make_gemm_aquant_kernel_name(
                 *_ARGS, **t, quant_group_m=1, quant_group_n=1, quant_group_k=128)),
             ("gemm_abquant", lambda **t: make_gemm_abquant_kernel_name(

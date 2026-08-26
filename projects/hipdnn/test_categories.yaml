@@ -38,6 +38,7 @@ test_categories:
     description: "Current hipDNN unit-check coverage"
     test_patterns:
       - "hipdnn_test_name_validation"
+      - "hipdnn_cache_key_codegen_tests"
       - "hipdnn_data_sdk_tests"
       - "hipdnn_flatbuffers_sdk_tests"
       - "hipdnn_backend_tests"

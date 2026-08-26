@@ -51,7 +51,7 @@ from codegen_common import (
     emit_single_kernel_include_footer,
     fp8_warp_tile_k_for_arch,
     iter_quant_axes,
-    make_rowcolquant_kernel_name,
+    make_gemm_rowcolquant_kernel_name,
     quant_decode_default_config,
     rcr_only_layout_guard,
     run_codegen_cli,
@@ -133,7 +133,7 @@ class RowColQuantKernelSpec:
     @property
     def name(self) -> str:
         t = self.tile
-        return make_rowcolquant_kernel_name(
+        return make_gemm_rowcolquant_kernel_name(
             variant_key=self.variant_key,
             layout=self.layout,
             pipeline=self.pipeline,

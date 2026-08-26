@@ -1274,47 +1274,47 @@ try
 
     if(dataTypeA == HIP_R_32F && dataTypeB == HIP_R_32F)
     {
-        return hipsolver::rocblas2hip_status(rocsolver_spotrs((rocblas_handle)handle,
-                                                              hipsolver::hip2rocblas_fill(uplo),
-                                                              n,
-                                                              nrhs,
-                                                              (float*)A,
-                                                              lda,
-                                                              (float*)B,
-                                                              ldb));
+        return hipsolver::rocblas2hip_status(rocsolver_spotrs_64((rocblas_handle)handle,
+                                                                 hipsolver::hip2rocblas_fill(uplo),
+                                                                 n,
+                                                                 nrhs,
+                                                                 (float*)A,
+                                                                 lda,
+                                                                 (float*)B,
+                                                                 ldb));
     }
     else if(dataTypeA == HIP_R_64F && dataTypeB == HIP_R_64F)
     {
-        return hipsolver::rocblas2hip_status(rocsolver_dpotrs((rocblas_handle)handle,
-                                                              hipsolver::hip2rocblas_fill(uplo),
-                                                              n,
-                                                              nrhs,
-                                                              (double*)A,
-                                                              lda,
-                                                              (double*)B,
-                                                              ldb));
+        return hipsolver::rocblas2hip_status(rocsolver_dpotrs_64((rocblas_handle)handle,
+                                                                 hipsolver::hip2rocblas_fill(uplo),
+                                                                 n,
+                                                                 nrhs,
+                                                                 (double*)A,
+                                                                 lda,
+                                                                 (double*)B,
+                                                                 ldb));
     }
     else if(dataTypeA == HIP_C_32F && dataTypeB == HIP_C_32F)
     {
-        return hipsolver::rocblas2hip_status(rocsolver_cpotrs((rocblas_handle)handle,
-                                                              hipsolver::hip2rocblas_fill(uplo),
-                                                              n,
-                                                              nrhs,
-                                                              (rocblas_float_complex*)A,
-                                                              lda,
-                                                              (rocblas_float_complex*)B,
-                                                              ldb));
+        return hipsolver::rocblas2hip_status(rocsolver_cpotrs_64((rocblas_handle)handle,
+                                                                 hipsolver::hip2rocblas_fill(uplo),
+                                                                 n,
+                                                                 nrhs,
+                                                                 (rocblas_float_complex*)A,
+                                                                 lda,
+                                                                 (rocblas_float_complex*)B,
+                                                                 ldb));
     }
     else if(dataTypeA == HIP_C_64F && dataTypeB == HIP_C_64F)
     {
-        return hipsolver::rocblas2hip_status(rocsolver_zpotrs((rocblas_handle)handle,
-                                                              hipsolver::hip2rocblas_fill(uplo),
-                                                              n,
-                                                              nrhs,
-                                                              (rocblas_double_complex*)A,
-                                                              lda,
-                                                              (rocblas_double_complex*)B,
-                                                              ldb));
+        return hipsolver::rocblas2hip_status(rocsolver_zpotrs_64((rocblas_handle)handle,
+                                                                 hipsolver::hip2rocblas_fill(uplo),
+                                                                 n,
+                                                                 nrhs,
+                                                                 (rocblas_double_complex*)A,
+                                                                 lda,
+                                                                 (rocblas_double_complex*)B,
+                                                                 ldb));
     }
     else
         return HIPSOLVER_STATUS_INVALID_ENUM;

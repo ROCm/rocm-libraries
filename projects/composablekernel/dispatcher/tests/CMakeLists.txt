@@ -122,6 +122,48 @@ foreach(_gpu_test
     )
 endforeach()
 
+# =============================================================================
+# RowColQuant / TensorQuant bridge tests.
+#
+# These are pytest-style (bare test functions and the tmp_path fixture), not
+# unittest.TestCase, so they are invoked via `-m pytest` like the examples
+# integration tests below rather than via `unittest discover` -- discovery would
+# silently collect zero tests and report success.
+#
+# The *_utils suites are pure Python (naming, config, codegen text) and run
+# anywhere. The *_gpu_correctness suites arch-gate to gfx942/gfx950 and skip
+# cleanly without a GPU or hipcc, so they cost nothing on a CPU-only runner.
+# =============================================================================
+foreach(_quant_test
+        test_grouped_gemm_rowcolquant_utils
+        test_grouped_gemm_tensorquant_utils)
+    add_test(
+        NAME dispatcher_${_quant_test}
+        COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/${_quant_test}.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(dispatcher_${_quant_test} PROPERTIES
+        LABELS "dispatcher;python;quant;validation"
+        TIMEOUT 120
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+    )
+endforeach()
+
+foreach(_quant_gpu_test
+        test_rowcolquant_gpu_correctness
+        test_tensorquant_gpu_correctness)
+    add_test(
+        NAME dispatcher_${_quant_gpu_test}
+        COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/${_quant_gpu_test}.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(dispatcher_${_quant_gpu_test} PROPERTIES
+        LABELS "dispatcher;python;bridge;quant;gpu"
+        TIMEOUT 600
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+    )
+endforeach()
+
 # Verbose version of the test
 add_test(
     NAME dispatcher_test_autocorrect_verbose
@@ -514,12 +556,15 @@ message(STATUS "  Run verbose:    ctest -R dispatcher_test_autocorrect_verbose")
 
 
 # Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
+# NON-GROUPED gemm_rowcolquant. The GROUPED grouped_gemm_rowcolquant GPU test is
+# registered above in the _quant_gpu_test foreach as
+# dispatcher_test_rowcolquant_gpu_correctness -- distinct test, distinct file.
 add_test(
-    NAME dispatcher_test_rowcolquant_gpu_correctness
-    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_rowcolquant_gpu_correctness.py
+    NAME dispatcher_test_gemm_rowcolquant_gpu_correctness
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_rowcolquant_gpu_correctness.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
-set_tests_properties(dispatcher_test_rowcolquant_gpu_correctness PROPERTIES
+set_tests_properties(dispatcher_test_gemm_rowcolquant_gpu_correctness PROPERTIES
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"

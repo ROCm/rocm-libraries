@@ -62,7 +62,7 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "gemm_r
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_rowcolquant_kernel_name  # noqa: E402
+from codegen_common import make_gemm_rowcolquant_kernel_name  # noqa: E402
 
 _DEFAULT_HIPCC    = "hipcc"
 
@@ -113,8 +113,8 @@ class RowColQuantKernelConfig:
 
     @property
     def name(self) -> str:
-        """Byte-exact match to codegen KERNEL_NAME (delegates to make_rowcolquant_kernel_name)."""
-        return make_rowcolquant_kernel_name(
+        """Byte-exact match to codegen KERNEL_NAME (delegates to make_gemm_rowcolquant_kernel_name)."""
+        return make_gemm_rowcolquant_kernel_name(
             variant_key=self.variant_key,
             layout=self.layout,
             pipeline=self.pipeline,
