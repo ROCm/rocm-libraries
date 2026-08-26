@@ -924,6 +924,22 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
 
     const Token& regTypeTok = consume();
     std::string regTypeStr(regTypeTok.text);
+    // Compact FileCheck/emitter form: `-v0` is one Identifier token (lexer
+    // folds the leading '-' into the ident). Strip it and set isMinus.
+    const bool negated = !regTypeStr.empty() && regTypeStr.front() == '-';
+    if (negated) {
+        regTypeStr.erase(0, 1);
+        if (regTypeStr.empty()) {
+            emitError("Expected register after '-'");
+            return std::nullopt;
+        }
+    }
+    auto withNeg = [&](StinkyRegister r) {
+        if (negated && r.dataType == StinkyRegister::Type::Register) {
+            r.reg.isMinus = 1;
+        }
+        return r;
+    };
 
     // Handle label_*: label reference (e.g. label_LoopEndL, label_LoopBeginL)
     if (regTypeStr.size() >= 6 && regTypeStr.substr(0, 6) == "label_") {
@@ -985,7 +1001,7 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
             std::all_of(suffix.begin(), suffix.end(),
                         [](unsigned char c) { return std::isdigit(c); })) {
             auto idx = safeStoi(suffix);
-            if (idx) return StinkyRegister(rt, *idx, 1);
+            if (idx) return withNeg(StinkyRegister(rt, *idx, 1));
         }
     }
 
@@ -1005,7 +1021,7 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
             emitError("Register index out of range or invalid: " + std::string(idxTok.text));
             return std::nullopt;
         }
-        return StinkyRegister(regType, *idx, 1);  // Single element
+        return withNeg(StinkyRegister(regType, *idx, 1));  // Single element
     }
 
     // Check for format: v[12] or v[10:13]
@@ -1062,7 +1078,7 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
         return std::nullopt;
     }
 
-    return StinkyRegister(regType, *startIdx, regNum);
+    return withNeg(StinkyRegister(regType, *startIdx, regNum));
 }
 
 bool IRParser::expect(TokenKind kind, const std::string& message) {

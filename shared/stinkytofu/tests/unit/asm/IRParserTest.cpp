@@ -465,14 +465,29 @@ TEST_F(IRParserTest, ParsesInstructionWithModifiers) {
 }
 
 TEST_F(IRParserTest, ParsesInstructionWithNegation) {
-    // MLIR format doesn't support negation modifiers like -v[2]
-    // Modifiers are specified in attributes instead
+    // Bracketed form historically used attributes instead of `-v[2]`.
     const std::string input = R"(v[0] = "st.v_add_f32"(v[1], v[2]) { negateOperand2 = true })";
 
     auto instructions = parseAssemblyString(input);
 
     // Parser should handle this format
     EXPECT_EQ(instructions.size(), 1);
+}
+
+TEST_F(IRParserTest, ParsesCompactNegatedVgprOperand) {
+    // Compact form used by AsmMovePropagationPass FileCheck: `-v0`.
+    const std::string input =
+        R"(v2 = "st.v_add_f32"(-v0, v3) { issueCycles = 1, latencyCycles = 5 })";
+
+    auto instructions = parseAssemblyString(input);
+
+    ASSERT_EQ(instructions.size(), 1);
+    ASSERT_EQ(instructions[0].srcRegs.size(), 2);
+    EXPECT_EQ(instructions[0].srcRegs[0].reg.type, RegType::V);
+    EXPECT_EQ(instructions[0].srcRegs[0].reg.idx, 0u);
+    EXPECT_EQ(instructions[0].srcRegs[0].reg.isMinus, 1u);
+    EXPECT_EQ(instructions[0].srcRegs[1].reg.idx, 3u);
+    EXPECT_EQ(instructions[0].srcRegs[1].reg.isMinus, 0u);
 }
 
 TEST_F(IRParserTest, ParsesInstructionWithAbsolute) {
