@@ -50,6 +50,14 @@ namespace hipblaslt::client
         int64_t                         rotatingBytes = 0;
     };
 
+    bool supportsMatmulSwizzle(hipDataType dataType);
+
+    bool usesRocrollerMxLayout();
+
+    hipblasLtOrder_t matmulOrderForDataType(hipDataType dataType);
+
+    hipblasLtMatmulMatrixScale_t matmulScaleMode(hipblaslt_scaling_format format);
+
     hipblasLtEpilogue_t matmulEpilogue(const Arguments& arguments);
 
     MatmulSwizzleParameters matmulSwizzleParameters(hipDataType          dataType,
