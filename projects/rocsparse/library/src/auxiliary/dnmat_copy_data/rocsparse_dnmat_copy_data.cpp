@@ -23,7 +23,23 @@
 
 #include "rocsparse_utility.hpp"
 
-#include "rocsparse_dnmat_copy_data.h"
+#include "rocsparse-types.h"
+#include "rocsparse-version.h"
+#include "rocsparse/rocsparse-export.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+ROCSPARSE_EXPORT rocsparse_status rocsparse_dnmat_copy_data(rocsparse_handle            handle,
+                                                            rocsparse_const_dnvec_descr alpha,
+                                                            rocsparse_const_dnmat_descr X,
+                                                            rocsparse_dnmat_descr       Y,
+                                                            rocsparse_error*            p_error);
+
+#ifdef __cplusplus
+}
+#endif
 
 namespace rocsparse
 {
@@ -243,126 +259,93 @@ rocsparse_status rocsparse::dnmat_copy_data(rocsparse_handle            handle,
                                       ? rocsparse_status_success
                                       : rocsparse_status_invalid_value);
     }
-#if 0
-int deviceId = 0;
-    hipGetDevice(&deviceId);
 
-    int maxGridX = 0;
-    int maxGridY = 0;
-    int maxBlockX = 0;
-    int maxBlockY = 0;
-
-    // Extract maximum block grid dimensions for 2D
-    hipDeviceGetAttribute(&maxGridX, hipDeviceAttributeMaxGridDimX, deviceId);
-    hipDeviceGetAttribute(&maxGridY, hipDeviceAttributeMaxGridDimY, deviceId);
-
-    // Extract maximum threads per block dimensions for 2D
-    hipDeviceGetAttribute(&maxBlockX, hipDeviceAttributeMaxBlockDimX, deviceId);
-    hipDeviceGetAttribute(&maxBlockY, hipDeviceAttributeMaxBlockDimY, deviceId);
-
-    std::cout << "Max Grid Dimensions:  X=" << maxGridX << ", Y=" << maxGridY << "\n";
-    std::cout << "Max Block Dimensions: X=" << maxBlockX << ", Y=" << maxBlockY << "\n";
-#endif
-#if 0
-  if ( alpha == nullptr )
+    if(alpha == nullptr)
     {
-      const int64_t M = (target->order == rocsparse_order_column)
-	? target->rows
-	: target->cols;
+        const int64_t M = (target->order == rocsparse_order_column) ? target->rows : target->cols;
 
-      const int64_t N = (target->order == rocsparse_order_column)
-	? target->cols
-	: target->rows;
+        const int64_t N = (target->order == rocsparse_order_column) ? target->cols : target->rows;
 
-      const int64_t MxN = M * N;
-      const auto sizelm = rocsparse::datatype_sizeof(target->data_type);
-      if (target->batch_count == 1)
-	{
-	  if ( (source->ld == M) && (target->ld == M) )
-	    {
-	      RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(target->values,
-							   source->const_values,
-							   sizelm * MxN,
-							   hipMemcpyDeviceToDevice,
-							   handle->stream));
-	    }
-	  else
-	    {
-	      RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(target->values,
-							     sizelm * target->ld,
-							     source->const_values,
-							     sizelm * source->ld,
-							     sizelm * M,
-							     N,
-							     hipMemcpyDeviceToDevice,
-							     handle->stream));
-	    }
-	  return rocsparse_status_success;
-	}
-      else if ( (target->batch_count == source->batch_count) && (source->batch_stride != 0) )
-	{
-	  const auto batch_count = target->batch_count;
-	  const int64_t Mx_batch_count = M * batch_count;
+        const int64_t MxN    = M * N;
+        const auto    sizelm = rocsparse::datatype_sizeof(target->data_type);
+        if(target->batch_count == 1)
+        {
+            if((source->ld == M) && (target->ld == M))
+            {
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(target->values,
+                                                             source->const_values,
+                                                             sizelm * MxN,
+                                                             hipMemcpyDeviceToDevice,
+                                                             handle->stream));
+            }
+            else
+            {
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(target->values,
+                                                               sizelm * target->ld,
+                                                               source->const_values,
+                                                               sizelm * source->ld,
+                                                               sizelm * M,
+                                                               N,
+                                                               hipMemcpyDeviceToDevice,
+                                                               handle->stream));
+            }
+            return rocsparse_status_success;
+        }
+        else if((target->batch_count == source->batch_count) && (source->batch_stride != 0))
+        {
+            const auto    batch_count    = target->batch_count;
+            const int64_t Mx_batch_count = M * batch_count;
 
-	  const rocsparse_order target_layout = ( (target->ld == M)  && (target->batch_stride >= MxN ) )
-	    ? rocsparse_order_row
-	    : ( (target->ld >= Mx_batch_count) && (target->batch_stride == M) )
-	    ? rocsparse_order_column
-	    : ((rocsparse_order)-1);
+            const rocsparse_order target_layout
+                = ((target->ld == M) && (target->batch_stride >= MxN)) ? rocsparse_order_row
+                  : ((target->ld >= Mx_batch_count) && (target->batch_stride == M))
+                      ? rocsparse_order_column
+                      : ((rocsparse_order)-1);
 
-	  const rocsparse_order source_layout = ( (source->ld == M)  && (source->batch_stride >= MxN ) )
-	    ? rocsparse_order_row
-	    : ( (source->ld >= Mx_batch_count) && (source->batch_stride == M) )
-	    ? rocsparse_order_column
-	    : ( (source->batch_stride == 0) && (source->ld == M) )
-	    ? target_layout
-	    : ((rocsparse_order)-1);
+            const rocsparse_order source_layout
+                = ((source->ld == M) && (source->batch_stride >= MxN)) ? rocsparse_order_row
+                  : ((source->ld >= Mx_batch_count) && (source->batch_stride == M))
+                      ? rocsparse_order_column
+                  : ((source->batch_stride == 0) && (source->ld == M)) ? target_layout
+                                                                       : ((rocsparse_order)-1);
 
-	  if ( (source_layout == target_layout) &&
-	       (target_layout != ((rocsparse_order)-1)) )
-	    {
-	      const auto layout = target_layout;
-	      const bool is_row_order = (rocsparse_order_row == layout);
-	      const size_t sequence_size = (is_row_order)
-		? MxN
-		: Mx_batch_count;
+            if((source_layout == target_layout) && (target_layout != ((rocsparse_order)-1)))
+            {
+                const auto   layout        = target_layout;
+                const bool   is_row_order  = (rocsparse_order_row == layout);
+                const size_t sequence_size = (is_row_order) ? MxN : Mx_batch_count;
 
-	      const size_t nsequences = (is_row_order)
-		? batch_count
-		: N;
+                const size_t nsequences = (is_row_order) ? batch_count : N;
 
-	      const int64_t source_ld = (is_row_order)
-		? source->batch_stride
-		: source->ld;
+                const int64_t source_ld = (is_row_order) ? source->batch_stride : source->ld;
 
-	      const int64_t target_ld = (is_row_order)
-		? target->batch_stride
-		: target->ld;
+                const int64_t target_ld = (is_row_order) ? target->batch_stride : target->ld;
 
-	      if ( (target_ld == sequence_size) && (source_ld == sequence_size) )
-		{
-		  RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(target->values,
-							       source->const_values,
-							       sizelm * sequence_size * nsequences,
-							       hipMemcpyDeviceToDevice,
-							       handle->stream));
-		}
-	      else
-		{
-		  RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(target->values,
-								 sizelm * target_ld,
-								 source->const_values,
-								 sizelm * source_ld,
-								 sizelm * sequence_size,
-								 nsequences,
-								 hipMemcpyDeviceToDevice,
-								 handle->stream));
-		}
-	      return rocsparse_status_success;
-	    }
-	}
+                if((target_ld == sequence_size) && (source_ld == sequence_size))
+                {
+                    RETURN_IF_HIP_ERROR(
+                        rocsparse_hipMemcpyAsync(target->values,
+                                                 source->const_values,
+                                                 sizelm * sequence_size * nsequences,
+                                                 hipMemcpyDeviceToDevice,
+                                                 handle->stream));
+                }
+                else
+                {
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(target->values,
+                                                                   sizelm * target_ld,
+                                                                   source->const_values,
+                                                                   sizelm * source_ld,
+                                                                   sizelm * sequence_size,
+                                                                   nsequences,
+                                                                   hipMemcpyDeviceToDevice,
+                                                                   handle->stream));
+                }
+                return rocsparse_status_success;
+            }
+        }
     }
-#endif
+
     const rocsparse_indextype I_indextype = (source->rows <= std::numeric_limits<int32_t>::max()
                                              && source->cols <= std::numeric_limits<int32_t>::max())
                                                 ? rocsparse_indextype_i32

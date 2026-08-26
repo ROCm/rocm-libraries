@@ -23,7 +23,23 @@
 
 #include "rocsparse_utility.hpp"
 
-#include "rocsparse_dnmat_transpose.h"
+#include "rocsparse-types.h"
+#include "rocsparse-version.h"
+#include "rocsparse/rocsparse-export.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+ROCSPARSE_EXPORT rocsparse_status rocsparse_dnmat_transpose(rocsparse_handle            handle,
+                                                            rocsparse_const_dnvec_descr alpha,
+                                                            rocsparse_const_dnmat_descr X,
+                                                            rocsparse_dnmat_descr       Y,
+                                                            rocsparse_error*            p_error);
+
+#ifdef __cplusplus
+}
+#endif
 
 namespace rocsparse
 {

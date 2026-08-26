@@ -109,16 +109,17 @@ namespace rocsparse
                 scsr_col_ind[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
                                                    ? csr_col_ind[hipThreadIdx_x + j] - idx_base
                                                    : -1;
-
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
                 scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
                                                ? (!OP_A_CONJUGATE)
-#endif
                                                      ? csr_val[hipThreadIdx_x + j]
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
                                                      : rocsparse::conj(csr_val[hipThreadIdx_x + j])
-#endif
                                                : static_cast<T>(0);
+#else
+                scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
+                                               ? csr_val[hipThreadIdx_x + j]
+                                               : static_cast<T>(0);
+#endif
 
                 // Wait for preload to finish
                 __syncthreads();
