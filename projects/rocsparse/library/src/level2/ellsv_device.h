@@ -56,10 +56,11 @@ namespace rocsparse
                       "WF_SIZE must be a power of two.");
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
 
-        const int lid = hipThreadIdx_x & (WF_SIZE - 1);
-        const int wid = hipThreadIdx_x / WF_SIZE;
+        const uint32_t lid = hipThreadIdx_x & (WF_SIZE - 1);
+        const uint32_t wid = hipThreadIdx_x / WF_SIZE;
 
-        const I row = static_cast<I>(hipBlockIdx_x) * (BLOCKSIZE / WF_SIZE) + wid;
+        const I row = static_cast<I>(hipBlockIdx_x) * static_cast<I>(BLOCKSIZE / WF_SIZE)
+                      + static_cast<I>(wid);
 
         if(row >= m)
         {
@@ -67,8 +68,8 @@ namespace rocsparse
         }
 
         // Local dependency depth.
-        int local_max      = 0;
-        int local_has_diag = 0;
+        int32_t local_max      = 0;
+        int32_t local_has_diag = 0;
 
         for(int64_t p = lid; p < ell_width; p += WF_SIZE)
         {
@@ -89,7 +90,7 @@ namespace rocsparse
             // Only strictly-lower entries are dependencies.
             if(col < row)
             {
-                const int local_done
+                const int32_t local_done
                     = rocsparse::spin_loop<SLEEP>(&done_array[col], __HIP_MEMORY_SCOPE_AGENT);
                 local_max = rocsparse::max(local_done, local_max);
             }
@@ -130,18 +131,20 @@ namespace rocsparse
                       "WF_SIZE must be a power of two.");
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
 
-        const int lid = hipThreadIdx_x & (WF_SIZE - 1);
-        const int wid = hipThreadIdx_x / WF_SIZE;
+        const uint32_t lid = hipThreadIdx_x & (WF_SIZE - 1);
+        const uint32_t wid = hipThreadIdx_x / WF_SIZE;
 
-        const I row = (m - 1) - (static_cast<I>(hipBlockIdx_x) * (BLOCKSIZE / WF_SIZE) + wid);
+        const I row = (m - 1)
+                      - (static_cast<I>(hipBlockIdx_x) * static_cast<I>(BLOCKSIZE / WF_SIZE)
+                         + static_cast<I>(wid));
 
         if(row < 0)
         {
             return;
         }
 
-        int local_max      = 0;
-        int local_has_diag = 0;
+        int32_t local_max      = 0;
+        int32_t local_has_diag = 0;
 
         for(int64_t p = lid; p < ell_width; p += WF_SIZE)
         {
@@ -162,7 +165,7 @@ namespace rocsparse
             // Only strictly-upper entries are dependencies.
             if(col > row)
             {
-                const int local_done
+                const int32_t local_done
                     = rocsparse::spin_loop<SLEEP>(&done_array[col], __HIP_MEMORY_SCOPE_AGENT);
                 local_max = rocsparse::max(local_done, local_max);
             }
@@ -212,11 +215,10 @@ namespace rocsparse
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
 
         const uint32_t lid = hipThreadIdx_x & (WF_SIZE - 1);
-        int            wid = hipThreadIdx_x / WF_SIZE;
+        const uint32_t wid = rocsparse::read_first_lane(hipThreadIdx_x / WF_SIZE);
 
-        wid = rocsparse::read_first_lane(wid);
-
-        const I idx = static_cast<I>(hipBlockIdx_x) * (BLOCKSIZE / WF_SIZE) + wid;
+        const I idx = static_cast<I>(hipBlockIdx_x) * static_cast<I>(BLOCKSIZE / WF_SIZE)
+                      + static_cast<I>(wid);
 
         // Shared memory to hold the (reciprocal) diagonal entry of each row.
         __shared__ T diagonal[BLOCKSIZE / WF_SIZE];
@@ -326,7 +328,8 @@ namespace rocsparse
                                       rocsparse_index_base idx_base,
                                       unsigned long long* __restrict__ counts)
     {
-        const I row = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+        const I row = static_cast<I>(hipBlockIdx_x) * static_cast<I>(BLOCKSIZE)
+                      + static_cast<I>(hipThreadIdx_x);
         if(row >= m)
         {
             return;
@@ -371,7 +374,8 @@ namespace rocsparse
                                         I* __restrict__ t_col_ind,
                                         T* __restrict__ t_val)
     {
-        const I row = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+        const I row = static_cast<I>(hipBlockIdx_x) * static_cast<I>(BLOCKSIZE)
+                      + static_cast<I>(hipThreadIdx_x);
         if(row >= m)
         {
             return;

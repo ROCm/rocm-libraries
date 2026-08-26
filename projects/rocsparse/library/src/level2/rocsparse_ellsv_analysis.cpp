@@ -147,23 +147,40 @@ namespace rocsparse
                                                   rocsparse_indextype  index_type,
                                                   I*                   row_map,
                                                   I*                   zero_pivot,
-                                                  void*                temp_buffer)
+                                                  void*                temp_buffer,
+                                                  size_t               buffer_size)
     {
         constexpr uint32_t BLOCKSIZE = 1024;
 
         hipStream_t  stream   = handle->stream;
         const size_t sizeof_I = sizeof(I);
 
-        char*        ptr        = reinterpret_cast<char*>(temp_buffer);
-        const size_t done_bytes = ellsv_align256(sizeof(int32_t) * static_cast<size_t>(m));
-        int32_t*     done_array = reinterpret_cast<int32_t*>(ptr);
+        const uint32_t startbit = 0;
+        const uint32_t endbit   = rocsparse::clz(static_cast<int64_t>(m));
+
+        size_t rocprim_size = 0;
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<int32_t, I>(
+            handle, m, startbit, endbit, &rocprim_size)));
+
+        const size_t done_bytes       = ellsv_align256(sizeof(int32_t) * static_cast<size_t>(m));
+        const size_t workspace_bytes  = ellsv_align256(sizeof_I * static_cast<size_t>(m));
+        const size_t workspace2_bytes = ellsv_align256(sizeof(int32_t) * static_cast<size_t>(m));
+
+        // Must stay in sync with rocsparse::ellsv_analysis_buffer_size.
+        if(buffer_size < done_bytes + workspace_bytes + workspace2_bytes + rocprim_size)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_size);
+        }
+
+        char*    ptr        = reinterpret_cast<char*>(temp_buffer);
+        int32_t* done_array = reinterpret_cast<int32_t*>(ptr);
         ptr += done_bytes;
 
         void* workspace = ptr;
-        ptr += ellsv_align256(sizeof_I * static_cast<size_t>(m));
+        ptr += workspace_bytes;
 
         void* workspace2 = ptr;
-        ptr += ellsv_align256(sizeof(int32_t) * static_cast<size_t>(m));
+        ptr += workspace2_bytes;
 
         void* rocprim_buffer = ptr;
 
@@ -210,13 +227,6 @@ namespace rocsparse
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::gcreate_identity_permutation(handle, m, index_type, workspace));
 
-        const uint32_t startbit = 0;
-        const uint32_t endbit   = rocsparse::clz(static_cast<int64_t>(m));
-
-        size_t rocprim_size = 0;
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<int32_t, I>(
-            handle, m, startbit, endbit, &rocprim_size)));
-
         rocsparse::primitives::double_buffer<int32_t> keys(done_array,
                                                            reinterpret_cast<int32_t*>(workspace2));
         rocsparse::primitives::double_buffer<I> vals(reinterpret_cast<I*>(workspace), row_map);
@@ -252,7 +262,8 @@ namespace rocsparse
                                                     rocsparse_indextype  index_type,
                                                     void*                row_map,
                                                     void*                zero_pivot,
-                                                    void*                temp_buffer)
+                                                    void*                temp_buffer,
+                                                    size_t               buffer_size)
     {
         const I* col_ind = reinterpret_cast<const I*>(ell_col_ind);
         I*       map     = reinterpret_cast<I*>(row_map);
@@ -271,7 +282,8 @@ namespace rocsparse
                                                                  index_type,
                                                                  map,
                                                                  pivot,
-                                                                 temp_buffer);
+                                                                 temp_buffer,
+                                                                 buffer_size);
         }
         else if(wfsize == 64)
         {
@@ -286,7 +298,8 @@ namespace rocsparse
                                                                   index_type,
                                                                   map,
                                                                   pivot,
-                                                                  temp_buffer);
+                                                                  temp_buffer,
+                                                                  buffer_size);
         }
 
         return rocsparse::ellsv_launch_analysis<32, false, I>(handle,
@@ -300,7 +313,8 @@ namespace rocsparse
                                                               index_type,
                                                               map,
                                                               pivot,
-                                                              temp_buffer);
+                                                              temp_buffer,
+                                                              buffer_size);
     }
 
     template <typename I, typename T>
@@ -411,7 +425,8 @@ namespace rocsparse
                                                   uint32_t                  wfsize,
                                                   rocsparse::trm_info_t*    trm_info,
                                                   void*                     zero_pivot,
-                                                  void*                     temp_buffer)
+                                                  void*                     temp_buffer,
+                                                  size_t                    buffer_size)
     {
         const rocsparse_fill_mode uplo = descr->fill_mode;
         rocsparse_fill_mode       fill = uplo;
@@ -446,7 +461,8 @@ namespace rocsparse
                                                      rocsparse::get_indextype<I>(),
                                                      trm_info->get_row_map(),
                                                      zero_pivot,
-                                                     temp_buffer);
+                                                     temp_buffer,
+                                                     buffer_size);
     }
 
     rocsparse_status gellsv_analysis(rocsparse_handle          handle,
@@ -462,7 +478,8 @@ namespace rocsparse
                                      rocsparse_index_base      idx_base,
                                      rocsparse::trm_info_t*    info,
                                      rocsparse::pivot_info_t*  pivot_info,
-                                     void*                     temp_buffer)
+                                     void*                     temp_buffer,
+                                     size_t                    buffer_size)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -504,7 +521,8 @@ namespace rocsparse
                                         wfsize,                                      \
                                         info,                                        \
                                         pivot_info->get_position(),                  \
-                                        temp_buffer)
+                                        temp_buffer,                                 \
+                                        buffer_size)
 
         switch(ell_col_ind_indextype)
         {
@@ -620,7 +638,8 @@ rocsparse_status rocsparse::ellsv_analysis(rocsparse_handle            handle,
                                            rocsparse_const_spmat_descr A,
                                            rocsparse_analysis_policy   analysis_policy,
                                            rocsparse_ellsv_info*       p_ellsv_info,
-                                           void*                       temp_buffer)
+                                           void*                       temp_buffer,
+                                           size_t                      buffer_size)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -675,7 +694,8 @@ rocsparse_status rocsparse::ellsv_analysis(rocsparse_handle            handle,
                                            A->const_col_data,
                                            A->ell_width,
                                            A->idx_base,
-                                           temp_buffer));
+                                           temp_buffer,
+                                           buffer_size));
 
     return rocsparse_status_success;
 }
