@@ -252,11 +252,8 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  2,  2,  2, 2]   # MT64x64   wg2x2 GR4/LR2
-          - [16, 16, 128, 1,  1,  1,  1,  4, 4]   # MT64x64   wg4x4 GR4/LR1
           - [16, 16, 128, 1,  1,  4,  4,  2, 2]   # MT128x128 wg2x2 GR8/LR4
-          - [16, 16, 128, 1,  1,  2,  2,  4, 4]   # MT128x128 wg4x4 GR8/LR2
           - [16, 16, 128, 1,  1,  8,  8,  2, 2]   # MT256x256 wg2x2 GR16/LR8
-          - [16, 16, 128, 1,  1,  4,  4,  4, 4]   # MT256x256 wg4x4 GR16/LR4
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [128]
