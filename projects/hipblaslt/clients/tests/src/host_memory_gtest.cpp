@@ -5,7 +5,8 @@
  *
  *******************************************************************************/
 
-// Host-only smoke tests for cgroup-aware host memory probing in d_vector.hpp.
+// Linux integration smokes for cgroup-aware host memory probing in d_vector.hpp.
+// Parsing edge cases live in cgroup_memory_probe_gtest.cpp.
 // No GPU allocations: reads sysinfo and cgroup sysfs only.
 
 #include "d_vector.hpp"

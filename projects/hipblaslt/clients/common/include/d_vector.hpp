@@ -1,3 +1,4 @@
+~~~
 /*******************************************************************************
  *
  * MIT License
@@ -26,6 +27,7 @@
 
 #pragma once
 
+#include "cgroup_memory_probe.hpp"
 #include "datatype_interface.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_init.hpp"
@@ -87,103 +89,7 @@ public:
     static size_t cgroup_available_memory()
     {
 #ifdef __linux__
-        // A v1 limit reads as a huge sentinel rather than the word "max".
-        size_t const unlimited = static_cast<size_t>(1) << 62;
-
-        auto read_size = [](std::string const& path, size_t& out) -> bool {
-            FILE* f = fopen(path.c_str(), "r");
-            if(!f)
-                return false;
-            char token[64] = {};
-            bool ok        = fscanf(f, "%63s", token) == 1;
-            fclose(f);
-            if(!ok)
-                return false;
-            if(strcmp(token, "max") == 0)
-            {
-                out = std::numeric_limits<size_t>::max();
-                return true;
-            }
-            char*              end   = nullptr;
-            unsigned long long value = strtoull(token, &end, 10);
-            if(end == token)
-                return false;
-            out = static_cast<size_t>(value);
-            return true;
-        };
-
-        std::string v2, v1;
-        if(FILE* f = fopen("/proc/self/cgroup", "r"))
-        {
-            char line[512];
-            while(fgets(line, sizeof(line), f))
-            {
-                std::string entry(line);
-                while(!entry.empty() && (entry.back() == '\n' || entry.back() == '\r'))
-                    entry.pop_back();
-                if(entry.compare(0, 3, "0::") == 0)
-                    v2 = entry.substr(3);
-                else
-                {
-                    // "<id>:<controllers>:<path>", where controllers may be co-mounted
-                    // and comma-joined, so match a whole token rather than ":memory:".
-                    auto ids = entry.find(':');
-                    auto sep = entry.find(':', ids == std::string::npos ? 0 : ids + 1);
-                    if(ids != std::string::npos && sep != std::string::npos)
-                    {
-                        std::string list = entry.substr(ids + 1, sep - ids - 1);
-                        for(size_t at = 0; at <= list.size();)
-                        {
-                            auto end = list.find(',', at);
-                            if(end == std::string::npos)
-                                end = list.size();
-                            if(list.compare(at, end - at, "memory") == 0)
-                            {
-                                v1 = entry.substr(sep + 1);
-                                break;
-                            }
-                            at = end + 1;
-                        }
-                    }
-                }
-            }
-            fclose(f);
-        }
-
-        size_t available = std::numeric_limits<size_t>::max();
-
-        auto consider = [&](std::string const& dir, char const* limit, char const* usage) {
-            size_t cap = 0, used = 0;
-            if(!read_size(dir + "/" + limit, cap) || cap >= unlimited)
-                return;
-            if(!read_size(dir + "/" + usage, used))
-                used = 0;
-            available = std::min(available, cap > used ? cap - used : static_cast<size_t>(0));
-        };
-
-        // A MemoryMax may sit on any ancestor, so the effective allowance is the tightest.
-        auto walk = [&](std::string const& base,
-                        std::string const& rel,
-                        char const*        limit,
-                        char const*        usage) {
-            if(rel.empty())
-                return;
-            std::string dir = base + rel;
-            for(;;)
-            {
-                consider(dir, limit, usage);
-                if(dir.size() <= base.size())
-                    break;
-                auto slash = dir.rfind('/');
-                if(slash == std::string::npos || slash < base.size())
-                    break;
-                dir.erase(slash);
-            }
-        };
-
-        walk("/sys/fs/cgroup", v2, "memory.max", "memory.current");
-        walk("/sys/fs/cgroup/memory", v1, "memory.limit_in_bytes", "memory.usage_in_bytes");
-        return available;
+        return hipblaslt_client::cgroup_available_memory_live();
 #else
         return std::numeric_limits<size_t>::max();
 #endif
@@ -740,3 +646,4 @@ bool d_vector<T>::m_init_guard = false;
 
 #undef MEM_MAX_GUARD_PAD
 #undef MAX_DTYPE_SIZE
+~~~
