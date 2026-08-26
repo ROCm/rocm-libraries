@@ -90,8 +90,8 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
 
     bool tileAligned = node.length[0] % tileX == 0 && node.length[1] % tileX == 0;
 
-    // This runs after buffer assignment, fusion and padding, so the node's
-    // lengths and strides are final.
+    // GetKernelIndexType runs after buffer assignment, fusion
+    // and padding, so the node's lengths and strides are final.
     IndexType itype = node.GetKernelIndexType();
 
     TransposeSpecs specs{itype,

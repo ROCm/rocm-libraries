@@ -365,7 +365,8 @@ void build_realcomplex(CompileQueue& queue)
                                                         ? rocfft_array_type_complex_planar
                                                         : rocfft_array_type_complex_interleaved;
 
-                                RealComplexEvenSpecs specs{{scheme,
+                                RealComplexEvenSpecs specs{{IndexType::U32,
+                                                            scheme,
                                                             dim,
                                                             lensz,
                                                             precision,
@@ -398,7 +399,8 @@ void build_realcomplex(CompileQueue& queue)
 
                 for(size_t lensz = 1; lensz <= 3; lensz++)
                 {
-                    RealComplexEvenTransposeSpecs specs{{scheme,
+                    RealComplexEvenTransposeSpecs specs{{IndexType::U32,
+                                                         scheme,
                                                          static_cast<size_t>(1),
                                                          lensz,
                                                          precision,
@@ -406,8 +408,7 @@ void build_realcomplex(CompileQueue& queue)
                                                          outArrayType,
                                                          CallbackType::NONE,
                                                          {},
-                                                         {}},
-                                                        IndexType::U32};
+                                                         {}}};
                     auto kernel_name = realcomplex_even_transpose_rtc_kernel_name(specs);
                     std::function<std::string(const std::string&)> generate_src
                         = [=](const std::string& kernel_name) -> std::string {

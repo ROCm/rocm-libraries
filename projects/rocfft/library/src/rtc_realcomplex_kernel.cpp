@@ -52,7 +52,8 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
            1};
     generator.blockDim = {LAUNCH_BOUNDS_R2C_C2R_KERNEL, 1, 1};
 
-    RealComplexSpecs specs{node.scheme,
+    RealComplexSpecs specs{node.GetKernelIndexType(),
+                           node.scheme,
                            node.dimension,
                            node.length.size(),
                            node.precision,
@@ -165,7 +166,8 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
 
     generator.blockDim = {LAUNCH_BOUNDS_R2C_C2R_KERNEL, 1, 1};
 
-    RealComplexEvenSpecs specs{{node.scheme,
+    RealComplexEvenSpecs specs{{node.GetKernelIndexType(),
+                                node.scheme,
                                 node.dimension,
                                 node.length.size(),
                                 node.precision,
@@ -290,7 +292,8 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
     generator.blockDim = {tileX, tileY, 1};
 
-    RealComplexEvenTransposeSpecs specs{{node.scheme,
+    RealComplexEvenTransposeSpecs specs{{node.GetKernelIndexType(),
+                                         node.scheme,
                                          node.dimension,
                                          node.length.size(),
                                          node.precision,
@@ -299,8 +302,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
                                          cbtype,
                                          node.loadOps,
                                          node.storeOps,
-                                         grid3D},
-                                        node.GetKernelIndexType()};
+                                         grid3D}};
 
     generator.generate_name = [=]() { return realcomplex_even_transpose_rtc_kernel_name(specs); };
 
