@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <iostream>
 #include <unordered_map>
 
 namespace origami::nn::twrec {
