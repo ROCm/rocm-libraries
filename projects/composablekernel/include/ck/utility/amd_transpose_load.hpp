@@ -56,6 +56,12 @@ __device__ auto amd_lds_load_transpose_to_vgpr(const T* __restrict__ in_ptr)
         auto lds_ptr        = reinterpret_cast<__LDS_ADDR llvm_fp16x8_t*>(in_ptr_);
         return bit_cast<vector_t>(__builtin_amdgcn_ds_load_tr16_b128_v8f16(lds_ptr));
     }
+    else if constexpr(is_same<T, bhalf_t>::value)
+    {
+        using llvm_bf16x8_t = __bf16 __attribute__((ext_vector_type(8)));
+        auto lds_ptr        = reinterpret_cast<__LDS_ADDR llvm_bf16x8_t*>(in_ptr_);
+        return bit_cast<vector_t>(__builtin_amdgcn_ds_load_tr16_b128_v8bf16(lds_ptr));
+    }
     else
     {
         static_assert(false, "not implemented");
