@@ -10,11 +10,10 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
-#include <iomanip>
 #include <mutex>
 #include <nlohmann/json.hpp>
-#include <sstream>
 
 namespace hipdnn_backend::logging
 {
@@ -90,38 +89,63 @@ std::filesystem::path GraphLogger::getOutputDirectory()
 
 void GraphLogger::logGraph(const uint8_t* serializedGraph, size_t size)
 {
-    auto hash = hipdnn_data_sdk::utilities::fnv1aHash(serializedGraph, size);
+    flatbuffers::Verifier verifier(serializedGraph, size);
+    if(!hipdnn_flatbuffers_sdk::data_objects::VerifyGraphBuffer(verifier))
+    {
+        HIPDNN_BACKEND_LOG_WARN("Not logging a graph whose buffer failed verification");
+        return;
+    }
 
-    std::ostringstream oss;
-    oss << "graph_" << std::hex << std::setfill('0') << std::setw(16) << hash << ".json";
-    auto fullPath = getOutputDirectory() / oss.str();
+    const auto* graph
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(serializedGraph);
 
-    if(fullPath.empty())
+    // Dumps are named by the graph's ID, so re-finalizing a descriptor or replaying a serialized
+    // graph reuses one file, while a graph rebuilt from scratch is a distinct graph object and
+    // gets its own.
+    if(graph->id() == nullptr)
+    {
+        HIPDNN_BACKEND_LOG_WARN("Not logging a graph without an identity; only a finalized graph "
+                                "has one");
+        return;
+    }
+
+    const auto graphId = hipdnn_flatbuffers_sdk::utilities::formatUuid(
+        hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id()));
+    const auto graphName = graph->name() != nullptr ? graph->name()->str() : std::string();
+
+    const auto outputDirectory = getOutputDirectory();
+    if(outputDirectory.empty())
     {
         HIPDNN_BACKEND_LOG_WARN("Graph logging is enabled but no valid output directory is set");
         return;
     }
 
+    const auto fullPath = outputDirectory / ("graph_" + graphId + ".json");
     if(std::filesystem::exists(fullPath))
     {
-        HIPDNN_BACKEND_LOG_INFO("Skipping duplicate graph logged to {}", fullPath.string());
+        HIPDNN_BACKEND_LOG_INFO("Skipping graph \"{}\" with id {}, already logged to {}",
+                                graphName,
+                                graphId,
+                                fullPath.string());
         return;
     }
 
-    auto* graph
-        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(serializedGraph);
-    const nlohmann::json j = *graph;
+    const nlohmann::json graphJson = *graph;
 
     std::ofstream file(fullPath);
     if(file.is_open())
     {
-        file << j.dump(2);
+        file << graphJson.dump(2);
         file.close();
-        HIPDNN_BACKEND_LOG_INFO("Graph logged to {}", fullPath.string());
+        HIPDNN_BACKEND_LOG_INFO(
+            "Writing graph \"{}\" with id {} to {}", graphName, graphId, fullPath.string());
     }
     else
     {
-        HIPDNN_BACKEND_LOG_WARN("Failed to open graph log file: {}", fullPath.string());
+        HIPDNN_BACKEND_LOG_WARN("Failed to open graph log file {} for graph \"{}\" with id {}",
+                                fullPath.string(),
+                                graphName,
+                                graphId);
     }
 }
 

@@ -112,6 +112,7 @@ jobs:
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "linux"
           CI_CONFIG_PATH: ci-config
+          IS_DRAFT: ${{ github.event.pull_request.draft || false }}
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -121,6 +122,7 @@ jobs:
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "windows"
           CI_CONFIG_PATH: ci-config
+          IS_DRAFT: ${{ github.event.pull_request.draft || false }}
         run: |
           python .github/scripts/therock_configure_ci.py
 

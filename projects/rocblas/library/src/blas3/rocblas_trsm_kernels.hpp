@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -2469,7 +2469,7 @@ rocblas_trsm_small_left_device(rocblas_fill      uplo,
         __syncthreads();
 
         if(tx >= maxColB)
-            return;
+            continue;
 
         // Solve for B in shared memory
         if(LOWER && transA == rocblas_operation_none)

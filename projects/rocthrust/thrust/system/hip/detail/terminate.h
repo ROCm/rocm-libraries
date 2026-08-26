@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -38,13 +38,12 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/libcxx_wrapper/std/__exception/terminate.h>
+#include <thrust/system/hip/detail/nv/target.h>
 #include <thrust/system/hip/detail/util.h>
 
 #include <cstdio>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <cstdlib>
-#endif
+#include <cstdlib>
+#include <exception>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -57,9 +56,14 @@ inline THRUST_HOST_DEVICE void terminate_with_message(const char* message)
 {
   THRUST_HIP_PRINTF("%s\n", message);
 #if THRUST_HIP_PRINTF_ENABLED == 0
-  (void) message;
+  THRUST_UNUSED_VAR(message);
 #endif
-  ::internal::terminate();
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  _THRUST_STD::terminate();
+#else
+  NV_IF_TARGET(NV_IS_HOST, (::std::exit(-1);), (__builtin_trap();));
+  __builtin_unreachable();
+#endif
 }
 } // namespace detail
 } // namespace hip
