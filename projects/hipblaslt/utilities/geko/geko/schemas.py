@@ -215,25 +215,20 @@ class GemmType:
             return "xf32_r", "f32_r", "f32_r", "xf32_r"
 
         if dt in m:
-            try:
-                a_type = b_type = m[dt]
-            except KeyError as e:
-                raise ValueError(f"Unknown Tensile DataType letter {dt!r}") from e
-        elif len(dt) == 1:
-            try:
-                a_type = b_type = m[dt]
-            except KeyError as e:
-                raise ValueError(f"Unknown Tensile DataType letter {dt!r}") from e
-        elif len(dt) == 2:
-            try:
-                a_type = m[dt[0]]
-                b_type = m[dt[1]]
-            except KeyError as e:
-                raise ValueError(f"Unknown Tensile DataType code {dt!r}") from e
+            a_type = b_type = m[dt]
         else:
-            raise ValueError(
-                f"Tensile DataType must be 1 or 2 letters for this mapper, got {dt!r}"
+            # Try all split points for an ordered pair of known type keys.
+            pair = next(
+                ((m[dt[:i]], m[dt[i:]]) for i in range(1, len(dt))
+                 if dt[:i] in m and dt[i:] in m),
+                None,
             )
+            if pair is None:
+                raise ValueError(
+                    f"Cannot resolve Tensile DataType {dt!r}: not a known type "
+                    f"or a valid ordered pair of types."
+                )
+            a_type, b_type = pair
 
         try:
             c_type = m[dd]
