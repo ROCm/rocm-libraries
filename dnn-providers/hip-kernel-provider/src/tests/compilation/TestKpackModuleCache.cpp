@@ -30,8 +30,9 @@ constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 /// kernel symbol, so kernels differing only by entry point share one hipModule_t.
 TEST(TestKpackModuleCacheKey, MakeKeyFormatsCorrectly)
 {
-    EXPECT_EQ(KpackModuleCache::makeKey("/opt/packs/pointwise.kpack", "lib/libhip.so#0", "gfx942"),
-              "/opt/packs/pointwise.kpack::lib/libhip.so#0::gfx942");
+    EXPECT_EQ(
+        KpackModuleCache::makeKey("/opt/packs/pointwise.kpack", "lib/libhip.so#0", "gfx942", 0),
+        "/opt/packs/pointwise.kpack::lib/libhip.so#0::gfx942::0");
 }
 
 TEST(TestKpackModuleCacheKey, KeyDistinguishesTocKeyAndArch)
@@ -39,17 +40,39 @@ TEST(TestKpackModuleCacheKey, KeyDistinguishesTocKeyAndArch)
     const std::string archive = "/opt/packs/pointwise.kpack";
 
     // Same archive, different entry: different module.
-    EXPECT_NE(KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx942"),
-              KpackModuleCache::makeKey(archive, "bin/hiptest#0", "gfx942"));
+    EXPECT_NE(KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx942", 0),
+              KpackModuleCache::makeKey(archive, "bin/hiptest#0", "gfx942", 0));
 
     // Same archive and entry, different device arch: also a different module, because
     // one archive holds a distinct blob per arch.
-    EXPECT_NE(KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx942"),
-              KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx1100"));
+    EXPECT_NE(KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx942", 0),
+              KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx1100", 0));
 
     // Not asserted: "::"-joining is not prefix-free, so a tocKey ending in "::" would
     // collide -- unreachable for packer-emitted "<path>#<index>" keys and [a-z0-9]+ arch
     // names, and closing it would change the format the case above pins.
+}
+
+/// Two devices of one arch must not share an entry. A hipModule_t belongs to the device
+/// current when it was loaded, so handing device 1 the module device 0 loaded is the
+/// defect the ordinal closes. This case pins the key half; load() binds the ordinal as well.
+TEST(TestKpackModuleCacheKey, KeyDistinguishesTwoOrdinalsOfTheSameArch)
+{
+    const std::string archive = "/opt/packs/pointwise.kpack";
+
+    EXPECT_NE(KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx942", 0),
+              KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx942", 1));
+}
+
+/// Feature flags describe the device, not the code object, and archMatches gates on the
+/// bare name -- so a decorated arch must reach the entry the bare one made rather than
+/// load the identical blob a second time.
+TEST(TestKpackModuleCacheKey, KeyIgnoresArchFeatureDecoration)
+{
+    const std::string archive = "/opt/packs/pointwise.kpack";
+
+    EXPECT_EQ(KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx90a:sramecc+:xnack-", 0),
+              KpackModuleCache::makeKey(archive, "lib/libhip.so#0", "gfx90a", 0));
 }
 
 /// A blob that is found and decompressed but is not a code object at all.
@@ -66,7 +89,7 @@ TEST(TestKpackModuleCacheLoad, RejectsAPayloadThatIsNotACodeObject)
 
     try
     {
-        KpackModuleCache::load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, ARCHIVE_ARCH);
+        KpackModuleCache::load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, 0);
         FAIL() << "expected a payload without code-object magic to be rejected";
     }
     catch(const KpackModuleLoadFailure& failure)
@@ -98,7 +121,7 @@ TEST(TestKpackModuleCacheLoad, ReportsAnArchTheArchiveDoesNotHold)
 
     try
     {
-        KpackModuleCache::load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, "gfx90a");
+        KpackModuleCache::load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, "gfx90a", 0);
         FAIL() << "expected an arch the archive does not hold to be rejected";
     }
     catch(const KpackModuleLoadFailure& failure)
