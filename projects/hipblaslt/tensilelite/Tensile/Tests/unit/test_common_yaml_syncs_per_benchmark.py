@@ -80,6 +80,10 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
         "LibraryLogic requires benchmark data to build the library table",
     ),
     SyncsPerBenchmarkOptOut(
+        "common/gemm/gfx950/f4_nt_maf.yaml",
+        "MAF roofline benchmark; the reported FLOPs come from the timing loop",
+    ),
+    SyncsPerBenchmarkOptOut(
         "common/gemm/icache_flush.yaml",
         "flush_icache is launched only inside the benchmark sync loop",
     ),
