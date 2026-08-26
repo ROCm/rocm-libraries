@@ -36,6 +36,14 @@ test_categories:
       - "pre-commit"
       - "smoke"
 
+  conv-library:
+    description: "rocKE library conv CPU-only tests: dispatch, signature guard, layering"
+    test_patterns:
+      - "rocke_library_conv_pytest"
+    labels:
+      - "quick"
+      - "pre-commit"
+
   ffm-quick:
     description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
     test_patterns:
@@ -45,5 +53,6 @@ test_categories:
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
       - "rocke_pytest"
+      - "rocke_library_conv_pytest"
     labels:
       - "ffm-full"
