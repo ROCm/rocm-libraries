@@ -6,7 +6,7 @@ SPDX-License-Identifier: MIT
 # FindROCFFT.cmake - Locate rocFFT library for RPP audio FFT acceleration
 
 find_path(ROCFFT_INCLUDE_DIR
-    NAMES rocfft/rocfft.h rocfft.h
+    NAMES rocfft.h
     PATHS
         ${ROCM_PATH}/include
         /opt/rocm/include
@@ -14,7 +14,7 @@ find_path(ROCFFT_INCLUDE_DIR
         ${ROCM_PATH}/lib/python*/site-packages/_rocm_sdk_devel/include
         /usr/local/include
         /usr/include
-    PATH_SUFFIXES rocfft
+    PATH_SUFFIXES rocfft ""
 )
 
 find_library(ROCFFT_LIBRARY
