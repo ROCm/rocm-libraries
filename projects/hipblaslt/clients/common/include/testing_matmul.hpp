@@ -649,14 +649,37 @@ void testing_matmul_with_bias(const Arguments&                                  
 
     struct MatmulRuntimeCase
     {
-        void*                   alphaPointer = nullptr;
-        hipblasLtMatrixLayout_t matrixA      = nullptr;
-        hipblasLtMatrixLayout_t matrixB      = nullptr;
-        hipblasLtMatrixLayout_t matrixC      = nullptr;
-        hipblasLtMatrixLayout_t matrixD      = nullptr;
+        explicit MatmulRuntimeCase(const hipblaslt::client::MatmulTestCase& testCase)
+            : matrixA(testCase.a.rows(),
+                      testCase.a.columns(),
+                      testCase.a.leadingDimension(),
+                      testCase.a.apiType)
+            , matrixB(testCase.b.rows(),
+                      testCase.b.columns(),
+                      testCase.b.leadingDimension(),
+                      testCase.b.apiType)
+            , matrixC(testCase.c.rows(),
+                      testCase.c.columns(),
+                      testCase.c.leadingDimension(),
+                      testCase.c.apiType)
+            , matrixD(testCase.d.rows(),
+                      testCase.d.columns(),
+                      testCase.d.leadingDimension(),
+                      testCase.d.apiType)
+        {
+        }
+
+        void*                         alphaPointer = nullptr;
+        hipblaslt_local_matrix_layout matrixA;
+        hipblaslt_local_matrix_layout matrixB;
+        hipblaslt_local_matrix_layout matrixC;
+        hipblaslt_local_matrix_layout matrixD;
     };
-    std::vector<MatmulRuntimeCase> runtimeCases(problem_count);
-    const auto&                    firstRuntimeCase = runtimeCases.front();
+    std::vector<MatmulRuntimeCase> runtimeCases;
+    runtimeCases.reserve(matmulCases.size());
+    for(const auto& testCase : matmulCases)
+        runtimeCases.emplace_back(testCase);
+    const auto& firstRuntimeCase = runtimeCases.front();
 
     std::vector<std::vector<hipblasLtMatmulDesc_t>> matmul;
 
@@ -706,26 +729,10 @@ void testing_matmul_with_bias(const Arguments&                                  
         const int64_t batchStrideC = testCase.c.batchStride();
         const int64_t batchStrideD = testCase.d.batchStride();
 
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(runtimeCase.matrixA),
-                                                          arg.a_type,
-                                                          testCase.a.rows(),
-                                                          testCase.a.columns(),
-                                                          testCase.a.leadingDimension()));
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(runtimeCase.matrixB),
-                                                          arg.b_type,
-                                                          testCase.b.rows(),
-                                                          testCase.b.columns(),
-                                                          testCase.b.leadingDimension()));
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(runtimeCase.matrixC),
-                                                          arg.c_type,
-                                                          testCase.m,
-                                                          testCase.n,
-                                                          testCase.c.leadingDimension()));
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(runtimeCase.matrixD),
-                                                          arg.d_type,
-                                                          testCase.m,
-                                                          testCase.n,
-                                                          testCase.d.leadingDimension()));
+        CHECK_HIPBLASLT_ERROR(runtimeCase.matrixA.status());
+        CHECK_HIPBLASLT_ERROR(runtimeCase.matrixB.status());
+        CHECK_HIPBLASLT_ERROR(runtimeCase.matrixC.status());
+        CHECK_HIPBLASLT_ERROR(runtimeCase.matrixD.status());
 
         if(do_swizzle_a)
         {
@@ -4133,17 +4140,6 @@ void testing_matmul_with_bias(const Arguments&                                  
         CHECK_HIP_ERROR(hipFree(userArgs));
     if(d_userArgs != nullptr)
         CHECK_HIP_ERROR(hipFree(d_userArgs));
-
-    // Explicitly destroy opaque handles to avoid leaks.
-    for(auto& runtimeCase : runtimeCases)
-    {
-        for(auto layout : {
-                runtimeCase.matrixA, runtimeCase.matrixB, runtimeCase.matrixC, runtimeCase.matrixD})
-        {
-            if(layout)
-                (void)hipblasLtMatrixLayoutDestroy(layout);
-        }
-    }
 
     for(auto& block : matmul)
         for(auto& h : block)
