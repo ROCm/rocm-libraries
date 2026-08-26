@@ -595,7 +595,9 @@ st.func @compose_vop3_neg_with_mapped_neg() {
     const auto& add = *result.parsedFunction->blocks[0]->instructions[1];
     auto vop3 = add.modifiers.find("mod.vop3");
     ASSERT_NE(vop3, add.modifiers.end());
-    EXPECT_EQ(vop3->second["neg_src0"], "true");
+    const auto& fields = vop3->second;
+    ASSERT_TRUE(fields.contains("neg_src0"));
+    EXPECT_EQ(fields.at("neg_src0"), "true");
 }
 
 TEST_F(IRParserTest, RawAsmParsesFinalMatrixBScaleModifierWithoutTrailingComment) {
