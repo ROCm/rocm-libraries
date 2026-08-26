@@ -237,19 +237,31 @@ public:
 /*! \brief  local matrix multiplication descriptor which is automatically created and destroyed  */
 class hipblaslt_local_matmul_descr
 {
-    hipblasLtMatmulDesc_t m_descr;
+    hipblasLtMatmulDesc_t m_descr  = nullptr;
     hipblasStatus_t       m_status = HIPBLAS_STATUS_NOT_INITIALIZED;
 
+    void reset() noexcept
+    {
+        if(m_status == HIPBLAS_STATUS_SUCCESS)
+            (void)hipblasLtMatmulDescDestroy(m_descr);
+        m_descr  = nullptr;
+        m_status = HIPBLAS_STATUS_NOT_INITIALIZED;
+    }
+
 public:
+    hipblaslt_local_matmul_descr(hipblasComputeType_t compute_type, hipDataType scale_type)
+    {
+        this->m_status = hipblasLtMatmulDescCreate(&this->m_descr, compute_type, scale_type);
+    }
+
     hipblaslt_local_matmul_descr(hipblasOperation_t   opA,
                                  hipblasOperation_t   opB,
                                  hipblasComputeType_t compute_type,
                                  hipDataType          scale_type,
                                  hipDataType compute_input_typeA = HIPBLASLT_DATATYPE_INVALID,
                                  hipDataType compute_input_typeB = HIPBLASLT_DATATYPE_INVALID)
+        : hipblaslt_local_matmul_descr(compute_type, scale_type)
     {
-        this->m_status = hipblasLtMatmulDescCreate(&this->m_descr, compute_type, scale_type);
-
         hipblasLtMatmulDescSetAttribute(
             this->m_descr, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(int32_t));
         hipblasLtMatmulDescSetAttribute(
@@ -267,14 +279,28 @@ public:
 
     ~hipblaslt_local_matmul_descr()
     {
-        if(this->m_status == HIPBLAS_STATUS_SUCCESS)
-            hipblasLtMatmulDescDestroy(this->m_descr);
+        reset();
     }
 
     hipblaslt_local_matmul_descr(const hipblaslt_local_matmul_descr&)            = delete;
-    hipblaslt_local_matmul_descr(hipblaslt_local_matmul_descr&&)                 = delete;
     hipblaslt_local_matmul_descr& operator=(const hipblaslt_local_matmul_descr&) = delete;
-    hipblaslt_local_matmul_descr& operator=(hipblaslt_local_matmul_descr&&)      = delete;
+
+    hipblaslt_local_matmul_descr(hipblaslt_local_matmul_descr&& other) noexcept
+        : m_descr(std::exchange(other.m_descr, nullptr))
+        , m_status(std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED))
+    {
+    }
+
+    hipblaslt_local_matmul_descr& operator=(hipblaslt_local_matmul_descr&& other) noexcept
+    {
+        if(this != &other)
+        {
+            reset();
+            m_descr  = std::exchange(other.m_descr, nullptr);
+            m_status = std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED);
+        }
+        return *this;
+    }
 
     hipblasStatus_t status()
     {
