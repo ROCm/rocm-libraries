@@ -1,0 +1,11 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block benchmarking_include %}
+// Include main benchmarking logic device select benchmarks.
+#include "benchmark_device_select.hpp"
+{% endblock %}
+
+{% block config_constructor -%}
+rocprim::select_config<{{ config.block_size_x }}, {{ config.ipt }}>
+{%- endblock %}
+

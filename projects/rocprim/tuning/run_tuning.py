@@ -70,7 +70,12 @@ def get_available_algorithms() -> List[str]:
         "device_partition_predicate",
         "device_partition_three_way",
         "device_partition_two_way_flag",
-        "device_partition_two_way_predicate"
+        "device_partition_two_way_predicate",
+        "device_select_predicated_flag",
+        "device_select_unique_by_key",
+        "device_select_flag",
+        "device_select_predicate",
+        "device_select_unique"
         # Add new algorithms here
     ]
 
