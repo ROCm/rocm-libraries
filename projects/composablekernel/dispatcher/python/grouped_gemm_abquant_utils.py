@@ -54,6 +54,11 @@ if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
 from codegen_common import make_abquant_kernel_name  # noqa: E402
 
+_python_dir = str(Path(__file__).parent)
+if _python_dir not in sys.path:
+    sys.path.insert(0, _python_dir)
+from dispatcher_common import arch_feature_defines  # noqa: E402
+
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
 
@@ -546,9 +551,16 @@ def _compile_abquant_kernel(
 ) -> bool:
     ck_include = _get_ck_include_dir()
 
+    # Arch-specific defines: gfx950 uses OCP fp8 (not FNUZ) and native MX support.
+    # These mirror the CMakeLists.txt definitions that are normally injected by CMake
+    # but are absent in the standalone hipcc build path. Without them the host pass of
+    # config.hpp silently falls back to FNUZ while the device pass picks OCP.
+    arch_defines = arch_feature_defines(gfx_arch)
+
     cmd = [hipcc] + _HIPCC_BASE_FLAGS + [
         f"--offload-arch={gfx_arch}",
         f"-DGFX_ARCH=\"{gfx_arch}\"",
+        *arch_defines,
         "-include", str(hpp_path),
         str(_CTYPES_LIB_SRC),
         "-o", str(so_path),

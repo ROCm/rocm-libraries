@@ -1601,33 +1601,27 @@ def dispatcherGemmVariantsFor(String arch) {
 
 // Which dtypes the GEMM sweeps may ask for on each arch.
 //
-// gfx950 is fp16/bf16 only, and the reason is not that the hardware lacks fp8 --
-// it is that the dispatcher's fp8 path is gfx942-shaped on both ends:
+// gfx950 used to be fp16/bf16 only. Not because the hardware lacks fp8, but
+// because the dispatcher's fp8 path was gfx942-shaped on both ends: the JIT
+// handed hipcc only --offload-arch, so gfx950 kernels fell into the FNUZ #else
+// branch of ck_tile/core/numeric/float8.hpp on the host pass while the device
+// pass and the fp8 MFMA used OCP -- and the numpy reference in gemm_utils.py was
+// unconditionally FNUZ. Three encodings, one test; the strata passed only because
+// the parity gates are loose. Both halves are fixed now:
 //
-//   * Device: CMakeLists.txt (see the CK_TILE_USE_OCP_FP8 block) compiles gfx950
-//     and gfx12 with -DCK_TILE_USE_OCP_FP8. The quant bridges replicate that in
-//     their own JIT flags (grouped_gemm_{a,b,rowcol,tensor}quant_utils.py all
-//     append -DCK_USE_OCP_FP8 -DCK_TILE_USE_OCP_FP8 for gfx950), but the GEMM
-//     sweep path does not: gemm_utils.py and ctypes_utils.py hand hipcc only
-//     --offload-arch. So a gfx950 node here JIT-builds kernels that fall into
-//     the FNUZ #else branch of ck_tile/core/numeric/float8.hpp, while gfx950's
-//     fp8 MFMA and its __gfx950__ conversion intrinsics are OCP. That asymmetry
-//     is why the quant operators keep their fp8 coverage on gfx950 and the
-//     sweeps below lose theirs.
-//   * Host: the fp8/bf8 codec in gemm_utils.py is FNUZ-only and says so --
-//     "gfx950/MI350 uses the OCP fp8 format instead; this codec targets the
-//     gfx942 default and the OCP path needs separate handling."
+//   * Device: gemm_utils._build_compile_jobs appends ocp_arch_defines(gfx_arch)
+//     (-DCK_USE_OCP_FP8 -DCK_TILE_USE_OCP_FP8), matching what CMake does for a
+//     gfx950 build and what the quant bridges already did for their own JIT.
+//   * Host: the gemm_utils fp8/bf8 codec is arch-aware -- _fp8_decode_table
+//     carries both formats and is verified byte-for-byte against ml_dtypes, and
+//     numpy_dtype_for picks e4m3fn/e5m2 vs e4m3fnuz/e5m2fnuz from the arch.
 //
-// Those strata therefore validate an encoding production never ships, and they
-// pass only because the parity tolerances are loose (fp8 1.5e-1, bf8 3.0e-1).
-// test_streamk_gpu_correctness.py already refuses gfx950 for exactly this
-// reason. Re-widening this list is not the fix; the fix is to port
-// test_rowcolquant_gpu_correctness.py's _fp8_uses_ocp() into gemm_utils AND to
-// pass -DCK_TILE_USE_OCP_FP8 in the JIT flags. Both, or neither works.
+// dispatcher_common.fp8_uses_ocp is the single predicate behind both, so they
+// cannot drift apart again.
 def dispatcherSweepDtypesFor(String arch) {
     switch (arch) {
         case "gfx942":  return "fp16,bf16,fp8,bf8"
-        case "gfx950":  return "fp16,bf16"
+        case "gfx950":  return "fp16,bf16,fp8,bf8"
         default:        return "fp16,bf16"
     }
 }

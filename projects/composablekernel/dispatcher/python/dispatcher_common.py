@@ -102,6 +102,63 @@ def detect_gpu_arch(fallback: str = "gfx942") -> str:
 
 
 # ============================================================================
+# fp8 / bf8 encoding format per architecture
+# ============================================================================
+#
+# CK has two incompatible 8-bit float encodings and picks between them per arch:
+#
+#   OCP  (gfx950, gfx12): e4m3fn   / e5m2    -- exponent bias 7 / 15
+#   FNUZ (everything else, notably gfx942): e4m3fnuz / e5m2fnuz -- bias 8 / 16
+#
+# include/ck_tile/core/config.hpp:361-371 resolves this at compile time, but only
+# the *device* pass sees __gfx950__; the host pass of the very same header falls
+# back to FNUZ. So a host-side reference encoder that guesses from the header ends
+# up disagreeing with the kernel it is validating. Every caller must therefore
+# decide from the target arch string, and pass -DCK_TILE_USE_OCP_FP8 explicitly so
+# both compiler passes agree. These helpers are the single source of truth for
+# both halves of that contract.
+
+
+def fp8_uses_ocp(arch: Optional[str]) -> bool:
+    """True iff `arch` uses the OCP fp8/bf8 encoding rather than FNUZ.
+
+    Mirrors the __gfx950__ / __gfx12__ test in include/ck_tile/core/config.hpp.
+    Use this to select the host-side codec (ml_dtypes.float8_e4m3fn vs
+    float8_e4m3fnuz) so it matches the bytes the kernel actually produces.
+    """
+    a = (arch or "").lower()
+    return a.startswith("gfx950") or a.startswith("gfx12")
+
+
+def ocp_arch_defines(arch: Optional[str]) -> List[str]:
+    """hipcc defines that pin the fp8/bf8 encoding for `arch`.
+
+    Returned for OCP archs only; FNUZ is the default for both compiler passes and
+    needs no define. Passing these makes the host pass agree with the device pass
+    instead of silently falling back to FNUZ.
+    """
+    if not fp8_uses_ocp(arch):
+        return []
+    return ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+
+
+def arch_feature_defines(arch: Optional[str]) -> List[str]:
+    """`ocp_arch_defines` plus the gfx950 MX / scale-MFMA enablement defines.
+
+    CMake sets CK_USE_NATIVE_MX_SUPPORT and CK_GFX950_SUPPORT for gfx950 builds;
+    they are absent in the standalone hipcc JIT path, so bridges that compile
+    block-scaled kernels must add them here. Note CK_GFX950_SUPPORT also selects
+    the warp-tile K in tile_gemm_shape.hpp get_k_warp_tile(), so a config whose
+    warp_tile_k was tuned for gfx950 will silently produce zeros if built for
+    gfx942 -- keep warp_tile_k arch-aware alongside these defines.
+    """
+    defines = ocp_arch_defines(arch)
+    if (arch or "").lower().startswith("gfx950"):
+        defines = defines + ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
+    return defines
+
+
+# ============================================================================
 # Architecture Filter Data
 # ============================================================================
 

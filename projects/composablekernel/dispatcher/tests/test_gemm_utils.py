@@ -37,11 +37,27 @@ from gemm_utils import (  # noqa: E402
     _fp32_to_bf8_u8,
     _bf8_u8_to_fp32,
     _fnuz_decode_table,
+    _fp8_decode_table,
+    _fp8_encode,
+    numpy_dtype_for,
     _output_dtype,
     _dtype_from_kernel_name,
     _layout_from_kernel_name,
     _cshuffle_store_ok,
 )
+
+
+def _require_ml_dtypes():
+    """Return the ``ml_dtypes`` module, skipping the test when it is absent.
+
+    It is the independent oracle for the fp8/bf8 tables, so a test that needs it
+    must skip rather than silently assert nothing.
+    """
+    try:
+        import ml_dtypes  # noqa: WPS433 (lazy: optional dep)
+    except ImportError:  # pragma: no cover - env-dependent
+        raise unittest.SkipTest("ml_dtypes is required for fp8/bf8 table checks")
+    return ml_dtypes
 
 
 class TestBf16Encoding(unittest.TestCase):
@@ -129,16 +145,114 @@ class TestFp8Bf8Encoding(unittest.TestCase):
             self.assertTrue(np.all(np.isfinite(d)))
 
     def test_saturates_no_inf(self):
-        # FNUZ has no infinity: huge magnitudes clamp to the finite max.
+        # FNUZ has no infinity: huge magnitudes clamp to the finite max. Pin the
+        # format explicitly -- the wrappers otherwise follow the local GPU, and on
+        # a gfx950 runner these are the OCP maxima (448 / -57344) instead.
         big = np.array([1e30, -1e30], dtype=np.float32)
-        self.assertEqual(float(_fp8_u8_to_fp32(_fp32_to_fp8_u8(big))[0]), 240.0)
-        self.assertEqual(float(_bf8_u8_to_fp32(_fp32_to_bf8_u8(big))[1]), -57344.0)
+        enc8 = _fp32_to_fp8_u8(big, use_ocp=False)
+        enc5 = _fp32_to_bf8_u8(big, use_ocp=False)
+        self.assertEqual(float(_fp8_u8_to_fp32(enc8, use_ocp=False)[0]), 240.0)
+        self.assertEqual(float(_bf8_u8_to_fp32(enc5, use_ocp=False)[1]), -57344.0)
 
     def test_dtype_and_size(self):
         for enc in (_fp32_to_fp8_u8, _fp32_to_bf8_u8):
             u8 = enc(np.zeros(4, dtype=np.float32))
             self.assertEqual(u8.dtype, np.uint8)
             self.assertEqual(u8.itemsize, 1)  # must match sizeof(fp8_t/bf8_t)
+
+
+class TestFp8Bf8OcpEncoding(unittest.TestCase):
+    """The OCP (gfx950/gfx12) half of the fp8/bf8 codec.
+
+    The decode table is the load-bearing half -- it defines what the numpy
+    reference multiplies -- so it is checked byte-for-byte against ml_dtypes
+    rather than spot-checked. Getting the format wrong does not crash; it
+    silently rescales every reference value by a factor of two.
+    """
+
+    def test_decode_matches_ml_dtypes_for_every_byte(self):
+        ml_dtypes = _require_ml_dtypes()
+        cases = (
+            (4, 3, True, ml_dtypes.float8_e4m3fn),
+            (4, 3, False, ml_dtypes.float8_e4m3fnuz),
+            (5, 2, True, ml_dtypes.float8_e5m2),
+            (5, 2, False, ml_dtypes.float8_e5m2fnuz),
+        )
+        all_bytes = np.arange(256, dtype=np.uint8)
+        for exp_bits, mant_bits, use_ocp, ml_type in cases:
+            with self.subTest(dtype=ml_type.__name__):
+                ours = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
+                theirs = all_bytes.view(ml_type).astype(np.float32)
+                same = (ours == theirs) | (np.isnan(ours) & np.isnan(theirs))
+                self.assertTrue(
+                    np.all(same),
+                    f"bytes {np.flatnonzero(~same).tolist()} disagree with ml_dtypes",
+                )
+
+    def test_ocp_format_ranges(self):
+        # OCP bias is one less than FNUZ, so e4m3fn reaches 448 (not 240);
+        # e5m2 keeps 57344 but gains a real infinity.
+        t43 = _fp8_decode_table(4, 3, True)
+        t52 = _fp8_decode_table(5, 2, True)
+        self.assertEqual(float(np.nanmax(t43[np.isfinite(t43)])), 448.0)
+        self.assertEqual(float(np.nanmin(t43[np.isfinite(t43)])), -448.0)
+        self.assertEqual(float(np.nanmax(t52[np.isfinite(t52)])), 57344.0)
+        self.assertEqual(np.count_nonzero(np.isinf(t43)), 0)  # e4m3fn has no Inf
+        self.assertEqual(np.count_nonzero(np.isinf(t52)), 2)  # e5m2 does
+
+    def test_ocp_zero_slots(self):
+        # Unlike FNUZ, 0x80 is a genuine -0.0 rather than the lone NaN.
+        for tab in (_fp8_decode_table(4, 3, True), _fp8_decode_table(5, 2, True)):
+            self.assertEqual(float(tab[0x00]), 0.0)
+            self.assertFalse(np.isnan(tab[0x80]))
+            self.assertEqual(float(tab[0x80]), 0.0)
+
+    def test_every_representable_value_roundtrips_exactly(self):
+        for exp_bits, mant_bits in ((4, 3), (5, 2)):
+            for use_ocp in (False, True):
+                with self.subTest(bits=(exp_bits, mant_bits), ocp=use_ocp):
+                    table = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
+                    vals = table[np.isfinite(table)]
+                    enc = _fp8_encode(vals, exp_bits, mant_bits, use_ocp=use_ocp)
+                    np.testing.assert_array_equal(table[enc.astype(np.intp)], vals)
+
+    def test_ocp_saturates_to_max_finite_not_inf(self):
+        # e5m2 has an Inf byte; a naive nearest-neighbour search would round
+        # huge inputs to it. CK's convert saturates, so the codec must too.
+        big = np.array([1e30, -1e30], dtype=np.float32)
+        table = _fp8_decode_table(5, 2, True)
+        got = table[_fp8_encode(big, 5, 2, use_ocp=True).astype(np.intp)]
+        self.assertEqual(float(got[0]), 57344.0)
+        self.assertEqual(float(got[1]), -57344.0)
+        t43 = _fp8_decode_table(4, 3, True)
+        got8 = t43[_fp8_encode(big, 4, 3, use_ocp=True).astype(np.intp)]
+        self.assertEqual(float(got8[0]), 448.0)
+
+    def test_nan_maps_to_a_nan_byte_in_both_formats(self):
+        nan = np.array([np.nan], dtype=np.float32)
+        for exp_bits, mant_bits in ((4, 3), (5, 2)):
+            for use_ocp in (False, True):
+                with self.subTest(bits=(exp_bits, mant_bits), ocp=use_ocp):
+                    table = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
+                    enc = _fp8_encode(nan, exp_bits, mant_bits, use_ocp=use_ocp)
+                    self.assertTrue(np.isnan(table[int(enc[0])]))
+
+    def test_fnuz_aliases_forward_to_the_shared_table(self):
+        # _fnuz_decode_table is kept as a thin FNUZ view; callers rely on the
+        # lru_cache identity, so it must return the cached instance itself.
+        self.assertIs(_fnuz_decode_table(4, 3), _fp8_decode_table(4, 3, False))
+        self.assertIsNot(_fnuz_decode_table(4, 3), _fp8_decode_table(4, 3, True))
+
+    def test_numpy_dtype_follows_the_requested_format(self):
+        ml_dtypes = _require_ml_dtypes()
+        self.assertEqual(numpy_dtype_for("fp8", use_ocp=True),
+                         np.dtype(ml_dtypes.float8_e4m3fn))
+        self.assertEqual(numpy_dtype_for("fp8", use_ocp=False),
+                         np.dtype(ml_dtypes.float8_e4m3fnuz))
+        self.assertEqual(numpy_dtype_for("bf8", use_ocp=True),
+                         np.dtype(ml_dtypes.float8_e5m2))
+        self.assertEqual(numpy_dtype_for("bf8", use_ocp=False),
+                         np.dtype(ml_dtypes.float8_e5m2fnuz))
 
 
 class TestOutputDtype(unittest.TestCase):

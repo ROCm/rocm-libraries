@@ -52,6 +52,11 @@ if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
 from codegen_common import make_bquant_kernel_name  # noqa: E402
 
+_python_dir = str(Path(__file__).parent)
+if _python_dir not in sys.path:
+    sys.path.insert(0, _python_dir)
+from dispatcher_common import arch_feature_defines  # noqa: E402
+
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
 
@@ -524,11 +529,7 @@ def _compile_bquant_kernel(
     # Arch-specific defines: gfx950 uses OCP fp8 (not FNUZ) and native MX support.
     # These mirror the CMakeLists.txt definitions that are normally injected by CMake
     # but are absent in the standalone hipcc build path.
-    arch_defines = []
-    if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
-        arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
-    if "gfx950" in gfx_arch:
-        arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
+    arch_defines = arch_feature_defines(gfx_arch)
 
     compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",
                    "-DCK_TILE_SINGLE_KERNEL_INCLUDE", "-w",

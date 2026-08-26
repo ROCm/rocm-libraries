@@ -89,9 +89,15 @@ _SHAPES = [
 
 # Global-relative-error gates. fp16 measured ~3-4e-4 and bf16 ~8e-3 on gfx942.
 # fp8/bf8 are far coarser (3- and 2-bit mantissa) so their gates are looser; int8
-# is an exact integer accumulation so it must match bit-for-bit. The fp8/bf8
-# gates are first-cut headroom values and may want tightening once measured on a
-# GPU.
+# is an exact integer accumulation so it must match bit-for-bit.
+#
+# The fp8/bf8 numbers are still first-cut headroom, and they are deliberately
+# unchanged by the OCP/FNUZ fix. That fix removed a real source of error on
+# gfx950 -- the reference used to be FNUZ while the kernel ran OCP, a factor-of-
+# two shift these gates were wide enough to swallow -- but it changed nothing on
+# gfx942, which was FNUZ-correct all along and still needs this much room purely
+# for 3-/2-bit quantization. Tightening is a measurement, not a deduction: run
+# the sweep on both archs and set each gate from the observed maximum.
 _TOL = {
     "fp16": 2e-3,
     "bf16": 1.5e-2,

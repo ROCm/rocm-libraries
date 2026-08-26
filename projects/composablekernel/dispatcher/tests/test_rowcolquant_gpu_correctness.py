@@ -32,6 +32,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
+from dispatcher_common import fp8_uses_ocp as _fp8_uses_ocp
+
 from grouped_gemm_rowcolquant_utils import (
     RowColQuantGemmProblem,
     RowColQuantGpuGemmRunner,
@@ -98,17 +100,6 @@ def _require_ml_dtypes():
             "ml_dtypes is required for valid fp8/bf8 encoding; "
             "install with: pip install ml-dtypes"
         )
-
-
-def _fp8_uses_ocp(arch: str) -> bool:
-    """Mirror the -DCK_USE_OCP_FP8 compile logic in grouped_gemm_rowcolquant_utils.py.
-
-    gfx950 / gfx12 build the kernel with OCP fp8 (e4m3fn / e5m2); every other
-    supported arch (notably gfx942) uses the native FNUZ format
-    (e4m3fnuz / e5m2fnuz). The host-side encoding MUST match the format the kernel
-    was compiled for, otherwise the reinterpreted bytes decode to NaN/Inf on device.
-    """
-    return "gfx950" in arch or "gfx12" in arch
 
 
 def _fp8_ml_dtype(dtype: str):
