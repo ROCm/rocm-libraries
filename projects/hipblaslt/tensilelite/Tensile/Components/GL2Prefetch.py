@@ -21,9 +21,8 @@ class GL2PrefetchLoad(GL2Prefetch):
     def init(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping):
         globalPrefetchSize: int = writer.states.regCaps["GlobalPrefetchSize"]
         tc: str = tp["tensorChar"]
-        subTc: str = tc[-1]
         isMX: bool = tc.startswith("MX")
-        mt: int = kernel["MacroTile%s" % subTc]
+        isM: bool = tp.get("isM", False)
         # Cooperative prefetch spans the *whole* cluster: every workgroup in the
         # cluster contributes threads, and together they cover all the distinct
         # macro-tiles the cluster consumes rather than only the single tile one
@@ -31,18 +30,28 @@ class GL2PrefetchLoad(GL2Prefetch):
         # (WorkGroup0 for A, WorkGroup1 for B) the cluster spans numTileWGs
         # contiguous macro-tiles, so the tile dimension of the prefetched block
         # is scaled accordingly.
-        numTileWGs: int = kernel["ClusterDim"][0] if subTc == "A" else kernel["ClusterDim"][1]
+        # TODO: boundary clusters from the padded-WG edge-size path have fewer
+        # than ClusterDim live workgroups, so this full-cluster count over-counts
+        # the cooperative tile span and thread population. The effect is perf-only
+        # (padded WGs early-exit and just skip their prefetch slice; real compute
+        # data is loaded by each WG's own TDM load), so it is left unfixed for now.
         numCooperativeWGs: int = kernel["ClusterDim"][0] * kernel["ClusterDim"][1]
         numCooperativeThreads: int = numCooperativeWGs * kernel["NumThreads"]
+
+        subTc: str = tc if isM else tc[-1]
+        mt: int = kernel["MacroTile%s" % subTc]
+        numTileWGs: int = kernel["ClusterDim"][tp["idx"]] if isM else (kernel["ClusterDim"][0] if subTc == "A" else kernel["ClusterDim"][1])
+        bpe: float = tp["bpeGR"]
 
         if isMX:
             coalescedDim = mt * numTileWGs * kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
             perpendicularDim = kernel["DepthU"] // kernel["MatrixInstK"]
         else:
-            coalescedDim, perpendicularDim = (mt * numTileWGs, kernel["DepthU"]) if tp["tlu"] else (kernel["DepthU"], mt * numTileWGs)
+            du: int = kernel["_DepthU%s" % subTc]
+            coalescedDim, perpendicularDim = (mt * numTileWGs, du) if tp["tlu"] else (du, mt * numTileWGs)
 
         tp["gl2ncp"] = perpendicularDim
-        tp["gl2ncc"] = max(1, round(coalescedDim * tp["bpeGR"]) // globalPrefetchSize)
+        tp["gl2ncc"] = max(1, round(coalescedDim * bpe) // globalPrefetchSize)
         tp["gl2nc"] = tp["gl2ncp"] * tp["gl2ncc"]
         tp["gl2nl"] = max(1, ceil(tp["gl2nc"] / numCooperativeThreads))
 
@@ -50,28 +59,31 @@ class GL2PrefetchLoad(GL2Prefetch):
         mod = Module()
         tc: str = tp["tensorChar"]
         tIdx: int = tp['idx']
-        subTc: str = tc[-1]
+        isM: bool = tp.get("isM", False)
+        subTc: str = tc if isM else tc[-1]
         bpe: float = tp["bpeGR"]
+        du: int = kernel["_DepthU%s" % subTc]
         if tc.startswith("MX"):
             mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), \
                 round(kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe), comment="addr increment"))
         elif tp["tlu"]:
             perpStride: str | RegisterContainer = writer.strideRef(subTc, 3)
-            mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), perpStride, round(kernel["DepthU"] * bpe), comment="addr increment"))
+            mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), perpStride, round(du * bpe), comment="addr increment"))
         else:
-            mod.add(SMovB32(dst=sgpr(f"GL2PrefetchInc{tc}"), src=round(kernel["DepthU"] * bpe), comment="addr increment"))
+            mod.add(SMovB32(dst=sgpr(f"GL2PrefetchInc{tc}"), src=round(du * bpe), comment="addr increment"))
         return mod
 
     def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
         mod = Module()
         globalPrefetchSize: int = writer.states.regCaps["GlobalPrefetchSize"]
         tc: str = tp["tensorChar"]
-        subTc: str = tc[-1]
         tIdx: int = tp['idx']
-        mt: int = kernel["MacroTile%s" % subTc]
-        bpe: float = tp["bpeGR"]
         tlu: bool = tp["tlu"]
         isMX: bool = tc.startswith("MX")
+        isM: bool = tp.get("isM", False)
+        subTc: str = tc if isM else tc[-1]
+        mt: int = kernel["MacroTile%s" % subTc]
+        bpe: float = tp["bpeGR"]
         tileStride: str | RegisterContainer = writer.strideRef(subTc, tIdx)
         unrollStride: str | RegisterContainer = writer.strideRef(subTc, 3)
         perpStride: str | RegisterContainer = unrollStride if tlu else tileStride

@@ -1,10 +1,10 @@
 {
     "tile_config": {
         "tile_m": {
-            "values": [128]
+            "values": [256]
         },
         "tile_n": {
-            "values": [128]
+            "values": [256]
         },
         "tile_k": {
             "values": [64]

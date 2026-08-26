@@ -21,7 +21,13 @@ namespace hipdnn_frontend::detail
     std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
     graph::{{ op.frontend.attributes_class }}& attributes)
 {
-{% for tf in op.tensor_fields %}
+{% set mode_field = op.mode_rule_mode_field %}
+{% if op.mode_rules %}
+{% set tensors_to_unpack = op.required_tensor_fields %}
+{% else %}
+{% set tensors_to_unpack = op.tensor_fields %}
+{% endif %}
+{% for tf in tensors_to_unpack %}
 {% set ft = op.tensor_field_frontend_map.get(tf.name) %}
 {% if ft %}
     // Unpack {{ ft.name }} tensor
@@ -41,12 +47,72 @@ namespace hipdnn_frontend::detail
 
 {% endif %}
 {% endfor %}
+{% if op.mode_rules %}
+{% set tf_by_name = op.tensor_field_by_name %}
+{% set df_by_name = op.data_field_by_name %}
+    // The mode determines which routing attributes are present.
+    {{ mode_field.test_c_type }} {{ mode_field.camel_name }}{};
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(
+        opDesc, {{ mode_field.attr_name }}, {{ mode_field.backend_type }},
+        {{ mode_field.camel_name }}, "{{ op.effective_error_label }} {{ mode_field.name }}"));
+    auto [{{ mode_field.camel_name }}Result, {{ mode_field.camel_name }}Err]
+        = {{ mode_field.frontend_inverse_converter }}({{ mode_field.camel_name }});
+    if({{ mode_field.camel_name }}Err.is_bad())
+    {
+        return {{ mode_field.camel_name }}Err;
+    }
+    attributes.{{ mode_field.frontend_setter_name }}({{ mode_field.camel_name }}Result);
+
+    switch({{ mode_field.camel_name }}Result)
+    {
+{% for rule in op.mode_rules %}
+    case {{ mode_field.effective_frontend_type }}::{{ rule.mode }}:
+{% for tensor_name in rule.required_optional_tensors %}
+{% set tf = tf_by_name[tensor_name] %}
+{% set ft = op.tensor_field_frontend_map[tf.name] %}
+        {
+            std::shared_ptr<graph::TensorAttributes> {{ ft.camel_name }}Tensor;
+            HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+                opDesc, {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, tensorMap,
+                {{ ft.camel_name }}Tensor,
+                "{{ op.effective_error_label }} {{ tf.attr_suffix }} tensor"));
+            attributes.{{ ft.effective_setter_name }}({{ ft.camel_name }}Tensor);
+        }
+{% endfor %}
+{% for scalar_name in rule.serialized_scalars %}
+{% set field = df_by_name[scalar_name] %}
+        {
+{% if field.type == "scalar_float" %}
+            float {{ field.camel_name }} = 0.0f;
+{% elif field.type == "bool" %}
+            bool {{ field.camel_name }} = false;
+{% else %}
+            {{ field.cpp_type }} {{ field.camel_name }} = 0;
+{% endif %}
+            HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(
+                opDesc, {{ field.attr_name }}, {{ field.backend_type }},
+                {{ field.camel_name }},
+                "{{ op.effective_error_label }} {{ field.name }}"));
+{% if field.frontend_uses_member_access %}
+            attributes.{{ field.frontend_member_name }} = {{ field.camel_name }};
+{% else %}
+            attributes.{{ field.frontend_setter_name }}({{ field.camel_name }});
+{% endif %}
+        }
+{% endfor %}
+        break;
+{% endfor %}
+    default:
+        return {ErrorCode::INVALID_VALUE, "{{ op.effective_error_label }} has an unknown routing mode"};
+    }
+{% endif %}
+
 {% if op.data_fields_helper is defined and op.data_fields_helper %}
     // Unpack shared {{ op.data_fields_helper.label }} parameters
     HIPDNN_CHECK_ERROR({{ op.data_fields_helper.unpack_function }}(opDesc, attributes, "{{ op.effective_error_label }}"));
 
 {% else %}
-{% for df in op.data_fields %}
+{% for df in op.data_fields if not op.mode_rules or (df.name != mode_field.name and df.name not in op.mode_rule_controlled_scalar_names) %}
 {% if df.is_vector %}
     // Unpack {{ df.name }}
     std::vector<int64_t> {{ df.camel_name }};

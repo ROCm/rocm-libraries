@@ -37,6 +37,7 @@ HIPSPARSE_DO_ROUTINE(bsrsv2)        \
 HIPSPARSE_DO_ROUTINE(coomv)         \
 HIPSPARSE_DO_ROUTINE(csrmv)         \
 HIPSPARSE_DO_ROUTINE(csrsv)         \
+HIPSPARSE_DO_ROUTINE(cscsv)         \
 HIPSPARSE_DO_ROUTINE(gemvi)         \
 HIPSPARSE_DO_ROUTINE(hybmv)         \
 HIPSPARSE_DO_ROUTINE(bsrmm)         \
@@ -46,6 +47,7 @@ HIPSPARSE_DO_ROUTINE(cscmm)         \
 HIPSPARSE_DO_ROUTINE(csrmm)         \
 HIPSPARSE_DO_ROUTINE(coosm)         \
 HIPSPARSE_DO_ROUTINE(csrsm)         \
+HIPSPARSE_DO_ROUTINE(cscsm)         \
 HIPSPARSE_DO_ROUTINE(gemmi)         \
 HIPSPARSE_DO_ROUTINE(csrgeam)       \
 HIPSPARSE_DO_ROUTINE(csrgemm)       \

@@ -100,10 +100,9 @@ add_library( rocfft-function-pool OBJECT
   ${FUNCTION_POOLS}
   function_pool.cpp
 )
-# Don't add function pool to coverage as it's just generated code
-# that sets up kernel config data structures, and isn't interesting
-# to cover.
-#rocfft_add_coverage_flags( rocfft-function-pool )
+# Instrument for code coverage (no-op unless BUILD_CODE_COVERAGE is ON).
+# The internal test suite exercises function_pool.cpp directly.
+rocfft_add_coverage_flags( rocfft-function-pool )
 
 target_include_directories( rocfft-function-pool
   PRIVATE

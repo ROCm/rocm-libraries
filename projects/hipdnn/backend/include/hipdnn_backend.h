@@ -55,6 +55,7 @@
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnMoeGroupedMatmulMode.h"
 #include "HipdnnPaddingMode.h"
 #include "HipdnnReduceTensorOp.h"
 #include "HipdnnResampleMode.h"
@@ -793,6 +794,56 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                                                              size_t* versionLen,
                                                              char* type,
                                                              size_t* typeLen);
+
+/**
+ * @brief Resolves an engine name to the ID of the engine that carries it.
+ *
+ * This is the inverse of the names reported by hipdnnGetEngineInfo_ext: any name obtained
+ * from that enumeration resolves here, and it resolves to exactly one engine.
+ *
+ * Names are unique across loaded engines. The backend enforces this at load time, dropping
+ * any engine whose reported name does not hash to its ID, or whose ID an earlier plugin
+ * already provides.
+ *
+ * @param[in]  handle       A valid hipDNN handle.
+ * @param[in]  engineName   Null-terminated engine name to resolve.
+ * @param[out] engineId     Pointer where the resolved engine ID will be stored.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   Null handle, name, or output pointer.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            No loaded engine carries the given name.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR           Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineIdByName_ext(hipdnnHandle_t handle,
+                                                                 const char* engineName,
+                                                                 int64_t* engineId);
+
+/**
+ * @brief Resolves an engine ID to the name that engine carries.
+ *
+ * This is the inverse of hipdnnGetEngineIdByName_ext, and reports the same name as
+ * hipdnnGetEngineInfo_ext without needing the engine's index. Only loaded engines
+ * resolve; any other ID reports HIPDNN_STATUS_NOT_SUPPORTED rather than a synthesized name.
+ *
+ * Uses the same two-call pattern as hipdnnGetEngineInfo_ext: pass `engineName` as `nullptr`
+ * to query the required size, then call again with an allocated buffer.
+ *
+ * @param[in]     handle         A valid hipDNN handle.
+ * @param[in]     engineId       Engine ID to resolve.
+ * @param[out]    engineName     Buffer for the engine name, or `nullptr` to query size.
+ * @param[in,out] engineNameLen  On the size query, receives the required size. On the fill
+ *                               call, supplies the buffer size and is left unchanged.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   Null handle or null `engineNameLen`.
+ * @retval HIPDNN_STATUS_BAD_PARAM                Supplied buffer is too small.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            No loaded engine carries the given ID.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR           Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineNameById_ext(hipdnnHandle_t handle,
+                                                                 int64_t engineId,
+                                                                 char* engineName,
+                                                                 size_t* engineNameLen);
 
 /**
  * @brief Gets the count of loaded heuristic policies.

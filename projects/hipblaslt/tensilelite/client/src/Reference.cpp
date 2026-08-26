@@ -1751,21 +1751,21 @@ namespace TensileLite
                                         current = (alpha * current);
                                     }
 
+                                    bool                 aConjugate = false;
+                                    size_t               dNum
+                                        = global_m + (global_n * sizeM) + (b * sizeM * sizeN);
+                                    auto const&          d = problem.d();
+                                    std::vector<int64_t> dCoord(d.dimensions());
+                                    CoordNumbered(dNum,
+                                                  dCoord.begin(),
+                                                  dCoord.end(),
+                                                  d.sizes().begin(),
+                                                  d.sizes().end());
+
                                     if(problem.useBias() && inputs.bias)
                                     {
-
                                         assert(!problem.useGradient()
                                                && "Bias gradient not supported on this path.");
-
-                                        size_t dNum
-                                            = global_m + (global_n * sizeM) + (b * sizeM * sizeN);
-                                        auto const&          d = problem.d();
-                                        std::vector<int64_t> dCoord(d.dimensions());
-                                        CoordNumbered(dNum,
-                                                      dCoord.begin(),
-                                                      dCoord.end(),
-                                                      d.sizes().begin(),
-                                                      d.sizes().end());
 
                                         auto const&          bias = problem.bias();
                                         std::vector<int64_t> biasCoord(bias.dimensions());
@@ -1788,7 +1788,6 @@ namespace TensileLite
                                         else
                                             pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
 
-                                        bool   aConjugate = false;
                                         AccumT biasVal
                                             = GetValue<AccumT>(problem.bias().dataType(),
                                                                inputs.bias,
@@ -1806,6 +1805,17 @@ namespace TensileLite
                                                              actArgs);
                                     }
 
+                                    if(problem.useGateResidual() && inputs.gateResidual)
+                                    {
+                                        auto        gateIndex = problem.gateResidual().index(dCoord);
+                                        AccumT gateVal
+                                            = GetValue<AccumT>(
+                                                problem.gateResidual().dataType(),
+                                                inputs.gateResidual,
+                                                gateIndex,
+                                                aConjugate);
+                                        current = gateVal * current + gateVal;
+                                    }
                                     curBatchD[idxD] = current;
                                 }
                             }
@@ -1923,9 +1933,9 @@ namespace TensileLite
 
             // gemm
             omp_set_num_threads(MAX_OMP_THREADS);
-#pragma omp parallel for
-            for(size_t dNum = 0; dNum < d.totalLogicalElements(); dNum += validationStrideGemm)
+#pragma omp parallel
             {
+                // Allocate coordinate buffers per-thread.
                 std::vector<int64_t> aCoord(a.dimensions());
                 std::vector<int64_t> bCoord(b.dimensions());
                 std::vector<int64_t> cCoord(c.dimensions());
@@ -1933,6 +1943,10 @@ namespace TensileLite
                 std::vector<int64_t> biasCoord(bias.dimensions());
                 std::vector<int64_t> mxsaCoord(mxsa.dimensions());
                 std::vector<int64_t> mxsbCoord(mxsb.dimensions());
+                std::vector<int64_t> bound(problem.boundIndices().size());
+#pragma omp for
+            for(size_t dNum = 0; dNum < d.totalLogicalElements(); dNum += validationStrideGemm)
+            {
                 CoordNumbered(
                     dNum, dCoord.begin(), dCoord.end(), d.sizes().begin(), d.sizes().end());
 
@@ -1981,7 +1995,6 @@ namespace TensileLite
                 {
                     for(size_t boundNum = 0; boundNum < boundCount; boundNum++)
                     {
-                        std::vector<int64_t> bound(problem.boundIndices().size());
                         CoordNumbered(boundNum,
                                       bound.begin() + 1,
                                       bound.end(),
@@ -2232,8 +2245,22 @@ namespace TensileLite
                 {
                     ws[dIndex] = resultD;
                 }
+
+                // gate residual: D[i,j] = gate[i,j] * resultD[i,j] + gate[i,j]
+                if(problem.useGateResidual() && inputs.gateResidual)
+                {
+                    auto gateIndex = problem.gateResidual().index(dCoord);
+                    Accumulator gateVal
+                        = GetValue<Accumulator>(problem.gateResidual().dataType(),
+                                               inputs.gateResidual,
+                                               gateIndex,
+                                               aConjugate);
+                    resultD = gateVal * resultD + gateVal;
+                }
+
                 dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
             }
+            } // end #pragma omp parallel
 
             if(problem.outputAmaxD())
             {

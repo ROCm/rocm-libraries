@@ -18,7 +18,7 @@
 // void notify_all_at_thread_exit(condition_variable& cond, unique_lock<mutex> lk);
 
 // Test that this function works with threads that were not created by
-// hip::thread. See https://llvm.org/PR30202
+// hip::wthread. See https://llvm.org/PR30202
 
 
 #include <condition_variable>
@@ -64,7 +64,7 @@ int main(int, char**)
     exited = false;
     {
     hip::unique_lock<::std::mutex> lk(mut);
-    hip::thread t(&func, nullptr);
+    hip::wthread t(&func, nullptr);
     Clock::time_point t0 = Clock::now();
     assert(exited == false);
     cv.wait(lk);

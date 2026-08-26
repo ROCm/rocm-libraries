@@ -2,13 +2,15 @@
 # SPDX-License-Identifier:  MIT
 #
 # rocke project umbrella:
-#   - library/  : the SDPA product (C-api provider plugin + build-time Python).
-#                 Added first to mirror the historical rocke-client-before-rocKE
-#                 ordering; both complete before src/ (added by the parent) reads
-#                 the staged CTest entries.
 #   - platform/ : the authoring SDK + engine (former rocKE/).
-add_subdirectory(library)
-add_subdirectory(platform)
+# The library/ tree is build-time-only Python (kernels/builders/dispatch); it is
+# editable-installed and wheeled by the rocke-pyenv / rocke-wheels blocks below,
+# not added as a CMake subdirectory.
+#
+# NOTE: add_subdirectory(platform) is deferred to after the ROCKE_BUILD_PYENV /
+# ROCKE_WHEEL_DIR / ROCKE_WHEEL_VERSION declarations below so that
+# platform/CMakeLists.txt sees those variables when it registers the wheel
+# install() rules.
 
 # ---------------------------------------------------------------------------
 # rocke-pyenv: build-time editable Python environment.
@@ -98,3 +100,5 @@ if(ROCKE_BUILD_PYENV)
         DEPENDS "${_rocke_platform_wheel}" "${_rocke_library_wheel}"
         COMMENT "rocke-wheels: building platform + library Python wheels")
 endif()
+
+add_subdirectory(platform)

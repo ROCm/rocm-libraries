@@ -99,14 +99,18 @@ GLOBAL_PREFETCH_SIZE = 256
 # ---------------------------------------------------------------------------
 @dataclass
 class TensorSpec:
-    tc: str            # "A", "B", "MXSA", "MXSB"
+    tc: str            # "A", "B", "MXSA", "MXSB", "Metadata"
     tlu: bool
     mt: int            # MacroTile (A-type tensors share MacroTileA; B-type MacroTileB)
     bpe: float = 1     # bytes/elem: FP8/scale=1 (int), FP4=0.5
+    is_m: bool = False       # sparse metadata tensor (isM in GL2Prefetch)
+    sparse_side: str = None  # for is_m: "A" or "B" -- which sparse data tensor this
+                             # metadata mirrors (Sparse==1 -> A, Sparse==2 -> B); tc
+                             # itself is always literally "Metadata"
 
     @property
     def subtc(self):
-        return self.tc[-1]            # 'A' or 'B'
+        return self.sparse_side if self.is_m else self.tc[-1]  # 'A' or 'B'
 
     @property
     def idx(self):
@@ -147,6 +151,13 @@ class GL2Config:
                               # into the base address (the batch-offset path).
     num_batches: int = 1      # batch extent (grid z). Each batch b shifts the whole
                               # footprint by b * Stride{tc}K * bpe.
+    sparse: int = 0           # 0 = dense; 1 = A is the 2:4-compressed sparse operand;
+                              # 2 = B is. Halves _DepthU{A,B} for that data tensor
+                              # (GL2Prefetch reads _DepthU{A,B}, not the raw DepthU,
+                              # so this must be modeled here too) and is required
+                              # whenever cfg.tensors includes a Metadata (_M) spec.
+    depth_u_metadata: int = 0 # _DepthUMetadata: metadata's own (already-compressed)
+                              # unroll extent; independent of DepthU/_DepthU{A,B}.
 
     @property
     def n_wg(self):
@@ -165,6 +176,20 @@ def num_cooperative_threads(cfg, subtc):
     return cfg.cluster[0] * cfg.cluster[1] * cfg.num_threads
 
 
+def depth_u_side(side, cfg):
+    """_DepthU{A,B}: the per-tensor unroll extent GL2Prefetch.init actually reads
+    for a plain data tensor (matches Solution.py). Equal to DepthU, except for
+    the 2:4-compressed sparse data tensor (A when Sparse==1, B when Sparse==2),
+    which is physically halved along K."""
+    if (cfg.sparse == 1 and side == "A") or (cfg.sparse == 2 and side == "B"):
+        return cfg.depth_u // 2
+    return cfg.depth_u
+
+
+def data_depth_u(spec, cfg):
+    return depth_u_side(spec.subtc, cfg)
+
+
 def tensor_dims(spec, cfg):
     """(coal_dim, perp_dim, ncc, nc) for a tensor, matching GL2Prefetch.init.
     The prefetched block spans *all* the macro-tiles the cluster consumes along
@@ -172,11 +197,16 @@ def tensor_dims(spec, cfg):
     dimension is scaled by mt_tiles: it is the coalesced dim for TLU/MX and the
     perpendicular dim for non-TLU."""
     M = mt_tiles(spec, cfg)
-    if spec.is_mx:
+    if spec.is_m:
+        # metadata uses its own compressed unroll extent (_DepthUMetadata), not
+        # DepthU/_DepthU{A,B}; bpe is always 1 (already byte-granular)
+        coal, perp = (spec.mt * M, cfg.depth_u_metadata) if spec.tlu else (cfg.depth_u_metadata, spec.mt * M)
+    elif spec.is_mx:
         coal = spec.mt * M * cfg.matrix_inst_k // cfg.mx_block
         perp = cfg.depth_u // cfg.matrix_inst_k
     else:
-        coal, perp = (spec.mt * M, cfg.depth_u) if spec.tlu else (cfg.depth_u, spec.mt * M)
+        du = data_depth_u(spec, cfg)
+        coal, perp = (spec.mt * M, du) if spec.tlu else (du, spec.mt * M)
     ncc = max(1, round(coal * spec.bpe) // GLOBAL_PREFETCH_SIZE)
     return coal, perp, ncc, perp * ncc
 
@@ -191,7 +221,7 @@ def free_dim_size(cfg, subtc):
     """Programmed SizeI/SizeJ (the GEMM free-dim, used for the edge-limit clamp).
     Defaults to a clean tiling (cluster_extent * MacroTile); an explicit size_i/
     size_j makes the last macro-tile partial so the edge clamp fires."""
-    mt = next((t.mt for t in cfg.tensors if t.subtc == subtc), 1)
+    mt = next((t.mt for t in cfg.tensors if t.subtc == subtc and not t.is_m), 1)
     if subtc == "A":
         return cfg.size_i if cfg.size_i is not None else cfg.cluster[0] * mt
     return cfg.size_j if cfg.size_j is not None else cfg.cluster[1] * mt
@@ -209,6 +239,7 @@ def _A(tlu, mt, bpe=1):   return TensorSpec("A", tlu, mt, bpe)
 def _B(tlu, mt, bpe=1):   return TensorSpec("B", tlu, mt, bpe)
 def _MXSA(mt):            return TensorSpec("MXSA", True, mt, 1)
 def _MXSB(mt):            return TensorSpec("MXSB", True, mt, 1)
+def _M(side, tlu, mt):    return TensorSpec("Metadata", tlu, mt, 1, is_m=True, sparse_side=side)
 
 
 # gl2-prefetch is emitted whenever PrefetchGL2 is set (KernelWriter guards
@@ -283,6 +314,28 @@ CONFIGS = [
     # every scalarStaticRemainder (tile-selector and share) hits the non-POT path
     # for both A and B, while the MT offset/folded tile dim land on the perp dim ----
     GL2Config("ab_ntlu_cluster3", [_A(False, 256), _B(False, 256)], cluster=(3, 3)),
+    # ---- Sparse metadata (isM) coverage. Sparse=1 -> A is the 2:4-compressed
+    # data tensor (_DepthUA halved) and Metadata mirrors A's tile axis (idx=0);
+    # Sparse=2 is the mirror on B. MetadataLayout is independent of the data
+    # tensor's TLU (real kernels support both), so both are exercised. ----
+    # ---- Sparse=1, data TLU, metadata non-TLU (MetadataLayout=0) ----
+    GL2Config("a_sparse_tlu_mlayout0", [_A(True, 256), _B(True, 256), _M("A", False, 256)],
+              cluster=(2, 2), sparse=1, depth_u_metadata=64),
+    # ---- Sparse=1, data TLU, metadata also TLU (MetadataLayout=1) ----
+    GL2Config("a_sparse_tlu_mlayout1", [_A(True, 256), _B(True, 256), _M("A", True, 256)],
+              cluster=(2, 2), sparse=1, depth_u_metadata=64),
+    # ---- Sparse=2 (mirror on B), non-TLU data; MT=384 (non-POT) on both data and
+    # metadata -> exercises non-POT gl2ncc/scalarStaticRemainder for isM too ----
+    GL2Config("b_sparse_ntlu_nonpot", [_A(False, 384), _B(False, 384), _M("B", True, 384)],
+              cluster=(3, 3), sparse=2, depth_u_metadata=96),
+    # ---- Sparse=1 + StridedBatched: exercises the WorkGroup2*Stride{tc}K batch
+    # offset for Metadata too (AddressMetadata/StrideMetadataK) ----
+    GL2Config("a_sparse_batched", [_A(True, 256), _B(True, 256), _M("A", False, 256)],
+              cluster=(2, 2), sparse=1, depth_u_metadata=64, batched=True, num_batches=2),
+    # ---- Sparse=1 + gl2nl > 1 for the metadata tensor (small thread pool, larger
+    # DepthUMetadata) -> exercises the per-inst stride-add path on isM ----
+    GL2Config("a_sparse_nl2", [_A(True, 256), _B(True, 256), _M("A", True, 256)],
+              cluster=(2, 2), num_threads=16, sparse=1, depth_u_metadata=256),
 ]
 
 
@@ -291,7 +344,8 @@ def batch_stride_elems(spec, cfg):
     but fixed and distinct per tensor so the verifier can reproduce the
     WorkGroup2 * Stride{tc}K * bpe shift and so a cross-tensor stride mixup fails.
     Chosen even so that stride * bpe is integral for fractional bpe (FP4)."""
-    return {"A": 1_000_002, "B": 2_000_006, "MXSA": 3_000_010, "MXSB": 4_000_014}[spec.tc]
+    return {"A": 1_000_002, "B": 2_000_006, "MXSA": 3_000_010, "MXSB": 4_000_014,
+            "Metadata": 5_000_018}[spec.tc]
 
 # ---------------------------------------------------------------------------
 # Kernel + writer construction
@@ -299,7 +353,7 @@ def batch_stride_elems(spec, cfg):
 
 def _subtc_attr(cfg, sub, attr, default):
     for t in cfg.tensors:
-        if t.subtc == sub:
+        if t.subtc == sub and not t.is_m:
             return getattr(t, attr)
     return default
 
@@ -307,7 +361,8 @@ def _subtc_attr(cfg, sub, attr, default):
 def _make_kernel(cfg):
     has_mxa = any(t.tc == "MXSA" for t in cfg.tensors)
     has_mxb = any(t.tc == "MXSB" for t in cfg.tensors)
-    return {
+    m_spec = next((t for t in cfg.tensors if t.is_m), None)
+    kernel = {
         "ProblemType": {
             "Batched": cfg.batched,
             "StridedBatched": cfg.batched,
@@ -321,9 +376,15 @@ def _make_kernel(cfg):
             "MXBlockB": cfg.mx_block if has_mxb else 0,
             "TLUA": _subtc_attr(cfg, "A", "tlu", True),
             "TLUB": _subtc_attr(cfg, "B", "tlu", True),
+            "Sparse": cfg.sparse,
         },
         "MacroTileA": _subtc_attr(cfg, "A", "mt", 256),
         "MacroTileB": _subtc_attr(cfg, "B", "mt", 256),
+        # _DepthU{A,B}: per-tensor unroll extent (== DepthU for dense; GL2Prefetch
+        # reads these instead of the plain DepthU so it matches the sparse-halved
+        # layout when a data tensor is the compressed (2:4) sparse operand).
+        "_DepthUA": depth_u_side("A", cfg),
+        "_DepthUB": depth_u_side("B", cfg),
         "MatrixInstK": cfg.matrix_inst_k,
         "ClusterDim": list(cfg.cluster),
         "NumThreads": cfg.num_threads,
@@ -332,6 +393,10 @@ def _make_kernel(cfg):
         "WavefrontSize": WAVESIZE,
         "PrefetchGL2": cfg.pgl,
     }
+    if m_spec is not None:
+        kernel["MacroTileMetadata"] = m_spec.mt
+        kernel["_DepthUMetadata"] = cfg.depth_u_metadata
+    return kernel
 
 
 def _make_writer(kernel):
@@ -401,6 +466,10 @@ def build_kernel(cfg):
         shared += ["StrideAI", "StrideAL", "SizeI"]
     if "B" in subtcs:
         shared += ["StrideBJ", "StrideBL", "SizeJ"]
+    for t in cfg.tensors:
+        if t.is_m:                        # StrideMetadata{I,J} + StrideMetadataL
+            idxChar = "I" if t.idx == 0 else "J"
+            shared += [f"StrideMetadata{idxChar}", "StrideMetadataL"]
     for n in shared:
         w.sgprs[n] = w.sgprPool.checkOut(1, n, preventOverflow=False)
     for t in cfg.tensors:
@@ -416,7 +485,7 @@ def build_kernel(cfg):
     vgpr_sets = {}
     for t in cfg.tensors:
         ia = t.ia + [2] if cfg.batched else t.ia   # batch index 2 must be in ia
-        tp = {"tensorChar": t.tc, "idx": t.idx, "tlu": t.tlu, "bpeGR": t.bpe, "ia": ia}
+        tp = {"tensorChar": t.tc, "idx": t.idx, "tlu": t.tlu, "bpeGR": t.bpe, "ia": ia, "isM": t.is_m}
         comp.init(w, kernel, tp)
         assert tp["gl2nc"] == tensor_dims(t, cfg)[3], \
             f"{t.tc}: gl2nc {tp['gl2nc']} != expected {tensor_dims(t, cfg)[3]}"
@@ -460,6 +529,14 @@ def build_kernel(cfg):
         coal_b = _data_coal(cfg, "B")
         consts += [("StrideBJ", coal_b), ("StrideBL", coal_b),
                    ("SizeJ", free_dim_size(cfg, "B"))]
+    for t in cfg.tensors:
+        if t.is_m:
+            # StrideMetadata{I,J}/StrideMetadataL are both programmed to the
+            # metadata's own (folded) coalesced extent, mirroring how StrideAI==
+            # StrideAL / StrideBJ==StrideBL are set for a plain data tensor.
+            coal_m = tensor_dims(t, cfg)[0]
+            idxChar = "I" if t.idx == 0 else "J"
+            consts += [(f"StrideMetadata{idxChar}", coal_m), ("StrideMetadataL", coal_m)]
     consts += [("WorkGroup0", 0), ("WorkGroup1", 0), ("WorkGroup2", 0)]
     if cfg.batched:                              # programmed batch stride Stride{tc}K
         consts += [(f"Stride{t.tc}K", batch_stride_elems(t, cfg)) for t in cfg.tensors]
@@ -599,9 +676,10 @@ amdhsa.kernels:
 def _data_coal(cfg, sub):
     """Leading (coalesced) extent of the data tensor for subtc, used as the
     contiguous stride. MX tensors derive their stride in-kernel, so any value
-    works there; fall back to whatever tensor is present."""
+    works there; fall back to whatever tensor is present. Excludes Metadata:
+    the data tensor's stride is programmed independently of StrideMetadataL."""
     for t in cfg.tensors:
-        if t.subtc == sub and not t.is_mx:
+        if t.subtc == sub and not t.is_mx and not t.is_m:
             return tensor_dims(t, cfg)[0]
     for t in cfg.tensors:
         if t.subtc == sub:
@@ -617,16 +695,21 @@ def inc_bytes(spec, cfg):
     """Per-iteration K (summation) address increment in bytes, matching
     GL2Prefetch.setIncrement. Advancing the prefetch by one iteration moves a
     full DepthU along the summation axis; in bytes this is:
-      - MX:      SizeFree * (DepthU // MXBlock)              (* bpe == 1)
-      - TLU:     StrideUnroll(=coal) * (DepthU * bpe)
-      - non-TLU: (DepthU * bpe)                              (K is the coalesced axis)
+      - MX:       SizeFree * (DepthU // MXBlock)              (* bpe == 1)
+      - Metadata: StrideMetadataL(=coal_m) * DepthUMetadata if TLUMetadata,
+                  else DepthUMetadata                          (bpe == 1)
+      - TLU:      StrideUnroll(=coal) * (_DepthU{A,B} * bpe)
+      - non-TLU:  (_DepthU{A,B} * bpe)                        (K is the coalesced axis)
     """
     bpe = spec.bpe
     if spec.is_mx:
         return free_dim_size(cfg, spec.subtc) * round(cfg.depth_u // cfg.mx_block * bpe)
+    if spec.is_m:
+        coal, _, _, _ = tensor_dims(spec, cfg)
+        return round(coal * cfg.depth_u_metadata) if spec.tlu else round(cfg.depth_u_metadata)
     if spec.tlu:
-        return _data_coal(cfg, spec.subtc) * round(cfg.depth_u * bpe)
-    return round(cfg.depth_u * bpe)
+        return _data_coal(cfg, spec.subtc) * round(data_depth_u(spec, cfg) * bpe)
+    return round(data_depth_u(spec, cfg) * bpe)
 
 
 def expected_offsets(spec, cfg, stage=0, batch=0):

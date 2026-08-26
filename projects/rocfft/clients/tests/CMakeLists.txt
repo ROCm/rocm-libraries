@@ -124,6 +124,12 @@ endif()
 if( NOT "${ROCFFT_LINKED_VERSION}" STREQUAL ""
     AND NOT ROCFFT_LINKED_VERSION VERSION_LESS ROCFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION )
   add_executable( rocfft_c rocfft_c.c )
+  # Use BEFORE so that the repository's public header takes priority over
+  # any system-installed rocfft header added by directory-level
+  # include_directories() (e.g. from HIP_INCLUDE_DIRS).
+  target_include_directories( rocfft_c BEFORE PRIVATE
+    $<TARGET_PROPERTY:roc::rocfft,INTERFACE_INCLUDE_DIRECTORIES>
+    )
   target_link_libraries( rocfft_c
     PRIVATE
     roc::rocfft
@@ -402,7 +408,9 @@ set_target_properties(rocfft-test
 # On Linux, always include amdgcnspirv target so the clients work
 # on an architecture that the runtime supports but was not
 # specified a build time
-if( NOT WIN32 )
+# TODO: amdgcnspirv is not compatible with ASAN.
+get_target_property(test_opts rocfft-test COMPILE_OPTIONS)
+if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
   target_compile_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
   target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
 endif()
@@ -537,7 +545,9 @@ if( ROCFFT_MPI_ENABLE )
     # On Linux, always include amdgcnspirv target so the clients work
     # on an architecture that the runtime supports but was not
     # specified a build time
-    if( NOT WIN32 )
+    # TODO: amdgcnspirv is not compatible with ASAN.
+    get_target_property(worker_opts ${worker} COMPILE_OPTIONS)
+    if( NOT WIN32 AND NOT worker_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
       target_compile_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
       target_link_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
     endif()
@@ -567,10 +577,11 @@ if(BUILD_CODE_COVERAGE)
 
   add_custom_target(
     code_cov_tests
-    DEPENDS rocfft-test rocfft_rtc_helper
+    DEPENDS rocfft-test rocfft_rtc_helper rocfft-internal-test
     COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocfft-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG $<TARGET_FILE:rocfft-test> --precompile=rocfft-test-precompile.db ${COVERAGE_TEST_OPTIONS}
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocfft-internal-coverage_%p.profraw" $<TARGET_FILE:rocfft-internal-test>
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
@@ -593,10 +604,10 @@ if(BUILD_CODE_COVERAGE)
   add_custom_target(
     coverage
     DEPENDS code_cov_tests
-    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocfft-coverage_*.profraw -o ./coverage-report/rocfft.profdata
-    COMMAND ${LLVM_COV} report -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata
-    COMMAND ${LLVM_COV} show -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=html -output-dir=coverage-report
-    COMMAND ${LLVM_COV} export -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=lcov > ./coverage-report/coverage.info
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/*.profraw -o ./coverage-report/rocfft.profdata
+    COMMAND ${LLVM_COV} report -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata
+    COMMAND ${LLVM_COV} show -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

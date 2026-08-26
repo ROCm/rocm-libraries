@@ -41,8 +41,7 @@ set_target_properties( rocfft-internal-test PROPERTIES
 
 target_compile_options( rocfft-internal-test PRIVATE ${WARNING_FLAGS} )
 
-# Link rocfft-function-pool directly (not roc::rocfft, which would
-# duplicate the function_pool_data singleton).
+# Link rocfft-function-pool directly, not roc::rocfft, to avoid a duplicate function_pool_data singleton.
 target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-function-pool
   rocfft-rtc-cache

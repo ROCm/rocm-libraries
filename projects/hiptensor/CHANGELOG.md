@@ -2,10 +2,21 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## hipTensor 2.4.0 for ROCm 7.15
+## hipTensor 2.4.0
 
 ### Added
-* Added a host-only stub `libhiptensor`, built automatically when `GPU_TARGETS` resolves to an empty target list (or explicitly with `-DHIPTENSOR_DISABLE_DEVICE=ON`), so the package, headers, and CMake config remain available and every API call returns `HIPTENSOR_STATUS_NOT_SUPPORTED` instead of failing to link.
+* Added `ffm-quick` and `ffm-full` test categories for emulation tests.
+* Added a Windows version resource so `hiptensor.dll` exposes file metadata (file description, version, product name, and copyright) in File Explorer properties.
+
+### Changed
+* Reorganized test configurations per tier and category.
+
+### Optimized
+* Reduced test execution duration.
+
+### Resolved issues
+* Enabled `-frtti` on Windows to fix RTTI-related build failures.
+* Removed the internal compiler flags `-amdgpu-early-inline-all=true` and `-amdgpu-function-calls=false` from the build, which caused excessive compile-time memory usage (OOM) with newer ROCm/LLVM toolchains (JIRA: LCOMPILER-2589).
 
 ## hipTensor 2.3.0 for ROCm 7.14
 

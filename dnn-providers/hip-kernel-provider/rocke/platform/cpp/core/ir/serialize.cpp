@@ -729,7 +729,8 @@ static const rocke_type_t* parse_type(rocke_ir_builder_t* b, const char* s, size
                 }
             }
         }
-        return rocke_smem_type(b, elem, shape, rank);
+        /* exclusive is reconstructed from the op attr in parse_op (name-only). */
+        return rocke_smem_type(b, elem, shape, rank, 0);
     }
 
     /* scalar: reconstruct the singleton by name. */
@@ -1857,6 +1858,21 @@ static rocke_op_t* parse_op(rocke_ir_builder_t* b, line_reader_t* lr, val_table_
         }
         memcpy(op->operands, operands, sizeof(rocke_value_t*) * (size_t)num_operands);
         op->num_operands = num_operands;
+    }
+
+    /* The smem type name deliberately omits the `exclusive` bit; it rides on
+     * the smem_alloc op as an attr. Rebuild the result SmemType with exclusive
+     * set so the packer's no-alias behavior round-trips through the serializer. */
+    if(opcode == ROCKE_OP_TILE_SMEM_ALLOC && num_results > 0 && result_types[0]
+       && result_types[0]->kind == ROCKE_TYPE_SMEM
+       && rocke_attr_get_bool(&attrs, "exclusive", false))
+    {
+        result_types[0] = rocke_smem_type(
+            b, result_types[0]->elem, result_types[0]->shape, result_types[0]->rank, 1);
+        if(!result_types[0])
+        {
+            return NULL;
+        }
     }
 
     if(num_results > 0)

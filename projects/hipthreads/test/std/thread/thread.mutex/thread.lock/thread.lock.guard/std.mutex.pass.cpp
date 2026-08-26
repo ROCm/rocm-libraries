@@ -31,7 +31,7 @@ int main(int, char**) {
     hip::spin_mutex m;
     {
       hip::lock_guard<hip::spin_mutex> lg(m);
-      hip::thread t = support::make_test_thread(do_try_lock, ::std::ref(m));
+      hip::wthread t = support::make_test_thread(do_try_lock, ::std::ref(m));
       t.join();
     }
 

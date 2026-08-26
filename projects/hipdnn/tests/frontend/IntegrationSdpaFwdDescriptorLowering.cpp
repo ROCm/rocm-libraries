@@ -282,6 +282,45 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdGraphRoundTrip)
     EXPECT_EQ(sdpa->implementation, AttentionImplementationSdk::AUTO);
 }
 
+// Verifies that a tensor attention scale survives descriptor lowering and serialization.
+TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdTensorScaleRoundTrip)
+{
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(K_SDPA_TENSOR_SCALE_UID).set_name("SCALE");
+    scale->set_value(0.125f);
+
+    SdpaAttributes sdpaAttrs;
+    sdpaAttrs.set_name("sdpa_tensor_scale").set_attn_scale(scale);
+
+    auto graphT = buildAndDeserializeSdpaGraph(_handle, std::move(sdpaAttrs));
+    if(HasFailure())
+    {
+        return;
+    }
+
+    ASSERT_EQ(graphT.tensors.size(), 5u);
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*>
+        tensorMap;
+    for(const auto& tensor : graphT.tensors)
+    {
+        tensorMap[tensor->uid] = tensor.get();
+    }
+
+    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_SCALE_UID), 0u);
+    const auto* scaleT = tensorMap[K_SDPA_TENSOR_SCALE_UID];
+    EXPECT_EQ(scaleT->name, "SCALE");
+    EXPECT_EQ(scaleT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(scaleT->dims, (std::vector<int64_t>{1}));
+    EXPECT_EQ(scaleT->strides, (std::vector<int64_t>{1}));
+
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    const auto* sdpa = graphT.nodes[0]->attributes.AsSdpaAttributes();
+    ASSERT_NE(sdpa, nullptr);
+    ASSERT_TRUE(sdpa->scale_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->scale_tensor_uid.value(), K_SDPA_TENSOR_SCALE_UID);
+    EXPECT_FALSE(sdpa->attn_scale_value.has_value());
+}
+
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved
 // through the lowering round-trip.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)

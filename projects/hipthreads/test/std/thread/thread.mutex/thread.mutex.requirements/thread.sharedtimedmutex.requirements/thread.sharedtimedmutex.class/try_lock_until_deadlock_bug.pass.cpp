@@ -55,10 +55,10 @@ int main(int, char**)
   typedef cuda::std::chrono::steady_clock Clock;
 
   m.lock_shared();
-  hip::thread t1 = support::make_test_thread(writer_one);
+  hip::wthread t1 = support::make_test_thread(writer_one);
   // create some readers
-  hip::thread t2 = support::make_test_thread(blocked_reader);
-  hip::thread t3 = support::make_test_thread(blocked_reader);
+  hip::wthread t2 = support::make_test_thread(blocked_reader);
+  hip::wthread t3 = support::make_test_thread(blocked_reader);
   // Kill the test after 10 seconds if it hasn't completed.
   auto end_point = Clock::now() + cuda::std::chrono::seconds(10);
   while (readers_finished != total_readers && Clock::now() < end_point) {

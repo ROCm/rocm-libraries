@@ -34,7 +34,7 @@ SOFTWARE.
 #include <stddef.h>
 
 #include <cmath>
-#ifdef RPP_BACKEND_HIP
+#if RPP_BACKEND_HIP
 #include <hip/hip_fp16.h>
 #endif  // RPP_BACKEND_HIP
 #if __has_include(<half/half.hpp>)
@@ -66,7 +66,7 @@ typedef halfhpp Rpp16f;
 /*! \brief RPP maximum channels in audio tensor \ingroup group_rppdefs \page subpage_rppt */
 #define RPPT_MAX_AUDIO_CHANNELS (16)
 
-#ifdef RPP_BACKEND_HIP
+#if RPP_BACKEND_HIP
 #include <hip/hip_runtime.h>
 #define RPP_HOST_DEVICE __host__ __device__
 
@@ -766,7 +766,7 @@ typedef struct {
     Rpp32f* scratchBufferHost;
 } memCPU;
 
-#ifdef RPP_BACKEND_HIP
+#if RPP_BACKEND_HIP
 
 /******************** HIP memory typedefs ********************/
 

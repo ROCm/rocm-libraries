@@ -3,115 +3,82 @@
 
 #pragma once
 
-#include <algorithm>
-#include <array>
-#include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <vector>
 #include <sstream>
-#include "ck_tile/core.hpp"
-#include "ck_tile/host.hpp"
-#include "ck_tile/ops/common/tensor_layout.hpp"
-#include "ck_tile/ops/common/utils.hpp"
-#include "common/utils.hpp"
+#include <stdexcept>
+#include <numeric>
 
-inline std::vector<ck_tile::index_t> parse_dimensions(const std::string& dims_str)
+// Local KernelTraits -- kept here to avoid touching tile_engine/ops/common/utils.hpp
+// (shared-utils changes were the root cause of the revert in PR #9759).
+struct ContractionMultiABDKernelTraits
 {
-    std::vector<ck_tile::index_t> dims;
+    std::string pipeline;
+    std::string epilogue;
+    std::string scheduler;
+    bool pad_m;
+    bool pad_n;
+    bool pad_k;
+    bool persistent;
+
+    ContractionMultiABDKernelTraits()
+        : pipeline("compv3"),
+          epilogue("cshuffle"),
+          scheduler("intrawave"),
+          pad_m(false),
+          pad_n(false),
+          pad_k(false),
+          persistent(false)
+    {
+    }
+};
+
+// Parse comma-separated dimension string, e.g. "4,256" -> {4, 256}
+inline std::vector<int> parse_dims(const std::string& dims_str)
+{
+    std::vector<int> dims;
+    if(dims_str.empty())
+        return dims;
     std::stringstream ss(dims_str);
     std::string token;
     while(std::getline(ss, token, ','))
-    {
         dims.push_back(std::stoi(token));
-    }
-    if(dims.empty())
-    {
-        throw std::invalid_argument("Dimensions cannot be empty");
-    }
     return dims;
 }
 
-inline ck_tile::index_t calculate_total(const std::vector<ck_tile::index_t>& dims)
+inline int product(const std::vector<int>& v)
 {
-    ck_tile::index_t total = 1;
-    for(auto d : dims)
-        total *= d;
-    return total;
+    return std::accumulate(v.begin(), v.end(), 1, std::multiplies<int>{});
 }
 
-template <std::size_t N>
-inline std::array<ck_tile::index_t, N> to_fixed_dims(const std::vector<ck_tile::index_t>& dims)
+inline std::string dims_to_str(const std::vector<int>& dims)
 {
-    if(dims.size() != N)
+    std::string s;
+    for(size_t i = 0; i < dims.size(); ++i)
     {
-        throw std::invalid_argument("Expected " + std::to_string(N) + " dimensions, got " +
-                                    std::to_string(dims.size()));
+        if(i > 0)
+            s += ',';
+        s += std::to_string(dims[i]);
     }
-
-    std::array<ck_tile::index_t, N> result{};
-    std::copy(dims.begin(), dims.end(), result.begin());
-    return result;
+    return s;
 }
 
-inline std::vector<ck_tile::index_t>
-concatenate_dims(const std::vector<std::vector<ck_tile::index_t>>& components)
+struct ContractionMultiABDProblem
 {
-    std::vector<ck_tile::index_t> result;
-    for(const auto& c : components)
-        result.insert(result.end(), c.begin(), c.end());
-    return result;
-}
+    std::vector<int> g_dims;
+    std::vector<int> m_dims;
+    std::vector<int> n_dims;
+    std::vector<int> k_dims;
 
-inline std::vector<ck_tile::index_t>
-compute_row_major_strides(const std::vector<ck_tile::index_t>& dims)
-{
-    std::vector<ck_tile::index_t> strides(dims.size(), 1);
-    for(int i = static_cast<int>(dims.size()) - 2; i >= 0; --i)
-    {
-        strides[i] = strides[i + 1] * dims[i + 1];
-    }
-    return strides;
-}
+    int num_a_tensors = 1;
+    int num_b_tensors = 1;
+    int num_d_tensors = 1;
 
-// Compute strides for a contraction tensor T[G..., outer..., inner...] honoring the
-// 2D matrix layout of the [outer, inner] block:
-//   RowMajor    : storage order [G..., outer..., inner...] (inner block innermost)
-//   ColumnMajor : storage order [G..., inner..., outer...] (outer block innermost)
-// For A: outer = M, inner = K. For B: outer = N, inner = K. For E: outer = M, inner = N.
-template <typename Layout>
-inline std::vector<ck_tile::index_t>
-compute_strides_for_layout(const std::vector<ck_tile::index_t>& g_dims,
-                           const std::vector<ck_tile::index_t>& outer_dims,
-                           const std::vector<ck_tile::index_t>& inner_dims)
-{
-    if constexpr(std::is_same_v<Layout, ck_tile::tensor_layout::gemm::RowMajor>)
-    {
-        std::vector<ck_tile::index_t> all_dims;
-        all_dims.insert(all_dims.end(), g_dims.begin(), g_dims.end());
-        all_dims.insert(all_dims.end(), outer_dims.begin(), outer_dims.end());
-        all_dims.insert(all_dims.end(), inner_dims.begin(), inner_dims.end());
-        return compute_row_major_strides(all_dims);
-    }
-    else
-    {
-        std::vector<ck_tile::index_t> storage_dims;
-        storage_dims.insert(storage_dims.end(), g_dims.begin(), g_dims.end());
-        storage_dims.insert(storage_dims.end(), inner_dims.begin(), inner_dims.end());
-        storage_dims.insert(storage_dims.end(), outer_dims.begin(), outer_dims.end());
-        const auto storage_strides = compute_row_major_strides(storage_dims);
+    std::string dtype;
+    std::string layout; // 3-char: a+b+e
 
-        const auto num_g     = g_dims.size();
-        const auto num_inner = inner_dims.size();
-        const auto num_outer = outer_dims.size();
-
-        std::vector<ck_tile::index_t> logical_strides(num_g + num_outer + num_inner);
-        for(std::size_t i = 0; i < num_g; ++i)
-            logical_strides[i] = storage_strides[i];
-        for(std::size_t i = 0; i < num_outer; ++i)
-            logical_strides[num_g + i] = storage_strides[num_g + num_inner + i];
-        for(std::size_t i = 0; i < num_inner; ++i)
-            logical_strides[num_g + num_outer + i] = storage_strides[num_g + i];
-        return logical_strides;
-    }
-}
+    int G_total() const { return product(g_dims); }
+    int M_total() const { return product(m_dims); }
+    int N_total() const { return product(n_dims); }
+    int K_total() const { return product(k_dims); }
+};

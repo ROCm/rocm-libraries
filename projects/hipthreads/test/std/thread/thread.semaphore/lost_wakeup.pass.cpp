@@ -50,7 +50,7 @@ void release() {
 
 int main(int, char**) {
   for (int run = 0; run < 20; ++run) {
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     for (int i = 0; i < 8; ++i)
       threads.push_back(support::make_test_thread(acquire));
 

@@ -66,7 +66,9 @@ foreach( sample ${sample_list} )
   # On Linux, always include amdgcnspirv target so the clients work
   # on an architecture that the runtime supports but was not
   # specified a build time
-  if( NOT WIN32 )
+  # TODO: amdgcnspirv is not compatible with ASAN.
+  get_target_property(sample_opts ${sample} COMPILE_OPTIONS)
+  if( NOT WIN32 AND NOT sample_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
     target_compile_options( ${sample} PRIVATE --offload-arch=amdgcnspirv )
     target_link_options( ${sample} PRIVATE --offload-arch=amdgcnspirv )
   endif()

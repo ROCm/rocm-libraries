@@ -77,9 +77,11 @@ class _ClassicPapWriter:
         self.states = SimpleNamespace(
             a=SimpleNamespace(numVgprGlobalReadOffsets=2),
             b=SimpleNamespace(numVgprGlobalReadOffsets=2),
+            kernel={"TDMPlusLdsBuf": 0},
             ldsTensorTokenIdx=0,
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
+            numLDSBlk=2,
             staggerUCode=False,
             unrollIdx=0,
             use64bShadowLimit=use64b_shadow,
@@ -151,6 +153,7 @@ class _ClassicPapWriter:
 
 
 _ClassicPapWriter.setupPrefetchAcrossPersistentLoads = KernelWriter.setupPrefetchAcrossPersistentLoads
+_ClassicPapWriter._nextLdsToken = KernelWriter._nextLdsToken
 
 
 class _SetupNewTilePapTdmWriter:
@@ -162,12 +165,28 @@ class _SetupNewTilePapTdmWriter:
             ldsTensorTokenIdx=0,
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
+            numLDSBlk=2,
             staggerUCode=False,
             unrollIdx=0,
+            # Capability/kernel state consumed by ClusterLoadTDM.find()'s
+            # PartialMatch (asmCaps HasTDM + kernel TDMInst==3), mirroring the
+            # real writer.states on a gfx1250 TDM path so the component matches.
+            asmCaps={"HasTDM": True},
+            kernel={"TDMInst": 3, "TDMPlusLdsBuf": 0},
+            waveIdxReleasedAfterStagger=False,
+            tdmParityPackedInArgType=False,
         )
         self.do = {"executeToInitEnd": False}
         self.dontAppendCode = False
         self.labels = _StubLabels()
+        # releaseWaveIdxAfterStagger runs for real here (it asserts the pool slot is
+        # still checked out and latches against a second check-in), so back the mock
+        # with a real RegisterPool rather than stubbing the release out.
+        self.sgprPool = RegisterPool(
+            8, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False
+        )
+        self.sgprPool.add(0, 8, "unit")
+        self.sgprs = {"WaveIdx": self.sgprPool.checkOut(1, "WaveIdx")}
 
     def _module(self, name):
         return _module_with_comment(name, "unit: %s" % name)
@@ -202,8 +221,30 @@ class _SetupNewTilePapTdmWriter:
     def releaseGlobalReadIncsSgprsAfterTdmWaveSep(self, kernel):
         return self._module("releaseGlobalReadIncsSgprsAfterTdmWaveSep")
 
+    def isTdmWaveSeparated(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
+
     def undefineSgpr(self, name):
+        # Mirror the real undefineSgpr: return the slot to the pool but keep the name
+        # in self.sgprs, so the latch stays the only guard against a double check-in.
+        if name in self.sgprs:
+            self.sgprPool.checkIn(self.sgprs[name])
         return self._module("undefineSgpr_%s" % name)
+
+    def releaseWaveIdxAfterStagger(self, kernel):
+        return kwa_module.KernelWriterAssembly.releaseWaveIdxAfterStagger(self, kernel)
+
+    def hoistWaveParityWrapUSel(self, kernel, tpa, tpb):
+        return self._module("hoistWaveParityWrapUSel")
+
+    def packTdmParityIntoArgType(self, kernel):
+        return self._module("packTdmParityIntoArgType")
+
+    def declareStaggerParms(self, kernel):
+        return self._module("declareStaggerParms")
+
+    def calculateStagger(self, kernel, tensor_parameters):
+        return self._module("calculateStagger_%s" % tensor_parameters["tensorChar"])
 
     def initC(self, kernel):
         return self._module("initC")
@@ -216,6 +257,9 @@ class _SetupNewTilePapTdmWriter:
 
     def isPrefetchAcrossPersistentEnabled(self, kernel):
         return KernelWriter.isPrefetchAcrossPersistentEnabled(self, kernel)
+
+    def _nextLdsToken(self, idx):
+        return KernelWriter._nextLdsToken(self, idx)
 
     def papTdmRestoreLdsBank(self, kernel, tpa, tpb):
         return self._module("papTdmRestoreLdsBank")
@@ -375,6 +419,7 @@ _CLASSIC_KERNEL_BASE = {
     "EdgeType": "None",
     "GuaranteeNoPartialA": False,
     "GuaranteeNoPartialB": False,
+    "HalfPLR": 0,
     "NoTailLoop": False,
     "PrefetchGlobalRead": 2,
     "PrefetchGL2": 0,
@@ -452,6 +497,7 @@ _RUNTIME_STAGGER_BASE = {
     "StaggerUMapping": 2,
     "StaggerUStride": 256,
     "InternalSupportParams": {"SupportCustomStaggerU": True},
+    "ClusterDim": [1, 1],
     "ProblemType": {"MXBlockA": 0, "MXBlockB": 0},
     "enableTDMA": False,
     "enableTDMB": False,
@@ -548,10 +594,10 @@ def _pap_solution_config(**overrides):
     return config
 
 
-def _pap_solution(**overrides):
+def _pap_solution(*, rocm_version=SemanticVersion(6, 4, 0), **overrides):
     assembler = SimpleNamespace(
         code_object_version="default",
-        rocm_version=SemanticVersion(6, 4, 0),
+        rocm_version=rocm_version,
     )
     return Solution(
         _pap_solution_config(**overrides),
@@ -601,15 +647,26 @@ def _instruction_index(items, instruction_type, dst, src):
     )
 
 
-def _setup_new_tile_module_names(prefetch_across_persistent):
+def _setup_new_tile_writer_and_names(prefetch_across_persistent, stagger_u_code=False):
     tpa, tpb = _tensor_parameters(with_metadata=True)
+    writer = _SetupNewTilePapTdmWriter()
+    writer.states.staggerUCode = stagger_u_code
     module = KernelWriter.setupNewTile(
-        _SetupNewTilePapTdmWriter(),
+        writer,
         _setup_new_tile_tdm_kernel(prefetch_across_persistent=prefetch_across_persistent),
         tpa,
         tpb,
     )
-    return _module_names(module)
+    return writer, _module_names(module)
+
+
+def _setup_new_tile_module_names(prefetch_across_persistent, stagger_u_code=False):
+    return _setup_new_tile_writer_and_names(prefetch_across_persistent, stagger_u_code)[1]
+
+
+def _waveidx_is_in_pool(writer):
+    status = writer.sgprPool.getPool()[writer.sgprs["WaveIdx"]].status
+    return status == RegisterPool.Status.Available
 
 
 def _prefetch_across_persistent(monkeypatch, *, skip_barrier=False, **kernel_overrides):
@@ -668,13 +725,32 @@ def test_pap_is_valid_solution_parameter():
 def test_solution_validation_accepts_minimal_pap_tdm_contract():
     assert _pap_solution()["Valid"] is True
 
+@pytest.mark.parametrize(
+    "rocm_version, expected_preload",
+    [
+        pytest.param(SemanticVersion(6, 0, 32649), False, id="rocm_6_before_floor"),
+        pytest.param(SemanticVersion(6, 0, 32650), True, id="rocm_6_at_floor"),
+        pytest.param(SemanticVersion(7, 1, 25424), True, id="rocm_7_low_build"),
+    ],
+)
+def test_solution_applies_preload_gate_from_assembler_version(
+    rocm_version, expected_preload
+):
+    solution = _pap_solution(
+        rocm_version=rocm_version,
+        PreloadKernArgs=True,
+    )
+
+    assert solution["Valid"] is True
+    assert solution["PreloadKernArgs"] is expected_preload
+
 
 def test_solution_validation_accepts_pap_streamk_dynamic():
-    # Phase 1: PAP is now allowed for StreamK==4 (StreamKDynamic) in addition to
-    # StreamK==3. The validation gate was relaxed to accept StreamK in (3, 4);
-    # every other PAP axis restriction is StreamK-agnostic and still applies.
-    # TDM is disabled here (TDMInst=0): the TDM+PAP twin gate is intentionally
-    # kept SK3-only, so SK4 PAP is supported for the non-TDM path only.
+    # PAP is allowed for StreamK==4 (StreamKDynamic) in addition to StreamK==3.
+    # The validation gate accepts StreamK in (3, 4, 5); every other PAP axis
+    # restriction is StreamK-agnostic and still applies. TDM is disabled here
+    # (TDMInst=0): the TDM+PAP twin gate is intentionally kept SK3-only, so
+    # SK4 PAP is supported for the non-TDM path only.
     assert _pap_solution(StreamK=4, TDMInst=0)["Valid"] is True
 
 
@@ -686,12 +762,12 @@ def test_solution_validation_rejects_pap_streamk_dynamic_with_tdm(capsys):
 
 
 def test_solution_validation_accepts_pap_streamk_hybrid():
-    # Phase 2: PAP is now allowed for StreamK==5 (StreamKHybrid) in addition to
-    # StreamK==3 and StreamK==4. The validation gate accepts StreamK in
-    # (3, 4, 5). A single PAP-enabled SK5 kernel is correct for BOTH runtime
-    # sub-paths (static SK3-like and dynamic SK4-like) via StreamKHybridMode
-    # dispatch. TDM is disabled here (TDMInst=0): the TDM+PAP twin gate is
-    # intentionally kept SK3-only, so SK5 PAP is supported for the non-TDM path.
+    # PAP is allowed for StreamK==5 (StreamKHybrid) in addition to StreamK==3
+    # and StreamK==4. The validation gate accepts StreamK in (3, 4, 5). A
+    # single PAP-enabled SK5 kernel is correct for BOTH runtime sub-paths
+    # (static SK3-like and dynamic SK4-like) via StreamKHybridMode dispatch.
+    # TDM is disabled here (TDMInst=0): the TDM+PAP twin gate is intentionally
+    # kept SK3-only, so SK5 PAP is supported for the non-TDM path.
     assert _pap_solution(StreamK=5, TDMInst=0)["Valid"] is True
 
 
@@ -700,7 +776,6 @@ def test_solution_validation_rejects_pap_streamk_hybrid_with_tdm(capsys):
     # remains StreamK==3 only (hybrid TDM+PAP deferred).
     assert _pap_solution(StreamK=5, TDMInst=3)["Valid"] is False
     assert "TDM + PrefetchAcrossPersistent requires StreamK == 3" in capsys.readouterr().out
-
 
 @pytest.mark.parametrize(
     "overrides, reason",
@@ -760,6 +835,27 @@ def test_runtime_staggeru_controls_for_tdm_pap(pap, tdm, expected):
     assert state["InternalSupportParams"]["SupportCustomStaggerU"] is support_custom
 
 
+@pytest.mark.parametrize(
+    "cluster_dim, expected",
+    [
+        pytest.param([1, 1], (32, 2, 256, True), id="no_cluster_keeps_runtime_custom_staggeru"),
+        pytest.param([2, 2], (0, 0, 0, False), id="cluster_2x2_disables_runtime_custom_staggeru"),
+        pytest.param([4, 4], (0, 0, 0, False), id="cluster_4x4_disables_runtime_custom_staggeru"),
+    ],
+)
+def test_runtime_staggeru_controls_for_cluster(cluster_dim, expected):
+    # PAP off + TDM off so only the workgroup-cluster gate can fire.
+    state = _stagger_runtime_state(pap=False, tdm=False, ClusterDim=cluster_dim)
+
+    _disableUnsupportedRuntimeStaggerU(state)
+
+    stagger_u, mapping, stride, support_custom = expected
+    assert state["StaggerU"] == stagger_u
+    assert state["StaggerUMapping"] == mapping
+    assert state["StaggerUStride"] == stride
+    assert state["InternalSupportParams"]["SupportCustomStaggerU"] is support_custom
+
+
 def test_setup_new_tile_releases_waveidx_for_pap_wave_separated_tdm(monkeypatch):
     monkeypatch.setattr(kw_module.Component.GSU, "find", lambda writer: _StubGsu())
 
@@ -770,6 +866,71 @@ def test_setup_new_tile_releases_waveidx_for_pap_wave_separated_tdm(monkeypatch)
     assert "undefineSgpr_WaveIdx" in pap_module_names
     assert "undefineSgpr_WaveIdx" in non_pap_module_names
     assert pap_module_names.index("undefineSgpr_WaveIdx") < pap_module_names.index("papTdmRestoreLdsBank")
+
+
+def test_setup_new_tile_releases_waveidx_after_stagger_for_wave_separated_tdm(monkeypatch):
+    """WaveIdx survives the stagger prologue, then dies before the unroll loop.
+
+    The stagger prologue reads wave parity straight out of s[sgprWaveIdx], so the
+    release cannot happen at the usual spot above calculateLoopNumIter. It must still
+    happen inside setupNewTile: WaveIdx sits at a low physical index and holding it
+    across the main loop pushes the tightest gfx1250 StreamK configs over MaxSgpr.
+    """
+    monkeypatch.setattr(kw_module.Component.GSU, "find", lambda writer: _StubGsu())
+
+    for pap in (0, 1):
+        writer, module_names = _setup_new_tile_writer_and_names(
+            prefetch_across_persistent=pap, stagger_u_code=True
+        )
+        # Confirm we really took the stagger path before asserting on its effect.
+        assert "calculateStagger_A" in module_names
+        assert "calculateStagger_B" in module_names
+        # The release is not the plain undefineSgpr emitted on the non-stagger path;
+        # it goes through releaseWaveIdxAfterStagger after packing parity into
+        # ArgType bit 8. Later sites use that packed bit, not a live WaveIdx.
+        assert "undefineSgpr_WaveIdx" not in module_names
+        assert "ReleaseWaveIdxAfterStagger" in module_names
+        assert "hoistWaveParityWrapUSel" in module_names
+        assert "packTdmParityIntoArgType" in module_names
+        assert module_names.index("calculateStagger_B") < module_names.index(
+            "hoistWaveParityWrapUSel"
+        )
+        assert module_names.index("hoistWaveParityWrapUSel") < module_names.index(
+            "packTdmParityIntoArgType"
+        )
+        assert module_names.index("packTdmParityIntoArgType") < module_names.index(
+            "ReleaseWaveIdxAfterStagger"
+        )
+        assert writer.states.waveIdxReleasedAfterStagger is True
+        assert _waveidx_is_in_pool(writer)
+
+
+def test_setup_new_tile_releases_waveidx_at_most_once(monkeypatch):
+    """A second setupNewTile emit must not check the WaveIdx slot in twice."""
+    monkeypatch.setattr(kw_module.Component.GSU, "find", lambda writer: _StubGsu())
+
+    tpa, tpb = _tensor_parameters(with_metadata=True)
+    writer = _SetupNewTilePapTdmWriter()
+    writer.states.staggerUCode = True
+    kernel = _setup_new_tile_tdm_kernel(prefetch_across_persistent=1)
+
+    first = KernelWriter.setupNewTile(writer, kernel, tpa, tpb)
+    second = KernelWriter.setupNewTile(writer, kernel, tpa, tpb)
+
+    def release_module(module):
+        found = [
+            item
+            for item in _module_items(module)
+            if isinstance(item, Module) and item.name == "ReleaseWaveIdxAfterStagger"
+        ]
+        assert len(found) == 1, f"expected one ReleaseWaveIdxAfterStagger, got {len(found)}"
+        return found[0]
+
+    assert _module_names(release_module(first)) == ["undefineSgpr_WaveIdx"]
+    # The second emit still calls the helper, but the latch must make it come back
+    # empty -- a second undefineSgpr would check the same pool slot in twice.
+    assert _module_names(release_module(second)) == []
+    assert writer.states.waveIdxReleasedAfterStagger is True
 
 
 def test_pap_tdm_descriptor_refresh_threads_temporary_waveidx(monkeypatch):
@@ -875,9 +1036,7 @@ def test_classic_pap_saves_direct_to_lds_bank_state_after_priming():
     assert writer.states.ldsTensorTokenIdx == writer.states.memTokenLdsBuffer1
 
 
-def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount(monkeypatch):
-    writer, items = _prefetch_across_persistent(monkeypatch)
-
+def _assert_loop_counters_checkpointed_in_vgprs(writer, items):
     loop_vgpr = next(base for base, _, tag in writer.vgprPool.checked_out if tag == "PAP loop counters")
     orig_loop_vgpr = loop_vgpr + 1
     loop_checkpoint = _instruction_index(items, kwa_module.VMovB32, "v%u" % loop_vgpr, "s[sgprLoopCounterL]")
@@ -895,11 +1054,25 @@ def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount
     assert writer.vgprPool.checked_in == [loop_vgpr]
 
 
+def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount(monkeypatch):
+    writer, items = _prefetch_across_persistent(monkeypatch)
+
+    _assert_loop_counters_checkpointed_in_vgprs(writer, items)
+
+
+def test_halfplr_pap_checkpoints_loop_counters_even_under_dp_only(monkeypatch):
+    # HalfPLR enters PAP while LoopCounter is one, so the counters cannot be
+    # recomputed and DP-only has to checkpoint them anyway.
+    writer, items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1, HalfPLR=1)
+
+    _assert_loop_counters_checkpointed_in_vgprs(writer, items)
+
+
 def test_dp_only_pap_skips_loop_counter_checkpoint(monkeypatch):
     # DP-only StreamK keeps LoopCounter/OrigLoopCounter constant (idempotent
     # recompute, PAP never runs on the last tile), so prefetchAcrossPersistent
     # skips the 2-VGPR checkpoint/restore entirely
-    # (KernelWriterAssembly: snapshotLoopCounter = not StreamKForceDPOnly).
+    # (KernelWriterAssembly: snapshotLoopCounter = HalfPLR or not StreamKForceDPOnly).
     writer, items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1)
 
     assert not any(tag == "PAP loop counters" for _, _, tag in writer.vgprPool.checked_out)

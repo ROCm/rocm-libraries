@@ -31,11 +31,11 @@
 int main(int, char**)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    hip::thread::id id1;
-    hip::thread::id id2 = hip::this_thread::get_id();
-    typedef ::std::hash<hip::thread::id> H;
+    hip::wthread::id id1;
+    hip::wthread::id id2 = hip::this_thread::get_id();
+    typedef ::std::hash<hip::wthread::id> H;
 #if TEST_STD_VER <= 14
-    static_assert((::std::is_same<typename H::argument_type, hip::thread::id>::value), "" );
+    static_assert((::std::is_same<typename H::argument_type, hip::wthread::id>::value), "" );
     static_assert((::std::is_same<typename H::result_type, ::std::size_t>::value), "" );
 #endif
     ASSERT_NOEXCEPT(H()(id2));

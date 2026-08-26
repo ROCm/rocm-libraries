@@ -54,6 +54,12 @@ add_executable(
     descriptors/TestMatmulOperationDescriptor.cpp
     descriptors/TestMatmulOperationFromNode.cpp
     descriptors/TestGraphDescriptorMatmul.cpp
+    descriptors/TestMoeGroupedMatmulOperationDescriptor.cpp
+    descriptors/TestMoeGroupedMatmulOperationFromNode.cpp
+    descriptors/TestGraphDescriptorMoeGroupedMatmul.cpp
+    descriptors/TestMoeGroupedMatmulBwdOperationDescriptor.cpp
+    descriptors/TestMoeGroupedMatmulBwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorMoeGroupedMatmulBwd.cpp
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
@@ -89,6 +95,9 @@ add_executable(
     descriptors/TestResampleFwdOperationDescriptor.cpp
     descriptors/TestResampleFwdOperationFromNode.cpp
     descriptors/TestGraphDescriptorResampleFwd.cpp
+    descriptors/TestResampleBwdOperationDescriptor.cpp
+    descriptors/TestResampleBwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorResampleBwd.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp
@@ -149,6 +158,8 @@ target_compile_definitions(
             TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME="${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}"
+            TEST_LYING_ENGINE_NAME_PLUGIN_NAME="${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}"
+            TEST_MISMATCHED_NAME_PLUGIN_NAME="${TEST_MISMATCHED_NAME_PLUGIN_NAME}"
 )
 target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 clang_tidy_check(hipdnn_backend_tests)
@@ -220,7 +231,43 @@ install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
 
-# Add dependencies on heuristic test plugins (built in tests/test_plugins/)
+# A real, loadable engine plugin used by TestEnginePluginResourceManager.cpp, and
+# the only consumer of EnginePluginImpl.inl inside the main build; see
+# plugins/codegen_fixture/CodegenFixturePlugin.hpp for what it pins.
+#
+# It gets its own codegen_fixture/ subdirectory because ${HIPDNN_TEST_PLUGIN_DIR}
+# holds a plugin that deliberately fails to load. Output directory, install
+# destination and rpath origin all take the suffix together, otherwise the
+# isolation holds in the build tree but not in the installed tree.
+set(CODEGEN_FIXTURE_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/codegen_fixture")
+set(CODEGEN_FIXTURE_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/codegen_fixture")
+
+add_library(${TEST_ENGINE_PLUGIN1_NAME} SHARED plugins/codegen_fixture/CodegenFixturePlugin.cpp
+                                               plugins/codegen_fixture/CodegenFixturePluginPublic.cpp
+)
+target_link_libraries(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk
+                                                          hipdnn_plugin_sdk hip::host
+)
+set_target_properties(${TEST_ENGINE_PLUGIN1_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+target_compile_options(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_definitions(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE HIPDNN_COMPONENT_NAME="codegenFixture")
+clang_tidy_check(${TEST_ENGINE_PLUGIN1_NAME})
+add_dependencies(hipdnn_backend_tests ${TEST_ENGINE_PLUGIN1_NAME})
+
+set_target_properties(
+    ${TEST_ENGINE_PLUGIN1_NAME}
+    PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        THEROCK_INSTALL_RPATH_ORIGIN "${CODEGEN_FIXTURE_INSTALL_DIR}"
+)
+
+install(TARGETS ${TEST_ENGINE_PLUGIN1_NAME} LIBRARY DESTINATION ${CODEGEN_FIXTURE_INSTALL_DIR}
+        RUNTIME DESTINATION ${CODEGEN_FIXTURE_INSTALL_DIR}
+)
+
+# Add dependencies on test plugins built in tests/test_plugins/
 # Note: These targets are forward references - they will be created when tests/test_plugins/
 # is processed later. CMake resolves these dependencies at build time.
 add_dependencies(hipdnn_backend_tests
@@ -231,6 +278,8 @@ add_dependencies(hipdnn_backend_tests
     ${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}
     ${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}
     ${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}
+    ${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}
+    ${TEST_MISMATCHED_NAME_PLUGIN_NAME}
 )
 
 add_hipdnn_test(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})

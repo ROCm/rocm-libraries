@@ -336,12 +336,12 @@ CSRMatrix_raw __device__ multiply(const CSRMatrix_raw &matrixA_local, const CSRM
     // Arbitrary value that is hopefully big enough to hold a row of values in the result matrix
     const int initialAlloc = (matrixA_local.entry_count + matrixB_csr.entry_count)/n_rows;
 
-    const uint32_t nThreads = 4 * hip::thread::hardware_concurrency();
-    auto threads = hip::std::make_unique<hip::thread[]>(nThreads);
+    const uint32_t nThreads = 4 * hip::wthread::hardware_concurrency();
+    auto threads = hip::std::make_unique<hip::wthread[]>(nThreads);
     for (uint32_t t = 0; t < nThreads; ++t) {
         const uint32_t chunk_size = (t < n_rows % nThreads) ? (n_rows / nThreads + 1) : (n_rows / nThreads);
         const uint32_t startRow =   (t < n_rows % nThreads) ? (t * chunk_size)              : (t * chunk_size + n_rows % nThreads);
-        threads[t] = hip::thread(hip::thread::max_width(), [=, &matrixA = *matrixA, &matrixB_csc = *matrixB_csc, row_size = row_size.get(),
+        threads[t] = hip::wthread(hip::wthread::max_width(), [=, &matrixA = *matrixA, &matrixB_csc = *matrixB_csc, row_size = row_size.get(),
                         col = col.get(), values = values.get()](const uint32_t startRow, const uint32_t endRow) {
             const uint32_t width = hip::this_thread::get_width();
             for (uint32_t curRow = startRow + hip::this_thread::get_fiber_id(); curRow < endRow; curRow += width) {
@@ -386,7 +386,7 @@ CSRMatrix_raw __device__ multiply(const CSRMatrix_raw &matrixA_local, const CSRM
     for (uint32_t t = 0; t < nThreads; ++t) {
         const uint32_t chunk_size = (t < n_rows % nThreads) ? (n_rows / nThreads + 1) : (n_rows / nThreads);
         const uint32_t startRow =   (t < n_rows % nThreads) ? (t * chunk_size)              : (t * chunk_size + n_rows % nThreads);
-        threads[t] = hip::thread(hip::thread::max_width(), [=, &matrixA = *matrixA, &matrixB_csc = *matrixB_csc, row_size = row_size.get(),
+        threads[t] = hip::wthread(hip::wthread::max_width(), [=, &matrixA = *matrixA, &matrixB_csc = *matrixB_csc, row_size = row_size.get(),
                         col = col.get(), values = values.get()](const uint32_t startRow, const uint32_t endRow) {
             const uint32_t width = hip::this_thread::get_width();
             for (uint32_t curRow = startRow + hip::this_thread::get_fiber_id(); curRow < endRow; curRow += width) {
@@ -422,7 +422,7 @@ void test(std::string fileName) {
     CSRMatrix_d matrix_d(std::move(matrix));
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     auto start = std::chrono::steady_clock::now();
-    hip::thread(
+    hip::wthread(
         [] __device__ (CSRMatrix_raw matrix_raw) {
             CSRMatrix_raw squared = multiply(matrix_raw, matrix_raw);
             delete [] squared.row_ptr;

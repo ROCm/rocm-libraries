@@ -10,9 +10,9 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
-// thread(thread&& t);
+// wthread(wthread&& t);
 
 #include <hip/thread>
 #include <cassert>
@@ -56,12 +56,12 @@ int main(int, char**)
         assert(G::n_alive == 1);
         assert(!G::op_run);
 
-        hip::thread t0 = support::make_test_thread(g);
-        hip::thread::id id = t0.get_id();
+        hip::wthread t0 = support::make_test_thread(g);
+        hip::wthread::id id = t0.get_id();
 
-        hip::thread t1 = ::std::move(t0);
+        hip::wthread t1 = ::std::move(t0);
         assert(t1.get_id() == id);
-        assert(t0.get_id() == hip::thread::id());
+        assert(t0.get_id() == hip::wthread::id());
 
         t1.join();
         assert(G::n_alive == 1);

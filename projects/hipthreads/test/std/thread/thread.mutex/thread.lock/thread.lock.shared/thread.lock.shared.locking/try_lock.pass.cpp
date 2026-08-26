@@ -50,7 +50,7 @@ void test() {
   // Basic sanity test
   {
     Mutex mutex;
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     ::std::atomic<bool> ready(false);
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {

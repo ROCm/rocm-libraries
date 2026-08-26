@@ -32,6 +32,7 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_memory_check.hpp"
 #include "test_utils_sort_comparator.hpp"
 
 // required rocprim headers
@@ -42,8 +43,6 @@
 // std library
 #include <unordered_set>
 #include <vector>
-
-// TODO: this is copied from test_dvice_topk. Adapt to segmented changes.
 
 // Params for tests
 template<class KeyType,
@@ -812,17 +811,22 @@ void segmented_topk_large_sizes_test(bool debug_synchronous)
 
         SCOPED_TRACE(testing::Message() << "with segments = " << segments_count);
 
+        test_utils::MemCheck memcheck;
+
         // Generate data
+        MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
         std::vector<key_type> input(size);
         test_utils::iota(input.begin(), input.end(), 0);
 
         common::device_ptr<key_type> d_input;
         common::device_ptr<key_type> d_output;
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, k)
         if(!d_input.resize_with_memory_check(size) || !d_output.resize_with_memory_check(k))
         {
             std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
-            return;
+            break;
         }
         d_input.store(input);
 
@@ -853,10 +857,11 @@ void segmented_topk_large_sizes_test(bool debug_synchronous)
         // allocate temporary storage
         common::device_ptr<void> d_temp_storage;
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
         if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
         {
             std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
-            return;
+            break;
         }
 
         test_utils::GraphHelper gHelper;
@@ -933,7 +938,7 @@ TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkLargeSizesStable)
 }
 
 TEST(RocprimDeviceSegmentedTopkTests, TopkLargeSizesUnstable)
-{
+{    
     constexpr bool descending            = false;
     constexpr bool stable                = false;
     using decomposer_t                   = rocprim::identity_decomposer;
