@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2019 - 2025 Advanced Micro Devices, Inc.
+Copyright (c) 2019 - 2026 Advanced Micro Devices, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,7 @@ SOFTWARE.
 
 #include <cmath>
 #include <complex>
+#include <utility>
 #include <vector>
 
 #include "rppdefs.h"
@@ -126,14 +127,20 @@ inline void rpp_fft_radix2_inverse(RppFftComplex* data, Rpp32s len,
     for (Rpp32s i = 0; i < len; i++) data[i] = std::conj(data[i]) * inv;
 }
 
+// Largest supported transform size. Guards against integer overflow in the Bluestein
+// setup (2*nfft-1 and the next-power-of-two search) and against pathological allocation.
+constexpr Rpp32s RPP_CPU_FFT_MAX_NFFT = 1 << 24;  // 16,777,216
+
 // Precompute all read-only tables for a forward transform of size nfft.
-inline void rpp_cpu_fft_plan_init(RppCpuFftPlan& plan, Rpp32s nfft) {
+// Returns false (leaving plan unmodified) if nfft is outside [1, RPP_CPU_FFT_MAX_NFFT].
+inline bool rpp_cpu_fft_plan_init(RppCpuFftPlan& plan, Rpp32s nfft) {
+    if (nfft <= 0 || nfft > RPP_CPU_FFT_MAX_NFFT) return false;
     plan.n = nfft;
     plan.isPow2 = rpp_fft_is_pow2(nfft);
     if (plan.isPow2) {
         rpp_fft_build_bitrev(plan.bitRev, nfft);
         rpp_fft_build_twiddles(plan.twiddles, nfft);
-        return;
+        return true;
     }
 
     // Bluestein setup
@@ -158,6 +165,7 @@ inline void rpp_cpu_fft_plan_init(RppCpuFftPlan& plan, Rpp32s nfft) {
         plan.kernelFft[plan.m - k] = v;
     }
     rpp_fft_radix2_forward(plan.kernelFft.data(), plan.m, plan.bitRevM, plan.twiddlesM);
+    return true;
 }
 
 // Forward FFT of a real-valued signal (imaginary part assumed zero). Writes the first

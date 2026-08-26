@@ -101,7 +101,7 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
 #else
     // One read-only plan is shared across OpenMP threads (nfft is constant across the batch).
     RppCpuFftPlan fftPlan;
-    rpp_cpu_fft_plan_init(fftPlan, nfft);
+    if (!rpp_cpu_fft_plan_init(fftPlan, nfft)) return RPP_ERROR_INVALID_ARGUMENTS;
     const Rpp32s fftScratchLen = fftPlan.isPow2 ? nfft : fftPlan.m;
 #endif
 
