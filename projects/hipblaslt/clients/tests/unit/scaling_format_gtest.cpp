@@ -3,19 +3,12 @@
 
 // Host-only unit tests for the hipblaslt_scaling_format helpers in
 // hipblaslt_datatype2string.hpp: scaleDataType, isBlockScaling, blockSize, and
-// scaleBufferSize. All four are pure functions of their arguments, so they are
-// compiled into both hipblaslt-test and the standalone hipblaslt-test-hostunit
-// binary. See parser_gtest.cpp for the dual-target rationale and for why the
-// names carry both a HostUnit suite prefix and a smoke_ test prefix.
+// scaleBufferSize. See README.md in this directory for the dual-target build,
+// the HostUnit/smoke_ naming, and the X-macro tripwire pattern used below.
 //
 // scaleBufferSize is the interesting one: it applies two independent paddings
 // with integer division, so it gets explicit boundary cases rather than a
 // restatement of its own formula.
-//
-// The enumerator list below is kept complete by the compiler, not by review: it
-// is expanded into a tripwire switch with no `default:` arm and -Wswitch promoted
-// to an error, so adding a scaling format without listing it here breaks this
-// file's build. See parser_gtest.cpp for the same pattern applied to the parsers.
 
 #include "hipblaslt_datatype2string.hpp"
 
