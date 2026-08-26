@@ -92,32 +92,32 @@ TEST(MatmulOrchestration, MapsEpiloguePolicy)
     arguments.bias_vector     = false;
     arguments.use_e           = false;
     arguments.gradient        = false;
-    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_DEFAULT);
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_DEFAULT);
 
     arguments.activation_type = hipblaslt_activation_type::relu;
     arguments.bias_vector     = true;
-    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_RELU_BIAS);
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_RELU_BIAS);
 
     arguments.use_e = true;
-    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_RELU_AUX_BIAS);
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_RELU_AUX_BIAS);
 
     arguments.activation_type = hipblaslt_activation_type::gelu;
     arguments.gradient        = true;
-    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_DGELU_BGRAD);
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_DGELU_BGRAD);
 
     arguments.activation_type = hipblaslt_activation_type::none;
     arguments.use_e           = false;
     arguments.bias_source     = hipblaslt_bias_source::a;
-    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_BGRADA);
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_BGRADA);
     arguments.bias_source = hipblaslt_bias_source::b;
-    EXPECT_EQ(matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_BGRADB);
+    EXPECT_EQ(hipblaslt::client::matmulEpilogue(arguments), HIPBLASLT_EPILOGUE_BGRADB);
 
     arguments                  = Arguments{};
     arguments.activation_type  = hipblaslt_activation_type::none;
     arguments.bias_vector      = false;
     arguments.use_e            = true;
     arguments.gradient         = false;
-    EXPECT_THROW(matmulEpilogue(arguments), std::invalid_argument);
+    EXPECT_THROW(hipblaslt::client::matmulEpilogue(arguments), std::invalid_argument);
 }
 
 TEST(MatmulBatchOffsetPlan, ValidatesOffsetArithmetic)
