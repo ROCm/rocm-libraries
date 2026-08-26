@@ -11,10 +11,11 @@
  *        share the buffer but are not scanned, so residue they leave is
  *        reported against the next scanned matmul.
  *
- *        Single-threaded debugging only: the scan synchronizes the stream and
- *        zeroes a handle-wide buffer, disrupting any concurrent kernel on
- *        another stream. Skipped during HIP graph capture, where both
- *        operations are illegal.
+ *        The scan synchronizes the stream and zeroes the handle-wide buffer.
+ *        Both rely on the handle already being single-stream by contract (see
+ *        hipblasLtHandle_t in hipblaslt.h), which is also what lets the
+ *        Synchronizer itself be shared unpartitioned. Skipped during HIP graph
+ *        capture, where both operations are illegal.
  */
 
 #pragma once
@@ -47,11 +48,10 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
     constexpr size_t count = hipblaslt_synchronizer_ints;
     constexpr size_t bytes = count * sizeof(int);
 
-    // Thread-local, so two threads sharing a handle do not race on it.
-    static thread_local std::vector<int> staging;
-    if(staging.size() != count)
-        staging.assign(count, 0);
-    std::vector<int>& host = staging;
+    // Staged on the handle, unguarded: a handle is single-stream by contract.
+    if(handle->check_synchronizer_host.size() != count)
+        handle->check_synchronizer_host.assign(count, 0);
+    std::vector<int>& host = handle->check_synchronizer_host;
 
     hipError_t err = hipStreamSynchronize(stream);
     if(err == hipSuccess)
