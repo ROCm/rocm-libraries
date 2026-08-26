@@ -182,8 +182,9 @@ BenchmarkProblems:
           - Exact: [1024, 256, 1, 512]
 
   -
-    - # ProblemType (16x1 stack at DepthU 256; wg2x2 exceeds 160KB LDS here so
-      # only the single-wave shapes fit)
+    - # ProblemType (16x1 stack at DepthU 256.  Only MT512x128 wg2x2 still misses
+      # the 160KB LDS budget; the wg2x2 MT512x64 fits once each operand is
+      # charged its own alignment instead of A's.)
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -199,8 +200,9 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 16, 2,  1, 1]   # MT 256x32  1 wave  (128KB LDS)
-          - [16, 16, 128, 1,  1, 16, 4,  1, 1]   # MT 256x64  1 wave  (128KB LDS)
+          - [16, 16, 128, 1,  1, 16, 2,  1, 1]   # MT 256x32  1 wave  (73KB LDS)
+          - [16, 16, 128, 1,  1, 16, 4,  1, 1]   # MT 256x64  1 wave  (81KB LDS)
+          - [16, 16, 128, 1,  1, 16, 2,  2, 2]   # MT 512x64  wg2x2   (145KB LDS)
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [256]
@@ -212,5 +214,38 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 64, 1, 256]
-          - Exact: [512, 128, 1, 512]
+          - Exact: [512, 64, 1, 256]
+          - Exact: [1024, 128, 1, 512]
+
+  -
+    - # ProblemType (deepest 16x1 K window that fits: DepthU 512 at MT256x32,
+      # four MFMA K-windows per strip)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 16, 2,  1, 1]   # MT 256x32  1 wave  (145KB LDS)
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 32, 1, 512]
+          - Exact: [512, 64, 1, 1024]
