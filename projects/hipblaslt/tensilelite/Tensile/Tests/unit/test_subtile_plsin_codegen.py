@@ -246,6 +246,22 @@ def test_fused_store_predicate_excludes_alpha():
                     assert "Alpha" not in arg.value
 
 
+def test_fused_store_predicate_routes_non_null_bias_to_plain_nll():
+    source = open(KWA_PATH).read()
+    func = _function_node(source, "computePostLoopFusedStore")
+    body = ast.get_source_segment(source, func)
+
+    assert 'if kernel["ProblemType"]["UseBias"]' in body
+    assert 'normalBiasOffset = self.argLoader.getOffset()' in body
+    assert "extBiasOffset = (" in body
+    assert "PLSIN_LoadExternalBiasPtr" in body
+    assert 'SWaitCnt(kmcnt=0, comment="wait for runtime AddressBias")' in body
+    assert 'comment="bad |= AddressBias[0]"' in body
+    assert 'comment="bad |= AddressBias[1] (non-null -> plain)"' in body
+    assert 'sgpr("AddressBias' not in body, (
+        "the early guard must not reference the late-defined AddressBias alias")
+
+
 def test_fused_store_guard_requires_full_tile():
     # The runtime guard must require a COMPLETE MacroTile in M and N (not the
     # relaxed subtile-aligned/NonEdge check), so the branch-free full-tile store is

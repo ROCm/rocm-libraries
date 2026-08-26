@@ -16045,6 +16045,7 @@ class KernelWriterAssembly(KernelWriter):
     compare instead of recomputing the chain each time (and the SALU overlaps the
     prefetch/MFMA shadow instead of the NLL prologue critical path):
         flag = (no tail) && (beta==0)
+               && (AddressBias==nullptr)
                && (full-tile in M) && (full-tile in N)
                && (StreamK full-tile owner)
     Alpha and scalar-scale pointers are intentionally not guard terms: the fused store
@@ -16111,6 +16112,53 @@ class KernelWriterAssembly(KernelWriter):
           for i in range(max(1, self.states.bpeCinternal // self.states.bpr)):
             m.add(SOrB32(dst=sgpr(bad), src0=sgpr("Beta+%u" % i), src1=sgpr(bad),
                          comment="bad |= Beta[%u] (beta != 0 -> not fused)" % i))
+        # Bias-capable hipBLASLt solutions are also selected for runtime calls
+        # whose optional bias pointer is null. AddressBias is part of the deferred
+        # post-loop kernarg block, so load only its two dwords here and fold them
+        # into the uniform predicate. Reuse `flag` and `off` as load destinations:
+        # flag has not been materialised yet and off is not needed until the
+        # full-tile divides below, avoiding any extra persistent or temporary SGPR.
+        if kernel["ProblemType"]["UseBias"]:
+          names = self.states.numStoreSgprNames
+          sizes = self.states.numStoreSgprNameSizes
+          assert "AddressBias" in names
+          biasIdx = names.index("AddressBias")
+          normalBiasOffset = self.argLoader.getOffset() + sum(sizes[:biasIdx]) * 4
+
+          def _loadBiasPointer(offset):
+            load = Module("PLSINLoadBiasPointer")
+            load.add(self.argLoader.loadKernArg(
+              flag, "KernArgAddress", sgprOffset=hex(offset), dword=1))
+            load.add(self.argLoader.loadKernArg(
+              off, "KernArgAddress", sgprOffset=hex(offset + 4), dword=1))
+            return load
+
+          m.addComment1("PLSIN guard-hoist: runtime bias pointer -> PLAIN NLL")
+          if kernel["ProblemType"]["SupportUserArgs"]:
+            extBiasOffset = (
+              self.externalArgLoader.getOffset()
+              + self.states.userArgsInfo.scaleASize
+              + self.states.userArgsInfo.scaleBSize
+              + self.states.userArgsInfo.scaleCSize
+              + self.states.userArgsInfo.scaleDSize
+              + self.states.userArgsInfo.scaleAlphaVecSize)
+            loadExternal = Label(self.labels.getNameInc("PLSIN_LoadExternalBiasPtr"), "")
+            loadDone = Label(self.labels.getNameInc("PLSIN_LoadBiasPtrDone"), "")
+            self.cmpNamedArgTypeEq(m, 2, "ArgType == 2 uses external epilogue struct")
+            m.add(SCBranchSCC1(labelName=loadExternal.getLabelName(),
+                               comment="load AddressBias from external args"))
+            m.add(_loadBiasPointer(normalBiasOffset))
+            m.add(SBranch(labelName=loadDone.getLabelName()))
+            m.add(loadExternal)
+            m.add(_loadBiasPointer(extBiasOffset))
+            m.add(loadDone)
+          else:
+            m.add(_loadBiasPointer(normalBiasOffset))
+          m.add(SWaitCnt(kmcnt=0, comment="wait for runtime AddressBias"))
+          m.add(SOrB32(dst=sgpr(bad), src0=sgpr(flag), src1=sgpr(bad),
+                       comment="bad |= AddressBias[0]"))
+          m.add(SOrB32(dst=sgpr(bad), src0=sgpr(off), src1=sgpr(bad),
+                       comment="bad |= AddressBias[1] (non-null -> plain)"))
         # StreamK: this WG started the tile (LocalStart == 0).
         if useStreamK:
           m.add(SOrB32(dst=sgpr(bad), src0=sgpr("StreamKLocalStart"), src1=sgpr(bad),

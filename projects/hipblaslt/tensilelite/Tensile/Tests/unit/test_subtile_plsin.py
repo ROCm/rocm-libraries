@@ -125,6 +125,12 @@ def test_plsin_supports_scale_cd_epilogue():
     assert computeSubtilePlsin(kernel)
 
 
+def test_plsin_keeps_bias_capable_solution_eligible_for_runtime_guard():
+    kernel = _eligible_kernel()
+    kernel["ProblemType"]["UseBias"] = True
+    assert computeSubtilePlsin(kernel)
+
+
 def test_plsin_falls_back_for_tailloop_in_nll():
     kernel = _eligible_kernel()
     kernel["TailloopInNll"] = True
