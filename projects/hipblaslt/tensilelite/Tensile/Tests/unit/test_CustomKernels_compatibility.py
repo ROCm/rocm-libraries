@@ -258,10 +258,42 @@ def test_omitted_structural_declarations_are_derived_and_compatible():
     assert compareCustomKernelProblemTypes(_problem_type(), _problem_type()) == []
 
 
-def test_missing_embedded_problem_type_is_rejected():
-    mismatches = compareCustomKernelProblemTypes(_problem_type(), None)
+def test_missing_embedded_problem_type_is_accepted():
+    # The shipped CustomGSUs_* kernels carry a custom.config holding only
+    # InternalSupportParams. Declaring no ProblemType declares no constraints,
+    # so there is nothing to contradict and the pairing stands.
+    library = _problem_type(
+        UseBias=1,
+        BiasDataTypeList=["S"],
+        Activation=True,
+        UseScaleAlphaVec=1,
+    )
+
+    assert compareCustomKernelProblemTypes(library, None) == []
+
+
+@pytest.mark.parametrize("kernel_problem_type", ["ProblemType", ["S"], 7])
+def test_malformed_embedded_problem_type_is_rejected(kernel_problem_type):
+    # Absent is fine; present-but-not-a-mapping is a broken custom.config.
+    mismatches = compareCustomKernelProblemTypes(
+        _problem_type(), kernel_problem_type
+    )
 
     assert _fields(mismatches) == {"ProblemType"}
+
+
+def test_declared_problem_type_omitting_bias_is_rejected():
+    # Regression guard for the gfx950 BF16 kernels that were listed in bias /
+    # ScaleAlphaVec selection tables they cannot service (norm error 0.87).
+    # Their custom.config declares a ProblemType but leaves UseBias and
+    # UseScaleAlphaVec out of it -- unlike the no-ProblemType case above, a
+    # declared block is authoritative, so the omission means "unsupported".
+    library = _problem_type(UseBias=1, BiasDataTypeList=["S"], UseScaleAlphaVec=1)
+    kernel = _problem_type()
+
+    mismatches = compareCustomKernelProblemTypes(library, kernel)
+
+    assert _fields(mismatches) == {"UseBias", "UseScaleAlphaVec"}
 
 
 def test_bias_data_types_use_directional_coverage():

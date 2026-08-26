@@ -123,7 +123,17 @@ def compareCustomKernelProblemTypes(
     Directional capabilities may be a custom-kernel superset of what the logic
     advertises; Bias and ScaleAlphaVec require full bitmask coverage. A custom
     ActivationType is non-authoritative and is ignored.
+
+    A kernel whose custom.config omits ProblemType entirely declares no
+    constraints and is accepted. Note this is *not* the same as omitting a
+    single field from a declared ProblemType: a declared block is authoritative,
+    so a capability missing from it normalizes to disabled and is enforced.
+    That distinction is load-bearing -- the gfx950 BF16 kernels that produced
+    wrong results in bias/ScaleAlphaVec logic tables declared a ProblemType and
+    simply left UseBias/UseScaleAlphaVec out of it.
     """
+    if kernelProblemType is None:
+        return []
     if not isinstance(kernelProblemType, Mapping):
         return [
             CustomKernelProblemTypeMismatch(

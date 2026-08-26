@@ -149,24 +149,13 @@ def test_runchecks_known_bug_skip(tmp_path, passing_validators, monkeypatch, sna
 def test_runchecks_only_custom_kernels_filters(tmp_path, passing_validators, monkeypatch, snapshot):
     # hasCustomKernel True so solutions are loaded; handleCustomKernel marks the
     # first solution custom and the second not -> only the custom one counts.
-    problem_type = {
-        "OperationType": "GEMM",
-        "DataType": "S",
-        "DestDataType": "S",
-        "ComputeDataType": "S",
-    }
-
-    def handle_custom_kernel(solution, _isa_info_map):
-        is_custom = solution.get("SolutionIndex") == 0
-        if is_custom:
-            solution["CustomKernelName"] = "synthetic_kernel"
-            solution["ProblemType"] = problem_type
-        return solution, is_custom
-
     monkeypatch.setattr(Run, "hasCustomKernel", lambda f: True)
-    monkeypatch.setattr(Run, "handleCustomKernel", handle_custom_kernel)
+    monkeypatch.setattr(
+        Run, "handleCustomKernel",
+        lambda s, iim: (s, s.get("SolutionIndex") == 0),
+    )
     f = _write_logic(tmp_path / "lib" / "a.yaml",
-                     [{"SolutionIndex": 0}, {"SolutionIndex": 1}], problem_type)
+                     [{"SolutionIndex": 0}, {"SolutionIndex": 1}])
     assert _result(*Run._runChecks(tmp_path, {}, _CUSTOM, frozenset(), [f])) == snapshot
 
 
