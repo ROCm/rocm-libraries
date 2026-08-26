@@ -1,0 +1,185 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <hipblaslt/client/MatmulTestCase.hpp>
+
+#include <gtest/gtest.h>
+
+#include <stdexcept>
+
+namespace
+{
+    Arguments baseArguments()
+    {
+        Arguments arguments{};
+        arguments.init();
+        arguments.transA = 'N';
+        arguments.transB = 'N';
+        arguments.a_type = HIP_R_16F;
+        arguments.b_type = HIP_R_16BF;
+        arguments.c_type = HIP_R_32F;
+        arguments.d_type = HIP_R_32F;
+        arguments.M[0]   = 3;
+        arguments.N[0]   = 5;
+        arguments.K[0]   = 7;
+        arguments.lda[0] = 4;
+        arguments.ldb[0] = 8;
+        arguments.ldc[0] = 6;
+        arguments.ldd[0] = 9;
+        arguments.lde[0] = 10;
+        return arguments;
+    }
+
+    void expectMatrix(const hipblaslt::client::MatmulMatrix& matrix,
+                      hipDataType                            type,
+                      size_t                                 rows,
+                      size_t                                 columns,
+                      size_t                                 batches,
+                      ptrdiff_t                              leadingDimension,
+                      ptrdiff_t                              batchStride)
+    {
+        EXPECT_EQ(matrix.apiType, type);
+        EXPECT_EQ(matrix.hostType, hipblaslt::host_validation::scalarType(type));
+        ASSERT_EQ(matrix.layout.rank(), 3);
+        EXPECT_EQ(matrix.layout.extent(0), rows);
+        EXPECT_EQ(matrix.layout.extent(1), columns);
+        EXPECT_EQ(matrix.layout.extent(2), batches);
+        EXPECT_EQ(matrix.layout.stride(0), 1);
+        EXPECT_EQ(matrix.layout.stride(1), leadingDimension);
+        EXPECT_EQ(matrix.layout.stride(2), batchStride);
+    }
+} // namespace
+
+TEST(MatmulTestCase, NormalizesLogicalMatrixGeometry)
+{
+    auto arguments   = baseArguments();
+    arguments.transB = 'T';
+
+    const auto cases = hipblaslt::client::normalizeMatmulCases(arguments);
+
+    ASSERT_EQ(cases.size(), 1);
+    const auto& testCase = cases.front();
+    EXPECT_EQ(testCase.m, 3);
+    EXPECT_EQ(testCase.n, 5);
+    EXPECT_EQ(testCase.k, 7);
+    EXPECT_EQ(testCase.operationA, HIPBLAS_OP_N);
+    EXPECT_EQ(testCase.operationB, HIPBLAS_OP_T);
+    EXPECT_EQ(testCase.batchMode, HIPBLASLT_BATCH_MODE_STRIDED);
+    EXPECT_EQ(testCase.batchCount, 1);
+    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 1, 4, 28);
+    expectMatrix(testCase.b, HIP_R_16BF, 5, 7, 1, 8, 56);
+    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 1, 6, 30);
+    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 1, 9, 45);
+    EXPECT_FALSE(testCase.auxiliary);
+}
+
+TEST(MatmulTestCase, KeepsDistinctStridedBatchGeometry)
+{
+    auto arguments        = baseArguments();
+    arguments.batch_count = 4;
+    arguments.stride_a[0] = 101;
+    arguments.stride_b[0] = 202;
+    arguments.stride_c[0] = 303;
+    arguments.stride_d[0] = 404;
+    arguments.stride_e[0] = 505;
+    arguments.use_e       = true;
+    arguments.aux_type    = HIP_R_16F;
+
+    const auto  cases    = hipblaslt::client::normalizeMatmulCases(arguments);
+    const auto& testCase = cases.front();
+
+    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 4, 4, 101);
+    expectMatrix(testCase.b, HIP_R_16BF, 7, 5, 4, 8, 202);
+    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 4, 6, 303);
+    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 4, 9, 404);
+    ASSERT_TRUE(testCase.auxiliary);
+    expectMatrix(*testCase.auxiliary, HIP_R_16F, 3, 5, 4, 10, 505);
+}
+
+TEST(MatmulTestCase, PointerArraysUseCanonicalLogicalBatchOffsets)
+{
+    auto arguments        = baseArguments();
+    arguments.batch_mode  = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+    arguments.batch_count = 3;
+    arguments.stride_a[0] = 101;
+    arguments.stride_b[0] = 202;
+    arguments.stride_c[0] = 303;
+    arguments.stride_d[0] = 404;
+
+    const auto  cases    = hipblaslt::client::normalizeMatmulCases(arguments);
+    const auto& testCase = cases.front();
+
+    EXPECT_EQ(testCase.batchMode, HIPBLASLT_BATCH_MODE_POINTER_ARRAY);
+    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 3, 4, 28);
+    expectMatrix(testCase.b, HIP_R_16BF, 7, 5, 3, 8, 40);
+    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 3, 6, 30);
+    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 3, 9, 45);
+}
+
+TEST(MatmulTestCase, NormalizesEachGroupedProblem)
+{
+    auto arguments         = baseArguments();
+    arguments.grouped_gemm = 2;
+    arguments.batch_count  = 2;
+    arguments.M[1]         = 11;
+    arguments.N[1]         = 13;
+    arguments.K[1]         = 17;
+    arguments.lda[1]       = 12;
+    arguments.ldb[1]       = 18;
+    arguments.ldc[1]       = 14;
+    arguments.ldd[1]       = 15;
+    arguments.lde[1]       = 16;
+    arguments.stride_a[1]  = 1001;
+    arguments.stride_b[1]  = 1002;
+    arguments.stride_c[1]  = 1003;
+    arguments.stride_d[1]  = 1004;
+    arguments.stride_e[1]  = 1005;
+
+    const auto cases = hipblaslt::client::normalizeMatmulCases(arguments);
+
+    ASSERT_EQ(cases.size(), 2);
+    EXPECT_EQ(cases[1].m, 11);
+    EXPECT_EQ(cases[1].n, 13);
+    EXPECT_EQ(cases[1].k, 17);
+    expectMatrix(cases[1].a, HIP_R_16F, 11, 17, 2, 12, 1001);
+    expectMatrix(cases[1].b, HIP_R_16BF, 17, 13, 2, 18, 1002);
+    expectMatrix(cases[1].c, HIP_R_32F, 11, 13, 2, 14, 1003);
+    expectMatrix(cases[1].d, HIP_R_32F, 11, 13, 2, 15, 1004);
+}
+
+TEST(MatmulTestCase, MakesCEqualsDExplicit)
+{
+    auto arguments        = baseArguments();
+    arguments.c_equal_d   = true;
+    arguments.batch_count = 2;
+    arguments.stride_c[0] = 303;
+    arguments.stride_d[0] = 404;
+
+    const auto  cases    = hipblaslt::client::normalizeMatmulCases(arguments);
+    const auto& testCase = cases.front();
+
+    EXPECT_TRUE(testCase.cEqualsD);
+    EXPECT_EQ(testCase.c.layout, testCase.d.layout);
+    EXPECT_EQ(testCase.d.layout.stride(1), arguments.ldc[0]);
+    EXPECT_EQ(testCase.d.layout.stride(2), arguments.stride_c[0]);
+}
+
+TEST(MatmulTestCase, RejectsInvalidSerializedGeometry)
+{
+    auto arguments       = baseArguments();
+    arguments.batch_mode = 2;
+    EXPECT_THROW(hipblaslt::client::normalizeMatmulCases(arguments), std::invalid_argument);
+
+    arguments              = baseArguments();
+    arguments.grouped_gemm = MAX_SUPPORTED_NUM_PROBLEMS + 1;
+    EXPECT_THROW(hipblaslt::client::normalizeMatmulCases(arguments), std::invalid_argument);
+
+    arguments      = baseArguments();
+    arguments.M[0] = -1;
+    EXPECT_THROW(hipblaslt::client::normalizeMatmulCases(arguments), std::invalid_argument);
+
+    arguments           = baseArguments();
+    arguments.c_equal_d = true;
+    arguments.d_type    = HIP_R_16F;
+    EXPECT_THROW(hipblaslt::client::normalizeMatmulCases(arguments), std::invalid_argument);
+}
