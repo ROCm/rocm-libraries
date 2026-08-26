@@ -37,7 +37,7 @@ extern "C" {
 *
 *  \details
 *  \p rocsparse_spsv solves a triangular linear system of equations defined by a sparse \f$m \times m\f$ square matrix \f$op(A)\f$,
-*  given in CSR or COO storage format, such that
+*  given in CSR, COO, CSC, or ELL storage format, such that
 *  \f[
 *    op(A) \cdot y = \alpha \cdot x,
 *  \f]
@@ -46,7 +46,8 @@ extern "C" {
 *    op(A) = \left\{
 *    \begin{array}{ll}
 *        A,   & \text{if trans == rocsparse_operation_none} \\
-*        A^T, & \text{if trans == rocsparse_operation_transpose}
+*        A^T, & \text{if trans == rocsparse_operation_transpose} \\
+*        A^H, & \text{if trans == rocsparse_operation_conjugate_transpose}
 *    \end{array}
 *    \right.
 *  \f]
@@ -75,7 +76,7 @@ extern "C" {
 *  </table>
 *
 *  \note
-*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo, \ref rocsparse_format_csr, and \ref rocsparse_format_csc.
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo, \ref rocsparse_format_csr, \ref rocsparse_format_csc, and \ref rocsparse_format_ell.
 *
 *  \note
 *  Only the \ref rocsparse_spsv_stage_buffer_size stage and the \ref rocsparse_spsv_stage_compute stage are non-blocking
@@ -83,7 +84,8 @@ extern "C" {
 *  The \ref rocsparse_spsv_stage_preprocess stage is blocking with respect to the host.
 *
 *  \note
-*  Currently, only \p trans == \ref rocsparse_operation_none and \p trans == \ref rocsparse_operation_transpose is supported.
+*  Currently, only \p trans == \ref rocsparse_operation_none, \p trans == \ref rocsparse_operation_transpose,
+*  and \p trans == \ref rocsparse_operation_conjugate_transpose is supported.
 *
 *  \note
 *  Only the \ref rocsparse_spsv_stage_buffer_size stage and the \ref rocsparse_spsv_stage_compute stage
