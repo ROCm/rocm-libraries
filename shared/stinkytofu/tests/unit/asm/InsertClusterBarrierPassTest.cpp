@@ -153,6 +153,16 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return inst;
     }
 
+    StinkyInstruction* createWaitTensorCnt(int count) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_wait_tensorcnt, arch));
+        inst->addSrcReg(StinkyRegister(count));
+        SWaitTensorCntData d;
+        d.tlcnt = count;
+        inst->addModifier<SWaitTensorCntData>(d);
+        return inst;
+    }
+
     StinkyInstruction* createWMMA(int destStart, int src0Start, int src1Start) {
         AsmIRBuilder builder(*bb, arch);
         const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, arch);
@@ -592,4 +602,53 @@ TEST_F(InsertClusterBarrierPassTest, ProducerDrainAfterSia4SplitAMxsaGroup) {
     EXPECT_FALSE(aIdx < waitIdx && waitIdx < mxsaIdx)
         << "producer drain must not sit between A and MXSA tensor_load";
     EXPECT_LT(mxsaIdx, waitIdx) << "producer drain must follow the MXSA tensor_load";
+}
+
+// StinkyWaitCntInsertionPass runs before this pass and anchors its counter
+// drains on the same workgroup signal Rule 3(b) targets, so the slot right
+// before that signal is already taken by an s_wait_tensorcnt. The cluster wait
+// must be planted ABOVE that drain:
+//
+//     s_barrier_wait -3
+//     s_wait_tensorcnt N
+//     s_barrier_signal -1
+//
+// The inverted order is equally correct but measured slower. This test pins the
+// ordering only; see hoistAboveLeadingWaitCnts for why no mechanism is claimed.
+TEST_F(InsertClusterBarrierPassTest, Rule3ClusterWaitIsHoistedAboveTensorDrain) {
+    createWMMA(24, 0, 8);
+    StinkyInstruction* drain = createWaitTensorCnt(0);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
+
+    runPass();
+
+    StinkyInstruction* clusterWait = nullptr;
+    for (IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        auto* inst = cast<StinkyInstruction>(&ir);
+        if (isClusterBarrierWithLiteral(*inst, /*wantSignal=*/false)) {
+            clusterWait = inst;
+            break;
+        }
+    }
+    ASSERT_NE(clusterWait, nullptr) << "Rule 3(b) must emit an s_barrier_wait -3";
+    EXPECT_LT(indexOf(clusterWait), indexOf(drain))
+        << "s_barrier_wait -3 must precede the tensor drain it was hoisted over";
+}
+
+// Re-running the pass must not plant a second cluster wait just because the
+// first one now sits above the drain rather than adjacent to the anchor.
+TEST_F(InsertClusterBarrierPassTest, HoistedClusterWaitStaysIdempotent) {
+    createWMMA(24, 0, 8);
+    createWaitTensorCnt(0);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
+
+    runPass();
+    const auto afterFirst = clusterBarrierCounts();
+    runPass();
+    EXPECT_EQ(clusterBarrierCounts(), afterFirst) << "re-running the pass must be a no-op";
 }

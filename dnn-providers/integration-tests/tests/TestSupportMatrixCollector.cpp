@@ -86,8 +86,10 @@ TEST_F(TestSupportMatrixCollector, UnknownEngineId)
     auto records = collector.getRecords();
     ASSERT_EQ(records.size(), 1u);
     ASSERT_EQ(records[0].supportingEngines.size(), 1u);
+    // An unregistered ID is rendered as its zero-padded hexadecimal, which is the
+    // same spelling the backend logs use, so a matrix entry can be grepped for.
     auto engineName = *records[0].supportingEngines.begin();
-    EXPECT_TRUE(engineName.find("Unknown(") != std::string::npos);
+    EXPECT_EQ(engineName, "0x00000000000F423F");
 }
 
 TEST_F(TestSupportMatrixCollector, ResetClearsState)

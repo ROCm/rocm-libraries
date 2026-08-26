@@ -37,6 +37,7 @@
 #include "stinkytofu/pipeline/OptimizationPasses.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
+#include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
@@ -58,6 +59,7 @@
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
@@ -66,6 +68,7 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
+#include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -87,10 +90,11 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
-        // TODO: remove this temporary SIA4/SIA0 split once a dedicated hazard pass
-        // handles xcnt placement.
-        pm.addPass(createStinkyRemoveWaitCntPass(/*removeTensorWaitCnt=*/true,
-                                                 /*removeXcntWaitCnt=*/optLevel == OptLevel::O3));
+        // Only O3 has the hazard pass that re-places xcnt. kmcnt and tensor keep
+        // the defaults; RemoveWaitCntOptions documents why each is exempt.
+        RemoveWaitCntOptions removeOptions;
+        removeOptions.removeXcnt = (optLevel == OptLevel::O3);
+        pm.addPass(createStinkyRemoveWaitCntPass(removeOptions));
         pm.addPass(createStinkyRemoveNopPass());
     }
 
@@ -100,6 +104,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     pm.addPass(createStinkyBuildImplicitDependencyPass());
     if (runScheduler) {
         pm.addPass(createStinkyDAGSchedulerPass());
+        pm.addPass(createStinkyMergeBarrierPass());
     }
 }
 
@@ -155,6 +160,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
                 passFeatureConfig.dagFeatures.dsReadThrottleLatency =
                     moduleOptions.DsReadThrottleLatency;
+                passFeatureConfig.dagFeatures.tensorLoadWmmaSpace =
+                    moduleOptions.TensorLoadWmmaSpace;
                 passFeatureConfig.dagFeatures.globalReadQueueDepth =
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =
@@ -182,6 +189,16 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
                 if (runScheduler) innerPM.addPass(createRemoveDscntPass());
             }
+
+            // The wait insertion above leaves each final wait immediately before the
+            // WMMA that consumes its loads, so that WMMA has nothing to issue behind
+            // it. Repair moves this many non-WMMA instructions past each anchor to
+            // refill those slots, without changing any wait immediate.
+            const int waitRepairSlotsAfterAnchor = 1;
+            if (runScheduler && waitRepairSlotsAfterAnchor > 0) {
+                innerPM.addPass(createWaitAwareScheduleRepairPass(waitRepairSlotsAfterAnchor));
+            }
+
             pm.addPass(createKernelToRegionsPassAdaptor(
                 module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));
         }
@@ -215,6 +232,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         pm.addPass(createRegionClonePass(moduleOptions.CloneList));
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
+
+    mpm.addPass(createFunctionToModuleAdaptor(createAsmMovePropagationPass()));
 
     // MSB is materialized for the entry function and every callable function
     // (each function owns its VGPR MSB hardware state).

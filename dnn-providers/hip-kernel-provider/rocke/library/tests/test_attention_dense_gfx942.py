@@ -47,6 +47,8 @@ from kernels.gfx942.attention_dense import (
     _k_group_pad_active,
     _k_group_stride,
     _use_exp2_fast,
+    _v_row_pad,
+    _v_swizzle_width,
     _tuned_waves_per_eu,
 )
 
@@ -179,7 +181,17 @@ def test_kernel_name_pins_the_two_shipped_cache_collisions():
 # legal value to perturb to, so the property is untestable (and uninteresting -- an
 # unbuildable config cannot collide with anything). Rejection itself is covered by
 # test_supports_rejects_modes_deferred_to_later_phases.
-_UNBUILDABLE_SPEC_FIELDS = frozenset({"varlen", "ragged", "sliding_window"})
+_UNBUILDABLE_SPEC_FIELDS = frozenset(
+    {
+        "varlen",
+        "ragged",
+        "sliding_window",
+        "paged",
+        "block_size",
+        "num_kv_blocks",
+        "use_sinks",
+    }
+)
 
 # Fields that move the NAME but never the gfx942 IR. Over-naming is SAFE -- it costs
 # a duplicate compile and can never serve a wrong binary -- so these are recorded,
@@ -203,6 +215,9 @@ _SPEC_PERTURBATIONS = {
     "sliding_window": (),  # unbuildable -- see _UNBUILDABLE_SPEC_FIELDS
     "ragged": (),  # unbuildable
     "varlen": (),  # unbuildable
+    "paged": (),  # unbuildable (not yet supported)
+    "block_size": (),  # unbuildable (paged-only, paged not supported)
+    "num_kv_blocks": (),  # unbuildable (paged-only, paged not supported)
     "block_n": (32, 128),
     "waves_per_eu": (3, 4),
     "lds_k_group_pad": (0, 16),
@@ -211,13 +226,15 @@ _SPEC_PERTURBATIONS = {
     "interleave": (True, False),
     "persist_decode": ("qb_major", "hkv_major"),
     "lazy_rescale": (False, True),
+    "use_sinks": (),  # unbuildable (not yet supported)
 }
 
 _TUNING_PERTURBATIONS = {
     "block_m": (128, 512),
     "lds_row_pad": (0, 16),
-    "v_row_pad": (0, 16),
+    "v_row_pad": (0, 64),
     "use_cfvst": (False, True),
+    "use_v_swizzle": (False, True),
     "use_exp2_fast": (False, True),
     "waves_per_eu": (4, 3),
     "iglp": (True, False),
@@ -411,6 +428,7 @@ def test_supports_rejects_non_gfx942():
         (dict(varlen=True), "varlen"),
         (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
         (dict(sliding_window=64), "sliding_window"),
+        (dict(use_sinks=True), "sinks"),
     ],
 )
 def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
@@ -581,6 +599,9 @@ _CONTRACT_GRID = [
     (dict(dtype="fp16"), dict(use_cfvst=False)),  # accepted: OFF is always legal
     (dict(head_size=64), dict(use_cfvst=True)),  # REJECTED: policy says off at D64
     (dict(dtype="bf16", head_size=128), dict(use_cfvst=True)),  # REJECTED: spills
+    # --- tuning: use_v_swizzle (independent of the pad; cfvst-gated) ---
+    (dict(dtype="fp16"), dict(use_v_swizzle=False)),  # accepted: OFF is always legal
+    (dict(head_size=64), dict(use_v_swizzle=True)),  # REJECTED: no V^T path at D64
     # --- tuning: use_exp2_fast (no rejected region -- see the comment above) ---
     (dict(), dict(use_exp2_fast=False)),
     (dict(), dict(use_exp2_fast=True)),  # accepted: policy is True for every config
@@ -844,29 +865,136 @@ def _walk_op_names(op):
 
 
 @pytest.mark.parametrize(
-    "head_size, dtype, expected",
+    "head_size, dtype, seqlen, expected",
     [
-        (64, "fp16", True),
-        (128, "fp16", True),
-        (64, "bf16", True),  # fused rescale gave the headroom (P2)
-        (128, "bf16", True),  # re-measured: no spill -> last holdout enabled
+        # fp16 D128 is byte-identical across the exp2_fast boundary and flat at every
+        # seqlen in the sweeps -> stays enabled everywhere (no short-seq regression).
+        (128, "fp16", 512, True),
+        (128, "fp16", 2048, True),
+        (128, "fp16", 8192, True),
+        (64, "fp16", 512, True),
+        # bf16 D64: enabled (fused rescale gave the P2 headroom; no D128 short-seq cost).
+        (64, "bf16", 512, True),
+        (64, "bf16", 8192, True),
+        # bf16 D128 SHORT-SEQ GUARD: plain exp2 below 4096 (short-seq regressor);
+        # exp2_fast at/above 4096.
+        (128, "bf16", 512, False),
+        (128, "bf16", 1024, False),
+        (128, "bf16", 2048, False),
+        (128, "bf16", 4096, True),
+        (128, "bf16", 8192, True),
     ],
 )
-def test_exp2_fast_is_enabled_for_every_config(head_size, dtype, expected):
-    """exp2_fast is enabled for EVERY config. It is numerically safe everywhere (both
-    softmax args -- alpha's m_i - m_new and p's s - m_new -- are <= 0, exactly
-    exp2_fast's precondition, independent of head_size/dtype) and a strict VALU win.
-    bf16 D128 was the last holdout on a measurement that no longer reproduces on the
-    current kernel (re-measured: 0 scratch and lower VGPR than plain exp2 on both
-    grids, numerically identical), so it is removed. This pins the enabled set (now
-    all configs) so a future edit that re-introduces a rejected arm has to update
-    this matrix on purpose.
+def test_exp2_fast_policy_bf16_d128_short_seq_guard(head_size, dtype, seqlen, expected):
+    """exp2_fast is enabled for every config EXCEPT short-sequence bf16 head_dim=128,
+    which reverts to plain exp2 below seqlen 4096. It is numerically safe everywhere
+    (both softmax args -- alpha's m_i - m_new and p's s - m_new -- are <= 0, exactly
+    exp2_fast's precondition), so this is a pure perf gate. bf16 D128 short sequences
+    are occupancy/latency-bound, where exp2_fast's register/schedule shift regresses
+    them (gfx942, ROCm 7.2.2); fp16 D128 -- byte-identical across the boundary
+    -- is flat and stays enabled. Pins the guard so a future edit that changes the
+    enabled set has to update this matrix on purpose.
     """
-    assert _use_exp2_fast(head_size, dtype) is expected
+    assert _use_exp2_fast(head_size, dtype, seqlen) is expected
 
 
 @pytest.mark.parametrize(
-    "head_size, dtype", [(128, "fp16"), (64, "fp16"), (64, "bf16"), (128, "bf16")]
+    "head_size, dtype, block_n, expected",
+    [
+        # cfvst path (fp16-D128): pad is DERIVED so V_LDROW = block_n + pad is the
+        # smallest pow2 >= max(64, block_n) -> the XOR swizzle engages at EVERY tile
+        # width, not only block_n=64.
+        (128, "fp16", 64, 0),  # shipped tile; V_LDROW=64 (golden pinned here)
+        (128, "fp16", 32, 32),  # small-tile double-K variant; V_LDROW=64, swizzle ON
+        (128, "fp16", 128, 0),  # wide tile; V_LDROW=128, swizzle ON
+        (128, "bf16", 64, 8),  # no cfvst (bf16 D128 spills) -> no swizzle
+        (64, "fp16", 64, 8),  # D64 naive-V layout -> no swizzle
+        (64, "bf16", 64, 8),
+    ],
+)
+def test_v_row_pad_policy_matches_the_cfvst_swizzle_matrix(
+    head_size, dtype, block_n, expected
+):
+    """On the cfvst path (fp16-D128) v_row_pad is DERIVED from block_n so V_lds is the
+    smallest pow2 >= max(64, block_n) wide and the XOR bank-conflict swizzle engages at
+    any tile width; 8 (no swizzle) everywhere else. This
+    pins the derived values so a future edit that flips one arm updates this on purpose.
+    """
+    assert _v_row_pad(head_size, dtype, block_n) == expected
+
+
+@pytest.mark.parametrize("block_n", [32, 64, 128])
+def test_cfvst_swizzle_engages_at_every_block_n(block_n):
+    """Regression guard for the tile-width axis: on the cfvst path the derived pad keeps
+    V_LDROW = block_n + pad a pow2 >= 64 at EVERY block_n, so the swizzle never silently
+    turns off (a constant pad dropped it + wasted LDS at block_n != 64). The non-cfvst
+    path stays unpadded (no swizzle)."""
+    v_ldrow = block_n + _v_row_pad(128, "fp16", block_n)
+    assert v_ldrow == _v_swizzle_width(block_n), (block_n, v_ldrow)
+    assert v_ldrow >= 64 and (v_ldrow & (v_ldrow - 1)) == 0, (block_n, v_ldrow)
+    assert _v_row_pad(128, "bf16", block_n) == 8
+
+
+@pytest.mark.parametrize("block_n", [64, 32])
+def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
+    """The V^T swizzle must appear in the lowered IR with the SAME mask on the store
+    and the read. A store/read mask mismatch is the silent-wrong-answer bug for this
+    pattern, and the fp32-oracle numeric test cannot catch it -- store and read apply
+    the same permutation regardless, so an off build is numerically identical. Pure
+    text lowering, CPU lane (no comgr / no GPU).
+
+    The swizzle key ``(dim & (V_LDROW//4 - 1)) << 2`` lowers to an ``and i32`` / ``shl
+    i32 .., 2`` / ``xor i32`` triple, and the ONLY ``and i32 x, C`` mask in this kernel
+    is that swizzle mask -- so the set of such constants must be exactly the derived
+    ``V_LDROW//4 - 1`` (two distinct values == store and read drifted). Forcing
+    ``use_v_swizzle=False`` drops the swizzle, so the mask disappears and 'on' is
+    provably distinct from 'off'."""
+    import re
+
+    spec = _spec(head_size=128, dtype="fp16", block_n=block_n)
+    expected_mask = (block_n + _v_row_pad(128, "fp16", block_n)) // 4 - 1
+
+    def _swz_masks(ir):
+        consts = {int(c) for c in re.findall(r"\band i32 [^,]+, (\d+)", ir)}
+        return sorted(consts & {7, 15, 31, 63})
+
+    def _xors(ir):
+        return len(re.findall(r"\bxor i32\b", ir))
+
+    on = _lower(build_attention_dense(spec, arch="gfx942"))
+    assert _swz_masks(on) == [expected_mask], (block_n, _swz_masks(on))
+    assert _xors(on) > 2, ("swizzle triple absent", block_n, _xors(on))
+
+    off = _lower(
+        build_attention_dense(
+            spec, arch="gfx942", tuning=Gfx942DenseTuning(use_v_swizzle=False)
+        )
+    )
+    assert _swz_masks(off) == [], (block_n, _swz_masks(off))
+    assert _xors(off) < _xors(on)
+
+
+def test_default_tuning_v_row_pad_resolves_through_policy():
+    """The shipped default leaves ``v_row_pad=None`` and resolves through the policy,
+    derived from (head_size, dtype, block_n): fp16-D128 -> a pow2 (>=64) V_LDROW at any
+    width (swizzle on), 8 otherwise; an explicit override still wins. Guards that
+    production picks up the swizzle without a hand-set pad, at block_n 64 AND 32."""
+    fp16_d128 = _spec(head_size=128, dtype="fp16")  # block_n=64 default
+    fp16_d128_bn32 = _spec(head_size=128, dtype="fp16", block_n=32)
+    bf16_d128 = _spec(head_size=128, dtype="bf16")
+    assert _DEFAULT_TUNING.v_row_pad is None
+    assert _DEFAULT_TUNING.resolved_v_row_pad(fp16_d128) == 0  # V_LDROW=64, swizzle on
+    assert _DEFAULT_TUNING.resolved_v_row_pad(fp16_d128_bn32) == 32  # V_LDROW=64 too
+    assert _DEFAULT_TUNING.resolved_v_row_pad(bf16_d128) == 8
+    assert (
+        dataclasses.replace(_DEFAULT_TUNING, v_row_pad=16).resolved_v_row_pad(fp16_d128)
+        == 16
+    )
+
+
+@pytest.mark.parametrize(
+    "head_size, dtype",
+    [(128, "fp16"), (64, "fp16"), (64, "bf16"), (128, "bf16")],
 )
 @pytest.mark.parametrize("use_exp2_fast", [False, True])
 def test_softmax_emits_the_gated_exp2_intrinsic(head_size, dtype, use_exp2_fast):
@@ -948,7 +1076,7 @@ def test_fused_rescale_casts_each_p_exactly_once(head_size, dtype):
     [
         (64, "bf16", 4),  # 2 WG/CU (215->117 VGPR, 0 spill) -- +~50% at long seq
         (64, "fp16", 2),  # wpe=3 reaches 2 WG/CU but loses more ILP than it buys
-        (128, "fp16", 2),  # LDS-bound at ~35 KB: no wpe reaches a 2nd WG/CU
+        (128, "fp16", 2),  # LDS-bound at ~33-34 KB: no wpe reaches a 2nd WG/CU
         (128, "bf16", 2),  # LDS-bound: same
     ],
 )

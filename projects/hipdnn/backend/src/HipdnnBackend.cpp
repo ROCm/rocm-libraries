@@ -18,6 +18,7 @@
 #include "plugin/HeuristicPluginResourceManager.hpp"
 
 #include <hipdnn_backend/version.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
@@ -824,6 +825,77 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                         info.pluginName,
                         info.version,
                         info.type);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineIdByName_ext(hipdnnHandle_t handle,
+                                                                 const char* engineName,
+                                                                 int64_t* engineId)
+{
+    LOG_API_ENTRY("handle={:p}, engineName_ptr={:p}, engineId_ptr={:p}",
+                  static_cast<void*>(handle),
+                  static_cast<const void*>(engineName),
+                  static_cast<void*>(engineId));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(engineName);
+        throwIfNull(engineId);
+
+        const auto resolved = handle->findEngineIdByName(engineName);
+        if(!resolved.has_value())
+        {
+            throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                                  std::string("No loaded engine is named '") + engineName + "'.");
+        }
+
+        *engineId = *resolved;
+
+        LOG_API_SUCCESS(apiName, "engineName={}, engineId={}", engineName, *engineId);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineNameById_ext(hipdnnHandle_t handle,
+                                                                 int64_t engineId,
+                                                                 char* engineName,
+                                                                 size_t* engineNameLen)
+{
+    LOG_API_ENTRY("handle={:p}, engineId={}, engineName_ptr={:p}, engineNameLen_ptr={:p}",
+                  static_cast<void*>(handle),
+                  engineId,
+                  static_cast<void*>(engineName),
+                  static_cast<void*>(engineNameLen));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(engineNameLen);
+
+        const auto resolved = handle->findEngineNameById(engineId);
+        if(!resolved.has_value())
+        {
+            throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                                  "No loaded engine has ID "
+                                      + hipdnn_data_sdk::utilities::formatEngineIdHex(engineId)
+                                      + ".");
+        }
+
+        const size_t requiredEngineNameLen = resolved->size() + 1;
+
+        if(engineName == nullptr)
+        {
+            *engineNameLen = requiredEngineNameLen;
+            return;
+        }
+
+        if(*engineNameLen < requiredEngineNameLen)
+        {
+            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Insufficient buffer space provided.");
+        }
+
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            engineName, resolved->c_str(), *engineNameLen);
+
+        LOG_API_SUCCESS(apiName, "engineId={}, engineName={}", engineId, *resolved);
     });
 }
 

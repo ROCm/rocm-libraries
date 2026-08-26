@@ -206,7 +206,7 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
     signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
 
     static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     StinkyInstruction* lblInst = irBuilder.create(&labelMCID, anchor);
     lblInst->addModifier<LabelData>(LabelData{labelName, /*alignment=*/1});
 }
@@ -247,7 +247,7 @@ void insertRule1ClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuild
     insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
 
     static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     StinkyInstruction* lclLblInst = irBuilder.create(&labelMCID, anchor);
     lclLblInst->addModifier<LabelData>(LabelData{lclLabelName, /*alignment=*/1});
 }
@@ -399,6 +399,54 @@ StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
     return nullptr;
 }
 
+/// Hoist a cluster-wait insertion point above the run of wait-cnt instructions
+/// immediately preceding \p anchor.
+///
+/// StinkyWaitCntInsertionPass runs before this pass and anchors its counter
+/// drains on the very instructions this pass targets (barriers and
+/// tensor_loads), so the slot right before the anchor is typically already
+/// occupied by `s_wait_tensorcnt` / `s_wait_dscnt` / ... Inserting the cluster
+/// wait there would emit
+///
+///     s_wait_tensorcnt N
+///     s_barrier_wait -3
+///
+/// Both orders are correct. The inverted one measured materially slower, which
+/// is the whole justification for this hoist -- the mechanism is NOT
+/// established. Both instructions are blocking waits on independent conditions
+/// (a per-wave local counter; peer arrival at the barrier), and two such waits
+/// commute, so no timing argument offered so far survives scrutiny. Treat this
+/// as measurement-driven until someone explains it.
+///
+/// Wait-cnt instructions never write SCC, so hoisting past them does not
+/// disturb the Rule 3 SCC restore.
+/// Any counter drain the wait-cnt pass may have parked ahead of an anchor.
+/// `s_wait_tensorcnt` carries IF_WaitTensorCnt, disjoint from IF_WaitCnt, so
+/// `isWaitCnt()` alone misses it -- and it is the drain that matters most here.
+/// Same idiom as WaitAwareScheduleRepairPass and StinkyRemoveWaitCntPass.
+bool isAnyCounterDrain(const StinkyInstruction& inst) {
+    return isWaitCnt(inst) || inst.is(InstFlag::IF_WaitTensorCnt);
+}
+
+IRBase* hoistAboveLeadingWaitCnts(StinkyInstruction* anchor) {
+    BasicBlock* parent = anchor->getParent();
+    if (parent == nullptr) return anchor;
+    IRBase* hoisted = anchor;
+    auto it = BasicBlock::iterator(anchor);
+    while (it != parent->begin()) {
+        --it;
+        auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (prev == nullptr) continue;
+        if (isPseudoInst(prev)) continue;
+        if (!isAnyCounterDrain(*prev)) break;
+        hoisted = prev;
+    }
+    return hoisted;
+}
+
+/// Idempotency check for the cluster wait. Skips the same wait-cnt run that
+/// hoistAboveLeadingWaitCnts walks over, so a re-run recognizes a handshake
+/// this pass already planted above those waits and does not duplicate it.
 bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
     BasicBlock* parent = anchor->getParent();
     if (parent == nullptr) return false;
@@ -408,6 +456,7 @@ bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
         auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (prev == nullptr) continue;
         if (isPseudoInst(prev)) continue;
+        if (isAnyCounterDrain(*prev)) continue;
         return isClusterBarrierWait(*prev);
     }
     return false;
@@ -522,9 +571,16 @@ class InsertClusterBarrierPassImpl : public Pass {
                 if (trigger == nullptr) continue;
                 if (!seenTriggers.insert(trigger).second) continue;
 
-                IRBase* waitAnchor = trigger;
-                StinkyInstruction* waitAnchorInst = trigger;
-                if (isImmediatelyPrecededByClusterBarrierWait(waitAnchorInst)) continue;
+                if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
+                // Emit the cluster wait above the drains the wait-cnt pass
+                // already anchored on this workgroup signal.
+                IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
+                // Measure the lead from where the wait actually lands, not from
+                // the trigger, so the hoist does not eat into the guaranteed
+                // signal->wait distance.
+                auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
+                StinkyInstruction* waitAnchorInst =
+                    (hoistedInst != nullptr) ? hoistedInst : trigger;
 
                 std::unordered_set<StinkyInstruction*> priorWaitAnchors;
                 for (const auto& [priorTrigger, _sig, _wait, _live] : pending) {
@@ -634,8 +690,8 @@ class InsertClusterBarrierPassImpl : public Pass {
                     insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
                 }
                 if (tailTL != nullptr) {
-                    insertClusterBarrierWaitBefore(tailTL, "cluster barrier wait", irBuilder,
-                                                   archId);
+                    insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(tailTL),
+                                                   "cluster barrier wait", irBuilder, archId);
                 }
             }
         }
@@ -646,7 +702,8 @@ class InsertClusterBarrierPassImpl : public Pass {
             !isImmediatelyPrecededByClusterBarrierWait(firstTL)) {
             BasicBlock* parent = firstTL->getParent();
             AsmIRBuilder irBuilder(*parent, archId);
-            insertClusterBarrierWaitBefore(firstTL, "cluster_barrier wait", irBuilder, archId);
+            insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(firstTL),
+                                           "cluster_barrier wait", irBuilder, archId);
         }
 
         // Drain prologue TDM before the LDS ping-pong XOR of the descriptor.

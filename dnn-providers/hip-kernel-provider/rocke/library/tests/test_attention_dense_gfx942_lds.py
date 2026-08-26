@@ -215,8 +215,11 @@ def test_v_row_pad_moves_budget_and_allocation_by_the_same_amount(pad):
     ``dp`` must move both numbers by exactly ``D * dp * 2`` bytes and nothing else.
     """
     spec = _spec(head_size=128, dtype="fp16")  # the cfvst path: v_row_pad is live
-    base_t = dataclasses.replace(_DEFAULT_TUNING, v_row_pad=0)
-    alt_t = dataclasses.replace(_DEFAULT_TUNING, v_row_pad=pad)
+    # Hold the swizzle off so the pad varies independently: an explicit non-pow2 pad
+    # with the swizzle on is rejected (the mask would address out of bounds) -- exactly
+    # the pad/swizzle decoupling use_v_swizzle exists for.
+    base_t = dataclasses.replace(_DEFAULT_TUNING, v_row_pad=0, use_v_swizzle=False)
+    alt_t = dataclasses.replace(_DEFAULT_TUNING, v_row_pad=pad, use_v_swizzle=False)
     assert base_t.resolved_use_cfvst(spec), "premise: this config takes the cfvst path"
     expect = spec.head_size * pad * 2
     assert _lds_bytes(spec, alt_t) - _lds_bytes(spec, base_t) == expect
