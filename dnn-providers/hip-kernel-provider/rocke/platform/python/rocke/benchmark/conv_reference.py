@@ -253,14 +253,15 @@ def dgrad_reference_gfx1250(
     W_np = W.float().cpu().numpy()  # (K, Y, X, C)
 
     N, Ho, Wo, K = dY_np.shape
-    C = W_np.shape[3]
     Hi, Wi = p.Hi, p.Wi
     g = p.groups
+    C = p.C
     Cg = C // g  # input channels per group
     Kg = K // g  # output channels per group
+    if W_np.shape[3] != Cg:
+        raise ValueError(f"expected W last dim Cg={Cg} (=C/groups), got {W_np.shape[3]}")
 
     dX = np.zeros((N, Hi, Wi, C), dtype=np.float32)
-
     for grp in range(g):
         w_grp = W_np[grp * Kg : (grp + 1) * Kg]  # (Kg, Y, X, Cg)
         for n in range(N):
@@ -326,8 +327,7 @@ def wgrad_reference_gfx1250(
     Cg = C // g  # input channels per group
     Kg = K // g  # output channels per group
 
-    dW = np.zeros((K, p.Y, p.X, C), dtype=np.float32)
-
+    dW = np.zeros((K, p.Y, p.X, Cg), dtype=np.float32)
     for grp in range(g):
         x_grp = X_np[:, :, :, grp * Cg : (grp + 1) * Cg]  # (N, Hi, Wi, Cg)
         for n in range(N):
