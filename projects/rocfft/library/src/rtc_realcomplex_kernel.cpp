@@ -98,20 +98,20 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
         // dim_0 is the innermost dimension
         kern_lengths[0]       = data.node->outputLength[0];
         size_t hermitian_size = kern_lengths[0] / 2 + 1;
-        kargs.append_unsigned_int(hermitian_size);
+        kargs.append_index(hermitian_size);
     }
-    kargs.append_unsigned_int(kern_lengths[0]);
-    kargs.append_unsigned_int(kern_lengths[1]);
-    kargs.append_unsigned_int(kern_lengths[2]);
-    kargs.append_unsigned_int(data.node->batch);
-    kargs.append_unsigned_int(kern_stride_in[0]);
-    kargs.append_unsigned_int(kern_stride_in[1]);
-    kargs.append_unsigned_int(kern_stride_in[2]);
-    kargs.append_unsigned_int(kern_stride_in[3]);
-    kargs.append_unsigned_int(kern_stride_out[0]);
-    kargs.append_unsigned_int(kern_stride_out[1]);
-    kargs.append_unsigned_int(kern_stride_out[2]);
-    kargs.append_unsigned_int(kern_stride_out[3]);
+    kargs.append_index(kern_lengths[0]);
+    kargs.append_index(kern_lengths[1]);
+    kargs.append_index(kern_lengths[2]);
+    kargs.append_index(data.node->batch);
+    kargs.append_index(kern_stride_in[0]);
+    kargs.append_index(kern_stride_in[1]);
+    kargs.append_index(kern_stride_in[2]);
+    kargs.append_index(kern_stride_in[3]);
+    kargs.append_index(kern_stride_out[0]);
+    kargs.append_index(kern_stride_out[1]);
+    kargs.append_index(kern_stride_out[2]);
+    kargs.append_index(kern_stride_out[3]);
 
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
@@ -197,28 +197,28 @@ RTCKernelArgs RTCKernelRealComplexEven::get_launch_args(DeviceCallIn& data)
 {
     RTCKernelArgs kargs;
 
-    kargs.append_unsigned_int(half_N);
+    kargs.append_index(half_N);
     // lengths + strides are exploded out into separate params
     for(unsigned int i = 1; i < data.node->length.size(); ++i)
     {
-        kargs.append_unsigned_int(data.node->inStride[i]);
-        kargs.append_unsigned_int(data.node->outStride[i]);
-        kargs.append_unsigned_int(data.node->length[i]);
+        kargs.append_index(data.node->inStride[i]);
+        kargs.append_index(data.node->outStride[i]);
+        kargs.append_index(data.node->length[i]);
     }
-    kargs.append_unsigned_int(data.node->batch);
+    kargs.append_index(data.node->batch);
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
-    kargs.append_unsigned_int(data.node->iDist);
+    kargs.append_index(data.node->iDist);
     kargs.append_ptr(data.bufOut[0]);
     if(array_type_is_planar(data.node->outArrayType))
         kargs.append_ptr(data.bufOut[1]);
-    kargs.append_unsigned_int(data.node->oDist);
+    kargs.append_index(data.node->oDist);
     kargs.append_ptr(data.node->twiddles);
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+    kargs.append_index(data.callbacks.load_cb_lds_bytes);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
     append_load_store_args(kargs, *data.node);
@@ -325,15 +325,15 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
 {
     RTCKernelArgs kargs;
 
-    kargs.append_size_t(data.node->dimension);
+    kargs.append_index(data.node->dimension, IndexType::U32);
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
-    kargs.append_size_t(data.node->iDist);
+    kargs.append_index(data.node->iDist);
     kargs.append_ptr(data.bufOut[0]);
     if(array_type_is_planar(data.node->outArrayType))
         kargs.append_ptr(data.bufOut[1]);
-    kargs.append_size_t(data.node->oDist);
+    kargs.append_index(data.node->oDist);
     kargs.append_ptr(data.node->twiddles);
     kargs.append_ptr(data.node->devKernArg.lengths());
     kargs.append_ptr(data.node->devKernArg.stride_in());
@@ -341,7 +341,7 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+    kargs.append_index(data.callbacks.load_cb_lds_bytes);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
 
@@ -372,8 +372,8 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
         gridY = std::max<unsigned int>((((m - 1) / 2) + (tileY - 1)) / tileY, 1);
     }
 
-    kargs.append_unsigned_int(gridY);
-    kargs.append_unsigned_int(gridZ);
+    kargs.append_index(gridY);
+    kargs.append_index(gridZ);
 
     append_load_store_args(kargs, *data.node);
 
