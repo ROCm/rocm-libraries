@@ -94,7 +94,7 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
     std::copy(data.node->outStride.begin(), data.node->outStride.end(), kern_stride_out.begin());
     kern_stride_out[lensz] = data.node->oDist;
 
-    RTCKernelArgs kargs(itype);
+    RTCKernelArgs kargs = make_launch_args();
     if(data.node->scheme == CS_KERNEL_COPY_HERM_TO_CMPLX)
     {
         // dim_0 is the innermost dimension
@@ -199,7 +199,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
 
 RTCKernelArgs RTCKernelRealComplexEven::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs(itype);
+    RTCKernelArgs kargs = make_launch_args();
 
     kargs.append_index(half_N);
     // lengths + strides are exploded out into separate params
@@ -329,7 +329,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
 RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs(itype);
+    RTCKernelArgs kargs = make_launch_args();
 
     kargs.append_index(data.node->dimension, IndexType::U32);
     kargs.append_ptr(data.bufIn[0]);

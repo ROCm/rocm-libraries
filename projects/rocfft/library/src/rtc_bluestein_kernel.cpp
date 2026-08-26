@@ -53,7 +53,9 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
     generator.gridDim        = {DivRoundingUp(batch_accum, bwd)};
     generator.blockDim       = config.workgroup_size;
 
-    BluesteinSingleSpecs specs{node.GetKernelIndexType(),
+    const IndexType itype = node.GetKernelIndexType();
+
+    BluesteinSingleSpecs specs{itype,
                                static_cast<unsigned int>(node.length[0]),
                                static_cast<unsigned int>(node.length.size()),
                                factors,
@@ -79,7 +81,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelBluesteinSingle(kernel_name, module, gridDim, blockDim));
+            new RTCKernelBluesteinSingle(kernel_name, itype, module, gridDim, blockDim));
     };
 
     return generator;
@@ -87,7 +89,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
 
 RTCKernelArgs RTCKernelBluesteinSingle::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs = make_launch_args();
     kargs.append_ptr(data.bufTemp);
     kargs.append_ptr(data.node->twiddles);
     kargs.append_ptr(data.node->devKernArg.lengths());
@@ -167,7 +169,9 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
         generator.blockDim = {LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL};
     }
 
-    BluesteinMultiSpecs specs{node.GetKernelIndexType(),
+    const IndexType itype = node.GetKernelIndexType();
+
+    BluesteinMultiSpecs specs{itype,
                               scheme,
                               node.precision,
                               node.inArrayType,
@@ -186,7 +190,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(new RTCKernelBluesteinMulti(
-            kernel_name, scheme, N, M, numof, count, module, gridDim, blockDim));
+            kernel_name, itype, scheme, N, M, numof, count, module, gridDim, blockDim));
     };
 
     return generator;
@@ -194,7 +198,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
 
 RTCKernelArgs RTCKernelBluesteinMulti::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs = make_launch_args();
 
     if(scheme == CS_KERNEL_CHIRP)
     {

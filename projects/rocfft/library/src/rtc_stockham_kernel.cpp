@@ -246,7 +246,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
 {
     // construct arguments to pass to the kernel
-    RTCKernelArgs kargs(itype);
+    RTCKernelArgs kargs = make_launch_args();
 
     // twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_PP)

@@ -152,8 +152,10 @@ struct RTCKernel
                         CallbackType       cbtype = CallbackType::NONE);
 
     // take already-compiled code object and prepare to launch the
-    // named kernel
+    // named kernel.  itype is the width the kernel was generated with,
+    // so that get_launch_args can pack "index_type" arguments to match.
     RTCKernel(const std::string&                       kernel_name,
+              IndexType                                itype,
               std::shared_future<hipModule_wrapper_t>& module,
               dim3                                     gridDim  = {},
               dim3                                     blockDim = {});
@@ -213,9 +215,20 @@ struct RTCKernel
     dim3 blockDim;
 
     const std::string kernel_name;
+    const IndexType   itype;
     const int         deviceId = hipInvalidDeviceId;
 
 protected:
+    // Argument buffer that packs arguments declared as "index_type" at
+    // the width this kernel was generated with.  get_launch_args
+    // implementations must build their arguments through this - a
+    // default-constructed RTCKernelArgs always packs 32-bit, which
+    // silently misaligns every argument of a 64-bit kernel.
+    RTCKernelArgs make_launch_args() const
+    {
+        return RTCKernelArgs(itype);
+    }
+
     // Hang on to the module that was used to construct this kernel, to
     // ensure that the module lives long enough.  Normally we'd expect
     // the module to be kept alive by the active_modules map below, but

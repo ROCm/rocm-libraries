@@ -42,7 +42,9 @@ protected:
                      std::shared_future<hipModule_wrapper_t>& module,
                      dim3                                     gridDim,
                      dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        // twiddle kernels declare no "index_type" arguments, so the
+        // width is irrelevant to how they're launched
+        : RTCKernel(kernel_name, IndexType::U32, module, gridDim, blockDim)
     {
     }
 };

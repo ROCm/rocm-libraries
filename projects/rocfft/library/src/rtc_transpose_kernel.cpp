@@ -120,14 +120,14 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelTranspose(kernel_name, module, gridDim, blockDim, itype));
+            new RTCKernelTranspose(kernel_name, itype, module, gridDim, blockDim));
     };
     return generator;
 }
 
 RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs{itype};
+    RTCKernelArgs kargs = make_launch_args();
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
