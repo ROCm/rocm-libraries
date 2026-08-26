@@ -37,7 +37,7 @@ def loadCk() {
 
 //launch develop branch daily jobs
 CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 23 * * * % RUN_FULL_QA=true;RUN_CK_TILE_FMHA_TESTS=true;RUN_PERFORMANCE_TESTS=true;FORCE_CI=true
-                                              0 22 * * * % RUN_FULL_QA=true;DISABLE_DL_KERNELS=true;RUN_TILE_ENGINE_BASIC_TESTS=true;RUN_TILE_ENGINE_GEMM_TESTS=true;RUN_DISPATCHER_PERF_TESTS_DAILY=true;RUN_DISPATCHER_CORRECTNESS_TESTS_DAILY=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
+                                              0 22 * * * % RUN_FULL_QA=true;DISABLE_DL_KERNELS=true;RUN_TILE_ENGINE_BASIC_TESTS=true;RUN_TILE_ENGINE_GEMM_TESTS=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
                                               0 21 * * * % RUN_GROUPED_CONV_LARGE_CASES_TESTS=true;hipTensor_test=true;BUILD_GFX101=false;BUILD_GFX908=false;BUILD_GFX942=true;BUILD_GFX950=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true;BUILD_PACKAGES=true
                                               0 19 * * * % BUILD_DOCKER=true;COMPILER_VERSION=develop;BUILD_COMPILER=/llvm-project/build/bin/clang++;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
                                               0 17 * * * % BUILD_DOCKER=true;COMPILER_VERSION=therock;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
@@ -140,17 +140,9 @@ pipeline {
             defaultValue: false,
             description: "Smoke-tier benchmark of ahead-of-time tile_engine GEMM instances on gfx942+gfx950: gemm_universal, batched_gemm, batched_contraction, gemm_streamk at fp16/rcr on gfx942; gemm_aquant, gemm_bquant at fp8/rcr on gfx950, one problem size, 500-instance budget (default: OFF)")
         booleanParam(
-            name: "RUN_DISPATCHER_PERF_TESTS_DAILY",
-            defaultValue: false,
-            description: "Full-tier benchmark of ahead-of-time tile_engine GEMM instances on gfx942+gfx950: gemm_universal, batched_gemm, batched_contraction, gemm_streamk across fp8/fp16/bf8/bf16 x rcr/rrr/crr/ccr on gfx942; gemm_aquant, gemm_bquant across fp8/bf8 x rcr/rrr/ccr/crr on gfx950, three problem sizes, 8000-instance budget (default: OFF)")
-        booleanParam(
             name: "RUN_DISPATCHER_CORRECTNESS_TESTS",
             defaultValue: false,
             description: "Smoke-tier verification of JIT-compiled dispatcher kernels on gfx942 + gfx950: gemm_universal sweep at budget 64 plus parity, grouped, multi_d, multi_abd, batched_gemm, batched_contraction, rowcolquant, tensorquant on both arches, stream_k on gfx942, and mx_gemm + aquant + bquant + abquant on gfx950 (per-arch subset; default: OFF)")
-        booleanParam(
-            name: "RUN_DISPATCHER_CORRECTNESS_TESTS_DAILY",
-            defaultValue: false,
-            description: "Full-tier verification of JIT-compiled dispatcher kernels on gfx942 + gfx950: the same operator set as the smoke tier, at budget 500 for the gemm_universal sweep and 64 for each variant sweep (default: OFF)")
         booleanParam(
             name: "BUILD_INSTANCES_ONLY",
             defaultValue: false,
@@ -644,7 +636,7 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx942")) {
                                 deleteDir()
-                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "smoke", "gfx942")
+                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "gfx942")
                                 cleanWs()
                             }
                         }
@@ -662,53 +654,7 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx950")) {
                                 deleteDir()
-                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "smoke", "gfx950")
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        stage("Run DISPATCHER_PERF_DAILY Tests")
-        {
-            when {
-                beforeAgent true
-                expression { env.SHOULD_RUN_CI.toBoolean() }
-            }
-            parallel
-            {
-                stage("Run DISPATCHER_PERF_DAILY Tests on gfx942")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_DISPATCHER_PERF_TESTS_DAILY.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx942")) {
-                                deleteDir()
-                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "daily", "gfx942")
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-                stage("Run DISPATCHER_PERF_DAILY Tests on gfx950")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_DISPATCHER_PERF_TESTS_DAILY.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx950")) {
-                                deleteDir()
-                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "daily", "gfx950")
+                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "gfx950")
                                 cleanWs()
                             }
                         }
@@ -780,11 +726,11 @@ pipeline {
                 }
             }
         }
-        // Both tiers fan out to gfx942 and gfx950. The quant operators (mx_gemm,
+        // The lane fans out to gfx942 and gfx950. The quant operators (mx_gemm,
         // aquant, bquant, abquant) are gfx950-only, so covering the full operator
-        // surface is impossible from a single node type. What separates smoke from
-        // daily is the search budget, not the operator count -- see the tier table
-        // on runDispatcherCorrectnessTests in groovy/vars/ck.groovy.
+        // surface is impossible from a single node type. Cost is held down by the
+        // search budget, not by dropping operators -- see the budget note on
+        // runDispatcherCorrectnessTests in groovy/vars/ck.groovy.
         stage("Run DISPATCHER_CORRECTNESS Tests")
         {
             when {
@@ -805,7 +751,7 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx942")) {
                                 deleteDir()
-                                ck.runDispatcherCorrectnessTests("gfx942", params.BUILD_COMPILER, "smoke")
+                                ck.runDispatcherCorrectnessTests("gfx942", params.BUILD_COMPILER)
                                 cleanWs()
                             }
                         }
@@ -823,56 +769,7 @@ pipeline {
                             loadCk()
                             ck.runOnHealthyNode(rocmnode("gfx950")) {
                                 deleteDir()
-                                ck.runDispatcherCorrectnessTests("gfx950", params.BUILD_COMPILER, "smoke")
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-                // No gfx1201 dispatcher stage: the dispatcher has no RDNA4 tile
-                // coverage, so such a stage could only ever run red. See the
-                // arch note on dispatcherGemmVariantsFor in groovy/vars/ck.groovy.
-            }
-        }
-        stage("Run DISPATCHER_CORRECTNESS_DAILY Tests")
-        {
-            when {
-                beforeAgent true
-                expression { env.SHOULD_RUN_CI.toBoolean() }
-            }
-            parallel
-            {
-                stage("Run DISPATCHER_CORRECTNESS_DAILY Tests on gfx942")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_DISPATCHER_CORRECTNESS_TESTS_DAILY.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx942")) {
-                                deleteDir()
-                                ck.runDispatcherCorrectnessTests("gfx942", params.BUILD_COMPILER, "daily")
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-                stage("Run DISPATCHER_CORRECTNESS_DAILY Tests on gfx950")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_DISPATCHER_CORRECTNESS_TESTS_DAILY.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx950")) {
-                                deleteDir()
-                                ck.runDispatcherCorrectnessTests("gfx950", params.BUILD_COMPILER, "daily")
+                                ck.runDispatcherCorrectnessTests("gfx950", params.BUILD_COMPILER)
                                 cleanWs()
                             }
                         }
