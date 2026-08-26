@@ -408,6 +408,10 @@ globalParameters["StinkyTofuTimePasses"] = False
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
 globalParameters["StinkyTofuCostOutputDir"] = ""
 
+# StinkyTofu SGPR allocation: 0 off, 1 shadow, 2 apply (higher values clamp
+# to apply). Shadow colours and reports without rewriting operands.
+globalParameters["StinkyTofuRegisterAllocation"] = 0
+
 globalParameters["DisableSTWaitCnt"] = True
 
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
