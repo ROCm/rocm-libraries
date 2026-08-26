@@ -547,7 +547,8 @@ inline bool isAsyncMemOp(const StinkyInstruction& inst) {
 // Vector memory outside the DS and FLAT classes.
 inline bool isVmemTex(const StinkyInstruction& inst) {
     return isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) ||
-           isGLOBALOrAtomic(inst) || isAsyncMemOp(inst) || isGlobalPrefetch(inst);
+           isGLOBALOrAtomic(inst) || isAsyncMemOp(inst) || isGlobalPrefetch(inst) ||
+           isTensorLoad(inst);
 }
 
 inline bool isDSRead(const StinkyInstruction& inst) {
