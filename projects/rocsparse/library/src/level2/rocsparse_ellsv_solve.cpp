@@ -92,17 +92,25 @@ namespace rocsparse
                                                rocsparse_fill_mode  fill_mode,
                                                rocsparse_diag_type  diag_type,
                                                void*                temp_buffer,
+                                               size_t               buffer_size,
                                                bool                 is_host_mode)
     {
         constexpr uint32_t BLOCKSIZE = 1024;
 
         hipStream_t stream = handle->stream;
 
+        const size_t done_bytes = ellsv_align256(sizeof(int32_t) * static_cast<size_t>(m));
+
+        // Must stay in sync with rocsparse::ellsv_solve_buffer_size.
+        if(buffer_size < 256 + done_bytes)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_size);
+        }
+
         char* ptr = reinterpret_cast<char*>(temp_buffer);
         ptr += 256;
 
-        const size_t done_bytes = ellsv_align256(sizeof(int32_t) * static_cast<size_t>(m));
-        int32_t*     done_array = reinterpret_cast<int32_t*>(ptr);
+        int32_t* done_array = reinterpret_cast<int32_t*>(ptr);
 
         RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done_array, 0, done_bytes, stream));
 
@@ -158,6 +166,7 @@ namespace rocsparse
                                                  rocsparse_fill_mode  fill_mode,
                                                  rocsparse_diag_type  diag_type,
                                                  void*                temp_buffer,
+                                                 size_t               buffer_size,
                                                  bool                 is_host_mode)
     {
         if(sleep)
@@ -179,6 +188,7 @@ namespace rocsparse
                                                                  fill_mode,
                                                                  diag_type,
                                                                  temp_buffer,
+                                                                 buffer_size,
                                                                  is_host_mode);
         }
         else if(wfsize == 64)
@@ -200,6 +210,7 @@ namespace rocsparse
                                                                   fill_mode,
                                                                   diag_type,
                                                                   temp_buffer,
+                                                                  buffer_size,
                                                                   is_host_mode);
         }
 
@@ -220,6 +231,7 @@ namespace rocsparse
                                                               fill_mode,
                                                               diag_type,
                                                               temp_buffer,
+                                                              buffer_size,
                                                               is_host_mode);
     }
 
@@ -234,6 +246,7 @@ namespace rocsparse
                                           rocsparse_const_dnvec_descr x,
                                           rocsparse_dnvec_descr       y,
                                           void*                       temp_buffer,
+                                          size_t                      buffer_size,
                                           bool                        is_host_mode)
     {
         const I                   m    = static_cast<I>(A->rows);
@@ -278,6 +291,7 @@ namespace rocsparse
                                                      fill,
                                                      A->descr->diag_type,
                                                      temp_buffer,
+                                                     buffer_size,
                                                      is_host_mode);
     }
 
@@ -383,7 +397,8 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
                                         rocsparse_const_dnvec_descr x,
                                         rocsparse_dnvec_descr       y,
                                         rocsparse_ellsv_info        ellsv_info,
-                                        void*                       temp_buffer)
+                                        void*                       temp_buffer,
+                                        size_t                      buffer_size)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -430,7 +445,7 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
 
 #define ELLSV_SOLVE_DISPATCH(ITYPE, TTYPE)  \
     rocsparse::ellsv_compute<ITYPE, TTYPE>( \
-        handle, ei, sleep, wfsize, trans, A, alpha, x, y, temp_buffer, is_host_mode)
+        handle, ei, sleep, wfsize, trans, A, alpha, x, y, temp_buffer, buffer_size, is_host_mode)
 
     switch(A->col_type)
     {
