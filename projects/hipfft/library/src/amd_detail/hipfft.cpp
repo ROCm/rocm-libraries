@@ -1103,7 +1103,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     if(std::any_of(rm_lengths.begin(), rm_lengths.end(), [](const auto& l) { return l == 0; })
        || number_of_transforms == 0)
     {
-        return HIPFFT_INVALID_VALUE;
+        return HIPFFT_INVALID_SIZE;
     }
 
     // magic static to handle rocfft setup/cleanup
