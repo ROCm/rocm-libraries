@@ -262,7 +262,7 @@ after the one above it, in the order the rest of this document describes formats
 
 | Call | Asked of | Loads | Produces |
 |---|---|---|---|
-| `isApplicable` | every engine | UED and its pattern, KMD, KDPs, UMDs, kernel metadata | the pattern's binding, and over it the **catalog** and the **bound token state** |
+| `isApplicable` | every engine | UED and its `graph_match`, KMD, KDPs, UMDs, kernel metadata | the engine's binding, and over it the **catalog** and the **bound token state** |
 | `getDetails` (knobs, optional) | engines the caller inspects | UHD | a ranked catalog |
 | `getMaxWorkspaceSize` | candidate engines | UDD | a byte count |
 | `initializeExecutionContext` | the selected engine | kernel sources | the plan |
@@ -270,9 +270,11 @@ after the one above it, in the order the rest of this document describes formats
 Two terms from that first call recur throughout. The **catalog** is the set of an engine's
 kernels that pass every matcher for one graph, keyed by each kernel's KMD values; an engine
 is applicable exactly when its catalog is non-empty. The **bound token state** is every
-`$`-prefixed value the engine's pattern published and its matchers resolved along the way
-(`$graph.*`, `$device.*`, tensor fields, `$kernel.*`), kept so ranking, workspace, and
-dispatch read it instead of recomputing it. Both are cached per graph and device.
+`$`-prefixed value the engine's `graph_match` published (`$graph.*`, tensor fields, node
+attributes), read alongside the two namespaces nothing binds (`$device.*`, `$kernel.*`), kept so
+ranking, workspace, and dispatch read it instead of recomputing it. The engine's match is the
+**only** producer: a matcher reads the binding and never adds to it, so no two descriptors can
+write one token to different values. Both are cached per graph and device.
 
 The engine has **one plan builder**, not one per kernel: a catalog entry is a candidate,
 and the builder's job is to produce a plan that can launch them. Ranking the catalog builds
@@ -389,33 +391,44 @@ each format are specified in that format's follow-up RFC.
 
 ```jsonc
 {
-  "schema": "hipdnn.ued/v1",
+  "version": "1.0",      // descriptor format version, gated at load (Section 4)
   "id":     "efc9eae4-fe33-4cb0-a593-95d771dc13b2",  // stable, unique; referenced by the KDP
-  "name":   "Example attention engine",              // human-readable label
+  "name":   "rocke:example_attention_fwd",           // globally-unique, scoped `namespace:local`
   "sdk_version": "1.0",   // hipDNN graph schema version this pattern was authored against
-  "heuristic":   "ae896b07-80cd-473c-b3f4-6a8892998519",  // one UHD: the selector for this engine's kernels
+  "heuristic":   "ae896b07-80cd-473c-b3f4-6a8892998519",  // optional: one UHD, the selector for this engine's kernels
   "metadata":    "9ae0b215-32a7-49d1-96df-e9b05e1927ea",  // one KMD: the variant schema this engine's kernels fill
-  "nodes": [              // the graph this engine serves; binds the symbols every consumer reads
-    {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
-     "operands": {"q": "$q", "k": "$k", "v": "$v", "attn_mask": "$attn_mask?"},
-     "results":  {"o": "$o"}}
-  ],
+  "graph_match": {        // how this engine matches a graph and binds the symbols every consumer reads
+    "nodes": [            // the declarative arm: the graph this engine serves
+      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+       "operands": {"q": "$q", "k": "$k", "v": "$v", "attn_mask": "$attn_mask?"},
+       "results":  {"o": "$o"}}
+    ]
+  },
   "behavior_notes":  ["runtime_compilation"],   // hipDNN behavior notes for this engine
   "numerical_notes": ["tensor_core", "reduced_precision_reduction"],  // hipDNN numerical notes
   "knobs": ["split_k", "tile_m"]    // KMD fields this engine lets the user control
 }
 ```
 
-**The engine states the graph it serves.** A UED's `nodes` block is a structural pattern over
-the op DAG: named op nodes and the operand and result edges connecting them to the graph's
-tensors, each mapped to a pattern variable. Matching it publishes the bound symbol table
-every consumer downstream reads, the pack's criteria, its UDD's formulas, and the engine's
-own UHD features, so the engine that owns the heuristic and the metadata schema also owns the
-symbols they are written against. The pattern is engine-wide: a UED carries exactly one `nodes`
-block, so every pack naming that engine matches the same graph shape and constrains it differently.
-[Section 5](#5-matching-the-ueds-pattern-and-the-umds-criteria) covers matching; the pattern
-block's own format and the matching semantics that bind it are specified in the engine follow-up
-([Section 14.2](#142-follow-up-rfcs)).
+**The engine states the graph it serves, and it is the one thing that binds.** A UED's
+`graph_match` is stage one: it decides whether the engine serves this graph and, when it does,
+publishes the bound symbol table every consumer downstream reads — the pack's criteria, its UDD's
+formulas, and the engine's own UHD features. So the engine that owns the heuristic and the
+metadata schema also owns the symbols they are written against, and a matcher is a pure reader of
+that table.
+
+It takes one of two forms. The **declarative arm**, `nodes`, is a structural pattern over the op
+DAG: named op nodes and the operand and result edges connecting them to the graph's tensors, each
+mapped to a pattern variable. The **native arm**, `native`, is the escape hatch — a registered
+symbol resolving to C++ that returns the binding or declines the graph — for a match the
+declarative form cannot yet state; it is what ships today. Either way the match is engine-wide: a
+UED carries exactly one, so every pack naming that engine matches the same graph shape and
+constrains it differently. An engine may also omit `graph_match` entirely, binding nothing and
+leaving applicability to its packs' criteria.
+[Section 5](#5-matching-the-ueds-pattern-and-the-umds-criteria) covers matching; both arms'
+formats and the matching semantics that bind them are specified in the engine follow-up
+([RFC 0020 § 4](0020_UniversalEngineDescriptor.md#4-the-ued-schema),
+[Section 14.2](#142-follow-up-rfcs)).
 
 **A knob is a KMD field the engine chooses to expose.** It is a name, nothing more: the KMD
 already declares the field's type and default, and every kernel already carries a value for
@@ -535,8 +548,9 @@ formula consumes to compute per-kernel dispatch detail, such as launch geometry.
   "id":     "9ae0b215-32a7-49d1-96df-e9b05e1927ea",       // stable, unique; referenced by the UED (one per engine)
   "name":   "Example attention variant fields",
   "fields": [                                             // the UED's knobs[] names a subset of these
-    {"name": "tile_m",  "type": "int", "optional": true, "default": 1},
-    {"name": "split_k", "type": "int", "optional": true, "default": 1}
+    {"name": "tile_m",    "type": "int",    "optional": true, "default": 1},
+    {"name": "split_k",   "type": "int",    "optional": true, "default": 1},
+    {"name": "mask_mode", "type": "string", "optional": false}   // read by the §5 matcher as $kernel.mask_mode
   ]
 }
 ```
@@ -548,11 +562,11 @@ IDs its kernels require.
 
 ```jsonc
 {
-  "schema": "hipdnn.umd/v1",
   "version":     "1.0",   // matcher format version, gated at load (Section 4)
   "sdk_version": "1.0",   // hipDNN graph schema version these criteria were authored against (Section 4)
   "id":     "968156a8-ee21-4827-bcd7-893a8a72dccc",    // stable; listed in KDP matchers[], shared across packs
   "name":   "Example attention forward (d128, bf16) criteria",
+  "scope":  "kernel",   // criteria read $kernel.*, so they are re-evaluated per candidate kernel
   "criteria": { ... }     // one boolean expression tree over the engine's bound tokens (Section 5)
 }
 ```
@@ -592,7 +606,7 @@ kernel's catalog key and must be unique, by the KMD rule above.
   "id":        "15b02840-05ba-40cf-ac17-384b50f56a7d",
   "name":      "Example attention forward (d128, bf16, gfx942)",
   "kernel_source": { ... },                       // Section 7: a compiled kernel, or how to build it AOT
-  "metadata":  {"tile_m": 128},                    // tile_m set; split_k omitted, takes the KMD default
+  "metadata":  {"tile_m": 128, "mask_mode": "none"},  // tile_m and mask_mode set; split_k omitted, takes the KMD default
   "priority":  100                                // tie-break when the UHD is not decisive
 }
 ```
@@ -637,16 +651,17 @@ matchers are shared by ID across packs. A validated study of MIOpen CK convoluti
 applicability found that over a thousand concrete kernels collapse to a handful of shared matcher
 shapes, with tile and vector constants carried as matcher *parameters* rather than new matchers.
 
-**Matching is two stages over one graph.** The engine's pattern runs first: the UED's `nodes` block
-resolves op and tensor names against the op-schema registry, walks the graph, and publishes the
-bound symbol table, every operand and result tensor with its dims and strides, and every matched
-node's scalar attributes. It runs once per engine per graph, and a graph its pattern does not match
-declines the engine outright, before any pack is consulted. The criteria run second: each UMD a pack
-lists evaluates its single boolean over that table, and a kernel applies only when every matcher in
-its pack passes. Graph matching and the symbols it binds belong to the engine follow-up, the
-criteria that read those symbols to the match follow-up, and the expression language both are
-written in to its own ([Section 14.2](#142-follow-up-rfcs)); the `nodes` block itself is the UED's,
-sketched here.
+**Matching is two stages over one graph.** The engine's `graph_match` runs first: on the
+declarative arm the UED's `nodes` block resolves op and tensor names against the op-schema
+registry and walks the graph; on the native arm a registered function does the same work in C++.
+Either way it publishes the bound symbol table — every operand and result tensor with its dims and
+strides, and every matched node's scalar attributes. It runs at most once per engine per graph,
+and a graph it declines declines the engine outright. The criteria run second: each UMD a pack
+lists evaluates its single boolean over that table, and a kernel applies only when every matcher
+in its pack passes. Matching and the symbols it binds belong to the engine follow-up, the criteria
+that read those symbols to the match follow-up, and the expression language both are written in to
+its own ([Section 14.2](#142-follow-up-rfcs)); `graph_match` itself is the UED's, sketched here and
+specified in [RFC 0020 § 4](0020_UniversalEngineDescriptor.md#4-the-ued-schema).
 
 **Criteria are expressions, not flat token lists.** A criterion is a nested `{"op": [args]}` tree
 over the symbols the engine's pattern bound. The expression language is specified in its own
@@ -666,7 +681,7 @@ The table is a representative vocabulary for reading this RFC, not the normative
 | Comparison | `==`, `!=`, `<`, `<=`, `>`, `>=`, `in` |
 | Arithmetic | `+`, `-`, `*`, `/`, `%`, `ceil_div`, `min`, `max`, `rsqrt` |
 | Presence | `present`, `not_present` |
-| Short-hands | `divisible`, `value_or_default`, `rank` |
+| Short-hands | `divisible`, `value_or_default` |
 | Escape hatch | None inside an expression: the set is closed, and a check the operators cannot express becomes a native matcher beside the descriptor |
 
 `ceil_div`, `min`, `max`, and `rsqrt` earn their place in real dispatch code: every grid formula here
@@ -772,9 +787,10 @@ metadata):
 ```jsonc
 // conv.tile_fit: implicit-GEMM M/N/K (products of the conv's bound dims) must divide the tile constants
 {
-  "schema": "hipdnn.umd/v1",
+  "version": "1.0",
   "id":   "a541565e-09eb-471b-8507-0e00f5bf75d7",
   "name": "conv.tile_fit",
+  "scope": "kernel",   // reads $kernel.* tile constants, so a failure prunes only that candidate
   "criteria": {"and": [
     {"==": ["$y.rank", 4]},   // output is (n, out channels, out h, out w)
     {"==": ["$w.rank", 4]},   // weights are (out channels, in channels, filter h, filter w)
@@ -808,23 +824,26 @@ it constrains them:
 
 ```jsonc
 {
-  "schema": "hipdnn.ued/v1",
+  "version": "1.0",
   "id":   "5c9d1f38-2a74-4b60-8e13-c4f70b2d9a56",
-  "name": "SDPA forward engine",
+  "name": "rocke:sdpa_fwd",
   "heuristic": "ae896b07-80cd-473c-b3f4-6a8892998519",   // one UHD, ranked over the symbols below
   "metadata":  "9ae0b215-32a7-49d1-96df-e9b05e1927ea",   // one KMD, supplying $kernel.*
-  "nodes": [
-    {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
-     "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
-  ]
+  "graph_match": {
+    "nodes": [
+      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+       "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
+    ]
+  }
 }
 ```
 
 ```jsonc
 {
-  "schema": "hipdnn.umd/v1",
+  "version": "1.0",
   "id":   "daef2dc6-647d-4c9e-b0e0-85402d2dc2bd",
   "name": "SDPA forward (d128, bf16) criteria",
+  "scope": "kernel",   // reads $kernel.mask_mode, so a failure prunes only that candidate
   "criteria": {"and": [
     {"in":    ["$q.dtype", ["BFLOAT16"]]},
     {"==":    ["$q.rank", 4]},                                  // (batch, heads, query positions, head size)
@@ -877,10 +896,23 @@ left to a future shape-matching RFC.
 namespace, or provider hook by which a criterion introduces an operation of its own, and an
 unlisted operation key is refused at load. A check the operators cannot express, for example a
 probe into a backing library's own support query whose logic lives in vendor code and cannot be
-reduced to schema fields, is written as a **native matcher** standing beside the descriptor rather
-than inside it: the matcher names a registered native predicate and carries typed arguments, never
-inline code. It is a last resort, not a routine tool: across the two families whose applicability
-was validated for this design, MIOpen CK convolution and rocKE SDPA, none needed one.
+reduced to schema fields, is written as **native code standing beside the descriptor** rather than
+inside it: the descriptor names a registered symbol, never inline code.
+
+That hatch has **two roles, at two scopes**, and they are not interchangeable:
+
+- A **native match** is the engine's, named by its UED's `graph_match.native`
+  ([RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative)). It runs at
+  stage one, and it *produces* the binding: it either declines the graph or returns the bound
+  tokens. This is the arm that ships today, ahead of the declarative pattern it substitutes for.
+- A **native criterion** is a pack's, named by a UMD, and it runs at stage two as one of the
+  pack's applicability checks. It *reads* the binding the engine's match produced and returns a
+  verdict; it cannot add to the binding.
+
+Both are a last resort rather than a routine tool: across the two families whose applicability was
+validated for this design, MIOpen CK convolution and rocKE SDPA, neither needed a native
+*criterion*, though both engines shipped so far use a native *match* while the declarative pattern
+is unimplemented.
 
 **Precomputed fields** sit between the built-ins and the native matcher: values the schema layer
 derives once and exposes as ordinary tokens, so a matcher compares them instead of
@@ -896,9 +928,10 @@ registry is part of its published contract. The dispatch layer has an analogous 
 ([Section 6](#6-dispatch-and-workspace)); together they form a graded ladder from declarative data,
 to a named escape hatch for a step that needs real C++, to a full provider.
 
-**Applicability is two cheap stages.** The engine's pattern runs first, once per engine per graph,
-and a graph it does not match declines the engine outright, before any of its packs' criteria are
-touched. The criteria run second, over the binding that pass produced. A matcher that reads only
+**Applicability is two cheap stages.** The engine's `graph_match` runs first, at most once per
+engine per graph, and a graph it declines declines the engine outright, before any of its packs'
+criteria are touched. The criteria run second, over the binding that pass produced, and they only
+ever read it. A matcher that reads only
 graph fields (Tensor/Graph/Attributes/Device) runs once for the whole graph (*run-once
 memoization*). On failure it disqualifies every pack that lists it (*fail-prune*), so evaluating the
 most-shared checks first (dtype, layout) prunes the candidate set fast. A matcher that also reads
@@ -961,27 +994,30 @@ chain as a single kernel.
 
 ```jsonc
 {
-  "schema": "hipdnn.ued/v1",
+  "version": "1.0",
   "id":   "6f1a0c93-84be-4d27-9c3a-70b5e2d81f44",
-  "name": "Conv-Bias-ReLU engine",
+  "name": "rocke:conv_bias_relu",
   "heuristic": "b3d81a52-0c47-4f9e-8a16-2d7c5e0b943f",
   "metadata":  "c07e4b31-95a2-4d68-b1fc-3e8a06d25b7c",
-  "nodes": [
-    {"kind": "op", "id": "conv", "op": "convolution_fwd",
-     "operands": {"X": "$x", "W": "$w"},           "results": {"Y": "$conv_out"}},
-    {"kind": "op", "id": "bias", "op": "pointwise_add",
-     "operands": {"A": "$conv_out", "B": "$bias"},  "results": {"Y": "$bias_out"}},
-    {"kind": "op", "id": "act",  "op": "pointwise_relu",
-     "operands": {"A": "$bias_out"},                "results": {"Y": "$y"}}
-  ]
+  "graph_match": {
+    "nodes": [
+      {"kind": "op", "id": "conv", "op": "convolution_fwd",
+       "operands": {"X": "$x", "W": "$w"},           "results": {"Y": "$conv_out"}},
+      {"kind": "op", "id": "bias", "op": "pointwise_add",
+       "operands": {"A": "$conv_out", "B": "$bias"},  "results": {"Y": "$bias_out"}},
+      {"kind": "op", "id": "act",  "op": "pointwise_relu",
+       "operands": {"A": "$bias_out"},                "results": {"Y": "$y"}}
+    ]
+  }
 }
 ```
 
 ```jsonc
 {
-  "schema": "hipdnn.umd/v1",
+  "version": "1.0",
   "id":   "963e2d15-9293-4eca-b071-793eb0a47d60",
   "name": "Conv-Bias-ReLU (NHWC, f16) criteria",
+  "scope": "graph",   // no $kernel.* token, so one failure prunes the whole pack
   "criteria": {"and": [
     {"in":    ["$x.dtype", ["FLOAT16"]]},
     {"==":    ["$x.stride_order", [0, 2, 3, 1]]}, "$x.packed",  // NHWC
@@ -1243,7 +1279,7 @@ last:
 
 | Phase | Host call | Asked of | Loads | Produces |
 |---|---|---|---|---|
-| Applicability | `IEngine::isApplicable` | every loaded engine | UED and its pattern, KMD, KDPs, UMDs, UKD metadata | the pattern's binding, and over it the **catalog**, plus the **bound token state**: every `$`-prefixed value matching resolved |
+| Applicability | `IEngine::isApplicable` | every loaded engine | UED and its `graph_match`, KMD, KDPs, UMDs, UKD metadata | the engine's binding, and over it the **catalog**, plus the **bound token state**: every `$`-prefixed value the match published, read alongside `$kernel.*` and `$device.*` |
 | Knob query (optional) | `IEngine::getDetails` | engines the caller asks about | UHD | a **ranked** catalog, so knob value sets and defaults |
 | Workspace | `IEngine::getMaxWorkspaceSize` | candidate engines | UDD | a byte count |
 | Plan build | `IEngine::initializeExecutionContext` | the selected engine only | kernel sources | the plan |
@@ -1283,43 +1319,53 @@ The id identifies a graph *object*, not its *content*. Two structurally identica
 separately carry different ids and do not share a cache entry. That costs a rematch, never a wrong
 answer, and a content hash can be layered on later if cross-construction reuse proves worth having.
 
-**3. Resolve this engine's descriptor, run its pattern, and load its metadata schema.** The engine
-descriptor (**UED**) gives the engine identity, the pattern its kernels match, the metadata fields
-it exposes as knobs, and the ids of its one heuristic (**UHD**) and one metadata schema (**KMD**).
-The pattern compiles once, then runs against this graph: a graph it does not match declines the
-engine here, before any pack is consulted. A match publishes the bound symbol table every later
-step reads. The metadata schema loads with the descriptor, because its fields key the catalog and
-name the `$kernel.*` references the matchers validate. The heuristic is named but **not** loaded;
-nothing ranks yet.
-*Stored:* the parsed engine descriptor, its compiled pattern, and the metadata schema, in the
-provider's descriptor cache, reused by every later graph; the binding is cached per graph.
+**3. Resolve this engine's descriptor and load its metadata schema.** The engine descriptor
+(**UED**) gives the engine identity, the `graph_match` its kernels are bound by, the metadata
+fields it exposes as knobs, and the ids of its metadata schema (**KMD**) and, when it ships one,
+its heuristic (**UHD**). The declarative pattern compiles, or the native symbol resolves, at
+registration rather than here, so an unresolvable name is already a load error
+([RFC 0020 § 12](0020_UniversalEngineDescriptor.md#12-engine-registration)). The metadata schema
+loads with the descriptor, because its fields key the catalog and name the `$kernel.*` references
+the matchers validate. The heuristic is named but **not** loaded; nothing ranks yet.
+*Stored:* the parsed engine descriptor, its resolved `graph_match`, and the metadata schema, in the
+provider's descriptor cache, reused by every later graph.
 
-**4. Resolve the kernel packs that name this engine, and their matchers.** Each pack (**KDP**)
+**4. Resolve the kernel packs that name this engine, and apply the arch gate.** Each pack (**KDP**)
 contributes a matcher set, one dispatch-descriptor (**UDD**) id, and a kernel vector with each
-kernel's metadata values. The dispatch descriptor is named but **not** loaded; nothing dispatches
-yet.
+kernel's metadata values. A pack whose `arch` list excludes this device is dropped here. The
+dispatch descriptor is named but **not** loaded; nothing dispatches yet.
 *Stored:* the parsed packs, matchers, and kernel metadata, in the same descriptor cache.
 
-**5. Evaluate each pack's criteria over that binding, in pruning order.** Graph-level matchers
+**5. Run the engine's `graph_match`, lazily, on the first pack that cleared the gate.** It either
+declines the graph — the engine is inapplicable here, with no criteria evaluated and an empty
+catalog — or publishes the bound symbol table every later step reads. It is the **only** producer
+of that table. The match runs at most once per (graph, device) and every surviving pack reads the
+same binding, so an engine whose packs are all arch-excluded never runs it at all: there is no
+device it could serve, so walking the graph could only reach the same answer more slowly.
+*Stored:* the binding, cached per graph and device.
+
+**6. Evaluate each pack's criteria over that binding, in pruning order.** Graph-level matchers
 first, the ones reading only `$graph.*`, node-attribute, and tensor fields; per-kernel matchers,
 the ones reading `$kernel.*`, last. A graph-level failure disqualifies every kernel in every pack
-that lists that matcher, so the broadly shared checks prune before the per-kernel pass runs.
+that lists that matcher, so the broadly shared checks prune before the per-kernel pass runs. A
+criterion reads the binding and never adds to it.
 *Produces two things, cached together under the applicability key:* the **catalog**, the kernels
 whose full matcher set passed, keyed by each kernel's metadata value tuple; and the **bound token
-state**, the pattern's binding plus the `$kernel.*` and `$device.*` values the criteria resolved.
+state**, the match's binding read alongside the `$kernel.*` and `$device.*` values the criteria
+resolved.
 
-**6. Return.** True if and only if the catalog is non-empty: applicability is whether any kernel
+**7. Return.** True if and only if the catalog is non-empty: applicability is whether any kernel
 survived matching.
 
 ### 8.2 Selection, By hipDNN
 
-**7. hipDNN picks the engine.** Its existing engine-selection heuristic, unchanged by this
+**8. hipDNN picks the engine.** Its existing engine-selection heuristic, unchanged by this
 proposal, decides among the engines that answered true. An engine that answered true but was not
 selected does no further work.
 
 ### 8.3 Knobs, If The Caller Asks
 
-**8. Rank the catalog to answer a knob query.** `IEngine::getDetails(handle, opGraph, out)` arrives
+**9. Rank the catalog to answer a knob query.** `IEngine::getDetails(handle, opGraph, out)` arrives
 for an engine the caller is inspecting. Read the cached catalog and bound token state, load this
 engine's heuristic, and score the catalog. A knob reports two things and the ranked catalog
 supplies both: the **value set** is the distinct values that field takes across the catalog, the
@@ -1334,7 +1380,7 @@ not only the winner's, so the heuristic may load for an engine that is never sel
 
 ### 8.4 Workspace
 
-**9. Report the workspace requirement.** `IEngine::getMaxWorkspaceSize(handle, opGraph, engineConfig)`
+**10. Report the workspace requirement.** `IEngine::getMaxWorkspaceSize(handle, opGraph, engineConfig)`
 arrives with no execution context, so in general no kernel has been chosen yet. Apply whatever knob
 filter the config carries, load the dispatch descriptor of each surviving kernel's pack, and
 evaluate its workspace requirement over the cached bound token state: `workspace_bytes`, or for a
@@ -1354,12 +1400,12 @@ range `[min, max]` across the catalog.
 
 ### 8.5 Plan Build and Execute, Selected Engine Only
 
-**10. Choose the kernel.** `IEngine::initializeExecutionContext` arrives. Read the cached catalog,
+**11. Choose the kernel.** `IEngine::initializeExecutionContext` arrives. Read the cached catalog,
 bound token state, and ranked order. With no knobs set the kernel is the top-ranked one; with knobs
 set, filter the catalog to the kernels whose metadata values match every setting and take the
 highest-ranked survivor. If a knob query never ran, the heuristic loads here.
 
-**11. Build the plan.** The engine's one plan builder produces a plan for the kernels it needs to
+**12. Build the plan.** The engine's one plan builder produces a plan for the kernels it needs to
 be able to launch, loading each one's `kernel_source` and evaluating its pack's dispatch grid,
 block, shared-memory, and argument formulas over the bound token state from matching. Ordinarily
 that is the single chosen kernel; under measurement it is the candidates being sampled, prepared
@@ -1368,7 +1414,7 @@ dispatch descriptors, each bound to the kernels from its own pack.
 *Stored:* the resulting plan, held by the execution context. Nothing is re-matched and nothing is
 re-scanned; every decision was made before this step.
 
-**12. Execute.** `IPlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace)`. hipDNN passes
+**13. Execute.** `IPlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace)`. hipDNN passes
 a flat array pairing each tensor uid with a device pointer, built from the caller's variant pack,
 and the launcher resolves each dispatch argument against it by uid.
 
@@ -1810,8 +1856,8 @@ a descriptor format with the subsystem it drives. Together they form the planned
 |---|---|
 | KDP + AOT packaging | The pack format plus the producer, packer, per-architecture manifest, and build-time validation ([§12](#12-packaging-and-delivery)) |
 | Expression language | The shared dialect every descriptor is written in: its grammar, type system, closed operator set, three-valued semantics, safe bounded interpreter, and conformance suite |
-| UED + graph matching | The engine format and the graph-matching specification: the `nodes` structural pattern, the matching semantics that bind it against a graph, the symbols matching publishes for every other descriptor to read, the op-schema registry that generates those bindings, and the registry that populates the generic engine and its plan builder from descriptor data |
-| UMD + applicability | How the expression language is used to decide applicability: the criteria model over the symbols the engine's pattern published, evaluated per matcher with run-once memoization and fail-prune, the native-matcher escape hatch for a check that needs real C++, and arbitration when several packs match ([§5](#5-matching-the-ueds-pattern-and-the-umds-criteria)) |
+| UED + graph matching | The engine format and the graph-matching specification: the `graph_match` member and both its arms — the `nodes` structural pattern and the native escape hatch that produces an engine's binding — the matching semantics that bind them against a graph, the symbols matching publishes for every other descriptor to read, the op-schema registry that generates those bindings, and the registry that populates the generic engine and its plan builder from descriptor data |
+| UMD + applicability | How the expression language is used to decide applicability: the criteria model over the symbols the engine's match published, evaluated per matcher with run-once memoization and fail-prune, the native-criterion escape hatch for a check that needs real C++, and arbitration when several packs match ([§5](#5-matching-the-ueds-pattern-and-the-umds-criteria)) |
 | UDD + dispatch | The dispatch format plus the symbolic grid, block, shared-memory, workspace, and argument descriptions |
 | UHD + kernel selection | The heuristic format plus the generic selector that ranks the kernels matching a graph, the per-kernel scorer interface, the retraining pipeline, the training-set provenance that makes a kernel's dormant-or-ranked state observable, and whether a future selector may reason over the candidate set as a whole |
 | KMD + metadata schema | The metadata format plus the field/type/default declaration and the feature contract the heuristic and matchers consume |
@@ -2255,14 +2301,17 @@ choices; none is a dependency.
   `$`-prefixed references to the symbols the engine's pattern published plus the ambient
   `$graph.*` / `$device.*` and per-kernel `$kernel.*` namespaces. Plain data the safe interpreter
   walks; it fails closed on any field the schema does not declare.
-- **UED (Universal Engine Descriptor):** one engine: a stable identity, the **structural pattern**
-  (`nodes`) stating the graph shape it serves and publishing the symbols every consumer reads, the
-  KMD fields it exposes as knobs, and its behavior/numerical notes. It names the engine's one
-  heuristic (UHD) and one metadata schema (KMD); many KDPs may share one engine, and they all
-  inherit its one pattern.
-- **Structural pattern:** a UED's `nodes` block, the op nodes and named operand/result edges the
-  engine matches against the graph. It runs once per engine per graph, and its binding is what a
-  UMD's criteria, a UDD's formulas, and the UHD's features are all written over.
+- **UED (Universal Engine Descriptor):** one engine: a stable identity, the `graph_match` stating
+  how it matches a graph and publishing the symbols every consumer reads, the KMD fields it exposes
+  as knobs, and its behavior/numerical notes. It names the engine's one metadata schema (KMD) and,
+  optionally, one heuristic (UHD); many KDPs may share one engine, and they all inherit its one
+  match.
+- **`graph_match`:** the UED member holding stage one, in one of two arms — the declarative
+  **structural pattern** (`nodes`) or the **native match** (`native`), the escape hatch that ships
+  today. Absent means the engine binds nothing and its packs' criteria decide alone.
+- **Structural pattern:** a UED's `graph_match.nodes` block, the op nodes and named operand/result
+  edges the engine matches against the graph. It runs at most once per engine per graph, and its
+  binding is what a UMD's criteria, a UDD's formulas, and the UHD's features are all written over.
 - **UHD (Universal Heuristic Descriptor):** one kernel-selection model that ranks the kernels fitting
   a graph and picks one. One per engine, named by the UED.
 - **KMD (Kernel Metadata Descriptor):** despite the name, an **engine-wide schema, not a per-kernel
@@ -2352,7 +2401,7 @@ choices; none is a dependency.
 - **JIT (future):** runtime kernel generation reached through the same descriptors and a JIT-source
   adapter in the provider SDK; deferred to its own follow-up RFC.
 - **Escape hatch:** a named, registry-resolved handler for logic the declarative model cannot
-  express, carried as a symbol name and typed arguments, never inline code. It stands beside a
-  descriptor, never inside an expression: the operator set is closed and admits no provider hook.
-  The two instances are the **native matcher** (match side) and the **custom plan**
-  (dispatch side).
+  express, carried as a symbol name, never inline code. It stands beside a descriptor, never inside
+  an expression: the operator set is closed and admits no provider hook. Three instances, at three
+  scopes: the **native match** (engine, `graph_match.native` — produces the binding), the **native
+  criterion** (pack, named by a UMD — reads it), and the **custom plan** (dispatch side).

@@ -35,29 +35,41 @@
 RFC 0017 established a family of declarative descriptors that one **generic engine** loads,
 matches, selects, and launches with no new C++. It described each at a framing level and deferred
 each descriptor's detailed format to its own follow-up. This RFC specifies the **Universal Engine
-Descriptor (UED)**: one engine's identity, the KMD fields it exposes as knobs, and its behavior and
-numerical notes, plus the registration that turns a UED into a selectable engine.
+Descriptor (UED)**: one engine's identity, the **structural pattern** stating the graph shape it
+serves, the KMD fields it exposes as knobs, and its behavior and numerical notes, plus the
+registration that turns a UED into a selectable engine and the graph matching its pattern drives.
 
 Concretely, this RFC delivers:
 
 - The **UED field contract**: the normative field set, with a single JSON Schema file
   recommended (not mandated) as its single-source-of-truth expression, plus serialization
   (§ 4, § 14.3).
+- The **`nodes` structural pattern**, normatively: the node-object members, the opcode and
+  optional-operand forms, how nodes connect through shared variables, and the well-formedness
+  rules a load rejects on (§ 4.3). RFC 0017 § 4 shows the block by example and defers its format
+  here. It is the declarative arm of `graph_match`; the **`native` escape hatch** beside it, which
+  is what ships today, is § 4.5.
+- The **graph model the pattern is matched against** and the **op-schema registry** generated from
+  FlatBuffers annotations that makes a UID-centric graph readable by name (§ 5, Appendix B).
+- The **symbol table matching publishes**: the five namespaces, the auto-binding formula, and the
+  normative published field set every consumer's references are validated against (§ 6, § 6.1).
+- **Stage one of matching**: pattern compilation, the root-opcode index over engines, the bind
+  step, and the parity a lowered pattern must hold to (§ 7).
 - The **engine-identity model**, including the two distinct id spaces a descriptor engine
   lives in: the descriptor-cross-reference UUID and the hipDNN 64-bit engine id (§ 3).
 - **Engine registration**: the process that instantiates the generic engine from UED data and
   exposes it through the provider's engine list (§ 12), plus the ingestion paths and the
   registration-timing guarantee a loaded UED depends on (§ 11).
 - The **validation contract**, structural (the field contract, build + runtime) and semantic
-  (cross-descriptor, including drop-all duplicate detection), with guidance on the UED-vs-KDP
-  boundary (§ 13).
+  (cross-descriptor, including pattern-name resolution and drop-all duplicate detection), with
+  guidance on the UED-vs-KDP boundary (§ 13).
 - **Versioning & compatibility**: the accept rule keyed on the `version` field, the constrained
   meaning of `major`/`minor`, and the single-schema mechanism (§ 14); plus
   **lifecycle/operational policy** (load-failure, concurrency, the `HIPDNN_DISABLE_ENGINES`
   opt-out) and **test scope** (§ 15-16).
 
 **Out of scope:** Drop-in **trust and enablement** rules for untrusted descriptor files remain
-out of scope, as in RFC 0017 § 14; this RFC adds no trust policy.
+out of scope, as in RFC 0017 § 16 and § 17 Q1; this RFC adds no trust policy.
 
 ## 2. Relationship to RFC 0017
 
@@ -75,18 +87,36 @@ a follow-up, filling 0017's deferred scope is expected and is not itself a diver
   hashed into the engine-id space and must not collide.
 - **Duplicate detection (§ 13.2.1).** An independent descriptor-`id` check; drop all UEDs in a
   genuine collision, but accept content-identical `id` duplicates, loading them as one.
+- **The `nodes` pattern grammar (§ 4.3).** RFC 0017 § 4 shows the block by example and defers its
+  format to this follow-up; this RFC fixes the node-object members, the opcode-set form, the `?`
+  optional-operand suffix, how nodes connect, and the well-formedness and registry-resolution rules
+  a load rejects on. It also adds the **`native` arm** (§ 4.5) beside it, the registry-resolved
+  escape hatch 0017 § 5 calls a "native predicate", scoped here to the engine's stage-one match.
+- **Pattern compile at registration (§ 12).** 0017 § 8.1 compiles the pattern on the first
+  `isApplicable`; this RFC pulls it to registration so an unresolvable op or operand name is a load
+  error rather than a first-graph surprise.
+- **The graph-schema floor on the engine (§ 4.2).** 0017 § 4 requires a UED to declare the hipDNN
+  schema version its pattern was authored against; this RFC gives it a field (`sdk_version`), a
+  default, and a comparison rule.
 
 **Divergences (this RFC departs from an 0017 convention):**
 
-- **No in-band type tag (§ 4).** 0017's examples carry a `schema` tag naming the descriptor kind;
-  a UED carries none. The descriptor kind is tracked externally (§ 4), and a `major.minor`
-  `version` field carries compatibility (§ 14).
+- **No in-band type tag (§ 4).** Several of 0017's examples still carry a `schema` tag naming the
+  descriptor kind; a UED carries none, and neither does a UMD
+  ([RFC 0018 § 11](0018_UniversalMatchDescriptor.md#11-serialization-and-versioning)). The
+  descriptor kind is tracked externally by the filename suffix (§ 4), and a `major.minor` `version`
+  field carries compatibility (§ 14). The remaining tagged examples are the types whose own
+  follow-ups have not landed; the loader already rejects `schema` on every one of the seven.
 - **Version-specific validation is not required (§ 13.1).** A single schema validates the
   structural superset across all supported versions. The schema carries `addedInVersion` data
   (§ 4.2) that makes validating a UED against its declared version's exact field set *possible*, but
   this RFC does not require any consumer to perform that check (§ 13.1).
 
-No other silent contradictions. Any conflict surfaced during review is recorded here.
+No other silent contradictions. In particular the two 0017 § 4 UED fields an earlier draft of this
+RFC omitted — the `nodes` pattern and `sdk_version` — are carried here (§ 4.2, § 4.3), so the
+field contract is a superset of 0017's, not a subset of it. The pattern is reached through
+`graph_match` rather than as a top-level member, which is what keeps it additive (§ 14.2). Any
+conflict surfaced during review is recorded here.
 
 ## 3. Engine Identity
 
@@ -115,8 +145,9 @@ UUID `id` binds. Names must be **globally unique** and should be scoped, e.g. `r
 ## 4. The UED Schema
 
 This section **defines** the UED schema: § 4.1 an example instance, § 4.2 the normative
-definition, § 4.3 serialization. A UED carries a `major.minor` `version` field that the accept
-rule gates on (§ 14).
+definition, § 4.3 the `nodes` structural pattern, § 4.4 serialization, § 4.5 the native
+escape hatch. A UED carries a `major.minor` `version` field that the accept rule gates on
+(§ 14).
 
 A UED does not carry an in-band type tag, so the descriptor kind is determined externally rather
 than from the file contents (for example, by a filename suffix such as `<name>.ued.json`).
@@ -130,19 +161,43 @@ to be a UED.
 {
   "version":         "1.0",                        // major.minor; gated at load (§ 14)
   "id":              "efc9eae4-fe33-4cb0-a593-95d771dc13b2",  // UUID; referenced by KDPs (§ 3a)
-  "name":            "rocke:attention_dense_fwd",  // globally-unique, scoped engine name (§ 3b)
-  "heuristic":       "ae896b07-80cd-473c-b3f4-6a8892998519",  // one UHD id (required)
+  "name":            "rocke:example_attention_fwd",  // globally-unique, scoped engine name (§ 3b)
+  "sdk_version":     "1.0",                        // graph schema this pattern was authored against
+  "heuristic":       "ae896b07-80cd-473c-b3f4-6a8892998519",  // optional: one UHD id (§ 4.2)
   "metadata":        "9ae0b215-32a7-49d1-96df-e9b05e1927ea",  // one KMD id (required)
+  "graph_match": {                                 // stage one: how this engine matches and binds
+    "nodes": [                                     // declarative arm: the graph shape served (§ 4.3)
+      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+       "operands": {"q": "$q", "k": "$k", "v": "$v", "attn_mask": "$attn_mask?"},
+       "results":  {"o": "$o"}}
+    ]
+  },
   "knobs":           ["split_k", "tile_m"],        // optional: KMD field names to expose (§ 8)
   "behavior_notes":  ["runtime_compilation"],      // optional (§ 9)
   "numerical_notes": ["tensor_core", "reduced_precision_reduction"]  // optional (§ 9)
 }
 ```
 
+The same engine written against the **native arm** instead, the escape hatch for a match the
+declarative form cannot yet state (§ 4.5). The two arms are mutually exclusive; everything
+outside `graph_match` is unchanged:
+
+```jsonc
+{
+  "version":     "1.0",
+  "id":          "efc9eae4-fe33-4cb0-a593-95d771dc13b2",
+  "name":        "rocke:example_attention_fwd",
+  "metadata":    "9ae0b215-32a7-49d1-96df-e9b05e1927ea",
+  "graph_match": { "native": "rocke.example_attention.graph_match" }   // one registered symbol (§ 4.5)
+}
+```
+
 ### 4.2 Normative schema
 
-A conforming UED is a JSON object with the members below. Unknown members are rejected. The object
-has no logic; it is a version, identity, two required references, and optional annotations.
+A conforming UED is a JSON object with the members below. Unknown members are rejected. Every
+member but `graph_match` is inert data — a version, identity, two references, and optional
+annotations; `graph_match` is the one member carrying structure, and it holds whichever of the
+two arms (§ 4.3, § 4.5) this engine matches with.
 
 **Field specification (normative).**
 
@@ -151,16 +206,23 @@ has no logic; it is a version, identity, two required references, and optional a
 | `version` | yes | string | `<major>.<minor>`, both numeric, and one of the values the schema enumerates (§ 14.3), e.g. `1.0`. The compatibility field the accept rule gates on (§ 14). |
 | `id` | yes | string | A UUID (RFC 4122) in canonical `8-4-4-4-12` hex form. Unique across all loaded descriptors, except that content-identical UEDs may share an `id` (§ 13.2.1). The cross-reference key a KDP's `engine` field uses (§ 3a). |
 | `name` | yes | string | Globally-unique, scoped engine name matching `^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$` (a `namespace:local` form, e.g. `rocke:SDPA`). Hashed (FNV-1a, 64-bit) into the hipDNN engine-id space (§ 3b). Non-empty; unique by both literal name and by hash. |
-| `heuristic` | yes | string | UUID of this engine's one UHD. Must resolve to a loadable UHD at load (§ 13.2). |
+| `sdk_version` | no | string | `<major>.<minor>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0` when omitted. Compared numerically by `(major, minor)`: refused at load when newer than the runtime's own graph schema, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 11](0018_UniversalMatchDescriptor.md#11-serialization-and-versioning)). Independent of `version`, which gates the UED *format*. |
+| `heuristic` | no | string | UUID of this engine's one UHD. Must resolve to a loadable UHD at load (§ 13.2). Absent => the engine ships no heuristic and its catalog is ordered by the declared fallback, `priority` then descriptor `id` (§ 8, RFC 0017 § 5). A key present but naming nothing is still an error. |
 | `metadata` | yes | string | UUID of this engine's one KMD. Must resolve to a loadable KMD at load (§ 13.2). |
+| `graph_match` | no | object | Stage one: how this engine decides a graph and binds the tokens every later stage reads (§ 6, § 7). Exactly one arm, and they are mutually exclusive: **`nodes`**, the declarative pattern of **§ 4.3**, or **`native`**, the escape-hatch symbol of **§ 4.5**. Absent => the engine binds nothing, publishes an empty symbol table, and is admitted or declined by its packs' UMDs alone. |
 | `knobs` | no | array of string | Each element is a field name declared in the referenced KMD (§ 8). No duplicates. Absent or `[]` => engine exposes no descriptor knobs. Every element must match a KMD field or it is a load error (§ 13.2). |
 | `behavior_notes` | no | array of string | hipDNN behavior-note tags ([RFC 0010](0010_BehaviorNotes.md)). No duplicates. Absent => none. |
 | `numerical_notes` | no | array of string | hipDNN numerical-note tags. No duplicates. Absent => none. |
 
-All three optional fields may be omitted; a valid engine can expose no knobs and carry no notes.
+Every field but `version`, `id`, `name`, and `metadata` may be omitted; a valid engine can expose
+no knobs, carry no notes, default its graph-schema floor, and ship no heuristic. `graph_match` is
+optional for the same reason the others are: its absence is well-defined as the behavior before
+the member existed — an engine that states no graph shape binds nothing and leaves applicability
+entirely to its packs' criteria. That is a narrow way to write an engine, not a broken one, and
+keeping it absence-safe is what holds the format on the `1.0` line (§ 14.2).
 
-A single JSON Schema **file** lives in the repository; the inline copy below mirrors the
-authoritative `ued.json`, and a build check verifies the match. The file reflects the latest version
+A single JSON Schema **file** is delivered with the provider, and the inline copy below is that
+file's content; a build check verifies the two match. The file reflects the latest version
 the runtime supports and covers **all** supported versions at once: its `version` property
 enumerates the accepted versions (here, only `1.0`), and each new version adds its value to the
 `enum`. The runtime supports exactly one major version, so every enumerated version is of that
@@ -171,6 +233,13 @@ version. Confirming whether a given field is permitted or required at the UED's 
 possible from the `addedInVersion` data but is not part of this schema's own validation (§ 13.1,
 § 14).
 
+The schema is also the limit of what a structural check can do for `graph_match`: it fixes the
+arms' *shape* — that exactly one is present, the node members, the binding-form spelling, the
+opcode forms, that `native` is a non-empty string — but every rule that needs the op-schema
+registry (does this `op` exist, does it declare this operand name, is that name optional) or the
+provider's native registry (is this symbol registered) is semantic and runs in § 13.2. § 4.3 and
+§ 4.5 state both sets and say which is which.
+
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -178,7 +247,7 @@ possible from the `addedInVersion` data but is not part of this schema's own val
   "title": "hipDNN UED",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "id", "name", "heuristic", "metadata"],
+  "required": ["version", "id", "name", "metadata"],
   "properties": {
     "version": {
       "type": "string",
@@ -196,6 +265,12 @@ possible from the `addedInVersion` data but is not part of this schema's own val
       "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$",
       "addedInVersion": "1.0"
     },
+    "sdk_version": {
+      "description": "Graph schema version this pattern was authored against; defaults to 1.0 when absent (see RFC 0020 section 4.2).",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "addedInVersion": "1.0"
+    },
     "heuristic": {
       "description": "Cross-reference: MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
       "type": "string",
@@ -206,6 +281,70 @@ possible from the `addedInVersion` data but is not part of this schema's own val
       "description": "Cross-reference: MUST resolve to a loadable KMD (semantic; see RFC 0020 section 13.2).",
       "type": "string",
       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "addedInVersion": "1.0"
+    },
+    "graph_match": {
+      "description": "Stage one: exactly one arm. 'nodes' is the declarative pattern (RFC 0020 section 4.3); 'native' is the escape-hatch symbol (section 4.5) and MUST be registered in the provider's graph-match registry (semantic; see section 13.2).",
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["nodes"] },
+        { "required": ["native"] }
+      ],
+      "properties": {
+        "native": {
+          "type": "string",
+          "minLength": 1,
+          "addedInVersion": "1.0"
+        },
+        "nodes": {
+          "description": "Structural pattern over the op DAG. Opcodes, operand and result names MUST resolve against the op-schema registry (semantic; see RFC 0020 section 13.2).",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "id", "op"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["op"] },
+              "id":   { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+              "op": {
+                "oneOf": [
+                  { "type": "string", "minLength": 1 },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["one_of"],
+                    "properties": {
+                      "one_of": {
+                        "type": "array",
+                        "minItems": 2,
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 1 }
+                      }
+                    }
+                  }
+                ]
+              },
+              "operands": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*\\??$"
+                }
+              },
+              "results": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*$"
+                }
+              }
+            }
+          },
+          "addedInVersion": "1.0"
+        }
+      },
       "addedInVersion": "1.0"
     },
     "knobs": {
@@ -237,21 +376,205 @@ machine-readable annotations and checked semantically (§ 13.2); `additionalProp
 makes any unknown field a hard rejection (§ 13.1).
 
 **`addedInVersion`.** Each property carries an `addedInVersion` keyword naming the `major.minor` at
-which the field was introduced (every field here is `1.0`); its value must be one the `version`
-enum accepts. The schema must include it on every property, since it is the machine-readable record
-that makes version-accurate auditing and validation possible (§ 13.1). **A JSON Schema validator
-ignores the keyword**, so it does not affect the superset check; it is consumed by tooling and
-follow-on checks instead.
+which the field was introduced; its value must be one the `version` enum accepts. The schema must
+include it on every property, since it is the machine-readable record that makes version-accurate
+auditing and validation possible (§ 13.1). **A JSON Schema validator ignores the keyword**, so it
+does not affect the superset check; it is consumed by tooling and follow-on checks instead.
+
+Every field here reads `1.0`: the format has had no major bump, so every member the schema
+declares has been present since the earliest version it enumerates. Should a major bump ever
+happen, `addedInVersion` **re-bases** across the whole file onto the new major's earliest minor,
+because the runtime supports exactly one major (§ 14.1) and the keyword's value must be one the
+`version` enum accepts. Field history before such a break is git's to carry, not the schema's;
+what the keyword must stay correct about is the minimum-version computation of § 13.1, which is
+only ever asked within the supported major.
 
 The schema targets **Draft 7** (recommended, not required): off-the-shelf C++ JSON-Schema
 validators target Draft 7, so one file can drive both the build-time and runtime checks without
-a bespoke validator. The constructs used (`type`, `enum`, `pattern`, `required`,
-`additionalProperties`, `uniqueItems`) are common to Draft 7 and later dialects.
+a bespoke validator. The constructs used (`type`, `enum`, `pattern`, `required`, `minItems`,
+`additionalProperties`, `uniqueItems`, `oneOf`) are common to Draft 7 and later dialects.
 
-### 4.3 Serialization
+### 4.3 The `nodes` pattern (normative)
+
+`graph_match.nodes` is the graph shape the engine serves: a list of op nodes and the operand and
+result edges connecting them to the graph's tensors, each edge mapped to a **pattern variable**.
+It is the **declarative arm** of `graph_match` (§ 4.2) and the one part of a UED that carries
+structure; matching it is what publishes the symbol table every consumer downstream reads (§ 6).
+RFC 0017 § 4 introduces the block by example and defers its format here; this section is that
+format. The other arm, `native`, is § 4.5.
+
+Throughout this section `nodes` means the `nodes` key of `graph_match`. A UED carries **exactly
+one** `nodes` block, so every pack naming the engine matches the same graph shape and differs only
+in what its criteria constrain (§ 6). A family spanning two topologies is two engines (§ 17 Q1).
+
+**This arm is specified, not yet implemented.** The escape hatch of § 4.5 is what ships today; a
+UED naming `nodes` is rejected by the current loader as an unknown key. Everything below is the
+contract the declarative implementation must meet, and the reason `native` is scoped as a hatch
+rather than the format's steady state.
+
+#### 4.3.1 Grammar
+
+```ebnf
+nodes        = "[" , node , { "," , node } , "]" ;   (* at least one *)
+node         = "{" , kind , "," , node-id , "," , opcode ,
+                     [ "," , operands ] , [ "," , results ] , "}" ;
+kind         = '"kind"'     , ":" , '"op"' ;         (* the only node kind at this version *)
+node-id      = '"id"'       , ":" , string ;         (* ident; names the Attributes namespace root *)
+opcode       = '"op"'       , ":" , ( string | opcode-set ) ;
+opcode-set   = "{" , '"one_of"' , ":" , "[" , string , "," , string , { "," , string } , "]" , "}" ;
+operands     = '"operands"' , ":" , "{" , [ edge , { "," , edge } ] , "}" ;
+results      = '"results"'  , ":" , "{" , [ edge , { "," , edge } ] , "}" ;
+edge         = edge-name , ":" , binding ;
+edge-name    = string ;                              (* an operand/result name the op declares *)
+binding      = '"$' , ident , [ "?" ] , '"' ;        (* "?" only on an operand *)
+ident        = ( letter | "_" ) , { letter | digit | "_" } ;
+```
+
+**Members.**
+
+| Member | Req. | Meaning |
+|---|---|---|
+| `kind` | yes | The node kind. `"op"` is the only value at this version; the member exists so a future node kind (a tensor-shaped or control-shaped node) is an additive change rather than a reinterpretation of an existing object. |
+| `id` | yes | Names this node within the pattern, and is the **Attributes namespace root** its scalar attributes bind under: `{"id": "sdpa_fwd"}` publishes `$sdpa_fwd.causal_mask` (§ 6.1). Unique within the block. Bare in the descriptor; the `$` appears only on the reference. |
+| `op` | yes | The opcode this node matches, keyed against the op-schema registry (§ 5, Appendix B). A bare string matches exactly. An **opcode set**, `{"one_of": ["a", "b"]}`, matches any listed opcode; every member must declare the operand and result names this node binds, so one node covers a family of ops that agree on their edges. |
+| `operands` | no | Input edges: an object mapping an operand **name the op declares** to a pattern variable. Absent or `{}` binds no operands, which is legal but publishes nothing for that node's inputs. |
+| `results` | no | Output edges, same form. A result binding takes no `?`: an op's declared result is always produced. |
+
+**Binding form.** A binding is `"$name"`, or `"$name?"` on an operand the op declares optional. The
+`?` is a property of the *pattern*, not of the graph: it says the engine still matches when the
+graph omits that operand, and `{"not_present": ["$name"]}` then answers true for it
+(§ 6.1, Appendix B.5).
+An operand with no `?` is required — a graph omitting it does not match, and the engine declines.
+An operand the pattern does not name at all is not bound, and no criterion can ask about it, which
+is a real authoring choice: declaring an optional operand and declining it in criteria is not the
+same as omitting it from the pattern, because only the first produces a diagnosable decline.
+
+**There is no wildcard opcode.** An earlier draft of the matcher RFC listed `any` alongside
+`one_of`; it is not in this grammar. A node whose op is unknown at compile has no registry entry,
+so none of its edge names can be resolved (§ 4.3.3) and the symbol table it publishes cannot be
+laid out ahead of a live graph — the pattern would bind by guess, which is the failure mode the
+registry exists to prevent. `one_of` gives the same reach with the resolution intact, because every
+arm is named and checked. A genuinely opcode-agnostic pattern is the general-matching problem
+deferred to the JIT follow-up ([RFC 0017 §
+9.3](0017_UniversalKernelDescriptor.md#93-future-jit-and-normalized-providers)).
+
+**Connectivity is implicit through shared variables.** Nodes do not reference each other by `id`.
+Two nodes are connected when the same pattern variable appears as one's result and the other's
+operand, which is exactly how the graph itself connects nodes — by a shared tensor UID (§ 5). A
+three-node Conv-Bias-ReLU pattern is written as three independent node objects whose chaining is
+carried entirely by `$conv_out` and `$bias_out` appearing twice each:
+
+```jsonc
+"nodes": [
+  {"kind": "op", "id": "conv", "op": "convolution_fwd",
+   "operands": {"X": "$x", "W": "$w"},              "results": {"Y": "$conv_out"}},
+  {"kind": "op", "id": "bias", "op": "pointwise_add",
+   "operands": {"A": "$conv_out", "B": "$bias"},    "results": {"Y": "$bias_out"}},
+  {"kind": "op", "id": "act",  "op": "pointwise_relu",
+   "operands": {"A": "$bias_out"},                  "results": {"Y": "$y"}}
+]
+```
+
+A variable appearing as a result of one node and an operand of another is an **intermediate**;
+whether it is legal to fuse across is not the pattern's to say, and a criterion asks with
+`$conv_out.virtual` ([RFC 0018 § 3](0018_UniversalMatchDescriptor.md#3-criteria-vocabulary)). The
+pattern binds a shape; the criteria decide whether that shape is servable.
+
+**Match semantics are exact, not subgraph-containment.** The pattern matches the ops it names and
+publishes what they bind; it does not by itself bound the rest of the graph. A pack that means
+"this graph and nothing else" pins it on the criteria side with `$graph.node_count` (§ 6.1). This
+split is deliberate: node count is a *constraint*, varies between packs on one engine, and so
+belongs with the criteria rather than being baked into a pattern all those packs share.
+
+#### 4.3.2 Well-formedness (structural)
+
+These are checkable from the block alone and are part of the structural check (§ 13.1); each is a
+load rejection, never a warning:
+
+- **The block is non-empty.** `"nodes": []` is refused.
+- **`kind` is `"op"`.** Any other value is refused rather than ignored.
+- **Node `id` is unique within the block**, and is an `ident`. A duplicate `id` would make an
+  Attributes reference ambiguous.
+- **A node `id` is not a reserved root.** `graph`, `kernel`, and `device` are refused (§ 6.1).
+- **A pattern variable is bound at most once.** The same `$name` may be *read* by several nodes —
+  that is how connectivity is expressed — but it is **bound** by exactly one edge: either one
+  node's result, or, for a graph input, one node's operand. A variable appearing as the result of
+  two nodes, or as an operand of two nodes with no producing result among them, is refused.
+- **A variable is not a reserved root**, and does not collide with a node `id`.
+- **`?` appears only on an operand binding**, never on a result and never mid-identifier.
+- **Edge names are unique within their `operands` or `results` object**, which JSON object
+  semantics already imply but a lenient parser may not enforce.
+
+#### 4.3.3 Registry resolution (semantic)
+
+These need the op-schema registry (§ 5, Appendix B) and so run in semantic validation (§ 13.2),
+at pattern compile (§ 12):
+
+- **Every `op` resolves.** An opcode absent from the registry is refused, never guessed at. For an
+  opcode set, *every* member must resolve.
+- **Every edge name is declared by the op**, as an operand for an `operands` entry and as a result
+  for a `results` entry. A name the registry does not declare for that op is refused; this is the
+  check that catches an operand renamed out from under a pattern by a schema change (Appendix B.6).
+- **`?` matches the registry's optionality.** A `?` on an operand the registry declares required is
+  refused, since the pattern would be claiming a graph the op cannot produce. A required binding on
+  an operand the registry declares optional is *permitted* — it is the pattern narrowing itself to
+  graphs that supply the operand.
+- **An opcode set agrees on its edges.** Every member of a `one_of` must declare every edge name
+  the node binds, with the same optionality, or the published symbol table would depend on which
+  arm matched.
+
+A failure here is a load error naming the UED, the node `id`, and the unresolved name (§ 15).
+
+### 4.4 Serialization
 
 The UED is authored and shipped as **JSONC** (JSON with comments), consistent with how RFC 0017
 presents every descriptor. Comments are stripped before validation (§ 4.2, § 14.3).
+
+### 4.5 The `native` arm (normative)
+
+`graph_match.native` is a symbol naming a function the provider ships, resolved through the
+provider's graph-match registry. It is the **escape hatch** for a match the declarative arm cannot
+yet state, and it is what ships today. Its signature:
+
+```cpp
+std::optional<BoundTokens> (*)(const MatchContext&);
+```
+
+`nullopt` **declines** the graph; a returned map **is** the binding. Match and bind are one answer
+from one function, which makes "matched but bound nothing" unrepresentable — the state the two
+arms would otherwise both have to define away.
+
+`MatchContext` carries the graph, a device ordinal, and the device properties (§ 5). `BoundTokens`
+is a flat map from token name to scalar value; the token names are the function's own choice, not
+derived from the op-schema registry, and the descriptor set naming them must agree with the
+provider's source by convention.
+
+**One producer.** An engine's binding comes from this function alone. A pack's UMDs read it and
+never add to it (§ 6), so two descriptors cannot write one token to different values, and the
+format needs no reconciliation rule for that case.
+
+**Structural check.** `native` is a non-empty string, and the enclosing object carries no other
+key. **Semantic check.** The symbol must be registered in the loading provider; an engine naming
+an unregistered symbol is dropped at read time, before its id is advertised (§ 13.2).
+
+**What this arm does not provide.** Each of these is a guarantee the declarative arm gives and
+this one cannot, and each is why `native` is a hatch rather than the format's steady state:
+
+- **No load-time symbol set.** The tokens are whatever the function returns on a live graph, so
+  the published set is unknown at load. The cross-descriptor validation of § 6 and § 13.2 — that
+  every `$`-reference in a UMD, UDD, or UHD resolves against the engine's binding — cannot run.
+  A stale reference fails closed at match time instead of being an error at load.
+- **No registry-derived naming.** Token names are hand-authored and restated in both the provider
+  source and the descriptors that read them; nothing checks the two agree.
+- **No root-opcode index entry.** The function is opaque, so it cannot be indexed by root opcode
+  (§ 7) and is not pruned before it runs.
+- **No structural/criteria separation.** The declarative arm splits topology (§ 4.3) from value
+  checks (the UMD's criteria); a native function may fuse both, and in the shipped engines it
+  does. Checks that would be per-pack memoized criteria then prune the whole engine instead.
+
+A UED SHOULD move to the declarative arm once the pattern it needs is expressible. Both arms fill
+the same slot in the same object, so that migration is a change within `graph_match` and not a
+format break.
 
 ## 5. The Graph Model the Pattern Matches
 
@@ -299,7 +622,7 @@ field-classification rules, and the generation pipeline). Names are never inferr
 vectors), `data_type()`, `uid()`, and `virtual_()`. Rank is `dims()->size()`. Layout is not stored;
 it is derived from the stride order, which is why the pattern publishes a stride-order index array
 and a criterion compares layout as one ([RFC 0018 §
-5](0018_UniversalMatchDescriptor.md#5-layout-and-stride-order-constraints)). Quantities like head
+5](0018_UniversalMatchDescriptor.md#5-layout-and-stride-order-criteria)). Quantities like head
 size, batch, and head count are **not** attributes; they are specific tensor dims (for SDPA,
 `q.dims[3]`, `q.dims[0]`, `q.dims[1]`). A criterion reaches them positionally as `$q.dims[i]`, never
 as an attribute read (§ 6).
@@ -316,15 +639,22 @@ UID-to-producer and UID-to-consumers index once per graph to walk edges and reco
 connectivity, since no adjacency query is provided; fusion legality reads each intermediate's
 `virtual` flag.
 
-__omp_shell("[The matcher reads a UID-centric graph via an op-schema registry that reconstructs
-edges and auto-binds symbols](../images/umd_binding_model.svg)")
+![The matcher reads a UID-centric graph via an op-schema registry that reconstructs
+edges and auto-binds symbols](../images/umd_binding_model.svg)
 
 ## 6. Symbol Binding: What the Pattern Publishes
 
 Matching does double duty: it decides applicability and it binds named variables. The binding half
-is the **engine's**: the UED's `nodes` block is a structural pattern over the op DAG, and matching
-it publishes a symbol table. That table is what every consumer downstream is written against, so it
-is specified here, with the field it travels on.
+is the **engine's**: the UED's `graph_match` (§ 4.2) is what runs, and matching publishes a symbol
+table. That table is what every consumer downstream is written against, so it is specified here,
+with the field it travels on.
+
+**One producer per engine.** Whichever arm is populated, the engine's binding comes from exactly
+one place, and a pack's UMDs are pure readers of it (§ 7). Two descriptors therefore cannot write
+one token to different values, so the format states no reconciliation or conflict rule: the
+conflict is unrepresentable rather than detected. An engine with no `graph_match` at all publishes
+an empty table, and its packs' criteria may then read only the two namespaces the pattern never
+bound, `$kernel.*` and `$device.*`.
 
 A symbol is **declared** in the UED's pattern, **bound** when the graph matches, and **used** by a
 UMD's criteria ([RFC 0018 § 2](0018_UniversalMatchDescriptor.md#2-the-symbol-table-criteria-read)),
@@ -333,7 +663,7 @@ by the UDD's dispatch and workspace formulas ([RFC 0017 §
 `features_signature`. Every symbol any of them references must be bound by the pattern, so none of
 them can read a value the match does not produce.
 
-**The pattern is engine-wide and singular**, one per UED, so every pack naming that engine matches
+**The pattern is engine-wide and singular**, one per UED (§ 4.3), so every pack naming that engine matches
 the same graph shape and differs only in what it constrains. Two consequences run through the rest
 of this document: the matcher binds once per engine per graph rather than once per matcher (§ 7),
 and the bound-symbol set has a single owner. A kernel family whose graph shape differs
@@ -349,6 +679,14 @@ three keeps the check mechanical: the UHD in particular is engine-wide, so befor
 onto the engine there was no engine-level binding for its feature tokens to resolve against, only
 whatever matchers the packs naming that engine happened to carry.
 
+**That check is the declarative arm's, and only its.** Everything from here to § 6.1 describes what
+`graph_match.nodes` publishes: a set laid out at compile from the op-schema registry, and therefore
+knowable before any graph arrives. Under `graph_match.native` (§ 4.5) the tokens are whatever the
+function returns at runtime, so there is no set to validate against and a stale `$`-reference fails
+closed on a live graph instead of erroring at load. An engine on the native arm gets the *binding*
+that the rest of this section describes; it does not get the load-time guarantee, and § 13.2 says
+which checks consequently do not run for it.
+
 **Auto-binding is the default, and follows a standard formula.** When the pattern names an operand
 or result variable, the matcher, using the op-schema registry (§ 5), automatically binds it and its
 fields, so authors get a complete symbol table for free and never hand-declare each field. Every
@@ -359,11 +697,12 @@ the interpreter fails closed on anything undeclared:
 - **Tensor** — a bound operand/result and its fields: `$q` is the whole tensor (the matched
   `TensorAttributes`) and `$q.uid` its graph UID; each dim positionally as `$q.dims[i]`;
   each stride as `$q.strides[i]`; and the derived facts `$q.rank`, `$q.dtype`, `$q.stride_order`
-  ([RFC 0018 § 5](0018_UniversalMatchDescriptor.md#5-layout-and-stride-order-constraints)), `$q.packed`, `$q.virtual` (an
+  ([RFC 0018 § 5](0018_UniversalMatchDescriptor.md#5-layout-and-stride-order-criteria)), `$q.packed`, `$q.virtual` (an
   internal intermediate between matched nodes, not a graph input or output),
   `$q.is_runtime_pass_by_value` (its value arrives per execution rather than being baked into the
   graph, [RFC 0016](0016_RuntimePassByValueTensors.md)), and the precomputed scalar `$q.value_f32`
-  (below). An optional operand also carries `$q.present`, true only when the graph supplies it.
+  (below). Whether the graph supplied an optional operand at all is a question asked with the
+  `present` / `not_present` operators, not a field read off the tensor (§ 6.1).
 - **Graph** — structural facts and graph-level flags of the matched graph: `$graph.node_count`, which
   pins an exact match, and `$graph.is_override_shape_enabled`, the graph's own opt-in to execute-time
   override shapes. That flag is the graph's state and is distinct from a matcher's
@@ -371,7 +710,7 @@ the interpreter fails closed on anything undeclared:
   ([RFC 0018 § A.1](0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
 - **Attributes** — a matched node's scalar attributes, named by the node's pattern `id`: an
   `{"id": "sdpa_fwd"}` node exposes `$sdpa_fwd.dropout_probability`, a `{"id": "conv"}` node
-  `$conv.dilation`. An optional attribute carries `$sdpa_fwd.<attr>.present`.
+  `$conv.dilation`. An optional attribute is asked about the same way, with those same operators.
 - **Kernel metadata** — `$kernel.<field>`, the values a UKD supplies for the fields its KMD declares
   (tile and vector constants, the dtype it targets, [RFC 0017 § 4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)).
   These are the one namespace the pattern does not bind: they come from the engine's KMD, and a
@@ -409,12 +748,12 @@ bind are listed with them, because a consumer resolves all five against one envi
 var-ref      = "$" , ( tensor-ref | graph-ref | attr-ref | kernel-ref | device-ref ) ;
 tensor-ref   = tvar , [ "." , tensor-field ] ;
 tvar         = ident ;                          (* a pattern variable bound to a Tensor *)
-tensor-field = "uid" | "rank" | "dtype" | "stride_order" | "packed" | "virtual" | "present"
+tensor-field = "uid" | "rank" | "dtype" | "stride_order" | "packed" | "virtual"
              | "is_runtime_pass_by_value" | "value_f32"
              | "dims"    , "[" , uint , "]"
              | "strides" , "[" , uint , "]" ;
 graph-ref    = "graph" , "." , ( "node_count" | "is_override_shape_enabled" ) ;
-attr-ref     = node-id , "." , attr-name , [ "." , "present" ] ;
+attr-ref     = node-id , "." , attr-name ;
 kernel-ref   = "kernel" , "." , ident ;
 device-ref   = "device" , "." , ident ;
 uint         = digit , { digit } ;
@@ -422,17 +761,19 @@ uint         = digit , { digit } ;
 
 | Namespace | Root | Bound by | Fields | Type |
 |---|---|---|---|---|
-| Tensor | a pattern variable (`$q`) | the pattern | `uid`, `rank`, `dtype`, `stride_order`, `packed`, `virtual`, `present`, `is_runtime_pass_by_value`, `value_f32`, `dims[i]`, `strides[i]` | `Tensor` / `Int` / `Dtype` / `IntArray` / `Bool` / `Float` |
+| Tensor | a pattern variable (`$q`) | the pattern | `uid`, `rank`, `dtype`, `stride_order`, `packed`, `virtual`, `is_runtime_pass_by_value`, `value_f32`, `dims[i]`, `strides[i]` | `Tensor` / `Int` / `Dtype` / `IntArray` / `Bool` / `Float` |
 | Graph | `$graph` | the pattern | `node_count`, `is_override_shape_enabled` | `Int` / `Bool` |
-| Attributes | a node `id` (`$sdpa_fwd`) | the pattern | `<attr-name>`, `<attr-name>.present` | scalar / `Bool` |
+| Attributes | a node `id` (`$sdpa_fwd`) | the pattern | `<attr-name>` | scalar |
 | Kernel | `$kernel` | the UKD, per candidate | `<field>` a UKD supplies ([RFC 0017 § 4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)) | scalar |
 | Device | `$device` | the `Handle` | `<field>` (`lds_size`, `warp_size`, …) | scalar |
 
 - `graph`, `kernel`, and `device` are **reserved** namespace roots: a `tvar` and a node `id` MUST NOT
   use them, and the registry generator fails the build on an operand name that collides with one
   (Appendix B.3).
-- `present` is bound only for an optional operand or attribute; reading it on a required one is
-  refused.
+- **Presence is a question, not a field.** Whether an optional operand or attribute was supplied is
+  asked with the `present` / `not_present` operators, which always evaluate and so are the one read
+  an absent operand answers definitely (RFC 0017 § 5). No root carries a `.present` member. Asking
+  it of a required operand is refused at compile, the answer being fixed by the pattern.
 - **A `$` marks a reference.** Every reference to a bound field carries a leading `$`: tensors and
   their fields (`$q`, `$q.uid`, `$q.dims[2]`, `$q.rank`), a node's attributes
   (`$sdpa_fwd.dropout_probability` — the node id `sdpa_fwd` is bare, the reference carries the `$`),
@@ -442,7 +783,18 @@ uint         = digit , { digit } ;
   propagates it, are the reader's rules
   ([RFC 0018 § A.2](0018_UniversalMatchDescriptor.md#a2-variable-references-and-resolution)).
 
-__omp_shell("[A live graph matched against a declarative pattern, auto-binding tensors, dims, strides, and attributes](../images/umd_symbol_binding.svg)")
+**The two spellings must widen together.** The native arm (§ 4.5) reaches the same five namespaces
+through positional operands rather than `$`-names: a stage takes `MatchContext` (the device and
+graph), `BoundTokens` (what the match bound), then `KernelDefinition` (the candidate kernel) — the
+same access this table spells `$device`, `$graph`, `$<token>`, and `$kernel`. Every native stage
+takes that one prefix, truncated to what exists at its point in the pipeline: the graph match takes
+`MatchContext` alone, since it is what *produces* the bindings; a graph-scoped criterion adds
+`BoundTokens`; a kernel-scoped criterion and a scorer add `KernelDefinition`. This correspondence is
+normative. Widening one spelling without the other — adding a namespace here without a
+corresponding operand there, or reordering the operands — makes the two arms disagree about what is
+knowable at a given stage, which is the drift the shared order exists to prevent.
+
+![A live graph matched against a declarative pattern, auto-binding tensors, dims, strides, and attributes](../images/umd_symbol_binding.svg)
 
 ## 7. Pattern Matching: Stage One
 
@@ -458,21 +810,31 @@ in-memory structure: compiling resolves op-schema names into typed accessors and
 table the pattern will publish (§ 6.1). That compiled form, not the text, is what runs against live
 graphs, and it is built at engine registration (§ 12) so a resolution failure is a load error rather
 than a first-graph surprise. The compiled pattern is shared across every graph the engine sees; only
-the binding result is per-problem.
+the binding result is per-problem. The native arm has no compile step — its symbol is resolved at
+registration instead (§ 12), which is the same load-time failure at a coarser grain.
 
 **Root-opcode indexing, over engines.** The compiled patterns are indexed by their root node's
 opcode, so match cost does not grow linearly with the number of descriptors: a graph whose root op
 is `sdpa_fwd` only consults engines whose pattern is rooted at `sdpa_fwd`. This is the index RFC
 0017 § 16 calls for, and putting the pattern on the engine makes it coarser and therefore cheaper —
 a miss prunes an engine and every pack naming it in one step, without loading a single UMD. Only the
-surviving engines pay for criteria at all.
+surviving engines pay for criteria at all. A native match carries no root opcode to index on
+(§ 4.5), so an engine on that arm is not pruned this way and pays the arch gate below instead.
 
-**Stage one: bind, once per engine per graph.** The engine's pattern walks the graph against the
-per-graph UID-to-producer and UID-to-consumers index (§ 5), and publishes the bound symbol table (§
-6). A graph the pattern does not match declines the engine outright: `isApplicable` returns false
-with no pack consulted, no UMD loaded, and no criteria evaluated. Because the pattern is the
+**Stage one: bind, at most once per engine per (graph, device).** The engine's match walks the
+graph against the per-graph UID-to-producer and UID-to-consumers index (§ 5), and publishes the
+bound symbol table (§ 6). A graph the match declines declines the engine outright: `isApplicable`
+returns false, no criteria are evaluated, and the catalog is empty. Because the match is the
 engine's, this cost is paid once no matter how many packs name that engine, which is the structural
 saving the split buys.
+
+**The arch gate runs first, and the match is lazy.** A pack whose `arch` list excludes the running
+device is skipped before the match is attempted, and the match runs on the first pack that clears
+that gate. An engine whose packs are *all* arch-excluded therefore never matches at all: there is no
+device it could serve, so walking the graph could only reach the same answer more slowly. The
+binding is computed at most once per (graph, device) and reused by every surviving pack, so
+laziness changes when the work happens, never how often. This orders stage one **after** pack
+resolution and the arch gate, which RFC 0017 § 8.1 states as a single pre-pack step.
 
 **Lowering parity, if the pattern is ever lowered.** [RFC 0018 §
 9](0018_UniversalMatchDescriptor.md#9-static-matcher-sketch) sketches pre-compiling a matcher into a
@@ -517,8 +879,13 @@ with the pack's matchers and dispatch and the engine's heuristic and metadata sc
 § 4). The membership chain is **UKD -> KDP -> UED**, bound by the descriptor UUID `id`; there is no
 direct UKD->UED reference.
 
-One UED is typically shared by many KDPs, and so serves many UKDs: one engine, one UHD, one
-KMD, ranking a whole catalog of kernels over one feature space.
+One UED is typically shared by many KDPs, and so serves many UKDs: one engine, one KMD, and at
+most one UHD, ranking a whole catalog of kernels over one feature space.
+
+Every pack naming the engine inherits its **one `graph_match`** (§ 4.2), so membership also fixes
+the graph shape a pack can constrain: a KDP does not narrow the shape, only what its criteria
+demand of the symbols the match published (§ 6). A pack under an engine with no `graph_match`
+inherits an empty binding and its criteria carry the whole applicability decision.
 
 ## 11. When a UED Is Loaded and Registered
 
@@ -562,13 +929,31 @@ hand-written engines), and registration is the descriptor-driven equivalent of t
 hand-written engine-registration path. For each UED that passes validation (§ 13), registration:
 
 1. **Derives the engine id**: the 64-bit hash of the UED `name` (§ 3).
-2. **Instantiates one generic engine**: a single engine implementation that satisfies hipDNN's
+2. **Resolves `graph_match`** (§ 4.2), by arm. For **`nodes`**, the block is resolved against the
+   op-schema registry (§ 5) and compiled once into the in-memory form that runs against live
+   graphs, laying out the symbol table it will publish (§ 6.1, § 7); the § 4.3.3 checks are exactly
+   the ones this step performs, and the compiled form is shared across every graph the engine sees
+   and across every pack naming it. RFC 0017 § 8.1 has the pattern compile once and stay in the
+   descriptor cache, but reaches it on the first `isApplicable`; this RFC pulls the compile forward
+   to registration, so a name the op-schema registry does not declare is a **load error naming the
+   UED and the node**, not a first-graph surprise. For **`native`**, there is nothing to compile:
+   the symbol is looked up in the provider's graph-match registry, and an unregistered symbol is a
+   load error naming the UED and the symbol (§ 13.2). An **absent** `graph_match` resolves to the
+   empty binding and skips this step. Either way the failure is at registration, before the
+   engine's id is advertised.
+3. **Instantiates one generic engine**: a single engine implementation that satisfies hipDNN's
    existing engine contract from descriptor data rather than hand-written code, one instance per
-   UED, bound to that UED's descriptors: its `heuristic` (UHD) and `metadata` (KMD) references
-   and the KDPs whose `engine` field names it.
-3. **Adds the engine to the provider's engine list** and records the name -> id mapping, so the
+   UED, bound to that UED's descriptors: its `heuristic` (UHD, when it ships one) and `metadata`
+   (KMD) references, its resolved `graph_match`, and the KDPs whose `engine` field names it.
+4. **Indexes the engine by its pattern's root opcode** (§ 7), so a graph whose root op no engine
+   pattern is rooted at prunes without a match attempt. Only the declarative arm is indexable; an
+   engine on the native arm is not entered here and is reached on every graph.
+5. **Adds the engine to the provider's engine list** and records the name -> id mapping, so the
    host can enumerate the engine and diagnostics / support claims
    ([RFC 0015](0015_EngineSupportClaims.md)) key on the real name rather than a hex id.
+
+A UED that fails step 2 registers no engine at all (§ 15): a match that does not resolve cannot
+decline a graph honestly, so the engine is dropped rather than exposed as one that never matches.
 
 Nothing in the host-facing engine contract changes: a descriptor-backed engine is selected and
 driven exactly as a hand-written one (RFC 0017 § 3, § 8). This RFC specifies registration (how
@@ -587,13 +972,22 @@ implementation may fold them into one pass.
 
 ### 13.1 Structural validation
 
-The **structural check** validates the UED against the schema (§ 4.2, § 14.3), confirming three
+The **structural check** validates the UED against the schema (§ 4.2, § 14.3), confirming six
 things:
 
 - **`version` is one the schema accepts**: the schema lists the exact `major.minor` values it
   recognizes, and the UED's `version` must be one of them.
 - **each present field is well-formed**: correct type and pattern.
-- **no unknown field is present**: an unknown field is a hard rejection.
+- **no unknown field is present**: an unknown field is a hard rejection, at the top level, inside
+  `graph_match`, and inside a `nodes` node object alike.
+- **`graph_match`, when present, carries exactly one arm**: `nodes` or `native`, never both and
+  never neither.
+- **the `nodes` block is well-formed**, when that is the arm: the § 4.3.2 rules — non-empty, `kind`
+  is `"op"`, node ids unique and non-reserved, each pattern variable bound exactly once, `?` only
+  on an operand. These need no other descriptor, so they belong here; the rules that need the
+  op-schema registry are § 4.3.3 and run in § 13.2.
+- **`native` is a non-empty string**, when that is the arm. Whether the symbol exists is semantic
+  and runs in § 13.2.
 
 Because fields added after the earliest version are optional in this schema, passing this check
 means the UED is structurally valid for *some* supported version, not necessarily for the one it
@@ -619,12 +1013,35 @@ require any consumer to perform it.
 These cannot be expressed in JSON Schema because they depend on other descriptors; each is
 performed at build time and run time alike:
 
-- **Reference resolution.** A UED's `heuristic` (UHD) and `metadata` (KMD) must each resolve to a
-  loadable descriptor of the correct kind; a dangling reference is an error. This is an
-  *existence* condition: the referent must be resolvable, not necessarily parsed.
+- **Reference resolution.** A UED's `metadata` (KMD) and, when present, its `heuristic` (UHD) must
+  each resolve to a loadable descriptor of the correct kind; a dangling reference is an error. This
+  is an *existence* condition: the referent must be resolvable, not necessarily parsed.
 - **`knobs` must be a subset of KMD field names.** A knob name no KMD field matches is an error
   (RFC 0017 § 4). Unlike reference resolution, this reads the KMD's declared field set, so the
   referenced KMD must be resolvable **to its field set**, more than existence.
+- **Pattern names resolve against the op-schema registry** (declarative arm). Every `op`, operand
+  name, and result name in `graph_match.nodes`, and every `?` against the registry's optionality —
+  the § 4.3.3 rules. This runs at pattern compile (§ 12) and, like the checks above, at build time
+  and run time alike. It is the check that catches a graph-schema change renaming an operand out
+  from under a shipped pattern (Appendix B.6).
+- **The native symbol is registered** (native arm). `graph_match.native` must name a function
+  registered in the loading provider's graph-match registry. An engine naming an unregistered
+  symbol is **dropped at read time**, before its id is advertised, so a descriptor set that
+  half-ships never advertises an engine it cannot serve. The diagnostic names the UED and the
+  symbol. A provider SHOULD pre-flight this alongside the other symbol checks rather than paying an
+  exception when the match is first attempted.
+- **The published symbol set is validated per consumer pair** (declarative arm only). A pattern
+  publishes a set (§ 6.1), and every descriptor written against it — a UMD listed by a pack naming
+  this engine, that pack's UDD, and the engine's own UHD `features_signature` — is checked against
+  that set. This is the UED half of the check; the reader's half, including that a failure names
+  the matcher, the engine, the reference, **and the pack that paired them**, is
+  [RFC 0018 A.5](0018_UniversalMatchDescriptor.md#a5-compile-time-validation-normative). The
+  pairing is cached on `(matcher, engine)` and re-run when either side changes, so a pattern edit
+  that drops or renames a bound variable invalidates every consumer written against it, loudly, at
+  load. **Under the native arm this check cannot run**: the token set is not known until the
+  function returns on a live graph (§ 4.5), so a consumer's `$`-reference is unvalidated at load and
+  fails closed at match time instead. That is the guarantee the hatch trades away, and the reason a
+  UED should leave it once the declarative arm can express its pattern.
 - **Uniqueness (§ 13.2.1).** No two loaded UEDs may share a descriptor `id`, and independently
   none may share a `name`, except for the content-identical case (§ 13.2.1).
 
@@ -727,6 +1144,22 @@ a requirement.
   required, or changing a field's meaning/permitted values). These are the changes where an old
   reader would misinterpret a file, which the hard `major ==` break (§ 14.1) prevents.
 
+**`ued/1.0` is this rule applied to this RFC's own change.** Both members this RFC adds are
+**additive and absence-safe**, so the format stays on the `1.0` line and no shipped UED is
+orphaned. `sdk_version` defaults to `1.0`. `graph_match` is optional, and its absence is
+well-defined as the behavior before the member existed: an engine that states no graph shape binds
+nothing and leaves applicability to its packs' criteria (§ 4.2). Neither member removes, renames,
+retypes, or changes the meaning of an existing field, and neither makes an optional field required.
+
+**An earlier draft made `nodes` a required top-level field and bumped to `ued/2.0` on that
+ground.** That is why the rule is worth restating here: a required field fails the absence-safe
+test outright, since there is no "behavior before the field existed" for an engine with no
+pattern, so it would have forced a major and dropped every `1.0` UED rather than reinterpreting
+it. Nesting the pattern inside an optional `graph_match` removes that forcing — the declarative
+arm is fully specified (§ 4.3) without being mandatory — and the format's one supported major
+stays `1`. That matters more now than when the draft was written: UEDs ship, and a major the
+runtime does not accept would be a spec no descriptor could conform to.
+
 **Authors should stamp the lowest version their UED needs**, so it stays loadable on the oldest
 runtime that can serve it and never carries a field its version does not define. The structural
 check (§ 13.1) does not enforce this, but the `addedInVersion` data makes the lowest version a UED
@@ -771,7 +1204,8 @@ any version-accurate check be performed.
   finer-grained `HIPDNN_DISABLE_KDPS` / `HIPDNN_DISABLE_UKDS` (RFC 0017 § 10) are governed by their
   own descriptors.
 - **Drop-in trust => out of scope.** Trust and enablement for untrusted drop-in descriptors are
-  out of scope (RFC 0017 § 14); this RFC adds no trust policy.
+  out of scope (RFC 0017 § 16 and § 17 Q1, which defer source-trust rules to the delivery
+  follow-up); this RFC adds no trust policy.
 
 ## 16. Testing
 
@@ -786,9 +1220,9 @@ fuzzing, this RFC adds UED-specific coverage.
 - **Schema `addedInVersion` completeness** (§ 4.2): every property in the schema carries an
   `addedInVersion` keyword whose value the `version` enum accepts, so version-accurate validation
   is possible.
-- **Version-accurate validation, if performed** (§ 13.1): a UED whose `version` is `1.0` that
-  carries a field whose `addedInVersion` is later is rejected even though the superset schema
-  accepts it.
+- **Version-accurate validation, if performed** (§ 13.1): a UED whose `version` is the earliest the
+  schema enumerates but that carries a field whose `addedInVersion` is later is rejected even
+  though the superset schema accepts it.
 - **Schema build/runtime parity** (if the single-schema design of § 14.3 is used): the schema
   embedded in the provider parses to the same JSON as the repository's canonical file and as
   the inline copy in § 4.2 (a CI check comparing parsed structure, not bytes, so formatting and
@@ -796,8 +1230,42 @@ fuzzing, this RFC adds UED-specific coverage.
 - **Version accept rule** (§ 14.1): matrix of `file` vs `provider` `major.minor` read from the
   `version` field: same major/older-or-equal minor loads; newer minor rejected; any major mismatch
   dropped.
-- **Semantic checks** (§ 13.2): dangling `heuristic`/`metadata`; a `knobs` entry absent from
-  the KMD.
+- **Semantic checks** (§ 13.2): dangling `metadata`; a dangling `heuristic` when one is named; a
+  `knobs` entry absent from the KMD.
+- **`graph_match` arm selection** (§ 4.2, § 13.1): an object carrying both `nodes` and `native` is
+  rejected; one carrying neither is rejected; an absent `graph_match` loads and the engine binds an
+  empty table, admitted or declined by its packs' UMDs alone.
+- **Native arm resolution** (§ 4.5, § 13.2): an engine naming an unregistered `graph_match.native`
+  symbol is dropped at read time and never advertises its id; a registered one loads; the match
+  returning `nullopt` declines the graph and yields an empty catalog while leaving other engines
+  unaffected. The drop must be asserted against the advertised engine list, not merely a log line.
+- **Match laziness and the arch gate** (§ 7): an engine whose packs are all arch-excluded never
+  invokes its match; an engine with one surviving pack invokes it exactly once per (graph, device)
+  however many packs then read the binding.
+- **`nodes` structural well-formedness** (§ 4.3.2): empty `nodes`; a `kind` other than `"op"`; a
+  duplicate node `id`; a node `id` or pattern variable colliding with `graph`/`kernel`/`device`; a
+  variable bound by two nodes' results; a `?` on a result binding; a binding that is not `$ident`.
+  Each is a load rejection naming the node.
+- **Pattern registry resolution** (§ 4.3.3, § 12): an unknown `op`; an operand name the op does not
+  declare; a result name the op does not declare; a `?` on an operand the registry declares
+  required; an opcode set whose members disagree on an edge name or its optionality. Each fails
+  pattern compile at registration, and the UED registers no engine.
+- **Pattern compile happens once, at registration** (§ 12): a UED with an unresolvable pattern name
+  fails at load rather than on the first graph, and a valid one compiles exactly once however many
+  graphs and packs exercise it.
+- **Published-symbol-set resolution** (§ 6.1, § 13.2): a UMD, a UDD, and a UHD
+  `features_signature` each referencing a symbol the engine's pattern does not publish are rejected
+  at load, naming the reference, both descriptors, and the pack that paired them; a pattern edit that renames a bound variable
+  invalidates every consumer written against it. Optional-`?` binding is covered directly: a graph
+  omitting the operand still matches and `not_present` answers true for it, while a graph
+  omitting a **required** operand declines the engine.
+- **Published-symbol-set resolution is declarative-only** (§ 4.5, § 13.2): the consumer-pair check
+  above is skipped for an engine on the native arm, and a UMD naming a token that arm does not
+  return fails closed at match time rather than at load. The test pins the *difference*, so the
+  guarantee the hatch trades away stays visible rather than being assumed absent.
+- **`sdk_version` floor** (§ 4.2): a UED below the graph's reported floor declines the whole engine
+  before binding, taking every pack naming it; a UED above the runtime's own graph schema is
+  refused at load; an omitted `sdk_version` reads as `1.0`.
 - **Duplicate detection, drop-all** (§ 13.2.1): two UEDs differing in content but sharing an
   `id`; two sharing a `name`; two sharing both; a UED colliding by name with a built-in engine. In
   each case *every* colliding UED is dropped and named in diagnostics, and no engine is left bound
@@ -826,19 +1294,39 @@ The descriptor pipeline parses untrusted input on the drop-in path, so the loade
 
 ## 17. Open Questions
 
-1. **Alternative patterns under one engine.** A UED carries exactly one `nodes` block (§ 6), so a
+1. **Alternative patterns under one engine.** A UED carries exactly one `nodes` block (§ 4.3), so a
    family spanning two topologies splits into two engines. A `patterns[]` list matched in order would
    avoid the split, but needs an answer for which arm's binding is published, whether the published
    set is the union or the intersection, and what a criterion referencing a symbol only one arm binds
    means. Is the split acceptable, or is that design worth doing?
+2. **`criteria` inside `graph_match`.** The declarative arm is expected to carry a `criteria` key
+   beside `nodes`, but every criteria expression this series specifies lives on a UMD
+   ([RFC 0018](0018_UniversalMatchDescriptor.md)). What an engine-scoped `criteria` would express
+   that a UMD listed by every pack does not, and how the two interact when both are present, is
+   unsettled. It is named here because the native arm fuses topology and value checks in one
+   function (§ 4.5), so the question is already live in shipped code even though no format carries
+   the key yet.
 
 ---
 
 ## 18. Glossary
 
 - **UED (Universal Engine Descriptor):** one engine, comprising a stable identity (`name` + UUID
-  `id`), the KMD field names it exposes as knobs, and its behavior/numerical notes. Names its one UHD
-  and one KMD by id. 1:1 with a hipDNN engine.
+  `id`), the `graph_match` stating how it matches and what it binds, the KMD field names it exposes
+  as knobs, and its behavior/numerical notes. Names its one KMD, and optionally one UHD, by id.
+  1:1 with a hipDNN engine.
+- **`graph_match`:** the UED member holding stage one, in exactly one of two arms: the declarative
+  **structural pattern** (`nodes`, § 4.3) or the **native escape hatch** (`native`, § 4.5). Absent
+  means the engine binds nothing.
+- **Structural pattern:** a UED's `graph_match.nodes` block — the op nodes and named operand/result
+  edges the engine matches against the graph, connected implicitly through shared pattern variables
+  (§ 4.3). One per engine; it runs at most once per engine per graph (§ 7) and its binding is what a
+  UMD's criteria, a UDD's formulas, and the UHD's features are all written over.
+- **Native match:** a registry-resolved function named by `graph_match.native`, returning the
+  binding or declining the graph (§ 4.5). The engine-scoped escape hatch, distinct from a UMD's
+  pack-scoped native criterion, which reads the binding rather than producing it.
+- **Pattern variable:** a `$name` in the `nodes` block, bound by exactly one edge and read by any
+  number of others; the unit of both connectivity (§ 4.3) and publication (§ 6.1).
 - **Engine id (64-bit):** the hipDNN-facing engine identifier, derived (FNV-1a) from the UED
   `name`; what the plugin reports to the backend and what selection/diagnostics key on.
 - **Descriptor UUID `id`:** the cross-reference identifier a descriptor carries; how a KDP
@@ -853,7 +1341,10 @@ The descriptor pipeline parses untrusted input on the drop-in path, so the loade
 The examples in § 4 keep optional fields minimal. This appendix shows UEDs that populate **all**
 optional fields, which requires knowing the KMD they reference, since every `knobs` entry must
 name a field the KMD declares. § A.1 sketches only as much of the KMD as the UED depends on; the
-KMD format itself is outside this RFC's scope.
+KMD format itself is outside this RFC's scope. Both UEDs below reach their pattern through
+`graph_match` (§ 4.2) on the declarative arm (§ 4.3); its operand and result names are the ones
+`sdpa_attributes.fbs` declares through the op-schema registry (Appendix B), minus the
+`_tensor_uid` suffix.
 
 ### A.1 What a UED needs from its KMD
 
@@ -889,20 +1380,35 @@ declares (§ A.1); the notes are RFC 0010 annotations.
   "version":         "1.0",
   "id":              "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",   // UUID; KDPs name this via "engine"
   "name":            "rocke:attention_dense_fwd",              // globally-unique, scoped; hashed to the 64-bit engine id
+  "sdk_version":     "1.0",                                    // graph schema this pattern was authored against
   "heuristic":       "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",   // this engine's one UHD
   "metadata":        "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",   // the KMD (§ A.1)
+  "graph_match": {                                             // declarative arm (§ 4.3)
+    "nodes": [                                                 // the graph shape
+      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+       "operands": {"q": "$q", "k": "$k", "v": "$v",
+                    "attn_mask": "$attn_mask?",                // optional: bound, and declined by criteria
+                    "scale":     "$scale?"},
+       "results":  {"o": "$o"}}
+    ]
+  },
   "knobs":           ["block_n", "waves_per_eu", "num_persistent"],  // all are KMD field names
   "behavior_notes":  ["runtime_compilation"],
   "numerical_notes": ["tensor_core", "reduced_precision_reduction"]
 }
 ```
 
-This exposes three KMD fields as knobs and carries two note lists. A KDP joins the engine with
-`"engine": "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14"`.
+This exposes three KMD fields as knobs, carries two note lists, and binds seven symbols' worth of
+tensors — `$q`, `$k`, `$v`, `$o` unconditionally and `$attn_mask`, `$scale` optionally
+(§ 6.1). A KDP joins the engine with `"engine": "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14"`.
 
 ### A.3 A minimal engine, for contrast (all optional fields omitted)
 
-The same engine with only required fields, no knobs, no notes:
+The same engine with only required fields: no knobs, no notes, and no `sdk_version`, which then
+defaults to `1.0`. `graph_match` is optional but populated here, since an engine that omits it
+binds nothing at all (§ 4.2) and would make a poor contrast — the minimal form still states a
+graph shape, here the required operands only, which narrows the engine to graphs supplying nothing
+else the pattern would have to bind:
 
 ```jsonc
 {
@@ -910,11 +1416,19 @@ The same engine with only required fields, no knobs, no notes:
   "id":        "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",
   "name":      "rocke:attention_dense_fwd",
   "heuristic": "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
-  "metadata":  "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40"
+  "metadata":  "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",
+  "graph_match": {
+    "nodes": [
+      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+       "operands": {"q": "$q", "k": "$k", "v": "$v"}, "results": {"o": "$o"}}
+    ]
+  }
 }
 ```
 
-Both load and register identically; § A.2 only surfaces knobs and notes that § A.3 leaves unset.
+Both load and register identically; § A.2 surfaces knobs and notes that § A.3 leaves unset, and
+binds two optional operands § A.3's pattern does not name — so a criterion on `$attn_mask` resolves
+under § A.2 and is a load error under § A.3 (§ 13.2).
 
 ---
 
@@ -982,8 +1496,8 @@ build** rather than emitting a wrong registry:
 | neither flag, a **non-scalar** field (vector, sub-table, union, string) | skipped (not a UMD scalar) | — |
 
 - **Optionality** is derived, not annotated: a field with a `= null` default (an optional UID or an
-  optional scalar) is optional; it supplies the `?`-binding of [RFC 0017 § 5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)
-  and the `.present` field of § 6.1.
+  optional scalar) is optional; it supplies the `?`-binding of § 4.3 and is what the
+  `present` / `not_present` operators of § 6.1 report on.
 - **Build errors (fail closed):** `umd_input_tensor` and `umd_output_tensor` on the same field; `umd_name` without
   either flag; `umd_input_tensor`/`umd_output_tensor` on a non-integer field; a duplicate `umd_name` within one op;
   an input/output tensor whose name collides with a reserved token
@@ -1060,7 +1574,7 @@ accessor, resolves the UID against the per-graph UID→producer/consumer index
 (§ 5) to bind the tensor, and auto-binds the tensor's fields
 and the node's scalar attributes into the five namespaces
 (§ 6.1). An optional operand absent from the
-graph binds `.present = false` and is read only through a guarded reference or `value_or_default`.
+graph is reported by `not_present` and is read only through a guarded reference or `value_or_default`.
 
 ### B.6 Lockstep and failure modes
 

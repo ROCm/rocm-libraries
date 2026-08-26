@@ -40,9 +40,9 @@
   <text x="345" y="168" font-size="10" fill="#8a6d1f" font-weight="600">UMD criteria &#183; over the symbols it bound</text>
   <text x="345" y="188" font-family="Consolas, monospace" font-size="11">{"in": ["$q.dtype", ["BFLOAT16","FP8_E4M3"]]}</text>
   <text x="345" y="208" font-family="Consolas, monospace" font-size="11">{"==": ["$k.dtype", "$q.dtype"]}</text>
-  <text x="345" y="228" font-family="Consolas, monospace" font-size="11">{"shape": ["$q", [b, h, sq, head_size]]}</text>
-  <text x="345" y="248" font-family="Consolas, monospace" font-size="11">{"shape": ["$k", [b, kvh, sk, head_size]]}</text>
-  <text x="345" y="268" font-family="Consolas, monospace" font-size="11">{"==": ["$q.head_size", 128]}</text>
+  <text x="345" y="228" font-family="Consolas, monospace" font-size="11">{"==": ["$q.rank", 4]}</text>
+  <text x="345" y="248" font-family="Consolas, monospace" font-size="11">{"==": ["$q.dims[3]", 128]}</text>
+  <text x="345" y="268" font-family="Consolas, monospace" font-size="11">{"divisible": ["$q.dims[1]", "$k.dims[1]"]}</text>
   <text x="345" y="288" font-family="Consolas, monospace" font-size="11">{"==": ["$q.stride_order", [3,2,1,0]]}</text>
   <text x="345" y="308" font-family="Consolas, monospace" font-size="11">{"not_present": ["$attn_mask"]}</text>
 
@@ -54,15 +54,15 @@
   <text x="720" y="86" font-family="Consolas, monospace" font-size="11">$q $k $v $o</text>
   <text x="720" y="112" font-family="Consolas, monospace" font-size="11">$q.dims[0..3]</text>
   <text x="720" y="132" font-family="Consolas, monospace" font-size="11">$q.strides[0..3]</text>
-  <text x="720" y="158" font-family="Consolas, monospace" font-size="11">$q.batch, $q.num_heads</text>
-  <text x="720" y="178" font-family="Consolas, monospace" font-size="11">$k.kv_heads, $v.kv_heads</text>
-  <text x="720" y="198" font-family="Consolas, monospace" font-size="11">$q.seqlen_q, $k.seqlen_k</text>
-  <text x="720" y="218" font-family="Consolas, monospace" font-size="11">$q.head_size, $k.head_size</text>
+  <text x="720" y="158" font-family="Consolas, monospace" font-size="11">$q.uid, $q.rank, $q.dtype</text>
+  <text x="720" y="178" font-family="Consolas, monospace" font-size="11">$q.stride_order, $q.packed</text>
+  <text x="720" y="198" font-family="Consolas, monospace" font-size="11">$q.virtual, $q.value_f32</text>
+  <text x="720" y="218" font-family="Consolas, monospace" font-size="11">$q.is_runtime_pass_by_value</text>
   <text x="720" y="252" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.causal_mask</text>
   <text x="720" y="272" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.dropout_..</text>
   <text x="720" y="308" font-family="Consolas, monospace" font-size="10" fill="#666">read by the criteria and</text>
   <text x="720" y="326" font-family="Consolas, monospace" font-size="10" fill="#666">the UDD's grid / arg formulas</text>
 
-  <text x="460" y="388" text-anchor="middle" font-style="italic" fill="#444">The engine's pattern auto-binds every tensor, dim, stride, and attribute; dim names are per-tensor, so a cross-tensor relation is an explicit criterion.</text>
+  <text x="460" y="388" text-anchor="middle" font-style="italic" fill="#444">The engine's pattern auto-binds every tensor, dim, stride, and attribute; dims are read positionally per tensor, so a cross-tensor relation is an explicit criterion.</text>
   <text x="460" y="406" text-anchor="middle" font-style="italic" fill="#444">A native matcher, when a pack lists one, is named beside these criteria, not inside them.</text>
 </svg>

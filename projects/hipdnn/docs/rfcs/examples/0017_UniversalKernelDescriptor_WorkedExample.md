@@ -8,11 +8,12 @@ and two declines traced end to end, the dispatch geometry for both performance c
 engine, metadata schema, and two kernel packs that bind them.
 
 Descriptor semantics are defined in
-[RFC 0017: Universal Kernel Descriptors](../0017_UniversalKernelDescriptor.md), the expression
-language in
-[RFC 0018: The Descriptor Expression Language](../0018_DescriptorExpressionLanguage.md), and the
-criteria vocabulary and the binding environment the `$`-tokens below resolve against in
-[RFC 0019: The Graph Matcher](../0019_UniversalMatchDescriptor.md); this document only uses them.
+[RFC 0017: Universal Kernel Descriptors](../0017_UniversalKernelDescriptor.md), and the criteria
+vocabulary and the binding environment the `$`-tokens below resolve against in
+[RFC 0018: The UMD's Criteria: Applicability over the Engine's Binding](../0018_UniversalMatchDescriptor.md);
+this document only uses them. The expression language itself is deferred to the descriptor
+expression language follow-up, which is not yet written, so the operators below are the
+representative vocabulary RFC 0017 publishes.
 
 ## Table of Contents
 
@@ -78,9 +79,10 @@ node's scalar attributes; this descriptor carries the constraints over them.
 
 ```jsonc
 {
-  "schema": "hipdnn.umd/v1",
+  "version": "1.0",
   "id":   "9c2a9e2e-8a2a-4a52-9d1a-9d9e6e5d9f11",
   "name": "SDPA forward (attention_dense family, gfx950) criteria",
+  "scope": "kernel",   // reads $kernel.* fields, so a failure prunes only that candidate
   "criteria": {"and": [
     // Dims are positional throughout this pack. $q and $o are
     // (batch, num_heads, seqlen_q, head_size); $k and $v are
@@ -375,7 +377,7 @@ The persistent UDD, the measured ~940-970 TFLOPS path (PR #9480):
     {"name": "o_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale", "kind": "scalar", "type": "f32",
       "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa_fwd.attn_scale_value",
-                                                               "$scale"]}}}
+                                                               "$scale.value_f32"]}}}
   ]
 }
 ```
@@ -410,18 +412,18 @@ over graph dims instead of a `$kernel.*` constant) and shares the identical `arg
     {"name": "o_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale", "kind": "scalar", "type": "f32",
       "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa_fwd.attn_scale_value",
-                                                               "$scale"]}}}
+                                                               "$scale.value_f32"]}}}
   ]
 }
 ```
 
 **What the scale binding shows.** Both UDDs resolve `scale` from whichever form the graph
 supplied, with no branch in the dispatch: `value_or_default` reads the node attribute and falls
-back to the scale operand, and the matcher has already guaranteed exactly one of them is there.
-Whether that operand carries a baked value or a runtime one supplied through the variant pack is
-the launcher's business, not the descriptor's, so a runtime scale costs this pack nothing: the
-same kernarg is filled from a different place. This is the field-reference fallback form of
-`value_or_default`, distinct from the literal one §3 uses.
+back to `$scale.value_f32`, the compile-time value carried by the scale operand, and the matcher
+has already guaranteed exactly one of them is there. Whether that operand carries a baked value or
+a runtime one supplied through the variant pack is the launcher's business, not the descriptor's,
+so a runtime scale costs this pack nothing: the same kernarg is filled from a different place. This
+is the field-reference fallback form of `value_or_default`, distinct from the literal one §3 uses.
 
 The pack could accept more. The SDPA convention's implicit default (`1/sqrt(head_size)`, matching
 what both `asm_sdpa_engine`'s `SdpaFwdPlanBuilder::buildPlan` and `attention_unified`'s dispatch
@@ -493,55 +495,60 @@ adapter invocation: the builder, plus the exact build values for that instance.
   "objective": "max"
 }
 
-// --- UED: the engine, referenced by both KDPs below. It carries the pattern, so the graph shape
-//     and every symbol §2's criteria, §5's two UDDs, and the UHD above read are published here,
-//     once, by the engine that owns all three. ---
+// --- UED: the engine, referenced by both KDPs below. It carries the graph match, so the graph
+//     shape and every symbol §2's criteria, §5's two UDDs, and the UHD above read are published
+//     here, once, by the engine that owns all three. ---
 {
-  "schema":      "hipdnn.ued/v1",
+  "version":     "1.0",
   "id":          "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",
-  "name":        "attention_dense forward engine",
+  "name":        "rocke:attention_dense_fwd",   // scoped namespace:local, per RFC 0020 § 4.2
   "sdk_version": "1.0",   // the hipDNN graph schema version this pattern was authored against
   "heuristic":   "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
   "metadata":    "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",
-  "nodes": [
-    {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
-     "operands": {
-       // Required operands, named as `sdpa_attributes.fbs` names them, minus the `_tensor_uid`
-       // suffix: a pattern binds the tensor, not its uid.
-       "q": "$q", "k": "$k", "v": "$v",
 
-       // Every optional tensor the schema declares, bound here and declined by §2's criteria.
-       // The set is generic hipDNN SDPA vocabulary; none of it appears in AttentionDenseSpec.
-       "attn_mask":     "$attn_mask?",
-       "scale":         "$scale?",           // the scale-tensor form; §2's scale gate accepts it
-       "seq_len_q":     "$seq_len_q?",       // varlen: a real AttentionDenseSpec.varlen mode, not
-       "seq_len_kv":    "$seq_len_kv?",      // wired into this candidate; see Section 7.
-       "seed":          "$seed?",
-       "offset":        "$offset?",
-       "dropout_mask":  "$dropout_mask?",
-       "dropout_scale": "$dropout_scale?",
-       "page_table_k":  "$page_table_k?",
-       "page_table_v":  "$page_table_v?",
-       "block_mask":    "$block_mask?",
-       "sink_token":    "$sink_token?",
-       "descale_q":     "$descale_q?",
-       "descale_k":     "$descale_k?",
-       "descale_v":     "$descale_v?",
-       "descale_s":     "$descale_s?",
-       "scale_s":       "$scale_s?",
-       "scale_o":       "$scale_o?",
-       "stats":         "$stats?",
-       "max":           "$max?",
-       "sum_exp":       "$sum_exp?",
-       "rng_dump":      "$rng_dump?",
-       "amax_s":        "$amax_s?",
-       "amax_o":        "$amax_o?"
-     },
-     "results": {"o": "$o"}}
-  ]
-  // A prebuilt kernel serves one fixed compile-time shape, so the pattern is the entire graph and
-  // matching it is all-or-nothing: a graph carrying any other node declines the engine outright,
-  // which is what §2's `node_count` conjunct restates on the criteria side.
+  // Stage one (RFC 0020 § 4.2). The declarative arm: this engine's shape is expressible as a
+  // pattern, so it needs no `native` escape hatch (RFC 0020 § 4.5).
+  "graph_match": {
+    "nodes": [
+      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+       "operands": {
+         // Required operands, named as `sdpa_attributes.fbs` names them, minus the `_tensor_uid`
+         // suffix: a pattern binds the tensor, not its uid.
+         "q": "$q", "k": "$k", "v": "$v",
+
+         // Every optional tensor the schema declares, bound here and declined by §2's criteria.
+         // The set is generic hipDNN SDPA vocabulary; none of it appears in AttentionDenseSpec.
+         "attn_mask":     "$attn_mask?",
+         "scale":         "$scale?",           // the scale-tensor form; §2's scale gate accepts it
+         "seq_len_q":     "$seq_len_q?",       // varlen: a real AttentionDenseSpec.varlen mode, not
+         "seq_len_kv":    "$seq_len_kv?",      // wired into this candidate; see Section 7.
+         "seed":          "$seed?",
+         "offset":        "$offset?",
+         "dropout_mask":  "$dropout_mask?",
+         "dropout_scale": "$dropout_scale?",
+         "page_table_k":  "$page_table_k?",
+         "page_table_v":  "$page_table_v?",
+         "block_mask":    "$block_mask?",
+         "sink_token":    "$sink_token?",
+         "descale_q":     "$descale_q?",
+         "descale_k":     "$descale_k?",
+         "descale_v":     "$descale_v?",
+         "descale_s":     "$descale_s?",
+         "scale_s":       "$scale_s?",
+         "scale_o":       "$scale_o?",
+         "stats":         "$stats?",
+         "max":           "$max?",
+         "sum_exp":       "$sum_exp?",
+         "rng_dump":      "$rng_dump?",
+         "amax_s":        "$amax_s?",
+         "amax_o":        "$amax_o?"
+       },
+       "results": {"o": "$o"}}
+    ]
+    // A prebuilt kernel serves one fixed compile-time shape, so the pattern is the entire graph
+    // and matching it is all-or-nothing: a graph carrying any other node declines the engine
+    // outright, which is what §2's `node_count` conjunct restates on the criteria side.
+  }
 }
 
 // --- KDP 1: default grid ---
