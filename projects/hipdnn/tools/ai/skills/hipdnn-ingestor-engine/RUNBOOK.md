@@ -334,6 +334,55 @@ the binary was never invoked.
 grep HIPDNN_ENABLE_KERNEL_INGESTOR $BUILD/CMakeCache.txt
 ```
 
+### 5d. Desk-check the shipped set — no GPU required
+
+The validator proves the tree parses and cross-references. It does **not** check that
+your variant set is internally coherent or that anything will match. These four cost
+seconds and each catches a defect that otherwise surfaces at stage 8, or never:
+
+```bash
+KDP=<the shipped .kdp.json under the packed tree>
+python3 - "$KDP" <<'PY'
+import json, sys, collections
+ks = json.load(open(sys.argv[1]))["kernelDescriptors"]
+F = ["dtype","batch","head_size","num_query_heads","num_kv_heads",
+     "seqlen_q","seqlen_kv","causal","sliding_window","block_n"]   # your KMD fields
+F = [f for f in F if f in ks[0]["metadata"]]
+
+# 1. metadata must agree with the spec it claims to describe -- the matcher reads
+#    metadata, the compiler read spec; a drift between them is invisible and fatal.
+bad = [(k["name"], f) for k in ks for f in F
+       if f in k["kernel_source"].get("spec", {})
+       and str(k["kernel_source"]["spec"][f]).lower() != str(k["metadata"][f]).lower()
+       and not (isinstance(k["kernel_source"]["spec"][f], bool)
+                and int(k["kernel_source"]["spec"][f]) == k["metadata"][f])]
+print("metadata/spec drift:", bad or "none")
+
+# 2. no two kernels may share a matcher tuple on the same arch -- one is unreachable
+tups = collections.Counter(tuple(k["metadata"][f] for f in F) for k in ks)
+print("duplicate matcher tuples:", {t:c for t,c in tups.items() if c>1} or "none")
+
+# 3. every variant must be individually addressable in the archive
+toc = [k["kernel_source"].get("toc_key") for k in ks]
+print(f"kernels={len(ks)} distinct toc_key={len(set(toc))}",
+      "OK" if len(set(toc))==len(ks) else "COLLISION -- two variants share one blob")
+
+# 4. symbol names are NOT guaranteed unique. rocKE's kernel_name() may omit fields it
+#    still bakes in (attention_dense omits batch and waves_per_eu, and says so at
+#    attention_dense.py:2073-2079). Uniqueness comes from (toc_key, symbol), never the
+#    symbol alone -- do not build anything that keys on the symbol string.
+sym = [k["kernel_source"].get("symbol") for k in ks]
+print("distinct symbols:", len(set(sym)), "of", len(ks),
+      "(fewer is legal -- toc_key disambiguates)")
+PY
+```
+
+Then the check that decides whether stage 8 can pass at all: **for each test graph you
+plan to run, does a shipped variant match it?** Derive the tuple the matcher will compute
+from the graph — remembering any field that is a *derivation* rather than a copy — and
+look it up in the set above. A bundle with no matching variant is declined, and a stage-8
+run of declined graphs proves nothing while looking like a green suite.
+
 ---
 
 ## Step 6 — Implement the native pack. THIS IS THE WORK.
