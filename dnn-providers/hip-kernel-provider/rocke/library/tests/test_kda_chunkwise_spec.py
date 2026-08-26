@@ -58,6 +58,29 @@ class TestPrepSpec:
         ok, why = is_valid_spec(KdaChunkPrepSpec(), arch=ARCH)
         assert ok, why
 
+    def test_raw_default_off_matches_prepared_name(self):
+        base = KdaChunkPrepSpec().kernel_name()
+        assert "raw" not in base
+
+    def test_raw_fusion_requires_raw_inputs(self):
+        bad = KdaChunkPrepSpec(fuse_gate=True)
+        ok, why = is_valid_spec(bad, arch=ARCH)
+        assert not ok
+        assert "raw_inputs" in why
+
+    def test_raw_aligned_contract_is_admitted(self):
+        spec = KdaChunkPrepSpec(
+            raw_inputs=True,
+            fuse_qk_l2norm=True,
+            fuse_gate=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+        )
+        ok, why = is_valid_spec(spec, arch=ARCH)
+        assert ok, why
+        assert "raw" in spec.kernel_name()
+        assert spec.kernel_name() != KdaChunkPrepSpec().kernel_name()
+
     def test_lds_within_half_budget(self):
         """The prep kernel's whole optimization story is 2 workgroups per CU."""
         assert KdaChunkPrepSpec().lds_bytes() <= 160 * 1024 // 2
@@ -185,6 +208,24 @@ class TestScanSpec:
         ok, why = is_valid_scan_spec(KdaChunkScanSpec(), arch=ARCH)
         assert ok, why
 
+    @pytest.mark.parametrize(
+        "value_splits,block,scan_atom_m",
+        [(1, 256, 0), (2, 128, 0), (4, 64, 0), (8, 64, 16)],
+    )
+    def test_value_split_geometries(self, value_splits, block, scan_atom_m):
+        tile = KdaTileSpec(chunk=32, block_size=block, scan_atom_m=scan_atom_m)
+        spec = KdaChunkScanSpec(
+            tile=tile, value_splits=value_splits, token_major_io=True
+        )
+        ok, why = is_valid_scan_spec(spec, arch=ARCH)
+        assert ok, why
+        if value_splits != 1:
+            assert f"vs{value_splits}" in spec.kernel_name()
+
+    def test_token_major_flag_reaches_name(self):
+        spec = KdaChunkScanSpec(token_major_io=True)
+        assert "tm" in spec.kernel_name()
+
     def test_lds_leaves_room_for_two_workgroups(self):
         """The split path only earns back its tile traffic at 2 WG/CU.
 
@@ -201,7 +242,7 @@ class TestScanSpec:
     def test_head_v_must_match_wave_count(self):
         ok, why = is_valid_scan_spec(KdaChunkScanSpec(head_v=64), arch=ARCH)
         assert not ok
-        assert "head_v" in why
+        assert "head_v" in why or "v slice" in why
 
     def test_staging_alignment_rejections(self):
         """Staging is ds_write_b128 throughout, so both pitches stay 8-aligned."""

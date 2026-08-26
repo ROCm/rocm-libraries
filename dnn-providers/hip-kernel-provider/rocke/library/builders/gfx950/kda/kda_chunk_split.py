@@ -73,22 +73,78 @@ def make_launcher(spec: KdaChunkScanSpec) -> KernelLauncher:
     return _LAUNCHER_CACHE[key]
 
 
-def prep_spec_of(spec: KdaChunkScanSpec) -> KdaChunkPrepSpec:
+def prep_spec_of(spec: KdaChunkScanSpec, *, raw: bool = False) -> KdaChunkPrepSpec:
     """The tile builder that produces this scan's inputs.
 
     Both halves are derived from one scan spec so the tile layouts cannot drift
     apart: the scan's staging copies assume exactly the flat per-chunk layouts
     the prep kernel's global sink writes.
+
+    Raw prep keeps the default 256-thread tile builder even when the scan uses a
+    narrower block for ``value_splits > 1``.
     """
+    raw_kw = {}
+    tile = spec.tile
+    if raw:
+        raw_kw = dict(
+            raw_inputs=True,
+            fuse_qk_l2norm=True,
+            fuse_gate=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+            lower_bound=-5.0,
+        )
+        tile = KdaTileSpec(
+            chunk=spec.tile.chunk,
+            block_size=256,
+            pad_dk=spec.tile.pad_dk,
+            pad_c=spec.tile.pad_c,
+            pad_cb=spec.tile.pad_cb,
+            solve_block=spec.tile.solve_block,
+            tile_atom_m=spec.tile.tile_atom_m,
+        )
     return KdaChunkPrepSpec(
         head_k=spec.head_k,
         head_v=spec.head_v,
         dtype=spec.dtype,
-        tile=spec.tile,
+        tile=tile,
+        **raw_kw,
     )
 
 
-def run_scan(spec, ws, v, o, ht, bh, nc, h0=None, stream=None):
+def aligned_split_specs(value_splits: int = 1):
+    """Default aligned-C32 split family knobs for the ten benchmark shapes."""
+    if value_splits == 8:
+        tile = KdaTileSpec(chunk=32, block_size=64, scan_atom_m=16)
+    elif value_splits == 4:
+        tile = KdaTileSpec(chunk=32, block_size=64)
+    elif value_splits == 2:
+        tile = KdaTileSpec(chunk=32, block_size=128)
+    else:
+        tile = KdaTileSpec(chunk=32, block_size=256)
+    scan = KdaChunkScanSpec(
+        tile=tile,
+        value_splits=value_splits,
+        token_major_io=True,
+    )
+    return scan, prep_spec_of(scan, raw=True)
+
+
+def run_scan(
+    spec,
+    ws,
+    v,
+    o,
+    ht,
+    bh,
+    nc,
+    h0=None,
+    stream=None,
+    *,
+    batch=None,
+    heads=None,
+    tseq=None,
+):
     """Launch the scan over tiles already materialized by the prep kernel."""
     launcher = make_launcher(spec)
     if stream is None:
@@ -98,33 +154,199 @@ def run_scan(spec, ws, v, o, ht, bh, nc, h0=None, stream=None):
         block=(spec.tile.block_size, 1, 1),
         stream=stream,
     )
-    launcher(
-        {
-            "a_ptr": ws["a"],
-            "gk_ptr": ws["gk"],
-            "gq_ptr": ws["gq"],
-            "aqk_ptr": ws["aqk"],
-            "kt_ptr": ws["kt"],
-            "dec_ptr": ws["dec"],
-            "v_ptr": v,
-            "o_ptr": o,
-            # unread when the kernel was built with has_initial_state=False
-            "h0_ptr": ht if h0 is None else h0,
-            "ht_ptr": ht,
-            "nc": int(nc),
-        },
-        config=cfg,
-    )
+    args = {
+        "a_ptr": ws["a"],
+        "gk_ptr": ws["gk"],
+        "gq_ptr": ws["gq"],
+        "aqk_ptr": ws["aqk"],
+        "kt_ptr": ws["kt"],
+        "dec_ptr": ws["dec"],
+        "v_ptr": v,
+        "o_ptr": o,
+        # unread when the kernel was built with has_initial_state=False
+        "h0_ptr": ht if h0 is None else h0,
+        "ht_ptr": ht,
+        "nc": int(nc),
+    }
+    if spec.token_major_io:
+        args.update({"batch": int(batch), "heads": int(heads), "tseq": int(tseq)})
+    launcher(args, config=cfg)
 
 
-def run_split(spec, q, k, g, beta, v, o, ws, ht, scale, bh, nc, h0=None):
+def run_split(
+    spec,
+    q,
+    k,
+    g,
+    beta,
+    v,
+    o,
+    ws,
+    ht,
+    scale,
+    bh,
+    nc,
+    h0=None,
+    *,
+    raw=False,
+    batch=None,
+    heads=None,
+    tseq=None,
+    a_log=None,
+    dt_bias=None,
+):
     """Both kernels, back to back on one stream.
 
     No fence between them: they run in FIFO order on the same stream, so the
     scan already sees the tiles the prep kernel wrote.
     """
-    prep_mod.run_prep(prep_spec_of(spec), q, k, g, beta, ws, scale)
-    run_scan(spec, ws, v, o, ht, bh, nc, h0=h0)
+    pspec = prep_spec_of(spec, raw=raw)
+    prep_mod.run_prep(
+        pspec,
+        q,
+        k,
+        g,
+        beta,
+        ws,
+        scale,
+        batch=batch,
+        heads=heads,
+        tseq=tseq,
+        nc=nc,
+        a_log=a_log,
+        dt_bias=dt_bias,
+    )
+    run_scan(
+        spec,
+        ws,
+        v,
+        o,
+        ht,
+        bh,
+        nc,
+        h0=h0,
+        batch=batch,
+        heads=heads,
+        tseq=tseq,
+    )
+
+
+def run_raw_split(
+    spec,
+    q,
+    k,
+    v,
+    g,
+    beta,
+    a_log,
+    dt_bias,
+    o,
+    ht,
+    scale,
+    batch,
+    heads,
+    tseq,
+    h0=None,
+):
+    """Aligned raw token-major split path: fused prep + value-split scan."""
+    C = spec.tile.chunk
+    BH, NC = batch * heads, tseq // C
+    nt = BH * NC
+    ws = prep_mod.alloc_tiles(nt, prep_spec_of(spec, raw=True))
+    run_split(
+        spec,
+        q,
+        k,
+        g,
+        beta,
+        v,
+        o,
+        ws,
+        ht,
+        scale,
+        BH,
+        NC,
+        h0=h0,
+        raw=True,
+        batch=batch,
+        heads=heads,
+        tseq=tseq,
+        a_log=a_log,
+        dt_bias=dt_bias,
+    )
+    return ws
+
+
+def launch_raw(
+    spec,
+    q,
+    k,
+    v,
+    g,
+    beta,
+    a_log,
+    dt_bias,
+    h0=None,
+):
+    """Token-major [B,T,H,D] in/out with V-first final state."""
+    B, T, H, DK = q.shape
+    DV = v.shape[-1]
+    o = torch.empty_like(v)
+    ht = torch.zeros(B * H, DV, DK, dtype=torch.float32, device=q.device)
+    h0t = None
+    if h0 is not None:
+        h0t = h0.transpose(-1, -2).contiguous().view(B * H, DV, DK)
+    run_raw_split(
+        spec,
+        q,
+        k,
+        v,
+        g,
+        beta,
+        a_log,
+        dt_bias,
+        o,
+        ht,
+        DK**-0.5,
+        B,
+        H,
+        T,
+        h0=h0t,
+    )
+    return o, ht.view(B, H, DV, DK).transpose(-1, -2)
+
+
+def ref_aligned_raw(
+    q,
+    k,
+    v,
+    g,
+    beta,
+    a_log,
+    dt_bias,
+    scale,
+    lower_bound=-5.0,
+    h0=None,
+):
+    """Float64 oracle for the aligned raw contract (Aiter preprocessing + KDA)."""
+    import torch.nn.functional as F
+
+    qn = F.normalize(q.float(), dim=-1)
+    kn = F.normalize(k.float(), dim=-1)
+    B, T, H, DK = q.shape
+    db = dt_bias.view(H, DK)
+    al = a_log.view(H)
+    gf = g.float()
+    gate = lower_bound * torch.sigmoid(
+        torch.exp(al)[None, None, :, None] * (gf + db[None, None, :, :])
+    )
+    bb = torch.sigmoid(beta.float())
+    qbh = qn.permute(0, 2, 1, 3).to(torch.bfloat16)
+    kbh = kn.permute(0, 2, 1, 3).to(torch.bfloat16)
+    vbh = v.permute(0, 2, 1, 3)
+    gbh = gate.permute(0, 2, 1, 3)
+    bbh = bb.permute(0, 2, 1)
+    return ref_token_serial(qbh, kbh, vbh, gbh, bbh, scale, h0=h0)
 
 
 # ---------------------------------------------------------------------

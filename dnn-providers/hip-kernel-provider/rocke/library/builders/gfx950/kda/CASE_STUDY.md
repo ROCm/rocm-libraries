@@ -225,3 +225,40 @@ kernels run in a pipeline — the scan consumes the tiles on the same stream, so
 FIFO order already covers the dependency. At short sequences that sync is a
 large fraction of the measurement, and an early version of these benchmarks
 understated the kernels because of it.
+
+## 8. Aligned raw split path (stack-gap closure)
+
+The production gap on equal-length C=32 shapes was traced to **host
+preprocessing and layout packing**, not to the core recurrence math. The aligned
+closure keeps the ten-shape contract fixed (`bf16` token-major I/O, `DK=DV=128`,
+`C=32`, `Tseq % 32 == 0`, V-first fp32 final state) and adds a **default-off**
+raw producer on the split path:
+
+- `KdaChunkPrepSpec.raw_inputs` plus fused `q/k` L2 norm, `lower_bound *
+  sigmoid(exp(A_log) * (g + dt_bias))`, and `sigmoid(beta)` at the load/commit
+  seam. Prepared chunk-packed signatures stay byte-identical when raw mode is off.
+- `KdaChunkScanSpec.value_splits in {1,2,4,8}` launches `(BH * value_splits)`
+  workgroups with disjoint V/state slices, mirroring FlashKDA K2's independent
+  `ceil(V/BW)` grid dimension.
+- Token-major scan I/O removes the head-major pack from the hot path.
+
+### Step 0 sweep space (methodology only)
+
+Batch-compile the Cartesian product of legal `value_splits`, prep/scan tile
+`block_size`, `scan_atom_m`, padding knobs, and `solve_block`, then correctness-
+prune against the aligned float64 oracle (`kda_chunk_split.ref_aligned_raw`) and
+the token-serial walk. Survivors are timed with identical event windows and at
+least five median blocks via `/workspace/kda-ref/bench_apples.py` and
+`/workspace/kda-ref/sweep_aligned_split.py` (results recorded off-repo per
+compliance).
+
+Before profiling, inspect HSACO resources and ISA for each survivor: VGPR/SGPR/
+LDS occupancy, vector load/store widths, barrier/wait counts, shuffle reductions,
+and transcendental growth on the raw producer. Profile one **underfilled**
+`BH=12` shape and one filled shape to separate grid starvation, transform cost,
+LDS stalls, and lost prefetch overlap. Revert levers that do not move the
+bottleneck named by ATT.
+
+Do not hard-code a `value_splits` cutover until the sweep shows a stable
+`BH/CU` boundary. Raw monolithic fusion stays gated until the best raw split
+path misses the end-to-end target on filled shapes.

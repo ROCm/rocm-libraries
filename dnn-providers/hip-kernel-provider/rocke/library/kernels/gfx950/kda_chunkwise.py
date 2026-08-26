@@ -83,8 +83,11 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from rocke.core.ir import BF16, F32, I8, I32, IRBuilder, KernelDef, PtrType
+from rocke.helpers.activations import _sigmoid_via_exp2
 from rocke.helpers.atoms import MfmaAtom
 from rocke.helpers.spec import SignatureBuilder, kernel_name_join
+
+_RAW_VALUE_SPLITS = (1, 2, 4, 8)
 
 # Cumulative log decay is kept in the log2 domain so exp2 is a bare v_exp_f32.
 LOG2E = 1.4426950408889634
@@ -316,6 +319,14 @@ class KdaChunkPrepSpec:
     dtype: str = "bf16"
     tile: KdaTileSpec = KdaTileSpec()
     name: str = "rocke_kda_chunk_prep"
+    # Default-off raw token-major path: inputs are [B,T,H,D] / [B,T,H] and the
+    # producer may fuse the Aiter-equivalent q/k L2 norm, gate, and beta sigmoid.
+    raw_inputs: bool = False
+    fuse_qk_l2norm: bool = False
+    fuse_gate: bool = False
+    fuse_beta_sigmoid: bool = False
+    has_dt_bias: bool = False
+    lower_bound: float = -5.0
 
     @property
     def atom(self) -> MfmaAtom:
@@ -352,13 +363,26 @@ class KdaChunkPrepSpec:
         )
 
     def kernel_name(self) -> str:
-        return kernel_name_join(
+        parts = [
             self.name,
             f"dk{self.head_k}",
             f"dv{self.head_v}",
             self.dtype,
             *self.tile.name_parts(),
-        )
+        ]
+        if self.raw_inputs:
+            parts.append("raw")
+            if self.fuse_qk_l2norm:
+                parts.append("nl2")
+            if self.fuse_gate:
+                parts.append("fg")
+            if self.fuse_beta_sigmoid:
+                parts.append("fb")
+            if self.has_dt_bias:
+                parts.append("db")
+            if self.lower_bound != -5.0:
+                parts.append(f"lb{self.lower_bound:g}")
+        return kernel_name_join(*parts)
 
 
 def _scan_atom(tile: KdaTileSpec, default: MfmaAtom) -> MfmaAtom:
@@ -380,6 +404,22 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
         return False, f"kda_chunk_prep is gfx950-only (got {arch})"
     if spec.dtype not in _DTYPE_IR:
         return False, f"unsupported dtype {spec.dtype!r} (bf16 only)"
+
+    if spec.has_dt_bias and not spec.fuse_gate:
+        return False, "has_dt_bias requires fuse_gate"
+    for flag, name in (
+        (spec.fuse_qk_l2norm, "fuse_qk_l2norm"),
+        (spec.fuse_gate, "fuse_gate"),
+        (spec.fuse_beta_sigmoid, "fuse_beta_sigmoid"),
+    ):
+        if flag and not spec.raw_inputs:
+            return False, f"{name} requires raw_inputs=True"
+    if spec.raw_inputs:
+        if not (spec.fuse_qk_l2norm or spec.fuse_gate or spec.fuse_beta_sigmoid):
+            return False, (
+                "raw_inputs requires at least one fused preprocessing flag "
+                "(fuse_qk_l2norm, fuse_gate, fuse_beta_sigmoid)"
+            )
 
     t = spec.tile
     if t.tile_atom_m not in _SCAN_ATOMS:
@@ -462,6 +502,110 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
     return True, "ok"
 
 
+def _reduce16_fadd(b: IRBuilder, v):
+    """Sum ``v`` across the 16-lane row subgroup (XOR butterfly)."""
+    for mask in (1, 2, 4, 8):
+        v = b.fadd(v, b.warp_shuffle_xor(v, mask))
+    return v
+
+
+def _l2norm_scale8(b: IRBuilder, vals8):
+    """One in-register L2 norm over eight bf16-as-f32 values in a 16-lane group."""
+    ss = b.const_f32(0.0)
+    for x in vals8:
+        ss = b.fadd(ss, b.fmul(x, x))
+    ss = _reduce16_fadd(b, ss)
+    return b.rsqrt(b.fadd(ss, b.const_f32(1e-6)))
+
+
+def _apply_gate_fused(
+    b: IRBuilder,
+    raw_g,
+    a_log,
+    dt_bias,
+    head,
+    col,
+    lower_bound,
+    *,
+    has_dt_bias: bool,
+    dk: int,
+):
+    """``lower_bound * sigmoid(exp(A_log[h]) * (g + dt_bias[h,d]))``."""
+    g = b.cast_to_f32(raw_g)
+    if has_dt_bias:
+        g = b.fadd(
+            g,
+            b.global_load_f32(dt_bias, b.add(b.mul(head, b.const_i32(dk)), col)),
+        )
+    a = b.global_load_f32(a_log, head)
+    x = b.fmul(b.exp2(b.fmul(b.const_f32(LOG2E), a)), g)
+    return b.fmul(b.const_f32(lower_bound), _sigmoid_via_exp2(b, x))
+
+
+class _RawTokenAddr:
+    """Token-major [B,T,H,D] / [B,T,H] addressing for one chunk tile."""
+
+    def __init__(
+        self, b: IRBuilder, *, heads, tseq, nc, chunk, dk, a_log=None, dt_bias=None
+    ):
+        self.b = b
+        self.H = heads
+        self.T = tseq
+        self.nc = nc
+        self.C = chunk
+        self.DK = dk
+        self.a_log = a_log
+        self.dt_bias = dt_bias
+        self.stride_token_qk = b.mul(heads, b.const_i32(dk))
+        self.stride_batch_qk = b.mul(tseq, self.stride_token_qk)
+        self.stride_token_beta = heads
+        self.stride_batch_beta = b.mul(tseq, heads)
+
+    def _parts(self, tile, row):
+        b = self.b
+        bh = b.div(tile, self.nc)
+        chunk_n = b.mod(tile, self.nc)
+        batch = b.div(bh, self.H)
+        head = b.mod(bh, self.H)
+        token = b.add(b.mul(chunk_n, b.const_i32(self.C)), row)
+        return batch, head, token
+
+    def qk_off(self, tile, row, col):
+        b = self.b
+        batch, head, token = self._parts(tile, row)
+        return b.add(
+            b.add(
+                b.mul(batch, self.stride_batch_qk),
+                b.mul(token, self.stride_token_qk),
+            ),
+            b.add(b.mul(head, b.const_i32(self.DK)), col),
+        )
+
+    def beta_off(self, tile, row):
+        b = self.b
+        batch, head, token = self._parts(tile, row)
+        return b.add(
+            b.add(
+                b.mul(batch, self.stride_batch_beta),
+                b.mul(token, self.stride_token_beta),
+            ),
+            head,
+        )
+
+    def v_off(self, tile, chunk_row, ev, ev_dim):
+        b = self.b
+        batch, head, token = self._parts(tile, chunk_row)
+        stride_token = b.mul(self.H, b.const_i32(ev_dim))
+        stride_batch = b.mul(self.T, stride_token)
+        return b.add(
+            b.add(
+                b.mul(batch, stride_batch),
+                b.mul(token, stride_token),
+            ),
+            b.add(b.mul(head, b.const_i32(ev_dim)), ev),
+        )
+
+
 class _ChunkCtx:
     """Everything the per-chunk tile emitter needs that does not depend on
     *which* chunk is being built: the LDS tiles, the thread/lane decomposition,
@@ -478,7 +622,8 @@ class _ChunkCtx:
         t = spec.tile
         self.b = b
         self.spec = spec
-        self.q_ptr, self.k_ptr, self.g_ptr, self.beta_ptr, self.scale = inputs
+        self.q_ptr, self.k_ptr, self.g_ptr, self.beta_ptr, self.scale = inputs[:5]
+        self.raw = inputs[5] if len(inputs) > 5 else None
         self.C = C = t.chunk
         self.DK = DK = spec.head_k
         self.BLOCK = t.block_size
@@ -745,7 +890,9 @@ def _emit_stage_issue(ctx: _ChunkCtx, ch):
     ELEM = ctx.ELEM
     tid = ctx.tid
     tile_cd, tile_c = ch.cd, ch.c
+    tile = ch.tile
     staged = []
+    raw = ctx.raw
 
     for i in range((N_CD + 4 * BLOCK - 1) // (4 * BLOCK)):
         vidx = b.add(tid, b.const_i32(i * BLOCK))
@@ -755,16 +902,24 @@ def _emit_stage_issue(ctx: _ChunkCtx, ch):
             valid = b.cmp_gt(b.const_i32(N_CD // 4), vidx)
             safe = b.select(valid, vidx, b.const_i32(N_CD // 4 - 1))
         off = b.mul(safe, b.const_i32(4))
-        staged.append(
-            (
-                ctx.g_lds,
-                b.div(off, b.const_i32(DK)),
-                b.mod(off, b.const_i32(DK)),
-                b.global_load_vN(ctx.g_ptr, b.add(tile_cd, off), F32, 4),
-                4,
-                valid,
+        row = b.div(off, b.const_i32(DK))
+        col4 = b.mod(off, b.const_i32(DK))
+        if raw is not None:
+            gidx = raw.qk_off(tile, row, col4)
+            gval = b.global_load_vN(ctx.g_ptr, gidx, ELEM, 4)
+            staged.append((ctx.g_lds, row, col4, gval, 4, valid, "g"))
+        else:
+            staged.append(
+                (
+                    ctx.g_lds,
+                    row,
+                    col4,
+                    b.global_load_vN(ctx.g_ptr, b.add(tile_cd, off), F32, 4),
+                    4,
+                    valid,
+                    None,
+                )
             )
-        )
     for i in range((N_CD + 8 * BLOCK - 1) // (8 * BLOCK)):
         vidx = b.add(tid, b.const_i32(i * BLOCK))
         valid = None
@@ -775,39 +930,73 @@ def _emit_stage_issue(ctx: _ChunkCtx, ch):
         off = b.mul(safe, b.const_i32(8))
         row = b.div(off, b.const_i32(DK))
         col = b.mod(off, b.const_i32(DK))
-        gidx = b.add(tile_cd, off)
-        staged.append(
-            (
-                ctx.k_lds,
-                row,
-                col,
-                b.global_load_vN(ctx.k_ptr, gidx, ELEM, 8),
-                8,
-                valid,
-            )
-        )
-        staged.append(
-            (
-                ctx.q_lds,
-                row,
-                col,
-                b.global_load_vN(ctx.q_ptr, gidx, ELEM, 8),
-                8,
-                valid,
-            )
-        )
-    bcol = b.select(b.cmp_gt(b.const_i32(C), tid), tid, b.const_i32(C - 1))
-    beta = b.global_load_f32(ctx.beta_ptr, b.add(tile_c, bcol))
-    return staged, beta
+        if raw is not None:
+            gidx = raw.qk_off(tile, row, col)
+            kval = b.global_load_vN(ctx.k_ptr, gidx, ELEM, 8)
+            qval = b.global_load_vN(ctx.q_ptr, gidx, ELEM, 8)
+        else:
+            gidx = b.add(tile_cd, off)
+            kval = b.global_load_vN(ctx.k_ptr, gidx, ELEM, 8)
+            qval = b.global_load_vN(ctx.q_ptr, gidx, ELEM, 8)
+        staged.append((ctx.k_lds, row, col, kval, 8, valid, "k"))
+        staged.append((ctx.q_lds, row, col, qval, 8, valid, "q"))
+    if raw is not None:
+        bcol = b.select(b.cmp_gt(b.const_i32(C), tid), tid, b.const_i32(C - 1))
+        beta = b.global_load_f32(ctx.beta_ptr, raw.beta_off(tile, bcol))
+    else:
+        bcol = b.select(b.cmp_gt(b.const_i32(C), tid), tid, b.const_i32(C - 1))
+        beta = b.global_load_f32(ctx.beta_ptr, b.add(tile_c, bcol))
+    return staged, beta, tile
 
 
 def _emit_stage_commit(ctx: _ChunkCtx, issued) -> None:
     """Write what :func:`_emit_stage_issue` loaded into the staging tiles."""
     b = ctx.b
-    staged, beta = issued
-    for lds, row, col, value, n, valid in staged:
+    staged, beta, tile = issued
+    spec = ctx.spec
+    raw = ctx.raw
+    bh = None
+    head = None
+    if raw is not None:
+        bh = b.div(tile, raw.nc)
+        head = b.mod(bh, raw.H)
+
+    for lds, row, col, value, n, valid, kind in staged:
         with b.scf_if(valid) if valid is not None else nullcontext():
-            _st(b, lds, row, col, value=value, n=n)
+            if kind == "g" and raw is not None and spec.fuse_gate:
+                for j in range(4):
+                    raw_g = b.vec_extract(value, j)
+                    col_j = b.add(col, b.const_i32(j))
+                    gate = _apply_gate_fused(
+                        b,
+                        raw_g,
+                        raw.a_log,
+                        raw.dt_bias,
+                        head,
+                        col_j,
+                        spec.lower_bound,
+                        has_dt_bias=spec.has_dt_bias,
+                        dk=ctx.DK,
+                    )
+                    _st(b, lds, row, col_j, value=gate, n=1)
+            elif kind in ("k", "q") and raw is not None and spec.fuse_qk_l2norm:
+                vals = [b.cast_to_f32(b.vec_extract(value, j)) for j in range(8)]
+                inv = _l2norm_scale8(b, vals)
+                vals = [b.fmul(v, inv) for v in vals]
+                _st(
+                    b,
+                    lds,
+                    row,
+                    col,
+                    value=b.vec_pack(
+                        [b.cast_f32_to(v, ctx.ELEM) for v in vals], ctx.ELEM
+                    ),
+                    n=8,
+                )
+            else:
+                _st(b, lds, row, col, value=value, n=n)
+    if spec.fuse_beta_sigmoid and raw is not None:
+        beta = _sigmoid_via_exp2(b, beta)
     with b.scf_if(b.cmp_gt(b.const_i32(ctx.C), ctx.tid)):
         _st(b, ctx.beta_lds, ctx.tid, value=beta, n=1)
 
@@ -1391,12 +1580,14 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
 
     Kernel signature::
 
-        (q, k: ptr<bf16>,      # [NT, C * DK]
-         g:    ptr<f32>,       # [NT, C * DK]  per-channel log decay
+        (q, k: ptr<bf16>,      # [NT, C * DK] or raw [B,T,H,D]
+         g:    ptr<f32>,       # [NT, C * DK] per-channel log decay, or raw bf16
          beta: ptr<f32>,       # [NT, C]
          a_out, gk_out, gq_out, aqk_out, kt_out: ptr<bf16>,
          dec_out: ptr<f32>,    # [NT, DK]
          scale: f32)
+
+    Raw mode adds ``a_log``, optional ``dt_bias``, and ``batch``/``heads``/``tseq``/``nc``.
 
     Grid ``(NT, 1, 1)`` where ``NT = BH * NC``; block ``(block_size, 1, 1)``.
     """
@@ -1405,17 +1596,19 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
         raise ValueError(f"invalid kda_chunk_prep spec for {arch}: {why}")
 
     ELEM = _DTYPE_IR[spec.dtype]
+    t = spec.tile
     b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = spec.tile.block_size
-    if spec.tile.waves_per_eu:
+    b.kernel.attrs["max_workgroup_size"] = t.block_size
+    if t.waves_per_eu:
         b.kernel.attrs["waves_per_eu"] = (
-            spec.tile.waves_per_eu,
-            spec.tile.waves_per_eu,
+            t.waves_per_eu,
+            t.waves_per_eu,
         )
 
     q_ptr = b.param("q_ptr", PtrType(ELEM, "global"), readonly=True, align=16)
     k_ptr = b.param("k_ptr", PtrType(ELEM, "global"), readonly=True, align=16)
-    g_ptr = b.param("g_ptr", PtrType(F32, "global"), readonly=True, align=16)
+    g_elem = ELEM if spec.raw_inputs else F32
+    g_ptr = b.param("g_ptr", PtrType(g_elem, "global"), readonly=True, align=16)
     beta_ptr = b.param("beta_ptr", PtrType(F32, "global"), readonly=True, align=4)
     a_ptr = b.param("a_ptr", PtrType(ELEM, "global"), writeonly=True, align=16)
     gk_ptr = b.param("gk_ptr", PtrType(ELEM, "global"), writeonly=True, align=16)
@@ -1425,7 +1618,28 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
     dec_ptr = b.param("dec_ptr", PtrType(F32, "global"), writeonly=True, align=16)
     scale = b.param("scale", F32)
 
-    ctx = _ChunkCtx(b, spec, (q_ptr, k_ptr, g_ptr, beta_ptr, scale))
+    raw = None
+    if spec.raw_inputs:
+        a_log_ptr = b.param("a_log_ptr", PtrType(F32, "global"), readonly=True, align=4)
+        dt_bias_ptr = b.param(
+            "dt_bias_ptr", PtrType(F32, "global"), readonly=True, align=4
+        )
+        batch = b.param("batch", I32)
+        heads = b.param("heads", I32)
+        tseq = b.param("tseq", I32)
+        nc = b.param("nc", I32)
+        raw = _RawTokenAddr(
+            b,
+            heads=heads,
+            tseq=tseq,
+            nc=nc,
+            chunk=t.chunk,
+            dk=spec.head_k,
+            a_log=a_log_ptr,
+            dt_bias=dt_bias_ptr,
+        )
+
+    ctx = _ChunkCtx(b, spec, (q_ptr, k_ptr, g_ptr, beta_ptr, scale, raw))
     sink = _GlobalTileSink(a_ptr, gk_ptr, gq_ptr, aqk_ptr, kt_ptr, dec_ptr)
     _emit_chunk_tiles(ctx, b.block_id_x(), sink)
 
@@ -1680,11 +1894,18 @@ class _ScanCtx:
         dec_is_log: bool,
         ex2=None,
         v_lds=None,
+        v_row_base=0,
+        ev_stride=None,
+        io=None,
     ):
         self.b = b
         self.ex2 = ex2
         self.atom = atom
-        self.C, self.DK, self.EV = chunk, head_k, head_v
+        self.C, self.DK = chunk, head_k
+        self.EV = head_v
+        self.EV_stride = head_v if ev_stride is None else ev_stride
+        self.v_row_base = v_row_base if isinstance(v_row_base, int) else v_row_base
+        self.io = io
         self.BLOCK = block_size
         self.ELEM = elem
         (
@@ -1723,6 +1944,35 @@ class _ScanCtx:
         )
         # This wave's band of S^T rows.
         self.wrow = b.mul(b.div(tid, b.const_i32(64)), b.const_i32(atom.m))
+
+    def cv_base(self, tile):
+        """Flat chunk base for v/o in the chunk-packed layout."""
+        return self.b.mul(tile, self.b.const_i32(self.C * self.EV_stride))
+
+    def global_ev(self, local_ev):
+        b = self.b
+        if isinstance(self.v_row_base, int):
+            if self.v_row_base == 0:
+                return local_ev
+            return b.add(b.const_i32(self.v_row_base), local_ev)
+        return b.add(self.v_row_base, local_ev)
+
+    def v_global(self, tile, chunk_row, local_ev):
+        """Absolute index of one v/o element."""
+        b = self.b
+        gev = self.global_ev(local_ev)
+        if self.io is not None:
+            return self.io.v_off(tile, chunk_row, gev, self.EV_stride)
+        return b.add(
+            self.cv_base(tile),
+            b.add(b.mul(chunk_row, b.const_i32(self.EV_stride)), gev),
+        )
+
+    def o_global(self, tile, chunk_row, ev_col, v_row):
+        """Absolute index of one output element (chunk row x v channel)."""
+        b = self.b
+        local_ev = b.add(v_row, ev_col)
+        return self.v_global(tile, chunk_row, local_ev)
 
     def slot(self, i):
         """Slot ``i``'s (row, col) inside the atom's output tile.
@@ -1839,7 +2089,6 @@ def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = N
     ELEM = sc.ELEM
     NC_T = sc.NC_T
     srow = b.add(wrow, lane_m)  # this wave's S^T operand row
-    cv_base = b.mul(tile, b.const_i32(sc.N_CV))
 
     # Issued before anything else in the scan so the whole body covers the HBM
     # latency; the staging tiles are already dead by here.
@@ -1905,10 +2154,7 @@ def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = N
             else:
                 vvec = b.global_load_vN(
                     sc.v_ptr,
-                    b.add(
-                        cv_base,
-                        b.add(b.mul(cg, b.const_i32(sc.EV)), b.add(wrow, row0)),
-                    ),
+                    sc.v_global(tile, cg, b.add(wrow, row0)),
                     ELEM,
                     4,
                 )
@@ -1973,13 +2219,7 @@ def _emit_scan_body(sc: _ScanCtx, state, tile, *, prefetch: "_InputPrefetch" = N
             row, col = sc.slot(i)
             b.global_store_vN(
                 sc.o_ptr,
-                b.add(
-                    cv_base,
-                    b.add(
-                        b.mul(cidx(jt, row), b.const_i32(sc.EV)),
-                        b.add(wrow, col),
-                    ),
-                ),
+                sc.o_global(tile, cidx(jt, row), col, wrow),
                 b.cast_f32_to(b.vec_extract(acc_o, i), ELEM),
                 1,
             )
@@ -2233,6 +2473,11 @@ class KdaChunkScanSpec:
     store_final_state: bool = True
     # Workgroups resident per CU that the LDS request must leave room for.
     min_occupancy: int = 2
+    # Split the v extent across ``value_splits`` independent workgroups per
+    # (batch, head), mirroring FlashKDA K2's ``ceil(V/BW)`` grid dimension.
+    value_splits: int = 1
+    # Read/write token-major [B,T,H,D] tensors instead of chunk-packed views.
+    token_major_io: bool = False
     name: str = "rocke_kda_chunk_scan"
 
     @property
@@ -2265,6 +2510,7 @@ class KdaChunkScanSpec:
         """
         t = self.tile
         C, DK, EV = t.chunk, self.head_k, self.head_v
+        ev = EV // self.value_splits
         PDK, PCB = DK + t.pad_dk, C + t.pad_cb
         return (
             2 * C * PDK  # gk_s   bf16 (C x DK)
@@ -2272,22 +2518,28 @@ class KdaChunkScanSpec:
             + 2 * C * PCB  # a_s   bf16 (C x C)
             + 2 * C * PCB  # aqk_s bf16 (C x C)
             + 2 * DK * PCB  # kt_s bf16 (DK x C)
-            + 2 * EV * PDK  # stb_s bf16 mirror of S^T
-            + 2 * EV * PCB  # vn_s  bf16 (EV x C)
+            + 2 * ev * PDK  # stb_s bf16 mirror of S^T
+            + 2 * ev * PCB  # vn_s  bf16 (EV x C)
             + 4 * DK  # dec_s   fp32 (DK)
         )
 
     def kernel_name(self) -> str:
         t = self.tile
-        return kernel_name_join(
+        parts = [
             self.name,
             f"dk{self.head_k}",
             f"dv{self.head_v}",
             self.dtype,
             f"c{t.chunk}",
             f"b{t.block_size}",
-            *((f"sa{t.scan_atom_m}",) if t.scan_atom_m else ()),
-        )
+        ]
+        if t.scan_atom_m:
+            parts.append(f"sa{t.scan_atom_m}")
+        if self.value_splits != 1:
+            parts.append(f"vs{self.value_splits}")
+        if self.token_major_io:
+            parts.append("tm")
+        return kernel_name_join(*parts)
 
 
 def is_valid_scan_spec(
@@ -2299,8 +2551,30 @@ def is_valid_scan_spec(
     if spec.dtype not in _DTYPE_IR:
         return False, f"unsupported dtype {spec.dtype}"
 
+    if spec.value_splits not in _RAW_VALUE_SPLITS:
+        return False, (
+            f"value_splits must be one of {_RAW_VALUE_SPLITS}, "
+            f"got {spec.value_splits}"
+        )
+    if spec.head_v % spec.value_splits:
+        return False, (
+            f"head_v ({spec.head_v}) must divide evenly by value_splits "
+            f"({spec.value_splits})"
+        )
+    ev_slice = spec.head_v // spec.value_splits
+    if ev_slice % spec.scan_atom.n:
+        return False, (
+            f"v slice ({ev_slice}) must divide scan atom n ({spec.scan_atom.n})"
+        )
+    num_waves = spec.tile.num_waves
+    if ev_slice != num_waves * spec.scan_atom.m:
+        return False, (
+            f"v slice ({ev_slice}) must equal waves ({num_waves}) * scan atom m "
+            f"({spec.scan_atom.m}); adjust block_size, scan_atom_m, or value_splits"
+        )
+
     t = spec.tile
-    ok, why = _check_scan_partition(spec.scan_atom, t, spec.head_k, spec.head_v)
+    ok, why = _check_scan_partition(spec.scan_atom, t, spec.head_k, ev_slice)
     if not ok:
         return False, why
     # Staging is 128-bit per thread throughout, so both padded row pitches have
@@ -2362,6 +2636,7 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
 
     t = spec.tile
     C, DK, EV = t.chunk, spec.head_k, spec.head_v
+    ev_slice = EV // spec.value_splits
     BLOCK = t.block_size
     PDK, PCB = DK + t.pad_dk, C + t.pad_cb
     ELEM = _DTYPE_IR[spec.dtype]
@@ -2384,24 +2659,47 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
     ht_ptr = b.param("ht_ptr", PtrType(F32, "global"), writeonly=True, align=16)
     nc = b.param("nc", I32)
 
+    io = None
+    if spec.token_major_io:
+        batch = b.param("batch", I32)
+        heads = b.param("heads", I32)
+        tseq = b.param("tseq", I32)
+        io = _RawTokenAddr(
+            b,
+            heads=heads,
+            tseq=tseq,
+            nc=nc,
+            chunk=C,
+            dk=DK,
+        )
+
     gk_lds = b.smem_alloc(ELEM, [C, PDK], "gk_s")
     gq_lds = b.smem_alloc(ELEM, [C, PDK], "gq_s")
     ab_lds = b.smem_alloc(ELEM, [C, PCB], "a_s")
     aqb_lds = b.smem_alloc(ELEM, [C, PCB], "aqk_s")
     kt_lds = b.smem_alloc(ELEM, [DK, PCB], "kt_s")
     dec_lds = b.smem_alloc(F32, [DK], "dec_s")
-    stb_lds = b.smem_alloc(ELEM, [EV, PDK], "stb_s")
-    vn_lds = b.smem_alloc(ELEM, [EV, PCB], "vn_s")
+    stb_lds = b.smem_alloc(ELEM, [ev_slice, PDK], "stb_s")
+    vn_lds = b.smem_alloc(ELEM, [ev_slice, PCB], "vn_s")
 
     tid = b.thread_id_x()
     lane = b.mod(tid, b.const_i32(64))
+
+    wg = b.block_id_x()
+    if spec.value_splits == 1:
+        bh = wg
+        v_row_base = b.const_i32(0)
+    else:
+        bh = b.div(wg, b.const_i32(spec.value_splits))
+        v_split = b.mod(wg, b.const_i32(spec.value_splits))
+        v_row_base = b.mul(v_split, b.const_i32(ev_slice))
 
     sc = _ScanCtx(
         b,
         atom=atom,
         chunk=C,
         head_k=DK,
-        head_v=EV,
+        head_v=ev_slice,
         block_size=BLOCK,
         elem=ELEM,
         tiles=(gk_lds, gq_lds, ab_lds, aqb_lds, kt_lds, dec_lds),
@@ -2412,10 +2710,15 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
         tid=tid,
         lane=lane,
         dec_is_log=False,
+        v_row_base=v_row_base,
+        ev_stride=EV,
+        io=io,
     )
 
-    bh = b.block_id_x()
-    state_base = b.mul(bh, b.const_i32(EV * DK))
+    state_base = b.add(
+        b.mul(bh, b.const_i32(EV * DK)),
+        b.mul(v_row_base, b.const_i32(DK)),
+    )
     # No initial publish: the scan body mirrors whatever state it is handed.
     s_init = (
         sc.load_state(h0_ptr, state_base) if spec.has_initial_state else sc.zero_state()
@@ -2486,12 +2789,12 @@ def build_kda_chunk_scan(spec: KdaChunkScanSpec, arch: str = "gfx950") -> "Kerne
 
 
 def kda_chunk_scan_grid(spec: KdaChunkScanSpec, bh: int) -> Tuple[int, int, int]:
-    """One workgroup per (batch, head)."""
-    return (int(bh), 1, 1)
+    """One workgroup per (batch, head), times ``value_splits`` v bands."""
+    return (int(bh) * int(spec.value_splits), 1, 1)
 
 
 def kda_chunk_scan_signature(spec: KdaChunkScanSpec):
-    return (
+    sb = (
         SignatureBuilder()
         .ptr("a_ptr", spec.dtype)
         .ptr("gk_ptr", spec.dtype)
@@ -2504,8 +2807,10 @@ def kda_chunk_scan_signature(spec: KdaChunkScanSpec):
         .ptr("h0_ptr", "f32")
         .ptr("ht_ptr", "f32")
         .scalar("nc", "i32")
-        .build()
     )
+    if spec.token_major_io:
+        sb = sb.scalar("batch", "i32").scalar("heads", "i32").scalar("tseq", "i32")
+    return sb.build()
 
 
 def kda_chunk_prep_grid(spec: KdaChunkPrepSpec, num_tiles: int) -> Tuple[int, int, int]:
@@ -2514,11 +2819,11 @@ def kda_chunk_prep_grid(spec: KdaChunkPrepSpec, num_tiles: int) -> Tuple[int, in
 
 
 def kda_chunk_prep_signature(spec: KdaChunkPrepSpec):
-    return (
+    sb = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
         .ptr("k_ptr", spec.dtype)
-        .ptr("g_ptr", "f32")
+        .ptr("g_ptr", "bf16" if spec.raw_inputs else "f32")
         .ptr("beta_ptr", "f32")
         .ptr("a_ptr", spec.dtype)
         .ptr("gk_ptr", spec.dtype)
@@ -2527,8 +2832,17 @@ def kda_chunk_prep_signature(spec: KdaChunkPrepSpec):
         .ptr("kt_ptr", spec.dtype)
         .ptr("dec_ptr", "f32")
         .scalar("scale", "f32")
-        .build()
     )
+    if spec.raw_inputs:
+        sb = (
+            sb.ptr("a_log_ptr", "f32")
+            .ptr("dt_bias_ptr", "f32")
+            .scalar("batch", "i32")
+            .scalar("heads", "i32")
+            .scalar("tseq", "i32")
+            .scalar("nc", "i32")
+        )
+    return sb.build()
 
 
 __all__ = [

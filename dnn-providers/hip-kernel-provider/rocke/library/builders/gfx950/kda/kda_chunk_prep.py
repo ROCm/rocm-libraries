@@ -86,9 +86,25 @@ def alloc_tiles(num_tiles: int, spec: KdaChunkPrepSpec, device="cuda"):
     return ws
 
 
-def run_prep(spec, q, k, g, beta, ws, scale, stream=None):
-    """Launch the prep kernel over ``q/k/g/beta`` already packed by chunk."""
-    num_tiles = q.shape[0]
+def run_prep(
+    spec,
+    q,
+    k,
+    g,
+    beta,
+    ws,
+    scale,
+    stream=None,
+    *,
+    batch=None,
+    heads=None,
+    tseq=None,
+    nc=None,
+    a_log=None,
+    dt_bias=None,
+):
+    """Launch the prep kernel over ``q/k/g/beta`` already packed by chunk or raw."""
+    num_tiles = q.shape[0] if not spec.raw_inputs else batch * heads * nc
     launcher = make_launcher(spec)
     if stream is None:
         stream = torch.cuda.current_stream().cuda_stream
@@ -97,22 +113,35 @@ def run_prep(spec, q, k, g, beta, ws, scale, stream=None):
         block=(spec.tile.block_size, 1, 1),
         stream=stream,
     )
-    launcher(
-        {
-            "q_ptr": q,
-            "k_ptr": k,
-            "g_ptr": g,
-            "beta_ptr": beta,
-            "a_ptr": ws["a"],
-            "gk_ptr": ws["gk"],
-            "gq_ptr": ws["gq"],
-            "aqk_ptr": ws["aqk"],
-            "kt_ptr": ws["kt"],
-            "dec_ptr": ws["dec"],
-            "scale": float(scale),
-        },
-        config=cfg,
-    )
+    args = {
+        "q_ptr": q,
+        "k_ptr": k,
+        "g_ptr": g,
+        "beta_ptr": beta,
+        "a_ptr": ws["a"],
+        "gk_ptr": ws["gk"],
+        "gq_ptr": ws["gq"],
+        "aqk_ptr": ws["aqk"],
+        "kt_ptr": ws["kt"],
+        "dec_ptr": ws["dec"],
+        "scale": float(scale),
+    }
+    if spec.raw_inputs:
+        if dt_bias is None:
+            dt_bias = torch.zeros(
+                heads * spec.head_k, dtype=torch.float32, device=q.device
+            )
+        args.update(
+            {
+                "a_log_ptr": a_log,
+                "dt_bias_ptr": dt_bias,
+                "batch": int(batch),
+                "heads": int(heads),
+                "tseq": int(tseq),
+                "nc": int(nc),
+            }
+        )
+    launcher(args, config=cfg)
 
 
 # ---------------------------------------------------------------------

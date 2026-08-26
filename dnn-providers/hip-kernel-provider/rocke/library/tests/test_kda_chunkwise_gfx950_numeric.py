@@ -333,3 +333,67 @@ def test_scan_rejects_a_spec_it_cannot_emit():
 
     with pytest.raises(ValueError, match="unsupported spec"):
         split.make_launcher(KdaChunkScanSpec(head_v=64))
+
+
+def _make_raw_inputs(B, H, T, DK, DV, gate_low=-0.5, seed=0):
+    import torch
+
+    gen = torch.Generator(device="cuda").manual_seed(seed)
+    kw = dict(device="cuda", generator=gen)
+    q = torch.randn(B, T, H, DK, dtype=torch.bfloat16, **kw)
+    k = torch.randn(B, T, H, DK, dtype=torch.bfloat16, **kw)
+    v = (torch.randn(B, T, H, DV, dtype=torch.float32, **kw) * 0.2).bfloat16()
+    g = (gate_low * torch.rand(B, T, H, DK, dtype=torch.float32, **kw)).bfloat16()
+    beta = torch.randn(B, T, H, dtype=torch.float32, **kw)
+    a_log = torch.randn(H, dtype=torch.float32, device="cuda", generator=gen) * 0.1
+    dt_bias = (
+        torch.randn(H * DK, dtype=torch.float32, device="cuda", generator=gen) * 0.01
+    )
+    return q, k, v, g, beta, a_log, dt_bias
+
+
+@pytest.mark.parametrize("gate_low", GATES)
+def test_raw_split_matches_aligned_oracle(gate_low):
+    """Fused raw prep + token-major split scan vs the aligned float64 oracle."""
+    import torch
+
+    import kda_chunk_split as split
+
+    B, H, T = 1, 4, 256
+    scan, _ = split.aligned_split_specs(1)
+    q, k, v, g, beta, a_log, dt_bias = _make_raw_inputs(B, H, T, 128, 128, gate_low)
+    o_got, ht_got = split.launch_raw(scan, q, k, v, g, beta, a_log, dt_bias)
+    torch.cuda.synchronize()
+    o_ref, s_ref = split.ref_aligned_raw(q, k, v, g, beta, a_log, dt_bias, 128**-0.5)
+    o_ref = o_ref.permute(0, 2, 1, 3)
+    worst = max(
+        (o_got.double() - o_ref).abs().max().item()
+        / (o_ref.abs().max().item() + 1e-30),
+        (ht_got.double() - s_ref).abs().max().item()
+        / (s_ref.abs().max().item() + 1e-30),
+    )
+    assert worst <= TOL, f"gate {gate_low}: worst rel {worst:.3e}"
+
+
+@pytest.mark.parametrize(
+    "value_splits,block,scan_atom_m",
+    [(1, 256, 0), (2, 128, 0), (4, 64, 0), (8, 64, 16)],
+)
+def test_value_splits_agree_with_vs1(value_splits, block, scan_atom_m):
+    """Every legal value_splits geometry must match the unsplit scan."""
+    import torch
+
+    import kda_chunk_split as split
+
+    from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec, KdaTileSpec
+
+    B, H, T = 1, 4, 256
+    q, k, v, g, beta, a_log, dt_bias = _make_raw_inputs(B, H, T, 128, 128)
+    base, _ = split.aligned_split_specs(1)
+    o0, ht0 = split.launch_raw(base, q, k, v, g, beta, a_log, dt_bias)
+    tile = KdaTileSpec(chunk=32, block_size=block, scan_atom_m=scan_atom_m)
+    spec = KdaChunkScanSpec(tile=tile, value_splits=value_splits, token_major_io=True)
+    o1, ht1 = split.launch_raw(spec, q, k, v, g, beta, a_log, dt_bias)
+    torch.cuda.synchronize()
+    assert torch.allclose(o0.float(), o1.float(), rtol=0, atol=3e-2)
+    assert torch.allclose(ht0.float(), ht1.float(), rtol=0, atol=3e-2)
