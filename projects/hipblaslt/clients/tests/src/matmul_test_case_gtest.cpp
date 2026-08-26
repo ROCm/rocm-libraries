@@ -33,20 +33,17 @@ namespace
     hipblaslt::client::MatmulPreparation
         prepare(const Arguments& arguments, bool swizzleA = false, bool swizzleB = false)
     {
-        const auto cases           = hipblaslt::client::normalizeMatmulCases(arguments);
-        const auto computeType     = computeTypeToRealDataType(arguments.compute_type);
-        const auto coefficientType = arguments.a_type == HIP_C_32F || arguments.a_type == HIP_C_64F
-                                         ? arguments.a_type
-                                         : computeType;
+        const auto cases     = hipblaslt::client::normalizeMatmulCases(arguments);
+        const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(arguments);
         return hipblaslt::client::prepareMatmulCases(arguments,
                                                      cases,
                                                      arguments.a_type,
                                                      arguments.b_type,
                                                      arguments.c_type,
                                                      arguments.d_type,
-                                                     computeType,
-                                                     coefficientType,
-                                                     arguments.d_type,
+                                                     dataTypes.computeScalar,
+                                                     dataTypes.coefficient,
+                                                     dataTypes.biasStorage,
                                                      swizzleA,
                                                      swizzleB,
                                                      false);
@@ -206,6 +203,19 @@ TEST(MatmulTestCase, RejectsInvalidSerializedGeometry)
     arguments.c_equal_d = true;
     arguments.d_type    = HIP_R_16F;
     EXPECT_THROW(hipblaslt::client::normalizeMatmulCases(arguments), std::invalid_argument);
+}
+
+TEST(MatmulDataTypes, ResolvesDefaultsOnce)
+{
+    const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(baseArguments());
+
+    EXPECT_EQ(dataTypes.computeScalar, HIP_R_32F);
+    EXPECT_EQ(dataTypes.computeInputA, HIP_R_32F);
+    EXPECT_EQ(dataTypes.computeInputB, HIP_R_32F);
+    EXPECT_EQ(dataTypes.coefficient, HIP_R_32F);
+    EXPECT_EQ(dataTypes.bias, HIP_R_32F);
+    EXPECT_EQ(dataTypes.biasStorage, HIP_R_32F);
+    EXPECT_EQ(dataTypes.auxiliary, HIP_R_32F);
 }
 
 TEST(MatmulPreparation, ComputesLogicalStorageAndScalarState)
