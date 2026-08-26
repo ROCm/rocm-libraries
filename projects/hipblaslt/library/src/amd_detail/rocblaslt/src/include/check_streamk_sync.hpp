@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 /*! \file
- * \brief Post-launch dirty-buffer check for the StreamK Synchronizer buffer.
+ * \brief Post-launch dirty-buffer check for the shared Synchronizer buffer.
+ *        StreamK (work-queue / fixup Flags) and GSU MultipleBufferSingleKernel
+ *        both use it and both must leave it at zero on exit.
  *        Enabled by HIPBLASLT_CHECK_STREAMK_SYNC env var (read once in handle ctor).
  *
  *        Covers rocblaslt_matmul_impl only; the ext and user-argument launch
@@ -66,8 +68,10 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
         return;
     }
 
-    // Ints are both the scan step and the reported unit: the head of the buffer
-    // is one work-queue counter per XCD, so the offset names the counter left set.
+    // Ints are both the scan step and the reported unit: every consumer writes
+    // 32-bit counters, so the offset names the counter left set. StreamK works
+    // from the head; MBSK does too, except on the user-argument path, where it
+    // is handed the buffer offset by 1638400 bytes (int 409600).
     size_t nonzero = 0, first = count;
     for(size_t i = 0; i < count; ++i)
         if(host[i] != 0)
@@ -87,7 +91,8 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
             sink = &std::cerr;
         *sink << "[hipBLASLt CHECK_STREAMK_SYNC] " << label << ": Synchronizer left dirty ("
               << nonzero << "/" << count << " ints nonzero, first at offset " << first
-              << ") -- the kernel did not self-clean its work-queue state." << std::endl;
+              << ") -- the kernel did not reset the shared Synchronizer buffer on exit."
+              << std::endl;
     }
 
     // hipblasLtCreate zeroes the buffer once and every matmul is scanned, so
