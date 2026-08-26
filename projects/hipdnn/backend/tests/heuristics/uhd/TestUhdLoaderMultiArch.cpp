@@ -60,6 +60,11 @@ std::vector<uint8_t> buildUhdWithDerived(const std::string& uhdId,
     // Score metadata
     auto scoreOffset = CreateUhdScoreMetadata(builder, units, true, xform);
 
+    // A tree_data UHD without this is rejected by the loader, which requires an artifact
+    // for every model-backed adapter. The file need not exist: the loader only records the
+    // path, and the adapter that opens it is not exercised here.
+    auto modelArt = builder.CreateString("model_" + arch + ".bin");
+
     // Build UHD
     auto uhdOffset = CreateUHD(builder,
                                id,               // id
@@ -69,7 +74,8 @@ std::vector<uint8_t> buildUhdWithDerived(const std::string& uhdId,
                                featSig,          // features_signature
                                hash,             // features_hash
                                obj,              // objective
-                               scoreOffset);     // score
+                               scoreOffset,      // score
+                               modelArt);        // model_artifact_path
 
     builder.Finish(uhdOffset, "HUHD");
 

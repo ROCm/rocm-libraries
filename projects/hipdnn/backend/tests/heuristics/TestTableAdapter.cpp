@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/table_model_generated.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -94,6 +95,7 @@ public:
 
         // Build training arches
         std::vector<flatbuffers::Offset<flatbuffers::String>> archOffsets;
+        archOffsets.reserve(_trainingArches.size());
         for(const auto& arch : _trainingArches)
         {
             archOffsets.push_back(builder.CreateString(arch));
@@ -115,8 +117,7 @@ public:
 
         builder.Finish(model, fb::TableModelIdentifier());
 
-        return std::vector<uint8_t>(builder.GetBufferPointer(),
-                                    builder.GetBufferPointer() + builder.GetSize());
+        return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
     }
 
 private:
@@ -293,8 +294,8 @@ TEST_F(TestTableAdapter, LoadFromBufferNullBuffer)
 
 TEST_F(TestTableAdapter, LoadFromBufferTooSmall)
 {
-    uint8_t buffer[3] = {0, 0, 0};
-    auto adapter = TableAdapter::loadFromBuffer(buffer, sizeof(buffer), TEST_HASH);
+    const std::array<uint8_t, 3> buffer = {0, 0, 0};
+    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     EXPECT_EQ(adapter, nullptr);
 }
 
