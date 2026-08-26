@@ -148,10 +148,12 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
     Guarded to the fp4 (bpe 0.5) TLU stacks the bank model covers; anything
     else returns None so the emit paths keep their baseline addressing.
     """
-    # SubtileWideGR: the swizzle is an XOR on the chunk index realised by
-    # choosing which global chunk each lane fetches, so it must be applied to
-    # the wave-inclusive physical chunk.  The wide-GR wave K base is added
-    # after that computation, which XOR cannot absorb, so no swizzle yet.
+    # SubtileWideGR: the XOR acts on the physical chunk index, and under wide
+    # GR the wave contributes a high chunk bit that the XOR then transforms
+    # (e.g. chunk[7] for the 4x1 stack), so the wave cannot be expressed as an
+    # offset applied afterwards.  col_scatter has no such coupling -- there the
+    # load index enters purely additively as a K-column shift -- so wide GR uses
+    # col_scatter only.
     if int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1:
         return None
     try:
@@ -173,12 +175,6 @@ def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
     Mutually exclusive with selectTLUSwizzle: the XOR path handles 2x1/4x1, the
     col_scatter path handles 8x1 (and, once wired, 16x1/32x1).  Guarded to fp4.
     """
-    # SubtileWideGR: the swizzle is an XOR on the chunk index realised by
-    # choosing which global chunk each lane fetches, so it must be applied to
-    # the wave-inclusive physical chunk.  The wide-GR wave K base is added
-    # after that computation, which XOR cannot absorb, so no swizzle yet.
-    if int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1:
-        return None
     try:
         stack = int(tileInfo.subtileShape[0])
     except Exception:

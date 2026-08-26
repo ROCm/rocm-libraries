@@ -1159,8 +1159,17 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
     # extent, so waves do not step along the free dim -- they share the strip
     # and split its K rows.  Wave a starts at K row a*kRowsPerWave.  K is the
     # strided dim for NT, so this needs the runtime K stride.
-    kRows = int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1])
-    kRowsPerWave = kRows // wavesPerStrip
+    # Units must match what the per-lane GR offset walks:
+    #  - col_scatter: the load index IS the K column (col = col_group*N + L), so
+    #    a wave owning numGRPerSubtile consecutive loads starts that many K
+    #    columns in.
+    #  - K ramp: the lane walks a chunk ramp at chunksPerK chunks per K row, so
+    #    the wave's chunk base converts to whole K rows.
+    if selectTLUColScatter(tileInfo) is not None:
+      kRowsPerWave = int(tileInfo.numGRPerSubtile)
+    else:
+      kRows = int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1])
+      kRowsPerWave = kRows // wavesPerStrip
     unrollIdx = kernel["ProblemType"]["IndexUnroll"]
     strideK = writer.strideRef(tc, unrollIdx)
     tmpS = writer.sgprPool.checkOut(1, tag="_tluWaveAxisKOffset_s_%s" % tc, preventOverflow=False)
