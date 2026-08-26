@@ -886,41 +886,46 @@ IF_RULE3_CROSS_LOOP(TEST_F(InsertClusterBarrierPassTest,
 // The inverted order is equally correct but measured slower. This test pins the
 // ordering only; see hoistAboveLeadingWaitCnts for why no mechanism is claimed.
 TEST_F(InsertClusterBarrierPassTest, Rule3ClusterWaitIsHoistedAboveTensorDrain) {
+    appendGsu1Preheader();
+    openLoop();
     createWMMA(24, 0, 8);
     StinkyInstruction* drain = createWaitTensorCnt(0);
-    createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* trigger = createBarrierSignal(kWorkgroupBarrierId);
     createBarrierWait(kWorkgroupBarrierId);
     createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
+    closeLoop();
 
     runPass();
 
-    StinkyInstruction* clusterWait = nullptr;
-    for (IRBase& ir : *bb) {
-        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
-        auto* inst = cast<StinkyInstruction>(&ir);
-        if (isClusterBarrierWithLiteral(*inst, /*wantSignal=*/false)) {
-            clusterWait = inst;
-            break;
-        }
-    }
-    ASSERT_NE(clusterWait, nullptr) << "Rule 3(b) must emit an s_barrier_wait -3";
-    EXPECT_LT(indexOf(clusterWait), indexOf(drain))
-        << "s_barrier_wait -3 must precede the tensor drain it was hoisted over";
+    // Rule 2's wait belongs to the run-up, so the handshake's own wait is named by
+    // the drain it stands above rather than by being the first one in the block.
+    StinkyInstruction* clusterWait = realInstBefore(drain);
+    ASSERT_NE(clusterWait, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false))
+        << "s_barrier_wait -3 must stand directly above the drain it was hoisted over:"
+        << blockListing(*bb);
+    EXPECT_EQ(realInstBefore(trigger), drain)
+        << "the hoist moves the cluster wait, not the drain:" << blockListing(*bb);
 }
 
 // Re-running the pass must not plant a second cluster wait just because the
 // first one now sits above the drain rather than adjacent to the anchor.
 TEST_F(InsertClusterBarrierPassTest, HoistedClusterWaitStaysIdempotent) {
+    appendGsu1Preheader();
+    openLoop();
     createWMMA(24, 0, 8);
     createWaitTensorCnt(0);
     createBarrierSignal(kWorkgroupBarrierId);
     createBarrierWait(kWorkgroupBarrierId);
     createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
+    closeLoop();
 
     runPass();
     const auto afterFirst = clusterBarrierCounts();
     runPass();
     EXPECT_EQ(clusterBarrierCounts(), afterFirst) << "re-running the pass must be a no-op";
+}
+
 // A call ends the climb whatever the hop budget says. It is the one boundary that gets there
 // by falling through rather than by naming a label, so the segment below it is reached the
 // ordinary way and nothing about the listing warns that the code above ran under a callee's

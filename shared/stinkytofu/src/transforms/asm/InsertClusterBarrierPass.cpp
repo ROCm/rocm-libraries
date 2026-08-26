@@ -851,6 +851,14 @@ StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
     return nullptr;
 }
 
+/// Any counter drain the wait-cnt pass may have parked ahead of an anchor.
+/// `s_wait_tensorcnt` carries IF_WaitTensorCnt, disjoint from IF_WaitCnt, so
+/// `isWaitCnt()` alone misses it -- and it is the drain that matters most here.
+/// Same idiom as WaitAwareScheduleRepairPass and StinkyRemoveWaitCntPass.
+bool isAnyCounterDrain(const StinkyInstruction& inst) {
+    return isWaitCnt(inst) || inst.is(InstFlag::IF_WaitTensorCnt);
+}
+
 /// Hoist a cluster-wait insertion point above the run of wait-cnt instructions
 /// immediately preceding \p anchor.
 ///
@@ -870,16 +878,13 @@ StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
 /// commute, so no timing argument offered so far survives scrutiny. Treat this
 /// as measurement-driven until someone explains it.
 ///
+/// Only a contiguous run of drains ending at \p anchor is skipped: anything
+/// else between a drain and the anchor stops the walk and leaves the cluster
+/// wait below that drain. A layout that separates the two would need a
+/// different strategy than this one.
+///
 /// Wait-cnt instructions never write SCC, so hoisting past them does not
 /// disturb the Rule 3 SCC restore.
-/// Any counter drain the wait-cnt pass may have parked ahead of an anchor.
-/// `s_wait_tensorcnt` carries IF_WaitTensorCnt, disjoint from IF_WaitCnt, so
-/// `isWaitCnt()` alone misses it -- and it is the drain that matters most here.
-/// Same idiom as WaitAwareScheduleRepairPass and StinkyRemoveWaitCntPass.
-bool isAnyCounterDrain(const StinkyInstruction& inst) {
-    return isWaitCnt(inst) || inst.is(InstFlag::IF_WaitTensorCnt);
-}
-
 IRBase* hoistAboveLeadingWaitCnts(StinkyInstruction* anchor) {
     BasicBlock* parent = anchor->getParent();
     if (parent == nullptr) return anchor;
@@ -1229,7 +1234,8 @@ class InsertClusterBarrierPassImpl : public Pass {
         if (firstTL != nullptr && !isImmediatelyPrecededByClusterBarrierWait(firstTL)) {
             BasicBlock* parent = firstTL->getParent();
             AsmIRBuilder irBuilder(*parent, archId);
-            insertClusterBarrierWaitBefore(firstTL, "cluster_barrier wait", irBuilder, archId);
+            insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(firstTL),
+                                           "cluster_barrier wait", irBuilder, archId);
         }
 
         for (BasicBlock& bb : func) {
@@ -1239,6 +1245,11 @@ class InsertClusterBarrierPassImpl : public Pass {
             struct TriggerSite {
                 StinkyInstruction* trigger = nullptr;
                 BasicBlock::iterator segBegin;
+                // Where the cluster wait lands once hoisted over the drains the
+                // wait-cnt pass parked on this trigger, and the same spot as an
+                // instruction for the cycle-lead measurement.
+                IRBase* waitAnchor = nullptr;
+                StinkyInstruction* waitAnchorInst = nullptr;
             };
             std::vector<TriggerSite> triggers;
             std::unordered_set<StinkyInstruction*> seenTriggers;
@@ -1264,21 +1275,17 @@ class InsertClusterBarrierPassImpl : public Pass {
                     if (!seenTriggers.insert(trigger).second) continue;
                     if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
 
-                    // Emit the cluster wait above the drains the wait-cnt pass
-                    // already anchored on this workgroup signal.
-                    IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
-                    // Measure the lead from where the wait actually lands, not from
-                    // the trigger, so the hoist does not eat into the guaranteed
-                    // signal->wait distance.
-                    auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
-                    StinkyInstruction* waitAnchorInst =
-                        (hoistedInst != nullptr) ? hoistedInst : trigger;
-
                     // Rule 3 speaks for the loop body and nowhere else. Outside a loop there
                     // is no next trip to hand a token to and no exit to compensate at, and the
                     // run-up's own load is Rule 2's business.
                     if (findEnclosingLoopHead(trigger) == nullptr) continue;
-                    triggers.push_back({trigger, segBegin});
+
+                    // Emit the cluster wait above the drains the wait-cnt pass
+                    // already anchored on this workgroup signal.
+                    IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
+                    auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
+                    triggers.push_back({trigger, segBegin, waitAnchor,
+                                        (hoistedInst != nullptr) ? hoistedInst : trigger});
 
                     // Record the instruction right after this cooperative
                     // tensor_load group so a producer-side tensor drain can be
@@ -1327,9 +1334,12 @@ class InsertClusterBarrierPassImpl : public Pass {
                 StinkyInstruction* head = findEnclosingLoopHead(trigger);
                 // kRule3CrossLoop false: maxHops=0, climb stays in-segment. true: one hop.
                 const int maxSegmentHops = cluster_barrier::kRule3CrossLoop ? kMaxSegmentHops : 0;
+                // Measure the lead from where the wait actually lands, not from the trigger,
+                // so the hoist does not eat into the guaranteed signal->wait distance.
                 Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
-                    trigger, tSegBegin, /*defaultAnchor=*/trigger, cycleMap, kRule3SignalLeadCycles,
-                    kRule3SignalMaxLeadCycles, priorWaitAnchors, maxSegmentHops, head);
+                    site.waitAnchorInst, tSegBegin, /*defaultAnchor=*/site.waitAnchor, cycleMap,
+                    kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors,
+                    maxSegmentHops, head);
                 // Read the exit label and climb the preheader now: once the handshakes go
                 // in, the body is full of this pass's own skip branches and barriers, and
                 // neither the loop's real exit nor an unspoken-for stretch of preheader is
@@ -1355,7 +1365,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                                 "spot for the compensating signal");
                     }
                 }
-                pending.emplace_back(trigger, found.anchor, static_cast<IRBase*>(trigger));
+                pending.emplace_back(trigger, found.anchor, site.waitAnchor);
             }
 
             StinkyInstruction* tailTL = nullptr;
