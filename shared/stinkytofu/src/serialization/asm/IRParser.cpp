@@ -660,6 +660,7 @@ bool IRParser::parseAttributes(ParsedInstruction& inst) {
 
     // Parse comma-separated attributes
     while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof) {
+        skipNewlines();
         // Check for end of attributes
         if (peek().kind == TokenKind::RightBrace) {
             consume();
@@ -752,6 +753,7 @@ std::optional<std::unordered_map<std::string, std::string>> IRParser::parseModif
     std::unordered_map<std::string, std::string> dict;
 
     while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof) {
+        skipNewlines();
         if (peek().kind == TokenKind::RightBrace) {
             consume();
             return dict;

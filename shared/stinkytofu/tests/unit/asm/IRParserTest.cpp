@@ -572,6 +572,24 @@ TEST_F(IRParserTest, ParsesMultipleModifiers) {
     EXPECT_EQ(exec->second["setHi"], "true");
 }
 
+TEST_F(IRParserTest, ParsesMultilineAttributesWithNestedModifierDict) {
+    // AsmMovePropagationPass FileCheck wraps attributes across lines.
+    const std::string input = R"(
+v2 = "st.v_add_f32"(v0, v3) {
+    issueCycles = 1, latencyCycles = 5, mod.vop3 = { neg_src0 = true }
+}
+)";
+
+    auto instructions = parseAssemblyString(input);
+
+    ASSERT_EQ(instructions.size(), 1);
+    EXPECT_EQ(instructions[0].issueCycles, 1);
+    EXPECT_EQ(instructions[0].latencyCycles, 5);
+    auto vop3 = instructions[0].modifiers.find("mod.vop3");
+    ASSERT_NE(vop3, instructions[0].modifiers.end());
+    EXPECT_EQ(vop3->second["neg_src0"], "true");
+}
+
 TEST_F(IRParserTest, RawAsmParsesFinalMatrixBScaleModifierWithoutTrailingComment) {
     // Temporary regression coverage for ToStinkyTofuUtils.cpp.
     // This may be removed if the rocisa modifier extraction implementation changes.
