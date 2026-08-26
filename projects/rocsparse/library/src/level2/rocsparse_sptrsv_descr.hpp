@@ -71,7 +71,7 @@ public:
 
     rocsparse_ellsv_info get_ellsv_info();
     void                 set_ellsv_info(rocsparse_ellsv_info value);
-    void set_shared_ellsv_info(std::shared_ptr<_rocsparse_ellsv_info> value);
+    void                 set_shared_ellsv_info(std::shared_ptr<_rocsparse_ellsv_info> value);
 
     float m_local_host_alpha_value[4];
 
