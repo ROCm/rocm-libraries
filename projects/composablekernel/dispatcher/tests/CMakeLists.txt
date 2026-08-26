@@ -190,6 +190,25 @@ foreach(_quant_test
     )
 endforeach()
 
+# CPU-only bridge contract tests for non-quant ops. Registered here because the
+# test-registration invariant (test_quant_bridge_invariants.py, I2) requires every
+# test file under this directory to be reachable from ctest; both of these landed
+# on develop without a registration and were never run by CI.
+foreach(_bridge_cpu_test
+        test_preshuffle_bridge
+        test_contraction_multi_abd_bridge)
+    add_test(
+        NAME dispatcher_${_bridge_cpu_test}
+        COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/${_bridge_cpu_test}.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(dispatcher_${_bridge_cpu_test} PROPERTIES
+        LABELS "dispatcher;python;bridge;validation"
+        TIMEOUT 120
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+    )
+endforeach()
+
 foreach(_quant_gpu_test
         test_rowcolquant_gpu_correctness
         test_tensorquant_gpu_correctness
