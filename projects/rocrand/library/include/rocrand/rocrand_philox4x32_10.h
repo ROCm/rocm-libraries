@@ -83,9 +83,37 @@ class philox4x32_10_engine
 public:
     struct philox4x32_10_state
     {
+        // Unions are used here to force the compiler to map the variables
+        // strictly to VGPRs instead of spilling them to local scratch memory.
+        union
+        {
+            uint4 counter;
+            struct
+            {
+                unsigned int counter_x, counter_y, counter_z, counter_w;
+            };
+        };
+        union
+        {
+            uint4 result;
+            struct
+            {
+                unsigned int result_x, result_y, result_z, result_w;
+            };
+        };
+        union
+        {
+            uint2 key;
+            struct
+            {
+                unsigned int key_x, key_y;
+            };
+        };
+        /*
         uint4 counter;
         uint4 result;
         uint2 key;
+        */
         unsigned int substate;
 
     #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
@@ -169,6 +197,28 @@ public:
 
     __forceinline__ __device__ __host__ unsigned int next()
     {
+        unsigned int s = m_state.substate;
+        unsigned int ret;
+        if(s == 0)
+            ret = m_state.result_x;
+        else if(s == 1)
+            ret = m_state.result_y;
+        else if(s == 2)
+            ret = m_state.result_z;
+        else
+            ret = m_state.result_w;
+
+        s++;
+        if(s == 4)
+        {
+            s = 0;
+            this->discard_state();
+            m_state.result = this->ten_rounds(m_state.counter, m_state.key);
+        }
+        m_state.substate = s;
+        return ret;
+
+        /*
     #if defined(__HIP_PLATFORM_AMD__)
         unsigned int ret = ROCRAND_HIPVEC_ACCESS(m_state.result)[m_state.substate];
     #else
@@ -183,6 +233,8 @@ public:
             m_state.result = this->ten_rounds(m_state.counter, m_state.key);
         }
         return ret;
+        */
+
     }
 
     __forceinline__ __device__ __host__ uint4 next4()
@@ -214,9 +266,9 @@ protected:
         unsigned int lo = static_cast<unsigned int>(subsequence);
         unsigned int hi = static_cast<unsigned int>(subsequence >> 32);
 
-        unsigned int temp = m_state.counter.z;
-        m_state.counter.z += lo;
-        m_state.counter.w += hi + (m_state.counter.z < temp ? 1 : 0);
+        unsigned int temp = m_state.counter_z;
+        m_state.counter_z += lo;
+        m_state.counter_w += hi + (m_state.counter_z < temp ? 1 : 0);
     }
 
     // Advances the internal state by offset times.
@@ -227,10 +279,10 @@ protected:
         unsigned int hi = static_cast<unsigned int>(offset >> 32);
 
         uint4 temp = m_state.counter;
-        m_state.counter.x += lo;
-        m_state.counter.y += hi + (m_state.counter.x < temp.x ? 1 : 0);
-        m_state.counter.z += (m_state.counter.y < temp.y ? 1 : 0);
-        m_state.counter.w += (m_state.counter.z < temp.z ? 1 : 0);
+        m_state.counter_x += lo;
+        m_state.counter_y += hi + (m_state.counter_x < temp.x ? 1 : 0);
+        m_state.counter_z += (m_state.counter_y < temp.y ? 1 : 0);
+        m_state.counter_w += (m_state.counter_z < temp.z ? 1 : 0);
     }
 
     // Advances the internal state to the next state
