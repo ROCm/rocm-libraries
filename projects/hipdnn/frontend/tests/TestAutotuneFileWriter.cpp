@@ -21,6 +21,7 @@
 #include <iterator>
 #include <nlohmann/json.hpp>
 #include <set>
+#include <utility>
 #endif
 
 using namespace hipdnn_frontend;
@@ -64,14 +65,14 @@ struct TempFile
 };
 
 /// Create a simple AutotuneResult for testing
-AutotuneResult makeResult(int64_t engineId,
-                          const std::string& engineName,
+AutotuneResult makeResult(const std::string& engineName,
                           float minTime = 1.0f,
                           bool succeeded = true,
                           int rank = 0)
 {
     AutotuneResult r;
-    r.engineId = engineId;
+    // The ID is derived from the name so the pair round-trips.
+    r.engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(engineName);
     r.engineName = engineName;
     r.minTimeMs = minTime;
     r.avgTimeMs = minTime + 0.5f;
@@ -129,7 +130,7 @@ nlohmann::json makeExistingVersionedRoot(int64_t version = config_version::CURRE
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
     const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::W};
     auto oldEntry = hipdnn_frontend::autotune::detail::buildOverrideEntry(
-        makeResult(1, "OLD"), config_op::CONV_FPROP, dims, {}, {}, tensorIds);
+        makeResult("OLD"), config_op::CONV_FPROP, dims, {}, {}, tensorIds);
 
     nlohmann::json root;
     root[config_json::VERSION] = version;
@@ -178,7 +179,7 @@ Error writeVersionedAutotuneResults(const std::filesystem::path& filePath,
 Error writeReplacementConvFprop(const std::filesystem::path& path)
 {
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
+    results.push_back(makeResult("NEW", 0.5f, true, 0));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
     return writeVersionedAutotuneResults(path, config_op::CONV_FPROP, results, false, dims, {});
 }
@@ -245,7 +246,7 @@ TEST(TestAutotuneFileWriter, KnobSettingToJsonYieldsExactKeys)
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryBasic)
 {
-    auto result = makeResult(1, "MIOPEN_ENGINE");
+    auto result = makeResult("MIOPEN_ENGINE");
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
     const std::vector<std::vector<int64_t>> tensorStrides
         = {{150528, 50176, 224, 1}, {147, 49, 7, 1}};
@@ -269,7 +270,7 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryBasic)
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWritesTensorIds)
 {
-    auto result = makeResult(1, "MIOPEN_ENGINE");
+    auto result = makeResult("MIOPEN_ENGINE");
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
     const std::vector<std::vector<int64_t>> tensorStrides
         = {{150528, 50176, 224, 1}, {147, 49, 7, 1}};
@@ -295,11 +296,11 @@ TEST(TestAutotuneFileWriter, NamedEntryRejectsLegacyEntryWithSamePositionalSigna
 
     nlohmann::json root;
     root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array(
-        {buildOverrideEntry(makeResult(1, "OLD"), config_op::CONV_FPROP, dims, {})});
+        {buildOverrideEntry(makeResult("OLD"), config_op::CONV_FPROP, dims, {})});
     const auto originalContents = writeJsonFile(tmpFile.path, root);
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
+    results.push_back(makeResult("NEW", 0.5f, true, 0));
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
@@ -354,7 +355,7 @@ TEST(TestAutotuneFileWriter, DuplicateTensorIdsRejectNewFileWrite)
 {
     const TempFile tmpFile;
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
+    results.push_back(makeResult("NEW", 0.5f, true, 0));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
     const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::X};
 
@@ -372,7 +373,7 @@ TEST(TestAutotuneFileWriter, DuplicateTensorIdsRejectAndExistingFileRemainsUncha
     const TempFile tmpFile;
     const auto originalContents = writeJsonFile(tmpFile.path, makeExistingVersionedRoot());
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
+    results.push_back(makeResult("NEW", 0.5f, true, 0));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
     const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::X};
 
@@ -392,7 +393,7 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTe
     const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::W};
 
     auto oldEntry = hipdnn_frontend::autotune::detail::buildOverrideEntry(
-        makeResult(1, "OLD"), config_op::CONV_FPROP, dims, {}, {}, tensorIds);
+        makeResult("OLD"), config_op::CONV_FPROP, dims, {}, {}, tensorIds);
     std::reverse(oldEntry[config_json::TENSORS].begin(), oldEntry[config_json::TENSORS].end());
 
     nlohmann::json root;
@@ -401,7 +402,7 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTe
     writeJsonFile(tmpFile.path, root);
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
+    results.push_back(makeResult("NEW", 0.5f, true, 0));
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
     ASSERT_TRUE(err.is_good()) << err.get_message();
@@ -421,7 +422,7 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTe
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWithCriteria)
 {
-    auto result = makeResult(1, "MIOPEN_ENGINE");
+    auto result = makeResult("MIOPEN_ENGINE");
     const std::vector<std::vector<int64_t>> tensorDims = {{2, 4, 16, 16}};
     const Criteria criteria = {{config_criterion::POINTWISE_MODE, 34}};
 
@@ -434,7 +435,7 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWithCriteria)
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWithKnobs)
 {
-    auto result = makeResult(1, "MIOPEN_ENGINE");
+    auto result = makeResult("MIOPEN_ENGINE");
     result.knobSettings.emplace_back("TILE_SIZE", int64_t{128});
     result.knobSettings.emplace_back("SPLIT_K", int64_t{2});
 
@@ -455,7 +456,7 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWithKnobs)
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWithMetadata)
 {
-    auto result = makeResult(1, "MIOPEN_ENGINE", 1.5f, true, 0);
+    auto result = makeResult("MIOPEN_ENGINE", 1.5f, true, 0);
     result.modeUsed = TuneMode::EXHAUSTIVE;
     result.strategyUsed = AutotuneStrategy::FIXED_AVERAGE;
     result.ranExhaustive = true;
@@ -483,6 +484,88 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWithMetadata)
     EXPECT_NE(ts.find('Z'), std::string::npos);
     EXPECT_TRUE(meta["ran_exhaustive"].get<bool>());
 }
+
+TEST(TestAutotuneFileWriter, BuildOverrideEntryKeepsRegisteredEngineName)
+{
+    AutotuneResult result;
+    result.engineName = "MIOPEN_ENGINE";
+    result.engineId = engineNameToId("MIOPEN_ENGINE");
+
+    const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
+
+    auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, {});
+
+    EXPECT_EQ(entry[config_json::ENGINE_NAME], "MIOPEN_ENGINE");
+}
+
+TEST(TestAutotuneFileWriter, BuildOverrideEntryKeepsUnregisteredNameThatHashesToItsId)
+{
+    const std::string engineName = "EXAMPLE_PROVIDER_RELU_ENGINE";
+
+    AutotuneResult result;
+    result.engineName = engineName;
+    result.engineId = engineNameToId(engineName);
+
+    const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
+
+    auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, {});
+
+    EXPECT_EQ(entry[config_json::ENGINE_NAME], engineName);
+}
+
+TEST(TestAutotuneFileWriter, BuildOverrideEntryFallsBackToHexWhenNameDoesNotHashToId)
+{
+    constexpr int64_t ENGINE_ID = 0x5A5A;
+
+    AutotuneResult result;
+    result.engineName = "LYING_ENGINE_NAME";
+    result.engineId = ENGINE_ID;
+
+    const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
+
+    auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, {});
+
+    EXPECT_EQ(entry[config_json::ENGINE_NAME], formatEngineIdHex(ENGINE_ID));
+}
+
+TEST(TestAutotuneFileWriter, BuildOverrideEntryFallsBackToHexForEmptyEngineName)
+{
+    constexpr int64_t ENGINE_ID = 0x1234;
+
+    AutotuneResult result;
+    result.engineId = ENGINE_ID;
+
+    const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
+
+    auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, {});
+
+    EXPECT_EQ(entry[config_json::ENGINE_NAME], formatEngineIdHex(ENGINE_ID));
+}
+
+TEST(TestAutotuneFileWriter, BuildOverrideEntryEngineNameRoundTripsToEngineId)
+{
+    constexpr int64_t LYING_ENGINE_ID = 0x5A5A;
+
+    const std::vector<std::pair<std::string, int64_t>> cases
+        = {{"MIOPEN_ENGINE", engineNameToId("MIOPEN_ENGINE")},
+           {"EXAMPLE_PROVIDER_RELU_ENGINE", engineNameToId("EXAMPLE_PROVIDER_RELU_ENGINE")},
+           {"LYING_ENGINE_NAME", LYING_ENGINE_ID}};
+
+    const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
+
+    for(const auto& [engineName, engineId] : cases)
+    {
+        AutotuneResult result;
+        result.engineName = engineName;
+        result.engineId = engineId;
+
+        const auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, {});
+        const auto persisted = entry[config_json::ENGINE_NAME].get<std::string>();
+
+        EXPECT_EQ(engineNameOrIdToId(persisted), engineId) << "engine name: " << engineName;
+    }
+}
+
 // --- writeAutotuneResults Tests ---
 
 TEST(TestAutotuneFileWriter, WriteToNewFile)
@@ -490,7 +573,7 @@ TEST(TestAutotuneFileWriter, WriteToNewFile)
     const TempFile tmpFile;
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
+    results.push_back(makeResult("MIOPEN_ENGINE", 1.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
 
@@ -518,7 +601,7 @@ TEST(TestAutotuneFileWriter, WriteRejectsLegacyExistingFile)
     writeTextFile(tmpFile.path, originalContents);
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
+    results.push_back(makeResult("MIOPEN_ENGINE", 1.0f, true, 0));
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
 
     auto err = writeVersionedAutotuneResults(
@@ -535,9 +618,9 @@ TEST(TestAutotuneFileWriter, WriteSkipsFailedResults)
     const TempFile tmpFile;
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
-    results.push_back(makeResult(2, "HIPBLASLT_ENGINE", 0.0f, false, -1));
-    results.push_back(makeResult(3, "FUSILLI_ENGINE", 3.0f, true, 1));
+    results.push_back(makeResult("MIOPEN_ENGINE", 1.0f, true, 0));
+    results.push_back(makeResult("HIPBLASLT_ENGINE", 0.0f, false, -1));
+    results.push_back(makeResult("FUSILLI_ENGINE", 3.0f, true, 1));
 
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
 
@@ -559,7 +642,7 @@ TEST(TestAutotuneFileWriter, AppendToExistingFile)
 
     // Write initial results for conv_fprop
     std::vector<AutotuneResult> results1;
-    results1.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
+    results1.push_back(makeResult("MIOPEN_ENGINE", 1.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims1 = {{1, 3, 224, 224}, {64, 3, 7, 7}};
     auto err1 = writeVersionedAutotuneResults(
@@ -568,7 +651,7 @@ TEST(TestAutotuneFileWriter, AppendToExistingFile)
 
     // Write new results for conv_dgrad (different op)
     std::vector<AutotuneResult> results2;
-    results2.push_back(makeResult(2, "HIPBLASLT_ENGINE", 2.0f, true, 0));
+    results2.push_back(makeResult("HIPBLASLT_ENGINE", 2.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims2 = {{8, 64, 56, 56}};
     auto err2 = writeVersionedAutotuneResults(
@@ -590,7 +673,7 @@ TEST(TestAutotuneFileWriter, ReplaceMatchingEntryWithSameKnobs)
 
     // Write initial result with no knobs
     std::vector<AutotuneResult> results1;
-    results1.push_back(makeResult(1, "MIOPEN_ENGINE", 5.0f, true, 0));
+    results1.push_back(makeResult("MIOPEN_ENGINE", 5.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
     auto err1 = writeVersionedAutotuneResults(
@@ -599,7 +682,7 @@ TEST(TestAutotuneFileWriter, ReplaceMatchingEntryWithSameKnobs)
 
     // Write updated result for same op + tensors + same (empty) knobs
     std::vector<AutotuneResult> results2;
-    results2.push_back(makeResult(2, "HIPBLASLT_ENGINE", 1.0f, true, 0));
+    results2.push_back(makeResult("HIPBLASLT_ENGINE", 1.0f, true, 0));
 
     auto err2 = writeVersionedAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results2, false, dims, {});
@@ -619,7 +702,7 @@ TEST(TestAutotuneFileWriter, ReplaceEntriesWithDifferentKnobs)
 
     // Write initial result with SPLIT_K=2
     std::vector<AutotuneResult> results1;
-    auto r1 = makeResult(1, "MIOPEN_ENGINE", 5.0f, true, 0);
+    auto r1 = makeResult("MIOPEN_ENGINE", 5.0f, true, 0);
     r1.knobSettings.emplace_back("SPLIT_K", int64_t{2});
     results1.push_back(r1);
 
@@ -630,7 +713,7 @@ TEST(TestAutotuneFileWriter, ReplaceEntriesWithDifferentKnobs)
 
     // Write new result for same op + tensors but DIFFERENT knobs (SPLIT_K=4)
     std::vector<AutotuneResult> results2;
-    auto r2 = makeResult(2, "HIPBLASLT_ENGINE", 1.0f, true, 0);
+    auto r2 = makeResult("HIPBLASLT_ENGINE", 1.0f, true, 0);
     r2.knobSettings.emplace_back("SPLIT_K", int64_t{4});
     results2.push_back(r2);
 
@@ -652,7 +735,7 @@ TEST(TestAutotuneFileWriter, CriteriaDifferentiatesSameOperationAndTensors)
     const std::vector<std::vector<int64_t>> dims = {{2, 4, 16, 16}, {2, 4, 16, 16}};
 
     std::vector<AutotuneResult> addResults;
-    addResults.push_back(makeResult(1, "ADD_ENGINE", 1.0f, true, 0));
+    addResults.push_back(makeResult("ADD_ENGINE", 1.0f, true, 0));
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
         tmpFile.path.string(),
         config_op::POINTWISE,
@@ -665,7 +748,7 @@ TEST(TestAutotuneFileWriter, CriteriaDifferentiatesSameOperationAndTensors)
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
     std::vector<AutotuneResult> mulResults;
-    mulResults.push_back(makeResult(2, "MUL_ENGINE", 1.0f, true, 0));
+    mulResults.push_back(makeResult("MUL_ENGINE", 1.0f, true, 0));
     err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
         tmpFile.path.string(),
         config_op::POINTWISE,
@@ -700,16 +783,16 @@ TEST(TestAutotuneFileWriter, ReplaceOnlyExactOperationAndTensorSignature)
           {config_json::TENSORS, nlohmann::json::array()}},
          {{config_json::OP, config_op::CONV_FPROP}, {config_json::ENGINE_NAME, "MISSING_TENSORS"}},
          hipdnn_frontend::autotune::detail::buildOverrideEntry(
-             makeResult(7, "OTHER_TENSORS"), config_op::CONV_FPROP, otherDims, {}, {}, tensorIds),
+             makeResult("OTHER_TENSORS"), config_op::CONV_FPROP, otherDims, {}, {}, tensorIds),
          hipdnn_frontend::autotune::detail::buildOverrideEntry(
-             makeResult(8, "OLD_MATCH"), config_op::CONV_FPROP, matchingDims, {}, {}, tensorIds)});
+             makeResult("OLD_MATCH"), config_op::CONV_FPROP, matchingDims, {}, {}, tensorIds)});
     {
         std::ofstream file(tmpFile.path);
         file << root.dump(2) << '\n';
     }
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(9, "NEW_MATCH", 0.5f, true, 0));
+    results.push_back(makeResult("NEW_MATCH", 0.5f, true, 0));
     auto err = writeVersionedAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results, false, matchingDims, {});
     ASSERT_TRUE(err.is_good()) << err.get_message();
@@ -730,7 +813,7 @@ TEST(TestAutotuneFileWriter, DeleteAllExistingContent)
 
     // Write initial results
     std::vector<AutotuneResult> results1;
-    results1.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
+    results1.push_back(makeResult("MIOPEN_ENGINE", 1.0f, true, 0));
     const std::vector<std::vector<int64_t>> dims1 = {{1, 3, 224, 224}};
     auto err1 = writeVersionedAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results1, false, dims1, {});
@@ -738,7 +821,7 @@ TEST(TestAutotuneFileWriter, DeleteAllExistingContent)
 
     // Write new results with deleteAllExisting=true
     std::vector<AutotuneResult> results2;
-    results2.push_back(makeResult(2, "HIPBLASLT_ENGINE", 2.0f, true, 0));
+    results2.push_back(makeResult("HIPBLASLT_ENGINE", 2.0f, true, 0));
     const std::vector<std::vector<int64_t>> dims2 = {{8, 64, 56, 56}};
     auto err2 = writeVersionedAutotuneResults(
         tmpFile.path, config_op::CONV_DGRAD, results2, true, dims2, {});
@@ -760,7 +843,7 @@ TEST(TestAutotuneFileWriter, RoundTripWriteThenLoad)
 
     // Write results with knobs
     std::vector<AutotuneResult> results;
-    auto result = makeResult(MIOPEN_ENGINE_ID, "MIOPEN_ENGINE", 1.0f, true, 0);
+    auto result = makeResult("MIOPEN_ENGINE", 1.0f, true, 0);
     result.knobSettings.emplace_back("TILE_SIZE", int64_t{128});
     result.knobSettings.emplace_back("SPLIT_K", int64_t{2});
     results.push_back(result);
@@ -817,7 +900,7 @@ TEST(TestAutotuneFileWriter, RoundTripNoKnobs)
 
     // Write results without knobs
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(MIOPEN_ENGINE_ID, "MIOPEN_ENGINE", 1.0f, true, 0));
+    results.push_back(makeResult("MIOPEN_ENGINE", 1.0f, true, 0));
 
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
     auto err = writeVersionedAutotuneResults(
@@ -845,7 +928,7 @@ TEST(TestAutotuneFileWriter, RoundTripNoKnobs)
 TEST(TestAutotuneFileWriter, WriteToInvalidPathFails)
 {
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "MIOPEN_ENGINE"));
+    results.push_back(makeResult("MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     auto err = writeVersionedAutotuneResults("/nonexistent/deep/path/that/does/not/exist/file.json",
@@ -865,7 +948,7 @@ TEST(TestAutotuneFileWriter, WriteNoSucceededResultsIsOk)
 
     // All results failed
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "MIOPEN_ENGINE", 0.0f, false, -1));
+    results.push_back(makeResult("MIOPEN_ENGINE", 0.0f, false, -1));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     auto err = writeVersionedAutotuneResults(
@@ -886,7 +969,7 @@ TEST(TestAutotuneFileWriter, HandleCorruptExistingFile)
     }
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "MIOPEN_ENGINE"));
+    results.push_back(makeResult("MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     // During write, corrupt file is moved aside; writer starts fresh and returns OK.
@@ -919,7 +1002,7 @@ TEST(TestAutotuneFileWriter, HandleExistingTopLevelArray)
     }
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "MIOPEN_ENGINE"));
+    results.push_back(makeResult("MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     Error err;
@@ -941,7 +1024,7 @@ TEST(TestAutotuneFileWriter, HandleExistingBareScalar)
     }
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "MIOPEN_ENGINE"));
+    results.push_back(makeResult("MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     Error err;
@@ -963,7 +1046,7 @@ TEST(TestAutotuneFileWriter, HandleInvalidJsonDoesNotThrow)
     }
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "MIOPEN_ENGINE"));
+    results.push_back(makeResult("MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     // Must not throw; corrupt file is moved aside; a fresh file is written; OK returned.
@@ -994,7 +1077,7 @@ TEST(TestAutotuneFileWriter, HandleWellFormedObjectPreservesOtherKeys)
     }
 
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "MIOPEN_ENGINE"));
+    results.push_back(makeResult("MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
 
     Error err;
@@ -1015,7 +1098,7 @@ TEST(TestAutotuneFileWriter, RanExhaustiveAlwaysWritten)
 
     // ranExhaustive = false should be written
     {
-        auto result = makeResult(1, "MIOPEN_ENGINE");
+        auto result = makeResult("MIOPEN_ENGINE");
         result.ranExhaustive = false;
         auto entry = buildOverrideEntry(result, "conv_fprop", tensorDims, tensorStrides);
         auto& meta = entry["autotune_metadata"];
@@ -1025,7 +1108,7 @@ TEST(TestAutotuneFileWriter, RanExhaustiveAlwaysWritten)
 
     // ranExhaustive = true should be written
     {
-        auto result = makeResult(1, "MIOPEN_ENGINE");
+        auto result = makeResult("MIOPEN_ENGINE");
         result.ranExhaustive = true;
         auto entry = buildOverrideEntry(result, "conv_fprop", tensorDims, tensorStrides);
         auto& meta = entry["autotune_metadata"];
@@ -1041,7 +1124,7 @@ TEST(TestAutotuneFileWriter, ConvergedOnlyForRunUntilStable)
 
     // FIXED_AVERAGE: converged should NOT be present
     {
-        auto result = makeResult(1, "MIOPEN_ENGINE");
+        auto result = makeResult("MIOPEN_ENGINE");
         result.strategyUsed = AutotuneStrategy::FIXED_AVERAGE;
         result.converged = true;
         auto entry = buildOverrideEntry(result, "conv_fprop", tensorDims, tensorStrides);
@@ -1051,7 +1134,7 @@ TEST(TestAutotuneFileWriter, ConvergedOnlyForRunUntilStable)
 
     // RUN_UNTIL_STABLE with converged=true: converged should be present
     {
-        auto result = makeResult(1, "MIOPEN_ENGINE");
+        auto result = makeResult("MIOPEN_ENGINE");
         result.strategyUsed = AutotuneStrategy::RUN_UNTIL_STABLE;
         result.converged = true;
         auto entry = buildOverrideEntry(result, "conv_fprop", tensorDims, tensorStrides);
@@ -1062,7 +1145,7 @@ TEST(TestAutotuneFileWriter, ConvergedOnlyForRunUntilStable)
 
     // RUN_UNTIL_STABLE with converged=false: converged should be present
     {
-        auto result = makeResult(1, "MIOPEN_ENGINE");
+        auto result = makeResult("MIOPEN_ENGINE");
         result.strategyUsed = AutotuneStrategy::RUN_UNTIL_STABLE;
         result.converged = false;
         auto entry = buildOverrideEntry(result, "conv_fprop", tensorDims, tensorStrides);
@@ -1074,7 +1157,7 @@ TEST(TestAutotuneFileWriter, ConvergedOnlyForRunUntilStable)
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWithEmptyStrides)
 {
-    auto result = makeResult(1, "MIOPEN_ENGINE");
+    auto result = makeResult("MIOPEN_ENGINE");
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
     const std::vector<std::vector<int64_t>> tensorStrides = {}; // No strides
 
@@ -1093,9 +1176,9 @@ TEST(TestAutotuneFileWriter, WritesOnlyRank0Winner)
 
     // Create 3 succeeded results with different ranks (pre-sorted by rank)
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(1, "FAST_ENGINE", 0.5f, true, 0));
-    results.push_back(makeResult(2, "MEDIUM_ENGINE", 1.5f, true, 1));
-    results.push_back(makeResult(3, "SLOW_ENGINE", 3.0f, true, 2));
+    results.push_back(makeResult("FAST_ENGINE", 0.5f, true, 0));
+    results.push_back(makeResult("MEDIUM_ENGINE", 1.5f, true, 1));
+    results.push_back(makeResult("SLOW_ENGINE", 3.0f, true, 2));
 
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
 
@@ -1119,10 +1202,10 @@ TEST(TestAutotuneFileWriter, WritesRank0WinnerSkippingLeadingFailures)
 
     // Failed results appear first, then succeeded results
     std::vector<AutotuneResult> results;
-    results.push_back(makeResult(10, "BROKEN_ENGINE_A", 0.0f, false, -1));
-    results.push_back(makeResult(11, "BROKEN_ENGINE_B", 0.0f, false, -1));
-    results.push_back(makeResult(1, "WINNER_ENGINE", 1.0f, true, 0));
-    results.push_back(makeResult(2, "RUNNER_UP_ENGINE", 2.0f, true, 1));
+    results.push_back(makeResult("BROKEN_ENGINE_A", 0.0f, false, -1));
+    results.push_back(makeResult("BROKEN_ENGINE_B", 0.0f, false, -1));
+    results.push_back(makeResult("WINNER_ENGINE", 1.0f, true, 0));
+    results.push_back(makeResult("RUNNER_UP_ENGINE", 2.0f, true, 1));
 
     const std::vector<std::vector<int64_t>> tensorDims = {{4, 64, 56, 56}};
 
@@ -1149,7 +1232,7 @@ TEST(TestAutotuneFileWriter, Rank0WinnerReplacesExistingEntry)
     // Write initial rank-0 winner
     {
         std::vector<AutotuneResult> results;
-        results.push_back(makeResult(1, "OLD_WINNER", 2.0f, true, 0));
+        results.push_back(makeResult("OLD_WINNER", 2.0f, true, 0));
         auto err = writeVersionedAutotuneResults(
             tmpFile.path, config_op::CONV_FPROP, results, false, dims, {});
         ASSERT_TRUE(err.is_good());
@@ -1158,8 +1241,8 @@ TEST(TestAutotuneFileWriter, Rank0WinnerReplacesExistingEntry)
     // Re-autotune with multiple results; rank-0 winner should replace old entry
     {
         std::vector<AutotuneResult> results;
-        results.push_back(makeResult(5, "NEW_WINNER", 0.8f, true, 0));
-        results.push_back(makeResult(6, "NEW_RUNNER_UP", 1.2f, true, 1));
+        results.push_back(makeResult("NEW_WINNER", 0.8f, true, 0));
+        results.push_back(makeResult("NEW_RUNNER_UP", 1.2f, true, 1));
         auto err = writeVersionedAutotuneResults(
             tmpFile.path, config_op::CONV_FPROP, results, false, dims, {});
         ASSERT_TRUE(err.is_good());

@@ -30,6 +30,7 @@
 #include "lapack/roclapack_geqrf.hpp"
 #include "lapack_device_functions.hpp"
 #include "lib_device_helpers.hpp"
+#include "rocauxiliary_laset.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
@@ -210,9 +211,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
     T const neg_one = -1;
     S const r_one = 1;
 
-    rocsolver_laset(handle, rocblas_fill_full, ldab, n, zero, zero, // opts
-                    Aband, 0, ldab, strideAb, // A
-                    batch_count);
+    rocsolver_laset_template<T>(handle, rocblas_fill_full, ldab, n, zero, zero, // opts
+                                Aband, 0, ldab, strideAb, // A
+                                batch_count);
 
     I ldd = nb;
     I ldv = n;
@@ -296,9 +297,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
             // Set upper triangle of Vi to identity.
             T const offdiag = zero;
             T const diag = one;
-            rocsolver_laset(handle, rocblas_fill_upper, qn, qn, offdiag, diag, // opts
-                            V, idx2D(i + kd, i - j, ldv), ldv, strideV, // Vi
-                            batch_count);
+            rocsolver_laset_template<T>(handle, rocblas_fill_upper, qn, qn, offdiag, diag, // opts
+                                        V, idx2D(i + kd, i - j, ldv), ldv, strideV, // Vi
+                                        batch_count);
 
             // Form corresponding matrix Ti = larft( Vi, tau_i ), stored above Vi.
             rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_column_wise, qm,
@@ -325,9 +326,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
                 //     [ 0   Ti  ]
 
                 // Zero out block above Wi*.
-                rocsolver_laset(handle, rocblas_fill_full, i - j, qn, zero, zero, // opts
-                                W, idx2D(j + kd, i - j, ldw), ldw, strideW, // Wi
-                                batch_count);
+                rocsolver_laset_template<T>(handle, rocblas_fill_full, i - j, qn, zero, zero, // opts
+                                            W, idx2D(j + kd, i - j, ldw), ldw, strideW, // Wi
+                                            batch_count);
 
                 // Cji = Vj^H Wi, Cji stored in V above [ Ti; Vi ].
                 rocsolver_gemm(handle, rocblas_operation_conjugate_transpose,

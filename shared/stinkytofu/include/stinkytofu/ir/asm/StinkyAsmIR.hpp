@@ -305,7 +305,7 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     /// reordered across it.
     StinkyInstruction* createFence() {
         static const HwInstDesc fenceMCID{
-            GFX::FENCE, GFX::FENCE, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::FENCE, GFX::FENCE, 0, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
         return create(&fenceMCID);
     }
 
@@ -325,8 +325,14 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     ///   final linear ASM stream.
     StinkyInstruction* createFunctionAsmPlacementMarker(const std::string& functionName) {
         static const HwInstDesc functionAsmPlacementMarkerMCID{
-            GFX::FUNCTION_ASM_PLACEMENT_MARKER, GFX::FUNCTION_ASM_PLACEMENT_MARKER,       0, 0, 0,
-            "FUNCTION_ASM_PLACEMENT_MARKER",    makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::FUNCTION_ASM_PLACEMENT_MARKER,
+            GFX::FUNCTION_ASM_PLACEMENT_MARKER,
+            0,
+            0,
+            0,
+            0,
+            "FUNCTION_ASM_PLACEMENT_MARKER",
+            makeFlagSet({InstFlag::IF_HasSideEffect})};
         StinkyInstruction* inst = create(&functionAsmPlacementMarkerMCID);
         inst->addModifier<LabelData>(LabelData{functionName});
         return inst;
@@ -336,7 +342,7 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     /// so the DAG scheduler treats it as one atomic node. Own descriptor carries no
     /// IF_HasSideEffect; hasSideEffect() below still inherits it from children.
     StinkyInstruction* createExecMaskGroup(IRBase* insertBefore) {
-        static const HwInstDesc execGroupMCID{GFX::EXEC_GROUP, GFX::EXEC_GROUP, 0, 0, 0,
+        static const HwInstDesc execGroupMCID{GFX::EXEC_GROUP, GFX::EXEC_GROUP, 0, 0, 0, 0,
                                               "EXEC_GROUP",    makeFlagSet({})};
         return create(&execGroupMCID, insertBefore);
     }

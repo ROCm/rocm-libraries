@@ -82,13 +82,14 @@ from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
-from .CustomKernels import isCustomKernelConfig
+from .CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKMulticast
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from Tensile.Common.DataType import DataType
+from Tensile.Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk
 
@@ -159,7 +160,7 @@ class KernelWriterAssembly(KernelWriter):
     kernelName = getKernelFileBase(self.debugConfig.splitGSU, kernel)
     with open(os.path.join(CustomKernelDirectory, (kernelName + ".s"))) as f:
       rocmVersion = self.assembler.rocm_version
-      if not (rocmVersion.major >= 6 and rocmVersion.patch >= 32650):
+      if not supportsUserSgprKernargPreload(rocmVersion):
         code = []
         for line in f.readlines():
           if "amdhsa_user_sgpr_kernarg_preload" not in line:
@@ -3389,8 +3390,6 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
 
-
-
   def graMetadataTileAssignment(self, kernel, tP):
     module = Module("graMetadataTileAssignment")
     module.addComment0("calculate metadata gra tile assignment")
@@ -6063,14 +6062,13 @@ class KernelWriterAssembly(KernelWriter):
     if (tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]:
       module = Module("lraDeclareAddresses (Empty)")
     elif (kernel["LdsOffset%s"%tc] != 0) or \
-         (kernel.get("LDSSegmentInterleave") == 1 and tc in ("B", "MXSA", "MXSB")):
+         (kernel.get("LDSSegmentInterleave") == 1 and
+          (tc in ("MXSA", "MXSB") or
+           kernel["LDSSegInterleaveOffsets"].get("ldsBase" + tc) is not None)):
       _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
-      if tc == "B" and kernel.get("LDSSegmentInterleave") == 1:
-        _ldsBase = _segOff["ldsBaseB"]
-      elif tc in ("MXSA", "MXSB") and _segOff.get("ldsBase" + tc) is not None:
-        _ldsBase = _segOff["ldsBase" + tc]   # relocated MX scale base
-      else:
-        _ldsBase = kernel["LdsOffset%s"%tc]
+      # ldsBase<tc> covers A/B (interleaved or baseline) and relocated MX scales; falls back
+      # to the plain LdsOffset when this tensor has no segment-interleave base.
+      _ldsBase = _segOff.get("ldsBase" + tc, kernel["LdsOffset%s"%tc])
       module.add(VAddCOU32(dst=vgpr("LocalReadAddr%s+0"%tc), dst1=VCC(),
                            src0=hex(_ldsBase), src1=vgpr("LocalReadAddr%s+0"%tc),
                            comment=" += LdsOffset%s (lower)"%tc))
@@ -8876,107 +8874,6 @@ class KernelWriterAssembly(KernelWriter):
     shiftK = Module("shiftK")
     m = (u) % (self.states.numVgprBuffer) # local to use for MACs
 
-    def dataTypeToMfmaInstTypePair(dataTypeA: DataType, dataTypeB: DataType, sourceSwap: bool) -> Tuple[InstType, InstType]:
-      miInTypeStrA  = dataTypeA.toNameAbbrev()
-      miInTypeStrB  = dataTypeB.toNameAbbrev()
-      miInTypeStr = miInTypeStrA + "_" + miInTypeStrB if miInTypeStrA != miInTypeStrB else miInTypeStrA
-      miInInstType = dataTypeNameAbbrevToInstType(miInTypeStr, sourceSwap) # v_mfma_[...xK]<InType>
-      miOutInstType = dataTypeNameAbbrevToInstType(dataTypeA.MIOutputTypeNameAbbrev()) # v_mfma_<OutType>..
-      return miInInstType, miOutInstType
-
-    def dataTypeNameAbbrevToInstType(abbrev: str, sourceSwap: bool = False) -> InstType:
-      if abbrev == 'f64':
-          return InstType.INST_F64
-      elif abbrev == 'f32':
-          return InstType.INST_F32
-      elif abbrev == 'f16':
-          return InstType.INST_F16
-      elif abbrev == 'i32':
-          return InstType.INST_I32
-      elif abbrev == 'i8':
-          return InstType.INST_I8
-      elif abbrev == 'bf16':
-          return InstType.INST_BF16
-      elif abbrev == 'xf32':
-          return InstType.INST_XF32
-      elif abbrev == 'fp8':
-          return InstType.INST_F8
-      elif abbrev == 'bf8':
-          return InstType.INST_BF8
-      elif (abbrev == 'fp8_bf8' and sourceSwap == False) or \
-          (abbrev == 'bf8_fp8' and sourceSwap == True):
-          return InstType.INST_F8_BF8
-      elif (abbrev == 'bf8_fp8' and sourceSwap == False) or \
-          (abbrev == 'fp8_bf8' and sourceSwap == True):
-          return InstType.INST_BF8_F8
-      elif abbrev == 'fp6':
-          return InstType.INST_F6
-      elif abbrev == 'bf6':
-          return InstType.INST_BF6
-      elif (abbrev == 'fp6_bf6' and sourceSwap == False) or \
-          (abbrev == 'bf6_fp6' and sourceSwap == True):
-          return InstType.INST_F6_B6
-      elif (abbrev == 'bf6_fp6' and sourceSwap == False) or \
-          (abbrev == 'fp6_bf6' and sourceSwap == True):
-          return InstType.INST_B6_F6
-      elif abbrev == 'fp4':
-          return InstType.INST_F4
-      elif (abbrev == 'fp8_fp4' and sourceSwap == False) or \
-          (abbrev == 'fp4_fp8' and sourceSwap == True):
-          return InstType.INST_F8_F4
-      elif (abbrev == 'fp4_fp8' and sourceSwap == False) or \
-          (abbrev == 'fp8_fp4' and sourceSwap == True):
-          return InstType.INST_F4_F8
-      elif (abbrev == 'fp6_fp4' and sourceSwap == False) or \
-          (abbrev == 'fp4_fp6' and sourceSwap == True):
-          return InstType.INST_F6_F4
-      elif (abbrev == 'fp4_fp6' and sourceSwap == False) or \
-          (abbrev == 'fp6_fp4' and sourceSwap == True):
-          return InstType.INST_F4_F6
-      elif (abbrev == 'fp8_fp6' and sourceSwap == False) or \
-          (abbrev == 'fp6_fp8' and sourceSwap == True):
-          return InstType.INST_F8_F6
-      elif (abbrev == 'fp6_fp8' and sourceSwap == False) or \
-          (abbrev == 'fp8_fp6' and sourceSwap == True):
-          return InstType.INST_F6_F8
-      elif (abbrev == 'fp8_bf6' and sourceSwap == False) or \
-          (abbrev == 'bf6_fp8' and sourceSwap == True):
-          return InstType.INST_F8_B6
-      elif (abbrev == 'bf6_fp8' and sourceSwap == False) or \
-          (abbrev == 'fp8_bf6' and sourceSwap == True):
-          return InstType.INST_B6_F8
-      elif (abbrev == 'bf8_fp4' and sourceSwap == False) or \
-          (abbrev == 'fp4_bf8' and sourceSwap == True):
-          return InstType.INST_B8_F4
-      elif (abbrev == 'fp4_bf8' and sourceSwap == False) or \
-          (abbrev == 'bf8_fp4' and sourceSwap == True):
-          return InstType.INST_F4_B8
-      elif (abbrev == 'bf6_fp4' and sourceSwap == False) or \
-          (abbrev == 'fp4_bf6' and sourceSwap == True):
-          return InstType.INST_B6_F4
-      elif (abbrev == 'fp4_bf6' and sourceSwap == False) or \
-          (abbrev == 'bf6_fp4' and sourceSwap == True):
-          return InstType.INST_F4_B6
-      elif (abbrev == 'bf8_fp6' and sourceSwap == False) or \
-          (abbrev == 'fp6_bf8' and sourceSwap == True):
-          return InstType.INST_B8_F6
-      elif (abbrev == 'fp6_bf8' and sourceSwap == False) or \
-          (abbrev == 'bf8_fp6' and sourceSwap == True):
-          return InstType.INST_F6_B8
-      elif (abbrev == 'bf8_bf6' and sourceSwap == False) or \
-          (abbrev == 'bf6_bf8' and sourceSwap == True):
-          return InstType.INST_B8_B6
-      elif (abbrev == 'bf6_bf8' and sourceSwap == False) or \
-          (abbrev == 'bf8_bf6' and sourceSwap == True):
-          return InstType.INST_B6_B8
-      elif abbrev == 'e8':
-        return InstType.INST_E8
-      elif abbrev == 'e5m3':
-          return InstType.INST_E5M3
-      else:
-          assert("Unsupported data type.")
-      return InstType.INST_NOTYPE
-
     isgfx950 = kernel["ISA"][:2] == (9, 5)
     miInputTypeA     = kernel["ProblemType"]["F32XdlMathOp"] if kernel["EnableF32XdlMathOp"] else kernel["ProblemType"]["MacDataTypeA"]
     miInputTypeB     = kernel["ProblemType"]["F32XdlMathOp"] if kernel["EnableF32XdlMathOp"] else kernel["ProblemType"]["MacDataTypeB"]
@@ -9008,14 +8905,9 @@ class KernelWriterAssembly(KernelWriter):
     numMIInput       = max(numMIInputA, numMIInputB)
     numMIInUnroll    = max(numMIInputA//numTileInInstA, numMIInputB//numTileInInstB)
 
-    miInInstType, miOutInstType = dataTypeToMfmaInstTypePair(miInputTypeA, miInputTypeB, kernel["SourceSwap"])
-    neg_flag           = True if ((not is_mfma) and (miInInstType == InstType.INST_I8)) else False
-    miInInstType       = InstType.INST_U8 if ((not is_mfma) and miInInstType == InstType.INST_I8) else miInInstType
-    computeDataType    = kernel["ProblemType"]["ComputeDataType"]
-    # complex WMMA is emulated with real matrix ops, so the output inst type is the
-    # real base (f32/f64), not the complex abbrev (f32c/f64c) which has no InstType.
-    computeOutAbbrev   = computeDataType.MIOutputTypeNameAbbrev() if computeDataType.isComplex() else computeDataType.toNameAbbrev()
-    miOutInstType      = miOutInstType if (is_mfma or kernel["ProblemType"]["Sparse"]) else dataTypeNameAbbrevToInstType(computeOutAbbrev)
+    miInInstType, miOutInstType, neg_flag = matrixInstructionTypes(
+        miInputTypeA, miInputTypeB, kernel["ProblemType"]["ComputeDataType"],
+        kernel["SourceSwap"], kernel["ProblemType"]["Sparse"], is_mfma)
     miInScaleAInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSA"].toNameAbbrev())
     miInScaleBInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSB"].toNameAbbrev())
     numReadsIterCoalescedA = self.states.numReadsIterCoalescedA
@@ -19326,13 +19218,25 @@ class KernelWriterAssembly(KernelWriter):
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
     if kernel.get("LDSSegmentInterleave") == 1 and tc in ("A", "B"):
       _segOff = kernel["LDSSegInterleaveOffsets"]
-      if tc == "A" and _segOff.get("portSplitA", False):
-        numVec = kernel["MIWaveTile"][ti] // kernel["VectorWidthA"]
-        vIdxFootprint = round(mt * du * bpe // dim1Divisor // numVec)   # per-vIdx, not the component jump
-        vIdxPad = vIdxFootprint // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
-        return vIdxFootprint + vIdxPad
-      # Coarse A / non-bcontig B: component jump.
-      if tc == "A" or not _segOff.get("bBaseline", False):
+      _portSplit = (tc == "A" and _segOff.get("portSplitA", False)) or \
+                   (tc == "B" and _segOff.get("portSplitB", False))
+      # componentSplit: ldsSplit is the per-vIdx step within the segment; the component jump
+      # rides the wave base (initTDMDescriptorWaveSeparatedImpl), not ldsSplit.
+      _componentSplit = _segOff.get("componentSplit", False) and _segOff.get("activeTC") == tc
+      if _portSplit or _componentSplit:
+        vw = kernel["VectorWidthA"] if tc == "A" else kernel["VectorWidthB"]
+        numVec = kernel["MIWaveTile"][ti] // vw
+        numComp = kernel["NumWaves"] // 2
+        # Both halves stay in one segment, so the boundary is the per-vIdx footprint, not a segment
+        # jump. splitDiv = numVec (VW==WaveTile/2) or numComp (VW==WaveTile).
+        splitDiv = numVec if numVec > 1 else numComp
+        halfFootprint = round(mt * du * bpe // dim1Divisor // splitDiv)
+        halfPad = halfFootprint // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
+        return halfFootprint + halfPad
+      # Otherwise the boundary is a segment jump (writeStrideBytes): the second half lands in the next
+      # segment. A baseline tensor (aBaseline/bBaseline) is skipped and uses the default footprint below.
+      if (tc == "A" and not _segOff.get("aBaseline", False)) or \
+         (tc == "B" and not _segOff.get("bBaseline", False)):
         return _segOff["writeStrideBytes"]
     half = round(mt * du * bpe // dim1Divisor)
     extraPadSize = half // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
@@ -19623,10 +19527,17 @@ class KernelWriterAssembly(KernelWriter):
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+      _segOffAB = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+      # Active tensor only gets the component wave jump; the baseline tensor (aBaseline/bBaseline) is untouched.
       _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and (
-          tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))
-      _segPortSplitA = _segAB and tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False)
-      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplitA
+          (tc == "A" and not _segOffAB.get("aBaseline", False)) or
+          (tc == "B" and not _segOffAB.get("bBaseline", False)))
+      _segPortSplit = _segAB and ((tc == "A" and _segOffAB.get("portSplitA", False)) or
+                                  (tc == "B" and _segOffAB.get("portSplitB", False)))
+      # componentSplit: the wave base carries the component segment jump (wId * writeStrideBytes);
+      # the per-vIdx split stays within the segment.
+      _segComponentSplit = _segAB and _segOffAB.get("componentSplit", False) and _segOffAB.get("activeTC") == tc
+      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplit or _segComponentSplit
       _segFootprint = _segWaveJump and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
       if _segWaveJump:
           dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
@@ -19640,12 +19551,10 @@ class KernelWriterAssembly(KernelWriter):
                 f"padBytes = numPadBlocks * ({ldsPadSize=})"))
         mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
                 "woffset += padBytes"))
-      if kernel.get("LDSSegmentInterleave") == 1 and tc == "B":
-          ldsConstOffset = kernel["LDSSegInterleaveOffsets"]["ldsBaseB"]
-      elif kernel.get("LDSSegmentInterleave") == 1 and tc in ("MXSA", "MXSB"):
-          _mxBase = kernel["LDSSegInterleaveOffsets"].get("ldsBase" + tc)
-          if _mxBase is not None:
-              ldsConstOffset = _mxBase   # relocated MX scale base
+      if kernel.get("LDSSegmentInterleave") == 1 and _segOffAB.get("ldsBase" + tc) is not None:
+          # A/B interleaved-or-shared base (e.g. ldsBaseB for [2,2]/[4,1], ldsBaseA for [1,4]),
+          # or relocated MX scale base.
+          ldsConstOffset = _segOffAB["ldsBase" + tc]
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
