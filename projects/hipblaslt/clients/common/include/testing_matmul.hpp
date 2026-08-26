@@ -411,140 +411,6 @@ void dumpBuffer(const char* title, hipDataType To, HipHostBuffer& buf, size_t M,
     return;
 }
 
-// A function to determine the default bias_type
-hipDataType derive_unset_bias_type(const Arguments& arg)
-{
-    // TODO: confirm if HIP_R_64F, HIP_R_32I are neccessary for biastype
-    static const std::set<hipDataType> supported_bias_types
-        = {HIP_R_32F, HIP_R_16F, HIP_R_16BF, HIP_R_64F, HIP_R_32I, HIP_C_32F, HIP_C_64F};
-
-    hipDataType real_bias_type = arg.bias_type;
-
-    // when bias type is unset
-    if(arg.bias_type == HIPBLASLT_DATATYPE_INVALID)
-    {
-        if(arg.compute_type == HIPBLAS_COMPUTE_32I)
-        {
-            real_bias_type = HIP_R_32I;
-        }
-        else if(arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32)
-        {
-            real_bias_type = HIP_R_32F;
-        }
-        else if((arg.a_type == HIP_R_8F_E4M3_FNUZ || arg.a_type == HIP_R_8F_E5M2_FNUZ)
-                && (arg.b_type == HIP_R_8F_E4M3_FNUZ || arg.b_type == HIP_R_8F_E5M2_FNUZ))
-        {
-            if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
-                real_bias_type = HIP_R_16BF;
-            else if(arg.d_type == HIP_R_16F)
-                real_bias_type = HIP_R_16F;
-            else //more default cases once support C != D
-                real_bias_type = HIP_R_16F;
-        }
-        else if((arg.a_type == HIP_R_8F_E4M3 || arg.a_type == HIP_R_8F_E5M2)
-                && (arg.b_type == HIP_R_8F_E4M3 || arg.b_type == HIP_R_8F_E5M2))
-        {
-            if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
-                real_bias_type = HIP_R_16BF;
-            else if(arg.d_type == HIP_R_16F)
-                real_bias_type = HIP_R_16F;
-            else //more default cases once support C != D
-                real_bias_type = HIP_R_16F;
-        }
-        else if((arg.a_type == HIP_R_6F_E2M3 && arg.b_type == HIP_R_6F_E2M3)
-                || (arg.a_type == HIP_R_6F_E3M2 && arg.b_type == HIP_R_6F_E3M2)
-                || (arg.a_type == HIP_R_4F_E2M1 && arg.b_type == HIP_R_4F_E2M1))
-        {
-            if(arg.d_type == HIP_R_32F || arg.d_type == HIP_R_16BF)
-                real_bias_type = HIP_R_16BF;
-            else if(arg.d_type == HIP_R_16F)
-                real_bias_type = HIP_R_16F;
-            else
-                real_bias_type = HIP_R_16F;
-        }
-        else
-        {
-            real_bias_type = arg.d_type;
-        }
-    }
-
-    if(supported_bias_types.count(real_bias_type) == 0)
-        throw std::invalid_argument("Invalid bias type "
-                                    + std::string(hip_datatype_to_string(real_bias_type)));
-
-    return real_bias_type;
-}
-
-// A function to determine the default aux_type
-hipDataType derive_unset_aux_type(const Arguments& arg)
-{
-    static const std::set<hipDataType> supported_aux_types = {
-        HIP_R_16F,
-        HIP_R_16BF,
-        HIP_R_8F_E4M3_FNUZ,
-        HIP_R_8F_E4M3,
-    };
-
-    hipDataType real_aux_type = arg.aux_type;
-
-    // when aux type is unset
-    if(arg.aux_type == HIPBLASLT_DATATYPE_INVALID)
-    {
-        real_aux_type = arg.d_type;
-    }
-
-    if(real_aux_type != arg.d_type && supported_aux_types.count(real_aux_type) == 0)
-        throw std::invalid_argument("Invalid aux type "
-                                    + std::string(hip_datatype_to_string(real_aux_type)));
-
-    return real_aux_type;
-}
-
-// A function to determine the default compute_input_type
-std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Arguments& arg)
-{
-    static const std::set<hipDataType> supported_compute_input_types = {
-        HIP_R_32F,
-        HIP_R_16BF,
-        HIP_R_16F,
-        HIP_R_8F_E4M3,
-        HIP_R_8F_E5M2,
-        HIP_R_8F_E4M3_FNUZ,
-        HIP_R_8F_E5M2_FNUZ,
-        static_cast<hipDataType>(HIP_R_6F_E2M3),
-        static_cast<hipDataType>(HIP_R_6F_E3M2),
-        static_cast<hipDataType>(HIP_R_4F_E2M1),
-    };
-
-    hipDataType real_compute_input_typeA = arg.compute_input_typeA;
-    hipDataType real_compute_input_typeB = arg.compute_input_typeB;
-
-    if(real_compute_input_typeA != HIPBLASLT_DATATYPE_INVALID
-       && !supported_compute_input_types.count(real_compute_input_typeA))
-        throw std::invalid_argument(
-            "Invalid compute_input_typeA "
-            + std::string(hip_datatype_to_string(real_compute_input_typeA)));
-
-    if(real_compute_input_typeB != HIPBLASLT_DATATYPE_INVALID
-       && !supported_compute_input_types.count(real_compute_input_typeB))
-        throw std::invalid_argument(
-            "Invalid compute_input_typeB "
-            + std::string(hip_datatype_to_string(real_compute_input_typeB)));
-
-    // when compute_input_type type is unset
-    if(real_compute_input_typeA == HIPBLASLT_DATATYPE_INVALID)
-    {
-        real_compute_input_typeA = computeTypeToRealDataType(arg.compute_type);
-    }
-
-    if(real_compute_input_typeB == HIPBLASLT_DATATYPE_INVALID)
-    {
-        real_compute_input_typeB = computeTypeToRealDataType(arg.compute_type);
-    }
-
-    return {real_compute_input_typeA, real_compute_input_typeB};
-}
-
 std::vector<hipblaslt::host_validation::MatmulValidationCase::PointwiseTolerance>
     matmulValidationTolerances(
         const Arguments&                                  arg,
@@ -588,35 +454,14 @@ std::vector<hipblaslt::host_validation::MatmulValidationCase::PointwiseTolerance
 void testing_matmul_with_bias(
     const Arguments&                                  arg,
     std::span<const hipblaslt::client::MatmulTestCase> matmulCases,
-    hipDataType                                       TiA,
-    hipDataType                                       TiB,
-    hipDataType                                       TiC,
-    hipDataType                                       To,
-    hipDataType                                       Tc,
-    hipDataType                                       TciA,
-    hipDataType                                       TciB,
-    hipDataType                                       Tbias,
-    hipDataType                                       Taux);
+    const hipblaslt::client::MatmulDataTypes&          dataTypes);
 
 void testing_matmul(const Arguments& arg)
 {
-    hipDataType tiA = arg.a_type;
-    hipDataType tiB = arg.b_type;
-    hipDataType tiC = arg.c_type;
-    hipDataType to  = arg.d_type;
-    hipDataType tc  = computeTypeToRealDataType(arg.compute_type);
-    hipDataType tciA, tciB;
-
-    // after this, tciA and tciB should not be invalid
-    std::tie(tciA, tciB) = derive_unset_compute_input_type(arg);
-
-    // after this, real bias type should not be invalid
-    hipDataType real_bias_type = derive_unset_bias_type(arg);
-    Arguments   arg_revised    = arg;
-    arg_revised.bias_type      = real_bias_type;
-
-    hipDataType real_aux_type = derive_unset_aux_type(arg);
-    arg_revised.aux_type      = real_aux_type;
+    const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(arg);
+    Arguments  arg_revised = arg;
+    arg_revised.bias_type  = dataTypes.bias;
+    arg_revised.aux_type   = dataTypes.auxiliary;
 
     const auto matmulCases = hipblaslt::client::normalizeMatmulCases(arg_revised);
 
@@ -630,7 +475,7 @@ void testing_matmul(const Arguments& arg)
     // f32/f64 (and TF32x1 f32 path) still run on Navi.
     if(arg.initialization == hipblaslt_initialization::integer_exact)
     {
-        const bool is_16bit = (tiA == HIP_R_16F || tiA == HIP_R_16BF);
+        const bool is_16bit = (arg.a_type == HIP_R_16F || arg.a_type == HIP_R_16BF);
         if(hipblaslt_get_arch_major() == 11 && is_16bit)
         {
             hipblaslt_cout << "Skipping integer_exact on gfx11 for 16-bit float (fp16/bf16 A)"
@@ -659,7 +504,8 @@ void testing_matmul(const Arguments& arg)
     // FP16 full-matrix accumulator probe (see hipblaslt_init_device fp16_accumulator_probe).
     if(arg.initialization == hipblaslt_initialization::fp16_accumulator_probe)
     {
-        if(tiA != HIP_R_16F || tiB != HIP_R_16F || tiC != HIP_R_16F || to != HIP_R_16F
+        if(arg.a_type != HIP_R_16F || arg.b_type != HIP_R_16F || arg.c_type != HIP_R_16F
+           || arg.d_type != HIP_R_16F
            || arg.compute_type != HIPBLAS_COMPUTE_32F)
         {
             hipblaslt_cout
@@ -708,55 +554,40 @@ void testing_matmul(const Arguments& arg)
     }
 
     const bool lowPrecisionInput
-        = (realDataTypeSize(tiA) == 1 || realDataTypeSize(tiB) == 1) && tc != HIP_R_32I;
-    hipDataType executionBiasType = to;
-    if(lowPrecisionInput || to == HIP_R_16F || to == HIP_R_16BF)
-    {
-        const hipDataType preferredNarrowBias
-            = (to == HIP_R_16BF || to == HIP_R_32F) ? HIP_R_16BF : HIP_R_16F;
-        executionBiasType
-            = real_bias_type == preferredNarrowBias ? preferredNarrowBias : HIP_R_32F;
-    }
-    else if(to != HIP_R_32F && to != HIP_R_32I && to != HIP_R_8I && to != HIP_R_64F
-            && to != HIP_C_32F && to != HIP_C_64F)
+        = (realDataTypeSize(arg.a_type) == 1 || realDataTypeSize(arg.b_type) == 1)
+          && dataTypes.computeScalar != HIP_R_32I;
+    if(!lowPrecisionInput && arg.d_type != HIP_R_16F && arg.d_type != HIP_R_16BF
+       && arg.d_type != HIP_R_32F && arg.d_type != HIP_R_32I && arg.d_type != HIP_R_8I
+       && arg.d_type != HIP_R_64F && arg.d_type != HIP_C_32F && arg.d_type != HIP_C_64F)
     {
         hipblaslt_test_invalid{}(arg);
         return;
     }
 
-    testing_matmul_with_bias(arg_revised,
-                             matmulCases,
-                             tiA,
-                             tiB,
-                             tiC,
-                             to,
-                             tc,
-                             tciA,
-                             tciB,
-                             executionBiasType,
-                             real_aux_type);
+    testing_matmul_with_bias(arg_revised, matmulCases, dataTypes);
 }
 
 void testing_matmul_with_bias(const Arguments&                                   arg,
                               std::span<const hipblaslt::client::MatmulTestCase> matmulCases,
-                              hipDataType                                        TiA,
-                              hipDataType                                        TiB,
-                              hipDataType                                        TiC,
-                              hipDataType                                        To,
-                              hipDataType                                        Tc,
-                              hipDataType                                        TciA,
-                              hipDataType                                        TciB,
-                              hipDataType                                        Tbias,
-                              hipDataType                                        Taux)
+                              const hipblaslt::client::MatmulDataTypes&          dataTypes)
 {
     const auto& firstCase = matmulCases.front();
 
+    const hipDataType          TiA              = firstCase.a.apiType;
+    const hipDataType          TiB              = firstCase.b.apiType;
+    const hipDataType          TiC              = firstCase.c.apiType;
+    const hipDataType          To               = firstCase.d.apiType;
+    const hipDataType          Tc               = dataTypes.computeScalar;
+    const hipDataType          TciA             = dataTypes.computeInputA;
+    const hipDataType          TciB             = dataTypes.computeInputB;
+    const hipDataType          Talpha           = dataTypes.coefficient;
+    const hipDataType          Tbias            = dataTypes.biasStorage;
+    const hipDataType          Taux             = dataTypes.auxiliary;
     const hipblasOperation_t   transA           = firstCase.operationA;
     const hipblasOperation_t   transB           = firstCase.operationB;
     const hipblasLtBatchMode_t batchMode        = firstCase.batchMode;
     const bool                 do_grouped_gemm  = arg.grouped_gemm > 0;
     const int32_t              problem_count    = static_cast<int32_t>(matmulCases.size());
-    const hipDataType          Talpha           = (TiA == HIP_C_32F || TiA == HIP_C_64F) ? TiA : Tc;
     const bool                 do_swizzle_a     = arg.swizzle_a && isSwizzleSupported(TiA);
     const bool                 do_swizzle_b     = arg.swizzle_b && isSwizzleSupported(TiB);
     const bool                 mx_use_rocroller = MXUseRocroller();

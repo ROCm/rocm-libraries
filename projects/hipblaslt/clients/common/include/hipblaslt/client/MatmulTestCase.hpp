@@ -13,6 +13,17 @@
 
 namespace hipblaslt::client
 {
+    struct MatmulDataTypes
+    {
+        hipDataType computeScalar;
+        hipDataType computeInputA;
+        hipDataType computeInputB;
+        hipDataType coefficient;
+        hipDataType bias;
+        hipDataType biasStorage;
+        hipDataType auxiliary;
+    };
+
     struct MatmulMatrix
     {
         hipDataType                      apiType;
@@ -65,6 +76,8 @@ namespace hipblaslt::client
             return auxiliary ? auxiliary->allocationElements : 0;
         }
     };
+
+    MatmulDataTypes resolveMatmulDataTypes(const Arguments& arguments);
 
     std::vector<MatmulTestCase> normalizeMatmulCases(const Arguments& arguments);
 } // namespace hipblaslt::client
