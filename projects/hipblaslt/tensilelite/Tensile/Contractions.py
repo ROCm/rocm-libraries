@@ -428,6 +428,8 @@ class ProblemType:
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
             predicates.append(ProblemPredicate("FusedGemmA2A", value=self.fusedGemmA2A))
+            if self.fusedGemmA2A and self.batched:
+                predicates.append(ProblemPredicate("BatchSizeEqual", index=0, value=1))
             predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
             if self.mxBlockA:
                 predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))

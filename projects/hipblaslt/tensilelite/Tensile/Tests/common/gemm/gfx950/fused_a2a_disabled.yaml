@@ -7,10 +7,9 @@
 #
 #     Tensile <this file> <output-dir> --build-only
 #
-# Benchmarking needs the fused client path (--fused-a2a --fused-a2a-world 4
-# --fused-a2a-am <AM>) on 4 gfx950 cards; the ordinary benchmark loop leaves the
-# A2A kernel arguments unset. AM must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0
-# and AM<=M.
+# Benchmarking runs the fused client path on 4 gfx950 cards; FusedGemmA2A in the
+# ProblemType selects it, and the run takes --fused-a2a-world 4 --fused-a2a-am
+# <AM>. AM must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0 and AM<=M.
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -59,6 +58,9 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # One shape only: the fused client rejects multiple problems.
-          # Production shape is 18432x4096x8192 with AM 10240.
-          - Exact: [3072, 512, 1, 2048]      # AM 2048
+          # AM is not expressible here: the client takes it as --fused-a2a-am,
+          # one value per problem in this order -- 2048,10240,10240 for these
+          # three. M is the feature (A2A) dim, N the token dim.
+          - Exact: [3072, 512, 1, 2048]     # AM 2048,  nShard 512
+          - Exact: [18432, 2048, 1, 8192]   # AM 10240, nShard 2560
+          - Exact: [18432, 4096, 1, 8192]   # AM 10240, nShard 2560

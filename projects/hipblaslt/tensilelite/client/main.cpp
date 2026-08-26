@@ -82,12 +82,13 @@ namespace TensileLite
     namespace Client
     {
         // Single-process multi-GPU fused GEMM.A2A entry point.
-        // Defined in FusedA2AClient.cpp. Dispatched from main() when
-        // --fused-a2a is set; returns a process exit code.
+        // Defined in FusedA2AClient.cpp. Dispatched per problem when the
+        // fused-gemm-a2a option is set; returns a process exit code.
         int runFusedA2A(po::variables_map const&                                       args,
                         std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                         std::shared_ptr<Hardware>                                      hardware,
-                        ClientProblemFactory& problemFactory);
+                        ContractionProblem*                                            problem,
+                        int                                                            runIdx);
 
         __global__ void flush_icache()
         {
@@ -293,14 +294,12 @@ namespace TensileLite
                 ("dump-tensors",             po::value<bool>()->default_value(false), "Binary dump tensors instead of printing.")
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
-                ("fused-a2a",                po::value<bool>()->default_value(false), "Run the single-process multi-GPU fused GEMM.A2A setup+launch entry point instead of the single-GPU benchmark loop.")
-                ("fused-a2a-world",          po::value<int>()->default_value(4), "World size (number of GPUs) for --fused-a2a.")
+                ("fused-a2a-world",          po::value<int>()->default_value(4), "World size (number of GPUs) for the fused GEMM.A2A run.")
                 ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
                 ("fused-a2a-drain-send",     po::value<int>()->default_value(0), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
-                ("fused-a2a-iters",          po::value<int>()->default_value(100), "Number of repeat iterations for --fused-a2a (race detection + latency sampling). Each iteration re-zeroes counter/flag/recv and re-validates.")
-                ("fused-a2a-warmup",         po::value<int>()->default_value(10), "Number of leading --fused-a2a iterations excluded from the p50/p90 latency percentiles (they still run and count toward the race check).")
-                ("fused-a2a-validate",       po::value<int>()->default_value(1), "1 = compute the host golden GEMM and numerically validate recv+out every iteration (default); 0 = SKIP the golden + numeric compares (used on shapes whose CPU golden is too slow, e.g. the full production shape). With 0, race detection degrades to 'iteration exited cleanly' (no HIP error / no DRAIN hang), not byte-verified.")
-                ("fused-a2a-am",             po::value<int>()->default_value(1024), "A2A column count along FEATURE (M, index-0) for --fused-a2a (col-major swap): the first AM feature columns PUSH all-to-all; [AM,M) stay local. Must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0, AM<=M (MT0 = solution MacroTile0). Pass the value matching the shape being run (e.g. 2048 for the medium shape, 10240 for the full shape).")
+                ("fused-a2a-iters",          po::value<int>()->default_value(100), "Number of repeat iterations for the fused GEMM.A2A run (race detection + latency sampling). Each iteration re-zeroes counter/flag/recv and re-validates.")
+                ("fused-a2a-warmup",         po::value<int>()->default_value(10), "Number of leading fused GEMM.A2A iterations excluded from the p50/p90 latency percentiles (they still run and count toward the race check).")
+                ("fused-a2a-am",             po::value<std::vector<int>>()->default_value(std::vector<int>(1, 1024), "1024"), "A2A column count along FEATURE (M, index-0) for the fused GEMM.A2A run (col-major swap): the first AM feature columns PUSH all-to-all; [AM,M) stay local. Must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0, AM<=M (MT0 = solution MacroTile0). AM is a per-problem dimension: pass it once to apply to every problem, or comma-separated, one value per problem selected by --problem-start-idx/--num-problems, in that order (e.g. 2048 for the medium shape, 10240 for the full shape).")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
                 ("platform-idx",             po::value<int>()->default_value(0), "OpenCL Platform Index")
 
@@ -1136,16 +1135,6 @@ int main(int argc, const char* argv[])
         }
     }
 
-    // Fused GEMM.A2A single-process multi-GPU entry point. This is a
-    // self-contained setup+launch path that does NOT use the single-GPU
-    // benchmark loop below; dispatch here and return immediately.
-    if(args["fused-a2a"].as<bool>())
-    {
-        int rc = runFusedA2A(args, library, hardware, problemFactory);
-        flushTimingBuffer();
-        return rc;
-    }
-
     auto problems        = problemFactory.problems();
     int  firstProblemIdx = args["problem-start-idx"].as<int>();
     int  numProblems     = args["num-problems"].as<int>();
@@ -1275,6 +1264,20 @@ int main(int argc, const char* argv[])
                 reporters->report(ResultKey::ProblemIndex, problemIdx);
                 reporters->report(ResultKey::ProblemProgress,
                                   concatenate(problemIdx, "/", lastProblemIdx));
+
+                // Self-contained setup+launch across W devices; skips the
+                // single-GPU path below.
+                if(args["fused-gemm-a2a"].as<bool>())
+                {
+                    int rc = runFusedA2A(
+                        args, library, hardware, problem, problemIdx - firstProblemIdx);
+                    if(rc != 0)
+                    {
+                        flushTimingBuffer();
+                        return rc;
+                    }
+                    continue;
+                }
 
                 {
                     ScopedTimer timer("pre_problem");

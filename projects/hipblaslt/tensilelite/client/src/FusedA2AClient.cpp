@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Single-process multi-GPU orchestration for the fused GEMM.A2A kernel,
-// dispatched from main.cpp when --fused-a2a is set.
+// dispatched from main.cpp when the fused-gemm-a2a option is set.
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
@@ -12,7 +12,6 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
-#include "ClientProblemFactory.hpp"
 #include <array>
 
 #include "FusedA2ACounterSentinel.hpp"
@@ -44,15 +43,26 @@ namespace TensileLite
         int runFusedA2A(po::variables_map const&                                       args,
                         std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                         std::shared_ptr<Hardware>                                      hardware,
-                        ClientProblemFactory& problemFactory)
+                        ContractionProblem*                                            problemIn,
+                        int                                                            runIdx)
         {
 #ifdef TENSILELITE_ENABLE_SDMA_A2A
-            const int  W         = args["fused-a2a-world"].as<int>();
-            const int  drainRecv = args["fused-a2a-drain-recv"].as<int>() ? 1 : 0;
-            const int  drainSend = args["fused-a2a-drain-send"].as<int>() ? 1 : 0;
-            const bool validate  = args["fused-a2a-validate"].as<int>() != 0;
-            const uint32_t drain = (drainRecv ? FUSED_A2A_DRAIN_RECV : 0u)
-                                   | (drainSend ? FUSED_A2A_DRAIN_SEND : 0u);
+            const int      W          = args["fused-a2a-world"].as<int>();
+            const int      drainRecv  = args["fused-a2a-drain-recv"].as<int>() ? 1 : 0;
+            const int      drainSend  = args["fused-a2a-drain-send"].as<int>() ? 1 : 0;
+            const int      toValidate = args["num-elements-to-validate"].as<int>();
+            const bool     validate   = toValidate != 0;
+            const uint32_t drain
+                = (drainRecv ? FUSED_A2A_DRAIN_RECV : 0u) | (drainSend ? FUSED_A2A_DRAIN_SEND : 0u);
+
+            if(toValidate > 0)
+            {
+                std::cerr << "[fused-a2a] ERROR: --num-elements-to-validate=" << toValidate
+                          << " is not supported; this path compares every element or none. "
+                             "Use -1 for all, 0 for none. Refusing to launch."
+                          << std::endl;
+                return -1;
+            }
 
             // Bound W before it is used as a divisor further down.
             if(!fusedA2AWorldSizeValid(W))
@@ -62,6 +72,16 @@ namespace TensileLite
                           << FUSED_A2A_MAX_RANKS << " peer groups.\n"
                           << "  require: 1 <= W <= " << FUSED_A2A_MAX_RANKS
                           << ". Refusing to launch." << std::endl;
+                return -1;
+            }
+
+            const int deviceIdx = args["device-idx"].as<int>();
+            if(deviceIdx != 0)
+            {
+                std::cerr << "[fused-a2a] ERROR: only --device-idx=0 is supported; rank r runs "
+                             "on device r. Use HIP_VISIBLE_DEVICES to pick the set. Refusing to "
+                             "launch."
+                          << std::endl;
                 return -1;
             }
 
@@ -76,17 +96,10 @@ namespace TensileLite
                 return 1;
             }
 
-            auto problems = problemFactory.problems();
-            if(problems.size() != 1)
-            {
-                std::cerr << "[fused-a2a] ERROR: multiple problems are not supported yet"
-                          << std::endl;
-                return 1;
-            }
-            auto* problem = dynamic_cast<ContractionProblemGemm*>(problems.front().get());
+            auto* problem = dynamic_cast<ContractionProblemGemm*>(problemIn);
             if(!problem)
             {
-                std::cerr << "[fused-a2a] first problem is not a plain GEMM" << std::endl;
+                std::cerr << "[fused-a2a] problem is not a plain GEMM" << std::endl;
                 return 1;
             }
 
@@ -107,12 +120,48 @@ namespace TensileLite
             }
             std::cout << "[fused-a2a] solution: " << solution->name() << std::endl;
 
+            if(!solution->problemType.fusedGemmA2A)
+            {
+                std::cerr << "[fused-a2a] ERROR: solution was not built with FusedGemmA2A; it "
+                             "has no fused epilogue to drive. Refusing to launch."
+                          << std::endl;
+                return -1;
+            }
+
             if(!(*solution->problemPredicate)(*problem))
             {
                 std::cerr << "[fused-a2a] solution predicate does not match the problem:"
                           << std::endl;
                 solution->problemPredicate->debugEval(*problem, std::cerr);
                 return 1;
+            }
+
+            {
+                auto const&                        pt            = solution->problemType;
+                const std::pair<bool, char const*> unsupported[] = {
+                    {pt.useBias != 0, "bias"},
+                    {pt.useE, "E"},
+                    {pt.useGateResidual, "gate residual"},
+                    {!pt.useScaleAB.empty(), "scaleA/scaleB"},
+                    {pt.useScaleCD, "scaleC/scaleD"},
+                    {pt.useScaleAlphaVec != 0, "scaleAlphaVec"},
+                    {pt.outputAmaxD, "amaxD"},
+                    {pt.sparse != 0, "sparse metadata"},
+                    {pt.groupedGemm, "grouped GEMM"},
+                    {pt.activationType != ActivationType::None, "activation"},
+                    {solution->requiredWorkspaceSize(*problem, *hardware) != 0, "workspace"},
+                };
+                std::string missing;
+                for(auto const& [needed, name] : unsupported)
+                    if(needed)
+                        missing += (missing.empty() ? "" : ", ") + std::string(name);
+                if(!missing.empty())
+                {
+                    std::cerr << "[fused-a2a] ERROR: solution needs inputs this client does not "
+                                 "set: "
+                              << missing << ". Refusing to launch." << std::endl;
+                    return -1;
+                }
             }
 
             // Tile sizes must come from THIS solution's macro-tile: the kernel
@@ -143,7 +192,17 @@ namespace TensileLite
 
             // The first `AM` FEATURE columns go all-to-all; [AM, M) stay local in
             // `out`.
-            const uint32_t AM           = (uint32_t)args["fused-a2a-am"].as<int>();
+            auto const& amArgs = args["fused-a2a-am"].as<std::vector<int>>();
+            if(amArgs.size() != 1 && (size_t)runIdx >= amArgs.size())
+            {
+                std::cerr << "[fused-a2a] ERROR: --fused-a2a-am has " << amArgs.size()
+                          << " values, fewer than the problems selected by "
+                             "--problem-start-idx/--num-problems; pass one value per selected "
+                             "problem, or one value for all. Refusing to launch."
+                          << std::endl;
+                return -1;
+            }
+            const uint32_t AM           = (uint32_t)amArgs[amArgs.size() == 1 ? 0 : runIdx];
             const uint32_t nShard       = AM / (uint32_t)W;
             const uint32_t tilesPerRank = (uint32_t)(nShard / macroTileM);
             // tokenTiles sizes the counter array and the padded recv buffer.
@@ -204,6 +263,15 @@ namespace TensileLite
                              "the way the coordinates were: reduce AM or raise W "
                              "(the bound is AM < "
                           << ((size_t)(1u << 14) << elemShift) << "*W)." << std::endl;
+                return -1;
+            }
+
+            if(problem->a().dataType() != rocisa::DataType::BFloat16
+               || problem->b().dataType() != rocisa::DataType::BFloat16)
+            {
+                std::cerr << "[fused-a2a] ERROR: only bf16 A and B are supported, but A="
+                          << problem->a().dataType() << " B=" << problem->b().dataType()
+                          << ". Refusing to launch." << std::endl;
                 return -1;
             }
 
@@ -341,8 +409,8 @@ namespace TensileLite
             }
             else
             {
-                std::cout << "[fused-a2a] validate=0: SKIPPING host golden GEMM + numeric "
-                             "compares (race = clean-exit only, not byte-verified)\n";
+                std::cout << "[fused-a2a] num-elements-to-validate=0: SKIPPING host golden GEMM "
+                             "+ numeric compares (race = clean-exit only, not byte-verified)\n";
             }
 
             // --- Per-device fresh allocation. ---
