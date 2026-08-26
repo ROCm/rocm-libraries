@@ -329,7 +329,17 @@ class ABQuantDispatcherLib:
         AQ = np.ascontiguousarray(AQ)
         # BQ is col-major [QK_B, QN_B]: Fortran order makes leading dim = QK_B (stride_BQ = QK_B).
         BQ = np.asfortranarray(BQ)
-        C  = np.ascontiguousarray(C)
+        # Inputs may be copied into a contiguous temporary because the copy is what
+        # gets uploaded. C may not: the library memcpys the device result back into
+        # whatever buffer this pointer names. Copying C would send the results into a
+        # temporary that is discarded on return, and the caller's array would silently
+        # keep its pre-call contents.
+        if not C.flags["C_CONTIGUOUS"]:
+            raise ValueError(
+                "C must be a C-contiguous array; it is written in place. "
+                "Pass np.ascontiguousarray(C) and copy the result back yourself, "
+                "or allocate C with np.empty/np.zeros."
+            )
 
         time_ms = ctypes.c_float(0.0)
 

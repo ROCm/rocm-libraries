@@ -61,7 +61,7 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     return quant_bridge::
         run_scalar_quant_gemm<SelectedKernel, ADataType, BDataType, CDataType, QDataType>(
             "dispatcher_run_rowcolquant_gemm",
-            g_initialized,
+            bridge_initialized(),
             A,
             B,
             AQ,

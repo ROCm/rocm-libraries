@@ -65,7 +65,7 @@ int dispatcher_run_abquant_gemm(const void* A,
     // check_arch=false: unlike the other bridges, the arch check must run *after*
     // the fp4-preshuffle reject below so that case still returns -3, not -1.
     if(!check_entry_args(kFn,
-                         g_initialized,
+                         bridge_initialized(),
                          {A, B, AQ, BQ, C},
                          {M, N, K, QK_A, QK_B, QN_B},
                          /*allow_gfx90a=*/false,

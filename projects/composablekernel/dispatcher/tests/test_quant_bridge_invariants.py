@@ -222,3 +222,42 @@ def test_known_gap_tables_name_real_bridges(table_name, table):
     assert not unknown, (
         f"{table_name} names bridges that no longer exist: {unknown}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Output buffer: C is written in place and must never be copied
+# ---------------------------------------------------------------------------
+#
+# ``C = np.ascontiguousarray(C)`` on the *output* buffer sends the device
+# results into a temporary that is discarded on return; the caller's array
+# silently keeps its pre-call contents.  Eight of the ten bridges did this.
+
+_QUANT_UTILS = sorted(_PYTHON.glob("*quant*_utils.py"))
+_QUANT_UTILS_IDS = [p.name for p in _QUANT_UTILS]
+
+_C_COPY = re.compile(r"^\s*C\s*=\s*np\.ascontiguousarray\(\s*C\s*\)", re.MULTILINE)
+
+
+@pytest.mark.parametrize("path", _QUANT_UTILS, ids=_QUANT_UTILS_IDS)
+def test_output_buffer_is_never_copied(path):
+    """No bridge may rebind C to a contiguous copy: results would be discarded."""
+    hits = [
+        f"{path.name}:{i}"
+        for i, line in enumerate(path.read_text().splitlines(), 1)
+        if _C_COPY.match(line)
+    ]
+    assert not hits, (
+        f"{hits} rebinds the output buffer C to a temporary copy; the device "
+        f"result is memcpy'd into that temporary and discarded. Validate "
+        f"C.flags['C_CONTIGUOUS'] and raise instead."
+    )
+
+
+@pytest.mark.parametrize("path", _QUANT_UTILS, ids=_QUANT_UTILS_IDS)
+def test_output_buffer_contiguity_is_validated(path):
+    """Each bridge must reject a non-contiguous C rather than silently copying it."""
+    text = path.read_text()
+    assert 'C.flags["C_CONTIGUOUS"]' in text or "C.flags['C_CONTIGUOUS']" in text, (
+        f"{path.name} does not validate that the output buffer C is "
+        f"C-contiguous before handing its pointer to the library."
+    )

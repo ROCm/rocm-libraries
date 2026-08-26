@@ -87,7 +87,7 @@ int dispatcher_run_aquant_gemm(const void* A,
     using namespace quant_bridge;
     const char* kFn = "dispatcher_run_aquant_gemm";
 
-    if(!g_initialized)
+    if(!bridge_initialized())
     {
         std::cerr << kFn << ": not initialized\n";
         return -1;
@@ -220,26 +220,10 @@ int dispatcher_run_aquant_gemm(const void* A,
     args.stride_AQ = static_cast<ck_tile::index_t>(stride_AQ);
     args.stride_BQ = 0; // unused
 
-    // When timing is requested use GPU timer with warmup (cold_niters=3, nrepeat=10);
-    // otherwise run once with no overhead (make_stream_config handles both).
-    const float exec_time = launch<SelectedKernel>(args, time_ms != nullptr);
-    if(exec_time < 0.0f)
-    {
-        std::cerr << kFn << ": kernel reported unsupported args\n";
-        return -2;
-    }
-
-    // Copy result back
-    BRIDGE_HIP_CHECK(kFn,
-                     hipMemcpy(C,
-                               C_dev,
-                               elements_to_bytes<CDataType>(static_cast<std::size_t>(M) *
-                                                            static_cast<std::size_t>(N)),
-                               hipMemcpyDeviceToHost));
-
-    if(time_ms)
-        *time_ms = exec_time;
-    return 0;
+    // Shared launch tail: k_batch / index_t validation, the split-K per-launch C
+    // clear, the timed launch and the copy-back.
+    return launch_and_copyback<SelectedKernel, CDataType>(
+        kFn, args, C, C_dev, static_cast<std::size_t>(M) * static_cast<std::size_t>(N), time_ms);
 }
 
 } // extern "C"

@@ -61,7 +61,7 @@ int dispatcher_run_aquant_gemm(const void* A,
     const char* kFn = "dispatcher_run_aquant_gemm";
 
     if(!check_entry_args(kFn,
-                         g_initialized,
+                         bridge_initialized(),
                          {A, AQ, B, C},
                          {M, N, K, QK_A},
                          /*allow_gfx90a=*/true))
