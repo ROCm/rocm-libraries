@@ -291,6 +291,8 @@ namespace rocsparse
             return find_T<int32_t>(T_datatype);
         case rocsparse_indextype_i64:
             return find_T<int64_t>(T_datatype);
+        case deprecated_rocsparse_indextype_u16:
+	  return nullptr;
         }
 	return nullptr;
     }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,7 +45,9 @@
 
 namespace rocsparse
 {
-  template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
+
+
+  template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T,  bool A_OP_CONJUGATE>
   ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrsm(rocsparse_operation transB,
                J                   m,
@@ -78,7 +80,7 @@ namespace rocsparse
     //
     // Call batch sample.
     //
-    rocsparse::csrsm_device<BLOCKSIZE, SLEEP>(transB,
+    rocsparse::csrsm_device<BLOCKSIZE, SLEEP, I, J, T, A_OP_CONJUGATE>(transB,
 						m,
 						nrhs,
 						alpha,
@@ -93,11 +95,11 @@ namespace rocsparse
 						idx_base,
 						fill_mode,
 						diag_type);
-	
+
   }
 
 
-  template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
+  template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T, bool A_OP_CONJUGATE>
   static rocsparse_status csrsm_launch(rocsparse_handle          handle,
 				       int64_t nrhs,
 				       rocsparse_operation op_B,
@@ -111,25 +113,25 @@ namespace rocsparse
 				       int64_t              zero_pivot_stride,
 				       rocsparse_fill_mode  fill_mode,
 				       rocsparse_diag_type  diag_type,
-				       bool                 is_host_mode)      
+				       bool                 is_host_mode)
   {
-    // rocsparse::dnmat_disp(handle,B,"B csrsm_launch", true);
+
     const int64_t m = A->rows;
-    //    const int64_t nrhs = (rocsparse_operation_none == op_B) ? B->cols : B->rows;
+
     int32_t blockdim = 512;
     while(nrhs <= blockdim && blockdim > 32)
       {
 	blockdim >>= 1;
       }
-    blockdim <<= 1;    
+    blockdim <<= 1;
 
     const auto alpha_scalar = reinterpret_cast<const T*>(alpha->const_values);
-    
+
     const dim3 csrsm_blocks(((nrhs - 1) / blockdim + 1) * m,
 			    B->batch_count);
-    
+
     const dim3 csrsm_threads(blockdim);
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR( (csrsm<BLOCKSIZE,SLEEP,I,J,T>),
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR( (csrsm<BLOCKSIZE,SLEEP,I,J,T, A_OP_CONJUGATE>),
 					csrsm_blocks,
 					csrsm_threads,
 					0,
@@ -156,7 +158,7 @@ namespace rocsparse
 					is_host_mode);
     return rocsparse_status_success;
   }
-  
+
 
 }
 
@@ -177,25 +179,34 @@ typedef rocsparse_status (*csrsm_launch_t)(rocsparse_handle          handle,
 
 
 template<uint32_t BLOCKSIZE, bool SLEEP,typename I,typename J>
-static csrsm_launch_t find_csrsm_launch_T(rocsparse_datatype val_type)
+static csrsm_launch_t find_csrsm_launch_T(rocsparse_datatype val_type,
+					  bool A_load_conjugate)
 {
   switch(val_type)
     {
     case rocsparse_datatype_f32_r:
       {
-	return rocsparse::csrsm_launch<BLOCKSIZE, SLEEP, I, J, float>;
-      }
-    case rocsparse_datatype_f32_c:
-      {
-	return rocsparse::csrsm_launch<BLOCKSIZE, SLEEP, I, J, rocsparse_float_complex>;
+	return rocsparse::csrsm_launch<BLOCKSIZE, SLEEP, I, J, float, false>;
       }
     case rocsparse_datatype_f64_r:
       {
-	return rocsparse::csrsm_launch<BLOCKSIZE, SLEEP, I, J, double>;
+	return rocsparse::csrsm_launch<BLOCKSIZE, SLEEP, I, J, double, false>;
+      }
+
+    case rocsparse_datatype_f32_c:
+      {
+
+	if ( A_load_conjugate )
+	  return rocsparse::csrsm_launch<BLOCKSIZE, SLEEP, I, J, rocsparse_float_complex, true>;
+	else
+	  return rocsparse::csrsm_launch<BLOCKSIZE, SLEEP, I, J, rocsparse_float_complex, false>;
       }
     case rocsparse_datatype_f64_c:
       {
-	return rocsparse::csrsm_launch<BLOCKSIZE, SLEEP, I, J, rocsparse_double_complex>;
+	if ( A_load_conjugate )
+	  return rocsparse::csrsm_launch<BLOCKSIZE, SLEEP, I, J, rocsparse_double_complex, true>;
+	else
+	  return rocsparse::csrsm_launch<BLOCKSIZE, SLEEP, I, J, rocsparse_double_complex, false>;
       }
 
     case rocsparse_datatype_bf16_r:
@@ -208,24 +219,25 @@ static csrsm_launch_t find_csrsm_launch_T(rocsparse_datatype val_type)
 	THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
       }
     }
-  
+
 }
 
 template<uint32_t BLOCKSIZE, bool SLEEP,typename I>
 static csrsm_launch_t find_csrsm_launch_J(rocsparse_indextype col_type,
-				rocsparse_datatype val_type)
+					  rocsparse_datatype val_type,
+					  bool A_load_conjugate)
 {
   switch(col_type)
     {
     case rocsparse_indextype_i32:
       {
-	return find_csrsm_launch_T<BLOCKSIZE, SLEEP, I, int32_t>(val_type);
+	return find_csrsm_launch_T<BLOCKSIZE, SLEEP, I, int32_t>(val_type,A_load_conjugate);
       }
     case rocsparse_indextype_i64:
       {
-	return find_csrsm_launch_T<BLOCKSIZE, SLEEP, I, int64_t>(val_type);
+	return find_csrsm_launch_T<BLOCKSIZE, SLEEP, I, int64_t>(val_type,A_load_conjugate);
       }
-    case deprecated_rocsparse_indextype_u16:      
+    case deprecated_rocsparse_indextype_u16:
       {
 	  return nullptr;
       }
@@ -236,19 +248,19 @@ static csrsm_launch_t find_csrsm_launch_J(rocsparse_indextype col_type,
 template<uint32_t BLOCKSIZE, bool SLEEP>
 static csrsm_launch_t find_csrsm_launch_I(rocsparse_indextype row_type,
 				rocsparse_indextype col_type,
-				rocsparse_datatype val_type)
+				rocsparse_datatype val_type, bool A_load_conjugate)
 {
   switch(row_type)
     {
     case rocsparse_indextype_i32:
       {
-	return find_csrsm_launch_J<BLOCKSIZE, SLEEP, int32_t>(col_type,val_type);
+	return find_csrsm_launch_J<BLOCKSIZE, SLEEP, int32_t>(col_type,val_type,A_load_conjugate);
       }
     case rocsparse_indextype_i64:
       {
-	return find_csrsm_launch_J<BLOCKSIZE, SLEEP, int64_t>(col_type,val_type);
+	return find_csrsm_launch_J<BLOCKSIZE, SLEEP, int64_t>(col_type,val_type,A_load_conjugate);
       }
-    case deprecated_rocsparse_indextype_u16:      
+    case deprecated_rocsparse_indextype_u16:
       {
 	  return nullptr;
       }
@@ -258,82 +270,122 @@ static csrsm_launch_t find_csrsm_launch_I(rocsparse_indextype row_type,
 
 
 
-  
+
 static csrsm_launch_t find_csrsm_launch(rocsparse_handle handle,
-			      int32_t blockdim,
-			      rocsparse_indextype row_type,
+					int32_t blockdim,
+					rocsparse_indextype row_type,
 					rocsparse_indextype col_type,
-			      rocsparse_datatype val_type)
+					rocsparse_datatype val_type,
+					bool A_load_conjugate)
 {
   const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
   const int         asicRev       = handle->asic_rev;
-  const bool SLEEP = (gcn_arch_name == rocsparse::rocpsarse_arch_names::gfx908 && asicRev < 2);
-  
+  const bool SLEEP = (gcn_arch_name == rocsparse::rocsparse_arch_names::gfx908 && asicRev < 2);
+
   if(blockdim == 64)
     {
       if(SLEEP)
 	{
-	  return find_csrsm_launch_I<64, true>(row_type,col_type,val_type);
+	  return find_csrsm_launch_I<64,
+				     true>(row_type,
+					   col_type,
+					   val_type,
+					   A_load_conjugate);
 	}
       else
 	{
-	  return find_csrsm_launch_I<64, false>(row_type,col_type,val_type);
+	  return find_csrsm_launch_I<64,
+				     false>(row_type,
+					    col_type,
+					    val_type,
+					    A_load_conjugate);
 	}
     }
   else if(blockdim == 128)
     {
       if(SLEEP)
 	{
-	  return find_csrsm_launch_I<128, true>(row_type,col_type,val_type);
+	  return find_csrsm_launch_I<128,
+				     true>(row_type,
+					   col_type,
+					   val_type,
+					   A_load_conjugate);
 	}
       else
 	{
-	  return find_csrsm_launch_I<128, false>(row_type,col_type,val_type);
+	  return find_csrsm_launch_I<128,
+				     false>(row_type,
+					    col_type,
+					    val_type,
+					    A_load_conjugate);
 	}
     }
   else if(blockdim == 256)
     {
       if(SLEEP)
 	{
-	  return find_csrsm_launch_I<256, true>(row_type,col_type,val_type);
+	  return find_csrsm_launch_I<256,
+				     true>(row_type,
+					   col_type,
+					   val_type,
+					   A_load_conjugate);
 	}
       else
 	{
-	  return find_csrsm_launch_I<256, false>(row_type,col_type,val_type);
+	  return find_csrsm_launch_I<256,
+				     false>(row_type,
+					    col_type,
+					    val_type,
+					    A_load_conjugate);
 	}
     }
   else if(blockdim == 512)
     {
       if(SLEEP)
 	{
-	  return find_csrsm_launch_I<512, true>(row_type,col_type,val_type);
+	  return find_csrsm_launch_I<512,
+				     true>(row_type,
+					   col_type,
+					   val_type,
+					   A_load_conjugate);
 	}
       else
 	{
-	  return find_csrsm_launch_I<512, false>(row_type,col_type,val_type);
+	  return find_csrsm_launch_I<512,
+				     false>(row_type,
+					    col_type,
+					    val_type,
+					    A_load_conjugate);
 	}
     }
   else if(blockdim == 1024)
     {
       if(SLEEP)
 	{
-	  return find_csrsm_launch_I<1024, true>(row_type,col_type,val_type);
+	  return find_csrsm_launch_I<1024,
+				     true>(row_type,
+					   col_type,
+					   val_type,
+					   A_load_conjugate);
 	}
       else
 	{
-	  return find_csrsm_launch_I<1024, false>(row_type,col_type,val_type);
+	  return find_csrsm_launch_I<1024,
+				     false>(row_type,
+					    col_type,
+					    val_type,
+					    A_load_conjugate);
 	}
     }
   THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-  
+
 }
 
 
 rocsparse_status rocsparse::spmat_transpose_update_values(rocsparse_handle	handle,
 							  rocsparse_spmat_descr target,
 							  rocsparse_const_spmat_descr source,
-							  rocsparse::trm_info_t* trm_info,
-							  bool conjugate)
+							  rocsparse::trm_info_t* trm_info)
 {
 
   // Gather values
@@ -349,6 +401,8 @@ rocsparse_status rocsparse::spmat_transpose_update_values(rocsparse_handle	handl
 							     trm_info->get_offset_indextype(),
 							     trm_info->get_transposed_perm(),
 							     rocsparse_index_base_zero)));
+
+#if 0
   if(conjugate)
     {
 
@@ -359,6 +413,7 @@ rocsparse_status rocsparse::spmat_transpose_update_values(rocsparse_handle	handl
 								     target->val_data,
 								     target->batch_stride));
     }
+#endif
   return rocsparse_status_success;
 }
 
@@ -369,7 +424,37 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
 					  rocsparse_const_dnvec_descr     alpha,
 					  rocsparse_const_spmat_descr A,
 					  rocsparse_dnmat_descr     B,
-					  rocsparse_csrsm_info      csrsm_info,					  
+					  rocsparse_csrsm_info      csrsm_info,
+					  size_t buffer_size_in_bytes,
+					  void*                     buffer,
+					  rocsparse_error*p_error)
+{
+  static constexpr bool A_load_conjugate = false;
+
+  RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_compute(handle,
+						     nrhs,
+						     op_A,
+						     A_load_conjugate,
+						     op_B,
+						     alpha,
+						     A,
+						     B,
+						     csrsm_info,
+						     buffer_size_in_bytes,
+						     buffer,
+						     p_error));
+  return rocsparse_status_success;
+}
+
+rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
+					  const int64_t nrhs,
+					  rocsparse_operation   op_A,
+					  bool A_load_conjugate,
+					  rocsparse_operation   op_B,
+					  rocsparse_const_dnvec_descr     alpha,
+					  rocsparse_const_spmat_descr A,
+					  rocsparse_dnmat_descr     B,
+					  rocsparse_csrsm_info      csrsm_info,
 					  size_t buffer_size_in_bytes,
 					  void*                     buffer,
 					  rocsparse_error*p_error)
@@ -385,11 +470,12 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
       return rocsparse_status_success;
     }
 
-  const auto case_transpose_A = (op_A == rocsparse_operation_transpose
-				 || op_A == rocsparse_operation_conjugate_transpose);
+  const auto case_transpose_A =
+    (op_A == rocsparse_operation_transpose) ||
+    (op_A == rocsparse_operation_conjugate_transpose);
 
   const auto case_transform_B = (op_B == rocsparse_operation_none &&
-				 B->order == rocsparse_order_column); 
+				 B->order == rocsparse_order_column);
   if(nrhs == 1)
     {
       const int64_t b_batch_count = B->batch_count;
@@ -404,12 +490,12 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
 				  b_batch_stride);
       rocsparse_dnvec_descr b = &b_st;
 
-      
+
       const int64_t y_size = M;
       const int64_t y_batch_count = B->batch_count;
       const int64_t y_batch_stride = (B->batch_count == 1) ? 0 : M;
       const int64_t y_inc = 1;
-      const auto y_datatype = B->data_type;      
+      const auto y_datatype = B->data_type;
       _rocsparse_dnvec_descr y_st(y_batch_count,
 				  y_size,
 				  y_datatype,
@@ -417,20 +503,20 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
 				  buf,
 				  y_inc,
 				  y_batch_stride);
-      
+
       rocsparse_dnvec_descr y = &y_st;
-      
+
       // y->size because y_inc = 1;
       const size_t nbytes = rocsparse::align_size(rocsparse::datatype_sizeof(B->data_type) * y->size * y->batch_count);
       buf += nbytes;
       buffer_size_in_bytes -= nbytes;
       RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
 						       op_A,
-						       
+
 						       alpha->data_type,
 						       alpha->const_values,
 						       alpha->batch_stride,
-						       
+
 						       A,
 						       b,
 						       y,
@@ -438,7 +524,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
 						       csrsm_info,
 						       buffer_size_in_bytes,
 						       buf));
-      
+
       RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnvec_copy_data(handle,
 							   nullptr,
 							   y,
@@ -459,7 +545,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
       blockdim >>= 1;
     }
   blockdim <<= 1;
-  
+
   const int narrays = (nrhs - 1) / blockdim + 1;
   //
   // Buffer
@@ -470,23 +556,23 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
 
   if(case_transpose_A)
     {
-      nbytes += rocsparse::align_size(rocsparse::datatype_sizeof(A->data_type) *A->nnz * A_batch_count);  
+      nbytes += rocsparse::align_size(rocsparse::datatype_sizeof(A->data_type) *A->nnz * A_batch_count);
     }
 
   if(case_transform_B)
     {
-      nbytes += rocsparse::align_size(rocsparse::datatype_sizeof(B->data_type) * (A->rows *nrhs) * B->batch_count);  
+      nbytes += rocsparse::align_size(rocsparse::datatype_sizeof(B->data_type) * (A->rows *nrhs) * B->batch_count);
     }
   RETURN_IF_ROCSPARSE_ERROR( (nbytes <= buffer_size_in_bytes)
 			     ? rocsparse_status_success
 			       : rocsparse_status_invalid_size);
-  
-  
+
+
   // rocsparse::align_size(rocsparse::datatype_sizeof(B->data_type) * y->size * y->batch_count);
-  
+
   auto buf = reinterpret_cast<char*>(buffer);
   buf += 256;
-  
+
   // Each thread block performs at most blockdim columns of the
   // rhs matrix. Therefore, the number of blocks depend on nrhs
   // and the blocksize.
@@ -501,10 +587,10 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
 					       done_array_nbytes,
 					       handle->stream));
   buf += rocsparse::align_size(done_array_nbytes);
-  
+
   rocsparse_dnmat_descr Bt{};
   rocsparse_spmat_descr At{};
-    
+
   _rocsparse_dnmat_descr Bt_st
     {true,
      A->rows,
@@ -514,13 +600,13 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
      buf,
      B->data_type,
      rocsparse_order_row,
-     B->batch_count,  
+     B->batch_count,
      (B->batch_stride == 0) ? 0 : (A->rows * nrhs)};
-  
+
   if(case_transform_B)
     {
       Bt = &Bt_st;
-      const size_t Bt_nbytes = rocsparse::datatype_sizeof(Bt->data_type) * Bt->rows * Bt->cols * Bt->batch_count;  
+      const size_t Bt_nbytes = rocsparse::datatype_sizeof(Bt->data_type) * Bt->rows * Bt->cols * Bt->batch_count;
       buf += rocsparse::align_size(Bt_nbytes);
     }
 
@@ -529,7 +615,6 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
 						    A->descr->fill_mode);
 
   _rocsparse_spmat_descr At_st(rocsparse_format_csr,
-			       false,
 			       A_batch_count,
 			       M,
 			       M,
@@ -551,15 +636,14 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
 			       nullptr);//A->info);
 
 
-  
+
 
   if(case_transpose_A)
     {
-      std::cout << "transpose_A" << std::endl;
       At = &At_st;
     }
 
-    
+
   rocsparse_const_spmat_descr matrix = (case_transpose_A) ? At : A;
   rocsparse_dnmat_descr rhs = (case_transform_B) ? Bt : B;
   // If diag type is unit, re-initialize zero pivot to remove structural zeros
@@ -628,7 +712,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
 							   p_error));
     }
 
-  
+
   const rocsparse_fill_mode fill_mode = (case_transpose_A)
     ? ( (A->descr->fill_mode == rocsparse_fill_mode_lower)
 	? rocsparse_fill_mode_upper
@@ -643,20 +727,26 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle      handle,
   //
   if(case_transpose_A)
     {
-      
+
       RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_transpose_update_values(handle,
 									 At,
 									 A,
-									 trm_info,
-									 (op_A == rocsparse_operation_conjugate_transpose)));
+									 trm_info));
+
+
+      if (op_A == rocsparse_operation_conjugate_transpose)
+	{
+	  A_load_conjugate = true;
+	}
     }
 
   csrsm_launch_t launch = find_csrsm_launch(handle,
 					    blockdim,
 					    matrix->row_type,
 					    matrix->col_type,
-					    matrix->data_type);
-  
+					    matrix->data_type,
+					    A_load_conjugate);
+
   RETURN_IF_ROCSPARSE_ERROR(launch(handle,
 				   nrhs,
 				   op_B,

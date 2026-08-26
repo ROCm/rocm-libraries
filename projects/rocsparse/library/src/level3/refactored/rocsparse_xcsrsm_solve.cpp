@@ -122,7 +122,6 @@ namespace rocsparse
 	rocsparse_csrsm_info   csrsm_info = (info != nullptr) ? info->get_csrsm_info() : nullptr;
         _rocsparse_spmat_descr local_A(rocsparse_format_csr,
 
-				       false,
 				       static_cast<int64_t>(1),
 				       m,
 				       m,
@@ -171,17 +170,18 @@ namespace rocsparse
 					   0,
 					   handle->pointer_mode);
 
+
 	rocsparse::csrsm_compute(handle,
-				   nrhs,
-				   trans_A,
-				   trans_B,
-				   &local_alpha,
-				   &local_A,
-				   &local_B,
-				   csrsm_info,
-				   std::numeric_limits<size_t>::max(),
-				   temp_buffer,
-				   p_error);
+				 nrhs,
+				 trans_A,
+				 trans_B,
+				 &local_alpha,
+				 &local_A,
+				 &local_B,
+				 csrsm_info,
+				 std::numeric_limits<size_t>::max(),
+				 temp_buffer,
+				 p_error);
 
         return rocsparse_status_success;
     }

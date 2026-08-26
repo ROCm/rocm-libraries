@@ -1,3 +1,4 @@
+/*! \file */
 /* ************************************************************************
  * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
@@ -21,33 +22,50 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief rocsparse-config.h provides the build-time feature configuration that
- * was baked in when the rocSPARSE library was compiled.
- *
- * The macros below are resolved by CMake at library build time and installed
- * alongside the library. Do NOT define them yourself: they describe how the
- * installed library was actually built, and overriding them makes the visible
- * API surface diverge from the compiled shared object.
- */
+#include "rocsparse_control.hpp"
+#include "rocsparse_cscsm.hpp"
+#include "rocsparse_csrsm.hpp"
+#include "rocsparse_utility.hpp"
 
-#ifndef ROCSPARSE_CONFIG_H
-#define ROCSPARSE_CONFIG_H
+rocsparse_status rocsparse::cscsm_analysis(rocsparse_handle      handle,
+					   int64_t nrhs,
+					   rocsparse_operation   op_A,
+					   rocsparse_operation   op_B,
+					   rocsparse_const_dnvec_descr     alpha,
+					   rocsparse_const_spmat_descr A,
+					   rocsparse_const_dnmat_descr B,
+					   rocsparse_analysis_policy analysis,
+					   rocsparse_csrsm_info*     p_csrsm_info,
+					   size_t                   buffer_size_in_bytes,
+					   void * buffer,
+					   rocsparse_error*p_error)
+{
 
-/* Build-time feature flags baked in at compile time. */
+  ROCSPARSE_ROUTINE_TRACE;
 
-#cmakedefine ROCSPARSE_WITH_TRSM_REFACTORING
+  _rocsparse_mat_descr   descr_csr;
+  _rocsparse_spmat_descr A_csr(A,
+			       rocsparse_format_csr,
+			       &descr_csr,
+			       A->info);
 
-/* rocSPARSE 5.1 */
-#cmakedefine ROCSPARSE_WITH_SPMAT_SCALE
-#cmakedefine ROCSPARSE_WITH_SDDMM_BATCHED
+  op_A = (op_A == rocsparse_operation_none)
+    ? rocsparse_operation_transpose
+    : rocsparse_operation_none;
 
-/* rocSPARSE 5.0 */
-#cmakedefine ROCSPARSE_WITH_HANDLE_CREATE
-#cmakedefine ROCSPARSE_WITH_U16_REMOVED
+  RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
+						      nrhs,
+						      op_A,
+						      op_B,
+						      alpha,
+						      &A_csr,
+						      B,
+						      analysis,
+						      p_csrsm_info,
+						      buffer_size_in_bytes,
+						      buffer,
+						      p_error));
 
-/* rocSPARSE 4.7 */
-#cmakedefine ROCSPARSE_WITH_ILDLT0
-#cmakedefine ROCSPARSE_WITH_ILU0_BOOST_SIGN
+  return rocsparse_status_success;
+}
 
-#endif /* ROCSPARSE_CONFIG_H */

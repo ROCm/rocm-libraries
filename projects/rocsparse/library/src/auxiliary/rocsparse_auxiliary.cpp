@@ -1999,6 +1999,59 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
 {
 }
 
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+_rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_const_spmat_descr that,
+					       rocsparse_format    format,
+					       rocsparse_mat_descr descr,
+					       rocsparse_mat_info  info)
+  : _rocsparse_spmat_descr(format,
+			   that->batch_count,
+			   that->cols,
+			   that->rows,
+			   that->nnz,
+			   that->data_type,
+			   that->const_val_data,
+			   that->val_data,
+			   that->batch_stride,
+			   that->col_type,
+			   that->const_col_data,
+			   that->col_data,
+			   that->columns_values_batch_stride,
+			   that->row_type,
+			   that->const_row_data,
+			   that->row_data,
+			   that->offsets_batch_stride,
+			   that->idx_base,
+			   descr,
+			   info)
+      {
+	rocsparse_host_assert( (format == rocsparse_format_csr) ||
+			       (format == rocsparse_format_csc),
+			       "this constructor is targetting rocsparse_format_csr or rocsparse_format_csc");
+	rocsparse_host_assert( ((that->format == rocsparse_format_csr) && (format == rocsparse_format_csc)) ||
+			       ((that->format == rocsparse_format_csc) && (format == rocsparse_format_csr)),
+			       "it isn't a switch of format between rocsparse_format_csr and rocsparse_format_csc");
+	descr[0] = that->descr[0];
+	switch(descr->fill_mode)
+	  {
+	  case rocsparse_fill_mode_lower:
+	    {
+	      descr->fill_mode = rocsparse_fill_mode_upper;
+	      break;
+	    }
+
+	  case rocsparse_fill_mode_upper:
+	    {
+	      descr->fill_mode = rocsparse_fill_mode_lower;
+	      break;
+	    }
+	  }
+      }
+
+#endif
+
+
 _rocsparse_dnvec_descr::_rocsparse_dnvec_descr(int64_t            batch_count_,
                                                int64_t            nitems_,
                                                rocsparse_datatype datatype_,
@@ -4623,6 +4676,9 @@ try
                        rocsparse_status_invalid_value);
 
     descr->batch_count                 = batch_count;
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+  descr->batch_stride                = rows_values_batch_stride;
+#endif
     descr->offsets_batch_stride        = offsets_batch_stride;
     descr->columns_values_batch_stride = rows_values_batch_stride;
     return rocsparse_status_success;
@@ -5709,6 +5765,8 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+
+
 
 #ifdef __cplusplus
 }

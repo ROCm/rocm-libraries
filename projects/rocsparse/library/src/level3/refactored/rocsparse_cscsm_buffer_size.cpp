@@ -25,14 +25,13 @@
 
 
 #include "rocsparse_control.hpp"
-#include "rocsparse_coosm.hpp"
+#include "rocsparse_cscsm.hpp"
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_utility.hpp"
 
 
 
-
-rocsparse_status rocsparse::coosm_analysis_buffer_size(rocsparse_handle      handle,
+rocsparse_status rocsparse::cscsm_analysis_buffer_size(rocsparse_handle      handle,
 						       const int64_t nrhs,
 						       rocsparse_operation   op_A,
 						       rocsparse_operation   op_B,
@@ -45,104 +44,52 @@ rocsparse_status rocsparse::coosm_analysis_buffer_size(rocsparse_handle      han
 
   ROCSPARSE_ROUTINE_TRACE;
 
-  const rocsparse_indextype indextype
-    = (A->nnz <= std::numeric_limits<int32_t>::max())
-    ? rocsparse_indextype_i32
-    : rocsparse_indextype_i64;
-
-
-  //
-  // Trick since it is not used in csrsm_buffer_size, otherwise we need to create a proper ptr array for nothing.
-  //
-  const void* const_ptr = (const void*)0x4;
-  void* ptr = (void*)0x4;
-
-  _rocsparse_spmat_descr A_csr(rocsparse_format_csr,
-			       A->batch_count,
-			       A->rows,
-			       A->cols,
-			       A->nnz,
-			       A->data_type,
-			       A->const_val_data,
-			       A->val_data,
-			       A->batch_stride,
-			       indextype,
-			       const_ptr,
-			       ptr,
-			       0,
-			       A->col_type,
-			       A->const_col_data,
-			       A->col_data,
-			       0,
-			       A->idx_base,
-			       A->descr,
+  _rocsparse_mat_descr   descr_csr;
+  _rocsparse_spmat_descr A_csr(A,
+			       rocsparse_format_csr,
+			       &descr_csr,
 			       A->info);
 
-
   RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_buffer_size(handle,
-							   nrhs,
-							   op_A,
-							   op_B,
-							   alpha,
-							   &A_csr,
-							   X,
-							   p_buffer_size_in_bytes,
-							   p_error));
+								  nrhs,
+								  op_A,
+								  op_B,
+								  alpha,
+								  &A_csr,
+								  X,
+								  p_buffer_size_in_bytes,
+								  p_error));
 
   return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse::coosm_solve_buffer_size(rocsparse_handle      handle,
-						const int64_t nrhs,
-						rocsparse_operation   op_A,
-						rocsparse_operation   op_B,
-						rocsparse_const_dnvec_descr     alpha,
-						rocsparse_const_spmat_descr A,
-						rocsparse_const_dnmat_descr X,
-						size_t*                   p_buffer_size_in_bytes,
-						rocsparse_error*p_error)
+rocsparse_status rocsparse::cscsm_solve_buffer_size(rocsparse_handle      handle,
+						    const int64_t nrhs,
+						    rocsparse_operation   op_A,
+						    rocsparse_operation   op_B,
+						    rocsparse_const_dnvec_descr     alpha,
+						    rocsparse_const_spmat_descr A,
+						    rocsparse_const_dnmat_descr X,
+						    size_t*                   p_buffer_size_in_bytes,
+						    rocsparse_error*p_error)
 {
 
   ROCSPARSE_ROUTINE_TRACE;
 
-  const rocsparse_indextype indextype
-    = (A->nnz <= std::numeric_limits<int32_t>::max())
-    ? rocsparse_indextype_i32
-    : rocsparse_indextype_i64;
-
-
-  //
-  // Trick since it is not used in csrsm_buffer_size, otherwise we need to create a proper ptr array for nothing.
-  //
-  const void* const_ptr = (const void*)0x4;
-  void* ptr = (void*)0x4;
-
-  _rocsparse_spmat_descr A_csr(rocsparse_format_csr,
-			       A->batch_count,
-			       A->rows,
-			       A->cols,
-			       A->nnz,
-			       A->data_type,
-			       A->const_val_data,
-			       A->val_data,
-			       A->batch_stride,
-			       indextype,
-			       const_ptr,
-			       ptr,
-			       0,
-			       A->col_type,
-			       A->const_col_data,
-			       A->col_data,
-			       0,
-			       A->idx_base,
-			       A->descr,
+  _rocsparse_mat_descr   descr_csr;
+  _rocsparse_spmat_descr A_csr(A,
+			       rocsparse_format_csr,
+			       &descr_csr,
 			       A->info);
-
 
   RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_buffer_size(handle,
 							       nrhs,
-							       op_A,
-							       op_B,
+
+							       (op_A == rocsparse_operation_none)
+							       ? rocsparse_operation_transpose
+							       : rocsparse_operation_none,
+
+						      	       op_B,
 							       alpha,
 							       &A_csr,
 							       X,
@@ -152,8 +99,7 @@ rocsparse_status rocsparse::coosm_solve_buffer_size(rocsparse_handle      handle
   return rocsparse_status_success;
 }
 
-
-rocsparse_status rocsparse::coosm_buffer_size(rocsparse_handle      handle,
+rocsparse_status rocsparse::cscsm_buffer_size(rocsparse_handle      handle,
 						const int64_t nrhs,
 						rocsparse_operation   op_A,
 						rocsparse_operation   op_B,
@@ -164,10 +110,14 @@ rocsparse_status rocsparse::coosm_buffer_size(rocsparse_handle      handle,
 						rocsparse_error*p_error)
 {
   ROCSPARSE_ROUTINE_TRACE;
-  RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_analysis_buffer_size(handle,
+  RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_analysis_buffer_size(handle,
 								  nrhs,
-								  op_A,
-								  op_B,
+
+								  (op_A == rocsparse_operation_none)
+								  ? rocsparse_operation_transpose
+								  : rocsparse_operation_none,
+
+						      	       	  op_B,
 								  alpha,
 								  A,
 								  X,
@@ -175,9 +125,13 @@ rocsparse_status rocsparse::coosm_buffer_size(rocsparse_handle      handle,
 								  p_error));
 
   size_t buffer_size_in_bytes;
-  RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_solve_buffer_size(handle,
+  RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_solve_buffer_size(handle,
 							       nrhs,
-							       op_A,
+
+							       (op_A == rocsparse_operation_none)
+							       ? rocsparse_operation_transpose
+							       : rocsparse_operation_none,
+
 							       op_B,
 							       alpha,
 							       A,
@@ -190,8 +144,6 @@ rocsparse_status rocsparse::coosm_buffer_size(rocsparse_handle      handle,
 
   return rocsparse_status_success;
 }
-
-
 
 
 

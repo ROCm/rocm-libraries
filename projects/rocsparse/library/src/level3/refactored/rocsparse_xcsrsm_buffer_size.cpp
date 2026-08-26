@@ -118,7 +118,6 @@ namespace rocsparse
 
         _rocsparse_spmat_descr local_A(rocsparse_format_csr,
 
-				       false,
 				       static_cast<int64_t>(1),
 				       m,
 				       m,

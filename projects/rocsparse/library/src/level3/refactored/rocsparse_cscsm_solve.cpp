@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,13 +22,13 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_coosm.hpp"
+#include "rocsparse_cscsm.hpp"
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_enum_utils.hpp"
 #include "rocsparse_utility.hpp"
 
 
-rocsparse_status rocsparse::coosm_compute(rocsparse_handle      handle,
+rocsparse_status rocsparse::cscsm_compute(rocsparse_handle      handle,
 					    const int64_t nrhs,
 					    rocsparse_operation   op_A,
 					    rocsparse_operation   op_B,
@@ -45,46 +45,32 @@ rocsparse_status rocsparse::coosm_compute(rocsparse_handle      handle,
     {
       return rocsparse_status_success;
     }
-  rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = A->info->get_sorted_coo2csr_info();
-  RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((sorted_coo2csr_info)
-					 ? rocsparse_status_success
-					 : rocsparse_status_internal_error,
-					 "sorted_coo2csr_info is not available, it looks like the analysis phase of this "
-					 "algorithm was not previously executed.");
 
-  _rocsparse_spmat_descr A_csr(rocsparse_format_csr,
-			       A->batch_count,
-			       A->rows,
-			       A->cols,
-			       A->nnz,
-			       A->data_type,
-			       A->const_val_data,
-			       A->val_data,
-			       A->batch_stride,
-			       sorted_coo2csr_info->get_row_ptr_indextype(),
-			       sorted_coo2csr_info->get_row_ptr(),
-			       nullptr,
-			       0,
-			       A->col_type,
-			       A->const_col_data,
-			       A->col_data,
-			       0,
-			       A->idx_base,
-			       A->descr,
+
+  _rocsparse_mat_descr   descr_csr;
+  _rocsparse_spmat_descr A_csr(A,
+			       rocsparse_format_csr,
+			       &descr_csr,
 			       A->info);
 
+  const auto A_csr_op = (op_A == rocsparse_operation_none) ? rocsparse_operation_transpose : rocsparse_operation_none;
+  const bool A_load_conjugate = (op_A == rocsparse_operation_conjugate_transpose);
 
   RETURN_IF_ROCSPARSE_ERROR( rocsparse::csrsm_compute(handle,
-							nrhs,
-							op_A,
-							op_B,
-							alpha,
-							&A_csr,
-							B,
-							csrsm_info,
-							buffer_size_in_bytes,
-							buffer,
-							p_error) );
+						      nrhs,
+
+						      A_csr_op,
+						      A_load_conjugate,
+
+						      op_B,
+						      alpha,
+						      &A_csr,
+						      B,
+						      csrsm_info,
+						      buffer_size_in_bytes,
+						      buffer,
+						      p_error) );
 
   return rocsparse_status_success;
 }
+

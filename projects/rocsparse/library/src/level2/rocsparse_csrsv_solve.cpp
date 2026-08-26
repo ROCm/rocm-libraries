@@ -44,34 +44,6 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                                         void*                       temp_buffer,
                                         bool                        force_conj)
 {
-  RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
-						   trans,
-						   alpha_datatype,
-						   alpha,
-						   alpha_stride,
-						   A,
-						   x,
-						   y,
-						   policy,
-						   csrsv_info,
-						   std::numeric_limits<size_t>::max(),
-						   temp_buffer));
-  return rocsparse_status_success;
-}
-
-rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
-			       rocsparse_operation         trans,
-			       rocsparse_datatype          alpha_datatype,
-			       const void*                 alpha,
-			       int64_t                     alpha_stride,
-			       rocsparse_const_spmat_descr A,
-			       rocsparse_const_dnvec_descr x,
-			       rocsparse_dnvec_descr       y,
-			       rocsparse_solve_policy      policy,
-			       rocsparse_csrsv_info        csrsv_info,
-			       size_t                      buffer_size_in_bytes,
-			       void*                       temp_buffer)
-{
     ROCSPARSE_ROUTINE_TRACE;
 
     const int64_t batch_count = y->batch_count;
@@ -100,16 +72,6 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     hipStream_t stream = handle->stream;
 
     const rocsparse_diag_type diag_type = descr->diag_type;
-    size_t nbytes = 256 + rocsparse::align_size((sizeof(int32_t) * A->rows * batch_count));
-    if(trans == rocsparse_operation_transpose ||
-       trans == rocsparse_operation_conjugate_transpose)
-      {
-	nbytes += rocsparse::datatype_sizeof(A->data_type) * A->nnz;
-      }
-
-    RETURN_IF_ROCSPARSE_ERROR( (nbytes <= buffer_size_in_bytes)
-			       ? rocsparse_status_success
-			       : rocsparse_status_invalid_size);
 
     // Buffer
     char* ptr = reinterpret_cast<char*>(temp_buffer);

@@ -85,7 +85,7 @@ namespace rocsparse
                                  void*                       temp_buffer,
                                  bool                        force_conj = false);
 
-  rocsparse_status csrsv_solve(rocsparse_handle            handle,
+  inline rocsparse_status csrsv_solve(rocsparse_handle            handle,
 			       rocsparse_operation         trans,
 			       rocsparse_datatype          alpha_datatype,
 			       const void*                 alpha,
@@ -96,7 +96,23 @@ namespace rocsparse
 			       rocsparse_solve_policy      policy,
 			       rocsparse_csrsv_info        csrsv_info,
 			       size_t                      buffer_size_in_bytes,
-			       void*                       buffer);
+			       void*                       buffer)
+  {
+    RETURN_IF_ROCSPARSE_ERROR( csrsv_solve(handle,
+					   trans,
+					   alpha_datatype,
+					   alpha,
+					   alpha_stride,
+					   A,
+					   x,
+					   y,
+					   policy,
+					   csrsv_info,
+					   buffer,
+					   false ));
+
+    return rocsparse_status_success;
+  }
 
     rocsparse_status launch_csrsv_analysis_kernel(rocsparse_handle    handle,
                                                   rocsparse_operation trans,

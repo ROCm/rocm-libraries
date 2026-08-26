@@ -707,6 +707,9 @@ if(BUILD_WITH_TRSM_REFACTORING)
     src/level3/refactored/rocsparse_csrsm_buffer_size.cpp
     src/level3/refactored/rocsparse_csrsm_analysis.cpp
     src/level3/refactored/rocsparse_csrsm_solve.cpp
+    src/level3/refactored/rocsparse_cscsm_buffer_size.cpp
+    src/level3/refactored/rocsparse_cscsm_analysis.cpp
+    src/level3/refactored/rocsparse_cscsm_solve.cpp
     src/level3/refactored/rocsparse_coosm_buffer_size.cpp
     src/level3/refactored/rocsparse_coosm_analysis.cpp
     src/level3/refactored/rocsparse_coosm_solve.cpp

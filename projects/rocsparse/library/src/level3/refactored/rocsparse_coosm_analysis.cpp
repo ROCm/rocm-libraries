@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,7 +52,7 @@ rocsparse_status rocsparse::coosm_analysis(rocsparse_handle      handle,
     = (A->nnz <= std::numeric_limits<int32_t>::max())
     ? rocsparse_indextype_i32
     : rocsparse_indextype_i64;
-  
+
   rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = A->info->get_sorted_coo2csr_info();
   if(sorted_coo2csr_info == nullptr)
     {
@@ -75,7 +75,6 @@ rocsparse_status rocsparse::coosm_analysis(rocsparse_handle      handle,
   // Create a local CSR version..
   //
   _rocsparse_spmat_descr A_csr(rocsparse_format_csr,
-			       false,
 			       A->batch_count,
 			       A->rows,
 			       A->cols,
@@ -111,4 +110,5 @@ rocsparse_status rocsparse::coosm_analysis(rocsparse_handle      handle,
 
   return rocsparse_status_success;
 }
+
 

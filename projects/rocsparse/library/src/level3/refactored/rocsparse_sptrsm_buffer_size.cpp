@@ -80,6 +80,8 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_output value)
     switch(value)
     {
     case rocsparse_sptrsm_output_zero_pivot_position:
+    case rocsparse_sptrsm_output_singularity_position:
+    case rocsparse_sptrsm_output_singularity:
     {
         return false;
     }
