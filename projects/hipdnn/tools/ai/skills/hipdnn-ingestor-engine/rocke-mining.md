@@ -53,23 +53,58 @@ matcher:
 - **Knob-selection** — one side is a graph fact, the other is a knob *you* choose. These
   are neither, and they are the ones that break a two-bucket sort. See below.
 
-Build a table with a graph-derivable column filled for **every** rule. Example, from the
-gfx950 dense-attention kernel:
+Build a table with a graph-derivable column filled for **every** rule. Sort each rule by
+asking these in order — the first YES wins:
 
-| Rule | Graph-derivable? | Where it goes |
+| Ask | If yes | Bucket |
 |---|---|---|
-| `dtype in {bf16, fp16}` | YES — off the Q/K/V tensor | `graph_match` |
-| `head_size in (64, 128)` | YES — last dim | `graph_match` |
-| `num_query_heads % num_kv_heads == 0` | YES — both are dims | `graph_match` (GQA) |
-| `sliding_window > 0 requires causal` | YES — node attributes | `graph_match` |
-| `paged` requires `head_size == 128`, `batch == 1`, `sliding_window > 0` | **NO — SCOPE.** These fire only when `paged=True`. If you ship dense-only variants, no graph can reach them, and writing them into `graph_match` rejects nothing while *reading* as if paged were supported | decline `paged` outright; do NOT encode its sub-rules |
-| `seqlen_kv % block_n == 0` | PARTIAL — graph fact vs. a knob | `kernel_match`, against `$kernel.block_n` (KNOB-SEL) |
-| `block_n % 32 == 0` | NO — a knob you pick | spec construction |
-| `waves_per_eu` in `[1,8]`, `lds_k_group_pad % 8 == 0` | NO — tuning knobs | spec construction |
-| `persist_decode` enum, `num_persistent > 0` | NO — launch strategy | spec construction |
+| 1. Does the rule fire only when a feature you are **not shipping** is on? | Decline that feature wholesale in `graph_match`; do NOT encode its sub-rules | **SCOPE** |
+| 2. Can a caller's graph change the answer, using only tensor dims/strides/dtype and node attributes? | Continue to 3 | — |
+| 3. …and does it compare against a value a **variant bakes in**? | `kernel_match`, against `$kernel.<field>` | **GRAPH/BAKED** |
+| 4. …against a fixed constant instead? | `graph_match` | **GRAPH** |
+| 5. Is one side a graph fact and the other a knob **you** pick? | `kernel_match` against `$kernel.<knob>`, so each variant answers for itself | **KNOB-SEL** |
+| 6. Otherwise — both sides are knobs you pick | spec construction only | **SPEC** |
+
+Question 1 is the one most often skipped, and it produces guidance that reads backwards:
+a rule guarded by `if self.<feature>:` in `__post_init__` is unreachable when you ship
+that feature off. Writing it into `graph_match` rejects nothing, while telling the next
+reader the feature is supported. Find them mechanically:
+
+```bash
+python3 - "$M" <<'PY'
+import ast, sys
+src = open(sys.argv[1]).read()
+for node in ast.walk(ast.parse(src)):
+    if isinstance(node, ast.FunctionDef) and node.name == "__post_init__":
+        for stmt in node.body:
+            if isinstance(stmt, ast.If):
+                guard = ast.unparse(stmt.test)
+                raises = [n for n in ast.walk(stmt) if isinstance(n, ast.Raise)]
+                if raises:
+                    print(f"line {stmt.lineno}: {len(raises)} rule(s) guarded by  if {guard}:")
+PY
+```
+
+Anything under a guard naming a feature you decline is SCOPE. Anything ungated is
+unconditional and needs a real verdict.
+
+**Rules can also be baked WITHOUT appearing in `__post_init__`, and those are the
+dangerous ones** — they are invisible to a reader auditing the validation. Two sources:
+
+```bash
+grep -n "buffer_rsrc\|num_records" $M   # buffer bounds sized from SPEC fields, not tensors
+grep -nE "range\(|// *BN|// *BLOCK|_STEPS|n_[a-z]*tiles" $M   # compile-time loop trip counts
+```
+
+A buffer bound computed from spec fields means a graph exceeding it reads zero-fill
+rather than faulting — silently wrong. A trip count fixed at build time means a larger
+graph is silently truncated to a prefix. Both are `kernel_match` equality obligations, and
+neither shows up as a `raise`.
 
 **Over-rejecting is a real bug too.** A knob that does not fit is a reason to pick a
-different knob, not to decline the graph.
+different knob, not to decline the graph. `graph_match` returning `nullopt` empties the
+**whole engine's catalog**, so an overly narrow gate there is far more expensive than an
+overly narrow `kernel_match`.
 
 ### The rule the graph spells differently from the kernel
 

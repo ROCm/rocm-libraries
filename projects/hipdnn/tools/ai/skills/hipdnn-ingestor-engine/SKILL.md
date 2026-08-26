@@ -13,14 +13,24 @@ skill, two flows — not one skill per descriptor type — because descriptors c
 each other by UUID and the UMD-vs-`graph_match` decision is a property of the whole
 engine, not of any single file.
 
-This skill is four files. Read them in this order, as you reach them:
+This skill is five files. **If you are here to do an integration, read this page's
+completion contract and then drive from `RUNBOOK.md`** — the rest are reference material
+it sends you to at named steps.
 
-| File | When |
-|---|---|
-| `SKILL.md` (this) | First. The completion contract and the dialect decision. |
-| `prompt.md` | The authoritative step-by-step for both flows. |
-| `rocke-mining.md` | Step 2, for a rocKE kernel. How to extract the applicability rules that exist only in the Python source. Produces the matcher's content. |
-| `native-pack.md` | Step 6, always. How to implement the five hooks, with the reference pattern and the silent-failure traps. |
+| File | When | Shape |
+|---|---|---|
+| `SKILL.md` (this) | First, and only this far. The completion contract and the dialect decision. | Why |
+| `RUNBOOK.md` | **The thing you execute.** Every step, its commands, and the gate that ends it. | How |
+| `rocke-mining.md` | Sent from runbook step 2. Extracting applicability rules that exist only in the Python. | How |
+| `native-pack.md` | Sent from runbook step 6. The five hooks and their silent-failure traps. | How |
+| `prompt.md` | Reference. Fuller reasoning behind each step, plus the **extend** flow, which the runbook does not cover. | Why |
+
+Worked examples throughout are drawn from `kernels/gfx950/attention_dense.py`, a dense
+SDPA prefill kernel. **They are illustrations of a shape, not a description of your
+kernel.** Where a step gives a discovery command, run it against your own module rather
+than reusing the example's answer — a different kernel's spec fields, layout, ABI and
+baked constants will all differ, and the failure mode for assuming otherwise is silently
+wrong numbers.
 
 ## Completion contract — read this before starting
 
