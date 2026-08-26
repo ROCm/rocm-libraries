@@ -83,6 +83,14 @@ example_compile_options(example_moe_gemm2_xdl_fp8_blockscale PRIVATE ${BLOCKSCAL
 example_compile_options(example_moe_gemm1_xdl_fp8_blockscale PRIVATE ${BLOCKSCALE_GEMM_OPTIONS})
 
 # Increase the time limits to prevent occasional timeouts on gfx942
+add_test(
+    NAME example_moe_gemm1_xdl_fp8
+    COMMAND example_moe_gemm1_xdl_fp8
+)
+add_test(
+    NAME example_moe_gemm1_xdl_fp8_gelu_tanh
+    COMMAND example_moe_gemm1_xdl_fp8_gelu_tanh
+)
 set_tests_properties(example_moe_gemm1_xdl_fp8 PROPERTIES TIMEOUT 3600)
 set_tests_properties(example_moe_gemm1_xdl_fp8_gelu_tanh PROPERTIES TIMEOUT 3600)
 
