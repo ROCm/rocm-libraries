@@ -850,20 +850,117 @@ def _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, num
     module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr(colIdB), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
   writer.vgprPool.checkIn(tmpVgpr)
 
+def _isGRTLU1(tileInfo):
+  return bool(tileInfo.gr and isinstance(tileInfo.gr.config.tag, GRTag_TLU1))
+
+
+def _grSwizzleColId_single(module, writer, tileInfo, blockSize, numRowsPerLDSBanks,
+                           laneId, colId, waveId):
+  """Row-major GR colId swizzle for a single tensor.
+
+  Same rotation as _grSwizzleColIds_legacy, minus the colIdB copy: that path
+  swizzles A and derives B from it, which only works when both operands share
+  the row-major layout.
+  """
+  tc = tileInfo.tc
+  tmpVgpr = writer.vgprPool.checkOut(3, tag="_grSwizzleColId_single_tmpVgpr")
+  ldsRowId = tmpVgpr
+  tmp = tmpVgpr + 1
+  waveRotation = tmpVgpr + 2
+  half = blockSize // 2
+  module.addComment0("Swizzling (%s)" % tc)
+  module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
+  module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(ldsRowId), comment="lds row id"))
+  module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(ldsRowId), src1=hex(1), comment="swap_bit = ldsRowId & 1"))
+  if tileInfo.bpe == 1:  # FP8: step1=block-swap, step2=wave K_group rotation
+    module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(int(math.log2(half))), src=vgpr(tmp),
+               comment=f"swap_bit * {half}"))
+    module.add(VXorB32(dst=vgpr(colId), src0=vgpr(colId), src1=vgpr(tmp),
+               comment="FP8 step1: block-swap colId"))
+    module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(waveId), src1=hex(1), comment="wave_half = waveId & 1"))
+    module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="rotation = wave_half * 2"))
+    if tileInfo.loadRatioGR != 0.5:
+      module.add(VAndB32(dst=vgpr(waveRotation), src0=vgpr(colId), src1=hex(4), comment="FP8 step2: block_bit = colId & 4"))
+      module.add(VAndB32(dst=vgpr(colId), src0=vgpr(colId), src1=hex(3), comment="K_group = colId & 3"))
+      module.add(VAddU32(dst=vgpr(colId), src0=vgpr(colId), src1=vgpr(tmp), comment="K_group + rotation"))
+      module.add(VAndB32(dst=vgpr(colId), src0=vgpr(colId), src1=hex(3), comment="(K_group+rotation) % 4"))
+      module.add(VAddU32(dst=vgpr(colId), src0=vgpr(colId), src1=vgpr(waveRotation), comment="K_group_rot + block_bit"))
+  else:  # FP4/FP16: pair-swap (even ldsRowId) + intra/inter-wave rotation
+    module.add(VCmpXEqU32(dst=VCC(), src0=0, src1=vgpr(tmp), comment="lds row id % 2 == 0 ?"))
+    module.add(VMovB32(dst=vgpr(colId), src=vgpr(colId), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap colId pairs for swizzling"))
+    module.add(SMovB64(dst=EXEC(), src=-1))
+    module.addComment0("Rotation within a single wave")
+    module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(ldsRowId), comment=""))
+    module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="(ldsRowId //2) * 2"))
+    module.add(VSubU32(dst=vgpr(tmp), src0=hex(blockSize), src1=vgpr(tmp), comment="rotation offset : blockSize - (ldsRowId//2)*2"))
+    if tileInfo.loadRatioGR != 0.5:
+      module.addComment0("Rotation per wave")
+      module.add(VAndB32(dst=vgpr(waveRotation), src0=vgpr(waveId), src1=hex(1), comment=""))
+      module.add(VLShiftLeftB32(dst=vgpr(waveRotation), shiftHex=hex((2*numRowsPerLDSBanks).bit_length() - 1), src=vgpr(waveRotation), comment=""))
+      module.add(VSubU32(dst=vgpr(waveRotation), src0=vgpr(tmp), src1=vgpr(waveRotation), comment=""))
+      module.add(VAddU32(dst=vgpr(colId), src0=vgpr(waveRotation), src1=vgpr(colId), comment=""))
+    else:
+      module.add(VAddU32(dst=vgpr(colId), src0=vgpr(tmp), src1=vgpr(colId), comment=""))
+    module.add(VAndB32(dst=vgpr(colId), src0=vgpr(colId), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
+  writer.vgprPool.checkIn(tmpVgpr)
+
+
+def _graTileAssignment_rowMajorSingle(writer, kernel, module, tileInfo):
+  """Row-major (TLU=0) GR offsets for a single tensor.
+
+  Mirrors the interleaved A+B path, but every parameter comes from this
+  tensor's own geometry so it can be paired with a TLU=1 operand (NN / TT).
+  """
+  subIterKBytes = tileInfo.subIterKBytes
+  wavesize = kernel["WavefrontSize"]
+  ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
+  loadWidth = tileInfo.loadWidthGR
+  assert subIterKBytes % loadWidth == 0
+  assert subIterKBytes <= ldsRowBankSize
+  blockSize = subIterKBytes // loadWidth
+  numRowsPerLDSBanks = ldsRowBankSize // subIterKBytes
+  tmpVgpr = writer.vgprPool.checkOut(5, tag="_graTileAssignment_rowMajorSingle_tmpVgpr")
+  colId, rowId, rowOffset, waveId, laneId = range(tmpVgpr, tmpVgpr + 5)
+  module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
+  module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize-1, comment=""))
+  module.add(VAndB32(dst=vgpr(colId), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
+  module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
+  _grSwizzleColId_single(module, writer, tileInfo, blockSize, numRowsPerLDSBanks,
+                         laneId, colId, waveId)
+  _grComputeRowPartition_legacy(module, kernel, writer, tileInfo, waveId, rowOffset)
+  _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffset)
+  writer.vgprPool.checkIn(tmpVgpr)
+
+
 def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   module = Module()
   module.addComment0("GR Offset Calculation for Subtile Based Tiling")
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
+  aTLU1 = _isGRTLU1(tileInfoA)
+  bTLU1 = _isGRTLU1(tileInfoB)
   # TLU=1 (NT / free-dim contiguous): each lane's 128-bit buffer_load grabs a
   # full free-dim strip (M for A, N for B) at one K row; lanes walk K. Offset
   # addressing is a pure K-stride ramp, so it does not use the row-major
   # colId/rowId/bank-swizzle machinery below.
-  if tileInfoA.gr and isinstance(tileInfoA.gr.config.tag, GRTag_TLU1):
+  if aTLU1 and bTLU1:
     module.add(_graTileAssignment_tlu(writer, kernel, tileInfoA))
     module.add(_graTileAssignment_tlu(writer, kernel, tileInfoB))
     _grComputeSubtileOffsets_tlu(writer, module, tileInfoA)
     _grComputeSubtileOffsets_tlu(writer, module, tileInfoB)
+    return module
+  # NN / TT: exactly one operand is free-dim contiguous. The two emitters share
+  # no state, so run each tensor through the one matching its own layout. The
+  # row-major path below interleaves A and B (it derives colIdB from colIdA), so
+  # the odd operand out gets the single-tensor variant instead.
+  if aTLU1 or bTLU1:
+    for ti, isTLU1 in ((tileInfoA, aTLU1), (tileInfoB, bTLU1)):
+      if isTLU1:
+        module.add(_graTileAssignment_tlu(writer, kernel, ti))
+        _grComputeSubtileOffsets_tlu(writer, module, ti)
+      else:
+        _graTileAssignment_rowMajorSingle(writer, kernel, module, ti)
+        _grComputeSubtileOffsets_legacy(writer, module, ti)
     return module
   subIterKBytes = tileInfoA.subIterKBytes
   wavesize = kernel["WavefrontSize"]
@@ -1382,9 +1479,20 @@ def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
   wavesize = kernel["WavefrontSize"]
-  isTLU1 = bool(tileInfoA.gr and isinstance(tileInfoA.gr.config.tag, GRTag_TLU1))
-  if isTLU1:
+  aTLU1 = _isGRTLU1(tileInfoA)
+  bTLU1 = _isGRTLU1(tileInfoB)
+  if aTLU1 and bTLU1:
     return _globalReadDTLInitCommonSgpr_tlu(writer, kernel, module, tileInfoA, tileInfoB)
+  if aTLU1 or bTLU1:
+    # NN / TT: each tensor's DTL write base comes from its own layout.
+    module.addComment0("Mixed TLU: per-operand DTL write base")
+    for tc, ti, isTLU1 in (("A", tileInfoA, aTLU1), ("B", tileInfoB, bTLU1)):
+      if isTLU1:
+        _grDTLInitBase_tlu(writer, kernel, module, tc, ti)
+      else:
+        _grDTLInitBase_rowMajor(writer, kernel, module, tc, ti)
+      _grDTLInitSwap(writer, module, tc)
+    return module
   vgprWaveId = writer.vgprPool.checkOut(1, tag="_globalReadDTLInitCommonSgpr_legacy_vgprWaveId")
   module.addComment0("Compute shared offsets used by m0 in DTL loads")
   module.add(VLShiftRightB32(dst=vgpr(vgprWaveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
@@ -1419,44 +1527,73 @@ def _globalReadDTLInitCommonSgpr_tlu(writer, kernel, module, tileInfoA, tileInfo
   """
   module.addComment0("TLU: per-wave DTL write base (M/N strip partition)")
   for tc, ti in (("A", tileInfoA), ("B", tileInfoB)):
-    base = "LocalWriteBaseAddr%s" % tc
-    axisWaves = kernel["MIWaveGroup"][0] if tc == 'A' else kernel["MIWaveGroup"][1]
-    stripStride = stripStrideBytes(ti)
-    localSub0 = int(ti.localSubtileGrid[0])
-    wavesPerStrip = int(getattr(ti, "grWavesPerStrip", 1))
-    if wavesPerStrip > 1:
-      # Shared strip: all axis-waves write into the SAME strip, each owning a
-      # contiguous run of DTL load-blocks (its share of the strip's K rows).
-      # numGRPerSubtile is already the per-wave load count, and one load block
-      # occupies wavesize*loadWidth bytes plus the swizzle pad.
-      from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter
-      _swz = selectTLUSwizzle(ti); _cs = selectTLUColScatter(ti)
-      _pad = int(_cs.padBytes) if _cs else (int(_swz.padBytes) if _swz else 0)
-      blkBytes = int(kernel["WavefrontSize"] * ti.gr.config.loadWidth + _pad)
-      perWaveBytes = int(ti.numGRPerSubtile * blkBytes)
-    else:
-      perWaveBytes = int(localSub0 * stripStride)
-    if axisWaves > 1:
-      wv = writer.vgprPool.checkOut(1, tag="_grDTLInit_tlu_wave_%s" % tc)
-      _tluWaveAxisId(writer, kernel, module, tc, wv)
-      tmpS = writer.sgprPool.checkOut(1, tag="_grDTLInit_tlu_s_%s" % tc, preventOverflow=False)
-      module.add(SMovB32(dst=sgpr(tmpS), src=hex(perWaveBytes), comment="%s: LDS wave stride" % tc))
-      module.add(VMulLOU32(dst=vgpr(wv), src0=sgpr(tmpS), src1=vgpr(wv),
-                 comment="%s: wave LDS base = axisId*%d" % (tc, perWaveBytes)))
-      writer.sgprPool.checkIn(tmpS)
-      module.add(SNop(waitState=0, comment="wait for VGPR"))
-      module.add(VReadfirstlaneB32(dst=sgpr(base), src=vgpr(wv),
-                 comment="%s: per-wave DTL write base" % tc))
-      writer.vgprPool.checkIn(wv)
-    else:
-      module.add(SMovB32(dst=sgpr(base), src=0, comment="%s: single axis-wave, base 0" % tc))
-    if tc == 'B' and writer.ldsStartOffsetB:
-      module.add(SAddU32(dst=sgpr(base), src0=sgpr(base), src1=hex(writer.ldsStartOffsetB),
-                 comment="B: + ldsStartOffset"))
-    swap = "Swap%s" % tc
-    module.add(SAddU32(dst=sgpr(swap), src0=sgpr(base), src1=writer.ldsTotalSize, comment=""))
-    module.add(SXorB32(dst=sgpr(swap), src0=sgpr(base), src1=sgpr(swap), comment=""))
+    _grDTLInitBase_tlu(writer, kernel, module, tc, ti)
+    _grDTLInitSwap(writer, module, tc)
   return module
+
+
+def _grDTLInitBase_tlu(writer, kernel, module, tc, ti):
+  """LocalWriteBaseAddr for one TLU=1 tensor (multi-wave strip partition)."""
+  base = "LocalWriteBaseAddr%s" % tc
+  axisWaves = kernel["MIWaveGroup"][0] if tc == 'A' else kernel["MIWaveGroup"][1]
+  stripStride = stripStrideBytes(ti)
+  localSub0 = int(ti.localSubtileGrid[0])
+  wavesPerStrip = int(getattr(ti, "grWavesPerStrip", 1))
+  if wavesPerStrip > 1:
+    # Shared strip: all axis-waves write into the SAME strip, each owning a
+    # contiguous run of DTL load-blocks (its share of the strip's K rows).
+    # numGRPerSubtile is already the per-wave load count, and one load block
+    # occupies wavesize*loadWidth bytes plus the swizzle pad.
+    from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter
+    _swz = selectTLUSwizzle(ti); _cs = selectTLUColScatter(ti)
+    _pad = int(_cs.padBytes) if _cs else (int(_swz.padBytes) if _swz else 0)
+    blkBytes = int(kernel["WavefrontSize"] * ti.gr.config.loadWidth + _pad)
+    perWaveBytes = int(ti.numGRPerSubtile * blkBytes)
+  else:
+    perWaveBytes = int(localSub0 * stripStride)
+  if axisWaves > 1:
+    wv = writer.vgprPool.checkOut(1, tag="_grDTLInit_tlu_wave_%s" % tc)
+    _tluWaveAxisId(writer, kernel, module, tc, wv)
+    tmpS = writer.sgprPool.checkOut(1, tag="_grDTLInit_tlu_s_%s" % tc, preventOverflow=False)
+    module.add(SMovB32(dst=sgpr(tmpS), src=hex(perWaveBytes), comment="%s: LDS wave stride" % tc))
+    module.add(VMulLOU32(dst=vgpr(wv), src0=sgpr(tmpS), src1=vgpr(wv),
+               comment="%s: wave LDS base = axisId*%d" % (tc, perWaveBytes)))
+    writer.sgprPool.checkIn(tmpS)
+    module.add(SNop(waitState=0, comment="wait for VGPR"))
+    module.add(VReadfirstlaneB32(dst=sgpr(base), src=vgpr(wv),
+               comment="%s: per-wave DTL write base" % tc))
+    writer.vgprPool.checkIn(wv)
+  else:
+    module.add(SMovB32(dst=sgpr(base), src=0, comment="%s: single axis-wave, base 0" % tc))
+
+
+def _grDTLInitBase_rowMajor(writer, kernel, module, tc, ti):
+  """LocalWriteBaseAddr for one TLU=0 tensor."""
+  base = "LocalWriteBaseAddr%s" % tc
+  wavesize = kernel["WavefrontSize"]
+  vgprWaveId = writer.vgprPool.checkOut(1, tag="_grDTLInit_rm_wave_%s" % tc)
+  rowOffset = writer.vgprPool.checkOut(1, tag="_grDTLInit_rm_row_%s" % tc)
+  module.add(VLShiftRightB32(dst=vgpr(vgprWaveId), shiftHex=hex(wavesize.bit_length()-1),
+             src=vgpr("Serial"), comment="Wave Id"))
+  _grComputeRowPartition_legacy(module, kernel, writer, ti, vgprWaveId, rowOffset)
+  module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(ti.subIterKBytes.bit_length()-1),
+             src=vgpr(rowOffset), comment="Apply wave-specific offset for %s" % tc))
+  module.add(SNop(waitState=0, comment="Wait for VGPR to be ready"))
+  module.add(VReadfirstlaneB32(dst=sgpr(base), src=vgpr(rowOffset),
+             comment="Store base LDS offset, will be modified"))
+  writer.vgprPool.checkIn(vgprWaveId)
+  writer.vgprPool.checkIn(rowOffset)
+
+
+def _grDTLInitSwap(writer, module, tc):
+  """Fold in the tensor's LDS start offset and build its double-buffer Swap mask."""
+  base = "LocalWriteBaseAddr%s" % tc
+  if tc == 'B' and writer.ldsStartOffsetB:
+    module.add(SAddU32(dst=sgpr(base), src0=sgpr(base), src1=hex(writer.ldsStartOffsetB),
+               comment="B: + ldsStartOffset"))
+  swap = "Swap%s" % tc
+  module.add(SAddU32(dst=sgpr(swap), src0=sgpr(base), src1=writer.ldsTotalSize, comment=""))
+  module.add(SXorB32(dst=sgpr(swap), src0=sgpr(base), src1=sgpr(swap), comment=""))
 
 ##################################################
 # Subroutine to generate DTL M0 LDS buffer swap
