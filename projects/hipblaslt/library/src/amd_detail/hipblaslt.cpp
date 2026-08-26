@@ -161,7 +161,7 @@ try
     // TODO: Synchronizer size pass into predicate SynchronizerSizeCheck
     // 1K just for small size now, need to cal corner case if support all situations
     void* d_Synchronizer = nullptr;
-    constexpr size_t synchronizer_bytes = hipblaslt_streamk_synchronizer_ints * sizeof(int);
+    constexpr size_t synchronizer_bytes = hipblaslt_synchronizer_ints * sizeof(int);
     CHECK_HIP_ERROR(hipMalloc(&d_Synchronizer, synchronizer_bytes));
     CHECK_HIP_ERROR(hipMemset(d_Synchronizer, 0, synchronizer_bytes));
 

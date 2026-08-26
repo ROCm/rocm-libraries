@@ -769,7 +769,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
          else:
            numElementsToValidate = max(globalParameters["NumElementsToValidateWinner"], globalParameters["NumElementsToValidate"])
         param("num-elements-to-validate", numElementsToValidate)
-        param("check-streamk-sync",       globalParameters["CheckStreamKSync"])
+        param("check-synchronizer",       globalParameters["CheckSynchronizer"])
         param("num-enqueues-per-sync",    globalParameters["EnqueuesPerSync"])
         param("max-enqueues-per-sync",    globalParameters["MaxEnqueuesPerSync"])
         param("num-syncs-per-benchmark",  globalParameters["SyncsPerBenchmark"])

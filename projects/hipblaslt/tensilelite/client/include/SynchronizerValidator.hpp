@@ -13,7 +13,7 @@
  * rather than by every solution that follows. It also fails when the buffer is
  * declared too narrow to scan in full.
  *
- * On by default (GlobalParameters CheckStreamKSync); --check-streamk-sync=0
+ * On by default (GlobalParameters CheckSynchronizer); --check-synchronizer=0
  * turns it off. Being a default, it is built not to change what a config does:
  * it is passive (it inspects launches other listeners drive and never requests
  * one), and it skips solutions that are handed no Synchronizer at all, rather

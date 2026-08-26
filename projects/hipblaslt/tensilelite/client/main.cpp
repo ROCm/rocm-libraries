@@ -265,7 +265,7 @@ namespace TensileLite
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
-                ("check-streamk-sync",       po::value<bool>()->default_value(true),
+                ("check-synchronizer",       po::value<bool>()->default_value(true),
                 "Fail the run if a StreamK or GSU MBSK kernel leaves the shared Synchronizer buffer nonzero on exit."
                 " Solutions that do not use the buffer are skipped, so this is free for them.")
                 ("bounds-check",             po::value<BoundsCheckMode>()->default_value(BoundsCheckMode::Disable),
@@ -563,7 +563,7 @@ namespace TensileLite
             DUMP_OPT("pristine-on-gpu", bool);
             DUMP_OPT("c-equal-d", bool);
             DUMP_OPT("num-elements-to-validate", int);
-            DUMP_OPT("check-streamk-sync", bool);
+            DUMP_OPT("check-synchronizer", bool);
             DUMP_OPT("bounds-check", BoundsCheckMode);
             DUMP_OPT("prune-mode", PruneSparseMode);
             DUMP_OPT("device-idx", int);

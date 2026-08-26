@@ -72,8 +72,8 @@ private:
 
 // Size (ints) of the shared Synchronizer buffer allocated once in
 // hipblasLtCreate and reused across every launch, by both StreamK and GSU
-// MultipleBufferSingleKernel. See check_streamk_sync.hpp.
-constexpr size_t hipblaslt_streamk_synchronizer_ints = 16 * 409600;
+// MultipleBufferSingleKernel. See check_synchronizer.hpp.
+constexpr size_t hipblaslt_synchronizer_ints = 16 * 409600;
 
 /********************************************************************************
  * \brief rocblaslt_handle is a structure holding the rocblaslt library context.
@@ -135,12 +135,12 @@ struct _rocblaslt_handle
     // Sticky bypass for scan_D once any caller observes a NaN.
     std::atomic<bool>     check_numerics_short_circuit{false};
 
-    // HIPBLASLT_CHECK_STREAMK_SYNC state. Read once in the ctor; opt-in via
-    // env. See check_streamk_sync.hpp for the checker protocol.
-    bool check_streamk_sync = false;
+    // HIPBLASLT_CHECK_SYNCHRONIZER state. Read once in the ctor; opt-in via
+    // env. See check_synchronizer.hpp for the checker protocol.
+    bool check_synchronizer = false;
     // Host staging buffer for the Synchronizer readback, grown once to full
     // size on first use and reused across every scanned call.
-    std::vector<int> check_streamk_sync_host;
+    std::vector<int> check_synchronizer_host;
 };
 
 /********************************************************************************

@@ -217,7 +217,7 @@ globalParameters["StreamKHybridMode"] = [0]
 # otherwise: it corrupts a later launch, not the one that left it.
 # Only StreamK and GSU MultipleBufferSingleKernel solutions touch the buffer;
 # the client skips every other solution, so this costs nothing on them.
-globalParameters["CheckStreamKSync"] = True
+globalParameters["CheckSynchronizer"] = True
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )

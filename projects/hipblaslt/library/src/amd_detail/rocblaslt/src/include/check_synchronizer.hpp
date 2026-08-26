@@ -5,7 +5,7 @@
  * \brief Post-launch dirty-buffer check for the shared Synchronizer buffer.
  *        StreamK (work-queue / fixup Flags) and GSU MultipleBufferSingleKernel
  *        both use it and both must leave it at zero on exit.
- *        Enabled by HIPBLASLT_CHECK_STREAMK_SYNC env var (read once in handle ctor).
+ *        Enabled by HIPBLASLT_CHECK_SYNCHRONIZER env var (read once in handle ctor).
  *
  *        Covers rocblaslt_matmul_impl only; the ext and user-argument launch
  *        paths share the same buffer but are not scanned, so residue they leave
@@ -18,8 +18,8 @@
  */
 
 #pragma once
-#ifndef HIPBLASLT_CHECK_STREAMK_SYNC_HPP
-#define HIPBLASLT_CHECK_STREAMK_SYNC_HPP
+#ifndef HIPBLASLT_CHECK_SYNCHRONIZER_HPP
+#define HIPBLASLT_CHECK_SYNCHRONIZER_HPP
 
 #include "handle.h"
 #include "rocblaslt-types.h"
@@ -32,11 +32,11 @@
 
 // Blocks on `stream` to read the buffer back, and reports it if any int is
 // nonzero. Gated on the env var, so the default path costs nothing.
-inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
+inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
                                               hipStream_t      stream,
                                               const char*      label)
 {
-    if(!handle || !handle->check_streamk_sync || !handle->Synchronizer)
+    if(!handle || !handle->check_synchronizer || !handle->Synchronizer)
         return;
 
     // Skip during HIP graph capture: the sync and memset below cannot be
@@ -45,12 +45,12 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
     if(hipStreamIsCapturing(stream, &cap) == hipSuccess && cap != hipStreamCaptureStatusNone)
         return;
 
-    constexpr size_t count = hipblaslt_streamk_synchronizer_ints;
+    constexpr size_t count = hipblaslt_synchronizer_ints;
     constexpr size_t bytes = count * sizeof(int);
 
-    if(handle->check_streamk_sync_host.size() != count)
-        handle->check_streamk_sync_host.assign(count, 0);
-    std::vector<int>& host = handle->check_streamk_sync_host;
+    if(handle->check_synchronizer_host.size() != count)
+        handle->check_synchronizer_host.assign(count, 0);
+    std::vector<int>& host = handle->check_synchronizer_host;
 
     hipError_t err = hipStreamSynchronize(stream);
     if(err == hipSuccess)
@@ -63,7 +63,7 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
         std::ostream*               sink = get_logger_os();
         if(!sink)
             sink = &std::cerr;
-        *sink << "[hipBLASLt CHECK_STREAMK_SYNC] " << label << ": readback failed ("
+        *sink << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": readback failed ("
               << hipGetErrorString(err) << "); buffer not checked." << std::endl;
         return;
     }
@@ -89,7 +89,7 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
         std::ostream*               sink = get_logger_os();
         if(!sink)
             sink = &std::cerr;
-        *sink << "[hipBLASLt CHECK_STREAMK_SYNC] " << label << ": Synchronizer left dirty ("
+        *sink << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": Synchronizer left dirty ("
               << nonzero << "/" << count << " ints nonzero, first at offset " << first
               << ") -- the kernel did not reset the shared Synchronizer buffer on exit."
               << std::endl;
@@ -101,4 +101,4 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
     static_cast<void>(hipMemset(handle->Synchronizer, 0, bytes));
 }
 
-#endif // HIPBLASLT_CHECK_STREAMK_SYNC_HPP
+#endif // HIPBLASLT_CHECK_SYNCHRONIZER_HPP
