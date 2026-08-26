@@ -514,11 +514,13 @@ class TestWriteClientConfigIniPlain:
 
     @pytest.mark.parametrize("enabled", [True, False])
     def test_check_streamk_sync_reaches_the_client(self, tmp_path, monkeypatch, enabled):
-        """CheckStreamKSync must always be emitted.
+        """CheckStreamKSync must always be emitted, in both states.
 
-        The client's own default is false, so a dropped or renamed parameter
-        would silently disable the StreamK Synchronizer check in every YAML
-        that asks for it, and those tests would keep passing.
+        The check is on by default at both ends now, so a dropped or renamed
+        parameter would not disable it -- but it would make CheckStreamKSync
+        False unhonourable, silently re-enabling the check on the configs that
+        opt out, and those runs would keep passing until one of them was the
+        config that leaves residue.
         """
         pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
         content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT,

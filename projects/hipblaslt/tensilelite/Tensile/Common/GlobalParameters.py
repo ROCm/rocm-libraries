@@ -215,7 +215,9 @@ globalParameters["StreamKHybridMode"] = [0]
 # Read the shared Synchronizer buffer back after the first warmup of each
 # solution, and fail the run if a kernel left it nonzero. Residue is silent
 # otherwise: it corrupts a later launch, not the one that left it.
-globalParameters["CheckStreamKSync"] = False
+# Only StreamK and GSU MultipleBufferSingleKernel solutions touch the buffer;
+# the client skips every other solution, so this costs nothing on them.
+globalParameters["CheckStreamKSync"] = True
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
