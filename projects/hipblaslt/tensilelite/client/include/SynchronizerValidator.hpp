@@ -14,6 +14,8 @@
  * declared too narrow to scan in full.
  *
  * Enabled by --check-streamk-sync (GlobalParameters CheckStreamKSync).
+ * Solutions that are handed no Synchronizer at all are skipped, rather than
+ * paying for a scan that could only ever come back clean.
  */
 
 #pragma once
@@ -67,14 +69,18 @@ namespace TensileLite
             // does. One pass, so it never extends a loop someone else drives.
             virtual bool needMoreRunsInSolution() const override
             {
-                return m_enabled && !m_checkedSolution;
+                return active() && !m_checkedSolution;
             }
 
             // Request one warmup so validateWarmups always has a launch to
             // inspect, even when no other listener asks for warmups.
+            // Also reached once per problem, before any preSolution, to size the
+            // rotating buffers. preProblem restores m_usesSynchronizer first, so
+            // a non-consumer solution from the previous problem cannot size that
+            // allocation below what a consumer solution here would need.
             virtual size_t numWarmupRuns() override
             {
-                return m_enabled ? 1 : 0;
+                return active() ? 1 : 0;
             }
             virtual void setNumWarmupRuns(size_t count) override {}
             virtual void preWarmup() override {}
@@ -126,6 +132,13 @@ namespace TensileLite
             }
 
         private:
+            /// Whether the check should do anything right now: switched on, and
+            /// the solution in hand actually touches the Synchronizer.
+            bool active() const
+            {
+                return m_enabled && m_usesSynchronizer;
+            }
+
             /// Checks every Synchronizer buffer reachable from *inputs*.
             /// `stage` names the launch phase, for the diagnostic.
             void checkInputs(std::shared_ptr<ProblemInputs> inputs, char const* stage);
@@ -150,6 +163,11 @@ namespace TensileLite
             // Protected so a test-only subclass can drive these without a GPU.
             bool m_dirtyInSolution = false;
             int  m_errorsReported  = 0;
+            // Whether the solution in hand is one of the two Synchronizer
+            // consumers. Set per solution in preSolution and restored to true in
+            // preProblem; stays true when the solution is unknown, so an
+            // unrecognised launch is scanned rather than silently skipped.
+            bool m_usesSynchronizer = true;
             // Set once validateWarmups has run, so needMoreRunsInSolution stops
             // asking. Reset per solution in preSolution.
             bool m_checkedSolution = false;
