@@ -13,11 +13,11 @@
  * rather than by every solution that follows. It also fails when the buffer is
  * declared too narrow to scan in full.
  *
- * Enabled by --check-streamk-sync (GlobalParameters CheckStreamKSync). It is
- * built not to change what a config does: it is passive (it inspects launches
- * other listeners drive and never requests one), and it skips solutions that
- * are handed no Synchronizer at all, rather than paying for a scan that could
- * only ever come back clean.
+ * On by default (GlobalParameters CheckStreamKSync); --check-streamk-sync=0
+ * turns it off. Being a default, it is built not to change what a config does:
+ * it is passive (it inspects launches other listeners drive and never requests
+ * one), and it skips solutions that are handed no Synchronizer at all, rather
+ * than paying for a scan that could only ever come back clean.
  */
 
 #pragma once
@@ -67,7 +67,8 @@ namespace TensileLite
             virtual void postSolution() override;
 
             // Purely passive: the check inspects launches other listeners drive
-            // and never asks for one of its own. The ductile family sets
+            // and never asks for one of its own. Being on by default, it must
+            // not change what a config runs -- the ductile family sets
             // NumElementsToValidate 0 and SyncsPerBenchmark 0 precisely so no
             // kernel launches, and driving a run there would turn a zero-launch
             // codegen test into NumWarmups (10) launches per solution while
