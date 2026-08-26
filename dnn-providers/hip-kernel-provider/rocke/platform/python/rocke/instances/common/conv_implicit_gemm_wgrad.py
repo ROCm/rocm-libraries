@@ -278,7 +278,10 @@ class WgradConvSpec:
     Pipeline, epilogue, and async-DMA options are the same as
     :class:`~.conv_implicit_gemm.ImplicitGemmConvSpec`.  Grouped convolution
     (``groups > 1``) is supported via grid-per-group (the group index rides on
-    block_id_z), currently the direct-store epilogue at ``split_k=1``.
+    block_id_z) and is orthogonal to the epilogue and split-K: every epilogue
+    (direct, cshuffle, wmma-direct, and the split-K atomic path) threads the
+    per-group ``k_out += group*kpg`` fold.  Only grouped pointwise (1x1) wgrad
+    remains a follow-on.
     """
 
     problem: ConvProblem

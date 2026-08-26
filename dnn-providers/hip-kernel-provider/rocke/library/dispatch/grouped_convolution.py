@@ -1,18 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Grouped convolution dispatcher (forward, backward-weight; dgrad re-exported).
+"""Grouped convolution dispatcher (forward, backward-weight).
 
 Covers ``implicit_gemm_conv`` (forward NHWC × KYXC → NHWK) and
 ``implicit_gemm_conv_wgrad`` (dY × X → dW weight gradient), sharing a single
 ``ConvGroupedRequest`` so callers can dispatch both directions from the same
 shape description.
-
-Backward-data (dgrad) does not share that request shape (different ABI + grid;
-see the import note below), so it keeps its own family
-``rocke.dispatch.families.conv_dgrad``; its ``CONV_DGRAD_REGISTRY`` /
-``dispatch_conv_dgrad`` / ``conv_dgrad_candidates`` are re-exported here so all
-three directions are reachable from one module.
 
 SCOPE -- what this dispatcher decides
 -------------------------------------
@@ -166,21 +160,6 @@ from rocke.dispatch.core import (
     OperatorRequest,
     Ranker,
     stable_json_hash,
-)
-
-# Backward-data (dgrad) dispatch lives in its own family: unlike fwd/wgrad it does
-# NOT share ConvGroupedRequest -- it uses ConvDgradRequest, a different ABI
-# (sub_gemm_buf/num_sub_gemms + tilde sub-GEMM decomposition), and a grid with the
-# group on block_id_y (fwd/wgrad ride the group on block_id_z).  Its registry and
-# dispatcher therefore sit in rocke.dispatch.families.conv_dgrad, parallel to the
-# moe/norm families.  They are re-exported here so all three grouped-conv directions
-# are reachable from one module (library -> platform imports are one-way legal, so
-# there is no cycle).
-from rocke.dispatch.families.conv_dgrad import (  # noqa: F401  (re-exported)
-    CONV_DGRAD_REGISTRY,
-    ConvDgradRequest,
-    conv_dgrad_candidates,
-    dispatch_conv_dgrad,
 )
 
 # ---------------------------------------------------------------------------
@@ -1313,11 +1292,6 @@ CONV_WGRAD_REGISTRY.register(_make_gfx942_wgrad_candidate())
 CONV_WGRAD_REGISTRY.register(_make_gfx950_wgrad_candidate())
 CONV_WGRAD_REGISTRY.register(_make_gfx1250_wgrad_candidate())
 
-# Backward-data (dgrad): CONV_DGRAD_REGISTRY is defined + populated in the dgrad
-# family (imported at module top) rather than rebuilt here, because dgrad candidates
-# take ConvDgradRequest and a different grid/ABI.  Dispatch dgrad via the
-# re-exported ``dispatch_conv_dgrad`` (or ``conv_grouped_candidates("dgrad")``).
-
 
 def _registry_for(req: ConvGroupedRequest) -> CandidateRegistry:
     if req.direction == "wgrad":
@@ -1356,11 +1330,6 @@ def _kernel_id(
 def conv_grouped_candidates(direction: str = "fwd") -> Tuple[KernelCandidate, ...]:
     if direction == "wgrad":
         return CONV_WGRAD_REGISTRY.candidates()
-    if direction == "dgrad":
-        # Re-exported from the dgrad family (see module top). dgrad still dispatches
-        # via dispatch_conv_dgrad(ConvDgradRequest); this only exposes its candidates
-        # from the same module surface as fwd/wgrad.
-        return conv_dgrad_candidates()
     return CONV_FWD_REGISTRY.candidates()
 
 
