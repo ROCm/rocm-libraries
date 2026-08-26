@@ -333,12 +333,20 @@ private:
             // pointer reaches as<T>() and gets written through. Fail attributably instead.
             if(!retry.get() && std::is_same<M, h_memory>::value)
             {
+#ifdef GOOGLE_TEST
+                FAIL() << "Fatal: cannot allocate " << (bytes >> 20)
+                       << " MiB of pinned host memory even with an empty pool. This "
+                          "problem does not fit in the memory available to this "
+                          "process.";
+                return retry;
+#else
                 hipblaslt_cerr << "Fatal: cannot allocate " << (bytes >> 20)
                                << " MiB of pinned host memory even with an empty pool. This "
                                   "problem does not fit in the memory available to this "
                                   "process."
                                << std::endl;
                 exit(EXIT_FAILURE);
+#endif
             }
             return retry;
         }
