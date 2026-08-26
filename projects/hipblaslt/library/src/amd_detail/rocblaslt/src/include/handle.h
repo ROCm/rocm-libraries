@@ -70,8 +70,9 @@ private:
     size_t _data_size = 0;
 };
 
-// Size (ints) of the StreamK Synchronizer buffer allocated once in
-// hipblasLtCreate and reused across every launch. See check_streamk_sync.hpp.
+// Size (ints) of the shared Synchronizer buffer allocated once in
+// hipblasLtCreate and reused across every launch, by both StreamK and GSU
+// MultipleBufferSingleKernel. See check_streamk_sync.hpp.
 constexpr size_t hipblaslt_streamk_synchronizer_ints = 16 * 409600;
 
 /********************************************************************************

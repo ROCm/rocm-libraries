@@ -16,10 +16,10 @@ namespace TensileLite
         bool scanSynchronizerResidue(uint8_t const* host, size_t bytes, SynchronizerResidue& out)
         {
             // Ints are both the scan step and the reported unit: the buffer is
-            // declared with the alpha type but holds 32-bit counters, one per XCD
-            // at the head, so an offset in ints names the counter left set. The
-            // element count is a multiple of 8 and alpha is at least int-sized,
-            // so bytes always divides evenly.
+            // declared with the alpha type but every consumer writes 32-bit
+            // counters into it, so an offset in ints names the counter left set.
+            // The element count is a multiple of 8 and alpha is at least
+            // int-sized, so bytes always divides evenly.
             size_t const    ints    = bytes / sizeof(uint32_t);
             uint32_t const* v       = reinterpret_cast<uint32_t const*>(host);
             size_t          nonzero = 0;
@@ -170,10 +170,10 @@ namespace TensileLite
                 return true;
 
             std::ostringstream msg;
-            msg << "StreamK Synchronizer left dirty after " << stage << " (gemm " << gemmIdx
+            msg << "Synchronizer left dirty after " << stage << " (gemm " << gemmIdx
                 << "): " << residue.nonzeroInts << "/" << residue.totalInts
                 << " ints nonzero, first at int offset " << residue.firstInt
-                << " -- the kernel did not self-clean its work-queue state.\n";
+                << " -- the kernel did not reset the shared Synchronizer buffer on exit.\n";
             m_reporter->log(LogLevel::Error, msg.str());
 
             // The client zeroes the Synchronizer only on the first
