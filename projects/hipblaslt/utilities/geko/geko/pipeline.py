@@ -285,6 +285,18 @@ def run_search(
     state.dump(state_path)
 
 
+def _detect_mx_from_log(log_file: Path) -> bool:
+    """Return True if any row in the workload log uses MX block scaling (scaleA/B >= 3)."""
+    try:
+        data = bench.log.parse(log_file, as_df=True)
+        for col in ("scaleA", "scaleB"):
+            if col in data.columns and (data[col] >= 3).any():
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def run_configure(
     hipblaslt_path: str,
     log_file: str,
@@ -297,6 +309,7 @@ def run_configure(
     verbose: int = 1,
     bench_freq: bool = False,
     device: int | None = None,
+    mx: bool = False,
 ) -> None:
     """Summarize the workload log, then write tuning YAML under workdir/optimizations.
 
@@ -368,6 +381,11 @@ def run_configure(
         logger.warning("No GEMM operations found after filtering. Consider lowering keep_thr")
         return
 
+    if not mx:
+        mx = _detect_mx_from_log(log_file)
+        if mx:
+            logger.info("Auto-detected MX (Microscaling) mode from workload log scaleA/scaleB")
+
     logger.info("Generating GEMM Kernel Optimization configs...")
 
     tuning_dir = workdir / "optimizations"
@@ -382,6 +400,7 @@ def run_configure(
         arch=arch,
         backend=backend,
         search_space=search_space,
+        mx=mx,
     )
     n_configs = len(gemm_configs)
 

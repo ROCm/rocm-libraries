@@ -128,6 +128,7 @@ def configure(
     arch: str = "gfx950",
     backend: str = "ductile",
     search_space: str | None = None,
+    mx: bool = False,
 ) -> dict:
     """Generate tuning YAML configs for one or more GEMM types.
 
@@ -176,6 +177,8 @@ def configure(
         "backend": backend.lower(),
         "search_space": search_space,
     }
+    if mx:
+        config["MX"] = True
     config["GemmProblems"] = gcs
 
     output_dir = Path(output_dir)

@@ -238,3 +238,43 @@ def test_heuristic_rejected_for_complex_gemm_problems() -> None:
     }
     with pytest.raises(NotImplementedError, match="Heuristic search space"):
         apply_input_config_defaults(cfg)
+
+
+def test_mx_auto_forced_for_f4_data_type() -> None:
+    """MX should be auto-forced True when DataType is F4."""
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F4", "S", "S")
+    cfg = {
+        "ARCH": "gfx950",
+        "GemmProblems": [GemmConfig(gt, [[256, 256, 1, 256]])],
+    }
+    apply_input_config_defaults(cfg)
+    assert cfg["MX"] is True
+
+
+def test_mx_not_forced_for_f8_data_type() -> None:
+    """MX should remain False (default) for F8 unless explicitly set."""
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    cfg = {
+        "ARCH": "gfx950",
+        "GemmProblems": [GemmConfig(gt, [[256, 256, 1, 256]])],
+    }
+    apply_input_config_defaults(cfg)
+    assert cfg["MX"] is False
+
+
+def test_mx_explicit_true_preserved_for_f8() -> None:
+    """Explicit MX=True in config should be preserved for F8."""
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    cfg = {
+        "ARCH": "gfx950",
+        "MX": True,
+        "GemmProblems": [GemmConfig(gt, [[256, 256, 1, 256]])],
+    }
+    apply_input_config_defaults(cfg)
+    assert cfg["MX"] is True
