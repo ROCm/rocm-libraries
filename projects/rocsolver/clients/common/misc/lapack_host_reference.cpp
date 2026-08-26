@@ -76,10 +76,54 @@ void zlaset_(char* uplo,
              rocblas_double_complex* A,
              int* lda);
 
-float slange_(char* norm, int* m, int* n, float* A, int* lda, float* work);
-double dlange_(char* norm, int* m, int* n, double* A, int* lda, double* work);
-float clange_(char* norm, int* m, int* n, rocblas_float_complex* A, int* lda, float* work);
-double zlange_(char* norm, int* m, int* n, rocblas_double_complex* A, int* lda, double* work);
+float slange_(const char* norm, const int* m, const int* n, const float* A, const int* lda, float* rwork);
+double dlange_(const char* norm,
+               const int* m,
+               const int* n,
+               const double* A,
+               const int* lda,
+               double* rwork);
+float clange_(const char* norm,
+              const int* m,
+              const int* n,
+              const rocblas_float_complex* A,
+              const int* lda,
+              float* rwork);
+double zlange_(const char* norm,
+               const int* m,
+               const int* n,
+               const rocblas_double_complex* A,
+               const int* lda,
+               double* rwork);
+
+float slansb_(const char* norm,
+              const char* uplo,
+              const int* n,
+              const int* kd,
+              const float* Aband,
+              const int* ldab,
+              float* rwork);
+double dlansb_(const char* norm,
+               const char* uplo,
+               const int* n,
+               const int* kd,
+               const double* Aband,
+               const int* ldab,
+               double* rwork);
+float clanhb_(const char* norm,
+              const char* uplo,
+              const int* n,
+              const int* kd,
+              const rocblas_float_complex* Aband,
+              const int* ldab,
+              float* rwork);
+double zlanhb_(const char* norm,
+               const char* uplo,
+               const int* n,
+               const int* kd,
+               const rocblas_double_complex* Aband,
+               const int* ldab,
+               double* rwork);
 
 void sgecon_(char* norm,
              int* n,
@@ -2132,7 +2176,7 @@ void ssbev_(const char* evect,
             const int* kd,
             float* Aband,
             const int* ldab,
-            float* W,
+            float* Lambda,
             float* Z,
             const int* ldz,
             float* work,
@@ -2143,7 +2187,7 @@ void dsbev_(const char* evect,
             const int* kd,
             double* Aband,
             const int* ldab,
-            double* W,
+            double* Lambda,
             double* Z,
             const int* ldz,
             double* work,
@@ -2154,7 +2198,7 @@ void chbev_(const char* evect,
             const int* kd,
             rocblas_float_complex* Aband,
             const int* ldab,
-            float* W,
+            float* Lambda,
             rocblas_float_complex* Z,
             const int* ldz,
             rocblas_float_complex* work,
@@ -2166,7 +2210,7 @@ void zhbev_(const char* evect,
             const int* kd,
             rocblas_double_complex* Aband,
             const int* ldab,
-            double* W,
+            double* Lambda,
             rocblas_double_complex* Z,
             const int* ldz,
             rocblas_double_complex* work,
@@ -2861,47 +2905,97 @@ void dbdsvdx_(char* uplo,
 // lange
 
 template <>
-float cpu_lange<float, float>(char norm,
-                              rocblas_int m,
-                              rocblas_int n,
-                              float* A,
-                              rocblas_int lda,
-                              float* work)
+float cpu_lange<float>(char norm,
+                       rocblas_int m,
+                       rocblas_int n,
+                       const float* A,
+                       rocblas_int lda,
+                       float* rwork)
 {
-    return slange_(&norm, &m, &n, A, &lda, work);
+    return slange_(&norm, &m, &n, A, &lda, rwork);
 }
 
 template <>
-double cpu_lange<double, double>(char norm,
-                                 rocblas_int m,
-                                 rocblas_int n,
-                                 double* A,
-                                 rocblas_int lda,
-                                 double* work)
+double cpu_lange<double>(char norm,
+                         rocblas_int m,
+                         rocblas_int n,
+                         const double* A,
+                         rocblas_int lda,
+                         double* rwork)
 {
-    return dlange_(&norm, &m, &n, A, &lda, work);
+    return dlange_(&norm, &m, &n, A, &lda, rwork);
 }
 
 template <>
-float cpu_lange<rocblas_float_complex, float>(char norm,
-                                              rocblas_int m,
-                                              rocblas_int n,
-                                              rocblas_float_complex* A,
-                                              rocblas_int lda,
-                                              float* work)
+float cpu_lange<rocblas_float_complex>(char norm,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       const rocblas_float_complex* A,
+                                       rocblas_int lda,
+                                       float* rwork)
 {
-    return clange_(&norm, &m, &n, A, &lda, work);
+    return clange_(&norm, &m, &n, A, &lda, rwork);
 }
 
 template <>
-double cpu_lange<rocblas_double_complex, double>(char norm,
-                                                 rocblas_int m,
-                                                 rocblas_int n,
-                                                 rocblas_double_complex* A,
-                                                 rocblas_int lda,
-                                                 double* work)
+double cpu_lange<rocblas_double_complex>(char norm,
+                                         rocblas_int m,
+                                         rocblas_int n,
+                                         const rocblas_double_complex* A,
+                                         rocblas_int lda,
+                                         double* rwork)
 {
-    return zlange_(&norm, &m, &n, A, &lda, work);
+    return zlange_(&norm, &m, &n, A, &lda, rwork);
+}
+
+// lanhb
+
+template <>
+float cpu_lanhb<float>(char norm,
+                       char uplo,
+                       rocblas_int n,
+                       rocblas_int kd,
+                       const float* A,
+                       rocblas_int lda,
+                       float* rwork)
+{
+    return slansb_(&norm, &uplo, &n, &kd, A, &lda, rwork);
+}
+
+template <>
+double cpu_lanhb<double>(char norm,
+                         char uplo,
+                         rocblas_int n,
+                         rocblas_int kd,
+                         const double* A,
+                         rocblas_int lda,
+                         double* rwork)
+{
+    return dlansb_(&norm, &uplo, &n, &kd, A, &lda, rwork);
+}
+
+template <>
+float cpu_lanhb<rocblas_float_complex>(char norm,
+                                       char uplo,
+                                       rocblas_int n,
+                                       rocblas_int kd,
+                                       const rocblas_float_complex* A,
+                                       rocblas_int lda,
+                                       float* rwork)
+{
+    return clanhb_(&norm, &uplo, &n, &kd, A, &lda, rwork);
+}
+
+template <>
+double cpu_lanhb<rocblas_double_complex>(char norm,
+                                         char uplo,
+                                         rocblas_int n,
+                                         rocblas_int kd,
+                                         const rocblas_double_complex* A,
+                                         rocblas_int lda,
+                                         double* rwork)
+{
+    return zlanhb_(&norm, &uplo, &n, &kd, A, &lda, rwork);
 }
 
 // laset
@@ -7078,7 +7172,7 @@ void cpu_sbev_hbev<float, float>(rocblas_evect evect,
                                  rocblas_int kd,
                                  float* Aband,
                                  rocblas_int ldab,
-                                 float* W,
+                                 float* Lambda,
                                  float* Z,
                                  rocblas_int ldz,
                                  float* work,
@@ -7087,7 +7181,7 @@ void cpu_sbev_hbev<float, float>(rocblas_evect evect,
 {
     char evectC = rocblas2char_evect(evect);
     char uploC = rocblas2char_fill(uplo);
-    ssbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, info);
+    ssbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, Lambda, Z, &ldz, work, info);
 }
 
 template <>
@@ -7097,7 +7191,7 @@ void cpu_sbev_hbev<double, double>(rocblas_evect evect,
                                    rocblas_int kd,
                                    double* Aband,
                                    rocblas_int ldab,
-                                   double* W,
+                                   double* Lambda,
                                    double* Z,
                                    rocblas_int ldz,
                                    double* work,
@@ -7106,7 +7200,7 @@ void cpu_sbev_hbev<double, double>(rocblas_evect evect,
 {
     char evectC = rocblas2char_evect(evect);
     char uploC = rocblas2char_fill(uplo);
-    dsbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, info);
+    dsbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, Lambda, Z, &ldz, work, info);
 }
 
 template <>
@@ -7116,7 +7210,7 @@ void cpu_sbev_hbev<rocblas_float_complex, float>(rocblas_evect evect,
                                                  rocblas_int kd,
                                                  rocblas_float_complex* Aband,
                                                  rocblas_int ldab,
-                                                 float* W,
+                                                 float* Lambda,
                                                  rocblas_float_complex* Z,
                                                  rocblas_int ldz,
                                                  rocblas_float_complex* work,
@@ -7125,7 +7219,7 @@ void cpu_sbev_hbev<rocblas_float_complex, float>(rocblas_evect evect,
 {
     char evectC = rocblas2char_evect(evect);
     char uploC = rocblas2char_fill(uplo);
-    chbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, rwork, info);
+    chbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, Lambda, Z, &ldz, work, rwork, info);
 }
 
 template <>
@@ -7135,7 +7229,7 @@ void cpu_sbev_hbev<rocblas_double_complex, double>(rocblas_evect evect,
                                                    rocblas_int kd,
                                                    rocblas_double_complex* Aband,
                                                    rocblas_int ldab,
-                                                   double* W,
+                                                   double* Lambda,
                                                    rocblas_double_complex* Z,
                                                    rocblas_int ldz,
                                                    rocblas_double_complex* work,
@@ -7144,7 +7238,7 @@ void cpu_sbev_hbev<rocblas_double_complex, double>(rocblas_evect evect,
 {
     char evectC = rocblas2char_evect(evect);
     char uploC = rocblas2char_fill(uplo);
-    zhbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, W, Z, &ldz, work, rwork, info);
+    zhbev_(&evectC, &uploC, &n, &kd, Aband, &ldab, Lambda, Z, &ldz, work, rwork, info);
 }
 
 // sytrd & hetrd

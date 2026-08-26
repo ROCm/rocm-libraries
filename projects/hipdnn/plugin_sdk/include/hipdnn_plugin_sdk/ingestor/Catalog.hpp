@@ -19,6 +19,11 @@ struct Catalog
 {
     std::vector<KernelDefinition> entries;
     bool isSorted = false;
+    /// True when `entries` came from a benchmarked record rather than the heuristic,
+    /// distinct from `isSorted`: this asks whether the order can still be replaced by a
+    /// later measurement, since a measured order arriving after a memoized heuristic
+    /// sort must still win.
+    bool orderedFromRecord = false;
     BoundTokens bound; ///< What graph-scoped matchers resolved, merged across packs.
 };
 

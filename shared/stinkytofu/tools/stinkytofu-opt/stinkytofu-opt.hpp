@@ -34,6 +34,7 @@
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
+#include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
@@ -58,6 +59,7 @@
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
@@ -95,6 +97,7 @@ const std::vector<PassInfo> availablePasses = {
      [](const std::vector<std::string>& args) {
          return createHazardGapAnalysisPass(hasPassArg(args, "verbose"));
      }},
+    {"StinkyMergeBarrierPass", [](const auto&) { return createStinkyMergeBarrierPass(); }},
     {"SetMatrixReusePass", [](const auto&) { return createSetMatrixReusePass(); }},
     {"SwInstructionPrefetchRelStaticPass",
      [](const auto&) { return createSwInstructionPrefetchRelStaticPass(std::string{}); }},
@@ -163,6 +166,7 @@ const std::vector<PassInfo> availablePasses = {
     {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},
     {"RedundantMovEliminationPass",
      [](const auto&) { return createRedundantMovEliminationPass(); }},
+    {"AsmMovePropagationPass", [](const auto&) { return createAsmMovePropagationPass(); }},
     {"StinkyIRVerifierPass", [](const auto&) { return createStinkyIRVerifierPass(); }},
     {"RemoveDelayAluPass", [](const auto&) { return createRemoveDelayAluPass(); }},
     // RemoveInstructionPass accepts one or more mnemonics:

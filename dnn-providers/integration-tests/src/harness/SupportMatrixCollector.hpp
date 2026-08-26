@@ -81,14 +81,7 @@ public:
         std::set<std::string> engineNames;
         for(auto id : supportingEngineIds)
         {
-            try
-            {
-                engineNames.emplace(hipdnn_data_sdk::utilities::getEngineNameFromId(id));
-            }
-            catch(const std::out_of_range&)
-            {
-                engineNames.emplace("Unknown(" + std::to_string(id) + ")");
-            }
+            engineNames.emplace(hipdnn_data_sdk::utilities::engineNameOrHex(id));
         }
 
         const std::lock_guard<std::mutex> lock(_mutex);

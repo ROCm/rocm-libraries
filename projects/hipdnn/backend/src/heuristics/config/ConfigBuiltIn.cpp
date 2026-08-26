@@ -12,7 +12,7 @@
  * reorders the candidate engine IDs so the chosen engine is first. When the
  * env var is unset, the file is missing/invalid, no rule matches, or the
  * matched engine is not among the candidates, the policy declines so the
- * outer policy loop can try the next plugin.
+ * outer policy loop can try the next policy.
  *
  * Mechanics mirror StaticOrderingBuiltIn — a function-pointer table wrapped
  * by HeuristicPlugin::createBuiltIn so registration and validation flow
