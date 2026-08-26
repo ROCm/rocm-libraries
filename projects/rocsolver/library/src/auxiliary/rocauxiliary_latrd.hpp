@@ -3127,10 +3127,14 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
 }
 
 // Raw-buffer variant of latrd_lower_kernel_fused.
-// All cross-block global writes use raw buffer stores with the 0x10 (sc1) flag so they
-// bypass the L2 cache and are immediately visible to other blocks via device-scope
-// coherency.  The software grid sync therefore only needs barrier() (no L2 fences)
-// instead of sync().  Enabled via LATRD_SW_RAW_SYNC=1.
+// All cross-block global accesses use raw buffer stores/loads with the 0x10 (sc1) flag.
+// NOTE: on CDNA3/CDNA4 (gfx942/gfx950) sc1 is the system/device coherence-SCOPE bit (the
+// renamed 'scc'), NOT an L2-bypass. It makes the access coherent at the device (L2) scope so
+// a peer block observes the value without an explicit fence; the data still flows through L1
+// and L2 normally. (True L1 bypass would be sc0/glc; true L2 no-allocate would be nt/slc.)
+// Because sc1 provides device-scope visibility, the software grid sync only needs barrier()
+// (execution-only, no L2 flush/invalidate fences) instead of sync().  Enabled via
+// LATRD_SW_RAW_SYNC=1.
 template <int MAX_THDS, typename T, typename I, typename S, typename U>
 __global__ void __launch_bounds__(MAX_THDS)
     latrd_lower_kernel_fused_alt(const I n,
@@ -3178,22 +3182,29 @@ __global__ void __launch_bounds__(MAX_THDS)
     T* pW = W;
 
     // Build raw buffer descriptors for all global arrays written before a barrier.
-    // The 0xffffffff num_records covers the full allocation; 0x10 sc1 flag on each
-    // store bypasses the L2 write-back so other blocks see the value immediately.
-    auto A_buf = __builtin_amdgcn_make_buffer_rsrc(pA, 0, 0xffffffff, 0);
-    auto W_buf = __builtin_amdgcn_make_buffer_rsrc(pW, 0, 0xffffffff, 0);
-    auto tau_buf = __builtin_amdgcn_make_buffer_rsrc(tau, 0, 0xffffffff, 0);
-    auto z1_buf = __builtin_amdgcn_make_buffer_rsrc(z1, 0, 0xffffffff, 0);
-    auto z2_buf = __builtin_amdgcn_make_buffer_rsrc(z2, 0, 0xffffffff, 0);
+    // The 0xffffffff num_records covers the full allocation; the 0x10 sc1 flag on each
+    // access makes it device-scope coherent (see note above) so other blocks see the value.
+    // word3 (4th arg) is the config word of the buffer resource (V#): it maps to bits 127:96
+    // of the 128-bit descriptor, defined in the MI350 Shader Programming Guide section 3.9.6.
+    // It MUST be non-zero: with word3=0 (and stride=0) the descriptor is malformed so raw
+    // loads return 0 / stores are dropped, silently corrupting cross-step readback -- this was
+    // an actual bug (see docs/latrd_sync_paths_cache_and_sc1_analysis.md §5b: barrier failed
+    // --verify 1 with err ~0.9 until this was set correctly). 0x00027000 is the documented
+    // buffer-resource flag value from that guide (also used in softwareGridSync.hpp:60).
+    constexpr uint32_t RAW_BUF_WORD3 = 0x00027000;
+    auto A_buf = __builtin_amdgcn_make_buffer_rsrc(pA, 0, 0xffffffff, RAW_BUF_WORD3);
+    auto W_buf = __builtin_amdgcn_make_buffer_rsrc(pW, 0, 0xffffffff, RAW_BUF_WORD3);
+    auto tau_buf = __builtin_amdgcn_make_buffer_rsrc(tau, 0, 0xffffffff, RAW_BUF_WORD3);
+    auto z1_buf = __builtin_amdgcn_make_buffer_rsrc(z1, 0, 0xffffffff, RAW_BUF_WORD3);
+    auto z2_buf = __builtin_amdgcn_make_buffer_rsrc(z2, 0, 0xffffffff, RAW_BUF_WORD3);
 
-    // Raw buffer store/load helpers for T (float=b32, double=b64) with 0x10 sc1 flag.
-    // sc1 stores bypass the L2 write-back; sc1 loads bypass the L2 read cache.
-    // Using both on writer and reader sides ensures coherency without L2 flush/invalidate
-    // fences, making barrier() (execution-only sync) sufficient for cross-block coordination.
-    // sc1 raw store: bypasses L2 write-back (device-scope visible immediately).
-    // sc1 raw load:  bypasses L2 read cache (fetches from device memory directly).
-    // Pairing sc1 stores on writers with sc1 loads on readers avoids the need for
-    // L2 flush/invalidate fences, so barrier() suffices instead of sync().
+    // Raw buffer store/load helpers for T (float=b32, double=b64) with the 0x10 sc1 flag.
+    // sc1 = device/system coherence SCOPE (renamed 'scc' on CDNA3/4), NOT a cache bypass:
+    // stores are made visible at the device (L2) coherence point and loads observe that point,
+    // so a reader block sees a peer writer's value -- but the data still caches in L1/L2 as
+    // usual (verified via rocprof-compute + ISA: sc0/glc unset, so L1 is not bypassed).
+    // Pairing sc1 stores on writers with sc1 loads on readers gives cross-block visibility
+    // without L2 flush/invalidate fences, so barrier() suffices instead of sync().
     using u64_t = uint32_t __attribute__((ext_vector_type(2)));
     auto raw_store =
         [](T val, __amdgpu_buffer_rsrc_t buf, int byte_off) __attribute__((always_inline))
