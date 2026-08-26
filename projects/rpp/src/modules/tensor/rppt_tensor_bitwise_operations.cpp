@@ -65,11 +65,11 @@ RppStatus rppt_bitwise_and(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            hip_exec_bitwise_and_tensor(static_cast<Rpp8u*>(srcPtr1) + srcDescPtr->offsetInBytes,
-                                        static_cast<Rpp8u*>(srcPtr2) + srcDescPtr->offsetInBytes,
-                                        srcDescPtr,
-                                        static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes,
-                                        dstDescPtr, roiTensorPtrSrc, roiType, handle);
+            return hip_exec_bitwise_and_tensor(
+                static_cast<Rpp8u*>(srcPtr1) + srcDescPtr->offsetInBytes,
+                static_cast<Rpp8u*>(srcPtr2) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
+                roiTensorPtrSrc, roiType, handle);
         }
         return RPP_SUCCESS;
     }
@@ -110,11 +110,11 @@ RppStatus rppt_bitwise_xor(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            hip_exec_bitwise_xor_tensor(static_cast<Rpp8u*>(srcPtr1) + srcDescPtr->offsetInBytes,
-                                        static_cast<Rpp8u*>(srcPtr2) + srcDescPtr->offsetInBytes,
-                                        srcDescPtr,
-                                        static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes,
-                                        dstDescPtr, roiTensorPtrSrc, roiType, handle);
+            return hip_exec_bitwise_xor_tensor(
+                static_cast<Rpp8u*>(srcPtr1) + srcDescPtr->offsetInBytes,
+                static_cast<Rpp8u*>(srcPtr2) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
+                roiTensorPtrSrc, roiType, handle);
         }
         return RPP_SUCCESS;
     }
@@ -154,11 +154,11 @@ RppStatus rppt_bitwise_or(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDes
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            hip_exec_bitwise_or_tensor(static_cast<Rpp8u*>(srcPtr1) + srcDescPtr->offsetInBytes,
-                                       static_cast<Rpp8u*>(srcPtr2) + srcDescPtr->offsetInBytes,
-                                       srcDescPtr,
-                                       static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes,
-                                       dstDescPtr, roiTensorPtrSrc, roiType, handle);
+            return hip_exec_bitwise_or_tensor(
+                static_cast<Rpp8u*>(srcPtr1) + srcDescPtr->offsetInBytes,
+                static_cast<Rpp8u*>(srcPtr2) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
+                roiTensorPtrSrc, roiType, handle);
         }
         return RPP_SUCCESS;
     }
@@ -197,10 +197,10 @@ RppStatus rppt_bitwise_not(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            hip_exec_bitwise_not_tensor(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes,
-                                        srcDescPtr,
-                                        static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes,
-                                        dstDescPtr, roiTensorPtrSrc, roiType, handle);
+            return hip_exec_bitwise_not_tensor(
+                static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
+                roiTensorPtrSrc, roiType, handle);
         }
         return RPP_SUCCESS;
     }

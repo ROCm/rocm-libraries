@@ -116,9 +116,9 @@ RppStatus rppt_to_decibels(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
         if (tensorDims != 1 && tensorDims != 2) return RPP_ERROR_INVALID_SRC_DIMS;
 
         if (srcDescPtr->dataType == RpptDataType::F32) {
-            hip_exec_to_decibels_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                        static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDims, cutOffDB,
-                                        multiplier, referenceMagnitude, handle);
+            return hip_exec_to_decibels_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
+                                               static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDims,
+                                               cutOffDB, multiplier, referenceMagnitude, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -204,9 +204,9 @@ RppStatus rppt_down_mixing(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_down_mixing_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                        static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDimsTensor,
-                                        normalizeWeights, handle);
+            return hip_exec_down_mixing_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
+                                               static_cast<Rpp32f*>(dstPtr), dstDescPtr,
+                                               srcDimsTensor, normalizeWeights, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -260,10 +260,10 @@ RppStatus rppt_spectrogram(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_spectrogram_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                        static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcLengthTensor,
-                                        centerWindows, reflectPadding, windowFunction, nfft, power,
-                                        windowLength, windowStep, handle);
+            return hip_exec_spectrogram_tensor(
+                static_cast<Rpp32f*>(srcPtr), srcDescPtr, static_cast<Rpp32f*>(dstPtr), dstDescPtr,
+                srcLengthTensor, centerWindows, reflectPadding, windowFunction, nfft, power,
+                windowLength, windowStep, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -360,9 +360,9 @@ RppStatus rppt_resample(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
         if (tensorDims != 1 && tensorDims != 2) return RPP_ERROR_INVALID_SRC_DIMS;
 
         if (srcDescPtr->dataType == RpptDataType::F32) {
-            hip_exec_resample_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                     static_cast<Rpp32f*>(dstPtr), dstDescPtr, inRateTensor,
-                                     outRateTensor, srcDimsTensor, window, handle);
+            return hip_exec_resample_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
+                                            static_cast<Rpp32f*>(dstPtr), dstDescPtr, inRateTensor,
+                                            outRateTensor, srcDimsTensor, window, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -397,7 +397,7 @@ RppStatus rppt_audio_tensor_add_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptD
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_audio_tensor_add_tensor(
+            return hip_exec_audio_tensor_add_tensor(
                 static_cast<Rpp32f*>(srcPtr1), static_cast<Rpp32f*>(srcPtr2), srcDescPtr,
                 static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcLengthTensor, handle);
         } else {
@@ -434,9 +434,9 @@ RppStatus rppt_audio_tensor_mul_scalar(RppPtr_t srcPtr, Rpp32f scalarValue, Rppt
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_audio_tensor_mul_scalar(static_cast<Rpp32f*>(srcPtr), scalarValue, srcDescPtr,
-                                             static_cast<Rpp32f*>(dstPtr), dstDescPtr,
-                                             srcLengthTensor, handle);
+            return hip_exec_audio_tensor_mul_scalar(static_cast<Rpp32f*>(srcPtr), scalarValue,
+                                                    srcDescPtr, static_cast<Rpp32f*>(dstPtr),
+                                                    dstDescPtr, srcLengthTensor, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
 

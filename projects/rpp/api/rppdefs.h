@@ -82,6 +82,14 @@ typedef halfhpp Rpp16f;
         }                                                                                      \
     } while (0)
 
+/*! \brief If a nested RPP call fails, return its \ref RppStatus from the enclosing function. Use
+ * when forwarding the result of a hip_exec_* helper. \ingroup group_rppdefs */
+#define RPP_RETURN_IF_ERROR(expr)                           \
+    do {                                                    \
+        RppStatus _rpp_status = (expr);                     \
+        if (_rpp_status != RPP_SUCCESS) return _rpp_status; \
+    } while (0)
+
 /*! \brief Check last HIP error after kernel launch; return RPP_ERROR_HIP_LAUNCH on failure. Use
  * after hipLaunchKernelGGL. \ingroup group_rppdefs */
 #define HIP_CHECK_LAUNCH_RETURN()                                                              \

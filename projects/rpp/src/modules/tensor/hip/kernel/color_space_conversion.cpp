@@ -275,6 +275,7 @@ RppStatus hip_exec_yuv_to_rgb(T* srcYPtr, Rpp32u src_y_pitch, T* srcUVPtr, Rpp32
                        handle.GetStream(), (uint8_t*)srcYPtr, (int)src_y_pitch, (uint8_t*)srcUVPtr,
                        (int)src_uv_pitch, (uint8_t*)dstPtr, (int)dst_pitch, (int)width,
                        (int)height);
+    HIP_CHECK_LAUNCH_RETURN();
     return RPP_SUCCESS;
 }
 
@@ -297,6 +298,7 @@ RppStatus hip_exec_yuv_to_rgb_cubic_v(T* srcYPtr, Rpp32u src_y_pitch, T* srcUVPt
                        handle.GetStream(), (uint8_t*)srcYPtr, (int)src_y_pitch, (uint8_t*)srcUVPtr,
                        (int)src_uv_pitch, (uint8_t*)dstPtr, (int)dst_pitch, (int)width,
                        (int)height);
+    HIP_CHECK_LAUNCH_RETURN();
     return RPP_SUCCESS;
 }
 
@@ -320,6 +322,7 @@ RppStatus hip_exec_yuv_to_rgb_linear_v(T* srcYPtr, Rpp32u src_y_pitch, T* srcUVP
                        handle.GetStream(), (uint8_t*)srcYPtr, (int)src_y_pitch, (uint8_t*)srcUVPtr,
                        (int)src_uv_pitch, (uint8_t*)dstPtr, (int)dst_pitch, (int)width,
                        (int)height);
+    HIP_CHECK_LAUNCH_RETURN();
     return RPP_SUCCESS;
 }
 
