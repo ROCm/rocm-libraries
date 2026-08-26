@@ -920,12 +920,14 @@ void testing_matmul_with_bias(
         bool                  epilogueEnabled    = false;
         float                 activation0        = 0.0f;
         float                 activation1        = 0.0f;
+        hipblasLtMatrixLayout_t matrixA           = nullptr;
+        hipblasLtMatrixLayout_t matrixB           = nullptr;
+        hipblasLtMatrixLayout_t matrixC           = nullptr;
+        hipblasLtMatrixLayout_t matrixD           = nullptr;
     };
     std::vector<PreparedMatmulCase> preparedCases(problem_count);
     const auto& firstPreparedCase = preparedCases.front();
 
-    std::vector<hipblasLtMatrixLayout_t> matA(problem_count), matB(problem_count), matC(problem_count),
-        matD(problem_count);
     std::vector<std::vector<hipblasLtMatmulDesc_t>> matmul;
 
     std::vector<HipDeviceBuffer>  dA, dB, dC, dD, dE, dBias;
@@ -1190,22 +1192,22 @@ void testing_matmul_with_bias(
         const int64_t batchStrideC = testCase.c.batchStride();
         const int64_t batchStrideD = testCase.d.batchStride();
 
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(matA[i]),
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(preparedCase.matrixA),
                                                           arg.a_type,
                                                           testCase.a.rows(),
                                                           testCase.a.columns(),
                                                           testCase.a.leadingDimension()));
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(matB[i]),
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(preparedCase.matrixB),
                                                           arg.b_type,
                                                           testCase.b.rows(),
                                                           testCase.b.columns(),
                                                           testCase.b.leadingDimension()));
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(matC[i]),
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(preparedCase.matrixC),
                                                           arg.c_type,
                                                           testCase.m,
                                                           testCase.n,
                                                           testCase.c.leadingDimension()));
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(matD[i]),
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(preparedCase.matrixD),
                                                           arg.d_type,
                                                           testCase.m,
                                                           testCase.n,
@@ -1215,57 +1217,57 @@ void testing_matmul_with_bias(
         {
             hipblasLtOrder_t orderA = orderForDatatype(TiA);
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                matA[i], HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
+                preparedCase.matrixA, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
         }
 
         if(do_swizzle_b)
         {
             hipblasLtOrder_t orderB = orderForDatatype(TiB);
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                matB[i], HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderB, sizeof(orderB)));
+                preparedCase.matrixB, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderB, sizeof(orderB)));
         }
 
         if((testCase.batchCount > 1) || batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
         {
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matA[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
+                    preparedCase.matrixA, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matB[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
+                    preparedCase.matrixB, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matC[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
+                    preparedCase.matrixC, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matD[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
+                    preparedCase.matrixD, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
-                hipblasLtMatrixLayoutSetAttribute(matA[i],
+                hipblasLtMatrixLayoutSetAttribute(preparedCase.matrixA,
                                                   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                                   &(preparedCase.a.batchStride),
                                                   sizeof(int64_t)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
-                hipblasLtMatrixLayoutSetAttribute(matB[i],
+                hipblasLtMatrixLayoutSetAttribute(preparedCase.matrixB,
                                                   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                                   &(preparedCase.b.batchStride),
                                                   sizeof(int64_t)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
-                hipblasLtMatrixLayoutSetAttribute(matC[i],
+                hipblasLtMatrixLayoutSetAttribute(preparedCase.matrixC,
                                                   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                                   &batchStrideC,
                                                   sizeof(int64_t)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
-                hipblasLtMatrixLayoutSetAttribute(matD[i],
+                hipblasLtMatrixLayoutSetAttribute(preparedCase.matrixD,
                                                   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                                   &batchStrideD,
                                                   sizeof(int64_t)),
@@ -1276,21 +1278,21 @@ void testing_matmul_with_bias(
         {
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matA[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
+                    preparedCase.matrixA, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matB[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
+                    preparedCase.matrixB, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matC[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
+                    preparedCase.matrixC, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matD[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
+                    preparedCase.matrixD, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
         }
 
@@ -2942,26 +2944,38 @@ void testing_matmul_with_bias(
         {
             std::vector<void*> alphaPointers;
             std::vector<void*> betaPointers;
+            std::vector<hipblasLtMatrixLayout_t> matrixLayoutsA;
+            std::vector<hipblasLtMatrixLayout_t> matrixLayoutsB;
+            std::vector<hipblasLtMatrixLayout_t> matrixLayoutsC;
+            std::vector<hipblasLtMatrixLayout_t> matrixLayoutsD;
             alphaPointers.reserve(h_alpha.size());
             betaPointers.reserve(h_beta.size());
+            matrixLayoutsA.reserve(preparedCases.size());
+            matrixLayoutsB.reserve(preparedCases.size());
+            matrixLayoutsC.reserve(preparedCases.size());
+            matrixLayoutsD.reserve(preparedCases.size());
             for(size_t i = 0; i < h_alpha.size(); ++i)
             {
                 alphaPointers.push_back(&h_alpha[i]);
                 betaPointers.push_back(&h_beta[i]);
+                matrixLayoutsA.push_back(preparedCases[i].matrixA);
+                matrixLayoutsB.push_back(preparedCases[i].matrixB);
+                matrixLayoutsC.push_back(preparedCases[i].matrixC);
+                matrixLayoutsD.push_back(preparedCases[i].matrixD);
             }
             for(int32_t block = 0; block < block_count; ++block)
             {
                 CHECK_HIPBLASLT_ERROR(groupedGemmVec[block].setProblem(matmul[block],
                                                                        alphaPointers,
                                                                        da[block],
-                                                                       matA,
+                                                                       matrixLayoutsA,
                                                                        db[block],
-                                                                       matB,
+                                                                       matrixLayoutsB,
                                                                        betaPointers,
                                                                        dc[block],
-                                                                       matC,
+                                                                       matrixLayoutsC,
                                                                        dd[block],
-                                                                       matD));
+                                                                       matrixLayoutsD));
             }
         }
         extProblem = &groupedGemmVec.front();
@@ -2994,16 +3008,16 @@ void testing_matmul_with_bias(
                     matmul[block][0],
                     alpha_in[0],
                     dA[0].as<char>() + block * firstPreparedCase.a.elements * realDataTypeSize(TiA),
-                    matA[0],
+                    firstPreparedCase.matrixA,
                     dB[0].as<char>() + block * firstPreparedCase.b.elements * realDataTypeSize(TiB),
-                    matB[0],
+                    firstPreparedCase.matrixB,
                     &h_beta[0],
                     dC[0].as<char>()
                         + block * firstCase.c.allocationElements * realDataTypeSize(To),
-                    matC[0],
+                    firstPreparedCase.matrixC,
                     (*dDp)[0].as<char>()
                         + block * firstCase.d.allocationElements * realDataTypeSize(To),
-                    matD[0]));
+                    firstPreparedCase.matrixD));
             }
         }
         extProblem = &gemmVec.front();
@@ -3040,11 +3054,11 @@ void testing_matmul_with_bias(
                           = hipblaslt_ext::matmulIsAlgoSupported(handle,
                                                                  matmul[0][0],
                                                                  alpha_in[0],
-                                                                 matA[0],
-                                                                 matB[0],
+                                                                 firstPreparedCase.matrixA,
+                                                                 firstPreparedCase.matrixB,
                                                                  &h_beta[0],
-                                                                 matC[0],
-                                                                 matD[0],
+                                                                 firstPreparedCase.matrixC,
+                                                                 firstPreparedCase.matrixD,
                                                                  candidate.algo,
                                                                  requiredWorkspace);
                       if(supportStatus == HIPBLAS_STATUS_SUCCESS
@@ -3147,10 +3161,10 @@ void testing_matmul_with_bias(
             std::vector<hipblasLtMatmulHeuristicResult_t> candidates(requestAlgoCount);
             EXPECT_HIPBLAS_STATUS((hipblasLtMatmulAlgoGetHeuristic(handle,
                                                                    matmul[0][0],
-                                                                   matA[0],
-                                                                   matB[0],
-                                                                   matC[0],
-                                                                   matD[0],
+                                                                   firstPreparedCase.matrixA,
+                                                                   firstPreparedCase.matrixB,
+                                                                   firstPreparedCase.matrixC,
+                                                                   firstPreparedCase.matrixD,
                                                                    pref,
                                                                    requestAlgoCount,
                                                                    candidates.data(),
@@ -3783,14 +3797,14 @@ void testing_matmul_with_bias(
                                                           matmul[0][0],
                                                           alpha_in[0],
                                                           ptrA,
-                                                          matA[0],
+                                                          firstPreparedCase.matrixA,
                                                           ptrB,
-                                                          matB[0],
+                                                          firstPreparedCase.matrixB,
                                                           &(h_beta[0]),
                                                           ddc[0],
-                                                          matC[0],
+                                                          firstPreparedCase.matrixC,
                                                           ddd[0],
-                                                          matD[0],
+                                                          firstPreparedCase.matrixD,
                                                           &heuristicResult[sol].algo,
                                                           *dWorkspace,
                                                           workspace_size,
@@ -3804,14 +3818,14 @@ void testing_matmul_with_bias(
                                                           matmul[0][0],
                                                           alpha_ptr,
                                                           dA[0].buf(),
-                                                          matA[0],
+                                                          firstPreparedCase.matrixA,
                                                           dB[0].buf(),
-                                                          matB[0],
+                                                          firstPreparedCase.matrixB,
                                                           beta_ptr,
                                                           dC[0].buf(),
-                                                          matC[0],
+                                                          firstPreparedCase.matrixC,
                                                           (*dDp)[0].buf(),
-                                                          matD[0],
+                                                          firstPreparedCase.matrixD,
                                                           &heuristicResult[sol].algo,
                                                           *dWorkspace,
                                                           workspace_size,
@@ -4084,14 +4098,14 @@ void testing_matmul_with_bias(
                                                               ptr_matmul,
                                                               ptr_alpha,
                                                               ptrA,
-                                                              matA[0],
+                                                              firstPreparedCase.matrixA,
                                                               ptrB,
-                                                              matB[0],
+                                                              firstPreparedCase.matrixB,
                                                               &(h_beta[0]),
                                                               ddc[i % block_count],
-                                                              matC[0],
+                                                              firstPreparedCase.matrixC,
                                                               ddd[i % block_count],
-                                                              matD[0],
+                                                              firstPreparedCase.matrixD,
                                                               &heuristicResult[sol].algo,
                                                               *dWorkspace,
                                                               workspace_size,
@@ -4135,14 +4149,14 @@ void testing_matmul_with_bias(
                                                                   ptr_matmul,
                                                                   ptr_alpha,
                                                                   ptrA,
-                                                                  matA[0],
+                                                                  firstPreparedCase.matrixA,
                                                                   ptrB,
-                                                                  matB[0],
+                                                                  firstPreparedCase.matrixB,
                                                                   &(h_beta[0]),
                                                                   ddc[b],
-                                                                  matC[0],
+                                                                  firstPreparedCase.matrixC,
                                                                   ddd[b],
-                                                                  matD[0],
+                                                                  firstPreparedCase.matrixD,
                                                                   &heuristicResult[sol].algo,
                                                                   *dWorkspace,
                                                                   workspace_size,
@@ -4179,19 +4193,19 @@ void testing_matmul_with_bias(
                                 alpha_ptr,
                                 dA[0].as<char>()
                                     + (i % block_count) * firstPreparedCase.a.elements * realDataTypeSize(TiA),
-                                matA[0],
+                                firstPreparedCase.matrixA,
                                 dB[0].as<char>()
                                     + (i % block_count) * firstPreparedCase.b.elements * realDataTypeSize(TiB),
-                                matB[0],
+                                firstPreparedCase.matrixB,
                                 beta_ptr,
                                 dC[0].as<char>()
                                     + (i % block_count) * firstCase.c.allocationElements
                                           * realDataTypeSize(To),
-                                matC[0],
+                                firstPreparedCase.matrixC,
                                 (*dDp)[0].as<char>()
                                     + (i % block_count) * firstCase.d.allocationElements
                                           * realDataTypeSize(To),
-                                matD[0],
+                                firstPreparedCase.matrixD,
                                 &heuristicResult[sol].algo,
                                 *dWorkspace,
                                 workspace_size,
@@ -4235,18 +4249,18 @@ void testing_matmul_with_bias(
                                     ptr_matmul,
                                     alpha_ptr,
                                     dA[0].as<char>() + b * firstPreparedCase.a.elements * realDataTypeSize(TiA),
-                                    matA[0],
+                                    firstPreparedCase.matrixA,
                                     dB[0].as<char>() + b * firstPreparedCase.b.elements * realDataTypeSize(TiB),
-                                    matB[0],
+                                    firstPreparedCase.matrixB,
                                     beta_ptr,
                                     dC[0].as<char>()
                                         + b * firstCase.c.allocationElements
                                               * realDataTypeSize(To),
-                                    matC[0],
+                                    firstPreparedCase.matrixC,
                                     (*dDp)[0].as<char>()
                                         + b * firstCase.d.allocationElements
                                               * realDataTypeSize(To),
-                                    matD[0],
+                                    firstPreparedCase.matrixD,
                                     &heuristicResult[sol].algo,
                                     *dWorkspace,
                                     workspace_size,
@@ -4620,18 +4634,17 @@ void testing_matmul_with_bias(
         CHECK_HIP_ERROR(hipFree(d_userArgs));
 
     // Explicitly destroy opaque handles to avoid leaks.
-    for(auto& h : matA)
-        if(h)
-            (void)hipblasLtMatrixLayoutDestroy(h);
-    for(auto& h : matB)
-        if(h)
-            (void)hipblasLtMatrixLayoutDestroy(h);
-    for(auto& h : matC)
-        if(h)
-            (void)hipblasLtMatrixLayoutDestroy(h);
-    for(auto& h : matD)
-        if(h)
-            (void)hipblasLtMatrixLayoutDestroy(h);
+    for(auto& preparedCase : preparedCases)
+    {
+        for(auto layout : {preparedCase.matrixA,
+                           preparedCase.matrixB,
+                           preparedCase.matrixC,
+                           preparedCase.matrixD})
+        {
+            if(layout)
+                (void)hipblasLtMatrixLayoutDestroy(layout);
+        }
+    }
 
     for(auto& block : matmul)
         for(auto& h : block)
