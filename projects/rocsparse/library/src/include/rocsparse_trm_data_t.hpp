@@ -81,6 +81,9 @@ namespace rocsparse
 
         rocsparse::trm_info_t* get(rocsparse_operation operation, rocsparse_fill_mode fill_mode);
 
+        const rocsparse::trm_info_t* get(rocsparse_operation operation,
+                                         rocsparse_fill_mode fill_mode) const;
+
         void set(rocsparse_operation    operation,
                  rocsparse_fill_mode    fill_mode,
                  rocsparse::trm_info_t* trm_info);
