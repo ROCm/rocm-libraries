@@ -70,7 +70,7 @@ int dispatcher_run_abquant_gemm(const void* A,
                          {M, N, K, QK_A, QK_B, QN_B},
                          /*allow_gfx90a=*/false,
                          /*check_arch=*/false))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // ABQuant never needs permute_i4_inplace on B, unlike gemm_bquant which
     // applies it for pk_int4_t B. ABQUANT_VARIANTS admits only fp8/bf8/fp4 --
@@ -89,17 +89,20 @@ int dispatcher_run_abquant_gemm(const void* A,
         std::cerr << kFn
                   << ": Preshuffling weight matrix is not supported for bf16_fp4_gemm "
                      "(matches Old-TE reject)\n";
-        return -3;
+        return QUANT_BRIDGE_UNSUPPORTED_COMBINATION;
     }
 
     if(!validate_supported_arch(kFn))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // Validate QK_A/QK_B/QN_B against the compile-time quant group sizes.
     if(!check_quant_group_count(kFn, "QK_A", QK_A, "K", K, AQuantGroupSize::kK) ||
        !check_quant_group_count(kFn, "QK_B", QK_B, "K", K, BQuantGroupSize::kK) ||
        !check_quant_group_count(kFn, "QN_B", QN_B, "N", N, BQuantGroupSize::kN))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
+
+    if(!check_stride_range(kFn, {stride_A, stride_AQ, stride_B, stride_BQ, stride_C}))
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // Only packed layouts are supported. AQ leading dim depends on AQLayout: the
     // n=128 EightWaves fast path uses ColumnMajor [M, QK_A] -> M; otherwise
@@ -113,7 +116,7 @@ int dispatcher_run_abquant_gemm(const void* A,
                   << " stride_BQ=" << QK_B << " stride_C=" << N << ", got stride_A=" << stride_A
                   << " stride_B=" << stride_B << " stride_AQ=" << stride_AQ
                   << " stride_BQ=" << stride_BQ << " stride_C=" << stride_C << "\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     const BDataType* B_host  = static_cast<const BDataType*>(B);

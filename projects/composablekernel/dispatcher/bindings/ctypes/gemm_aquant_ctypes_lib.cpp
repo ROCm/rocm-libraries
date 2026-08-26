@@ -65,11 +65,14 @@ int dispatcher_run_aquant_gemm(const void* A,
                          {A, AQ, B, C},
                          {M, N, K, QK_A},
                          /*allow_gfx90a=*/true))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // Validate QK_A against the compile-time quant group size baked into this .so.
     if(!check_quant_group_count(kFn, "QK_A", QK_A, "K", K, QuantGroupSize::kK))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
+
+    if(!check_stride_range(kFn, {stride_A, stride_AQ, stride_B, stride_C}))
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // Only packed layouts are supported; expected leading dims depend on the
     // compile-time A/B/AQ layouts. AQLayout is always RowMajor (matches Old-TE), so
@@ -90,7 +93,7 @@ int dispatcher_run_aquant_gemm(const void* A,
                       << " stride_B=" << exp_stride_B << " stride_C=" << exp_stride_C
                       << ", got stride_A=" << stride_A << " stride_AQ=" << stride_AQ
                       << " stride_B=" << stride_B << " stride_C=" << stride_C << "\n";
-            return -1;
+            return QUANT_BRIDGE_INVALID_ARG;
         }
     }
 

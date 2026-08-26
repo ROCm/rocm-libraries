@@ -86,38 +86,46 @@ int dispatcher_run_grouped_bquant_gemm(const void* A,
     if(!bridge_initialized())
     {
         std::cerr << kFn << ": not initialized\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
     if(!A || !B || !BQ || !C)
     {
         std::cerr << kFn << ": null pointer argument\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
     if(M <= 0 || N <= 0 || K <= 0 || QK_B <= 0 || QN_B <= 0)
     {
         std::cerr << kFn << ": invalid dimensions\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
     // Derive the GPU architecture from the running device (do not assume one at
     // compile time) and reject unsupported archs, per review feedback.
     if(!validate_supported_arch(kFn, /*allow_gfx90a=*/true))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
 
-    // Hard reject rather than a silent wrong answer. The default configs for this
-    // op ship preshuffle_b=True, but a PreshuffleB kernel reads B in the
-    // interleaved weight-preshuffle layout, and this bridge has no way to produce
-    // it: unlike the non-grouped bquant header, the grouped generated header
-    // exports neither BShuffleConfig nor TiledMMAPermuteN, which
-    // ck_tile::shuffle_b / shuffle_b_permuteN both require. Feeding raw B to such
-    // a kernel returns a wrong C with no error. Producing the shuffled B here
-    // needs those symbols emitted by the grouped codegen first.
+    // Backstop, not the primary refusal. A PreshuffleB kernel reads B in the
+    // interleaved weight-preshuffle layout and this bridge cannot produce it:
+    // unlike the non-grouped bquant header, the grouped generated header exports
+    // neither BShuffleConfig nor TiledMMAPermuteN, which ck_tile::shuffle_b /
+    // shuffle_b_permuteN both require. Feeding raw B to such a kernel returns a
+    // wrong C with no error.
+    //
+    // On gfx950 today this branch is unreachable: the op pins BQLayout=RowMajor
+    // while every preshuffle pipeline static_asserts ColumnMajor BQ
+    // (gemm_wp_bquant_pipeline_ag_bg_cr_v2.hpp:215,
+    // gemm_quant_kernel.hpp:921/943), so a preshuffle_b=true config fails to
+    // compile before this translation unit is ever reached. The reachable
+    // refusal has to live where the config is constructed. This stays as the
+    // guard for the day the header does compile -- flipping the BQLayout pin
+    // without also emitting BShuffleConfig would otherwise land silently wrong
+    // results.
     if constexpr(SelectedKernel::PreshuffleB)
     {
         std::cerr << kFn
                   << ": PreshuffleB kernels are not supported by this bridge -- the generated "
                      "grouped header exports no BShuffleConfig, so B cannot be shuffled into "
                      "the layout the kernel reads\n";
-        return -3;
+        return QUANT_BRIDGE_UNSUPPORTED_COMBINATION;
     }
 
     // Validate that the caller's QK_B/QN_B match the compile-time quant group sizes
@@ -135,9 +143,12 @@ int dispatcher_run_grouped_bquant_gemm(const void* A,
                       << expected_QN_B << ") " << "for K=" << K << " N=" << N
                       << " with QuantGroupSize kK=" << QuantGroupSize::kK
                       << " kN=" << QuantGroupSize::kN << "\n";
-            return -1;
+            return QUANT_BRIDGE_INVALID_ARG;
         }
     }
+
+    if(!check_stride_range(kFn, {stride_A, stride_B, stride_BQ, stride_C}))
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // This implementation only supports packed (contiguous) layouts.
     // Device buffers are allocated and copied as M*K, K*N, QK_B*QN_B, M*N packed arrays.
@@ -149,7 +160,7 @@ int dispatcher_run_grouped_bquant_gemm(const void* A,
                   << "Expected stride_A=" << K << " stride_B=" << K << " stride_BQ=" << QN_B
                   << " stride_C=" << N << ", got stride_A=" << stride_A << " stride_B=" << stride_B
                   << " stride_BQ=" << stride_BQ << " stride_C=" << stride_C << "\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     const BDataType* B_host  = static_cast<const BDataType*>(B);

@@ -36,6 +36,43 @@
 
 namespace quant_bridge {
 
+// TiledMMAPermuteN has two consumers that must agree: the host reshuffle below
+// (shuffle_b_permuteN + bq_permuteN instead of shuffle_b) and the kernel's
+// epilogue (PermuteNEpilogue instead of CShuffleEpilogue). They are decided by
+// two different pieces of codegen, so nothing structurally stops them from
+// disagreeing -- and when they do, B is permuted for an epilogue that does not
+// un-permute it and the answer is silently wrong.
+//
+// If the generated header exports the epilogue choice as
+// `static constexpr bool PermuteNEpilogue`, cross-check it here at compile
+// time. The detector keeps this a no-op on headers that do not export it yet
+// (see the contract in the round-4 report) rather than forcing a lockstep
+// codegen change.
+template <typename KernelT, typename = void>
+struct exports_permute_n_epilogue : std::false_type
+{
+};
+
+template <typename KernelT>
+struct exports_permute_n_epilogue<KernelT, std::void_t<decltype(KernelT::PermuteNEpilogue)>>
+    : std::true_type
+{
+};
+
+template <typename KernelT, ck_tile::index_t GroupN>
+inline constexpr void assert_permute_n_consistent()
+{
+    if constexpr(exports_permute_n_epilogue<KernelT>::value)
+    {
+        constexpr bool host_permutes =
+            KernelT::PreshuffleB && KernelT::TiledMMAPermuteN && (GroupN == 1);
+        static_assert(host_permutes == KernelT::PermuteNEpilogue,
+                      "TiledMMAPermuteN disagrees with the compiled epilogue: the host would "
+                      "reshuffle B/BQ for a PermuteN epilogue the kernel does not have (or vice "
+                      "versa), which returns a silently wrong C");
+    }
+}
+
 // Load `rows`x`cols` logical elements from a packed host pointer into a
 // HostTensor with leading dim `lead`. RowMajor is a compile-time flag because
 // ck_tile::host_tensor_descriptor is overloaded on bool_constant<> layout.
@@ -113,6 +150,7 @@ inline hipError_t prepare_aq_device(const QT* AQ_host, void* AQ_dev, int64_t M, 
 template <typename KernelT, ck_tile::index_t GroupK, ck_tile::index_t GroupN, typename QT>
 inline hipError_t prepare_bq_device(const QT* BQ_host, void* BQ_dev, int64_t QK_B, int64_t QN_B)
 {
+    assert_permute_n_consistent<KernelT, GroupN>();
     constexpr bool use_permute_n =
         KernelT::PreshuffleB && KernelT::TiledMMAPermuteN && (GroupN == 1);
     const std::size_t bq_bytes = elements_to_bytes<QT>(QK_B * QN_B);

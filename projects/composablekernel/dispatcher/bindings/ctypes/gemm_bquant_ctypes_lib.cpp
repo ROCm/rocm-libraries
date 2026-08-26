@@ -72,8 +72,8 @@ int dispatcher_run_bquant_gemm(const void* A,
     (void)QN_B;
     (void)k_batch;
     (void)time_ms;
-    std::cerr << "dispatcher_run_bquant_gemm: library built without a kernel; unsupported\n";
-    return -2;
+    std::cerr << "dispatcher_run_bquant_gemm: library built without a kernel\n";
+    return QUANT_BRIDGE_NO_KERNEL;
 #else
     using namespace quant_bridge;
     const char* kFn = "dispatcher_run_bquant_gemm";
@@ -83,12 +83,15 @@ int dispatcher_run_bquant_gemm(const void* A,
                          {A, B, BQ, C},
                          {M, N, K, QK_B, QN_B},
                          /*allow_gfx90a=*/true))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // Validate QK_B/QN_B against the compile-time quant group sizes baked into this .so.
     if(!check_quant_group_count(kFn, "QK_B", QK_B, "K", K, QuantGroupSize::kK) ||
        !check_quant_group_count(kFn, "QN_B", QN_B, "N", N, QuantGroupSize::kN))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
+
+    if(!check_stride_range(kFn, {stride_A, stride_B, stride_BQ, stride_C}))
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // Only packed layouts are supported. BQ is ColumnMajor [QK_B, QN_B] (leading
     // dim QK_B), matching Old-TE's rcr path and the WPQuantB pipeline.
@@ -98,7 +101,7 @@ int dispatcher_run_bquant_gemm(const void* A,
                   << " stride_B=" << K << " stride_BQ=" << QK_B << " stride_C=" << N
                   << ", got stride_A=" << stride_A << " stride_B=" << stride_B
                   << " stride_BQ=" << stride_BQ << " stride_C=" << stride_C << "\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     const BDataType* B_host  = static_cast<const BDataType*>(B);

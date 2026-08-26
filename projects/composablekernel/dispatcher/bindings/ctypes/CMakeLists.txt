@@ -124,17 +124,17 @@ endfunction()
 # =============================================================================
 
 # Find a generated GEMM kernel header for the library.
-# NOTE: this glob also matches the block-scale quant kernel headers
-# (gemm_tensor_quant_*, gemm_rowcolquant_*, gemm_aquant_*, gemm_abquant_*,
-# gemm_bquant_*), which define a QuantGemm SelectedKernel with an API that is
-# incompatible with the regular GEMM ctypes lib. Because list(GET .. 0) takes the
-# first entry and "gemm_abquant_*" sorts ahead of the regular "gemm_<variant>_*"
-# names, an unfiltered glob would force-include a QuantGemm kernel into
-# dispatcher_gemm_lib / gpu_helper and fail the build. Exclude the quant families.
+# The glob "gemm_*.hpp" also matches every block-scale quant family, which
+# defines a QuantGemm SelectedKernel whose API is incompatible with the regular
+# GEMM ctypes lib; force-including one into dispatcher_gemm_lib / gpu_helper
+# fails the build. Filter with an ALLOW regex on the regular GEMM name shape
+# (gemm_<dtype>_<layout>_...) rather than a deny-list of quant family names: a
+# deny-list silently admits the next quant family somebody adds.
 file(GLOB GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_*.hpp")
-list(FILTER GEMM_KERNEL_HEADERS EXCLUDE REGEX
-     "/gemm_(tensor_quant|rowcolquant|aquant|abquant|bquant)_")
+list(FILTER GEMM_KERNEL_HEADERS INCLUDE REGEX
+     "/gemm_(fp16|bf16|fp32|fp8|bf8|int8)_[rc][rc][rc]_")
 if(GEMM_KERNEL_HEADERS)
+    list(SORT GEMM_KERNEL_HEADERS)
     list(GET GEMM_KERNEL_HEADERS 0 GEMM_KERNEL_HEADER)
     message(STATUS "Found GEMM kernel for ctypes lib: ${GEMM_KERNEL_HEADER}")
     
@@ -251,12 +251,14 @@ set_target_properties(dispatcher_conv_lib PROPERTIES
 
 # Add forward kernel if available
 if(CONV_FWD_KERNEL_HEADERS)
+    list(SORT CONV_FWD_KERNEL_HEADERS)
     list(GET CONV_FWD_KERNEL_HEADERS 0 CONV_FWD_KERNEL_HEADER)
     message(STATUS "Found Conv FWD kernel for ctypes lib: ${CONV_FWD_KERNEL_HEADER}")
     target_compile_options(dispatcher_conv_lib PRIVATE -include ${CONV_FWD_KERNEL_HEADER})
     target_compile_definitions(dispatcher_conv_lib PRIVATE CONV_KERNEL_AVAILABLE)
 elseif(CONV_KERNEL_HEADERS)
     # Fallback to any conv kernel
+    list(SORT CONV_KERNEL_HEADERS)
     list(GET CONV_KERNEL_HEADERS 0 CONV_KERNEL_HEADER)
     message(STATUS "Found Conv kernel for ctypes lib: ${CONV_KERNEL_HEADER}")
     target_compile_options(dispatcher_conv_lib PRIVATE -include ${CONV_KERNEL_HEADER})
@@ -267,6 +269,7 @@ endif()
 
 # Add backward data kernel if available
 if(CONV_BWDD_KERNEL_HEADERS)
+    list(SORT CONV_BWDD_KERNEL_HEADERS)
     list(GET CONV_BWDD_KERNEL_HEADERS 0 CONV_BWDD_KERNEL_HEADER)
     message(STATUS "Found Conv BWD_DATA kernel for ctypes lib: ${CONV_BWD_DATA_KERNEL_HEADER}")
     target_compile_options(dispatcher_conv_lib PRIVATE -include ${CONV_BWDD_KERNEL_HEADER})
@@ -279,6 +282,7 @@ endif()
 
 file(GLOB CONV_BWDW_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/conv_*bwd_weight*.hpp")
 if(CONV_BWDW_KERNEL_HEADERS)
+    list(SORT CONV_BWDW_KERNEL_HEADERS)
     list(GET CONV_BWDW_KERNEL_HEADERS 0 CONV_BWDW_KERNEL_HEADER)
     message(STATUS "Found Conv BwdWeight kernel for ctypes lib: ${CONV_BWDW_KERNEL_HEADER}")
     
@@ -574,8 +578,9 @@ endif()
 # Gemm ABQuant (A+B block-scale) ctypes Library
 # =============================================================================
 # MAIN_INCLUDE_ONLY: same rationale as AQuant above (QuantGemmHostArgs collision).
-# CK_TILE_GEMM_ABQUANT_GFX_ARCH is distinct from grouped CK_TILE_ABQUANT_GFX_ARCH
-# (D1 fix). ABQuant supports gfx942/gfx950; default gfx950 (prefill tile).
+# CK_TILE_GEMM_ABQUANT_GFX_ARCH is distinct from the grouped target's
+# CK_TILE_ABQUANT_GFX_ARCH. There is no default arch: an unresolved arch is a
+# configure-time error (see add_quant_ctypes_target).
 
 add_quant_ctypes_target(
     TARGET      dispatcher_gemm_abquant_lib

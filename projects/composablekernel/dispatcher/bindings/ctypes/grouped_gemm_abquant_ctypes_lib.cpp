@@ -101,22 +101,22 @@ int dispatcher_run_grouped_abquant_gemm(const void* A,
     if(!bridge_initialized())
     {
         std::cerr << kFn << ": not initialized\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
     if(!A || !B || !AQ || !BQ || !C)
     {
         std::cerr << kFn << ": null pointer argument\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
     if(M <= 0 || N <= 0 || K <= 0 || QK_A <= 0 || QM_A <= 0 || QK_B <= 0 || QN_B <= 0)
     {
         std::cerr << kFn << ": invalid dimensions\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
     // Derive the GPU architecture from the running device (do not assume one at
     // compile time) and reject unsupported archs.
     if(!validate_supported_arch(kFn, /*allow_gfx90a=*/true))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // Validate AQ dimensions
     {
@@ -128,7 +128,7 @@ int dispatcher_run_grouped_abquant_gemm(const void* A,
         {
             std::cerr << kFn << ": QK_A/QM_A mismatch. " << "Got (" << QK_A << ", " << QM_A << "), "
                       << "expected (" << exp_QK_A << ", " << exp_QM_A << ")\n";
-            return -1;
+            return QUANT_BRIDGE_INVALID_ARG;
         }
     }
 
@@ -142,9 +142,12 @@ int dispatcher_run_grouped_abquant_gemm(const void* A,
         {
             std::cerr << kFn << ": QK_B/QN_B mismatch. " << "Got (" << QK_B << ", " << QN_B << "), "
                       << "expected (" << exp_QK_B << ", " << exp_QN_B << ")\n";
-            return -1;
+            return QUANT_BRIDGE_INVALID_ARG;
         }
     }
+
+    if(!check_stride_range(kFn, {stride_A, stride_AQ, stride_B, stride_BQ, stride_C}))
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // Only packed (contiguous) layouts are supported.
     // AQ is RowMajor [QM_A, QK_A]: stride_AQ == QK_A
@@ -154,7 +157,7 @@ int dispatcher_run_grouped_abquant_gemm(const void* A,
         std::cerr << kFn << ": non-packed strides not supported. " << "Expected stride_A=" << K
                   << " stride_B=" << K << " stride_AQ=" << QK_A << " stride_BQ=" << QK_B
                   << " stride_C=" << N << "\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     const QDataType* AQ_host = static_cast<const QDataType*>(AQ);

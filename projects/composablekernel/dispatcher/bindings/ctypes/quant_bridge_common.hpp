@@ -34,11 +34,18 @@
  * ck_tile (numeric_traits, stream_config, QuantGemmHostArgs, index_t) and the
  * KERNEL_NAME macro.
  *
- * Return-code convention, uniform across all bridges:
+ * Return-code convention, uniform across all bridges. Every code has exactly one
+ * meaning; dispatcher_status_string() maps a code to its text at runtime, so a
+ * caller never has to hard-code this table.
+ *
  *   0   success
  *  -1   bad arguments, failed validation, or a HIP error
- *  -2   the kernel reported unsupported arguments
- *  -3   the combination is rejected up front, or the launch threw
+ *  -2   the kernel reported unsupported arguments (IsSupportedArgument false)
+ *  -3   the request is structurally incompatible with the compiled kernel and is
+ *       refused before any device work
+ *  -4   the requested measurement mode is unavailable on this kernel
+ *  -5   the kernel launch threw
+ *  -6   this .so was built without a kernel (the CMake no-kernel fallback)
  */
 
 #ifndef CK_TILE_DISPATCHER_QUANT_BRIDGE_COMMON_HPP
@@ -65,9 +72,10 @@
 #define GFX_ARCH "unknown"
 #endif
 
-// On a HIP error, print the failing op name + file/line and return -1. RAII
-// DeviceBuffers free themselves on the return, so no cleanup call is needed.
-// Defined before the namespace because the helpers below use it too.
+// On a HIP error, print the failing op name + file/line and return
+// QUANT_BRIDGE_INVALID_ARG. RAII DeviceBuffers free themselves on the return, so
+// no cleanup call is needed. Defined before the namespace because the helpers
+// below use it too.
 #define BRIDGE_HIP_CHECK(fn, call)                                                                \
     do                                                                                            \
     {                                                                                             \
@@ -76,7 +84,7 @@
         {                                                                                         \
             std::cerr << (fn) << ": HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ \
                       << ":" << __LINE__ << "\n";                                                 \
-            return -1;                                                                            \
+            return QUANT_BRIDGE_INVALID_ARG;                                                      \
         }                                                                                         \
     } while(0)
 
@@ -88,6 +96,32 @@
 #define QUANT_BRIDGE_KERNEL_NAME() ""
 #endif
 
+// Status codes. One meaning each; see the header comment. The names are what the
+// sources use so that a code and its meaning cannot drift apart.
+#define QUANT_BRIDGE_OK 0
+#define QUANT_BRIDGE_INVALID_ARG (-1)
+#define QUANT_BRIDGE_KERNEL_UNSUPPORTED_ARGS (-2)
+#define QUANT_BRIDGE_UNSUPPORTED_COMBINATION (-3)
+#define QUANT_BRIDGE_TIMING_UNAVAILABLE (-4)
+#define QUANT_BRIDGE_LAUNCH_THREW (-5)
+#define QUANT_BRIDGE_NO_KERNEL (-6)
+
+// Timing capability bits reported by dispatcher_timing_capabilities().
+#define QUANT_BRIDGE_TIMING_COLD_NITERS 0x1
+#define QUANT_BRIDGE_TIMING_NREPEAT 0x2
+#define QUANT_BRIDGE_TIMING_FLUSH_CACHE 0x4
+#define QUANT_BRIDGE_TIMING_ROTATING_COUNT 0x8
+#define QUANT_BRIDGE_TIMING_PREPROCESS_HOOK 0x10
+
+// The capability mask this .so reports. With a kernel force-included it is
+// derived from the kernel's own launch() overload set; without one there is
+// nothing to time.
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+#define QUANT_BRIDGE_TIMING_CAPS() quant_bridge::timing_capabilities<SelectedKernel>()
+#else
+#define QUANT_BRIDGE_TIMING_CAPS() 0
+#endif
+
 // Emit the C API boilerplate shared by every bridge. Invoke once at the top of
 // each op's `extern "C"` block (it declares the file-local reference count that
 // bridge_initialized() reads and the op's run() guard checks).
@@ -97,32 +131,56 @@
 // invalidating the others. Loads/stores are atomic with acquire/release
 // ordering; the entry points themselves are still intended for single-threaded
 // use (the Python ctypes harness) and are not otherwise synchronized.
-#define QUANT_BRIDGE_C_API()                                                                       \
-    static std::atomic<int> g_ref_count{0};                                                        \
-    static bool bridge_initialized() { return g_ref_count.load(std::memory_order_acquire) > 0; }   \
-    int dispatcher_initialize()                                                                    \
-    {                                                                                              \
-        g_ref_count.fetch_add(1, std::memory_order_release);                                       \
-        return 0;                                                                                  \
-    }                                                                                              \
-    const char* dispatcher_get_kernel_name() { return QUANT_BRIDGE_KERNEL_NAME(); }                \
-    int dispatcher_init() { return dispatcher_initialize(); }                                      \
-    int dispatcher_get_kernel_count() { return 1; }                                                \
-    int dispatcher_set_timing_config(                                                              \
-        int flush_cache, int rotating_count, int cold_niters, int nrepeat)                         \
-    {                                                                                              \
-        return quant_bridge::set_timing_config(flush_cache, rotating_count, cold_niters, nrepeat); \
-    }                                                                                              \
-    void dispatcher_cleanup()                                                                      \
-    {                                                                                              \
-        int prev = g_ref_count.load(std::memory_order_relaxed);                                    \
-        while(prev > 0 &&                                                                          \
-              !g_ref_count.compare_exchange_weak(                                                  \
-                  prev, prev - 1, std::memory_order_release, std::memory_order_relaxed))           \
-            ;                                                                                      \
+#define QUANT_BRIDGE_C_API()                                                                     \
+    static std::atomic<int> g_ref_count{0};                                                      \
+    static bool bridge_initialized() { return g_ref_count.load(std::memory_order_acquire) > 0; } \
+    int dispatcher_initialize()                                                                  \
+    {                                                                                            \
+        g_ref_count.fetch_add(1, std::memory_order_release);                                     \
+        return 0;                                                                                \
+    }                                                                                            \
+    const char* dispatcher_get_kernel_name() { return QUANT_BRIDGE_KERNEL_NAME(); }              \
+    int dispatcher_init() { return dispatcher_initialize(); }                                    \
+    int dispatcher_get_kernel_count() { return 1; }                                              \
+    const char* dispatcher_status_string(int code) { return quant_bridge::status_string(code); } \
+    int dispatcher_timing_capabilities() { return QUANT_BRIDGE_TIMING_CAPS(); }                  \
+    int dispatcher_set_timing_config(                                                            \
+        int flush_cache, int rotating_count, int cold_niters, int nrepeat)                       \
+    {                                                                                            \
+        return quant_bridge::set_timing_config(                                                  \
+            QUANT_BRIDGE_TIMING_CAPS(), flush_cache, rotating_count, cold_niters, nrepeat);      \
+    }                                                                                            \
+    void dispatcher_cleanup()                                                                    \
+    {                                                                                            \
+        int prev = g_ref_count.load(std::memory_order_relaxed);                                  \
+        while(prev > 0 &&                                                                        \
+              !g_ref_count.compare_exchange_weak(                                                \
+                  prev, prev - 1, std::memory_order_release, std::memory_order_relaxed))         \
+            ;                                                                                    \
     }
 
 namespace quant_bridge {
+
+// The single source of truth for what a status code means. Exported through
+// every bridge as dispatcher_status_string() so a Python caller can turn a code
+// into a reason without a second copy of this table.
+inline const char* status_string(int code)
+{
+    switch(code)
+    {
+    case QUANT_BRIDGE_OK: return "success";
+    case QUANT_BRIDGE_INVALID_ARG: return "invalid argument, failed validation, or a HIP error";
+    case QUANT_BRIDGE_KERNEL_UNSUPPORTED_ARGS: return "the kernel reported unsupported arguments";
+    case QUANT_BRIDGE_UNSUPPORTED_COMBINATION:
+        return "the request is structurally incompatible with the compiled kernel and was refused "
+               "before any device work";
+    case QUANT_BRIDGE_TIMING_UNAVAILABLE:
+        return "the requested measurement mode is unavailable on this kernel";
+    case QUANT_BRIDGE_LAUNCH_THREW: return "the kernel launch threw";
+    case QUANT_BRIDGE_NO_KERNEL: return "this library was built without a kernel";
+    default: return "unknown status code";
+    }
+}
 
 #ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
 // Compute the byte count for N logical elements of type T.
@@ -248,33 +306,48 @@ inline timing_config& mutable_timing_config()
 }
 
 // Backing implementation of the exported dispatcher_set_timing_config(). A
-// negative argument leaves that field unchanged.
+// negative argument leaves that field unchanged. `caps` is the mask this .so
+// reports from dispatcher_timing_capabilities(); a knob whose bit is clear is
+// refused rather than silently ignored.
 //
-// flush_cache and rotating_count are REFUSED rather than stored. The generated
+// flush_cache and rotating_count have no bit today. The generated
 // SelectedKernel::launch() calls ck_tile::launch_kernel(), which ignores
 // stream_config::flush_cache_ and rotating_count_ entirely -- Old-TE implements
 // the rotating-buffer flush in its own invoker (run_gemm_quant_example.inc), not
 // in launch_kernel. Accepting them would make the bridge report a cache-flushed
-// measurement it never performed, which is worse than refusing to match the
-// baseline. Enabling them needs a flush-cache launch overload in the generated
-// header first; the refusal is the signal that it is missing.
-inline int set_timing_config(int flush_cache, int rotating_count, int cold_niters, int nrepeat)
+// measurement it never performed. Callers should query the capabilities first
+// rather than discovering this from a failed setter.
+inline int
+set_timing_config(int caps, int flush_cache, int rotating_count, int cold_niters, int nrepeat)
 {
     timing_config& cfg = mutable_timing_config();
-    if(flush_cache > 0 || rotating_count > 1)
+    if(flush_cache > 0 && !(caps & QUANT_BRIDGE_TIMING_FLUSH_CACHE))
     {
-        std::cerr << "dispatcher_set_timing_config: flush_cache / rotating_count are not "
-                     "supported by this bridge. The generated kernel launch uses "
-                     "ck_tile::launch_kernel, which ignores stream_config::flush_cache_ and "
-                     "rotating_count_; enabling them requires a flush-cache launch overload in "
-                     "the generated header.\n";
-        return -2;
+        std::cerr << "dispatcher_set_timing_config: flush_cache is not offered by this .so; "
+                     "dispatcher_timing_capabilities() reports "
+                  << caps << "\n";
+        return QUANT_BRIDGE_TIMING_UNAVAILABLE;
+    }
+    if(rotating_count > 1 && !(caps & QUANT_BRIDGE_TIMING_ROTATING_COUNT))
+    {
+        std::cerr << "dispatcher_set_timing_config: rotating_count is not offered by this .so; "
+                     "dispatcher_timing_capabilities() reports "
+                  << caps << "\n";
+        return QUANT_BRIDGE_TIMING_UNAVAILABLE;
     }
     if(cold_niters >= 0)
+    {
+        if(!(caps & QUANT_BRIDGE_TIMING_COLD_NITERS))
+            return QUANT_BRIDGE_TIMING_UNAVAILABLE;
         cfg.cold_niters = cold_niters;
+    }
     if(nrepeat > 0)
+    {
+        if(!(caps & QUANT_BRIDGE_TIMING_NREPEAT))
+            return QUANT_BRIDGE_TIMING_UNAVAILABLE;
         cfg.nrepeat = nrepeat;
-    return 0;
+    }
+    return QUANT_BRIDGE_OK;
 }
 
 #ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
@@ -316,6 +389,42 @@ struct has_preprocess_launch<
                                          std::declval<PreprocessFunc&>()))>> : std::true_type
 {
 };
+
+// Same question for the grouped kernels, whose launch() takes a vector of
+// descriptors plus a device kargs buffer. Reported through the same capability
+// bit so a caller sees one answer regardless of which contract the .so wraps.
+template <typename KernelT, typename PreprocessFunc, typename = void>
+struct has_grouped_preprocess_launch : std::false_type
+{
+};
+
+template <typename KernelT, typename PreprocessFunc>
+struct has_grouped_preprocess_launch<
+    KernelT,
+    PreprocessFunc,
+    std::void_t<decltype(KernelT::launch(
+        std::declval<const std::vector<ck_tile::QuantGroupedGemmHostArgs>&>(),
+        std::declval<const ck_tile::stream_config&>(),
+        std::declval<void*>(),
+        std::declval<PreprocessFunc&>()))>> : std::true_type
+{
+};
+
+// The capability mask behind dispatcher_timing_capabilities(). cold_niters and
+// nrepeat are always settable; flush_cache / rotating_count never are (see
+// set_timing_config); the preprocess bit is true exactly when the kernel offers
+// the per-launch hook the split-K C clear needs, which is the one fact a caller
+// cannot otherwise obtain.
+template <typename KernelT>
+inline int timing_capabilities()
+{
+    using probe = void (*)();
+    int caps    = QUANT_BRIDGE_TIMING_COLD_NITERS | QUANT_BRIDGE_TIMING_NREPEAT;
+    if constexpr(has_preprocess_launch<KernelT, probe>::value ||
+                 has_grouped_preprocess_launch<KernelT, probe>::value)
+        caps |= QUANT_BRIDGE_TIMING_PREPROCESS_HOOK;
+    return caps;
+}
 
 // Direct-launch the force-included kernel. Returns the kernel execution time in
 // ms, or a negative value if the kernel reports unsupported args (callers treat
@@ -398,6 +507,26 @@ inline bool check_positive_dims(const char* fn, std::initializer_list<int64_t> d
     return true;
 }
 
+// Strides are narrowed from the int64_t C ABI to ck_tile::index_t (int32) when
+// the host args are filled. The per-op stride checks pin most strides to a
+// dimension that check_positive_dims already bounded, but not all of them, and a
+// stride is silently allowed to be zero (a broadcast the kernels do not
+// implement). Check the narrowing explicitly at the one place the value crosses.
+inline bool check_stride_range(const char* fn, std::initializer_list<int64_t> strides)
+{
+    constexpr int64_t kIndexMax = static_cast<int64_t>(std::numeric_limits<int32_t>::max());
+    for(int64_t s : strides)
+    {
+        if(s < 0 || s > kIndexMax)
+        {
+            std::cerr << fn << ": stride " << s << " is outside the [0, " << kIndexMax
+                      << "] range of ck_tile::index_t (int32)\n";
+            return false;
+        }
+    }
+    return true;
+}
+
 // k_batch is the split-K factor and is used as a divisor in the kernel's
 // K-per-block computation, so it must be >= 1.
 inline bool check_k_batch(const char* fn, int64_t k_batch)
@@ -469,14 +598,14 @@ inline int launch_and_copyback(const char* fn,
                                float* time_ms)
 {
     if(!check_k_batch(fn, args.k_batch))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
 
     constexpr int64_t kIndexMax = static_cast<int64_t>(std::numeric_limits<int32_t>::max());
     if(static_cast<int64_t>(mn_elems) > kIndexMax)
     {
         std::cerr << fn << ": M*N (" << mn_elems
                   << ") exceeds the range of ck_tile::index_t (int32)\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     const bool do_time        = (time_ms != nullptr);
@@ -500,7 +629,7 @@ inline int launch_and_copyback(const char* fn,
                   << ") is not supported by this kernel: its launch() has no per-launch "
                      "preprocess hook, so C cannot be re-zeroed between the warmup and repeat "
                      "launches of the atomic_add epilogue\n";
-        return -3;
+        return QUANT_BRIDGE_TIMING_UNAVAILABLE;
     }
 
     float exec_time = -1.0f;
@@ -511,25 +640,25 @@ inline int launch_and_copyback(const char* fn,
     catch(const std::exception& e)
     {
         std::cerr << fn << ": kernel launch threw: " << e.what() << "\n";
-        return -3;
+        return QUANT_BRIDGE_LAUNCH_THREW;
     }
     catch(...)
     {
         std::cerr << fn << ": kernel launch threw unknown exception\n";
-        return -3;
+        return QUANT_BRIDGE_LAUNCH_THREW;
     }
 
     if(clear_err != hipSuccess)
     {
         std::cerr << fn << ": failed to clear C between split-K launches: "
                   << hipGetErrorString(clear_err) << "\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     if(exec_time < 0.0f)
     {
         std::cerr << fn << ": kernel reported unsupported args\n";
-        return -2;
+        return QUANT_BRIDGE_KERNEL_UNSUPPORTED_ARGS;
     }
 
     const hipError_t err = hipMemcpy(C_host, C_dev, c_bytes, hipMemcpyDeviceToHost);
@@ -537,7 +666,7 @@ inline int launch_and_copyback(const char* fn,
     {
         std::cerr << fn << ": HIP error: " << hipGetErrorString(err) << " at " << __FILE__ << ":"
                   << __LINE__ << "\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     if(time_ms)
@@ -577,7 +706,9 @@ inline int run_scalar_quant_gemm(const char* fn,
                                  float* time_ms)
 {
     if(!check_entry_args(fn, initialized, {A, B, AQ, BQ, C}, {M, N, K}))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
+    if(!check_stride_range(fn, {stride_A, stride_B, stride_C}))
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // Only packed (contiguous) layouts are supported: A is [M,K] row-major, B is
     // [K,N] column-major (leading dim K), C is [M,N] row-major.
@@ -586,7 +717,7 @@ inline int run_scalar_quant_gemm(const char* fn,
         std::cerr << fn << ": non-packed strides are not supported. Expected stride_A=" << K
                   << " stride_B=" << K << " stride_C=" << N << ", got stride_A=" << stride_A
                   << " stride_B=" << stride_B << " stride_C=" << stride_C << "\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     DeviceBuffer<AT> A_dev;
@@ -672,9 +803,11 @@ inline int run_scalar_quant_grouped_gemm(const char* fn,
                                          float* time_ms)
 {
     if(!check_entry_args(fn, initialized, {A, B, AQ, BQ, C}, {M, N, K}))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     if(!check_k_batch(fn, k_batch))
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
+    if(!check_stride_range(fn, {stride_A, stride_AQ, stride_B, stride_BQ, stride_C}))
+        return QUANT_BRIDGE_INVALID_ARG;
 
     // The kernel derives the scale counts from the problem shape and indexes the
     // buffers directly, so a smaller count is a device out-of-bounds read.
@@ -682,7 +815,7 @@ inline int run_scalar_quant_grouped_gemm(const char* fn,
     {
         std::cerr << fn << ": QK_A/QK_B mismatch. Got (" << QK_A << ", " << QK_B << "), expected ("
                   << expected_qk_a << ", " << expected_qk_b << ")\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     // Only packed (contiguous) layouts are supported: A is [M,K] row-major, B is
@@ -692,7 +825,7 @@ inline int run_scalar_quant_grouped_gemm(const char* fn,
         std::cerr << fn << ": non-packed strides are not supported. Expected stride_A=" << K
                   << " stride_B=" << K << " stride_C=" << N << ", got stride_A=" << stride_A
                   << " stride_B=" << stride_B << " stride_C=" << stride_C << "\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     // Rejected rather than ignored: the kernel builds its scale views with
@@ -701,7 +834,7 @@ inline int run_scalar_quant_grouped_gemm(const char* fn,
     {
         std::cerr << fn << ": stride_AQ and stride_BQ must be 1 (the kernel hardwires its scale "
                   << "strides); got stride_AQ=" << stride_AQ << " stride_BQ=" << stride_BQ << "\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     constexpr int64_t kIndexMax = static_cast<int64_t>(std::numeric_limits<int32_t>::max());
@@ -709,7 +842,7 @@ inline int run_scalar_quant_grouped_gemm(const char* fn,
     {
         std::cerr << fn << ": M*N (" << M << "*" << N
                   << ") exceeds the range of ck_tile::index_t (int32)\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
 
     DeviceBuffer<AT> A_dev;
@@ -780,24 +913,24 @@ inline int run_scalar_quant_grouped_gemm(const char* fn,
     catch(const std::exception& e)
     {
         std::cerr << fn << ": kernel launch threw: " << e.what() << "\n";
-        return -3;
+        return QUANT_BRIDGE_LAUNCH_THREW;
     }
     catch(...)
     {
         std::cerr << fn << ": kernel launch threw unknown exception\n";
-        return -3;
+        return QUANT_BRIDGE_LAUNCH_THREW;
     }
 
     if(clear_err != hipSuccess)
     {
         std::cerr << fn << ": failed to clear C between split-K launches: "
                   << hipGetErrorString(clear_err) << "\n";
-        return -1;
+        return QUANT_BRIDGE_INVALID_ARG;
     }
     if(exec_time < 0.0f)
     {
         std::cerr << fn << ": kernel reported unsupported args\n";
-        return -2;
+        return QUANT_BRIDGE_KERNEL_UNSUPPORTED_ARGS;
     }
 
     BRIDGE_HIP_CHECK(fn, hipMemcpy(C, C_dev, c_bytes, hipMemcpyDeviceToHost));
