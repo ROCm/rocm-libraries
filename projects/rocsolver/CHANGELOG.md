@@ -18,6 +18,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 ### Removed
 ### Optimized
+
+* Improved the performance of sygst/hegst.
+
 ### Resolved issues
 ### Known issues
 ### Upcoming changes
@@ -37,12 +40,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * Clarified the `geblttrf_npvt` API documentation to accurately describe the in-place LU block-factorization storage.
 
-### Removed
-### Optimized
-
-* Improved the performance of sygst/hegst.
-
-### Resolved issues
 ### Known issues
 
 * The 64-bit eigensolver APIs (SYEV_64, HEEV_64, SYEVD_64, HEEVD_64) require the matrix

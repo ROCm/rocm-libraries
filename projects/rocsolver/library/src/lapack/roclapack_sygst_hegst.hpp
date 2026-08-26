@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,7 +40,7 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 static bool constexpr use_sygs2_hegs2_alt = true;
-static bool constexpr use_recursion = true;
+static bool constexpr use_sygst_hegst_recursion = true;
 
 template <typename T, typename I>
 static inline I get_len_Asave(I const n)
@@ -53,7 +53,7 @@ static inline I get_len_Asave(I const n)
     I const nn = std::min(n, nb);
     I const len = nn * (nn - 1) / 2;
     I const len_with_alignment = ceildiv(len, nT) * nT;
-    return (len_with_alignment);
+    return len_with_alignment;
 }
 
 template <typename I>
@@ -62,12 +62,12 @@ static inline I split_n(I const n)
     I const n1 = n / 2;
     I const n2 = n - n1;
     I const max_n1n2 = std::max(n1, n2);
-    return (max_n1n2);
+    return max_n1n2;
 }
 
 static inline int get_max_blocks()
 {
-    return (1024);
+    return 1024;
 }
 
 // ----------------------------------------------------------
@@ -77,15 +77,12 @@ static inline int get_max_blocks()
 template <typename T, typename I, typename U>
 static __global__ void copy_symm_tri_kernel(bool const is_lower,
                                             I const n,
-
                                             U AA,
                                             rocblas_stride const shiftA,
                                             I const lda,
                                             rocblas_stride const strideA,
-
                                             T* const BB,
                                             rocblas_stride const strideB,
-
                                             I const batch_count,
                                             bool const is_restore)
 {
@@ -97,13 +94,13 @@ static __global__ void copy_symm_tri_kernel(bool const is_lower,
         assert(i < j);
         auto const k = ((i * n - i * (i + 1) / 2) + (j - (i + 1)));
         assert((0 <= k) && (k < n * (n - 1) / 2));
-        return (k);
+        return k;
     };
     auto idxL = [](auto i, auto j, auto n) {
         assert(i > j);
         auto const k = i * (i - 1) / 2 + j;
         assert((0 <= k) && (k < n * (n - 1) / 2));
-        return (k);
+        return k;
     };
 
     auto idx2D = [](auto i, auto j, auto ld) { return (i + j * ld); };
@@ -160,15 +157,12 @@ template <typename T, typename I, typename U>
 static void copy_symm_tri(rocblas_handle handle,
                           bool const is_lower,
                           I const n,
-
                           U AA,
                           rocblas_stride const shiftA,
                           I const lda,
                           rocblas_stride const strideA,
-
                           T* const BB,
                           rocblas_stride const strideB,
-
                           I const batch_count,
                           bool const is_restore)
 {
@@ -184,16 +178,11 @@ static void copy_symm_tri(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    copy_symm_tri_kernel<T, I, U><<<dim3(nbx, nby, nbz), dim3(nx, ny, 1), 0, stream>>>(
-
-        is_lower, n,
-
-        AA, shiftA, lda, strideA,
-
-        BB, strideB,
-
-        batch_count, is_restore);
+    ROCSOLVER_LAUNCH_KERNEL((copy_symm_tri_kernel<T, I, U>), dim3(nbx, nby, nbz), dim3(nx, ny, 1),
+                            0, stream, is_lower, n, AA, shiftA, lda, strideA, BB, strideB,
+                            batch_count, is_restore);
 }
+
 template <bool BATCHED, bool STRIDED, typename T, typename I>
 void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
                                          const rocblas_eform itype,
@@ -271,13 +260,9 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
 
     if(use_sygs2_hegs2_alt)
     {
-        // -----------------------------------
         // extra requirements for calling TRSM
-        // -----------------------------------
 
-        // ------------------------------------------
         // work around for multiple of 128 in rocblas
-        // ------------------------------------------
         I const nb = xxGST_BLOCKSIZE;
         I nn = std::min(n, nb);
         nn = ((nn % 128) == 0) ? (nn + 1) : nn;
@@ -288,53 +273,25 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         {
             if(uplo == rocblas_fill_upper)
             {
-                I const ldb_estimate = nn;
-                I const lda_estimate = nn;
-
-                // -------------------------
                 // Compute A <- inv(U')*A*inv(U)
-                // -------------------------
+                rocsolver_trsm_mem<BATCHED, STRIDED, T>(
+                    rocblas_side_left, rocblas_operation_conjugate_transpose, nn, nn, batch_count,
+                    &temp1, &temp2, &temp3, &temp4, optim_mem);
 
-                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_left,
-                                                 rocblas_operation_conjugate_transpose, nn, nn,
-
-                                                 lda_estimate, ldb_estimate,
-
-                                                 batch_count,
-
-                                                 &temp1, &temp2, &temp3, &temp4);
-
-                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_right, rocblas_operation_none, nn, nn,
-
-                                                 lda_estimate, ldb_estimate,
-
-                                                 batch_count,
-
-                                                 &temp5, &temp6, &temp7, &temp8);
+                rocsolver_trsm_mem<BATCHED, STRIDED, T>(rocblas_side_right, rocblas_operation_none,
+                                                        nn, nn, batch_count, &temp5, &temp6, &temp7,
+                                                        &temp8, optim_mem);
             }
             else
             {
-                I const ldb_estimate = nn;
-                I const lda_estimate = nn;
-                // -------------------------
                 // Compute A <- inv(L)*A*inv(L')
-                // -------------------------
-                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_left, rocblas_operation_none, nn, nn,
+                rocsolver_trsm_mem<BATCHED, STRIDED, T>(rocblas_side_left, rocblas_operation_none,
+                                                        nn, nn, batch_count, &temp1, &temp2, &temp3,
+                                                        &temp4, optim_mem);
 
-                                                 lda_estimate, ldb_estimate,
-
-                                                 batch_count,
-
-                                                 &temp1, &temp2, &temp3, &temp4);
-
-                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_right,
-                                                 rocblas_operation_conjugate_transpose, nn, nn,
-
-                                                 lda_estimate, ldb_estimate,
-
-                                                 batch_count,
-
-                                                 &temp5, &temp6, &temp7, &temp8);
+                rocsolver_trsm_mem<BATCHED, STRIDED, T>(
+                    rocblas_side_right, rocblas_operation_conjugate_transpose, nn, nn, batch_count,
+                    &temp5, &temp6, &temp7, &temp8, optim_mem);
             }
 
             *size_work_x_temp = std::max(*size_work_x_temp, std::max(temp1, temp5));
@@ -344,7 +301,7 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         }
     }
 
-    if(use_recursion)
+    if(use_sygst_hegst_recursion)
     {
         I const n1 = split_n(n);
         I const n2 = n - n1;
@@ -357,53 +314,25 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         {
             if(uplo == rocblas_fill_upper)
             {
-                I const ldb_estimate = nn;
-                I const lda_estimate = nn;
-
-                // -------------------------
                 // Compute A <- inv(U')*A*inv(U)
-                // -------------------------
+                rocsolver_trsm_mem<BATCHED, STRIDED, T>(
+                    rocblas_side_left, rocblas_operation_conjugate_transpose, nn, nn, batch_count,
+                    &temp1, &temp2, &temp3, &temp4, optim_mem);
 
-                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_left,
-                                                 rocblas_operation_conjugate_transpose, nn, nn,
-
-                                                 lda_estimate, ldb_estimate,
-
-                                                 batch_count,
-
-                                                 &temp1, &temp2, &temp3, &temp4);
-
-                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_right, rocblas_operation_none, nn, nn,
-
-                                                 lda_estimate, ldb_estimate,
-
-                                                 batch_count,
-
-                                                 &temp5, &temp6, &temp7, &temp8);
+                rocsolver_trsm_mem<BATCHED, STRIDED, T>(rocblas_side_right, rocblas_operation_none,
+                                                        nn, nn, batch_count, &temp5, &temp6, &temp7,
+                                                        &temp8, optim_mem);
             }
             else
             {
-                I const ldb_estimate = nn;
-                I const lda_estimate = nn;
-                // -------------------------
                 // Compute A <- inv(L)*A*inv(L')
-                // -------------------------
-                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_left, rocblas_operation_none, nn, nn,
+                rocsolver_trsm_mem<BATCHED, STRIDED, T>(rocblas_side_left, rocblas_operation_none,
+                                                        nn, nn, batch_count, &temp1, &temp2, &temp3,
+                                                        &temp4, optim_mem);
 
-                                                 lda_estimate, ldb_estimate,
-
-                                                 batch_count,
-
-                                                 &temp1, &temp2, &temp3, &temp4);
-
-                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_right,
-                                                 rocblas_operation_conjugate_transpose, nn, nn,
-
-                                                 lda_estimate, ldb_estimate,
-
-                                                 batch_count,
-
-                                                 &temp5, &temp6, &temp7, &temp8);
+                rocsolver_trsm_mem<BATCHED, STRIDED, T>(
+                    rocblas_side_right, rocblas_operation_conjugate_transpose, nn, nn, batch_count,
+                    &temp5, &temp6, &temp7, &temp8, optim_mem);
             }
 
             *size_work_x_temp = std::max(*size_work_x_temp, std::max(temp1, temp5));
@@ -413,8 +342,7 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         }
     }
 
-    bool const need_Asave = (use_sygs2_hegs2_alt);
-    if(need_Asave)
+    if(use_sygs2_hegs2_alt)
     {
         // ----------------------------------------
         // storage to save strictly triangular part
@@ -466,14 +394,9 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
     auto sygs2_hegs2_alt
         = [ceildiv](rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo,
-                    I const n,
-
-                    auto A, rocblas_stride const shiftA, I const lda, rocblas_stride const strideA,
-
-                    auto B, rocblas_stride const shiftB, I const ldb, rocblas_stride const strideB,
-
-                    I const batch_count, T* const Asave,
-
+                    I const n, auto A, rocblas_stride const shiftA, I const lda,
+                    rocblas_stride const strideA, auto B, rocblas_stride const shiftB, I const ldb,
+                    rocblas_stride const strideB, I const batch_count, T* const Asave,
                     bool const optim_mem, auto temp1, auto temp2, auto temp3,
                     auto temp4) -> rocblas_status {
         // ------------------------------------------------------------------
@@ -491,37 +414,13 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
         //                      (R' * A * R) * inv(R) * x = lambda * inv(R) * x
         // ------------------------------------------------------------------
 
-        bool const is_upper = (uplo == rocblas_fill_upper);
-        bool const is_lower = (uplo == rocblas_fill_lower);
-        {
-            bool const is_valid_uplo = (is_upper || is_lower);
-            if(!is_valid_uplo)
-            {
-                return rocblas_status_invalid_value;
-            }
-        }
-
-        T t_one = 1;
-
-        rocblas_status istat = rocblas_status_success;
-
         auto const len_Asave = get_len_Asave<T>(n);
         rocblas_stride const strideAsave = len_Asave;
 
-        // ---------------------------------------------------
         // symmetrize matrix and save strictly triangular part
-        // ---------------------------------------------------
-        {
-            bool const is_restore = false;
-
-            copy_symm_tri(handle, is_lower, n,
-
-                          A, shiftA, lda, strideA,
-
-                          Asave, strideAsave,
-
-                          batch_count, is_restore);
-        }
+        bool const is_lower = (uplo == rocblas_fill_lower);
+        copy_symm_tri(handle, is_lower, n, A, shiftA, lda, strideA, Asave, strideAsave, batch_count,
+                      false);
 
         if(itype == rocblas_eform_ax)
         {
@@ -530,224 +429,135 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
             // or
             // Compute    A <- inv(U') * A * inv(U)
             // -----------------------------------
+            if(uplo == rocblas_fill_upper)
             {
-                // ----------------
-                // A <- inv(L) * A
-                // or
                 // A <- inv(U') * A
-                // ----------------
-                rocblas_operation trans
-                    = (is_lower) ? rocblas_operation_none : rocblas_operation_conjugate_transpose;
-                istat = rocblasCall_trsm(handle, rocblas_side_left, uplo, trans,
-                                         rocblas_diagonal_non_unit,
+                rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+                    handle, rocblas_side_left, rocblas_operation_conjugate_transpose,
+                    rocblas_diagonal_non_unit, n, n, B, shiftB, ldb, strideB, A, shiftA, lda,
+                    strideA, batch_count, optim_mem, temp1, temp2, temp3, temp4);
 
-                                         n, n,
-
-                                         &t_one,
-
-                                         B, shiftB, ldb, strideB,
-
-                                         A, shiftA, lda, strideA,
-
-                                         batch_count,
-
-                                         optim_mem, temp1, temp2, temp3, temp4);
-            }
-
-            if(istat == rocblas_status_success)
-            {
-                // ----------------
-                // A <- A * inv(L')
-                // or
                 // A <- A * inv(U)
-                // ----------------
+                rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+                    handle, rocblas_side_right, rocblas_operation_none, rocblas_diagonal_non_unit,
+                    n, n, B, shiftB, ldb, strideB, A, shiftA, lda, strideA, batch_count, optim_mem,
+                    temp1, temp2, temp3, temp4);
+            }
+            else
+            {
+                // A <- inv(L) * A
+                rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+                    handle, rocblas_side_left, rocblas_operation_none, rocblas_diagonal_non_unit, n,
+                    n, B, shiftB, ldb, strideB, A, shiftA, lda, strideA, batch_count, optim_mem,
+                    temp1, temp2, temp3, temp4);
 
-                rocblas_operation const trans
-                    = (is_lower) ? rocblas_operation_conjugate_transpose : rocblas_operation_none;
-                istat = rocblasCall_trsm(handle, rocblas_side_right, uplo, trans,
-                                         rocblas_diagonal_non_unit,
-
-                                         n, n,
-
-                                         &t_one,
-
-                                         B, shiftB, ldb, strideB,
-
-                                         A, shiftA, lda, strideA,
-
-                                         batch_count,
-
-                                         optim_mem, temp1, temp2, temp3, temp4);
+                // A <- A * inv(L')
+                rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+                    handle, rocblas_side_right, rocblas_operation_conjugate_transpose,
+                    rocblas_diagonal_non_unit, n, n, B, shiftB, ldb, strideB, A, shiftA, lda,
+                    strideA, batch_count, optim_mem, temp1, temp2, temp3, temp4);
             }
         }
         else
         {
-            rocblas_stride const stride_alpha = 0;
             // ----------------------
             // Compute A <- L' * A * L
             // or
             // Compute A <- U * A * U'
             // ----------------------
+            T const t_one = 1;
+            rocblas_stride const stride_alpha = 0;
 
+            if(uplo == rocblas_fill_upper)
             {
-                // -----------
-                // A <- L' * A
-                // or
                 // A <- U * A
-                // -----------
-                rocblas_operation const trans
-                    = (is_lower) ? rocblas_operation_conjugate_transpose : rocblas_operation_none;
+                rocblasCall_trmm(handle, rocblas_side_left, rocblas_fill_upper,
+                                 rocblas_operation_none, rocblas_diagonal_non_unit, n, n, &t_one,
+                                 stride_alpha, B, shiftB, ldb, strideB, A, shiftA, lda, strideA,
+                                 batch_count, (T**)temp2);
 
-                istat = rocblasCall_trmm(handle, rocblas_side_left, uplo, trans,
-                                         rocblas_diagonal_non_unit,
-
-                                         n, n, &t_one, stride_alpha,
-
-                                         B, shiftB, ldb, strideB,
-
-                                         A, shiftA, lda, strideA,
-
-                                         batch_count, (T**)temp2);
-            }
-
-            if(istat == rocblas_status_success)
-            {
-                // ----------
-                // A <- A * L
-                // or
                 // A <- A * U'
-                // ----------
+                rocblasCall_trmm(handle, rocblas_side_right, rocblas_fill_upper,
+                                 rocblas_operation_conjugate_transpose, rocblas_diagonal_non_unit,
+                                 n, n, &t_one, stride_alpha, B, shiftB, ldb, strideB, A, shiftA,
+                                 lda, strideA, batch_count, (T**)temp2);
+            }
+            else
+            {
+                // A <- L' * A
+                rocblasCall_trmm(handle, rocblas_side_left, rocblas_fill_lower,
+                                 rocblas_operation_conjugate_transpose, rocblas_diagonal_non_unit,
+                                 n, n, &t_one, stride_alpha, B, shiftB, ldb, strideB, A, shiftA,
+                                 lda, strideA, batch_count, (T**)temp2);
 
-                rocblas_operation const trans
-                    = (is_lower) ? rocblas_operation_none : rocblas_operation_conjugate_transpose;
-
-                istat = rocblasCall_trmm(handle, rocblas_side_right, uplo, trans,
-                                         rocblas_diagonal_non_unit,
-
-                                         n, n, &t_one, stride_alpha,
-
-                                         B, shiftB, ldb, strideB,
-
-                                         A, shiftA, lda, strideA,
-
-                                         batch_count, (T**)temp2);
+                // A <- A * L
+                rocblasCall_trmm(handle, rocblas_side_right, rocblas_fill_lower,
+                                 rocblas_operation_none, rocblas_diagonal_non_unit, n, n, &t_one,
+                                 stride_alpha, B, shiftB, ldb, strideB, A, shiftA, lda, strideA,
+                                 batch_count, (T**)temp2);
             }
         }
 
-        // -------------------------------
         // restore strictly triangular part
-        // -------------------------------
-        {
-            bool const is_restore = true;
-            copy_symm_tri(handle, is_lower, n,
+        copy_symm_tri(handle, is_lower, n, A, shiftA, lda, strideA, Asave, strideAsave, batch_count,
+                      true);
 
-                          A, shiftA, lda, strideA,
-
-                          Asave, strideAsave,
-
-                          batch_count,
-
-                          is_restore);
-        }
-
-        return (istat);
+        return rocblas_status_success;
     }; // end sygs2_hegs2_alt
 
     auto call_sygs2_hegs2
         = [ceildiv, sygs2_hegs2_alt, optim_mem, scalars, work_x_temp, workArr_temp_arr,
-           store_wcs_invA, invA_arr](
-
-              rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo,
-
-              I const n,
-
-              auto A, rocblas_stride const shiftA, I const lda, rocblas_stride const strideA,
-
-              auto B, rocblas_stride const shiftB, I const ldb, rocblas_stride const strideB,
-
-              I const batch_count) -> rocblas_status {
-        rocblas_status istat = rocblas_status_success;
+           store_wcs_invA,
+           invA_arr](rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo,
+                     I const n, auto A, rocblas_stride const shiftA, I const lda,
+                     rocblas_stride const strideA, auto B, rocblas_stride const shiftB, I const ldb,
+                     rocblas_stride const strideB, I const batch_count) -> rocblas_status {
         if(use_sygs2_hegs2_alt)
         {
-            // ------------------------------------------
             // note nT to maintain alignment in temp1
-            // ------------------------------------------
             size_t const len_Asave = get_len_Asave<T>(n);
             T* const Asave = static_cast<T*>(work_x_temp);
 
-            // ------------------------
             // scratch storage for TRSM
-            // ------------------------
             auto const temp1 = Asave + len_Asave * batch_count;
             auto const temp2 = workArr_temp_arr;
             auto const temp3 = store_wcs_invA;
             auto const temp4 = invA_arr;
 
-            istat = sygs2_hegs2_alt(handle, itype, uplo, n,
-
-                                    A, shiftA, lda, strideA,
-
-                                    B, shiftB, ldb, strideB, batch_count,
-
-                                    Asave, optim_mem, temp1, temp2, temp3, temp4);
-            if(istat != rocblas_status_success)
-            {
-                return (istat);
-            }
+            return sygs2_hegs2_alt(handle, itype, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb,
+                                   strideB, batch_count, Asave, optim_mem, temp1, temp2, temp3,
+                                   temp4);
         }
         else
         {
-            istat = rocsolver_sygs2_hegs2_template<BATCHED, T>(handle, itype, uplo, n,
-
-                                                               A, shiftA, lda, strideA,
-
-                                                               B, shiftB, ldb, strideB,
-
-                                                               batch_count,
-
-                                                               scalars, work_x_temp, store_wcs_invA,
-                                                               (T**)workArr_temp_arr);
-            if(istat != rocblas_status_success)
-            {
-                return (istat);
-            }
+            return rocsolver_sygs2_hegs2_template<BATCHED, T>(
+                handle, itype, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB,
+                batch_count, scalars, work_x_temp, store_wcs_invA, (T**)workArr_temp_arr);
         }
-        return (istat);
     }; // end call_sygs2_hegs2
 
     auto sygst_hegst_alt
         = [call_sygs2_hegs2, optim_mem, scalars, work_x_temp, workArr_temp_arr, store_wcs_invA,
            invA_arr](rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo,
-                     I const n,
-
-                     U A, rocblas_stride const shiftA, I const lda, rocblas_stride const strideA,
-
-                     U B, rocblas_stride const shiftB, I const ldb, rocblas_stride const strideB,
-
-                     I const batch_count, auto&& self) -> rocblas_status {
+                     I const n, U A, rocblas_stride const shiftA, I const lda,
+                     rocblas_stride const strideA, U B, rocblas_stride const shiftB, I const ldb,
+                     rocblas_stride const strideB, I const batch_count,
+                     auto&& self) -> rocblas_status {
         S s_one = 1;
         T t_one = 1;
         T t_half = 0.5;
         T t_minone = -1;
         T t_minhalf = -0.5;
-        // ----------------------------------------------------------------------
+
         // if the matrix is too small, use the unblocked variant of the algorithm
-        // ----------------------------------------------------------------------
-        rocblas_status istat = rocblas_status_success;
         if(n <= xxGST_BLOCKSIZE)
         {
-            istat = call_sygs2_hegs2(handle, itype, uplo, n,
-
-                                     A, shiftA, lda, strideA,
-
-                                     B, shiftB, ldb, strideB,
-
-                                     batch_count);
-            return (istat);
+            return call_sygs2_hegs2(handle, itype, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb,
+                                    strideB, batch_count);
         }
 
         I nb = xxGST_BLOCKSIZE;
-        if(use_recursion)
+        if(use_sygst_hegst_recursion)
         {
             I const n1 = split_n(n);
             I const n2 = n - n1;
@@ -758,154 +568,91 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
         {
             if(uplo == rocblas_fill_upper)
             {
-                // Compute inv(U')*A*inv(U)
+                // Compute inv(U') * A * inv(U)
                 for(I k = 0; k < n; k += nb)
                 {
                     I kb = std::min(n - k, nb);
-                    {
-                        istat = self(handle, itype, uplo, kb,
-
-                                     A, shiftA + idx2D(k, k, lda), lda, strideA,
-
-                                     B, shiftB + idx2D(k, k, ldb), ldb, strideB,
-
-                                     batch_count, self);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
-                    }
+                    self(handle, itype, uplo, kb, A, shiftA + idx2D(k, k, lda), lda, strideA, B,
+                         shiftB + idx2D(k, k, ldb), ldb, strideB, batch_count, self);
 
                     if(k + kb < n)
                     {
-                        istat = rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+                        rocsolver_trsm_upper<BATCHED, STRIDED, T>(
                             handle, rocblas_side_left, rocblas_operation_conjugate_transpose,
                             rocblas_diagonal_non_unit, kb, n - k - kb, B, shiftB + idx2D(k, k, ldb),
                             ldb, strideB, A, shiftA + idx2D(k, k + kb, lda), lda, strideA,
                             batch_count, optim_mem, work_x_temp, workArr_temp_arr, store_wcs_invA,
                             invA_arr);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
 
-                        istat = rocblasCall_symm_hemm(
-                            handle, rocblas_side_left, uplo, kb, n - k - kb, &t_minhalf, A,
-                            shiftA + idx2D(k, k, lda), lda, strideA, B,
-                            shiftB + idx2D(k, k + kb, ldb), ldb, strideB, &t_one, A,
-                            shiftA + idx2D(k, k + kb, lda), lda, strideA, batch_count);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
+                        rocblasCall_symm_hemm(handle, rocblas_side_left, uplo, kb, n - k - kb,
+                                              &t_minhalf, A, shiftA + idx2D(k, k, lda), lda,
+                                              strideA, B, shiftB + idx2D(k, k + kb, ldb), ldb,
+                                              strideB, &t_one, A, shiftA + idx2D(k, k + kb, lda),
+                                              lda, strideA, batch_count);
 
-                        istat = rocblasCall_syr2k_her2k<BATCHED, T>(
+                        rocblasCall_syr2k_her2k<BATCHED, T>(
                             handle, uplo, rocblas_operation_conjugate_transpose, n - k - kb, kb,
                             &t_minone, A, shiftA + idx2D(k, k + kb, lda), lda, strideA, B,
                             shiftB + idx2D(k, k + kb, ldb), ldb, strideB, &s_one, A,
                             shiftA + idx2D(k + kb, k + kb, lda), lda, strideA, batch_count);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
 
-                        istat = rocblasCall_symm_hemm(
-                            handle, rocblas_side_left, uplo, kb, n - k - kb, &t_minhalf, A,
-                            shiftA + idx2D(k, k, lda), lda, strideA, B,
-                            shiftB + idx2D(k, k + kb, ldb), ldb, strideB, &t_one, A,
-                            shiftA + idx2D(k, k + kb, lda), lda, strideA, batch_count);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
+                        rocblasCall_symm_hemm(handle, rocblas_side_left, uplo, kb, n - k - kb,
+                                              &t_minhalf, A, shiftA + idx2D(k, k, lda), lda,
+                                              strideA, B, shiftB + idx2D(k, k + kb, ldb), ldb,
+                                              strideB, &t_one, A, shiftA + idx2D(k, k + kb, lda),
+                                              lda, strideA, batch_count);
 
-                        istat = rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+                        rocsolver_trsm_upper<BATCHED, STRIDED, T>(
                             handle, rocblas_side_right, rocblas_operation_none,
                             rocblas_diagonal_non_unit, kb, n - k - kb, B,
                             shiftB + idx2D(k + kb, k + kb, ldb), ldb, strideB, A,
                             shiftA + idx2D(k, k + kb, lda), lda, strideA, batch_count, optim_mem,
                             work_x_temp, workArr_temp_arr, store_wcs_invA, invA_arr);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
                     }
                 }
             }
             else
             {
-                // Compute inv(L)*A*inv(L')
+                // Compute inv(L) * A * inv(L')
                 for(I k = 0; k < n; k += nb)
                 {
                     I kb = std::min(n - k, nb);
-
-                    {
-                        istat = self(handle, itype, uplo, kb,
-
-                                     A, shiftA + idx2D(k, k, lda), lda, strideA,
-
-                                     B, shiftB + idx2D(k, k, ldb), ldb, strideB,
-
-                                     batch_count, self);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        };
-                    }
+                    self(handle, itype, uplo, kb, A, shiftA + idx2D(k, k, lda), lda, strideA, B,
+                         shiftB + idx2D(k, k, ldb), ldb, strideB, batch_count, self);
 
                     if(k + kb < n)
                     {
-                        istat = rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+                        rocsolver_trsm_lower<BATCHED, STRIDED, T>(
                             handle, rocblas_side_right, rocblas_operation_conjugate_transpose,
                             rocblas_diagonal_non_unit, n - k - kb, kb, B, shiftB + idx2D(k, k, ldb),
                             ldb, strideB, A, shiftA + idx2D(k + kb, k, lda), lda, strideA,
                             batch_count, optim_mem, work_x_temp, workArr_temp_arr, store_wcs_invA,
                             invA_arr);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
 
-                        istat = rocblasCall_symm_hemm(
-                            handle, rocblas_side_right, uplo, n - k - kb, kb, &t_minhalf, A,
-                            shiftA + idx2D(k, k, lda), lda, strideA, B,
-                            shiftB + idx2D(k + kb, k, ldb), ldb, strideB, &t_one, A,
-                            shiftA + idx2D(k + kb, k, lda), lda, strideA, batch_count);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
+                        rocblasCall_symm_hemm(handle, rocblas_side_right, uplo, n - k - kb, kb,
+                                              &t_minhalf, A, shiftA + idx2D(k, k, lda), lda,
+                                              strideA, B, shiftB + idx2D(k + kb, k, ldb), ldb,
+                                              strideB, &t_one, A, shiftA + idx2D(k + kb, k, lda),
+                                              lda, strideA, batch_count);
 
-                        istat = rocblasCall_syr2k_her2k<BATCHED, T>(
+                        rocblasCall_syr2k_her2k<BATCHED, T>(
                             handle, uplo, rocblas_operation_none, n - k - kb, kb, &t_minone, A,
                             shiftA + idx2D(k + kb, k, lda), lda, strideA, B,
                             shiftB + idx2D(k + kb, k, ldb), ldb, strideB, &s_one, A,
                             shiftA + idx2D(k + kb, k + kb, lda), lda, strideA, batch_count);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
 
-                        istat = rocblasCall_symm_hemm(
-                            handle, rocblas_side_right, uplo, n - k - kb, kb, &t_minhalf, A,
-                            shiftA + idx2D(k, k, lda), lda, strideA, B,
-                            shiftB + idx2D(k + kb, k, ldb), ldb, strideB, &t_one, A,
-                            shiftA + idx2D(k + kb, k, lda), lda, strideA, batch_count);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
+                        rocblasCall_symm_hemm(handle, rocblas_side_right, uplo, n - k - kb, kb,
+                                              &t_minhalf, A, shiftA + idx2D(k, k, lda), lda,
+                                              strideA, B, shiftB + idx2D(k + kb, k, ldb), ldb,
+                                              strideB, &t_one, A, shiftA + idx2D(k + kb, k, lda),
+                                              lda, strideA, batch_count);
 
-                        istat = rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+                        rocsolver_trsm_lower<BATCHED, STRIDED, T>(
                             handle, rocblas_side_left, rocblas_operation_none,
                             rocblas_diagonal_non_unit, n - k - kb, kb, B,
                             shiftB + idx2D(k + kb, k + kb, ldb), ldb, strideB, A,
                             shiftA + idx2D(k + kb, k, lda), lda, strideA, batch_count, optim_mem,
                             work_x_temp, workArr_temp_arr, store_wcs_invA, invA_arr);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
                     }
                 }
             }
@@ -914,150 +661,84 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
         {
             if(uplo == rocblas_fill_upper)
             {
-                // Compute U*A*U'
+                // Compute U * A * U'
                 for(I k = 0; k < n; k += nb)
                 {
                     I kb = std::min(n - k, nb);
 
-                    istat = rocblasCall_trmm(handle, rocblas_side_left, uplo, rocblas_operation_none,
-                                             rocblas_diagonal_non_unit, k, kb, &t_one, 0, B, shiftB,
-                                             ldb, strideB, A, shiftA + idx2D(0, k, lda), lda,
-                                             strideA, batch_count, (T**)workArr_temp_arr);
-                    if(istat != rocblas_status_success)
-                    {
-                        return (istat);
-                    }
+                    rocblasCall_trmm(handle, rocblas_side_left, uplo, rocblas_operation_none,
+                                     rocblas_diagonal_non_unit, k, kb, &t_one, 0, B, shiftB, ldb,
+                                     strideB, A, shiftA + idx2D(0, k, lda), lda, strideA,
+                                     batch_count, (T**)workArr_temp_arr);
 
-                    istat = rocblasCall_symm_hemm(
-                        handle, rocblas_side_right, uplo, k, kb, &t_half, A,
-                        shiftA + idx2D(k, k, lda), lda, strideA, B, shiftB + idx2D(0, k, ldb), ldb,
-                        strideB, &t_one, A, shiftA + idx2D(0, k, lda), lda, strideA, batch_count);
-                    if(istat != rocblas_status_success)
-                    {
-                        return (istat);
-                    }
+                    rocblasCall_symm_hemm(handle, rocblas_side_right, uplo, k, kb, &t_half, A,
+                                          shiftA + idx2D(k, k, lda), lda, strideA, B,
+                                          shiftB + idx2D(0, k, ldb), ldb, strideB, &t_one, A,
+                                          shiftA + idx2D(0, k, lda), lda, strideA, batch_count);
 
-                    istat = rocblasCall_syr2k_her2k<BATCHED, T>(
+                    rocblasCall_syr2k_her2k<BATCHED, T>(
                         handle, uplo, rocblas_operation_none, k, kb, &t_one, A,
                         shiftA + idx2D(0, k, lda), lda, strideA, B, shiftB + idx2D(0, k, ldb), ldb,
                         strideB, &s_one, A, shiftA, lda, strideA, batch_count);
-                    if(istat != rocblas_status_success)
-                    {
-                        return (istat);
-                    }
 
-                    istat = rocblasCall_symm_hemm(
-                        handle, rocblas_side_right, uplo, k, kb, &t_half, A,
-                        shiftA + idx2D(k, k, lda), lda, strideA, B, shiftB + idx2D(0, k, ldb), ldb,
-                        strideB, &t_one, A, shiftA + idx2D(0, k, lda), lda, strideA, batch_count);
-                    if(istat != rocblas_status_success)
-                    {
-                        return (istat);
-                    }
+                    rocblasCall_symm_hemm(handle, rocblas_side_right, uplo, k, kb, &t_half, A,
+                                          shiftA + idx2D(k, k, lda), lda, strideA, B,
+                                          shiftB + idx2D(0, k, ldb), ldb, strideB, &t_one, A,
+                                          shiftA + idx2D(0, k, lda), lda, strideA, batch_count);
 
-                    istat = rocblasCall_trmm(
-                        handle, rocblas_side_right, uplo, rocblas_operation_conjugate_transpose,
-                        rocblas_diagonal_non_unit, k, kb, &t_one, 0, B, shiftB + idx2D(k, k, ldb),
-                        ldb, strideB, A, shiftA + idx2D(0, k, lda), lda, strideA, batch_count,
-                        (T**)workArr_temp_arr);
-                    if(istat != rocblas_status_success)
-                    {
-                        return (istat);
-                    }
+                    rocblasCall_trmm(handle, rocblas_side_right, uplo,
+                                     rocblas_operation_conjugate_transpose, rocblas_diagonal_non_unit,
+                                     k, kb, &t_one, 0, B, shiftB + idx2D(k, k, ldb), ldb, strideB,
+                                     A, shiftA + idx2D(0, k, lda), lda, strideA, batch_count,
+                                     (T**)workArr_temp_arr);
 
-                    {
-                        istat = self(handle, itype, uplo, kb,
-
-                                     A, shiftA + idx2D(k, k, lda), lda, strideA,
-
-                                     B, shiftB + idx2D(k, k, ldb), ldb, strideB,
-
-                                     batch_count, self);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
-                    }
+                    self(handle, itype, uplo, kb, A, shiftA + idx2D(k, k, lda), lda, strideA, B,
+                         shiftB + idx2D(k, k, ldb), ldb, strideB, batch_count, self);
                 }
             }
             else
             {
-                // Compute L'*A*L
+                // Compute L' * A * L
                 for(I k = 0; k < n; k += nb)
                 {
                     I kb = std::min(n - k, nb);
 
-                    istat = rocblasCall_trmm(handle, rocblas_side_right, uplo, rocblas_operation_none,
-                                             rocblas_diagonal_non_unit, kb, k, &t_one, 0, B, shiftB,
-                                             ldb, strideB, A, shiftA + idx2D(k, 0, lda), lda,
-                                             strideA, batch_count, (T**)workArr_temp_arr);
-                    if(istat != rocblas_status_success)
-                    {
-                        return (istat);
-                    }
+                    rocblasCall_trmm(handle, rocblas_side_right, uplo, rocblas_operation_none,
+                                     rocblas_diagonal_non_unit, kb, k, &t_one, 0, B, shiftB, ldb,
+                                     strideB, A, shiftA + idx2D(k, 0, lda), lda, strideA,
+                                     batch_count, (T**)workArr_temp_arr);
 
-                    istat = rocblasCall_symm_hemm(
-                        handle, rocblas_side_left, uplo, kb, k, &t_half, A,
-                        shiftA + idx2D(k, k, lda), lda, strideA, B, shiftB + idx2D(k, 0, ldb), ldb,
-                        strideB, &t_one, A, shiftA + idx2D(k, 0, lda), lda, strideA, batch_count);
-                    if(istat != rocblas_status_success)
-                    {
-                        return (istat);
-                    }
+                    rocblasCall_symm_hemm(handle, rocblas_side_left, uplo, kb, k, &t_half, A,
+                                          shiftA + idx2D(k, k, lda), lda, strideA, B,
+                                          shiftB + idx2D(k, 0, ldb), ldb, strideB, &t_one, A,
+                                          shiftA + idx2D(k, 0, lda), lda, strideA, batch_count);
 
-                    istat = rocblasCall_syr2k_her2k<BATCHED, T>(
+                    rocblasCall_syr2k_her2k<BATCHED, T>(
                         handle, uplo, rocblas_operation_conjugate_transpose, k, kb, &t_one, A,
                         shiftA + idx2D(k, 0, lda), lda, strideA, B, shiftB + idx2D(k, 0, ldb), ldb,
                         strideB, &s_one, A, shiftA, lda, strideA, batch_count);
-                    if(istat != rocblas_status_success)
-                    {
-                        return (istat);
-                    }
 
-                    istat = rocblasCall_symm_hemm(
-                        handle, rocblas_side_left, uplo, kb, k, &t_half, A,
-                        shiftA + idx2D(k, k, lda), lda, strideA, B, shiftB + idx2D(k, 0, ldb), ldb,
-                        strideB, &t_one, A, shiftA + idx2D(k, 0, lda), lda, strideA, batch_count);
-                    if(istat != rocblas_status_success)
-                    {
-                        return (istat);
-                    }
+                    rocblasCall_symm_hemm(handle, rocblas_side_left, uplo, kb, k, &t_half, A,
+                                          shiftA + idx2D(k, k, lda), lda, strideA, B,
+                                          shiftB + idx2D(k, 0, ldb), ldb, strideB, &t_one, A,
+                                          shiftA + idx2D(k, 0, lda), lda, strideA, batch_count);
 
-                    istat = rocblasCall_trmm(
-                        handle, rocblas_side_left, uplo, rocblas_operation_conjugate_transpose,
-                        rocblas_diagonal_non_unit, kb, k, &t_one, 0, B, shiftB + idx2D(k, k, ldb),
-                        ldb, strideB, A, shiftA + idx2D(k, 0, lda), lda, strideA, batch_count,
-                        (T**)workArr_temp_arr);
-                    if(istat != rocblas_status_success)
-                    {
-                        return (istat);
-                    }
+                    rocblasCall_trmm(handle, rocblas_side_left, uplo,
+                                     rocblas_operation_conjugate_transpose, rocblas_diagonal_non_unit,
+                                     kb, k, &t_one, 0, B, shiftB + idx2D(k, k, ldb), ldb, strideB,
+                                     A, shiftA + idx2D(k, 0, lda), lda, strideA, batch_count,
+                                     (T**)workArr_temp_arr);
 
-                    {
-                        istat = self(handle, itype, uplo, kb,
-
-                                     A, shiftA + idx2D(k, k, lda), lda, strideA,
-
-                                     B, shiftB + idx2D(k, k, ldb), ldb, strideB,
-
-                                     batch_count, self);
-                        if(istat != rocblas_status_success)
-                        {
-                            return (istat);
-                        }
-                    }
+                    self(handle, itype, uplo, kb, A, shiftA + idx2D(k, k, lda), lda, strideA, B,
+                         shiftB + idx2D(k, k, ldb), ldb, strideB, batch_count, self);
                 }
             }
         }
-        return (istat);
+
+        return rocblas_status_success;
     }; // end sygst_hegst_alt
 
-    return sygst_hegst_alt(handle, itype, uplo, n,
-
-                           A, shiftA, lda, strideA,
-
-                           B, shiftB, ldb, strideB,
-
+    return sygst_hegst_alt(handle, itype, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB,
                            batch_count, sygst_hegst_alt);
 }
 
