@@ -34,6 +34,7 @@
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
+#include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
@@ -163,6 +164,7 @@ const std::vector<PassInfo> availablePasses = {
     {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},
     {"RedundantMovEliminationPass",
      [](const auto&) { return createRedundantMovEliminationPass(); }},
+    {"AsmMovePropagationPass", [](const auto&) { return createAsmMovePropagationPass(); }},
     {"StinkyIRVerifierPass", [](const auto&) { return createStinkyIRVerifierPass(); }},
     {"RemoveDelayAluPass", [](const auto&) { return createRemoveDelayAluPass(); }},
     // RemoveInstructionPass accepts one or more mnemonics:
