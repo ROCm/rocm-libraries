@@ -31,10 +31,22 @@ version = 1
 # filters aren't reliable here — skipping both fixtures outright. Root cause
 # not yet identified; revisit once the CPU reference / GPU kernel numerics
 # have been compared directly.
+#
+# The bundle suites (integration-test-bundles/{quick,full}/RMSNormBackward/Default)
+# cover the same shapes under a different GTest name (quick_RMSNormBackward_Default.*/
+# full_RMSNormBackward_Default.*, not Smoke/*) and hit the same flakiness — e.g.
+# quick_RMSNormBackward_Default.4096_128_1_1_bfp16_{nchw,nhwc}_* failed on gfx94X
+# in CI once the quick/full tiers started running bundles (PR #11240). Filters
+# below are scoped to the three known-flaky shapes (leading "*" matches either
+# tier's prefix) rather than a blanket "*bfp16*", since smaller-shape bfp16
+# bundle cases pass reliably and should keep running.
 [[test_skips]]
 filters = [
     "Smoke/IntegrationGpuRMSNormBackwardPureBfp16.Correctness/*",
     "Smoke/IntegrationGpuRMSNormBackward3dPureBfp16.Correctness/*",
+    "*RMSNormBackward_Default.4096_128_1_1_bfp16_*",
+    "*RMSNormBackward_Default.5_256_14_14_bfp16_*",
+    "*RMSNormBackward_Default.16_3_8_14_14_bfp16_*",
 ]
 reason = "RMSNormBackward Pure-Bfp16 is flaky at large reduction shapes — root cause under investigation"
 
