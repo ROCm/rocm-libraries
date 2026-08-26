@@ -524,7 +524,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             return False, "pipeline='wavelet' requires num_load_waves >= 1"
         if family != "wmma":
             return False, (
-                f"pipeline='wavelet' is WMMA/gfx1250 only: on MFMA (CDNA) targets "
+                f"pipeline='wavelet' is WMMA/gfx1250 only: on MFMA targets "
                 f"the single-buffer LDS is overwritten each K iteration and load/math "
                 f"waves execute sequentially rather than truly concurrently."
             )

@@ -815,7 +815,7 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             return False, "pipeline='wavelet' requires num_load_waves >= 1"
         if family != "wmma":
             return False, (
-                "pipeline='wavelet' is WMMA/gfx1250 only: on MFMA (CDNA) targets "
+                "pipeline='wavelet' is WMMA/gfx1250 only: on MFMA targets "
                 "the single-buffer LDS is overwritten each K iteration and load/math "
                 "waves execute sequentially rather than truly concurrently."
             )
