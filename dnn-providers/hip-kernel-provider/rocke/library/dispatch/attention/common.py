@@ -144,7 +144,6 @@ ATTENTION_DIM_VOCABULARY = (
     "kv_block_size",
 )
 
-# NOTE: dense_pipe reuses this set but does not implement fp8, saved only by its fp16-only dtype gate.
 ATTENTION_FEATURES = frozenset({"causal", "sliding_window", "sinks", "fp8"})
 
 
@@ -262,6 +261,12 @@ class AttentionSpec:
     dtype: str
     num_query_heads: int
     num_kv_heads: int
+    # fp8 KV-cache decode is a distinct kernel from the same-shape bf16 decode
+    # (per-element dequant in the inner loop), so it must not collapse onto the
+    # bf16 spec_hash/kernel_name -- consumers key their compile cache on
+    # kernel_name(), and the sweep space dedupes on asdict(spec).
+    use_fp8: bool = False
+    fp8_fnuz: bool = False
     name: str = "rocke_attention_unified"
     # When set, this verbatim kernel_name is returned by :meth:`kernel_name`
     # instead of the composed unified name. Used by the dense candidate to
@@ -278,11 +283,14 @@ class AttentionSpec:
             return self.kernel_name_override
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(
+        parts = [
             self.name,
             self.path,
             self.dtype,
             f"hd{self.head_size}",
             f"bs{self.block_size}",
             f"gqa{self.num_query_heads}x{self.num_kv_heads}",
-        )
+        ]
+        if self.use_fp8:
+            parts.append("fp8fnuz" if self.fp8_fnuz else "fp8")
+        return kernel_name_join(*parts)

@@ -92,6 +92,8 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             dtype=problem.dtype,
             num_query_heads=problem.num_query_heads,
             num_kv_heads=problem.num_kv_heads,
+            use_fp8=problem.use_fp8,
+            fp8_fnuz=problem.fp8_fnuz,
         )
 
     candidate = KernelCandidate(
