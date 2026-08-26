@@ -18,6 +18,26 @@ namespace hipblaslt::client
         hipDataType                      apiType;
         roc::host_validation::ScalarType hostType;
         roc::host_validation::Layout     layout;
+
+        int64_t rows() const
+        {
+            return static_cast<int64_t>(layout.extent(0));
+        }
+
+        int64_t columns() const
+        {
+            return static_cast<int64_t>(layout.extent(1));
+        }
+
+        int64_t leadingDimension() const
+        {
+            return static_cast<int64_t>(layout.stride(1));
+        }
+
+        int64_t batchStride() const
+        {
+            return static_cast<int64_t>(layout.stride(2));
+        }
     };
 
     struct MatmulTestCase
