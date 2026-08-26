@@ -118,7 +118,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         heuristics/uhd/EngineRegistry.cpp
         heuristics/uhd/SelectionEngine.cpp
         heuristics/uhd/UhdBuiltIn.cpp
-        heuristics/uhd/UhdLoader.cpp
         heuristics/uhd/adapters/OnnxAdapter.cpp
         heuristics/uhd/adapters/CustomLibraryAdapter.cpp
     )

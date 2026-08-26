@@ -11,6 +11,8 @@
 #include "adapters/CustomLibraryAdapter.hpp"
 #include "adapters/NativeAdapter.hpp"
 
+#include <hipdnn_plugin_sdk/ingestor/uhd/AdapterFactory.hpp>
+
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
 #include <algorithm>
@@ -290,25 +292,12 @@ std::shared_ptr<IUhdAdapter>
 
     // static_order never reaches here: SelectionEngine ranks it with the declared-order
     // comparator instead of building a scorer.
-    if(cfg.adapterType == "tree_data")
+    // Only the two adapters the plugin SDK will not carry are built here -- onnx needs a
+    // runtime that must not reach every provider's include path, and custom_library needs
+    // dlopen. Everything else is the shared factory, so these two call sites cannot drift
+    // from each other or from the ingestor's plan-build path.
+    if(cfg.adapterType == "onnx")
     {
-        // TreeDataAdapter loads from model file
-        if(!cfg.modelArtifactPath.empty())
-        {
-            adapter = TreeDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
-        }
-    }
-    else if(cfg.adapterType == "table")
-    {
-        // TableAdapter loads from model file
-        if(!cfg.modelArtifactPath.empty())
-        {
-            adapter = TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
-        }
-    }
-    else if(cfg.adapterType == "onnx")
-    {
-        // OnnxAdapter loads from .onnx file (dependency-gated, returns nullptr if unavailable)
         if(!cfg.modelArtifactPath.empty())
         {
             adapter = OnnxAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
@@ -316,7 +305,6 @@ std::shared_ptr<IUhdAdapter>
     }
     else if(cfg.adapterType == "custom_library")
     {
-        // CustomLibraryAdapter loads from .so
         if(!cfg.modelArtifactPath.empty() && !cfg.customLibrarySymbol.empty())
         {
             adapter = CustomLibraryAdapter::load(cfg.modelArtifactPath,
@@ -325,16 +313,9 @@ std::shared_ptr<IUhdAdapter>
                                                   cfg.featuresHash);
         }
     }
-    else if(cfg.adapterType == "native")
+    else
     {
-        // NativeAdapter resolves a scorer the engine registered in-process;
-        // nothing is loaded from disk (RFC 0019 §7.1).
-        if(!cfg.nativeSymbol.empty())
-        {
-            adapter = NativeAdapter::resolve(cfg.nativeSymbol,
-                                             cfg.featuresSignature.size(),
-                                             cfg.featuresHash);
-        }
+        adapter = hipdnn_plugin_sdk::ingestor::uhd::makeUhdAdapter(cfg);
     }
 
     // Cache and return
@@ -363,21 +344,11 @@ std::shared_ptr<IUhdAdapter>
     const auto& cfg = entry->uhdConfig;
     std::shared_ptr<IUhdAdapter> adapter;
 
-    if(cfg.adapterType == "tree_data")
-    {
-        if(!cfg.modelArtifactPath.empty())
-        {
-            adapter = TreeDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
-        }
-    }
-    else if(cfg.adapterType == "table")
-    {
-        if(!cfg.modelArtifactPath.empty())
-        {
-            adapter = TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
-        }
-    }
-    else if(cfg.adapterType == "onnx")
+    // Only the two adapters the plugin SDK will not carry are built here -- onnx needs a
+    // runtime that must not reach every provider's include path, and custom_library needs
+    // dlopen. Everything else is the shared factory, so these two call sites cannot drift
+    // from each other or from the ingestor's plan-build path.
+    if(cfg.adapterType == "onnx")
     {
         if(!cfg.modelArtifactPath.empty())
         {
@@ -394,16 +365,9 @@ std::shared_ptr<IUhdAdapter>
                                                   cfg.featuresHash);
         }
     }
-    else if(cfg.adapterType == "native")
+    else
     {
-        // NativeAdapter resolves a scorer the engine registered in-process;
-        // nothing is loaded from disk (RFC 0019 §7.1).
-        if(!cfg.nativeSymbol.empty())
-        {
-            adapter = NativeAdapter::resolve(cfg.nativeSymbol,
-                                             cfg.featuresSignature.size(),
-                                             cfg.featuresHash);
-        }
+        adapter = hipdnn_plugin_sdk::ingestor::uhd::makeUhdAdapter(cfg);
     }
 
     entry->cachedAdapter = adapter;
