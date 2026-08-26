@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -277,9 +277,8 @@ static constexpr unsigned int items[n_items] = {
 
 #define block_sort_test_suite_type_def(name, suffix) block_sort_test_suite_type_def_helper(name, suffix)
 
-// Variadic so callers may pass an optional 4th name-generator argument that is
-// forwarded to TYPED_TEST_SUITE's 3rd parameter. Existing 3-argument callers
-// expand exactly as before.
+// Variadic so callers may pass either 3 arguments or 4 arguments with the 4th
+// argument being a name generator forwarded to TYPED_TEST_SUITE's 3rd parameter.
 #define typed_test_suite_def_helper(name, suffix, ...) TYPED_TEST_SUITE(name ## suffix, __VA_ARGS__)
 
 #define typed_test_suite_def(name, suffix, ...) typed_test_suite_def_helper(name, suffix, __VA_ARGS__)
@@ -288,23 +287,19 @@ static constexpr unsigned int items[n_items] = {
 
 #define typed_test_def(suite, suffix, name) typed_test_def_helper(suite, suffix, name)
 
-// ------------------------------------------------------------------------
-// Name generators for index-free GTEST_FILTER targeting.
-//
+// ----------------------------------------------------------------------------
 // Default TYPED_TEST_SUITE naming uses the positional index of a type in its
-// ::testing::Types list, so filters that reference "/N" silently point at a
-// different type whenever the list is reordered. The generators below build a
-// stable, [A-Za-z0-9_]-safe name from the parameter struct's own fields; pass
-// one as the optional 4th argument of typed_test_suite_def (or the 3rd of
-// TYPED_TEST_SUITE) to make a suite filterable by name.
-// ------------------------------------------------------------------------
+// ::testing::Types list, which may silently point at a different type whenever
+// the list is reordered. The generators below build a stable name from the
+// parameter struct's own fields to make a TYPED_TEST_SUITE filterable by name.
+// ----------------------------------------------------------------------------
 
 template<class>
-struct type_tag_dependent_false : std::false_type
+struct dependent_false : std::false_type
 {};
 
 // Maps every concrete type used in the typed test parameter lists to a unique,
-// readable fragment. Uncovered types trip a static_assert so gaps fail to build.
+// readable name.
 template<class T>
 inline std::string type_tag()
 {
@@ -347,8 +342,7 @@ inline std::string type_tag()
     else if constexpr(std::is_same_v<T, rocprim::int128_t>) return "Int128";
 #endif
     else
-        static_assert(type_tag_dependent_false<T>::value,
-                      "type_tag: add a case for this type");
+        static_assert(dependent_false<T>::value, "type_tag: add a case for this type");
 }
 
 // warp_params<T, WarpSize, ItemsPerThread> -> e.g. "Int_w32_i1".
@@ -374,7 +368,7 @@ struct block_params_name_generator
     }
 };
 
-// vector_params<T, U, ItemsPerThread, Vectorized> -> e.g. "Int_Int_i4_vec".
+// vector_params<T, U, ItemsPerThread, ShouldBeVectorized> -> e.g. "Int_Int_i4_vec".
 struct vector_params_name_generator
 {
     template<class Params>

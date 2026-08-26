@@ -173,10 +173,12 @@ struct RocprimDeviceSegmentedReduceNameGenerator
             default: return "Default";
         }
     }
+
     static std::string num(int v)
     {
         return v < 0 ? "n" + std::to_string(-v) : std::to_string(v);
     }
+
     template<class Params>
     static std::string GetName(int /*index*/)
     {
@@ -192,6 +194,7 @@ struct RocprimDeviceSegmentedReduceNameGenerator
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceSegmentedReduce, Params, RocprimDeviceSegmentedReduceNameGenerator);
 
 TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
