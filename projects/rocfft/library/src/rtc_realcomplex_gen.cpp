@@ -665,8 +665,8 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Variable lengths{"lengths", rtc_index_type(IndexType::U32), true, true};
     Variable inStride{"inStride", "index_type", true, true};
     Variable outStride{"outStride", "index_type", true, true};
-    Variable gridY{"gridY", "const index_type"};
-    Variable gridZ{"gridZ", "const index_type"};
+    Variable gridY{"gridY", "const " + std::string(rtc_index_type(IndexType::U32))};
+    Variable gridZ{"gridZ", "const " + std::string(rtc_index_type(IndexType::U32))};
 
     // r2c uses a device function helper to work out which dimension
     // we're transposing to

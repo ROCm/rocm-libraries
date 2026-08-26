@@ -218,7 +218,7 @@ RTCKernelArgs RTCKernelRealComplexEven::get_launch_args(DeviceCallIn& data)
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_index(data.callbacks.load_cb_lds_bytes);
+    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
     append_load_store_args(kargs, *data.node);
@@ -341,7 +341,7 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_index(data.callbacks.load_cb_lds_bytes);
+    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
 
