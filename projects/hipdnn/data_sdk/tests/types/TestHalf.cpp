@@ -272,17 +272,21 @@ TEST_F(TestHalf, SubnormalUnderflowToSignedZero)
     EXPECT_EQ(half(std::nextafter(subnormalMidpoint(0), 1.0f)).data, 0x0001);
 }
 
-TEST_F(TestHalf, SubnormalRoundTripThroughFloat)
+TEST_F(TestHalf, RoundTripAllPatterns)
 {
-    for(int k = 1; k <= 1023; ++k)
+    // For every finite bit pattern: decode to float, re-encode, and verify the bit pattern
+    // is identical. The other narrow types all have this check; half did not, which is how
+    // the subnormal encode path stayed broken.
+    for(int bits = 0; bits <= 0xFFFF; ++bits)
     {
-        const auto bits = static_cast<uint16_t>(k);
-        const half original = half::from_bits(bits);
-        EXPECT_EQ(half(static_cast<float>(original)).data, bits) << "k = " << k;
-
-        const auto negativeBits = static_cast<uint16_t>(0x8000U | static_cast<uint32_t>(k));
-        const half negative = half::from_bits(negativeBits);
-        EXPECT_EQ(half(static_cast<float>(negative)).data, negativeBits) << "k = " << k;
+        const auto pattern = static_cast<uint16_t>(bits);
+        const half decoded = half::from_bits(pattern);
+        if(isnan(decoded))
+        {
+            continue; // NaN payload propagation is covered by the NaN tests
+        }
+        EXPECT_EQ(half(static_cast<float>(decoded)).data, pattern)
+            << "Bit pattern 0x" << std::hex << bits;
     }
 }
 
