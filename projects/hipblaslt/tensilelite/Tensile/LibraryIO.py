@@ -22,6 +22,10 @@
 #
 ################################################################################
 
+from .CustomKernelCompatibility import (
+    compareCustomKernelProblemTypes,
+    formatCustomKernelProblemTypeMismatches,
+)
 from .CustomKernels import getCustomKernelConfig
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
@@ -35,7 +39,7 @@ from Tensile.SolutionStructs import Solution, ProblemSizes
 from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
-from typing import IO, NamedTuple, List, Dict, Optional, Any
+from typing import IO, NamedTuple, Dict, Optional, Any
 from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
 from copy import deepcopy
@@ -656,7 +660,7 @@ def parseLibraryLogicData(
     )
 
     # unpack solution
-    def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Solution:
+    def solutionStateToSolution(solutionState, solutionIndex, assembler, isaInfoMap) -> Solution:
         # Fill missing keys: library DefaultSolution, then GlobalParameters defaultSolution.
         for key, val in libDefaults.items():
             if key not in solutionState:
@@ -682,6 +686,18 @@ def parseLibraryLogicData(
             if "InternalSupportParams" in solutionState:
                 isp = solutionState["InternalSupportParams"]
             customConfig = getCustomKernelConfig(solutionState["CustomKernelName"], isp)
+            mismatches = compareCustomKernelProblemTypes(
+                problemType, customConfig.get("ProblemType")
+            )
+            if mismatches:
+                raise ValueError(
+                    formatCustomKernelProblemTypeMismatches(
+                        mismatches,
+                        srcFile,
+                        solutionState.get("SolutionIndex", solutionIndex),
+                        solutionState["CustomKernelName"],
+                    )
+                )
             for key, value in customConfig.items():
                 solutionState[key] = value
 
@@ -717,7 +733,10 @@ def parseLibraryLogicData(
                          )
         return solutionObject
 
-    solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    solutions = [
+        solutionStateToSolution(solutionState, solutionIndex, assembler, isaInfoMap)
+        for solutionIndex, solutionState in enumerate(data["Solutions"])
+    ]
     typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(

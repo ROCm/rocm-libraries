@@ -134,10 +134,13 @@ def test_parse_library_logic_data_version_warning(assembler, isa_info_map, snaps
 # ===========================================================================
 
 def test_parse_library_logic_data_custom_kernel(assembler, isa_info_map, monkeypatch, snapshot):
-    # CustomKernelName set + an (empty) config -> the custom-kernel merge branch
-    # runs; getCustomKernelConfig is monkeypatched so no real kernel is needed.
-    monkeypatch.setattr(L, "getCustomKernelConfig", lambda name, isp: {})
     data = _raw_dict()
+    # Supply the matching embedded ProblemType now required of custom configs.
+    monkeypatch.setattr(
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp: {"ProblemType": data["ProblemType"]},
+    )
     data["Solutions"][0]["CustomKernelName"] = "synthetic_kernel"
     # InternalSupportParams present -> the isp-extraction branch also runs.
     data["Solutions"][0]["InternalSupportParams"] = {"KernelLanguage": "Assembly"}
@@ -150,10 +153,15 @@ def test_parse_library_logic_data_custom_kernel(assembler, isa_info_map, monkeyp
 def test_parse_library_logic_data_custom_kernel_bad_mi(assembler, isa_info_map, monkeypatch):
     # A custom-kernel config with a MatrixInstruction of length != 4 -> ValueError
     # before Solution construction (so MI consistency is irrelevant).
-    monkeypatch.setattr(
-        L, "getCustomKernelConfig", lambda name, isp: {"MatrixInstruction": [1, 2, 3]}
-    )
     data = _raw_dict()
+    monkeypatch.setattr(
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp: {
+            "MatrixInstruction": [1, 2, 3],
+            "ProblemType": data["ProblemType"],
+        },
+    )
     data["Solutions"][0]["CustomKernelName"] = "synthetic_kernel"
     with pytest.raises(ValueError):
         L.parseLibraryLogicData(
