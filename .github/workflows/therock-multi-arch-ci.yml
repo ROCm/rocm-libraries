@@ -109,7 +109,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
+          ref: 301bb83c144304976b4954d65d013d1b854f584d # 08/26/2026
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -157,7 +157,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure, resolve_therock_ref]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@301bb83c144304976b4954d65d013d1b854f584d # 08/26/2026
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
@@ -172,14 +172,19 @@ jobs:
       prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg') || '' }}
       # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
       baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
-      # Enable automatic stage reuse - TheRock finds commit-compatible baselines
-      # and determines which stages to rebuild based on changed files
-      stage_reuse_mode: reuse-stage
+      # Disable artifact reuse when validating release branches.
+      # PRs use the target branch; workflow_dispatch uses the selected branch.
+      stage_reuse_mode: >-
+        ${{
+          startsWith(github.base_ref || github.ref_name, 'release/')
+          && 'off'
+          || 'reuse-stage'
+        }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by resolve_therock_ref; setup re-exports the
       # checked-out commit as needs.setup.outputs.ref for downstream jobs.
       # TODO: After multi-arch CI is fully migrated to TheRock, remove the explicit ref here
-      ref: eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5  # 08/21/2026
+      ref: 301bb83c144304976b4954d65d013d1b854f584d  # 08/26/2026
       # Pass external repo info for stage-impact analysis
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
@@ -192,7 +197,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@301bb83c144304976b4954d65d013d1b854f584d # 08/26/2026
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -220,7 +225,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@301bb83c144304976b4954d65d013d1b854f584d # 08/26/2026
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
