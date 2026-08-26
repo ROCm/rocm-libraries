@@ -726,6 +726,7 @@ bool IRParser::parseAttributes(ParsedInstruction& inst) {
             return false;
         }
 
+        skipNewlines();
         // Check for comma or end of attributes
         if (peek().kind == TokenKind::Comma) {
             consume();
@@ -776,6 +777,7 @@ std::optional<std::unordered_map<std::string, std::string>> IRParser::parseModif
         }
         dict[fieldName] = std::move(*valueOpt);
 
+        skipNewlines();
         if (peek().kind == TokenKind::Comma) {
             consume();
             continue;
