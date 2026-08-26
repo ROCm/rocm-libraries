@@ -170,3 +170,14 @@ from .common.sparse_attention import (  # noqa: F401
     vsa_sparse_attention_grid,
     vsa_sparse_attention_signature,
 )
+
+# --- Convolution (dgrad) ---
+from .common.conv_implicit_gemm_dgrad import (  # noqa: F401
+    DgradConvSpec,
+    SubGemmParams,
+    TildeDecomposition,
+    build_implicit_gemm_conv_dgrad,
+    enumerate_sub_gemms,
+    is_valid_dgrad_spec,
+    pack_sub_gemm_buffer,
+)
