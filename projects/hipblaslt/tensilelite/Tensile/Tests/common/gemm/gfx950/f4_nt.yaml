@@ -129,7 +129,7 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 2, 2,  1, 1]   # MT 32x32
           - [16, 16, 128, 1,  1, 4, 4,  1, 1]   # MT 64x64  (2x2 strips)
           - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT 128x128 wg2x2 (4 waves)
-          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT 256x256 wg2x2 (144KB LDS, 496 VGPR)
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT 256x256 wg2x2 (129KB LDS, 496 VGPR)
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [256]
