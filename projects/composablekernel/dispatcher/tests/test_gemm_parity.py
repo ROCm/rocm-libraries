@@ -102,6 +102,16 @@ _TOL = {
 
 _LAYOUT_WORD = {"r": "row", "c": "col"}
 
+# Same convention as the sibling *_gpu_correctness.py tests and as
+# SKIP_RETURN_CODE in dispatcher/tests/CMakeLists.txt. This file is not
+# ctest-registered, so the exit code is the only signal a CI lane gets: returning
+# 0 from _main() on a CPU-only or hipcc-less runner would report a green PASS for
+# the 60-case matrix below -- the lane's only int8 coverage -- without a single
+# kernel having been built. The caller in groovy/vars/ck.groovy wraps this in
+# run_ok, which translates 77 into a logged skip and lets any other non-zero
+# exit fail the lane.
+SKIP_EXIT = 77
+
 
 def _emulate_input(x: np.ndarray, dtype: str) -> np.ndarray:
     """Round an fp32 operand to the kernel's storage dtype so the CPU reference
@@ -259,7 +269,7 @@ def _main() -> int:
     reason = _gpu_environment_reason()
     if reason:
         print(f"SKIP: {reason}")
-        return 0
+        return SKIP_EXIT
 
     arch = detect_gpu_arch()
     print("=" * 78)

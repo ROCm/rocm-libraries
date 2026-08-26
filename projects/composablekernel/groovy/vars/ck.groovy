@@ -1513,11 +1513,19 @@ def runDispatcherPerfTests(String compiler, String gpuTarget = "gfx942") {
     def gemmLayout     = "rcr"
     def problemSizes   = '"1024,1024,1024"'
     def problemConfigs = '"g=2;m=1024;n=1024;k=1024"'
-    // gemm_aquant and gemm_bquant are fp8/bf8-only; run on gfx950 where those
-    // data types are natively supported. gemm_streamk and the original three ops
-    // run on gfx942.
+    // gemm_aquant and gemm_bquant run on gfx950 because their tests and utils
+    // modules self-gate to it -- SUPPORTED_ARCHS = ("gfx950",) and
+    // _DEFAULT_GFX_ARCH = "gfx950" -- not because gfx942 lacks fp8. gfx942 has
+    // fp8 (FNUZ) and is in DESIRED_TARGETS; widening these ops to it means
+    // relaxing those guards first. gemm_streamk and the original three ops run
+    // on gfx942.
     def quantDatatype  = "fp8"
     def quantLayout    = "rcr"
+    // Stream-K below is tile_engine/ops/gemm_streamk/ (top level), not
+    // tile_engine/ops/gemm/gemm_streamk/. Two paths exist and only the first is
+    // real: it holds the CMakeLists, the instance builder and the benchmark. The
+    // nested one contains a lone configs/default_config.json that nothing in the
+    // tree reads. Edit the top-level tree.
     def execute_cmd
     if (gpuTarget == "gfx950") {
         execute_cmd = """
@@ -1591,12 +1599,52 @@ def dispatcherGemmVariantsFor(String arch) {
     }
 }
 
+// Which dtypes the GEMM sweeps may ask for on each arch.
+//
+// gfx950 is fp16/bf16 only, and the reason is not that the hardware lacks fp8 --
+// it is that the dispatcher's fp8 path is gfx942-shaped on both ends:
+//
+//   * Device: CMakeLists.txt (see the CK_TILE_USE_OCP_FP8 block) compiles gfx950
+//     and gfx12 with -DCK_TILE_USE_OCP_FP8. The quant bridges replicate that in
+//     their own JIT flags (grouped_gemm_{a,b,rowcol,tensor}quant_utils.py all
+//     append -DCK_USE_OCP_FP8 -DCK_TILE_USE_OCP_FP8 for gfx950), but the GEMM
+//     sweep path does not: gemm_utils.py and ctypes_utils.py hand hipcc only
+//     --offload-arch. So a gfx950 node here JIT-builds kernels that fall into
+//     the FNUZ #else branch of ck_tile/core/numeric/float8.hpp, while gfx950's
+//     fp8 MFMA and its __gfx950__ conversion intrinsics are OCP. That asymmetry
+//     is why the quant operators keep their fp8 coverage on gfx950 and the
+//     sweeps below lose theirs.
+//   * Host: the fp8/bf8 codec in gemm_utils.py is FNUZ-only and says so --
+//     "gfx950/MI350 uses the OCP fp8 format instead; this codec targets the
+//     gfx942 default and the OCP path needs separate handling."
+//
+// Those strata therefore validate an encoding production never ships, and they
+// pass only because the parity tolerances are loose (fp8 1.5e-1, bf8 3.0e-1).
+// test_streamk_gpu_correctness.py already refuses gfx950 for exactly this
+// reason. Re-widening this list is not the fix; the fix is to port
+// test_rowcolquant_gpu_correctness.py's _fp8_uses_ocp() into gemm_utils AND to
+// pass -DCK_TILE_USE_OCP_FP8 in the JIT flags. Both, or neither works.
+def dispatcherSweepDtypesFor(String arch) {
+    switch (arch) {
+        case "gfx942":  return "fp16,bf16,fp8,bf8"
+        case "gfx950":  return "fp16,bf16"
+        default:        return "fp16,bf16"
+    }
+}
+
 // One test_gemm_search_space.py invocation for a non-standard GEMM variant.
 //
-// dtypes/layouts are deliberately omitted: the runner picks per-variant defaults
+// layouts are deliberately omitted: the runner picks per-variant defaults
 // (multi_d/multi_abd are fp16/rcrr-only, so naming the standard 4x4 matrix here
 // would enumerate configs that variant cannot build). multi_d likewise takes the
 // runner's default --elementwise-op PassThrough.
+//
+// dtypes are omitted for the same reason -- except for "grouped", whose
+// _VARIANT_DEFAULTS entry in test_gemm_search_space.py is the full
+// fp16,bf16,fp8,bf8 list and would otherwise put fp8/bf8 back on gfx950 through
+// the side door. multi_d/multi_abd default to fp16 alone and must keep doing so,
+// which is why this is not applied to every variant. stream_k shares the full
+// list but is gfx942-only, so it is unaffected either way.
 //
 // The budget stays far under the standard sweep's 64 because each variant
 // JIT-compiles its own .so set and these run in addition to, not instead of,
@@ -1604,9 +1652,10 @@ def dispatcherGemmVariantsFor(String arch) {
 // reference.
 def dispatcherVariantCmd(String arch, String variant) {
     def budget = 16
+    def dtypeArg = (variant == "grouped") ? " --dtypes ${dispatcherSweepDtypesFor(arch)}" : ""
     return """python3 ../dispatcher/tests/test_gemm_search_space.py \
                 --variant ${variant} \
-                --arch ${arch} \
+                --arch ${arch}${dtypeArg} \
                 --budget ${budget} \
                 --warmup 5 \
                 --repeat 5 \
@@ -1622,9 +1671,60 @@ def dispatcherVariantCmd(String arch, String variant) {
 // Cost is held down by the search budget instead: --budget 64 for the standard
 // sweep, --budget 16 for each variant sweep.
 //
-// The dtype and layout lists stay at the full 4x4 on purpose: the sweep samples
-// per stratum, so even 64 spreads ~4 configs across all 16 dtype x layout
-// combinations rather than testing one combination deeply.
+// The layout list stays at the full 4 on purpose, as does the dtype list on
+// gfx942: the sweep samples per stratum, so even 64 spreads ~4 configs across
+// all 16 dtype x layout combinations rather than testing one combination
+// deeply. gfx950 runs 2 dtypes x 4 layouts -- see dispatcherSweepDtypesFor.
+//
+// ---------------------------------------------------------------------------
+// Coverage against the 13 dispatcher operators with a bridge on develop.
+//
+// All 13 are invoked. Six are covered across their full documented dtype x
+// layout x arch surface: Multi-ABD, Batched GEMM, MX Gemm, grouped_gemm_bquant,
+// grouped_gemm_rowcol, grouped_gemm_tensor. The other seven run, but over a
+// narrowed surface -- listed under "gaps" below.
+//
+// One non-obvious detail: gemm_universal's int8 coverage comes from
+// test_gemm_parity.py's _INT_DTYPES, not from the sweep. test_gemm_search_space
+// has no int8 stratum, so dropping the parity call would drop int8 entirely.
+// That is why it is invoked here and why its skip path now exits 77 rather
+// than 0.
+//
+// Known gaps, deliberately not closed here. Each needs a code change outside
+// this lane; none is a matter of adding a flag to the commands below, except
+// where noted:
+//
+//   StreamK on gfx950              test_streamk_gpu_correctness.py pins
+//                                  SUPPORTED_ARCHS = ("gfx942",); blocked on
+//                                  the arch-aware fp8 codec.
+//   gemm_universal + Grouped,      Blocked on the same thing from the other
+//   gfx950 fp8/bf8                 side: the sweep's JIT path never passes
+//                                  -DCK_TILE_USE_OCP_FP8, unlike the quant
+//                                  bridges. See dispatcherSweepDtypesFor.
+//   Multi-D layouts rrrr, ccrr,    Flag-only, and deferred by choice, not by
+//   crrr                           blocker -- the bridge handles all four (see
+//                                  gemm_multi_d_full_benchmark.py). Only rcrr
+//                                  runs today.
+//   Batched Contraction bf16,      Test is fp16-only and takes no dtype flag;
+//   fp32                           batched_contraction_utils exposes only
+//                                  default_fp16_config, though its _np_dtype()
+//                                  already resolves bf16 and fp32.
+//   grouped_gemm_aquant/abquant    Tests self-gate to gfx950 and their config
+//   on gfx942, and non-rcr         builders hardcode rcr.
+//   layouts
+//
+// Seven further operators (preshuffle, the non-grouped gemm_*quant family,
+// batched-contraction multi-ABD) have no dispatcher bridge on develop and so
+// cannot be covered from here at all. preshuffle is a partial exception: it
+// exists in gemm_utils but is absent from test_gemm_search_space's _VARIANTS,
+// so wiring it up is a real change, not a flag.
+//
+// The first two gaps unblock together and neither is fixable alone: the fix is
+// _fp8_uses_ocp() (test_rowcolquant_gpu_correctness.py) ported into gemm_utils
+// for the host side, plus -DCK_TILE_USE_OCP_FP8 in the sweep's JIT compile
+// flags for the device side -- copying what the quant bridges already do.
+// Tracked as a follow-up.
+// ---------------------------------------------------------------------------
 def runDispatcherCorrectnessTests(String arch, String compiler) {
     def budget = 64
     // run_ok wraps the script-style tests, which signal a clean skip with exit
@@ -1633,8 +1733,21 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
     // later operator would silently never run. Only 77 is swallowed; any other
     // non-zero exit still fails the lane. A function definition itself exits 0,
     // so it chains cleanly ahead of cmake.
+    //
+    // "$@" || rc=$?, not "$@"; rc=$? -- and the difference is not cosmetic.
+    // buildAndTest emits `sh cmd` with no shebang, so the Durable Task plugin
+    // runs this under /bin/sh -xe and set -e is live. set -e is suppressed
+    // inside a function body only while the call is a NON-FINAL element of an
+    // && list; when run_ok is the last element, set -e applies inside the body
+    // and a bare "$@" exiting 77 kills the shell before rc=$? can run. Both
+    // arch chains below end on a run_ok (gfx942 on test_streamk_gpu_correctness,
+    // gfx950 on test_abquant_gpu_correctness), so a legitimate skip there would
+    // fail the lane. `cmd || rc=$?` puts the call in a tested context, which is
+    // immune to set -e regardless of where run_ok is called from. Keep it that
+    // way. rc=0 is a plain assignment, not `local`: /bin/sh is not bash and
+    // local is not POSIX.
     def execute_cmd = """
-        run_ok() { "\$@"; rc=\$?; if [ \$rc -eq 77 ]; then echo "SKIP(77): \$*"; return 0; fi; return \$rc; } && \
+        run_ok() { rc=0; "\$@" || rc=\$?; if [ \$rc -eq 77 ]; then echo "SKIP(77): \$*"; return 0; fi; return \$rc; } && \
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
             -D CMAKE_CXX_COMPILER="${compiler}" \
             -D CMAKE_BUILD_TYPE=Release \
@@ -1645,14 +1758,14 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
         ninja -j${nthreads()} ck_tile_dispatcher dispatcher_gemm_lib && \
         python3 ../dispatcher/tests/test_gemm_search_space.py \
             --arch ${arch} \
-            --dtypes fp16,bf16,fp8,bf8 \
+            --dtypes ${dispatcherSweepDtypesFor(arch)} \
             --layouts rcr,rrr,crr,ccr \
             --budget ${budget} \
             --warmup 5 \
             --repeat 5 \
             --size 1024 \
             --json dispatcher_gemm_results.json && \
-        python3 ../dispatcher/tests/test_gemm_parity.py && \
+        run_ok python3 ../dispatcher/tests/test_gemm_parity.py && \
         run_ok python3 ../dispatcher/tests/test_batched_gemm_gpu_correctness.py --gfx ${arch} && \
         run_ok python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx ${arch} && \
         python3 ../dispatcher/tests/test_grouped_gemm_gpu_correctness.py && \
