@@ -259,7 +259,9 @@ def dgrad_reference_gfx1250(
     Cg = C // g  # input channels per group
     Kg = K // g  # output channels per group
     if W_np.shape[3] != Cg:
-        raise ValueError(f"expected W last dim Cg={Cg} (=C/groups), got {W_np.shape[3]}")
+        raise ValueError(
+            f"expected W last dim Cg={Cg} (=C/groups), got {W_np.shape[3]}"
+        )
 
     dX = np.zeros((N, Hi, Wi, C), dtype=np.float32)
     for grp in range(g):
@@ -314,7 +316,8 @@ def wgrad_reference_gfx1250(
             float32.
 
     Returns:
-        Float32 torch.Tensor of shape ``(K, Y, X, C)`` on CPU.
+        Float32 torch.Tensor of shape ``(K, Y, X, Cg)`` on CPU, where
+        ``Cg = C // groups`` (per-group input channels).
     """
     import numpy as np
 
@@ -350,7 +353,7 @@ def wgrad_reference_gfx1250(
                                 grp * Kg : (grp + 1) * Kg,
                                 y,
                                 x,
-                                grp * Cg : (grp + 1) * Cg,
+                                :,
                             ] += (
                                 dy_vec[:, None] * x_vec[None, :]
                             )

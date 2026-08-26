@@ -1953,12 +1953,14 @@ def _emit_dgrad_cshuffle_epilogue_wmma(
 ) -> None:
     """WMMA cshuffle epilogue for stride=1 dX (uses from_grid_op)."""
     _war_barriers = 2 if spec.pipeline == "wavelet" else 1
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
     dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec)
     _epi = CShuffleEpilogue.from_grid_op(
         op=op,
         grid=grid,
         max_store_vec=_dgrad_store_vec(spec),
         out_dtype=spec.data.dtype_d,
+        no_alias=_no_alias,
     )
     _epi = dc_replace(_epi, war_barriers=_war_barriers)
     _epi.store(b, accs=accs, addr_fn=dx_addr, d_rsrc=dx_rsrc, bounds=bounds)
@@ -1973,12 +1975,14 @@ def _emit_dgrad_cshuffle_epilogue(
 ) -> None:
     """MFMA cshuffle epilogue for stride=1 dX."""
     _war_barriers = 2 if spec.pipeline == "wavelet" else 1
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
     dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec)
     _epi = CShuffleEpilogue.from_grid(
         atom=spec.atom,
         grid=grid,
         max_store_vec=_dgrad_store_vec(spec),
         out_dtype=spec.data.dtype_d,
+        no_alias=_no_alias,
     )
     _epi = dc_replace(_epi, war_barriers=_war_barriers)
     _epi.store(
@@ -2143,9 +2147,11 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
         return offset, hw_ok
 
     _war_barriers = 2 if spec.pipeline == "wavelet" else 1
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
     _cshuffle_kwargs = {
         "max_store_vec": _dgrad_store_vec(spec),
         "out_dtype": spec.data.dtype_d,
+        "no_alias": _no_alias,
     }
     is_wmma = op is not None and getattr(op, "family", None) == "wmma"
     if is_wmma:

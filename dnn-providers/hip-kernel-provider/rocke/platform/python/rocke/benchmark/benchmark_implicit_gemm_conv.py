@@ -1311,6 +1311,7 @@ def _build_wgrad_one(args_tuple):
     )
 
     target = ArchTarget.from_gfx(arch)
+    _mma_family = "wmma" if target.wave_size == 32 else "mma"
     atom = target.mma.select_largest_k(
         family=_mma_family,
         a_dtype=dtype,
