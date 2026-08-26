@@ -351,6 +351,41 @@ BenchmarkProblems:
           - Exact: [192, 256, 1, 256]
           - Exact: [384, 512, 1, 512]
   -
+    - # Prefetch cross product.  PGR double-buffers LDS, PLR double-buffers the
+      # MFMA operand registers, so both change the GR/LR schedule and the LDS
+      # buffer swap rather than the subtile layout itself.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  1, 1]   # MT64x64   1 wave
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [0, 1]
+        - DepthU: [128, 256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [512, 512, 1, 512]
+  -
     - # NN: A free-contig (TLU=1, stacked), B K-contig (TLU=0, row-major)
       OperationType: GEMM
       DataType: F4
@@ -369,8 +404,8 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0, 1]
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
@@ -401,8 +436,8 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0, 1]
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
