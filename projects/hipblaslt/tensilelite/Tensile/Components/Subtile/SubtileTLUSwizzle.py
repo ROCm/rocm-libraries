@@ -181,7 +181,14 @@ def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
         return None
     if float(tileInfo.bpe) != 0.5:
         return None
-    if stack not in _COL_SCATTER_STACKS:
+    # Under SubtileWideGR every stack uses col_scatter: the XOR path cannot
+    # absorb the wave's contribution to the physical chunk index, and the bank
+    # model shows col_scatter reaches 1-way at stacks 2, 4, 8 and 16 alike (the
+    # XOR is only preferred elsewhere because it costs fewer VALU ops).
+    if int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1:
+        if stack not in (2, 4, 8, 16, 32):
+            return None
+    elif stack not in _COL_SCATTER_STACKS:
         return None
     instM = int(tileInfo.mmaTileShape[0])
     instK = int(tileInfo.mmaTileShape[1])

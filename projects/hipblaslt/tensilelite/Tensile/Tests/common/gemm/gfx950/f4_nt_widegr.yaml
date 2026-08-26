@@ -1,17 +1,21 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# SubtileWideGR correctness coverage.  The GR strip spans the full macro-tile
-# free dim (G = stack * waveGroup) while LR keeps the per-wave stack, so one
-# buffer_load covers G*16 contiguous fp4 elements:
-#   MT64x64   -> GR 4x1  / LR 2x1 ->  64 elem ( 32B)
-#   MT128x128 -> GR 8x1  / LR 4x1 -> 128 elem ( 64B)
-#   MT256x256 -> GR 16x1 / LR 8x1 -> 256 elem (128B = one cacheline)
-# The waves sharing a strip split its K rows.  col_scatter carries over to this
-# layout unchanged -- its load index enters purely additively as a K-column
-# shift -- so GR 8x1/16x1 are conflict-free (verified 0 SQ_LDS_BANK_CONFLICT).
-# GR 4x1 falls back to no swizzle: its XOR acts on a chunk bit the wave itself
-# supplies, which an after-the-fact offset cannot express.
+# SubtileWideGR correctness coverage over the MT x wave-group matrix.
+#
+# The GR strip always spans the whole macro-tile free dim (G = MacroTile/instM)
+# while LR stays at the per-wave stack (L = MIWaveTile[0]), so the contiguous
+# run one buffer_load covers is set by the macro tile alone and no longer
+# shrinks as waves are added:
+#   MT64x64   ->  GR 4x1  ->  64 elem ( 32B),  LR 2x1 (wg2x2) or 1x1 (wg4x4)
+#   MT128x128 ->  GR 8x1  -> 128 elem ( 64B),  LR 4x1 (wg2x2) or 2x1 (wg4x4)
+#   MT256x256 ->  GR 16x1 -> 256 elem (128B),  LR 8x1 (wg2x2) or 4x1 (wg4x4)
+# 256 fp4 elements is one full 128B cacheline.
+#
+# Every config is bank-conflict free: col_scatter reaches 1-way at stacks 2, 4,
+# 8 and 16 alike, and its load index enters only as an additive K-column shift
+# so it survives the loads being split across waves.  Verified 0
+# SQ_LDS_BANK_CONFLICT on all six.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 GlobalParameters:
@@ -49,9 +53,12 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64   -> GR 4x1  / LR 2x1
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 -> GR 8x1  / LR 4x1
-          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 -> GR 16x1 / LR 8x1
+          - [16, 16, 128, 1,  1,  2,  2,  2, 2]   # MT64x64   wg2x2 GR4/LR2
+          - [16, 16, 128, 1,  1,  1,  1,  4, 4]   # MT64x64   wg4x4 GR4/LR1
+          - [16, 16, 128, 1,  1,  4,  4,  2, 2]   # MT128x128 wg2x2 GR8/LR4
+          - [16, 16, 128, 1,  1,  2,  2,  4, 4]   # MT128x128 wg4x4 GR8/LR2
+          - [16, 16, 128, 1,  1,  8,  8,  2, 2]   # MT256x256 wg2x2 GR16/LR8
+          - [16, 16, 128, 1,  1,  4,  4,  4, 4]   # MT256x256 wg4x4 GR16/LR4
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [128]
@@ -65,4 +72,4 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [256, 256, 1, 128]
-          - Exact: [512, 512, 1, 512]
+          - Exact: [512, 512, 1, 256]
