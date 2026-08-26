@@ -542,21 +542,6 @@ catch(...)
     return rocfft_handle_exception();
 }
 
-static bool valid_symbol_name(const char* symbol_name)
-{
-    if(!symbol_name || symbol_name[0] == '\0'
-       || std::isdigit(static_cast<unsigned char>(symbol_name[0])))
-        return false;
-
-    static constexpr auto legal_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
-    constexpr auto legal_chars_end    = legal_chars + std::char_traits<char>::length(legal_chars);
-
-    const char* end = symbol_name + strlen(symbol_name);
-    return std::all_of(symbol_name, end, [=](unsigned char c) {
-        return std::isdigit(c) || std::find(legal_chars, legal_chars_end, c) != legal_chars_end;
-    });
-}
-
 rocfft_status rocfft_plan_description_set_load_callback(rocfft_plan_description description,
                                                         const char*             symbol_name,
                                                         const void*             bitcode_data,
@@ -582,16 +567,7 @@ try
     if(shared_mem_bytes)
         return rocfft_status_invalid_arg_value;
 
-    // clear the callback
-    if(!symbol_name || !bitcode_data || !bitcode_len_bytes)
-        description->loadOps.spirv_cb = {};
-    else
-    {
-        // validate that the symbol name is a legal C identifier
-        if(!valid_symbol_name(symbol_name))
-            return rocfft_status_invalid_arg_value;
-        description->loadOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes);
-    }
+    description->loadOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes);
     return rocfft_status_success;
 }
 catch(...)
@@ -624,16 +600,7 @@ try
     if(shared_mem_bytes)
         return rocfft_status_invalid_arg_value;
 
-    // clear the callback
-    if(!symbol_name || !bitcode_data || !bitcode_len_bytes)
-        description->storeOps.spirv_cb = {};
-    else
-    {
-        // validate that the symbol name is a legal C identifier
-        if(!valid_symbol_name(symbol_name))
-            return rocfft_status_invalid_arg_value;
-        description->storeOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes);
-    }
+    description->storeOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes);
     return rocfft_status_success;
 }
 catch(...)

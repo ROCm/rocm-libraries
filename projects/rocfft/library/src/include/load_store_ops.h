@@ -38,10 +38,14 @@ struct rocfft_spirv_cb_t
     rocfft_spirv_cb_t() = default;
     void set(const char* _symbol_name, const void* _bitcode_data, size_t _bitcode_len_bytes)
     {
+
         if(!_symbol_name)
             symbol_name.clear();
         else
+        {
+            validate_symbol_name(_symbol_name);
             symbol_name = _symbol_name;
+        }
 
         if(!_bitcode_data || _bitcode_len_bytes == 0)
             bitcode_data.clear();
@@ -61,6 +65,24 @@ struct rocfft_spirv_cb_t
     // Copies of data provided by users
     std::string       symbol_name;
     std::vector<char> bitcode_data;
+
+private:
+    // throws if the symbol is not valid
+    static void validate_symbol_name(const char* name)
+    {
+        if(!name || name[0] == '\0' || std::isdigit(static_cast<unsigned char>(name[0])))
+            throw std::invalid_argument("invalid symbol name");
+
+        static constexpr auto legal_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+        constexpr auto legal_chars_end = legal_chars + std::char_traits<char>::length(legal_chars);
+
+        const char* end = name + strlen(name);
+        if(!std::all_of(name, end, [=](unsigned char c) {
+               return std::isdigit(c)
+                      || std::find(legal_chars, legal_chars_end, c) != legal_chars_end;
+           }))
+            throw std::invalid_argument("invalid symbol name");
+    }
 };
 
 struct LoadOps
