@@ -74,6 +74,12 @@ import itertools
 # TODO: DEBUG ONLY, remove later
 from pprint import pprint
 
+
+def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitted):
+  return bool(numItersPLR and kernel["UseCustomMainLoopSchedule"] and kernel["ForceUnrollSubIter"]
+              and not preLoopLocalReadDrainEmitted)
+
+
 # Make const values immutable
 @dataclass(frozen=True)
 class ConstValues():
@@ -5322,6 +5328,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     pack = [ Module() for i in range (self.states.numPackBuffer ) ]
     packPre = [ Module() for i in range (self.states.numPackBuffer ) ]
     self.preLoopLocalWriteCode = None
+    preLoopLocalReadDrainEmitted = False
 
     # InitCIterWmma is resolved to 0/1 in SolutionStructs/Solution.py (-1 auto path).
     initCIterWmma = bool(kernel["InitCIterWmma"])
@@ -5587,6 +5594,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self._interleavePackAB(kernel, packPrePrefetchA.flatitems(), packPrePrefetchB.flatitems(), packPrePrefetchItems, prefetch=True)
           if len(packPrePrefetchItems) > 0:
             module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete (for pre Pack code)"))
+            preLoopLocalReadDrainEmitted = True
 
             module.addItems(packPrePrefetchItems)
           else:
@@ -5621,6 +5629,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         for lri in range(len(localReadCodeB) // 2):
           module.add(localReadCodeB[lri])
         module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete"))
+        preLoopLocalReadDrainEmitted = True
         if kernel["UsePLRPack"]:
           for pi in range(len(packCodeA) // 2):
             module.add(packCodeA[pi])
@@ -5661,6 +5670,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment2("Unrolled Loop(s) - Begin")
       if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
         module.add(SBarrier(comment="TDM PGR=0: prime barrier before loop"))
+      if _needsPreLoopLocalReadDrain(kernel, self.states.numItersPLR,
+                                     preLoopLocalReadDrainEmitted):
+        module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                            comment="complete one-time pre-loop local reads"))
       module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False, beforeInitCIter=initCIterWmma, nta=nta, ntb=ntb))
 
       #init C with wmma(mfma) instead of v_mov, then jump to unrolled loop iter1
