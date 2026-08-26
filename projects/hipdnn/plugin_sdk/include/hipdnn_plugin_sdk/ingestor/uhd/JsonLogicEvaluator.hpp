@@ -1,26 +1,156 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "JsonLogicEvaluator.hpp"
+#pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <variant>
+#include <vector>
+
+#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <sstream>
 
-namespace hipdnn_backend::heuristics::uhd
+namespace hipdnn_plugin_sdk::ingestor::uhd
 {
+
+/// @brief Exception thrown when JsonLogic evaluation fails.
+class JsonLogicError : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
+/// @brief Thrown specifically when a `$ref` names a variable that is not bound.
+///
+/// Distinguished from the other JsonLogicError cases so `value_or_default` can supply
+/// its default for an absent binding without also swallowing a type error or an
+/// invalid operation — RFC 0019 §7.2 requires those to fail closed.
+class UndefinedVariableError : public JsonLogicError
+{
+public:
+    using JsonLogicError::JsonLogicError;
+};
+
+/// @brief Variable resolution context for JsonLogic evaluation.
+///
+/// Provides bindings for $device.*, $kernel.*, and $q.* namespaces.
+/// Variables are resolved as doubles for feature extraction.
+class VariableContext
+{
+public:
+    using ValueType = std::variant<double, int64_t, std::string, bool>;
+
+    /// Bind a variable value by full name (e.g., "$device.cu_count").
+    void bind(const std::string& name, ValueType value);
+
+    /// Bind all variables from a namespace map (e.g., "device" -> {"cu_count": 64}).
+    void bindNamespace(const std::string& ns,
+                       const std::unordered_map<std::string, ValueType>& values);
+
+    /// Erase every binding in a namespace (e.g., "kernel" drops all $kernel.* entries).
+    ///
+    /// Rebinding a namespace does not remove keys the previous binding set but the
+    /// new one omits. Callers that reuse a context across candidates must clear the
+    /// namespace first, or a candidate missing a field silently inherits the previous
+    /// candidate's value.
+    void clearNamespace(const std::string& ns);
+
+    /// Resolve a variable to a double. Returns nullopt if not found.
+    std::optional<double> resolveDouble(const std::string& name) const;
+
+    /// Resolve a variable to its raw value. Returns nullopt if not found.
+    std::optional<ValueType> resolve(const std::string& name) const;
+
+    /// Check if a variable is bound.
+    bool has(const std::string& name) const;
+
+    /// Clear all bindings.
+    void clear();
+
+private:
+    std::unordered_map<std::string, ValueType> _bindings;
+};
+
+/// @brief JsonLogic expression evaluator.
+///
+/// Evaluates JsonLogic expressions per RFC 0018 format:
+/// - Operators: {"op": [args]} where op is the operation name
+/// - Variables: "$namespace.field" strings (no {"var": ...} wrapper)
+/// - Literals: numbers, strings, booleans
+///
+/// Supported operators (RFC 0018 set):
+/// - Arithmetic: +, -, *, /, %, ceil_div
+/// - Math: min, max, abs, pow, log2, rsqrt
+/// - Comparison: ==, !=, <, <=, >, >=
+/// - Logical: and, or, !
+/// - Control: if, value_or_default
+class JsonLogicEvaluator
+{
+public:
+    using Value = std::variant<double, bool, std::string>;
+
+    /// Parse a JsonLogic expression from JSON string.
+    /// @throws JsonLogicError on parse failure.
+    static nlohmann::json parse(const std::string& jsonStr);
+
+    /// Evaluate an expression against a variable context.
+    /// @returns The result as a double (for feature extraction).
+    /// @throws JsonLogicError on evaluation failure.
+    double evaluateDouble(const nlohmann::json& expr, const VariableContext& ctx) const;
+
+    /// Evaluate an expression to a generic value.
+    /// Evaluate an expression to a generic value.
+    /// @param depth Current recursion depth; the interpreter is bounded per RFC 0019
+    ///        §7.2/§16, since a descriptor is author-controlled input and a deeply
+    ///        nested expression would otherwise overflow the stack.
+    Value evaluate(const nlohmann::json& expr, const VariableContext& ctx, size_t depth = 0) const;
+
+    /// Maximum expression nesting the interpreter will descend.
+    static constexpr size_t MAX_EXPRESSION_DEPTH = 64;
+
+    /// Extract all variable references from an expression.
+    /// Returns variable names (e.g., "$device.cu_count", "$kernel.tile_m").
+    static std::unordered_set<std::string> extractVariables(const nlohmann::json& expr);
+
+private:
+    Value evaluateOp(const std::string& op,
+                     const nlohmann::json& args,
+                     const VariableContext& ctx,
+                     size_t depth) const;
+
+    /// Coerce to a number for a numeric context.
+    /// @throws JsonLogicError if the value is a string — RFC 0019 §7.2 requires
+    ///         failing closed on a type error rather than yielding NaN.
+    static double toDouble(const Value& v);
+
+    /// Structural equality: strings compare as strings, numbers as numbers.
+    /// @throws JsonLogicError when comparing a string against a number.
+    static bool valuesEqual(const Value& a, const Value& b);
+    static bool toBool(const Value& v);
+};
+
 
 // ============================================================================
 // VariableContext
 // ============================================================================
 
-void VariableContext::bind(const std::string& name, ValueType value)
+inline void VariableContext::bind(const std::string& name, ValueType value)
 {
     _bindings[name] = std::move(value);
 }
 
-void VariableContext::bindNamespace(const std::string& ns,
+inline void VariableContext::bindNamespace(const std::string& ns,
                                     const std::unordered_map<std::string, ValueType>& values)
 {
     std::string prefix = "$";
@@ -32,7 +162,7 @@ void VariableContext::bindNamespace(const std::string& ns,
     }
 }
 
-void VariableContext::clearNamespace(const std::string& ns)
+inline void VariableContext::clearNamespace(const std::string& ns)
 {
     std::string prefix = "$";
     prefix += ns;
@@ -51,7 +181,7 @@ void VariableContext::clearNamespace(const std::string& ns)
     }
 }
 
-std::optional<double> VariableContext::resolveDouble(const std::string& name) const
+inline std::optional<double> VariableContext::resolveDouble(const std::string& name) const
 {
     auto it = _bindings.find(name);
     if(it == _bindings.end())
@@ -82,7 +212,7 @@ std::optional<double> VariableContext::resolveDouble(const std::string& name) co
         it->second);
 }
 
-std::optional<VariableContext::ValueType> VariableContext::resolve(const std::string& name) const
+inline std::optional<VariableContext::ValueType> VariableContext::resolve(const std::string& name) const
 {
     auto it = _bindings.find(name);
     if(it == _bindings.end())
@@ -92,12 +222,12 @@ std::optional<VariableContext::ValueType> VariableContext::resolve(const std::st
     return it->second;
 }
 
-bool VariableContext::has(const std::string& name) const
+inline bool VariableContext::has(const std::string& name) const
 {
     return _bindings.find(name) != _bindings.end();
 }
 
-void VariableContext::clear()
+inline void VariableContext::clear()
 {
     _bindings.clear();
 }
@@ -106,7 +236,7 @@ void VariableContext::clear()
 // JsonLogicEvaluator
 // ============================================================================
 
-nlohmann::json JsonLogicEvaluator::parse(const std::string& jsonStr)
+inline nlohmann::json JsonLogicEvaluator::parse(const std::string& jsonStr)
 {
     try
     {
@@ -121,13 +251,13 @@ nlohmann::json JsonLogicEvaluator::parse(const std::string& jsonStr)
     }
 }
 
-double JsonLogicEvaluator::evaluateDouble(const nlohmann::json& expr,
+inline double JsonLogicEvaluator::evaluateDouble(const nlohmann::json& expr,
                                           const VariableContext& ctx) const
 {
     return toDouble(evaluate(expr, ctx));
 }
 
-JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& expr,
+inline JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& expr,
                                                        const VariableContext& ctx,
                                                        size_t depth) const
 {
@@ -207,7 +337,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& exp
     throw JsonLogicError("Unsupported expression type");
 }
 
-bool JsonLogicEvaluator::valuesEqual(const Value& a, const Value& b)
+inline bool JsonLogicEvaluator::valuesEqual(const Value& a, const Value& b)
 {
     const bool aIsString = std::holds_alternative<std::string>(a);
     const bool bIsString = std::holds_alternative<std::string>(b);
@@ -223,7 +353,7 @@ bool JsonLogicEvaluator::valuesEqual(const Value& a, const Value& b)
     return toDouble(a) == toDouble(b);
 }
 
-JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
+inline JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
                                                          const nlohmann::json& args,
                                                          const VariableContext& ctx,
                                                          size_t depth) const
@@ -701,7 +831,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
     throw JsonLogicError("Unknown operator: " + op);
 }
 
-std::unordered_set<std::string> JsonLogicEvaluator::extractVariables(const nlohmann::json& expr)
+inline std::unordered_set<std::string> JsonLogicEvaluator::extractVariables(const nlohmann::json& expr)
 {
     std::unordered_set<std::string> vars;
 
@@ -737,7 +867,7 @@ std::unordered_set<std::string> JsonLogicEvaluator::extractVariables(const nlohm
     return vars;
 }
 
-double JsonLogicEvaluator::toDouble(const Value& v)
+inline double JsonLogicEvaluator::toDouble(const Value& v)
 {
     return std::visit(
         [](const auto& val) -> double {
@@ -764,7 +894,7 @@ double JsonLogicEvaluator::toDouble(const Value& v)
         v);
 }
 
-bool JsonLogicEvaluator::toBool(const Value& v)
+inline bool JsonLogicEvaluator::toBool(const Value& v)
 {
     return std::visit(
         [](const auto& val) -> bool {
@@ -785,4 +915,6 @@ bool JsonLogicEvaluator::toBool(const Value& v)
         v);
 }
 
-} // namespace hipdnn_backend::heuristics::uhd
+} // namespace hipdnn_plugin_sdk::ingestor::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

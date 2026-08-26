@@ -1,56 +1,227 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "FeatureExtractor.hpp"
-#include "Sha256.hpp"
+#pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+#include <hipdnn_plugin_sdk/ingestor/uhd/JsonLogicEvaluator.hpp>
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/Sha256.hpp>
 #include <algorithm>
 #include <cmath>
 #include <sstream>
 
-namespace
+namespace hipdnn_plugin_sdk::ingestor::uhd
 {
-// SHA-256 implementation now lives in Sha256.cpp
-} // anonymous namespace
 
-namespace hipdnn_backend::heuristics::uhd
+/// @brief Context for feature extraction containing all bound variables.
+///
+/// Provides bindings for:
+/// - $device.*: Device properties (cu_count, arch, total_global_mem, etc.)
+/// - $kernel.*: Kernel metadata from KMD fields (tile_m, split_k, dtype, etc.)
+/// - $q.*: Problem/query properties from graph match (batch, seqlen, heads, etc.)
+class FeatureExtractionContext
 {
+public:
+    using ValueMap = std::unordered_map<std::string, VariableContext::ValueType>;
+
+    /// Bind device properties ($device.*).
+    void bindDeviceVars(const ValueMap& props);
+
+    /// Bind kernel metadata ($kernel.*).
+    void bindKernelVars(const ValueMap& metadata);
+
+    /// Drop all $kernel.* bindings, leaving $device.* and $q.* intact.
+    ///
+    /// Call this between candidates when reusing a context, so a candidate whose
+    /// metadata omits a field does not inherit the previous candidate's value.
+    void clearKernelVars();
+
+    /// Bind problem/query properties ($q.*).
+    void bindQueryVars(const ValueMap& queryProps);
+
+    /// Bind a single variable by full name.
+    void bind(const std::string& fullName, VariableContext::ValueType value);
+
+    /// Get the underlying VariableContext for evaluation.
+    const VariableContext& getContext() const
+    {
+        return _ctx;
+    }
+
+    /// Clear all bindings.
+    void clear();
+
+    /// Check if all required variables are bound.
+    bool hasAllVars(const std::unordered_set<std::string>& required) const;
+
+    /// Get list of missing variables from a required set.
+    std::vector<std::string> getMissingVars(const std::unordered_set<std::string>& required) const;
+
+private:
+    VariableContext _ctx;
+};
+
+/// @brief Feature extractor for UHD heuristic evaluation.
+///
+/// Extracts feature vectors from a features_signature (ordered list of JsonLogic
+/// expressions) using a FeatureExtractionContext. Supports RFC 0019 §6.4 derived
+/// values which are evaluated in order and bound to $derived.* namespace before
+/// evaluating the main signature. Also computes signature hashes for contract validation.
+class FeatureExtractor
+{
+public:
+    /// Construct with a features signature (list of JsonLogic expression strings).
+    /// @param signature Ordered list of feature expressions.
+    /// @param derived Optional derived values (RFC 0019 §6.4) as (name, expression) pairs.
+    explicit FeatureExtractor(const std::vector<std::string>& signature,
+                               const std::vector<std::pair<std::string, std::string>>& derived
+                               = {});
+
+    /// Extract feature vector from context.
+    /// @returns Ordered vector of feature values matching the signature.
+    /// @throws JsonLogicError if any expression fails to evaluate.
+    std::vector<double> extract(const FeatureExtractionContext& ctx) const;
+
+    /// Evaluate only the entries that do not reference $kernel.* (RFC 0019 §6 step 2).
+    ///
+    /// Problem ($q.*) and device ($device.*) features are shared across every
+    /// candidate, so they are evaluated once per selection rather than once per
+    /// candidate. Kernel-dependent slots are left at zero for extractKernelInto().
+    ///
+    /// @returns A full-width row with shared slots populated.
+    /// @throws JsonLogicError if any shared expression fails to evaluate.
+    std::vector<double> extractSharedRow(const FeatureExtractionContext& ctx) const;
+
+    /// Fill the $kernel.*-dependent slots of a row from extractSharedRow().
+    ///
+    /// @param ctx Context with this candidate's kernel metadata bound.
+    /// @param row Row to update in place; must be featureCount() wide.
+    /// @throws JsonLogicError if any kernel-dependent expression fails to evaluate.
+    void extractKernelInto(const FeatureExtractionContext& ctx, std::vector<double>& row) const;
+
+    /// Get the number of features in the signature.
+    size_t featureCount() const
+    {
+        return _parsedExprs.size();
+    }
+
+    /// Number of signature entries that reference $kernel.* (re-evaluated per candidate).
+    size_t kernelDependentCount() const
+    {
+        return _kernelIndices.size();
+    }
+
+    /// Get all variable references in the signature.
+    const std::unordered_set<std::string>& getVariableRefs() const
+    {
+        return _varRefs;
+    }
+
+    /// Validate that all referenced variables in the signature are present in context.
+    bool validateContext(const FeatureExtractionContext& ctx) const;
+
+    /// Get missing variables that are referenced but not bound in context.
+    std::vector<std::string> getMissingVariables(const FeatureExtractionContext& ctx) const;
+
+    /// Parse one features_signature entry.
+    ///
+    /// RFC 0019 §7.2 allows two forms: a bare field reference (`$q.seqlen_q`) or a
+    /// derived JsonLogic expression (`{"log2": ["$q.seqlen_q"]}`). A bare reference is
+    /// not valid JSON on its own, so it is lifted to a JSON string rather than parsed.
+    /// Pre-quoted entries (`"\"$q.seqlen_q\""`) still parse to the same node.
+    ///
+    /// @throws JsonLogicError if a non-reference entry is not valid JSON.
+    static nlohmann::json parseSignatureEntry(const std::string& entry);
+
+    /// Compute SHA-256 hash of the features signature.
+    /// This hash is embedded in trained models for contract validation.
+    ///
+    /// Entries are canonicalized through parseSignatureEntry() before hashing, so the
+    /// bare and pre-quoted spellings of a reference agree. Order is significant —
+    /// RFC 0019 §7.2 requires the signature to match training exactly, so a permuted
+    /// signature must not produce a matching hash.
+    static std::string computeHash(const std::vector<std::string>& signature);
+
+    /// Get the hash of this extractor's signature.
+    const std::string& getSignatureHash() const
+    {
+        return _signatureHash;
+    }
+
+    /// Validate that a set of KMD field names covers all $kernel.* references.
+    /// Returns true if every $kernel.<field> in the signature has a matching field name.
+    bool validateAgainstKmdFields(const std::unordered_set<std::string>& kmdFieldNames) const;
+
+    /// Get $kernel.* field names referenced but not in KMD.
+    std::vector<std::string>
+        getMissingKmdFields(const std::unordered_set<std::string>& kmdFieldNames) const;
+
+private:
+    /// Evaluate and bind derived values to $derived.* namespace (RFC 0019 §6.4).
+    /// @param ctx Context to bind derived values into (mutable because binding is lazy).
+    void evaluateDerived(FeatureExtractionContext& ctx) const;
+
+    // Derived values (RFC 0019 §6.4): ordered (name, parsed-expression) pairs
+    std::vector<std::pair<std::string, nlohmann::json>> _parsedDerived;
+    /// Derived value indices that depend on $kernel.* (must be re-evaluated per candidate)
+    std::unordered_set<size_t> _kernelDependentDerivedIndices;
+
+    std::vector<nlohmann::json> _parsedExprs;
+    std::unordered_set<std::string> _varRefs;
+    /// Signature positions with no $kernel.* reference — evaluated once per selection.
+    std::vector<size_t> _sharedIndices;
+    /// Signature positions referencing $kernel.* — evaluated once per candidate.
+    std::vector<size_t> _kernelIndices;
+    std::string _signatureHash;
+    JsonLogicEvaluator _evaluator;
+};
+
 
 // ============================================================================
 // FeatureExtractionContext
 // ============================================================================
 
-void FeatureExtractionContext::bindDeviceVars(const ValueMap& props)
+inline void FeatureExtractionContext::bindDeviceVars(const ValueMap& props)
 {
     _ctx.bindNamespace("device", props);
 }
 
-void FeatureExtractionContext::bindKernelVars(const ValueMap& metadata)
+inline void FeatureExtractionContext::bindKernelVars(const ValueMap& metadata)
 {
     _ctx.bindNamespace("kernel", metadata);
 }
 
-void FeatureExtractionContext::clearKernelVars()
+inline void FeatureExtractionContext::clearKernelVars()
 {
     _ctx.clearNamespace("kernel");
 }
 
-void FeatureExtractionContext::bindQueryVars(const ValueMap& queryProps)
+inline void FeatureExtractionContext::bindQueryVars(const ValueMap& queryProps)
 {
     _ctx.bindNamespace("q", queryProps);
 }
 
-void FeatureExtractionContext::bind(const std::string& fullName, VariableContext::ValueType value)
+inline void FeatureExtractionContext::bind(const std::string& fullName, VariableContext::ValueType value)
 {
     _ctx.bind(fullName, std::move(value));
 }
 
-void FeatureExtractionContext::clear()
+inline void FeatureExtractionContext::clear()
 {
     _ctx.clear();
 }
 
-bool FeatureExtractionContext::hasAllVars(const std::unordered_set<std::string>& required) const
+inline bool FeatureExtractionContext::hasAllVars(const std::unordered_set<std::string>& required) const
 {
     for(const auto& var : required)
     {
@@ -62,7 +233,7 @@ bool FeatureExtractionContext::hasAllVars(const std::unordered_set<std::string>&
     return true;
 }
 
-std::vector<std::string>
+inline std::vector<std::string>
     FeatureExtractionContext::getMissingVars(const std::unordered_set<std::string>& required) const
 {
     std::vector<std::string> missing;
@@ -80,7 +251,7 @@ std::vector<std::string>
 // FeatureExtractor
 // ============================================================================
 
-namespace
+namespace detail
 {
 
 /// Largest numeric literal magnitude the cross-language canonical form is safe for.
@@ -96,9 +267,9 @@ namespace
 /// Feature literals are tile sizes, dimensions and thresholds, so this bound is many
 /// orders of magnitude clear of anything real. Rejecting is the honest option: a
 /// signature we cannot canonicalize identically on both sides has no usable hash.
-constexpr double MAX_SAFE_NUMERIC_LITERAL = 1e15;
+inline constexpr double MAX_SAFE_NUMERIC_LITERAL = 1e15;
 
-void validateNumericLiterals(const nlohmann::json& node)
+inline void validateNumericLiterals(const nlohmann::json& node)
 {
     if(node.is_number())
     {
@@ -136,9 +307,9 @@ void validateNumericLiterals(const nlohmann::json& node)
     }
 }
 
-} // namespace
+} // namespace detail
 
-nlohmann::json FeatureExtractor::parseSignatureEntry(const std::string& entry)
+inline nlohmann::json FeatureExtractor::parseSignatureEntry(const std::string& entry)
 {
     // A bare reference such as `$q.seqlen_q` is the RFC 0019 §7.2 canonical spelling
     // and what tools/uhd_gen emits, but it is not valid JSON. Lift it to a JSON string
@@ -155,7 +326,7 @@ nlohmann::json FeatureExtractor::parseSignatureEntry(const std::string& entry)
     return JsonLogicEvaluator::parse(entry);
 }
 
-FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature,
+inline FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature,
                                      const std::vector<std::pair<std::string, std::string>>& derived)
 {
     // Parse and analyze derived values (RFC 0019 §6.4)
@@ -293,7 +464,7 @@ FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature,
     _signatureHash = computeHash(signature);
 }
 
-std::vector<double> FeatureExtractor::extract(const FeatureExtractionContext& ctx) const
+inline std::vector<double> FeatureExtractor::extract(const FeatureExtractionContext& ctx) const
 {
     // Evaluate and bind derived values (RFC 0019 §6.4)
     // Note: This requires a mutable context - derived values are lazily computed
@@ -311,7 +482,7 @@ std::vector<double> FeatureExtractor::extract(const FeatureExtractionContext& ct
     return features;
 }
 
-std::vector<double> FeatureExtractor::extractSharedRow(const FeatureExtractionContext& ctx) const
+inline std::vector<double> FeatureExtractor::extractSharedRow(const FeatureExtractionContext& ctx) const
 {
     // Evaluate and bind kernel-independent derived values (RFC 0019 §6.4)
     auto& mutableCtx = const_cast<FeatureExtractionContext&>(ctx);
@@ -337,7 +508,7 @@ std::vector<double> FeatureExtractor::extractSharedRow(const FeatureExtractionCo
     return row;
 }
 
-void FeatureExtractor::extractKernelInto(const FeatureExtractionContext& ctx,
+inline void FeatureExtractor::extractKernelInto(const FeatureExtractionContext& ctx,
                                          std::vector<double>& row) const
 {
     if(row.size() != _parsedExprs.size())
@@ -367,18 +538,18 @@ void FeatureExtractor::extractKernelInto(const FeatureExtractionContext& ctx,
     }
 }
 
-bool FeatureExtractor::validateContext(const FeatureExtractionContext& ctx) const
+inline bool FeatureExtractor::validateContext(const FeatureExtractionContext& ctx) const
 {
     return ctx.hasAllVars(_varRefs);
 }
 
-std::vector<std::string>
+inline std::vector<std::string>
     FeatureExtractor::getMissingVariables(const FeatureExtractionContext& ctx) const
 {
     return ctx.getMissingVars(_varRefs);
 }
 
-std::string FeatureExtractor::computeHash(const std::vector<std::string>& signature)
+inline std::string FeatureExtractor::computeHash(const std::vector<std::string>& signature)
 {
     // Canonical form is the parsed signature dumped as compact JSON, matching Python's
     // json.dumps(signature, separators=(",", ":")) in tools/uhd_gen. Parsing first means
@@ -393,7 +564,7 @@ std::string FeatureExtractor::computeHash(const std::vector<std::string>& signat
     }
 
     // Reject literals the two languages would render differently before hashing them.
-    validateNumericLiterals(canonical);
+    detail::validateNumericLiterals(canonical);
 
     std::string serialized;
     try
@@ -414,7 +585,7 @@ std::string FeatureExtractor::computeHash(const std::vector<std::string>& signat
     return "sha256:" + fullHash.substr(0, 16);
 }
 
-bool FeatureExtractor::validateAgainstKmdFields(
+inline bool FeatureExtractor::validateAgainstKmdFields(
     const std::unordered_set<std::string>& kmdFieldNames) const
 {
     const std::string kernelPrefix = "$kernel.";
@@ -434,7 +605,7 @@ bool FeatureExtractor::validateAgainstKmdFields(
     return true;
 }
 
-std::vector<std::string> FeatureExtractor::getMissingKmdFields(
+inline std::vector<std::string> FeatureExtractor::getMissingKmdFields(
     const std::unordered_set<std::string>& kmdFieldNames) const
 {
     const std::string kernelPrefix = "$kernel.";
@@ -454,7 +625,7 @@ std::vector<std::string> FeatureExtractor::getMissingKmdFields(
     return missing;
 }
 
-void FeatureExtractor::evaluateDerived(FeatureExtractionContext& ctx) const
+inline void FeatureExtractor::evaluateDerived(FeatureExtractionContext& ctx) const
 {
     // RFC 0019 §6.4: Evaluate derived values in order and bind to $derived.* namespace.
     // Each expression can reference $device.*, $kernel.*, $q.*, and earlier $derived.* entries.
@@ -477,4 +648,6 @@ void FeatureExtractor::evaluateDerived(FeatureExtractionContext& ctx) const
     }
 }
 
-} // namespace hipdnn_backend::heuristics::uhd
+} // namespace hipdnn_plugin_sdk::ingestor::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

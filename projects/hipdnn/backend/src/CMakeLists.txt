@@ -116,10 +116,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         hipdnn_backend_private
         PRIVATE
         heuristics/uhd/EngineRegistry.cpp
-        heuristics/uhd/JsonLogicEvaluator.cpp
-        heuristics/uhd/FeatureExtractor.cpp
         heuristics/uhd/SelectionEngine.cpp
-        heuristics/uhd/Sha256.cpp
         heuristics/uhd/UhdBuiltIn.cpp
         heuristics/uhd/UhdLoader.cpp
         heuristics/uhd/adapters/TreeDataAdapter.cpp
