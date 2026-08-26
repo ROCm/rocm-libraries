@@ -36,6 +36,7 @@
 #include "rocsparse_coosv.hpp"
 #include "rocsparse_cscsv.hpp"
 #include "rocsparse_csrsv.hpp"
+#include "rocsparse_ellsv.hpp"
 #include "rocsparse_sptrsv_descr.hpp"
 
 template <>
@@ -345,9 +346,22 @@ try
                            data_size_in_bytes != sizeof(int64_t),
                            rocsparse_status_invalid_size);
 
-        auto csrsv_info = sptrsv_descr->get_csrsv_info();
-        auto status
-            = rocsparse::csrsv_zero_pivot(handle, csrsv_info, rocsparse_indextype_i64, data);
+        rocsparse_status status{};
+        switch(sptrsv_descr->get_format())
+        {
+        case rocsparse_format_ell:
+        {
+            auto ellsv_info = sptrsv_descr->get_ellsv_info();
+            status = rocsparse::ellsv_zero_pivot(handle, ellsv_info, rocsparse_indextype_i64, data);
+            break;
+        }
+        default:
+        {
+            auto csrsv_info = sptrsv_descr->get_csrsv_info();
+            status = rocsparse::csrsv_zero_pivot(handle, csrsv_info, rocsparse_indextype_i64, data);
+            break;
+        }
+        }
 
         if(status == rocsparse_status_zero_pivot)
         {
@@ -412,8 +426,14 @@ namespace rocsparse
 #endif
             }
 
-            case rocsparse_format_bsr:
             case rocsparse_format_ell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_analysis_buffer_size(
+                    handle, operation, A, buffer_size_in_bytes));
+                return rocsparse_status_success;
+            }
+
+            case rocsparse_format_bsr:
             case rocsparse_format_bell:
             case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
@@ -456,8 +476,14 @@ namespace rocsparse
 #endif
             }
 
-            case rocsparse_format_bsr:
             case rocsparse_format_ell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_solve_buffer_size(
+                    handle, operation, A, x, y, buffer_size_in_bytes));
+                return rocsparse_status_success;
+            }
+
+            case rocsparse_format_bsr:
             case rocsparse_format_bell:
             case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
@@ -715,9 +741,44 @@ namespace rocsparse
                 return rocsparse_status_success;
 #endif
             }
+            case rocsparse_format_ell:
+            {
+                rocsparse_ellsv_info ellsv_info{};
+                switch(analysis_policy)
+                {
+                case rocsparse_analysis_policy_reuse:
+                {
+                    sptrsv_descr->set_shared_ellsv_info(A->info->get_shared_ellsv_info());
+                    ellsv_info = sptrsv_descr->get_ellsv_info();
+                    break;
+                }
+                case rocsparse_analysis_policy_force:
+                {
+                    ellsv_info = nullptr;
+                    break;
+                }
+                }
+
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_analysis(
+                    handle, operation, A, analysis_policy, &ellsv_info, buffer));
+                sptrsv_descr->set_stage(rocsparse_sptrsv_stage_analysis);
+                switch(analysis_policy)
+                {
+                case rocsparse_analysis_policy_reuse:
+                {
+                    break;
+                }
+                case rocsparse_analysis_policy_force:
+                {
+                    sptrsv_descr->set_ellsv_info(ellsv_info);
+                    break;
+                }
+                }
+
+                return rocsparse_status_success;
+            }
 
             case rocsparse_format_bsr:
-            case rocsparse_format_ell:
             case rocsparse_format_bell:
             case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
@@ -807,8 +868,23 @@ namespace rocsparse
 #endif
             }
 
-            case rocsparse_format_bsr:
             case rocsparse_format_ell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_solve(handle,
+                                                                 operation,
+                                                                 alpha_datatype,
+                                                                 alpha,
+                                                                 static_cast<int64_t>(0),
+                                                                 A,
+                                                                 dnvec_descr_x,
+                                                                 dnvec_descr_y,
+                                                                 sptrsv_descr->get_ellsv_info(),
+                                                                 buffer));
+                sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
+                return rocsparse_status_success;
+            }
+
+            case rocsparse_format_bsr:
             case rocsparse_format_bell:
             case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
