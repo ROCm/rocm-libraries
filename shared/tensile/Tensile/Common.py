@@ -2470,10 +2470,11 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
 
   # read current gfx version
   returncode = detectGlobalCurrentISA()
-  if globalParameters["CurrentISA"] == (0,0,0):
+  no_enumerate = globalParameters["ROCmAgentEnumeratorPath"] is False
+  if globalParameters["CurrentISA"] == (0,0,0) and not no_enumerate:
     printWarning(f"Did not detect SupportedISA: {globalParameters['SupportedISA']}; cannot benchmark assembly kernels."\
       "This warning can be safely ignored for TensileCreateLibrary builds.")
-  if returncode:
+  if returncode and not no_enumerate:
     if os.name == "nt":
       globalParameters["CurrentISA"] = (9,0,6)
       printWarning("Failed to detect ISA so forcing (gfx906) on windows")
