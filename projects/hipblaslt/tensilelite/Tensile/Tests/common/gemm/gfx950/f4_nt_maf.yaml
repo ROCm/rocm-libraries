@@ -1,29 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# NT F4 subtile GEMM -- MAF (max achievable FLOPs) benchmark.
-#
-# Companion to f4_nt.yaml: one workgroup per CU (256 WGs, M=N=MT*16) and a large
-# K so the mainloop dominates.  MIWaveGroup is fixed at 2x2 so the MFMA-M stack
-# is the only variable; note MT = 16 * stack * waveGroup, so at 4 waves each MT
-# is twice its strip.  DepthU is the largest that fits the 160KB LDS budget.
-#
-#   MIWT 2x2  -> MT64x64   -> 2x1  stack -> M=N=1024        -> DepthU 1024
-#   MIWT 4x4  -> MT128x128 -> 4x1  stack -> M=N=2048        -> DepthU 512
-#   MIWT 8x8  -> MT256x256 -> 8x1  stack -> M=N=4096        -> DepthU 256
-#   MIWT 16x4 -> MT512x128 -> 16x1 stack -> M=8192, N=2048  -> DepthU 128
-#
-# 16x1 is rectangular because acc VGPRs scale as MIWT[0]*MIWT[1]*4, so the square
-# MIWT 16x16 would need 1024 and cannot be built.  It is expected to land below
-# 8x1: MT512x128 moves 640 operand units per K step vs 512 for MT256x256.
-#
-# 4 waves is a control, not the peak -- 1 wave measures faster where it can form
-# the same MT, but MT256x256 cannot drop below 4 waves.
-#
-# PGR2/PLR1 throughout.  Without prefetch the mainloop serialises global load ->
-# barrier -> ds_read -> MFMA and MFMA utilisation is low.  Per-stack
-# optima differ slightly (128x128 peaks at PGR1) but only marginally, so the
-# setting is held fixed to keep the stack the only variable.
+# NT F4 subtile GEMM -- max achievable FLOPs.  Peak config per square macro
+# tile: 4 waves, SubtileWideGR, PGR2/PLR1, largest DepthU that fits 160KB LDS.
+# One workgroup per CU (M=N=MT*16 -> 256 WGs), K=65536.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
@@ -51,7 +31,7 @@ GlobalParameters:
 
 BenchmarkProblems:
 
-  # --- 2x1 stack: MT64x64 wg2x2, DepthU 1024 ------------------------------
+  # MT64x64, GR 4x1 / LR 2x1
   -
     - # ProblemType
       OperationType: GEMM
@@ -69,7 +49,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64 wg2x2
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [1024]
@@ -78,11 +58,12 @@ BenchmarkProblems:
         - StreamK: [0]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
+        - SubtileWideGR: [true]
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [1024, 1024, 1, 65536]
 
-  # --- 4x1 stack: MT128x128 wg2x2, DepthU 512 -----------------------------
+  # MT128x128, GR 8x1 / LR 4x1
   -
     - # ProblemType
       OperationType: GEMM
@@ -100,7 +81,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128 wg2x2
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [512]
@@ -109,11 +90,12 @@ BenchmarkProblems:
         - StreamK: [0]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
+        - SubtileWideGR: [true]
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [2048, 2048, 1, 65536]
 
-  # --- 8x1 stack: MT256x256 wg2x2, DepthU 256 -----------------------------
+  # MT256x256, GR 16x1 / LR 8x1 -- GR run is a full 128B cacheline
   -
     - # ProblemType
       OperationType: GEMM
@@ -131,7 +113,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256 wg2x2
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
@@ -140,37 +122,7 @@ BenchmarkProblems:
         - StreamK: [0]
         - StaggerU: [0]
         - UseSubtileImpl: [true]
+        - SubtileWideGR: [true]
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [4096, 4096, 1, 65536]
-
-  # --- 16x1 stack: MT512x128 wg2x2, DepthU 128 ----------------------------
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 16, 4,  2, 2]  # MT 512x128 wg2x2 (A 16x1, B 4x1)
-        - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [1]
-        - DepthU: [128]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [8192, 2048, 1, 65536]
