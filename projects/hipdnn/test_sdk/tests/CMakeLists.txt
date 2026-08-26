@@ -16,6 +16,7 @@ add_executable(
     hipdnn_test_sdk_tests
     main.cpp
     utilities/TestCpuFpReferenceBatchnorm.cpp
+    utilities/TestComparisonReport.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
     utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
@@ -26,6 +27,7 @@ add_executable(
     utilities/TestCpuFpReferenceLayernormBackward.cpp
     utilities/TestCpuFpReferenceMatmul.cpp
     utilities/TestCpuFpReferenceMoeGroupedMatmul.cpp
+    utilities/TestCpuFpReferenceMoeGroupedMatmulBwd.cpp
     utilities/TestCpuFpReferenceReduction.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
@@ -78,6 +80,8 @@ add_executable(
     utilities/cpu_graph_executor/TestMatmulSignatureKey.cpp
     utilities/cpu_graph_executor/TestMoeGroupedMatmulPlan.cpp
     utilities/cpu_graph_executor/TestMoeGroupedMatmulSignatureKey.cpp
+    utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdPlan.cpp
+    utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestPointwiseOperationsCpuGraphExecutor.cpp
     utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
     utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp

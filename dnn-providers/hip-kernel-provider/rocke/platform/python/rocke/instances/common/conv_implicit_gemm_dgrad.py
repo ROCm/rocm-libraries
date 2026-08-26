@@ -1107,13 +1107,13 @@ def _build_tilde_dgrad(
     ]
 
     threads = spec.block_size
+    _def_vec_a, _def_vec_b, _ = DgradConvSpec.default_vector_sizes(
+        p.C, p.K, spec.data.dtype_a
+    )
     # load_vec_a: k_out is innermost in k_dg → consecutive k_sub → consecutive k_out
     # → contiguous in dY (NHWK, last dim K).  Condition: K % load_vec_a == 0.
     # For split_k > 1 the slice boundary may not align to K_conv so use 1 there.
     if spec.split_k <= 1:
-        _def_vec_a, _, _ = DgradConvSpec.default_vector_sizes(
-            p.C, p.K, spec.data.dtype_a
-        )
         _safe_vec_a = _choose_load_vec_for(
             block_m, block_n, block_k, threads, spec.data.dtype_a
         )
@@ -1123,9 +1123,26 @@ def _build_tilde_dgrad(
         )
     else:
         load_vec_a = 1
-    # load_vec_b: B (KYXC) stride along k_out = Y*X*C ≠ 1 → non-contiguous along K.
-    # Vectorising B requires a transposed loader (future work); keep at 1 for now.
-    load_vec_b = 1
+    # load_vec_b: B (W, KYXC) — the GEMM row axis is N_dg = c (input channels), which
+    # is the stride-1 axis of KYXC.  Vectorise along the free (row) axis and transpose
+    # into the row-major (N, K) LDS tile on store (CoalescedTileLoader vector_axis="row"),
+    # exactly as wgrad does for its B (X, NHWC) operand.  Condition: C % load_vec_b == 0.
+    _vb = CoalescedTileLoader.choose_vec(
+        tile_rows=block_n,
+        tile_cols=block_k,
+        block_size=threads,
+        max_vec=_def_vec_b,
+        vector_axis="row",
+    )
+    if spec.vector_size_b is not None:
+        load_vec_b = spec.vector_size_b
+        axis_b = "row" if load_vec_b > 1 else "col"
+    elif _vb > 1:
+        load_vec_b = _vb
+        axis_b = "row"
+    else:
+        load_vec_b = 1
+        axis_b = "col"
 
     # Buffer resources for A (dY), B (W), D (dX).
     dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
@@ -1189,7 +1206,7 @@ def _build_tilde_dgrad(
         k_sub = b_.add(k_off_capture[0], col)
 
         # Same k_out-innermost decomposition as dy_descriptor (must match).
-        # B (KYXC) stride along k_out = Y*X*C — not contiguous; load_vec_b stays 1.
+        # c (row axis) is stride-1 in KYXC; vectorised loads along c use vector_axis="row".
         k_out = b_.mod(k_sub, c_K)
         yx_rem = b_.div(k_sub, c_K)
         ydot = b_.div(yx_rem, rec_x_dot_slice)
@@ -1226,6 +1243,7 @@ def _build_tilde_dgrad(
         block_size=threads,
         load_vec=load_vec_b,
         elem_dtype=ir_dtype_b,
+        vector_axis=axis_b,
     )
 
     schedule = SchedulePolicy.for_pipeline(spec.pipeline)
