@@ -314,3 +314,35 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [384, 768, 1, 512]
+
+  -
+    - # ProblemType (MT192: MIWaveTile 12, strip 4, 3 strips per wave)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 12, 4,  1, 4]   # MT192x256 wg1x4
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128, 256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [192, 256, 1, 256]
+          - Exact: [384, 512, 1, 512]
