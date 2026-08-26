@@ -573,20 +573,28 @@ TEST_F(IRParserTest, ParsesMultipleModifiers) {
 }
 
 TEST_F(IRParserTest, ParsesMultilineAttributesWithNestedModifierDict) {
-    // AsmMovePropagationPass FileCheck wraps attributes across lines.
+    // AsmMovePropagationPass FileCheck wraps attributes across lines inside st.func.
     const std::string input = R"(
-v2 = "st.v_add_f32"(v0, v3) {
+st.func @compose_vop3_neg_with_mapped_neg() {
+^entry:
+  v0 = "st.v_mov_b32"(-v1) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v0, v3) {
     issueCycles = 1, latencyCycles = 5, mod.vop3 = { neg_src0 = true }
+  }
+  v0 = "st.v_sub_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  "st.buffer_store_b32"(v40, v2) { issueCycles = 1, latencyCycles = 1 }
 }
 )";
 
-    auto instructions = parseAssemblyString(input);
+    auto result = parseSourceStringWithDiagnostics(input);
 
-    ASSERT_EQ(instructions.size(), 1);
-    EXPECT_EQ(instructions[0].issueCycles, 1);
-    EXPECT_EQ(instructions[0].latencyCycles, 5);
-    auto vop3 = instructions[0].modifiers.find("mod.vop3");
-    ASSERT_NE(vop3, instructions[0].modifiers.end());
+    ASSERT_FALSE(result.hasErrors()) << "multiline attributes must parse without errors";
+    ASSERT_NE(result.parsedFunction, nullptr);
+    ASSERT_EQ(result.parsedFunction->blocks.size(), 1u);
+    ASSERT_EQ(result.parsedFunction->blocks[0]->instructions.size(), 4u);
+    const auto& add = *result.parsedFunction->blocks[0]->instructions[1];
+    auto vop3 = add.modifiers.find("mod.vop3");
+    ASSERT_NE(vop3, add.modifiers.end());
     EXPECT_EQ(vop3->second["neg_src0"], "true");
 }
 
