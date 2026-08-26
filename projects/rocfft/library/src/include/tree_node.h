@@ -1035,6 +1035,22 @@ public:
     bool         CreateDeviceResources() override;
     void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
+
+    // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
+    virtual size_t GetU32KernelIndexLimit() const
+    {
+
+        return is_device_gcn_arch(deviceProp, "gfx1250") ? static_cast<size_t>(INT32_MAX)
+                                                         : static_cast<size_t>(UINT32_MAX);
+    }
+    // Return the index type for this node's kernel.
+    // Overridden by nodes that use narrower index types
+    virtual IndexType GetKernelIndexType() const
+    {
+        return IndexType::U64;
+    }
+    // Max element index the kernel would compute for a given I/O side.
+    size_t       MaxKernelIndex(io_data_label io) const;
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
 };
@@ -1058,6 +1074,8 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
+    IndexType GetKernelIndexType() const override;
+
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.
     bool PaddingBenefitsOutput() override

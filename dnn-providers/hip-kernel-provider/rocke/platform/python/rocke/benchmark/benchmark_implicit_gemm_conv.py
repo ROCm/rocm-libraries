@@ -415,10 +415,11 @@ def parse_miopen_cmd(cmd: str):
             -y 11 -x 11 -p 2 -q 2 -u 4 -v 4 -l 1 -j 1 -m conv -g 1 -F 1 \\
             -t 1 -in_layout=NHWC
 
-    Only forward-pass (2-D NHWC) convolutions are supported; the function
-    raises ``ValueError`` for unsupported cases (3-D, NCHW).
-    Returns ``(problem, dtype)`` where ``dtype`` is ``"fp16"``, ``"bf16"``,
-    or ``"fp32"``.
+    Only 2-D NHWC convolutions are supported; the function raises
+    ``ValueError`` for unsupported cases (3-D, NCHW).
+    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``,
+    ``"bf16"``, or ``"fp32"`` and ``forw`` is the raw MIOpenDriver ``-F``
+    value (1=fwd, 2=bwd_data, 4=bwd_weight, 0=all).
     """
     import shlex
 
@@ -497,7 +498,7 @@ def parse_miopen_cmd(cmd: str):
         dW=miopen_args.dW,
         groups=miopen_args.groups,
     )
-    return problem, dtype
+    return problem, dtype, miopen_args.forw
 
 
 # ---------------------------------------------------------------------------
@@ -505,6 +506,18 @@ def parse_miopen_cmd(cmd: str):
 # ---------------------------------------------------------------------------
 
 _CK_DTYPE_STR = {"fp32": "fp32", "fp16": "fp16", "bf16": "bfp16"}
+
+# MIOpenDriver -F flag → rocke direction string.  Values 0/3/5/6 run multiple
+# passes; we expand them at the call site.
+_FORW_TO_DIRECTIONS: dict[int, list[str]] = {
+    0: ["fwd", "dgrad", "wgrad"],
+    1: ["fwd"],
+    2: ["dgrad"],
+    3: ["fwd", "dgrad"],
+    4: ["wgrad"],
+    5: ["fwd", "wgrad"],
+    6: ["dgrad", "wgrad"],
+}
 
 
 def _run_ckprofiler(
@@ -965,13 +978,14 @@ def main() -> int:
             if not line or line.startswith("#"):
                 continue
             try:
-                prob, dt = parse_miopen_cmd(line)
-                cases.append((prob, dt))
+                prob, dt, forw = parse_miopen_cmd(line)
+                for _dir in _FORW_TO_DIRECTIONS.get(forw, ["fwd"]):
+                    cases.append((prob, dt, _dir))
             except ValueError as e:
                 print(f"[warn] {path}:{lineno}: skipping — {e}", file=sys.stderr)
     elif args.miopen_cmd is not None:
-        prob, dt = parse_miopen_cmd(args.miopen_cmd)
-        cases = [(prob, dt)]
+        prob, dt, forw = parse_miopen_cmd(args.miopen_cmd)
+        cases = [(prob, dt, _dir) for _dir in _FORW_TO_DIRECTIONS.get(forw, ["fwd"])]
     else:
         problem = ConvProblem(
             N=args.N,
@@ -994,7 +1008,7 @@ def main() -> int:
             dW=args.dW,
             groups=args.groups,
         )
-        cases = [(problem, args.dtype)]
+        cases = [(problem, args.dtype, args.direction)]
 
     _csv_fields = [
         "rank",
@@ -1046,7 +1060,7 @@ def main() -> int:
 
     n_csv_rows = 0
     try:
-        for case_idx, (problem, dtype) in enumerate(cases):
+        for case_idx, (problem, dtype, direction) in enumerate(cases):
             _elem_bytes = 4 if dtype == "fp32" else 2
             _A_bytes = (
                 problem.N
@@ -1077,13 +1091,13 @@ def main() -> int:
                 print(f"\n{'#'*72}", flush=True)
                 print(
                     f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} "
-                    f"dtype={dtype} direction={args.direction}",
+                    f"dtype={dtype} direction={direction}",
                     flush=True,
                 )
                 print(f"{'#'*72}", flush=True)
 
             if args.ckprofiler is not None:
-                _ck_forw = {"fwd": 1, "wgrad": 4}[args.direction]
+                _ck_forw = {"fwd": 1, "dgrad": 2, "wgrad": 4}[direction]
                 ck_rows = _run_ckprofiler(
                     problem=problem,
                     dtype=dtype,
@@ -1093,9 +1107,9 @@ def main() -> int:
                     verify=int(args.verify),
                 )
                 # Keep the best (highest tflops) CK result for this case.
-                _key = (problem.short(), dtype, args.direction)
+                _key = (problem.short(), dtype, direction)
                 for row in ck_rows:
-                    if row["direction"] == args.direction:
+                    if row["direction"] == direction:
                         prev = ck_best.get(_key)
                         if prev is None or row["tflops"] > prev["tflops"]:
                             ck_best[_key] = row
@@ -1118,14 +1132,14 @@ def main() -> int:
                 case_idx=case_idx,
             )
 
-            if args.direction == "wgrad":
+            if direction == "wgrad":
                 rc, rocke_results = _run_wgrad_sweep(
                     **_common,
                     WgradConvSpec=WgradConvSpec,
                     build_implicit_gemm_conv_wgrad=build_implicit_gemm_conv_wgrad,
                     is_valid_wgrad_spec=is_valid_wgrad_spec,
                 )
-            elif args.direction == "dgrad":
+            elif direction == "dgrad":
                 rc = _run_dgrad_sweep(
                     **_common,
                     DgradConvSpec=DgradConvSpec,
@@ -1144,7 +1158,7 @@ def main() -> int:
 
             if _csv_writer is not None and rocke_results:
                 _shape = problem.short()
-                _key = (_shape, dtype, args.direction)
+                _key = (_shape, dtype, direction)
                 _ck = ck_best.get(_key)
                 for rank, r in enumerate(rocke_results[:5], 1):
                     speedup = (r.tflops / _ck["tflops"]) if _ck else None
@@ -1160,7 +1174,7 @@ def main() -> int:
                             "dW": problem.dW,
                             "groups": problem.groups,
                             "dtype": dtype,
-                            "direction": args.direction,
+                            "direction": direction,
                             "tile_m": r.tile_m,
                             "tile_n": r.tile_n,
                             "tile_k": r.tile_k,
@@ -2449,7 +2463,7 @@ def _run_dgrad_sweep(
                 tflops=cur_tflops,
                 gbps=cur_gbps,
                 vec_a=vec_a,
-                vec_b=1,
+                vec_b=vec_b,
                 vec_c=vec_c,
             )
         )
@@ -2460,7 +2474,7 @@ def _run_dgrad_sweep(
             f"warp={spec.warp_m}x{spec.warp_n} "
             f"atom={spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k} "
             f"{spec.pipeline}/{spec.epilogue:9s} spk{resolved_split_k:<3d} "
-            f"vec={_lva}/1/{vec_c} "
+            f"vec={_lva}/{vec_b}/{vec_c} "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -2495,7 +2509,7 @@ def _run_dgrad_sweep(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"{r.pipeline}/{r.epilogue} spk{r.split_k} "
-            f"vec={_lva_r}/1/{r.vec_c}"
+            f"vec={_lva_r}/{r.vec_b}/{r.vec_c}"
         )
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
 
