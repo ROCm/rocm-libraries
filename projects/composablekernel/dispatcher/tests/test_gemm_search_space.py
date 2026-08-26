@@ -73,12 +73,19 @@ _SKIP = 77
 
 # Per-variant defaults for --dtypes / --layouts. multi_abd and multi_d are
 # fp16-only end-to-end (codegen, ctypes lib and runner all assume fp16) and take
-# the 4-char (A,B,C/E,D) layout code rather than the 3-char one.
+# the 4-char (A,B,C/E,D) layout code rather than the 3-char one. Only the A and
+# B chars vary -- the TE epilogue writes C/E and reads D row-major.
+#
+# Widening multi_d from one layout to four costs no extra runtime: _sample()
+# allocates floor(budget / n_strata) configs per stratum, so a fixed --budget is
+# redistributed rather than multiplied. multi_abd stays single-layout until its
+# bridge is verified the same way multi_d now is.
+_MULTI_LAYOUTS = ["rcrr", "rrrr", "ccrr", "crrr"]
 _VARIANT_DEFAULTS = {
     "standard": (_DTYPES, _LAYOUTS),
     "grouped": (_DTYPES, _LAYOUTS),
     "stream_k": (_DTYPES, _LAYOUTS),
-    "multi_d": (["fp16"], ["rcrr"]),
+    "multi_d": (["fp16"], _MULTI_LAYOUTS),
     "multi_abd": (["fp16"], ["rcrr"]),
 }
 _VARIANTS = tuple(_VARIANT_DEFAULTS)

@@ -13,7 +13,8 @@ dispatcher .so (elementwise_op = MultiDAdd, 2 D tensors), runs it on-device via
 
 Real numeric check -- random A/B/D, element-wise validation vs. fp32 reference,
 plus a non-zero / finite guard so a mis-launched (all-zero) kernel FAILS.
-The multi_d TE op is fp16-only, so only fp16 is exercised.
+The multi_d TE op is fp16-only, so only fp16 is exercised, but all four A/B
+layout combinations are (rcrr / rrrr / ccrr / crrr).
 
 Runs green on gfx942 (MI300X). SKIPs cleanly with no GPU / hipcc / static lib.
 
@@ -41,6 +42,12 @@ from gemm_utils import (  # noqa: E402
 )
 
 _TOL = 1e-2  # fp16 GEMM + fp16 D-fuse precision band
+
+# 4-char (A, B, C/E, D) layout codes, matching _VARIANT_DEFAULTS["multi_d"] in
+# test_gemm_search_space.py. C and E are row-major throughout: the TE multi_d
+# epilogue writes row-major, so only the A and B chars actually vary.
+_LAYOUTS = ("rcrr", "rrrr", "ccrr", "crrr")
+_LAYOUT_WORD = {"r": "row", "c": "col"}
 
 
 def _detect_arch():
@@ -95,23 +102,37 @@ class TestMultiDGemmGpu(unittest.TestCase):
             self.skipTest("hipcc not found")
 
     def test_fp16_multid_add(self):
+        """E = A@B + D0 + D1 across all four A/B layout combinations.
+
+        The runner reads the layout back out of the kernel name and transposes
+        the host operands itself, so A and B are handed over as logical (M, K)
+        and (K, N) in every case and the reference below is layout-independent.
+        Each layout is a separate build, hence subTest rather than four methods:
+        a failure names the layout without hiding the other three.
+        """
+        for layout in _LAYOUTS:
+            with self.subTest(layout=layout):
+                self._check_layout(layout)
+
+    def _check_layout(self, layout: str):
         num_d = 2
+        la, lb, lc, ld = (_LAYOUT_WORD[c] for c in layout)
         cfg = GemmKernelConfig(
             dtype_a="fp16", dtype_b="fp16", dtype_c="fp16", dtype_acc="fp32",
-            layout_a="row", layout_b="col", layout_c="row",
+            layout_a=la, layout_b=lb, layout_c=lc,
             tile_m=128, tile_n=128, tile_k=32,
             wave_m=2, wave_n=2, wave_k=1,
             warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
             pipeline="compv4", scheduler="intrawave", epilogue="cshuffle",
             pad_m=True, pad_n=True, pad_k=True, persistent=False,
             variant="multi_d", elementwise_op="MultiDAdd",
-            num_d_tensors=num_d, d_layout="row",
+            num_d_tensors=num_d, d_layout=ld,
             gfx_arch=self.ARCH,
         )
         so_paths = setup_multiple_gemm_dispatchers([cfg], verbose=False)
         so = so_paths[0]
         if so is None:
-            self.fail("multi_d fp16 kernel failed to build")
+            self.fail(f"multi_d fp16 kernel failed to build (layout={layout})")
 
         M, N, K = 512, 512, 512
         problem = MultiDGemmProblem(M=M, N=N, K=K, num_d=num_d)
@@ -128,8 +149,9 @@ class TestMultiDGemmGpu(unittest.TestCase):
         result = runner.run(A.astype(np.float16), B.astype(np.float16),
                             [d.astype(np.float16) for d in Ds], problem)
         self.assertEqual(result.status, 0,
-                         f"multi_d run status={result.status}")
-        self.assertGreater(result.time_ms, 0.0, "multi_d time_ms not positive")
+                         f"multi_d run status={result.status} (layout={layout})")
+        self.assertGreater(result.time_ms, 0.0,
+                           f"multi_d time_ms not positive (layout={layout})")
 
         # Reference at fp16 input precision, accumulated + fused in fp32:
         #   E = A@B + D0 + D1  (MultiDAdd).
@@ -140,14 +162,18 @@ class TestMultiDGemmGpu(unittest.TestCase):
             E_ref = E_ref + d.astype(np.float16).astype(np.float32)
 
         E_got = np.asarray(result.output).astype(np.float32)
-        self.assertFalse(np.all(E_got == 0.0), "multi_d output all-zero")
-        self.assertTrue(np.all(np.isfinite(E_got)), "multi_d output NaN/Inf")
+        self.assertFalse(np.all(E_got == 0.0),
+                         f"multi_d output all-zero (layout={layout})")
+        self.assertTrue(np.all(np.isfinite(E_got)),
+                        f"multi_d output NaN/Inf (layout={layout})")
         mre = _max_rel_err(E_got, E_ref)
         self.assertLessEqual(
             mre, _TOL,
-            f"multi_d fp16 max_rel={mre:.4f} > tol={_TOL} (M={M} N={N} K={K})",
+            f"multi_d fp16 layout={layout} max_rel={mre:.4f} > tol={_TOL} "
+            f"(M={M} N={N} K={K})",
         )
-        print(f"[multi_d/fp16] max_rel={mre:.4e}, time_ms={result.time_ms:.3f}")
+        print(f"[multi_d/fp16/{layout}] max_rel={mre:.4e}, "
+              f"time_ms={result.time_ms:.3f}")
 
 
 if __name__ == "__main__":
