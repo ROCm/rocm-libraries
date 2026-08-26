@@ -296,15 +296,8 @@ std::vector<Solution> EvaluateConvSolutions(const ExecutionContext& ctx,
 
         AlgorithmName algo{
             ConvolutionAlgoToDirectionalString(id.GetAlgo(), problem.GetDirection())};
-        bool ocl_non_naive_succeeded   = false;
-        std::vector<Solution> eval_sol = EvaluateInvokers(handle,
-                                                          conv_sols,
-                                                          algo,
-                                                          problem.MakeNetworkConfig(),
-                                                          invoke_ctx,
-                                                          core_result,
-                                                          false,
-                                                          ocl_non_naive_succeeded);
+        std::vector<Solution> eval_sol = EvaluateInvokers(
+            handle, conv_sols, algo, problem.MakeNetworkConfig(), invoke_ctx, core_result, false);
 
         if(!eval_sol.empty())
             eval_sols.emplace_back(eval_sol.front());

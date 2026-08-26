@@ -52,6 +52,17 @@ std::string ConvDirectNaiveConvCompileOption(const ExecutionContext& ctx,
 bool ConvDirectNaiveConvIsApplicableByKernelType(const ExecutionContext&,
                                                  const miopen::conv::ProblemDescription&);
 
+/// Returns true when the problem's total MAC work exceeds the naive-conv work
+/// limit. Naive stays applicable at any size (it is the universal fallback); this
+/// is consumed at the selection layer (EvaluateInvokers) to keep the un-tiled
+/// naive kernel from being benchmarked when it would run long enough to trip the
+/// OS GPU watchdog / TDR and a non-naive alternative also applies.
+/// Overridable via MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK; see the .cpp for detail.
+/// Exported (MIOPEN_INTERNALS_EXPORT) so the gtest unit test can link against it
+/// directly and exercise the metric on the CPU without launching a kernel.
+MIOPEN_INTERNALS_EXPORT bool
+ConvDirectNaiveConvExceedsWorkLimit(const miopen::conv::ProblemDescription&);
+
 bool IsInputFp32(const miopen::conv::ProblemDescription&);
 bool IsInputFp16(const miopen::conv::ProblemDescription&);
 bool IsInputBfp16(const miopen::conv::ProblemDescription&);

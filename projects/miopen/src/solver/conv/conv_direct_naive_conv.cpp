@@ -36,6 +36,11 @@
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_USE_PACKED_KERNELS);
 
+// Runtime override (in MACs) for the naive-conv work-size applicability gate.
+// 0 (unset) => use the built-in NAIVE_CONV_MAX_WORK default; set to a very large
+// value to effectively disable the gate. See ConvDirectNaiveConvExceedsWorkLimit.
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK);
+
 namespace miopen {
 
 namespace debug {
@@ -293,6 +298,54 @@ bool ConvDirectNaiveConvIsApplicableByKernelType(const ExecutionContext& ctx,
             return false;
     }
     return true;
+}
+
+// Upper bound (in multiply-accumulate operations) on the total work above which the
+// naive convolution solver should not be *benchmarked* during Find. The naive
+// kernel is un-tiled and the GPU saturates, so its wall-time is proportional to the
+// total MAC count: N * K * C_per_group * output_spatial_volume * filter_volume. On
+// very large problems (e.g. VAE-decode / 3D shapes) a single naive launch runs for
+// multiple seconds; when MIOpen's Find step *benchmarks* candidate solvers it will
+// execute naive and trip the OS GPU watchdog (TDR) -- even when a fast solver also
+// applies and would ultimately win. Naive stays *applicable* at any size so it can
+// serve as the universal fallback; the selection layer (EvaluateInvokers) consumes
+// this threshold to skip benchmarking naive when it is over the limit AND a
+// non-naive alternative also applies. When naive is the sole applicable solver it
+// still runs, so a shape only naive can serve is served (and, if huge, may TDR on a
+// short-watchdog OS -- an honest "extend coverage here" signal, not masked).
+// Overridable via MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK.
+// NOTE: the 16 GMAC default is a conservative estimate, not a measured value; it
+// should be calibrated once on stable hardware (see project_naive_find_tdr).
+constexpr size_t NAIVE_CONV_MAX_WORK = static_cast<size_t>(16) * 1000 * 1000 * 1000; // ~16 GMAC
+
+bool ConvDirectNaiveConvExceedsWorkLimit(const ProblemDescription& problem)
+{
+    const size_t n           = problem.GetInBatchSize();
+    const size_t k           = problem.GetOutChannels();
+    const auto group         = static_cast<size_t>(problem.GetGroupCount());
+    const size_t c_per_group = (group == 0) ? problem.GetInChannels() //
+                                            : problem.GetInChannels() / group;
+
+    const size_t out_vol = problem.GetOutWidth() * problem.GetOutHeight() *
+                           (problem.Is2d() ? size_t{1} : problem.GetOutDepth());
+    const size_t fil_vol = problem.GetWeightsWidth() * problem.GetWeightsHeight() *
+                           (problem.Is2d() ? size_t{1} : problem.GetWeightsDepth());
+
+    const size_t work = n * k * c_per_group * out_vol * fil_vol;
+
+    size_t limit = env::value(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK);
+    if(limit == 0)
+        limit = NAIVE_CONV_MAX_WORK;
+
+    if(work > limit)
+    {
+        MIOPEN_LOG_I2("ConvDirectNaiveConv over work limit: work "
+                      << work << " MACs exceeds limit " << limit
+                      << " -- defer from Find benchmark when an alternative applies (avoids "
+                         "TDR-prone naive launch)");
+        return true;
+    }
+    return false;
 }
 
 /// Figure out the index of C (channel) stride so we can expand it into
