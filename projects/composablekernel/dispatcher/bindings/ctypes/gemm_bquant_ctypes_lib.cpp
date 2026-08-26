@@ -52,6 +52,29 @@ int dispatcher_run_bquant_gemm(const void* A,
                                int k_batch,
                                float* time_ms)
 {
+#ifndef CK_TILE_SINGLE_KERNEL_INCLUDE
+    // No kernel was force-included (the CMake no-kernel fallback target). The body
+    // below needs SelectedKernel / QuantGemmHostArgs / the dtype aliases, which only
+    // exist under -DCK_TILE_SINGLE_KERNEL_INCLUDE, so this build cannot run
+    // anything: report "unsupported" (-2) instead of failing to compile.
+    (void)A;
+    (void)B;
+    (void)BQ;
+    (void)C;
+    (void)M;
+    (void)N;
+    (void)K;
+    (void)stride_A;
+    (void)stride_B;
+    (void)stride_BQ;
+    (void)stride_C;
+    (void)QK_B;
+    (void)QN_B;
+    (void)k_batch;
+    (void)time_ms;
+    std::cerr << "dispatcher_run_bquant_gemm: library built without a kernel; unsupported\n";
+    return -2;
+#else
     using namespace quant_bridge;
     const char* kFn = "dispatcher_run_bquant_gemm";
 
@@ -166,6 +189,7 @@ int dispatcher_run_bquant_gemm(const void* A,
 
     return launch_and_copyback<SelectedKernel, CDataType>(
         kFn, args, C, C_dev, static_cast<std::size_t>(M) * N, time_ms);
+#endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 }
 
 } // extern "C"

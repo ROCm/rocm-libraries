@@ -31,12 +31,12 @@
  */
 
 #include <hip/hip_runtime.h>
-#include "ck_tile/host/tensor_shuffle_utils.hpp"
 #include <cstdint>
 #include <iostream>
 #include <string>
 
 #include "quant_bridge_common.hpp"
+#include "quant_bridge_shuffle.hpp"
 
 // Kernel header force-included via -include compiler flag.
 // Defines: ADataType, BDataType, CDataType, QDataType (shared AQ/BQ type), AccDataType,
@@ -75,28 +75,28 @@ QUANT_BRIDGE_C_API()
  *
  * Returns 0 on success, negative on error.
  */
-int dispatcher_run_abquant_gemm(const void* A,
-                                const void* B,
-                                const void* AQ,
-                                const void* BQ,
-                                void* C,
-                                int64_t M,
-                                int64_t N,
-                                int64_t K,
-                                int64_t stride_A,
-                                int64_t stride_B,
-                                int64_t stride_AQ,
-                                int64_t stride_BQ,
-                                int64_t stride_C,
-                                int64_t QK_A,
-                                int64_t QM_A,
-                                int64_t QK_B,
-                                int64_t QN_B,
-                                int k_batch,
-                                float* time_ms)
+int dispatcher_run_grouped_abquant_gemm(const void* A,
+                                        const void* B,
+                                        const void* AQ,
+                                        const void* BQ,
+                                        void* C,
+                                        int64_t M,
+                                        int64_t N,
+                                        int64_t K,
+                                        int64_t stride_A,
+                                        int64_t stride_B,
+                                        int64_t stride_AQ,
+                                        int64_t stride_BQ,
+                                        int64_t stride_C,
+                                        int64_t QK_A,
+                                        int64_t QM_A,
+                                        int64_t QK_B,
+                                        int64_t QN_B,
+                                        int k_batch,
+                                        float* time_ms)
 {
     using namespace quant_bridge;
-    const char* kFn = "dispatcher_run_abquant_gemm";
+    const char* kFn = "dispatcher_run_grouped_abquant_gemm";
 
     if(!bridge_initialized())
     {
@@ -197,12 +197,8 @@ int dispatcher_run_abquant_gemm(const void* A,
     {
         constexpr int block_aq_k =
             static_cast<int>(SelectedKernel::TileK) / static_cast<int>(AQuantGroupSize::kK);
-        ck_tile::HostTensor<QDataType> aq_h(
-            ck_tile::host_tensor_descriptor(static_cast<int>(QM_A),
-                                            static_cast<int>(QK_A),
-                                            static_cast<int>(QK_A),
-                                            ck_tile::bool_constant<true>{} /*row-major*/));
-        std::copy(AQ_host, AQ_host + QM_A * QK_A, aq_h.begin());
+        auto aq_h = load_host_tensor<true>(
+            AQ_host, static_cast<int>(QM_A), static_cast<int>(QK_A), static_cast<int>(QK_A));
         auto aq_shuffled = ck_tile::shuffle_aq(&aq_h, block_aq_k);
         BRIDGE_HIP_CHECK(kFn,
                          hipMemcpy(AQ_dev,
@@ -222,12 +218,8 @@ int dispatcher_run_abquant_gemm(const void* A,
     {
         constexpr int block_bq_k =
             static_cast<int>(SelectedKernel::TileK) / static_cast<int>(BQuantGroupSize::kK);
-        ck_tile::HostTensor<QDataType> bq_h(
-            ck_tile::host_tensor_descriptor(static_cast<int>(QK_B),
-                                            static_cast<int>(QN_B),
-                                            static_cast<int>(QN_B),
-                                            ck_tile::bool_constant<true>{} /*row-major*/));
-        std::copy(BQ_host, BQ_host + QK_B * QN_B, bq_h.begin());
+        auto bq_h = load_host_tensor<true>(
+            BQ_host, static_cast<int>(QK_B), static_cast<int>(QN_B), static_cast<int>(QN_B));
         auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
         BRIDGE_HIP_CHECK(kFn,
                          hipMemcpy(BQ_dev,

@@ -20,14 +20,25 @@
  * body for the two bridges (tensor_quant, rowcolquant) that neither reshuffle
  * their operands nor carry a quant group size; those two sources are reduced to
  * an entry point plus their scale extents.
+ * run_scalar_quant_grouped_gemm() is its counterpart for the two grouped
+ * scalar-quant bridges, which target QuantGroupedGemmKernel and therefore take a
+ * vector of QuantGroupedGemmHostArgs plus a device kargs buffer.
  *
  * The three bridges that do reshuffle (aquant, abquant, bquant) keep their own
  * argument construction here, and their host-side reshuffle steps live in
  * quant_bridge_shuffle.hpp.
  *
- * The generated kernel header (force-included before this one) must already
- * provide ck_tile (numeric_traits, stream_config, QuantGemmHostArgs, index_t)
- * and the KERNEL_NAME macro.
+ * Everything that needs ck_tile is behind CK_TILE_SINGLE_KERNEL_INCLUDE, so a
+ * kernel-less build (the CMake no-kernel fallback) still compiles this header;
+ * the generated kernel header, force-included before this one, is what supplies
+ * ck_tile (numeric_traits, stream_config, QuantGemmHostArgs, index_t) and the
+ * KERNEL_NAME macro.
+ *
+ * Return-code convention, uniform across all bridges:
+ *   0   success
+ *  -1   bad arguments, failed validation, or a HIP error
+ *  -2   the kernel reported unsupported arguments
+ *  -3   the combination is rejected up front, or the launch threw
  */
 
 #ifndef CK_TILE_DISPATCHER_QUANT_BRIDGE_COMMON_HPP
@@ -86,34 +97,29 @@
 // invalidating the others. Loads/stores are atomic with acquire/release
 // ordering; the entry points themselves are still intended for single-threaded
 // use (the Python ctypes harness) and are not otherwise synchronized.
-#define QUANT_BRIDGE_C_API()                                                            \
-    static std::atomic<int> g_ref_count{0};                                             \
-    static bool bridge_initialized()                                                    \
-    {                                                                                   \
-        return g_ref_count.load(std::memory_order_acquire) > 0;                          \
-    }                                                                                   \
-    int dispatcher_initialize()                                                         \
-    {                                                                                   \
-        g_ref_count.fetch_add(1, std::memory_order_release);                            \
-        return 0;                                                                       \
-    }                                                                                   \
-    const char* dispatcher_get_kernel_name() { return QUANT_BRIDGE_KERNEL_NAME(); }     \
-    int dispatcher_init() { return dispatcher_initialize(); }                           \
-    int dispatcher_get_kernel_count() { return 1; }                                     \
-    int dispatcher_set_timing_config(                                                   \
-        int flush_cache, int rotating_count, int cold_niters, int nrepeat)              \
-    {                                                                                   \
-        return quant_bridge::set_timing_config(                                         \
-            flush_cache, rotating_count, cold_niters, nrepeat);                         \
-    }                                                                                   \
-    void dispatcher_cleanup()                                                           \
-    {                                                                                   \
-        int prev = g_ref_count.load(std::memory_order_relaxed);                         \
-        while(prev > 0 && !g_ref_count.compare_exchange_weak(prev,                      \
-                                                             prev - 1,                  \
-                                                             std::memory_order_release, \
-                                                             std::memory_order_relaxed)) \
-            ;                                                                           \
+#define QUANT_BRIDGE_C_API()                                                                       \
+    static std::atomic<int> g_ref_count{0};                                                        \
+    static bool bridge_initialized() { return g_ref_count.load(std::memory_order_acquire) > 0; }   \
+    int dispatcher_initialize()                                                                    \
+    {                                                                                              \
+        g_ref_count.fetch_add(1, std::memory_order_release);                                       \
+        return 0;                                                                                  \
+    }                                                                                              \
+    const char* dispatcher_get_kernel_name() { return QUANT_BRIDGE_KERNEL_NAME(); }                \
+    int dispatcher_init() { return dispatcher_initialize(); }                                      \
+    int dispatcher_get_kernel_count() { return 1; }                                                \
+    int dispatcher_set_timing_config(                                                              \
+        int flush_cache, int rotating_count, int cold_niters, int nrepeat)                         \
+    {                                                                                              \
+        return quant_bridge::set_timing_config(flush_cache, rotating_count, cold_niters, nrepeat); \
+    }                                                                                              \
+    void dispatcher_cleanup()                                                                      \
+    {                                                                                              \
+        int prev = g_ref_count.load(std::memory_order_relaxed);                                    \
+        while(prev > 0 &&                                                                          \
+              !g_ref_count.compare_exchange_weak(                                                  \
+                  prev, prev - 1, std::memory_order_release, std::memory_order_relaxed))           \
+            ;                                                                                      \
     }
 
 namespace quant_bridge {
@@ -212,10 +218,10 @@ inline bool validate_supported_arch(const char* fn, bool allow_gfx90a = false)
 // and from the exported dispatcher_set_timing_config().
 struct timing_config
 {
-    bool flush_cache    = false;
-    int rotating_count  = 1;
-    int cold_niters     = 3;
-    int nrepeat         = 10;
+    bool flush_cache   = false;
+    int rotating_count = 1;
+    int cold_niters    = 3;
+    int nrepeat        = 10;
 };
 
 inline int env_int(const char* name, int fallback)
@@ -234,9 +240,8 @@ inline timing_config& mutable_timing_config()
 {
     static timing_config cfg = [] {
         timing_config c;
-        c.cold_niters    = env_int("CK_BRIDGE_COLD_NITERS", c.cold_niters);
-        c.nrepeat        = env_int("CK_BRIDGE_NREPEAT", c.nrepeat);
-        c.rotating_count = env_int("CK_BRIDGE_ROTATING_COUNT", c.rotating_count);
+        c.cold_niters = env_int("CK_BRIDGE_COLD_NITERS", c.cold_niters);
+        c.nrepeat     = env_int("CK_BRIDGE_NREPEAT", c.nrepeat);
         return c;
     }();
     return cfg;
@@ -245,25 +250,26 @@ inline timing_config& mutable_timing_config()
 // Backing implementation of the exported dispatcher_set_timing_config(). A
 // negative argument leaves that field unchanged.
 //
-// flush_cache is REFUSED rather than stored: the generated SelectedKernel::launch()
-// calls ck_tile::launch_kernel(), which ignores stream_config::flush_cache_ and
-// rotating_count_ entirely -- Old-TE implements the rotating-buffer flush in its
-// own invoker (run_gemm_quant_example.inc), not in launch_kernel. Storing the flag
-// would make the bridge report a cache-flushed measurement it never performed.
-inline int
-set_timing_config(int flush_cache, int rotating_count, int cold_niters, int nrepeat)
+// flush_cache and rotating_count are REFUSED rather than stored. The generated
+// SelectedKernel::launch() calls ck_tile::launch_kernel(), which ignores
+// stream_config::flush_cache_ and rotating_count_ entirely -- Old-TE implements
+// the rotating-buffer flush in its own invoker (run_gemm_quant_example.inc), not
+// in launch_kernel. Accepting them would make the bridge report a cache-flushed
+// measurement it never performed, which is worse than refusing to match the
+// baseline. Enabling them needs a flush-cache launch overload in the generated
+// header first; the refusal is the signal that it is missing.
+inline int set_timing_config(int flush_cache, int rotating_count, int cold_niters, int nrepeat)
 {
     timing_config& cfg = mutable_timing_config();
-    if(flush_cache > 0)
+    if(flush_cache > 0 || rotating_count > 1)
     {
-        std::cerr << "dispatcher_set_timing_config: flush_cache is not supported by this bridge. "
-                     "The generated kernel launch uses ck_tile::launch_kernel, which ignores "
-                     "stream_config::flush_cache_/rotating_count_; enabling it requires a "
-                     "flush-cache launch overload in the generated header.\n";
+        std::cerr << "dispatcher_set_timing_config: flush_cache / rotating_count are not "
+                     "supported by this bridge. The generated kernel launch uses "
+                     "ck_tile::launch_kernel, which ignores stream_config::flush_cache_ and "
+                     "rotating_count_; enabling them requires a flush-cache launch overload in "
+                     "the generated header.\n";
         return -2;
     }
-    if(rotating_count > 0)
-        cfg.rotating_count = rotating_count;
     if(cold_niters >= 0)
         cfg.cold_niters = cold_niters;
     if(nrepeat > 0)
@@ -319,8 +325,7 @@ struct has_preprocess_launch<
 // hook, and exactly once otherwise. Callers must not rely on it for correctness
 // unless launch_supports_preprocess<KernelT, F>() is true.
 template <typename KernelT, typename PreprocessFunc>
-inline float
-launch(const ck_tile::QuantGemmHostArgs& args, bool do_time, PreprocessFunc preprocess)
+inline float launch(const ck_tile::QuantGemmHostArgs& args, bool do_time, PreprocessFunc preprocess)
 {
     const ck_tile::stream_config s = make_stream_config(do_time);
     if constexpr(has_preprocess_launch<KernelT, PreprocessFunc>::value)
@@ -489,8 +494,7 @@ inline int launch_and_copyback(const char* fn,
         }
     };
 
-    if(do_time && args.k_batch > 1 &&
-       !has_preprocess_launch<KernelT, decltype(clear_c)>::value)
+    if(do_time && args.k_batch > 1 && !has_preprocess_launch<KernelT, decltype(clear_c)>::value)
     {
         std::cerr << fn << ": timed split-K (k_batch=" << args.k_batch
                   << ") is not supported by this kernel: its launch() has no per-launch "
@@ -676,8 +680,8 @@ inline int run_scalar_quant_grouped_gemm(const char* fn,
     // buffers directly, so a smaller count is a device out-of-bounds read.
     if(QK_A != expected_qk_a || QK_B != expected_qk_b)
     {
-        std::cerr << fn << ": QK_A/QK_B mismatch. Got (" << QK_A << ", " << QK_B
-                  << "), expected (" << expected_qk_a << ", " << expected_qk_b << ")\n";
+        std::cerr << fn << ": QK_A/QK_B mismatch. Got (" << QK_A << ", " << QK_B << "), expected ("
+                  << expected_qk_a << ", " << expected_qk_b << ")\n";
         return -1;
     }
 

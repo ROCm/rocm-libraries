@@ -23,12 +23,16 @@
 #ifndef CK_TILE_DISPATCHER_QUANT_BRIDGE_SHUFFLE_HPP
 #define CK_TILE_DISPATCHER_QUANT_BRIDGE_SHUFFLE_HPP
 
+#include "quant_bridge_common.hpp"
+
+// Everything below needs the force-included generated kernel header for ck_tile.
+// Guarded so a kernel-less build (the CMake no-kernel fallback) still compiles.
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+
 #include <algorithm>
 
 #include "ck_tile/host/tensor_shuffle_utils.hpp"
 #include "ck_tile/host/permute_pk_int4.hpp"
-
-#include "quant_bridge_common.hpp"
 
 namespace quant_bridge {
 
@@ -145,5 +149,7 @@ inline hipError_t prepare_bq_device(const QT* BQ_host, void* BQ_dev, int64_t QK_
 }
 
 } // namespace quant_bridge
+
+#endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 
 #endif // CK_TILE_DISPATCHER_QUANT_BRIDGE_SHUFFLE_HPP

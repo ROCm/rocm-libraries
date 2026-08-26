@@ -29,9 +29,8 @@
 #include <type_traits>
 #include <vector>
 
-#include "ck_tile/host/tensor_shuffle_utils.hpp"
-
 #include "quant_bridge_common.hpp"
+#include "quant_bridge_shuffle.hpp"
 
 // Kernel header force-included via -include compiler flag.
 // Defines: ADataType, BDataType, CDataType, QDataType, AccDataType,
@@ -65,24 +64,24 @@ QUANT_BRIDGE_C_API()
  *
  * Returns 0 on success, negative on error.
  */
-int dispatcher_run_bquant_gemm(const void* A,
-                               const void* B,
-                               const void* BQ,
-                               void* C,
-                               int64_t M,
-                               int64_t N,
-                               int64_t K,
-                               int64_t stride_A,
-                               int64_t stride_B,
-                               int64_t stride_BQ,
-                               int64_t stride_C,
-                               int64_t QK_B,
-                               int64_t QN_B,
-                               int k_batch,
-                               float* time_ms)
+int dispatcher_run_grouped_bquant_gemm(const void* A,
+                                       const void* B,
+                                       const void* BQ,
+                                       void* C,
+                                       int64_t M,
+                                       int64_t N,
+                                       int64_t K,
+                                       int64_t stride_A,
+                                       int64_t stride_B,
+                                       int64_t stride_BQ,
+                                       int64_t stride_C,
+                                       int64_t QK_B,
+                                       int64_t QN_B,
+                                       int k_batch,
+                                       float* time_ms)
 {
     using namespace quant_bridge;
-    const char* kFn = "dispatcher_run_bquant_gemm";
+    const char* kFn = "dispatcher_run_grouped_bquant_gemm";
 
     if(!bridge_initialized())
     {
@@ -104,6 +103,23 @@ int dispatcher_run_bquant_gemm(const void* A,
     if(!validate_supported_arch(kFn, /*allow_gfx90a=*/true))
         return -1;
 
+    // Hard reject rather than a silent wrong answer. The default configs for this
+    // op ship preshuffle_b=True, but a PreshuffleB kernel reads B in the
+    // interleaved weight-preshuffle layout, and this bridge has no way to produce
+    // it: unlike the non-grouped bquant header, the grouped generated header
+    // exports neither BShuffleConfig nor TiledMMAPermuteN, which
+    // ck_tile::shuffle_b / shuffle_b_permuteN both require. Feeding raw B to such
+    // a kernel returns a wrong C with no error. Producing the shuffled B here
+    // needs those symbols emitted by the grouped codegen first.
+    if constexpr(SelectedKernel::PreshuffleB)
+    {
+        std::cerr << kFn
+                  << ": PreshuffleB kernels are not supported by this bridge -- the generated "
+                     "grouped header exports no BShuffleConfig, so B cannot be shuffled into "
+                     "the layout the kernel reads\n";
+        return -3;
+    }
+
     // Validate that the caller's QK_B/QN_B match the compile-time quant group sizes
     // baked into this .so.  A mismatch means the BQ device buffer would be allocated
     // with the wrong size while the kernel indexes it with different strides.
@@ -114,8 +130,8 @@ int dispatcher_run_bquant_gemm(const void* A,
             (N + static_cast<int64_t>(QuantGroupSize::kN) - 1) / QuantGroupSize::kN;
         if(QK_B != expected_QK_B || QN_B != expected_QN_B)
         {
-            std::cerr << "dispatcher_run_bquant_gemm: QK_B/QN_B mismatch. " << "Got (" << QK_B
-                      << ", " << QN_B << "), " << "expected (" << expected_QK_B << ", "
+            std::cerr << "dispatcher_run_grouped_bquant_gemm: QK_B/QN_B mismatch. " << "Got ("
+                      << QK_B << ", " << QN_B << "), " << "expected (" << expected_QK_B << ", "
                       << expected_QN_B << ") " << "for K=" << K << " N=" << N
                       << " with QuantGroupSize kK=" << QuantGroupSize::kK
                       << " kN=" << QuantGroupSize::kN << "\n";
@@ -129,7 +145,7 @@ int dispatcher_run_bquant_gemm(const void* A,
     // producing incorrect results or out-of-bounds accesses.
     if(stride_A != K || stride_B != K || stride_BQ != QN_B || stride_C != N)
     {
-        std::cerr << "dispatcher_run_bquant_gemm: non-packed strides are not supported. "
+        std::cerr << "dispatcher_run_grouped_bquant_gemm: non-packed strides are not supported. "
                   << "Expected stride_A=" << K << " stride_B=" << K << " stride_BQ=" << QN_B
                   << " stride_C=" << N << ", got stride_A=" << stride_A << " stride_B=" << stride_B
                   << " stride_BQ=" << stride_BQ << " stride_C=" << stride_C << "\n";
@@ -164,12 +180,8 @@ int dispatcher_run_bquant_gemm(const void* A,
     {
         constexpr int block_bq_k =
             static_cast<int>(SelectedKernel::TileK) / static_cast<int>(QuantGroupSize::kK);
-        ck_tile::HostTensor<QDataType> bq_h(
-            ck_tile::host_tensor_descriptor(static_cast<int>(QK_B),
-                                            static_cast<int>(QN_B),
-                                            static_cast<int>(QN_B),
-                                            ck_tile::bool_constant<true>{} /*row-major*/));
-        std::copy(BQ_host, BQ_host + QK_B * QN_B, bq_h.begin());
+        auto bq_h = load_host_tensor<true>(
+            BQ_host, static_cast<int>(QK_B), static_cast<int>(QN_B), static_cast<int>(QN_B));
         auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
         BRIDGE_HIP_CHECK(kFn,
                          hipMemcpy(BQ_dev,
