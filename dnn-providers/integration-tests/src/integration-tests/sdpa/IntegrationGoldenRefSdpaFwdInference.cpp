@@ -143,9 +143,11 @@ INSTANTIATE_TEST_SUITE_P(
 
 // --- causal mask (bottom-right) and hd192 head dim ---
 // The CPU reference executor supports bottom-right causal (via left_bound=-1,
-// right_bound=0, BOTTOM_RIGHT) and hd192 (D_qk=192, D_v=128). FP8 and GROUP-mode
-// bundles are produced by the generator but are not yet runnable by the CPU
-// executor, so they are intentionally not instantiated here.
+// right_bound=0, BOTTOM_RIGHT) and hd192 (D_qk=192, D_v=128). FP8, ragged
+// (RFC-0014), and ragged+group bundles are rejected by the CPU reference
+// executor and are therefore exercised through the generic engine-backed bundle
+// path (auto-discovered from integration-test-bundles/ under --allow-bundles),
+// not instantiated here.
 
 // quick tier — Small bundles
 
