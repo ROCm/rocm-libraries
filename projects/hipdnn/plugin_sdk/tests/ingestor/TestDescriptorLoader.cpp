@@ -2389,6 +2389,101 @@ TEST(TestDescriptorLoader, AcceptsAPackagedKernelAndCarriesItsCoordinates)
     EXPECT_TRUE(source.entryPoint.empty());
 }
 
+namespace
+{
+
+/// Writes a packaged kernel whose only departure from the shape above is `sha256`, so a
+/// rejection can only be the digest and not some other part of the document.
+void writePackagedKernelWithSha256(const std::filesystem::path& where, const std::string& digest)
+{
+    auto packaged = makeSetDocuments('1', "test:sha256");
+    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "kpack"},
+           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+           {"toc_key", "PointwiseAdd/block64"},
+           {"symbol", "PointwiseAdd"},
+           {"sha256", digest}};
+    writeDocuments(where, packaged);
+}
+
+/// Asserts the digest is refused and that the message can be acted on: it names the key, the
+/// locator, and the text that was wrong. A rejection whose message carries none of the three
+/// sends the reader to grep the loader rather than to their own descriptor.
+void expectSha256Rejected(const std::string& digest, const std::string& scratchLabel)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
+    writePackagedKernelWithSha256(dir.path(), digest);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'sha256' in"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel_source"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "'" + digest + "'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+} // namespace
+
+/// A digest one character short is what a truncated copy-paste produces, and it is the case
+/// a plain non-empty check cannot see.
+TEST(TestDescriptorLoader, RejectsASha256ThatIsTooShort)
+{
+    expectSha256Rejected(std::string(63, 'a'), "sha256_short");
+}
+
+TEST(TestDescriptorLoader, RejectsASha256ThatIsTooLong)
+{
+    expectSha256Rejected(std::string(65, 'a'), "sha256_long");
+}
+
+/// Uppercase is a real digest of the right length from a tool that spells hex the other way.
+/// Rejected rather than folded, because the packer emits `hexdigest()` and nothing else, and
+/// two spellings of one digest would compare unequal wherever the field is compared as text.
+TEST(TestDescriptorLoader, RejectsASha256WithUppercaseHex)
+{
+    expectSha256Rejected(std::string(64, 'A'), "sha256_upper");
+}
+
+/// Right length, wrong alphabet -- a placeholder or a digest from a different encoding.
+TEST(TestDescriptorLoader, RejectsASha256WithANonHexCharacter)
+{
+    expectSha256Rejected(std::string(63, 'a') + "z", "sha256_nonhex");
+}
+
+/// requireString already refuses an empty value, so this pins which of the two rules speaks.
+/// It is here because the length rule must own the case even if requireString ever softens.
+TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_empty"));
+    writePackagedKernelWithSha256(dir.path(), "");
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "sha256"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The positive half: the shape check must not reject what the packer actually emits. Pinned
+/// as a real hexdigest rather than 64 repeated characters so the case would still hold if the
+/// rule were ever tightened past "64 of [0-9a-f]".
+TEST(TestDescriptorLoader, AcceptsAConformingSha256)
+{
+    const std::string digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_ok"));
+    writePackagedKernelWithSha256(dir.path(), digest);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_FALSE(sets.front().packs.front().kernels.empty());
+    EXPECT_EQ(sets.front().packs.front().kernels.front().source.sha256, digest);
+}
+
 /// The packaged kernel entry key for key, copied from
 /// `descriptor-packaging/python/hkp_pack/pipeline.py::_rewrite_ukd_kpack`. The keys the
 /// loader has no reader for (`provenance` and everything under it) must pass the known-key
