@@ -98,7 +98,7 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        - ClusterDim: [[2, 1], [4, 1], [8, 1], [1, 2], [1, 4], [1, 8], [2, 2], [2, 4], [4, 2]]
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [1, 2], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

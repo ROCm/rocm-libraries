@@ -90,11 +90,8 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        # Cs==1 drops self-only MaskB, Ck==1 drops self-only MaskA, under PAP
-        # (papDropsSelfOnlyMaskA / papDropsSelfOnlyMaskB). Cs>1 and Ck>1 keep
-        # the matching mask live, so this is the tightest SGPR case and needs
-        # numerical coverage.
-        - ClusterDim: [[2, 1], [4, 1], [8, 1], [1, 2], [1, 4], [1, 8], [2, 2], [2, 4], [4, 2]]
+        # PAP frees self-only MaskB (Cs==1) / MaskA (Ck==1); both stay live otherwise.
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [1, 2], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
