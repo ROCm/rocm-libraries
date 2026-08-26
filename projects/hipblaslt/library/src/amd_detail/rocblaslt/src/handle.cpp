@@ -45,7 +45,7 @@ namespace
     constexpr const char* kEnvScanFrom      = "HIPBLASLT_CHECK_NUMERICS_SCAN_FROM";
     constexpr const char* kEnvScanUntil     = "HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL";
     constexpr const char* kEnvStopOnFirst   = "HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST";
-    constexpr const char* kEnvCheckStreamKSync = "HIPBLASLT_CHECK_STREAMK_SYNC";
+    constexpr const char* kEnvCheckSynchronizer = "HIPBLASLT_CHECK_SYNCHRONIZER";
 
     // Trim leading/trailing whitespace + lowercase. Used for the two
     // text-token env vars; numeric-only vars use std::atoi.
@@ -227,13 +227,13 @@ _rocblaslt_handle::_rocblaslt_handle()
         }
     }
 
-    // HIPBLASLT_CHECK_STREAMK_SYNC: opt-in debug check that a kernel using the
+    // HIPBLASLT_CHECK_SYNCHRONIZER: opt-in debug check that a kernel using the
     // shared Synchronizer buffer -- StreamK or GSU MBSK -- leaves it all-zero
     // on exit.
-    if(const char* cs = std::getenv(kEnvCheckStreamKSync))
+    if(const char* cs = std::getenv(kEnvCheckSynchronizer))
     {
         const std::string s = normalize_env(cs);
-        check_streamk_sync  = (s == "1" || s == "on" || s == "true");
+        check_synchronizer  = (s == "1" || s == "on" || s == "true");
     }
 }
 

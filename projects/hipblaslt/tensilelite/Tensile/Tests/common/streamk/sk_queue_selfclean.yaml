@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # Per-XCD work-queue self-reset. Caught by the Synchronizer dirty-buffer check,
-# which CheckStreamKSync enables by default -- without it this config passes,
+# which CheckSynchronizer enables by default -- without it this config passes,
 # because the residue corrupts a later launch rather than this one.
 #
 # A queue counter's atomic_inc auto-reset bound assumes queue q receives exactly
