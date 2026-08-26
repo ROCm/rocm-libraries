@@ -205,15 +205,20 @@ struct WarpExchangeTestNameGenerator
     template<class Op>
     static std::string op_tag()
     {
-        if constexpr(std::is_same_v<Op, common::BlockedToStripedOp>) return "_BlockedToStriped";
+        if constexpr(std::is_same_v<Op, void>) return "";
+        else if constexpr(std::is_same_v<Op, common::BlockedToStripedOp>)
+            return "_BlockedToStriped";
         else if constexpr(std::is_same_v<Op, common::BlockedToStripedShuffleOp>)
             return "_BlockedToStripedShuffle";
         else if constexpr(std::is_same_v<Op, common::StripedToBlockedOp>)
             return "_StripedToBlocked";
         else if constexpr(std::is_same_v<Op, common::StripedToBlockedShuffleOp>)
             return "_StripedToBlockedShuffle";
-        else return "";
+        else
+            static_assert(dependent_false<Op>::value,
+                          "op_tag: add a case for this exchange op");
     }
+
     template<class Params>
     static std::string GetName(int /*index*/)
     {
@@ -222,6 +227,7 @@ struct WarpExchangeTestNameGenerator
                + std::to_string(Params::warp_size) + op_tag<typename Params::exchange_op>();
     }
 };
+
 TYPED_TEST_SUITE(WarpExchangeTest, WarpExchangeTestParams, WarpExchangeTestNameGenerator);
 
 TYPED_TEST(WarpExchangeTest, WarpExchange)

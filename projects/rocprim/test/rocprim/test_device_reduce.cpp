@@ -186,6 +186,7 @@ struct RocprimDeviceReduceTestsNameGenerator
             default: return "Default";
         }
     }
+
     template<class Params>
     static std::string GetName(int /*index*/)
     {
@@ -201,6 +202,7 @@ struct RocprimDeviceReduceTestsNameGenerator
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceReduceTests,
                  RocprimDeviceReduceTestsParams,
                  RocprimDeviceReduceTestsNameGenerator);

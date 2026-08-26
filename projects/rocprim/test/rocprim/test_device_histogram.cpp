@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -173,18 +173,19 @@ using Params1
                        params1<int, 10, 0, 10, int, int, rocprim::default_config, true>,
                        params1<int, 10, 0, 10, int, int, rocprim::default_config, false, true>>;
 
-inline std::string histogram_num(int v)
+inline std::string level_tag(int l)
 {
-    return v < 0 ? "n" + std::to_string(-v) : std::to_string(v);
+    return l < 0 ? "n" + std::to_string(-l) : std::to_string(l);
 }
+
 struct RocprimDeviceHistogramEvenNameGenerator
 {
     template<class Params>
     static std::string GetName(int /*index*/)
     {
         std::string n = type_tag<typename Params::sample_type>() + "_"
-                        + std::to_string(Params::bins) + "_" + histogram_num(Params::lower_level)
-                        + "_" + histogram_num(Params::upper_level) + "_"
+                        + std::to_string(Params::bins) + "_" + level_tag(Params::lower_level)
+                        + "_" + level_tag(Params::upper_level) + "_"
                         + type_tag<typename Params::level_type>() + "_"
                         + type_tag<typename Params::counter_type>();
         if constexpr(Params::use_indirect_iterator) n += "_Indirect";
@@ -192,6 +193,7 @@ struct RocprimDeviceHistogramEvenNameGenerator
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceHistogramEven, Params1, RocprimDeviceHistogramEvenNameGenerator);
 
 void testHistogramEvenIncorrectInput()
@@ -412,7 +414,7 @@ struct RocprimDeviceHistogramRangeNameGenerator
     static std::string GetName(int /*index*/)
     {
         std::string n = type_tag<typename Params::sample_type>() + "_"
-                        + std::to_string(Params::bins) + "_" + histogram_num(Params::start_level)
+                        + std::to_string(Params::bins) + "_" + level_tag(Params::start_level)
                         + "_" + std::to_string(Params::min_bin_length) + "_"
                         + std::to_string(Params::max_bin_length) + "_"
                         + type_tag<typename Params::level_type>() + "_"
@@ -421,6 +423,7 @@ struct RocprimDeviceHistogramRangeNameGenerator
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceHistogramRange, Params2, RocprimDeviceHistogramRangeNameGenerator);
 
 void testHistogramRangeIncorrectInput()
@@ -635,14 +638,15 @@ struct RocprimDeviceHistogramMultiEvenNameGenerator
         std::string n = type_tag<typename Params::sample_type>() + "_"
                         + std::to_string(Params::channels) + "_"
                         + std::to_string(Params::active_channels) + "_" + std::to_string(Params::bins)
-                        + "_" + histogram_num(Params::lower_level) + "_"
-                        + histogram_num(Params::upper_level) + "_"
+                        + "_" + level_tag(Params::lower_level) + "_"
+                        + level_tag(Params::upper_level) + "_"
                         + type_tag<typename Params::level_type>() + "_"
                         + type_tag<typename Params::counter_type>();
         if constexpr(Params::use_graphs) n += "_Graphs";
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceHistogramMultiEven,
                  Params3,
                  RocprimDeviceHistogramMultiEvenNameGenerator);
@@ -886,7 +890,7 @@ struct RocprimDeviceHistogramMultiRangeNameGenerator
         std::string n = type_tag<typename Params::sample_type>() + "_"
                         + std::to_string(Params::channels) + "_"
                         + std::to_string(Params::active_channels) + "_" + std::to_string(Params::bins)
-                        + "_" + histogram_num(Params::start_level) + "_"
+                        + "_" + level_tag(Params::start_level) + "_"
                         + std::to_string(Params::min_bin_length) + "_"
                         + std::to_string(Params::max_bin_length) + "_"
                         + type_tag<typename Params::level_type>() + "_"
@@ -895,6 +899,7 @@ struct RocprimDeviceHistogramMultiRangeNameGenerator
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceHistogramMultiRange,
                  Params4,
                  RocprimDeviceHistogramMultiRangeNameGenerator);

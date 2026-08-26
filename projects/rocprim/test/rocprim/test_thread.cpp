@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -77,6 +77,7 @@ struct RocprimThreadTestsNameGenerator
                + "_" + std::to_string(Params::block_size_z);
     }
 };
+
 TYPED_TEST_SUITE(RocprimThreadTests, Params, RocprimThreadTestsNameGenerator);
 
 template<

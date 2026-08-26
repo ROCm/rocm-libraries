@@ -154,7 +154,7 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
 struct RocprimDeviceSortTestsNameGenerator
 {
     template<class T>
-    static std::string tt()
+    static std::string type_tag_or_custom()
     {
         if constexpr(std::is_same_v<T, common::custom_type_copyable<char, double, true>>)
             return "CustomCopyableCharDouble";
@@ -167,16 +167,19 @@ struct RocprimDeviceSortTestsNameGenerator
         else
             return type_tag<T>();
     }
+
     template<class Params>
     static std::string GetName(int /*index*/)
     {
-        std::string n = tt<typename Params::key_type>() + "_" + tt<typename Params::value_type>();
+        std::string n = type_tag_or_custom<typename Params::key_type>() + "_"
+                        + type_tag_or_custom<typename Params::value_type>();
         if constexpr(Params::use_graphs) n += "_Graphs";
         if constexpr(Params::use_indirect_iterator) n += "_Indirect";
         if constexpr(!std::is_same_v<typename Params::config, ::rocprim::default_config>) n += "_Cfg";
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceSortTests,
                  RocprimDeviceSortTestsParams,
                  RocprimDeviceSortTestsNameGenerator);

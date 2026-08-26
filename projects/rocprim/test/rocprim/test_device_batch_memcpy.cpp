@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -134,7 +134,7 @@ using RocprimDeviceBatchMemcpyTestsParams = ::testing::Types<
 struct RocprimDeviceBatchMemcpyTestsNameGenerator
 {
     template<class T>
-    static std::string tt()
+    static std::string type_tag_or_custom()
     {
         if constexpr(std::is_same_v<T, test_utils::custom_non_copyable_type<uint8_t>>)
             return "NonCopyable";
@@ -145,10 +145,11 @@ struct RocprimDeviceBatchMemcpyTestsNameGenerator
         else
             return type_tag<T>();
     }
+
     template<class Params>
     static std::string GetName(int /*index*/)
     {
-        std::string n = tt<typename Params::value_type>() + "_"
+        std::string n = type_tag_or_custom<typename Params::value_type>() + "_"
                         + type_tag<typename Params::size_type>()
                         + (Params::isMemCpy ? "_Memcpy" : "_Copy")
                         + (Params::shuffled ? "_Shuffled" : "") + "_b"
@@ -158,6 +159,7 @@ struct RocprimDeviceBatchMemcpyTestsNameGenerator
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceBatchMemcpyTests,
                  RocprimDeviceBatchMemcpyTestsParams,
                  RocprimDeviceBatchMemcpyTestsNameGenerator);

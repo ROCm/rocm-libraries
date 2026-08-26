@@ -1577,22 +1577,25 @@ class RocprimDeviceScanFutureTests : public RocprimDeviceScanTests<Params>
 struct RocprimDeviceScanFutureTestsNameGenerator
 {
     template<class T>
-    static std::string tt()
+    static std::string type_tag_or_array()
     {
         if constexpr(std::is_same_v<T, test_utils::custom_test_array_type<long long, 5>>)
             return "ArrayInt64x5";
         else
             return type_tag<T>();
     }
+
     template<class Params>
     static std::string GetName(int /*index*/)
     {
-        std::string n = tt<typename Params::input_type>() + "_" + tt<typename Params::output_type>();
+        std::string n = type_tag_or_array<typename Params::input_type>() + "_"
+                        + type_tag_or_array<typename Params::output_type>();
         if constexpr(Params::use_identity_iterator) n += "_Ident";
         if constexpr(Params::use_graphs) n += "_Graphs";
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceScanFutureTests,
                  RocprimDeviceScanFutureTestsParams,
                  RocprimDeviceScanFutureTestsNameGenerator);

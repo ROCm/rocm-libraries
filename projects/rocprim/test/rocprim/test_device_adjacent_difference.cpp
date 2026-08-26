@@ -218,19 +218,21 @@ inline std::string adjacent_difference_alias_tag(common::api_variant a)
         default: return "InPlace";
     }
 }
+
 struct RocprimDeviceAdjacentDifferenceTestsNameGenerator
 {
     template<class T>
-    static std::string tt()
+    static std::string type_tag_or_array()
     {
         if constexpr(std::is_same_v<T, custom_int64_array>) return "ArrayInt64x8";
         else return type_tag<T>();
     }
+
     template<class Params>
     static std::string GetName(int /*index*/)
     {
-        std::string n = tt<typename Params::input_type>() + "_"
-                        + tt<typename Params::output_type>() + "_"
+        std::string n = type_tag_or_array<typename Params::input_type>() + "_"
+                        + type_tag_or_array<typename Params::output_type>() + "_"
                         + (Params::left ? "Left" : "Right") + "_"
                         + adjacent_difference_alias_tag(Params::aliasing);
         if constexpr(std::is_same_v<typename Params::config, custom_config_0>) n += "_Cfg0";
@@ -240,6 +242,7 @@ struct RocprimDeviceAdjacentDifferenceTestsNameGenerator
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceTests,
                  RocprimDeviceAdjacentDifferenceTestsParams,
                  RocprimDeviceAdjacentDifferenceTestsNameGenerator);
@@ -538,6 +541,7 @@ struct RocprimDeviceAdjacentDifferenceLargeTestsNameGenerator
         return n;
     }
 };
+
 TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceLargeTests,
                  RocprimDeviceAdjacentDifferenceLargeTestsParams,
                  RocprimDeviceAdjacentDifferenceLargeTestsNameGenerator);
