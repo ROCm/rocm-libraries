@@ -82,6 +82,16 @@ struct PassFeatureConfig {
         int dsReadThrottleLatency = 0;
         int dsReadPerWmma = INT_MAX;
         int tensorLoadWmmaSpace = 0;
+        /// Honour the LD_SCALE blocked-cycle model (HwInstDesc::blockedScaleMask) in
+        /// the CDNA5 scheduler: a scale WMMA's window carries an LD_SCALE sub-issue that
+        /// no pipe can issue into, so one cycle of the window is unusable.
+        ///
+        /// OFF by default. The model is correct about the hardware but costs an issue
+        /// slot in every scale-WMMA window, and the scheduler has no way yet to decide
+        /// which windows can afford that (see the per-window hide budget in CDNA5.hpp).
+        /// Until it can, the default is the pre-model behaviour and this flag is how the
+        /// tests keep the path covered.
+        bool enableWmmaBlockedScaleCycles = false;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token
         /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).

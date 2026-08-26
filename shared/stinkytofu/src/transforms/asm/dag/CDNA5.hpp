@@ -402,6 +402,20 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
     }
+    // Whether to honour the LD_SCALE blocked-cycle model. OFF by default: the model is
+    // right about the hardware, but it costs an issue slot in every scale-WMMA window
+    // and the scheduler cannot yet tell which windows can afford that.
+    //
+    // All-or-nothing on purpose. activeWmmaBlockedScale_ is the single value every
+    // blocked-cycle path reads -- advanceTime's roll past a blocked cycle,
+    // computeValuAdvanceCycles' slot count, and freeCoIssueSpace's hidden-stall shadow
+    // -- and they are one mechanism, not three. advanceTime's roll is what guarantees
+    // the timeline never comes to rest on a blocked cycle, and isValuPickable() leans
+    // on that guarantee instead of re-checking the mask, so enabling the others
+    // without the roll would drop a VALU straight back into the LD_SCALE cycle.
+    bool blockedScaleCyclesEnabled() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.enableWmmaBlockedScaleCycles;
+    }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
     }
@@ -956,8 +970,11 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     activeCoIssueWindow_ = node->inst->coIssueWindow;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
-    // Set before the advanceTime() below so those cycles are never picked into.
-    activeWmmaBlockedScale_ = node->inst->getHwInstDesc()->blockedScaleMask;
+    // Set before the advanceTime() below so those cycles are never picked into. Stays 0
+    // unless the blocked-cycle model is switched on, which is what keeps every
+    // blocked-cycle path off together (see blockedScaleCyclesEnabled).
+    activeWmmaBlockedScale_ =
+        blockedScaleCyclesEnabled() ? node->inst->getHwInstDesc()->blockedScaleMask : 0;
     activeWmmaNode_ = node;
     nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
     // Advance by WMMA issue cycles after opening a new timeline window.

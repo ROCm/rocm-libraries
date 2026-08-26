@@ -1,4 +1,8 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --enable-wmma-blocked-scale --print-output
+#
+# Needs --enable-wmma-blocked-scale: dagFeatures.enableWmmaBlockedScaleCycles is OFF by
+# default, so without it both functions below schedule identically. This test is what
+# keeps the blocked-cycle path covered while the default stays off.
 #
 # HwInstDesc::blockedTailCycles -- window cycles nothing at all can be issued into.
 #

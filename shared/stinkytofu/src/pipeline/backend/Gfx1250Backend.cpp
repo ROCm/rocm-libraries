@@ -166,6 +166,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =
                     moduleOptions.GlobalReadDrainLatency;
+                passFeatureConfig.dagFeatures.enableWmmaBlockedScaleCycles =
+                    moduleOptions.EnableWmmaBlockedScaleCycles;
                 if (moduleOptions.DsReadPerWmma >= 0)
                     passFeatureConfig.dagFeatures.dsReadPerWmma = moduleOptions.DsReadPerWmma;
                 if (moduleOptions.DsReadOrder >= 0)

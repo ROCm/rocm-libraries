@@ -1,0 +1,39 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+#
+# dagFeatures.enableWmmaBlockedScaleCycles is OFF by default -- no flag on the RUN line
+# above -- so this pins the shipping behaviour.
+#
+# Same input as dag_wmma_scale_blocked_tail.stir, which switches the model ON and there
+# sees the scale pair fit 6 SALU in its latency-8 window against the plain WMMA's 7. By
+# default the scheduler leaves activeWmmaBlockedScale_ at 0 -- the single value every
+# blocked-cycle path reads -- so the scale pair fits 7 too, and the LD_SCALE cycle is
+# filled like any other.
+#
+# The model is right about the hardware; it is off because it costs an issue slot in
+# every scale-WMMA window and the scheduler cannot yet tell which windows can afford
+# that. See the per-window hide budget in CDNA5.hpp.
+
+# CHECK-LABEL: @scale_wmma_fills_whole_window_by_default
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4
+st.func @scale_wmma_fills_whole_window_by_default() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[20:35], v[36:51], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[52:67], v[68:83], v[8:15]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  s10, SCC0 = "st.s_add_u32"(s100, s101) { issueCycles = 1, latencyCycles = 1 }
+  s11, SCC0 = "st.s_add_u32"(s102, s103) { issueCycles = 1, latencyCycles = 1 }
+  s12, SCC0 = "st.s_add_u32"(s104, s105) { issueCycles = 1, latencyCycles = 1 }
+  s13, SCC0 = "st.s_add_u32"(s106, s107) { issueCycles = 1, latencyCycles = 1 }
+  s14, SCC0 = "st.s_add_u32"(s108, s109) { issueCycles = 1, latencyCycles = 1 }
+  s15, SCC0 = "st.s_add_u32"(s110, s111) { issueCycles = 1, latencyCycles = 1 }
+  s16, SCC0 = "st.s_add_u32"(s112, s113) { issueCycles = 1, latencyCycles = 1 }
+  s17, SCC0 = "st.s_add_u32"(s114, s115) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
