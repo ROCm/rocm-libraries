@@ -1127,6 +1127,20 @@ class Solution(collections.abc.Mapping):
               if perWaveMTiles % cand == 0:
                 stack = cand
                 break
+            # SubtileWideGR widens the GR strip to the full macro-tile free dim
+            # (G = stack * waveGroup) while LR keeps the per-wave stack, so one
+            # buffer_load covers G*instM contiguous elements instead of
+            # stack*instM.  Only meaningful when the axis splits across waves.
+            if state.get("SubtileWideGR", False) and waveGroup > 1:
+              grStack = stack * waveGroup
+              key = f"AB_B4_TLU1_GR{grStack}_LR{stack}"
+              from Tensile.Components.Subtile.Kernel import AB_GEOMETRY_MAP
+              if key not in AB_GEOMETRY_MAP:
+                reject(state, printRejectionReason,
+                       f"SubtileWideGR: no geometry {key} for stack {stack} x waveGroup {waveGroup}")
+                return
+              state[f"_ABTilePair{tc}"] = key
+              continue
             state[f"_ABTilePair{tc}"] = {
               2: "AB_B4_TLU1",
               4: "AB_B4_TLU1_4x1",

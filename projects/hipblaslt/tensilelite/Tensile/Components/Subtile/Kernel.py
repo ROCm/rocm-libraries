@@ -346,6 +346,25 @@ AB_B4_TLU1_16x1 = ABTilePair(
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=32, k=1)),
 )
 
+# SubtileWideGR: GR strip spans the FULL macro-tile free dim (G = L * waveGroup)
+# while the LR strip stays at the per-wave extent L.  One buffer_load then covers
+# G*16 contiguous fp4 elements along the unit-stride free dim instead of L*16, so
+# a big enough macro tile reaches a whole 128B cacheline per K row.  The waves
+# that share the strip split its K rows (see _tluWaveAxisGlobalOffset_tlu); the
+# LDS strip width, swizzle and pad all stay GR-determined, and LR just indexes
+# its own M-tile window inside the wider strip.
+def _wideGR(g, l):
+  return ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(g, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(l, 1), loadShape=LoadShape(m=32, k=1)),
+  )
+
+AB_B4_TLU1_GR4_LR2   = _wideGR(4, 2)    # MT64x64   wg2x2: GR 64 elem (32B),  LR 32 elem
+AB_B4_TLU1_GR8_LR4   = _wideGR(8, 4)    # MT128x128 wg2x2: GR 128 elem (64B), LR 64 elem
+AB_B4_TLU1_GR16_LR8  = _wideGR(16, 8)   # MT256x256 wg2x2: GR 256 elem (128B = full line), LR 128 elem
+AB_B4_TLU1_GR8_LR2   = _wideGR(8, 2)    # wg4x4 variants
+AB_B4_TLU1_GR16_LR4  = _wideGR(16, 4)
+
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
 _MXS_B8 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp8', 'bf8'))
@@ -386,6 +405,11 @@ AB_GEOMETRY_MAP = {
   "AB_B4_TLU1_4x1": AB_B4_TLU1_4x1,
   "AB_B4_TLU1_8x1": AB_B4_TLU1_8x1,
   "AB_B4_TLU1_16x1": AB_B4_TLU1_16x1,
+  "AB_B4_TLU1_GR4_LR2": AB_B4_TLU1_GR4_LR2,
+  "AB_B4_TLU1_GR8_LR4": AB_B4_TLU1_GR8_LR4,
+  "AB_B4_TLU1_GR16_LR8": AB_B4_TLU1_GR16_LR8,
+  "AB_B4_TLU1_GR8_LR2": AB_B4_TLU1_GR8_LR2,
+  "AB_B4_TLU1_GR16_LR4": AB_B4_TLU1_GR16_LR4,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
@@ -471,7 +495,15 @@ class TileInfo:
       self.subtileCount        = gr_cfg.subtileCount
       self.subtileStride       = gr_cfg.subtileStride
       self.globalSubtileGrid = list(gr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
-      self.localSubtileGrid  = [int(self.localMMATileGrid[0] / self.subtileShape[0]),
+      # Waves per GR strip along the free dim.  Normally 1: the GR strip is one
+      # wave's M extent, so each wave owns whole strips.  With SubtileWideGR the
+      # GR strip spans several waves' extents, so localMMATileGrid[0] (per wave)
+      # is smaller than subtileShape[0] and the plain ratio would floor to 0.
+      # Those waves cooperate on one strip instead, splitting its K rows.
+      _grStackM      = int(self.subtileShape[0])
+      _perWaveMTiles = int(self.localMMATileGrid[0])
+      self.grWavesPerStrip = max(1, _grStackM // _perWaveMTiles) if _perWaveMTiles else 1
+      self.localSubtileGrid  = [max(1, int(_perWaveMTiles / _grStackM)),
                                  int(self.localMMATileGrid[1] / self.subtileShape[1])]
       self.subtileSize       = gr_cfg.subtileSizeBytes()
 
@@ -483,8 +515,11 @@ class TileInfo:
       # the per-strip load ratio is a single-wave quantity -- folding numWaves in
       # would undercount the K loads per strip (numGRPerSubtile).  TLU=0 keeps the
       # cooperative-K behaviour where multiple waves share one strip.
+      # SubtileWideGR is the exception: grWavesPerStrip waves DO share one
+      # strip's K rows, so its load math is cooperative over exactly that many
+      # waves (not all numWaves -- the other axis' waves need the same data).
       _isTLU1 = isinstance(getattr(gr_cfg, "tag", None), GRTag_TLU1)
-      _grLoadWaves = 1 if _isTLU1 else self.numWaves
+      _grLoadWaves = self.grWavesPerStrip if _isTLU1 else self.numWaves
       # Effective wave count for GR cooperative-load math (numGRPerSubtile,
       # localGRGranularity).  TLU=1 waves partition free-dim strips instead of
       # cooperating on K, so their per-strip load math is single-wave.
