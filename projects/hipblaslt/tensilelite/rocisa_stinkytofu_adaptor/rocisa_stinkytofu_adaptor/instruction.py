@@ -4518,6 +4518,21 @@ class MXMFMAInstruction(Instruction):
         # from variant[3] (the MI blocks count, typically 1).
         self.block = block
 
+    def preStr(self) -> str:
+        """Port of rocisa MXMFMAInstruction::preStr (mfma.hpp:694-707)."""
+        from .base import getAsmCaps
+        caps = getAsmCaps()
+        m = self.variant[0] if len(self.variant) > 0 else 0
+        n = self.variant[1] if len(self.variant) > 1 else 0
+        k = self.variant[2] if len(self.variant) > 2 else 0
+        variant_str = f"{m}x{n}x{k}"
+        if bool(caps.get("HasMFMA", 0)):
+            return f"v_mfma_scale_f32_{variant_str}_f8f6f4"
+        blk_str = "16" if self.block == 16 else ""
+        f4_t = 32
+        type_str = "f8f6f4" if (m < f4_t and n < f4_t) else "f4"
+        return f"v_wmma_scale{blk_str}_f32_{variant_str}_{type_str}"
+
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         from .base import getAsmCaps
