@@ -714,15 +714,17 @@ std::vector<hipblaslt::host_validation::MatmulValidationCase::PointwiseTolerance
     return tolerances;
 }
 
-void testing_matmul_with_bias(const Arguments& arg,
-                              hipDataType      TiA,
-                              hipDataType      TiB,
-                              hipDataType      To,
-                              hipDataType      Tc,
-                              hipDataType      TciA,
-                              hipDataType      TciB,
-                              hipDataType      Tbias,
-                              hipDataType      Taux);
+void testing_matmul_with_bias(
+    const Arguments&                                  arg,
+    std::span<const hipblaslt::client::MatmulTestCase> matmulCases,
+    hipDataType                                       TiA,
+    hipDataType                                       TiB,
+    hipDataType                                       To,
+    hipDataType                                       Tc,
+    hipDataType                                       TciA,
+    hipDataType                                       TciB,
+    hipDataType                                       Tbias,
+    hipDataType                                       Taux);
 
 void testing_matmul(const Arguments& arg)
 {
@@ -742,6 +744,8 @@ void testing_matmul(const Arguments& arg)
 
     hipDataType real_aux_type = derive_unset_aux_type(arg);
     arg_revised.aux_type      = real_aux_type;
+
+    const auto matmulCases = hipblaslt::client::normalizeMatmulCases(arg_revised);
 
     // Set the values of flush, rotating size, cold_iters and hot_iters only for internal use
     hipblasltSetFlushValue(arg.flush);
@@ -765,12 +769,12 @@ void testing_matmul(const Arguments& arg)
             // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
             const int32_t k_limit
                 = (arg.alpha == 2.0f && (arg.beta == 0.0f || arg.beta == -2.0f)) ? 256 : 512;
-            const int32_t problem_count = std::max(1, arg.grouped_gemm);
-            for(int32_t i = 0; i < problem_count; i++)
+            for(const auto& testCase : matmulCases)
             {
-                if(arg.K[i] > k_limit)
+                if(testCase.k > k_limit)
                 {
-                    hipblaslt_cout << "Skipping integer_exact: 16-bit format with K=" << arg.K[i]
+                    hipblaslt_cout << "Skipping integer_exact: 16-bit format with K="
+                                   << testCase.k
                                    << " > " << k_limit << " (exact representability limit)"
                                    << std::endl;
                     return;
@@ -790,7 +794,8 @@ void testing_matmul(const Arguments& arg)
                 << std::endl;
             return;
         }
-        if(arg.transA != 'N' || arg.transB != 'N')
+        if(matmulCases.front().operationA != HIPBLAS_OP_N
+           || matmulCases.front().operationB != HIPBLAS_OP_N)
         {
             hipblaslt_cout << "Skipping fp16_accumulator_probe: only NN transposes supported"
                            << std::endl;
@@ -818,13 +823,12 @@ void testing_matmul(const Arguments& arg)
             hipblaslt_cout << "Skipping fp16_accumulator_probe: requires beta == 0" << std::endl;
             return;
         }
-        const int32_t gemm_count_pe = std::max(1, arg.grouped_gemm);
-        for(int32_t i = 0; i < gemm_count_pe; i++)
+        for(const auto& testCase : matmulCases)
         {
-            if((arg.K[i] & 1) != 0)
+            if((testCase.k & 1) != 0)
             {
                 hipblaslt_cout << "Skipping fp16_accumulator_probe: odd K not supported (K="
-                               << arg.K[i] << ")" << std::endl;
+                               << testCase.k << ")" << std::endl;
                 return;
             }
         }
@@ -847,22 +851,31 @@ void testing_matmul(const Arguments& arg)
         return;
     }
 
-    testing_matmul_with_bias(
-        arg_revised, tiA, tiB, to, tc, tciA, tciB, executionBiasType, real_aux_type);
+    testing_matmul_with_bias(arg_revised,
+                             matmulCases,
+                             tiA,
+                             tiB,
+                             to,
+                             tc,
+                             tciA,
+                             tciB,
+                             executionBiasType,
+                             real_aux_type);
 }
 
-void testing_matmul_with_bias(const Arguments& arg,
-                              hipDataType      TiA,
-                              hipDataType      TiB,
-                              hipDataType      To,
-                              hipDataType      Tc,
-                              hipDataType      TciA,
-                              hipDataType      TciB,
-                              hipDataType      Tbias,
-                              hipDataType      Taux)
+void testing_matmul_with_bias(
+    const Arguments&                                  arg,
+    std::span<const hipblaslt::client::MatmulTestCase> matmulCases,
+    hipDataType                                       TiA,
+    hipDataType                                       TiB,
+    hipDataType                                       To,
+    hipDataType                                       Tc,
+    hipDataType                                       TciA,
+    hipDataType                                       TciB,
+    hipDataType                                       Tbias,
+    hipDataType                                       Taux)
 {
-    const auto matmulCases = hipblaslt::client::normalizeMatmulCases(arg);
-    const auto& firstCase  = matmulCases.front();
+    const auto& firstCase = matmulCases.front();
 
     double gpu_time_used, cpu_time_used, gpu_mem_gbytes;
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
