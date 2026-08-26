@@ -251,6 +251,40 @@ def stage_v_tile_transposed(
             b.smem_store_vN(V_lds_T, idx, b.vec_extract(v8, i), 1)
 
 
+def dequant_transpose_fp8_v_tile(
+    b: IRBuilder,
+    V_fp8: Value,
+    buf_idx: Value,
+    V_lds_T: Value,
+    *,
+    lane: Value,
+    head_size: int,
+    v_scale: Value,
+    dtype: Type,
+) -> None:
+    """Dequant a token-major raw-fp8 V tile into dim-major bf16 ``V_lds_T``.
+
+    After DTLA ``global_load_async_to_lds`` has landed (``s_wait_asynccnt(0)``),
+    lane ``L`` owns token ``L``'s contiguous ``head_size`` fp8 row in
+    ``V_fp8[buf, L, :]``. Vector-load 8 fp8, dequant to bf16, scatter into
+    column ``L`` of ``V_lds_T[HD, T]`` so :func:`compute_pv_wide` keeps the
+    wide ``ds_load`` PV path. This is the fp8 extension beyond gfx950, which
+    fell back to a sync dequant load for fp8 KV.
+    """
+    for dd in range(head_size // 8):
+        raw = b.smem_load_vN(
+            V_fp8, buf_idx, lane, b.const_i32(dd * 8), dtype=FP8E4M3, n=8
+        )
+        v8 = dequant_fp8x8_to_dtype(b, raw, v_scale, dtype)
+        for i in range(8):
+            b.smem_store_vN(
+                V_lds_T,
+                [b.const_i32(dd * 8 + i), lane],
+                b.vec_extract(v8, i),
+                1,
+            )
+
+
 def compute_pv_wide(
     b: IRBuilder,
     P_lds: Value,

@@ -332,3 +332,53 @@ already committed in `b27ffa1c1b`.)
 
 Prior checkpoint: branch `users/yraparti/rocke/gfx1250_attention_prototype`;
 lever 1 wide-LDS-reads + lever 2 DTLA (opt-in) landed earlier.
+
+## 10. Checkpoint (2026-08-25, WaveScope/runbook gap pass)
+
+The gfx1250 A0 ATT capture completed, but the installed trace decoder identified
+the target as `gfxip=9/vega` and emitted an empty `code.json`. The A0 PMC catalog
+likewise accepted the requested SQ/GL2/TX counters but returned zero values.
+Consequently this pass used the runbook's required fallback: kernel-trace
+resource metadata plus static ISA/resource inspection. The production segment
+has a non-zero private segment and remains the structural hot stage; no ATT
+stall percentage is claimed.
+
+**Existing implementation gap fixed — vectorized reduce.** The old wave32
+reduce made two scalar dimension passes for d64 and reloaded each LDS factor in
+both passes. `UnifiedAttentionReduceTiledSpec.vector_width=2` now maps two
+adjacent dimensions to each lane, reuses the factor once, and emits packed
+workspace/output traffic. For seg16 the ISA changed from 34 scalar
+`global_load_b32` to 16 `global_load_b64` plus two scalar metadata loads, and
+from two `global_store_b16` to one `global_store_b32`; wait/load and VALU counts
+also fell. The candidate passed the fp8 decode cohort and reduced the reduce
+stage by roughly 14–39% depending on segment count/batch, so width 2 is the
+gfx1250 default. Width 1 remains available to reproduce the baseline.
+Because that changes the split/reduce balance, the segment-count sweep was
+re-run rather than preserving the old selector blindly. At KV≤1024, nseg32
+beats nseg64 by about 11–14% for the two-sequence cohort, while nseg8 beats
+nseg16 by about 3% for the 256-sequence cohort. The selector now applies those
+two narrow fp8 gates; the long-KV winners remain nseg64 and nseg16.
+
+**Escape-hatch experiments (new work mappings, neither production-selected):**
+
+1. A one-launch, single-segment direct-output mapping removed the workspace and
+   reduce launch, and a cooperative 2/4/8-wave version restored intra-CTA KV
+   parallelism. It was numerically correct, but losing inter-CTA split-KV
+   parallelism dominated: every tested decode cohort regressed, including the
+   best cooperative-wave variant. The direct-output prototype was therefore
+   reverted rather than wired into the production launcher.
+2. `use_scalar_decode` changes the opcode classes completely: two independent
+   query heads share a wave32 as 16-lane rows, Q/K/V and online-softmax state
+   stay in registers, fp8 uses packed conversion, and the kernel emits DPP
+   reductions with **no WMMA, LDS, or barrier instructions**. It is correct on
+   the q_len=1 GQA8 d64 fp8 cohort, but scalar per-token K/V streaming costs
+   2–7× the WMMA tiled segment. It remains a default-off harness prototype so
+   this mapping is not rediscovered as a supposed small-batch fix.
+
+The measured conclusion is narrower than “WMMA is always best”: on gfx1250 A0
+for this d64 GQA8 contract, the missing parallelism from eliminating split-KV
+and the instruction count of scalar per-token streaming both outweigh their
+launch/LDS savings. A future escape attempt must preserve split-KV CTA
+parallelism while removing the separate global reduction, e.g. with a hardware
+cross-CTA synchronization/cluster primitive rather than another tile or wave
+count retune.

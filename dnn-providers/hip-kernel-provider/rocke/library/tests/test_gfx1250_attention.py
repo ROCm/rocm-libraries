@@ -18,6 +18,7 @@ The GPU probe class is skipped unless run on a gfx1250 device.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import os
 import subprocess
 import sys
@@ -218,6 +219,71 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         )
         self.assertIn("llvm.amdgcn.s.barrier", ll_red)
 
+    def test_reduce_vector_width_2_lowers(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx1250.attention_tiled_3d import (
+            UnifiedAttentionReduceTiledSpec,
+            build_unified_attention_reduce_tiled,
+        )
+
+        red = UnifiedAttentionReduceTiledSpec(
+            head_size=64,
+            num_query_heads=32,
+            num_kv_heads=4,
+            dtype="bf16",
+            num_segments=16,
+            vector_width=2,
+        )
+        self.assertIn("v2", red.kernel_name())
+        ll = lower_kernel_to_llvm(
+            build_unified_attention_reduce_tiled(red, arch="gfx1250"),
+            arch="gfx1250",
+        )
+        self.assertIn("load <2 x float>", ll)
+        self.assertIn("store <2 x bfloat>", ll)
+        with self.assertRaises(ValueError):
+            UnifiedAttentionReduceTiledSpec(
+                head_size=64,
+                num_query_heads=32,
+                num_kv_heads=4,
+                dtype="bf16",
+                num_segments=16,
+                vector_width=4,
+            )
+
+    def test_scalar_decode_escape_lowers_without_wmma_or_lds(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx1250.attention_tiled_3d import (
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_3d_tiled,
+        )
+
+        spec = UnifiedAttention3DTiledSpec(
+            head_size=64,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=4,
+            dtype="bf16",
+            use_sinks=True,
+            sliding_window=0,
+            has_softcap=False,
+            num_segments=64,
+            num_seqs=2,
+            kv_storage_dtype="fp8e4m3",
+            use_wide_kv_load=False,
+            use_wide_lds_reads=False,
+            use_scalar_decode=True,
+        )
+        ll = lower_kernel_to_llvm(
+            build_unified_attention_3d_tiled(spec, arch="gfx1250"),
+            arch="gfx1250",
+        )
+        self.assertIn("scalar2h", spec.kernel_name())
+        self.assertIn("llvm.amdgcn.cvt.pk.f32.fp8", ll)
+        self.assertIn("v_add_f32_dpp", ll)
+        self.assertNotIn("llvm.amdgcn.wmma", ll)
+        self.assertNotIn("llvm.amdgcn.s.barrier", ll)
+
     def test_large_batch_regression_binary_search_floor(self):
         # Regression: large-batch decode binary search uses 32+ iterations
         # (the historically flaky 256-seq fp8 shape).
@@ -357,8 +423,10 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
             self.assertGreater(art.hsaco_bytes, 0)
 
     def test_dtla_prefetch_rejects_incompatible_levers(self):
-        # DTLA owns the V_lds layout + pipeline; guard the mutually exclusive
-        # combinations and the not-yet-implemented fp8 path.
+        # DTLA owns the V_lds layout + pipeline; guard mutually exclusive
+        # combinations. fp8 DTLA is implemented (raw-in-LDS + dequant-transpose)
+        # but still cannot compose with dim-major / multi-wave / register-P /
+        # ds_load_tr (token-major) levers.
         from kernels.gfx1250.attention_tiled_3d import (
             UnifiedAttention3DTiledSpec,
         )
@@ -385,7 +453,84 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         with self.assertRaises(ValueError):
             UnifiedAttention3DTiledSpec(**{**base, "use_register_p": True})
         with self.assertRaises(ValueError):
-            UnifiedAttention3DTiledSpec(**{**base, "kv_storage_dtype": "fp8e4m3"})
+            UnifiedAttention3DTiledSpec(
+                **{
+                    **base,
+                    "kv_storage_dtype": "fp8e4m3",
+                    "use_ds_tr_reads": True,
+                }
+            )
+        # fp8 DTLA itself is a legal spec (the hatch experiment).
+        UnifiedAttention3DTiledSpec(**{**base, "kv_storage_dtype": "fp8e4m3"})
+
+    def test_dtla_prefetch_fp8_lowers(self):
+        # fp8 DTLA: async raw-fp8 global->LDS + dequant-transpose + wide PV.
+        # Must emit the gfx1250 async opcode class (not gfx9 buffer_load_lds).
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx1250.attention_tiled_3d import (
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_3d_tiled,
+        )
+
+        spec = UnifiedAttention3DTiledSpec(
+            head_size=64,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=4,
+            dtype="bf16",
+            use_sinks=True,
+            sliding_window=0,
+            has_softcap=False,
+            num_segments=16,
+            num_seqs=2,
+            kv_storage_dtype="fp8e4m3",
+            use_dtla_prefetch=True,
+            use_wide_lds_reads=False,
+        )
+        self.assertIn("dtla", spec.kernel_name())
+        ll = lower_kernel_to_llvm(
+            build_unified_attention_3d_tiled(spec, arch="gfx1250"), arch="gfx1250"
+        )
+        self.assertIn("llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16", ll)
+        self.assertIn("llvm.amdgcn.global.load.async.to.lds.b128", ll)
+        self.assertIn("llvm.amdgcn.s.wait.asynccnt", ll)
+        self.assertNotIn("raw.ptr.buffer.load.lds", ll)
+        self.assertNotIn("global.load.lds", ll)
+
+    def test_dtla_prefetch_fp8_compiles(self):
+        from kernels.gfx1250.attention_tiled_3d import (
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_3d_tiled,
+        )
+
+        try:
+            from rocke.helpers.compile import compile_kernel
+        except Exception as e:  # pragma: no cover - env-dependent
+            self.skipTest(f"compile toolchain unavailable: {e}")
+
+        spec = UnifiedAttention3DTiledSpec(
+            head_size=64,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=4,
+            dtype="bf16",
+            use_sinks=True,
+            sliding_window=0,
+            has_softcap=False,
+            num_segments=16,
+            num_seqs=2,
+            kv_storage_dtype="fp8e4m3",
+            use_dtla_prefetch=True,
+            use_wide_lds_reads=False,
+        )
+        try:
+            art = compile_kernel(
+                build_unified_attention_3d_tiled(spec, arch="gfx1250"),
+                arch="gfx1250",
+            )
+        except Exception as e:  # pragma: no cover - env-dependent
+            self.skipTest(f"gfx1250 comgr compile unavailable: {e}")
+        self.assertGreater(art.hsaco_bytes, 0)
 
     def test_common_dispatch_selects_3d(self):
         from kernels.common import attention_unified as au
@@ -412,9 +557,34 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
             self.assertTrue(ok, why)
             spec = au._tiled_3d_spec_from_problem(problem)
             self.assertEqual(spec.block_q, 2)
-            self.assertGreaterEqual(spec.num_segments, 1)
+            self.assertEqual(spec.num_segments, 32)
+            # fp8 production: double-buffer V, not the wide-LDS-read path.
+            self.assertTrue(spec.use_wide_kv_load)
+            self.assertFalse(spec.use_wide_lds_reads)
             Spec, _, _, _, _ = au._tiled_3d_impl("gfx1250")
             self.assertEqual(Spec.__module__, "kernels.gfx1250.attention_tiled_3d")
+
+            large_fp8 = replace(problem, total_q=256, num_seqs=256)
+            self.assertEqual(au._tiled_3d_spec_from_problem(large_fp8).num_segments, 8)
+
+            bf16 = au.UnifiedAttentionProblem(
+                total_q=2,
+                num_seqs=2,
+                num_query_heads=32,
+                num_kv_heads=4,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=1,
+                max_seqlen_k=1024,
+                dtype="bf16",
+                q_dtype="bf16",
+                sliding_window=0,
+                use_sinks=True,
+                use_fp8=False,
+            )
+            spec_bf16 = au._tiled_3d_spec_from_problem(bf16)
+            self.assertFalse(spec_bf16.use_wide_kv_load)
+            self.assertTrue(spec_bf16.use_wide_lds_reads)
         finally:
             au._RESOLVED_ATTENTION_ARCH = old_arch
 

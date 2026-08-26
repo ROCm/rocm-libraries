@@ -2882,6 +2882,22 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
+    if (
+        _resolve_attention_arch() == "gfx1250"
+        and problem.max_seqlen_q == 1
+        and problem.head_size == 64
+        and problem.block_size == 16
+        and _kv_storage_dtype(problem) == "fp8e4m3"
+        and problem.max_seqlen_k <= 1024
+    ):
+        # Re-tuned after the d64 reduce switched to packed width-2 loads/stores:
+        # at short KV, the old split counts pay more empty/one-tile CTA and
+        # reduce overhead than useful latency hiding. Keep the measured decode
+        # cohort gates narrow; intermediate batch sizes retain AITER's formula.
+        if problem.num_seqs <= 4:
+            return min(segments, 32)
+        if problem.num_seqs >= 128:
+            return min(segments, 8)
     # Routing uses the device CU count (num_cus*4) so under-filled grids flip
     # 2D->3D; but the split-KV segment count must stay bounded, else the reduce
     # round-trip over-splits 3D shapes. The PRE-BUMP baseline (segments the same
@@ -3052,14 +3068,34 @@ def _resolve_gfx1250_tiled3d(problem: UnifiedAttentionProblem) -> _ResolvedTiled
     """
     dtla = _env_enabled_true("HIPDNN_GFX1250_3D_DTLA")
     dstr = _env_enabled_true("HIPDNN_GFX1250_3D_DSTR")
-    wkv = _env_enabled_true("HIPDNN_GFX1250_3D_WKV")
     regp = _env_enabled_true("HIPDNN_GFX1250_3D_REGP")
 
     num_waves = _gfx1250_3d_num_waves()
     if num_waves == -1:  # auto: policy picks the wave count from the shape
         num_waves = 1
-    # lever 1, default-on (transposed V + wide ds_load); auto-off when an incompatible
-    # lever (multi-wave / double-buffer / register-P) is on.
+    kv_dtype = _kv_storage_dtype(problem)
+    # Production fp8 decode: double-buffer V (``use_wide_kv_load``) so the next
+    # tile's global V load overlaps PV of the current tile. Step 0 sweep on
+    # gfx1250: this beats the default-on wide-LDS-read path for fp8 KV and
+    # regresses bf16 KV, so it is fp8-only. Disable with HIPDNN_GFX1250_3D_WKV=0.
+    wkv = (
+        kv_dtype == "fp8e4m3"
+        and num_waves == 1
+        and not dtla
+        and not dstr
+        and not regp
+        and not _env_disabled("HIPDNN_GFX1250_3D_WKV")
+    )
+    if (
+        _env_enabled_true("HIPDNN_GFX1250_3D_WKV")
+        and num_waves == 1
+        and not dtla
+        and not dstr
+        and not regp
+    ):
+        wkv = True
+    # lever 1 (transposed V + wide ds_load): auto-off when an incompatible
+    # lever (multi-wave / double-buffer / register-P / DTLA / ds_tr) is on.
     use_wide_lds_reads = (
         num_waves == 1
         and not wkv
@@ -3072,7 +3108,7 @@ def _resolve_gfx1250_tiled3d(problem: UnifiedAttentionProblem) -> _ResolvedTiled
         num_segments=_num_segments(problem),
         num_waves=num_waves,
         waves_per_eu=_select_3d_waves_per_eu(problem),
-        kv_storage_dtype=_kv_storage_dtype(problem),
+        kv_storage_dtype=kv_dtype,
         tile_size_override=_gfx942_3d_tile_size_override(problem),  # None on gfx1250
         use_invariant_hoist=_env_enabled_true("HIPDNN_GFX1250_3D_HOIST"),
         use_wide_kv_load=wkv,

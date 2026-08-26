@@ -121,6 +121,11 @@ def main() -> int:
         help="software-pipeline stack: DTLA async-V shadow + iglp/sched cadence",
     )
     ap.add_argument(
+        "--scalar-decode",
+        action="store_true",
+        help="escape hatch: register-only two-head-per-wave q_len=1 decode",
+    )
+    ap.add_argument(
         "--ablate-softmax",
         action="store_true",
         help="DEBUG perf-only: drop softmax wave-reduce+exp2 (output garbage)",
@@ -156,6 +161,13 @@ def main() -> int:
         type=int,
         default=None,
         help="cooperative multi-wave32 CTA: waves per (q-block, kv-head, segment)",
+    )
+    ap.add_argument(
+        "--reduce-vector-width",
+        type=int,
+        choices=(1, 2),
+        default=None,
+        help="gfx1250 reduce: adjacent output dimensions accumulated per lane",
     )
     ap.add_argument("--warmup", type=int, default=20)
     ap.add_argument("--iters", type=int, default=200)
@@ -250,6 +262,16 @@ def main() -> int:
     if hasattr(base_seg_spec, "use_sw_pipeline") and args.sw_pipeline:
         seg_updates["use_sw_pipeline"] = True
         seg_updates["use_wide_lds_reads"] = False
+    if hasattr(base_seg_spec, "use_scalar_decode") and args.scalar_decode:
+        seg_updates.update(
+            use_scalar_decode=True,
+            use_register_p=False,
+            use_wide_kv_load=False,
+            use_wide_lds_reads=False,
+            use_dtla_prefetch=False,
+            use_ds_tr_reads=False,
+            use_sw_pipeline=False,
+        )
     if hasattr(base_seg_spec, "ablate_softmax") and args.ablate_softmax:
         seg_updates["ablate_softmax"] = True
     if (args.plain or args.ablate_pv) and hasattr(base_seg_spec, "use_wide_lds_reads"):
@@ -264,12 +286,16 @@ def main() -> int:
         elif args.no_dpp_softmax:
             seg_updates["use_dpp_softmax"] = False
     seg_spec = replace(base_seg_spec, **seg_updates)
+    red_kwargs = {}
+    if args.reduce_vector_width is not None and hasattr(ReduceSpec, "vector_width"):
+        red_kwargs["vector_width"] = args.reduce_vector_width
     red_spec = ReduceSpec(
         head_size=_HD,
         num_query_heads=_NQH,
         num_kv_heads=_NKVH,
         dtype="bf16",
         num_segments=NUM_SEG,
+        **red_kwargs,
     )
     import os as _os
 
@@ -351,7 +377,10 @@ def main() -> int:
 
     block_q = _BLOCK_Q
     total_num_q_blocks = total_q // block_q + num_seqs
-    seg_grid = (int(total_num_q_blocks), int(_NKVH), int(NUM_SEG))
+    if getattr(seg_spec, "use_scalar_decode", False):
+        seg_grid = (int(total_q), int(_NQH // 2), int(NUM_SEG))
+    else:
+        seg_grid = (int(total_num_q_blocks), int(_NKVH), int(NUM_SEG))
     seg_waves = int(getattr(seg_spec, "num_waves", 1))
     seg_blk = (wave_size * seg_waves, 1, 1)
     red_blk = (wave_size, 1, 1)

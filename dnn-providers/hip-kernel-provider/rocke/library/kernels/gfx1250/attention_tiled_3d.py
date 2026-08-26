@@ -33,7 +33,17 @@ from dataclasses import dataclass
 import math
 from typing import Optional, Tuple
 
-from rocke.core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
+from rocke.core.ir import (
+    BF16,
+    F32,
+    FP8E4M3,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Type,
+    Value,
+)
 from rocke.helpers.attention import (
     PagedKvDescriptor,
     binary_search_seq_idx,
@@ -51,6 +61,7 @@ from ._wmma_attention_common import (
     compute_pv_from_probs,
     compute_pv_wide,
     compute_qk_scores,
+    dequant_transpose_fp8_v_tile,
     kv_storage_ir as _kv_storage_ir,
     load_q_frags,
     resolve_wmma,
@@ -90,6 +101,8 @@ class UnifiedAttention3DTiledSpec:
     # accepted for signature parity with the shared dispatch spec builder
     tile_size_override: Optional[int] = None
     use_invariant_hoist: bool = False
+    # Double-buffer V in LDS and prefetch tile i+1 during PV of tile i.
+    # Production default for gfx1250 fp8 decode (see _resolve_gfx1250_tiled3d).
     use_wide_kv_load: bool = False
     use_register_p: bool = False
     wmma_spacing: int = 0
@@ -99,10 +112,14 @@ class UnifiedAttention3DTiledSpec:
     # validated single-wave path byte-identical.
     num_waves: int = 1
     # --- gap-closing levers (ISA-driven; see gfx1250_mha_optimization_case_study) ---
-    # lever 1 (default on): transposed V_lds + wide ds_load reads, replacing the
-    #    64 scalar ds_load_u16 PV gathers/tile with wide loads.
+    # lever 1 (opt-in / bf16 default): transposed V_lds + wide ds_load reads.
+    #    Production fp8 decode prefers lever-style double-buffer V instead
+    #    (use_wide_kv_load); the two are mutually exclusive.
     use_wide_lds_reads: bool = True
-    # lever 2 (opt-in): DTLA (buffer_load...lds) staging + double-buffer + prefetch.
+    # lever 2 (opt-in): gfx1250 DTLA (global_load_async_to_lds + s_wait_asynccnt)
+    # staging + double-buffer + prefetch. bf16 KV lands token-major in LDS and
+    # feeds compute_pv / compute_pv_dstr. fp8 KV copies raw fp8 into LDS (half
+    # the bytes) then dequant-transposes into dim-major bf16 for compute_pv_wide.
     use_dtla_prefetch: bool = False
     # hardware transpose-LDS read (ds_load_tr16_b128) for the PV V operand:
     # V staged token-major, read transposed in HW (the gfx950 ds_read_tr
@@ -129,6 +146,10 @@ class UnifiedAttention3DTiledSpec:
     #    partials workspace / second launch). Only valid when one CTA covers the
     #    whole KV for a (token, head) (num_segments == 1).
     use_fused_reduce: bool = False
+    # Escape-hatch mapping for q_len=1, d64, GQA8 fp8 decode: two independent
+    # query heads per wave32, one 16-lane row per head, register-only Q/K/V and
+    # online softmax. This removes WMMA and all LDS/barrier traffic.
+    use_scalar_decode: bool = False
     # online-softmax cross-lane reduction via DPP ``row_xmask`` (VALU) instead
     # of ``ds_swizzle`` (LDS port). gfx1250 (RDNA) only: the wave32 16-lane
     # row-group butterfly moves off the serialized LDS port onto the VALU,
@@ -163,6 +184,29 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError("wmma_spacing must be non-negative")
         if self.num_waves not in (1, 2, 4, 8):
             raise ValueError("num_waves must be one of {1,2,4,8}")
+        if self.use_scalar_decode:
+            if (
+                self.head_size != 64
+                or self.block_size != 16
+                or self.num_queries_per_kv != 8
+                or self.kv_storage_dtype != "fp8e4m3"
+            ):
+                raise ValueError(
+                    "use_scalar_decode requires d64, block16, GQA8, fp8 KV"
+                )
+            if (
+                self.num_waves != 1
+                or self.use_register_p
+                or self.use_wide_kv_load
+                or self.use_wide_lds_reads
+                or self.use_dtla_prefetch
+                or self.use_ds_tr_reads
+                or self.use_sw_pipeline
+                or self.use_fused_reduce
+            ):
+                raise ValueError(
+                    "use_scalar_decode is a single-wave register-only mapping"
+                )
         if self.num_waves > 1 and (self.use_register_p or self.use_wide_kv_load):
             raise ValueError(
                 "num_waves>1 uses the LDS-P single-buffer path "
@@ -205,10 +249,11 @@ class UnifiedAttention3DTiledSpec:
                     "use_dtla_prefetch and use_wide_kv_load both double-buffer V; "
                     "use only one"
                 )
-            if self.kv_storage_dtype == "fp8e4m3":
+            if self.kv_storage_dtype == "fp8e4m3" and self.use_ds_tr_reads:
                 raise ValueError(
-                    "use_dtla_prefetch fp8 (raw-in-LDS + dequant-on-read) is not "
-                    "yet implemented; bf16 KV only for now"
+                    "fp8 use_dtla_prefetch dequant-transposes into dim-major V "
+                    "for compute_pv_wide; use_ds_tr_reads (token-major) is "
+                    "mutually exclusive"
                 )
             if self.block_size not in (16, 32):
                 raise ValueError("use_dtla_prefetch supports block_size in {16,32}")
@@ -320,6 +365,7 @@ class UnifiedAttention3DTiledSpec:
             "dtla" if self.use_dtla_prefetch else "",
             "swp" if self.use_sw_pipeline else "",
             "fred" if self.use_fused_reduce else "",
+            "scalar2h" if self.use_scalar_decode else "",
         )
 
 
@@ -331,6 +377,16 @@ class UnifiedAttentionReduceTiledSpec:
     dtype: str
     num_segments: int
     waves_per_eu: Optional[int] = None
+    # Number of adjacent output dimensions reduced by each lane. ``2`` maps
+    # d64 onto one wave32 pass, vectorizes the fp32 workspace load / bf16 store,
+    # and reuses each LDS factor load for both accumulators.
+    vector_width: int = 2
+
+    def __post_init__(self) -> None:
+        if self.vector_width not in (1, 2):
+            raise ValueError("vector_width must be 1 or 2")
+        if self.head_size % (_WAVE * self.vector_width) != 0:
+            raise ValueError("head_size must be divisible by wave_size * vector_width")
 
     @property
     def dtype_ir(self) -> Type:
@@ -345,6 +401,7 @@ class UnifiedAttentionReduceTiledSpec:
             f"h{self.num_query_heads}",
             self.dtype,
             f"seg{self.num_segments}",
+            f"v{self.vector_width}" if self.vector_width > 1 else "",
         )
 
 
@@ -457,6 +514,175 @@ def _seg_declare_params(b: IRBuilder, kv_dtype: Type):
     return locals()
 
 
+def _build_unified_attention_3d_scalar(
+    spec: UnifiedAttention3DTiledSpec,
+) -> KernelDef:
+    """Register-only q_len=1 decode: two 16-lane query heads per wave32."""
+    HD = spec.head_size
+    NUM_QH = spec.num_query_heads
+    NUM_KVH = spec.num_kv_heads
+    NUM_SEG = spec.num_segments
+    BS = spec.block_size
+    EPT = 4
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = _WAVE
+    if spec.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+    p = _seg_declare_params(b, FP8E4M3)
+
+    segm_output = p["segm_output"]
+    segm_max = p["segm_max"]
+    segm_expsum = p["segm_expsum"]
+    query = p["query"]
+    key = p["key"]
+    value = p["value"]
+    sinks = p["sinks"]
+    block_tables = p["block_tables"]
+    seq_lens = p["seq_lens"]
+    scale = p["scale"]
+    k_scale = p["k_scale"]
+    v_scale = p["v_scale"]
+    block_table_stride = p["block_table_stride"]
+
+    # q_len=1 contract: global query-token index is also the sequence id.
+    q_token = b.block_id_x()
+    head_pair = b.block_id_y()
+    seg_idx = b.block_id_z()
+    lane = b.mod(b.thread_id_x(), b.const_i32(_WAVE))
+    row = b.div(lane, b.const_i32(16))
+    lane16 = b.mod(lane, b.const_i32(16))
+    q_head = b.add(b.mul(head_pair, b.const_i32(2)), row)
+    kv_head = b.div(q_head, b.const_i32(8))
+    d_base = b.mul(lane16, b.const_i32(EPT))
+
+    seq_len = b.global_load_i32(seq_lens, q_token)
+    num_tiles = b.div(b.add(seq_len, b.const_i32(_T - 1)), b.const_i32(_T))
+    tiles_per_seg = b.div(
+        b.add(num_tiles, b.const_i32(NUM_SEG - 1)), b.const_i32(NUM_SEG)
+    )
+    tile_start = b.mul(seg_idx, tiles_per_seg)
+    tile_end_raw = b.mul(b.add(seg_idx, b.const_i32(1)), tiles_per_seg)
+    tile_end = b.select(b.cmp_lt(tile_end_raw, num_tiles), tile_end_raw, num_tiles)
+    token_start = b.mul(tile_start, b.const_i32(_T))
+    token_end_raw = b.mul(tile_end, b.const_i32(_T))
+    token_end = b.select(b.cmp_lt(token_end_raw, seq_len), token_end_raw, seq_len)
+
+    ml_idx = b.add(
+        b.mul(
+            b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head),
+            b.const_i32(NUM_SEG),
+        ),
+        seg_idx,
+    )
+    acc_base = b.mul(ml_idx, b.const_i32(HD))
+    is_row_lead = b.cmp_eq(lane16, b.const_i32(0))
+    zero_f = b.const_f32(0.0)
+    neg_inf = b.const_f32(-1e30)
+
+    def _store_state(m: Value, l: Value, accs: list[Value]) -> None:
+        with b.scf_if(is_row_lead):
+            b.global_store(segm_max, ml_idx, m, align=4)
+            b.global_store(segm_expsum, ml_idx, l, align=4)
+        for j, acc in enumerate(accs):
+            b.global_store(
+                segm_output,
+                b.add(acc_base, b.add(d_base, b.const_i32(j))),
+                acc,
+                align=4,
+            )
+
+    with b.scf_if(b.cmp_ge(token_start, token_end)):
+        _store_state(neg_inf, zero_f, [zero_f for _ in range(EPT)])
+        b.ret()
+
+    q_addr = b.add(
+        b.mul(
+            b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head),
+            b.const_i32(HD),
+        ),
+        d_base,
+    )
+    q_raw = b.global_load_vN(query, q_addr, BF16, EPT, align=8)
+    q_vals = [b.cast_to_f32(b.vec_extract(q_raw, j)) for j in range(EPT)]
+
+    rcp_ln2 = b.const_f32(1.4426950408889634)
+    qk_scale = b.fmul(scale, rcp_ln2)
+    if spec.use_sinks:
+        sink = b.fmul(
+            b.cast_to_f32(b.global_load(sinks, q_head, BF16, align=2)),
+            rcp_ln2,
+        )
+        use_sink = b.cmp_eq(seg_idx, b.const_i32(0))
+        m_init = b.select(use_sink, sink, neg_inf)
+        l_init = b.select(use_sink, b.const_f32(1.0), zero_f)
+    else:
+        m_init = neg_inf
+        l_init = b.const_f32(1.0)
+
+    kv_desc = PagedKvDescriptor(
+        block_size=BS,
+        stride_0=BS * NUM_KVH * HD,
+        stride_1=NUM_KVH * HD,
+        stride_2=HD,
+        stride_3=1,
+    )
+    loop = b.scf_for_iter(
+        token_start,
+        token_end,
+        b.const_i32(1),
+        [("m", m_init), ("l", l_init)] + [(f"a{j}", zero_f) for j in range(EPT)],
+        iv_name="scalar_k",
+    )
+    with loop as (k_idx, state):
+        m, l = state[0], state[1]
+        accs = state[2:]
+        logical_block = b.div(k_idx, b.const_i32(BS))
+        physical_block = b.global_load_i32(
+            block_tables,
+            b.add(b.mul(q_token, block_table_stride), logical_block),
+        )
+        token_in_block = b.mod(k_idx, b.const_i32(BS))
+        kv_addr = kv_desc.offset(
+            b,
+            physical_block=physical_block,
+            token_in_block=token_in_block,
+            kv_head=kv_head,
+            dim=d_base,
+        )
+        k_raw = b.global_load_vN(key, kv_addr, FP8E4M3, EPT, align=4)
+        v_raw = b.global_load_vN(value, kv_addr, FP8E4M3, EPT, align=4)
+        k_vec = b.cvt_pk_f32_fp8x4(k_raw)
+        v_vec = b.cvt_pk_f32_fp8x4(v_raw)
+        dot_part = zero_f
+        v_vals = []
+        for j in range(EPT):
+            k_f = b.fmul(b.vec_extract(k_vec, j), k_scale)
+            v_f = b.fmul(b.vec_extract(v_vec, j), v_scale)
+            dot_part = b.fma(q_vals[j], k_f, dot_part)
+            v_vals.append(v_f)
+        dot = wave_reduce_sum(
+            b,
+            dot_part,
+            wave_size=_WAVE,
+            lanes_per_row=16,
+            use_dpp=True,
+        )
+        score = b.fmul(dot, qk_scale)
+        m_new = b.fmax(m, score)
+        alpha = b.exp2(b.fsub(m, m_new))
+        prob = b.exp2(b.fsub(score, m_new))
+        l_new = b.fma(l, alpha, prob)
+        next_state = [m_new, l_new]
+        for j in range(EPT):
+            next_state.append(b.fma(prob, v_vals[j], b.fmul(accs[j], alpha)))
+        b.scf_yield(*next_state)
+
+    _store_state(loop.results[0], loop.results[1], list(loop.results[2:]))
+    b.ret()
+    return b.kernel
+
+
 def build_unified_attention_3d_tiled(
     spec: UnifiedAttention3DTiledSpec, arch: str = "gfx1250"
 ) -> KernelDef:
@@ -475,6 +701,8 @@ def build_unified_attention_3d_tiled(
     )
     if not ok:
         raise ValueError(why)
+    if spec.use_scalar_decode:
+        return _build_unified_attention_3d_scalar(spec)
 
     op, a_map, c_map, a_frag, c_frag = resolve_wmma(arch)
 
@@ -490,6 +718,7 @@ def build_unified_attention_3d_tiled(
     NUM_WAVES = spec.num_waves
     # sw-pipeline rides the DTLA async-V double-buffer staging path.
     use_dtla_stage = spec.use_dtla_prefetch or spec.use_sw_pipeline
+    use_fp8_dtla = use_dtla_stage and spec.kv_storage_dtype == "fp8e4m3"
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = _WAVE * NUM_WAVES
@@ -915,9 +1144,14 @@ def build_unified_attention_3d_tiled(
         if spec.use_register_p
         else b.smem_alloc(dtype, [_BLOCK_M, _T], name_hint="P3d_gfx1250")
     )
+    V_fp8_lds = None
     if spec.use_wide_lds_reads:
         # dim-major [HD, T] so each lane's 16-token WMMA-B fragment is one wide read.
         V_lds = b.smem_alloc(dtype, [HD, _T], name_hint="V3dT_gfx1250")
+    elif use_fp8_dtla:
+        # raw fp8 double buffer (async DMA) + dim-major bf16 scratch for wide PV.
+        V_fp8_lds = b.smem_alloc(FP8E4M3, [2, _T, HD], name_hint="V3d_dtla_fp8")
+        V_lds = b.smem_alloc(dtype, [HD, _T], name_hint="V3dT_dtla_fp8")
     elif spec.use_wide_kv_load or use_dtla_stage:
         # token-major double buffer; DTLA streams async global->LDS into it.
         V_lds = b.smem_alloc(dtype, [2, _T, HD], name_hint="V3d_gfx1250_dbl")
@@ -983,7 +1217,11 @@ def build_unified_attention_3d_tiled(
     # per-token ``_phys_block`` lookup handles block_size 16 (2 blocks/tile) and
     # 32 (1 block/tile) without a separate byte descriptor.
     if use_dtla_stage:
-        DTLA_CALLS_PER_TILE = HD // 8  # 8 b128 (16 B = 8 bf16) calls / token
+        # 16 B payload / call. bf16: 8 elements (HD/8 calls). fp8: 16 elements
+        # (HD/16 calls) — half the DMA bytes, dequant happens on the LDS read.
+        elems_per_b128 = 16 if use_fp8_dtla else 8
+        DTLA_CALLS_PER_TILE = HD // elems_per_b128
+        dtla_dst = V_fp8_lds if use_fp8_dtla else V_lds
         # CACHE_STREAM (SLC): one-shot streaming KV, not reused.
         DTLA_CPOL = 2
 
@@ -997,7 +1235,7 @@ def build_unified_attention_3d_tiled(
             # the global source and the LDS dest). Baking the constant chunk
             # offset into the *pointers* instead makes the gfx1250 backend merge
             # the unrolled async calls (only the dim-0 chunk lands) -- verified
-            # via a fill readback probe. 8 bf16 (b128 = 16 B) per call.
+            # via a fill readback probe.
             base_src = kv_desc.offset(
                 b,
                 physical_block=vpblk,
@@ -1009,7 +1247,7 @@ def build_unified_attention_3d_tiled(
                 b.global_load_async_to_lds(
                     value,
                     base_src,
-                    V_lds,
+                    dtla_dst,
                     [buf_idx, lane, b.const_i32(0)],
                     width_bytes=16,
                     coherency=DTLA_CPOL,
@@ -1159,7 +1397,36 @@ def build_unified_attention_3d_tiled(
             b.s_wait_asynccnt(0)
             b.sync_lds_only()
             _issue_v_load(safe_next, nxt_buf)
-            if spec.use_ds_tr_reads:
+            if use_fp8_dtla:
+                # Async raw-fp8 V[kt] has landed; dequant-transpose into the
+                # dim-major bf16 scratch and keep the wide-read PV path. The
+                # in-flight V[kt+1] DMA overlaps this dequant + PV + next QK.
+                assert V_fp8_lds is not None
+                dequant_transpose_fp8_v_tile(
+                    b,
+                    V_fp8_lds,
+                    cur_buf,
+                    V_lds,
+                    lane=lane,
+                    head_size=HD,
+                    v_scale=v_scale,
+                    dtype=dtype,
+                )
+                b.sync_lds_only()
+                new_accs = compute_pv_wide(
+                    b,
+                    P_lds,
+                    V_lds,
+                    new_accs,
+                    a_map=a_map,
+                    lane=lane,
+                    lane_row=lane_row,
+                    a_frag=a_frag,
+                    head_size=HD,
+                    dtype=dtype,
+                    spacing=spec.wmma_spacing,
+                )
+            elif spec.use_ds_tr_reads:
                 # combined stack: DTLA async double-buffer (wide global read) +
                 # ds_load_tr transpose-on-read (wide LDS read) off the cur_buf slab.
                 new_accs = compute_pv_dstr(
@@ -1354,6 +1621,7 @@ def build_unified_attention_reduce_tiled(
     NUM_QH = spec.num_query_heads
     NUM_SEG = spec.num_segments
     WAVE = _WAVE
+    VEC = spec.vector_width
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVE
@@ -1418,31 +1686,42 @@ def build_unified_attention_reduce_tiled(
     inv_l = b.select(b.fcmp("oeq", overall, zero_f), zero_f, b.rcp(overall))
     b.sync()
 
-    # pass 3: per-dim acc reduce + normalize + cast
-    d_iter = (HD + WAVE - 1) // WAVE
+    # pass 3: per-dim acc reduce + normalize + cast. With VEC=2, every lane
+    # owns two adjacent dimensions, so factor_lds[s] is loaded once for two
+    # accumulators and the workspace/output operations become vector accesses.
+    d_iter = HD // (WAVE * VEC)
     for i in range(d_iter):
-        d = b.add(lane, b.const_i32(i * WAVE))
-        d_valid = b.cmp_lt(d, b.const_i32(HD))
-        d_safe = b.select(d_valid, d, b.const_i32(0))
-        acc = zero_f
+        d = b.add(
+            b.mul(lane, b.const_i32(VEC)),
+            b.const_i32(i * WAVE * VEC),
+        )
+        accs = [zero_f for _ in range(VEC)]
         for s in range(NUM_SEG):
             f = b.vec_extract(
                 b.smem_load_vN(factor_lds, b.const_i32(s), dtype=F32, n=1), 0
             )
-            ov = b.global_load(
-                segm_output,
-                b.add(b.mul(b.add(ml_base, b.const_i32(s)), b.const_i32(HD)), d_safe),
-                F32,
-                align=4,
-            )
-            acc = b.fadd(acc, b.fmul(ov, f))
+            ov_addr = b.add(b.mul(b.add(ml_base, b.const_i32(s)), b.const_i32(HD)), d)
+            if VEC == 1:
+                ov = b.global_load(segm_output, ov_addr, F32, align=4)
+            else:
+                ov = b.global_load_vN(segm_output, ov_addr, F32, VEC, align=VEC * 4)
+            for j in range(VEC):
+                ov_j = ov if VEC == 1 else b.vec_extract(ov, j)
+                accs[j] = b.fadd(accs[j], b.fmul(ov_j, f))
         out_addr = b.add(
             b.mul(b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head), b.const_i32(HD)),
-            d_safe,
+            d,
         )
-        with b.scf_if(d_valid):
-            b.global_store(
-                output, out_addr, b.cast_f32_to(b.fmul(acc, inv_l), dtype), align=2
+        out = [b.cast_f32_to(b.fmul(acc, inv_l), dtype) for acc in accs]
+        if VEC == 1:
+            b.global_store(output, out_addr, out[0], align=2)
+        else:
+            b.global_store_vN(
+                output,
+                out_addr,
+                b.vec_pack(out, dtype),
+                VEC,
+                align=VEC * 2,
             )
     b.ret()
     return b.kernel
