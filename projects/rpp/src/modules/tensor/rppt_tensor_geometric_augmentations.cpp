@@ -451,7 +451,8 @@ RppStatus rppt_warp_affine(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
                     static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                     static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                     affineTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
-            }
+            } else
+                return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         } else if (interpolationType == RpptInterpolationType::BILINEAR) {
             if ((srcDescPtr->dataType == RpptDataType::U8) &&
                 (dstDescPtr->dataType == RpptDataType::U8)) {
@@ -483,11 +484,10 @@ RppStatus rppt_warp_affine(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
                     static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                     static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                     affineTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
-            }
+            } else
+                return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -520,8 +520,6 @@ RppStatus rppt_warp_affine(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
                 interpolationType, roiTensorPtrSrc, roiType, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
-
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -1239,7 +1237,8 @@ RppStatus rppt_rotate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                     static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                     static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                     affineTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
-            }
+            } else
+                return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         } else if (interpolationType == RpptInterpolationType::BILINEAR) {
             if ((srcDescPtr->dataType == RpptDataType::U8) &&
                 (dstDescPtr->dataType == RpptDataType::U8)) {
@@ -1271,11 +1270,10 @@ RppStatus rppt_rotate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                     static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                     static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                     affineTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
-            }
+            } else
+                return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -1317,8 +1315,6 @@ RppStatus rppt_rotate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                 interpolationType, roiTensorPtrSrc, roiType, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
-
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -1633,7 +1629,8 @@ RppStatus rppt_remap(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                     static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                     rowRemapTable, colRemapTable, tableDescPtr, roiTensorPtrSrc, roiType,
                     layoutParams, handle);
-            }
+            } else
+                return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         } else if (interpolationType == RpptInterpolationType::BILINEAR) {
             if ((srcDescPtr->dataType == RpptDataType::U8) &&
                 (dstDescPtr->dataType == RpptDataType::U8)) {
@@ -1669,11 +1666,10 @@ RppStatus rppt_remap(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                     static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                     rowRemapTable, colRemapTable, tableDescPtr, roiTensorPtrSrc, roiType,
                     layoutParams, handle);
-            }
+            } else
+                return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -1708,8 +1704,6 @@ RppStatus rppt_remap(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                 colRemapTable, tableDescPtr, interpolationType, roiTensorPtrSrc, roiType, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
-
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -1859,8 +1853,9 @@ RppStatus rppt_transpose(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, 
                 static_cast<Rpp8s*>(srcPtr) + srcGenericDescPtr->offsetInBytes, srcGenericDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstGenericDescPtr->offsetInBytes, dstGenericDescPtr,
                 permTensor, roiTensor, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -1895,9 +1890,9 @@ RppStatus rppt_transpose(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, 
                 static_cast<Rpp8s*>(srcPtr) + srcGenericDescPtr->offsetInBytes, srcGenericDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstGenericDescPtr->offsetInBytes, dstGenericDescPtr,
                 permTensor, roiTensor, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -1955,7 +1950,8 @@ RppStatus rppt_warp_perspective(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
                     reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) +
                                               dstDescPtr->offsetInBytes),
                     dstDescPtr, perspectiveTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
-            }
+            } else
+                return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         } else if (interpolationType == RpptInterpolationType::BILINEAR) {
             if ((srcDescPtr->dataType == RpptDataType::U8) &&
                 (dstDescPtr->dataType == RpptDataType::U8)) {
@@ -1987,11 +1983,10 @@ RppStatus rppt_warp_perspective(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
                     reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) +
                                               dstDescPtr->offsetInBytes),
                     dstDescPtr, perspectiveTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
-            }
+            } else
+                return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -2024,8 +2019,6 @@ RppStatus rppt_warp_perspective(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
                 perspectiveTensor, interpolationType, roiTensorPtrSrc, roiType, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
-
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -2198,8 +2191,9 @@ RppStatus rppt_concat(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptGenericDescPtr src
                 srcPtr1GenericDescPtr, srcPtr2GenericDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstGenericDescPtr->offsetInBytes, dstGenericDescPtr,
                 axisMask, roiTensorSrc1, roiTensorSrc2, layoutParams, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -2246,8 +2240,9 @@ RppStatus rppt_concat(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptGenericDescPtr src
                 srcPtr2GenericDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstGenericDescPtr->offsetInBytes, dstGenericDescPtr,
                 axisMask, roiTensorSrc1, roiTensorSrc2, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;

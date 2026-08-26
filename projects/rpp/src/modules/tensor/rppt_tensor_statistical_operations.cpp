@@ -83,8 +83,9 @@ RppStatus rppt_tensor_sum(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t tens
             return tensor_sum_i8_i64_host(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
                                           srcDescPtr, static_cast<Rpp64s*>(tensorSumArr),
                                           roiTensorPtrSrc, roiType, layoutParams);
+        } else {
+            return RPP_ERROR_INVALID_SRC_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -105,8 +106,9 @@ RppStatus rppt_tensor_sum(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t tens
             return hip_exec_tensor_sum(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
                                        srcDescPtr, static_cast<Rpp64s*>(tensorSumArr),
                                        roiTensorPtrSrc, roiType, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -148,8 +150,9 @@ RppStatus rppt_tensor_min(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t minA
             return tensor_min_i8_i8_host(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
                                          srcDescPtr, static_cast<Rpp8s*>(minArr), minArrLength,
                                          roiTensorPtrSrc, roiType, layoutParams);
+        } else {
+            return RPP_ERROR_INVALID_SRC_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -170,8 +173,9 @@ RppStatus rppt_tensor_min(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t minA
             return hip_exec_tensor_min(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
                                        srcDescPtr, static_cast<Rpp8s*>(minArr), roiTensorPtrSrc,
                                        roiType, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -213,8 +217,9 @@ RppStatus rppt_tensor_max(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t maxA
             return tensor_max_i8_i8_host(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
                                          srcDescPtr, static_cast<Rpp8s*>(maxArr), maxArrLength,
                                          roiTensorPtrSrc, roiType, layoutParams);
+        } else {
+            return RPP_ERROR_INVALID_SRC_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -235,8 +240,9 @@ RppStatus rppt_tensor_max(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t maxA
             return hip_exec_tensor_max(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
                                        srcDescPtr, static_cast<Rpp8s*>(maxArr), roiTensorPtrSrc,
                                        roiType, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -301,8 +307,9 @@ RppStatus rppt_normalize(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, 
                 static_cast<Rpp8u*>(dstPtr) + dstGenericDescPtr->offsetInBytes, dstGenericDescPtr,
                 axisMask, meanTensor, stdDevTensor, computeMeanStddev, scale, shift, roiTensor,
                 layoutParams, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -341,8 +348,9 @@ RppStatus rppt_normalize(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, 
                 static_cast<Rpp8s*>(dstPtr) + dstGenericDescPtr->offsetInBytes, dstGenericDescPtr,
                 axisMask, meanTensor, stdDevTensor, computeMeanStddev, scale, shift, roiTensor,
                 handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -398,8 +406,9 @@ RppStatus rppt_tensor_mean(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t ten
             return tensor_mean_i8_f32_host(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
                                            srcDescPtr, static_cast<Rpp32f*>(tensorMeanArr),
                                            roiTensorPtrSrc, roiType, layoutParams, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -420,8 +429,9 @@ RppStatus rppt_tensor_mean(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t ten
             return hip_exec_tensor_mean<Rpp8s, Rpp32s>(
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp32f*>(tensorMeanArr), roiTensorPtrSrc, roiType, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -481,8 +491,9 @@ RppStatus rppt_tensor_stddev(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t t
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp32f*>(tensorStddevArr), meanTensor, roiTensorPtrSrc, roiType,
                 layoutParams, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -505,8 +516,9 @@ RppStatus rppt_tensor_stddev(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t t
             return hip_exec_tensor_stddev(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
                                           srcDescPtr, static_cast<Rpp32f*>(tensorStddevArr),
                                           meanTensor, roiTensorPtrSrc, roiType, handle);
+        } else {
+            return RPP_ERROR_INVALID_SRC_DATATYPE;
         }
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -558,7 +570,6 @@ RppStatus rppt_threshold(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPt
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -592,7 +603,6 @@ RppStatus rppt_threshold(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPt
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
