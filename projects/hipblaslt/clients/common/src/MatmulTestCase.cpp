@@ -57,16 +57,26 @@ namespace hipblaslt::client
             return left * right;
         }
 
-        MatmulMatrix normalizeMatrix(hipDataType type,
-                                     int64_t     rows,
-                                     int64_t     columns,
-                                     int64_t     leadingDimension,
-                                     int64_t     batchStride,
-                                     int32_t     batchCount)
+        MatmulMatrix normalizeMatrix(hipDataType          type,
+                                     int64_t              rows,
+                                     int64_t              columns,
+                                     int64_t              leadingDimension,
+                                     int64_t              batchStride,
+                                     int32_t              batchCount,
+                                     hipblasLtBatchMode_t batchMode)
         {
             using roc::host_validation::Layout;
             using roc::host_validation::Shape;
 
+            const int64_t matrixElements
+                = checkedProduct(leadingDimension, columns, "matrix storage size");
+            const int64_t allocationElements
+                = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? batchStride
+                  : batchStride == 0
+                      ? checkedProduct(matrixElements, batchCount, "matrix allocation size")
+                  : leadingDimension <= batchStride
+                      ? checkedProduct(batchStride, batchCount, "matrix allocation size")
+                      : matrixElements;
             return {
                 type,
                 hipblaslt::host_validation::scalarType(type),
@@ -76,6 +86,7 @@ namespace hipblaslt::client
                        {1,
                         normalizeStride(leadingDimension, "matrix leading dimension"),
                         normalizeStride(batchStride, "matrix batch stride")}),
+                static_cast<size_t>(allocationElements),
             };
         }
     } // namespace
@@ -146,19 +157,30 @@ namespace hipblaslt::client
                 .operationB = operationB,
                 .batchMode  = batchMode,
                 .batchCount = batchCount,
-                .a          = normalizeMatrix(
-                    arguments.a_type, aRows, aColumns, arguments.lda[index], strideA, batchCount),
-                .b = normalizeMatrix(
-                    arguments.b_type, bRows, bColumns, arguments.ldb[index], strideB, batchCount),
-                .c = normalizeMatrix(
-                    arguments.c_type, m, n, arguments.ldc[index], strideC, batchCount),
+                .a          = normalizeMatrix(arguments.a_type,
+                                              aRows,
+                                              aColumns,
+                                              arguments.lda[index],
+                                              strideA,
+                                              batchCount,
+                                              batchMode),
+                .b          = normalizeMatrix(arguments.b_type,
+                                              bRows,
+                                              bColumns,
+                                              arguments.ldb[index],
+                                              strideB,
+                                              batchCount,
+                                              batchMode),
+                .c          = normalizeMatrix(
+                    arguments.c_type, m, n, arguments.ldc[index], strideC, batchCount, batchMode),
                 .d
                 = normalizeMatrix(arguments.d_type,
                                   m,
                                   n,
                                   arguments.c_equal_d ? arguments.ldc[index] : arguments.ldd[index],
                                   strideD,
-                                  batchCount),
+                                  batchCount,
+                                  batchMode),
                 .auxiliary = std::nullopt,
                 .cEqualsD  = arguments.c_equal_d,
             };
@@ -169,7 +191,7 @@ namespace hipblaslt::client
                           ? arguments.stride_e[index]
                           : checkedProduct(arguments.lde[index], n, "canonical E batch stride");
                 testCase.auxiliary = normalizeMatrix(
-                    arguments.aux_type, m, n, arguments.lde[index], strideE, batchCount);
+                    arguments.aux_type, m, n, arguments.lde[index], strideE, batchCount, batchMode);
             }
             cases.push_back(std::move(testCase));
         }

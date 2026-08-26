@@ -36,7 +36,8 @@ namespace
                       size_t                                 columns,
                       size_t                                 batches,
                       ptrdiff_t                              leadingDimension,
-                      ptrdiff_t                              batchStride)
+                      ptrdiff_t                              batchStride,
+                      size_t                                 allocationElements)
     {
         EXPECT_EQ(matrix.apiType, type);
         EXPECT_EQ(matrix.hostType, hipblaslt::host_validation::scalarType(type));
@@ -47,6 +48,7 @@ namespace
         EXPECT_EQ(matrix.layout.stride(0), 1);
         EXPECT_EQ(matrix.layout.stride(1), leadingDimension);
         EXPECT_EQ(matrix.layout.stride(2), batchStride);
+        EXPECT_EQ(matrix.allocationElements, allocationElements);
     }
 } // namespace
 
@@ -66,10 +68,10 @@ TEST(MatmulTestCase, NormalizesLogicalMatrixGeometry)
     EXPECT_EQ(testCase.operationB, HIPBLAS_OP_T);
     EXPECT_EQ(testCase.batchMode, HIPBLASLT_BATCH_MODE_STRIDED);
     EXPECT_EQ(testCase.batchCount, 1);
-    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 1, 4, 28);
-    expectMatrix(testCase.b, HIP_R_16BF, 5, 7, 1, 8, 56);
-    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 1, 6, 30);
-    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 1, 9, 45);
+    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 1, 4, 28, 28);
+    expectMatrix(testCase.b, HIP_R_16BF, 5, 7, 1, 8, 56, 56);
+    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 1, 6, 30, 30);
+    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 1, 9, 45, 45);
     EXPECT_FALSE(testCase.auxiliary);
 }
 
@@ -77,7 +79,7 @@ TEST(MatmulTestCase, KeepsDistinctStridedBatchGeometry)
 {
     auto arguments        = baseArguments();
     arguments.batch_count = 4;
-    arguments.stride_a[0] = 101;
+    arguments.stride_a[0] = 0;
     arguments.stride_b[0] = 202;
     arguments.stride_c[0] = 303;
     arguments.stride_d[0] = 404;
@@ -88,12 +90,12 @@ TEST(MatmulTestCase, KeepsDistinctStridedBatchGeometry)
     const auto  cases    = hipblaslt::client::normalizeMatmulCases(arguments);
     const auto& testCase = cases.front();
 
-    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 4, 4, 101);
-    expectMatrix(testCase.b, HIP_R_16BF, 7, 5, 4, 8, 202);
-    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 4, 6, 303);
-    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 4, 9, 404);
+    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 4, 4, 0, 112);
+    expectMatrix(testCase.b, HIP_R_16BF, 7, 5, 4, 8, 202, 808);
+    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 4, 6, 303, 1212);
+    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 4, 9, 404, 1616);
     ASSERT_TRUE(testCase.auxiliary);
-    expectMatrix(*testCase.auxiliary, HIP_R_16F, 3, 5, 4, 10, 505);
+    expectMatrix(*testCase.auxiliary, HIP_R_16F, 3, 5, 4, 10, 505, 2020);
 }
 
 TEST(MatmulTestCase, PointerArraysUseCanonicalLogicalBatchOffsets)
@@ -110,10 +112,10 @@ TEST(MatmulTestCase, PointerArraysUseCanonicalLogicalBatchOffsets)
     const auto& testCase = cases.front();
 
     EXPECT_EQ(testCase.batchMode, HIPBLASLT_BATCH_MODE_POINTER_ARRAY);
-    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 3, 4, 28);
-    expectMatrix(testCase.b, HIP_R_16BF, 7, 5, 3, 8, 40);
-    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 3, 6, 30);
-    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 3, 9, 45);
+    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 3, 4, 28, 28);
+    expectMatrix(testCase.b, HIP_R_16BF, 7, 5, 3, 8, 40, 40);
+    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 3, 6, 30, 30);
+    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 3, 9, 45, 45);
 }
 
 TEST(MatmulTestCase, NormalizesEachGroupedProblem)
@@ -141,10 +143,10 @@ TEST(MatmulTestCase, NormalizesEachGroupedProblem)
     EXPECT_EQ(cases[1].m, 11);
     EXPECT_EQ(cases[1].n, 13);
     EXPECT_EQ(cases[1].k, 17);
-    expectMatrix(cases[1].a, HIP_R_16F, 11, 17, 2, 12, 1001);
-    expectMatrix(cases[1].b, HIP_R_16BF, 17, 13, 2, 18, 1002);
-    expectMatrix(cases[1].c, HIP_R_32F, 11, 13, 2, 14, 1003);
-    expectMatrix(cases[1].d, HIP_R_32F, 11, 13, 2, 15, 1004);
+    expectMatrix(cases[1].a, HIP_R_16F, 11, 17, 2, 12, 1001, 2002);
+    expectMatrix(cases[1].b, HIP_R_16BF, 17, 13, 2, 18, 1002, 2004);
+    expectMatrix(cases[1].c, HIP_R_32F, 11, 13, 2, 14, 1003, 2006);
+    expectMatrix(cases[1].d, HIP_R_32F, 11, 13, 2, 15, 1004, 2008);
 }
 
 TEST(MatmulTestCase, MakesCEqualsDExplicit)
