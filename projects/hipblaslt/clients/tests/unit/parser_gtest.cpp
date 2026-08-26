@@ -2,29 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 // Host-only unit tests for the client string<->enum helpers declared in
-// hipblaslt_datatype2string.hpp. Nothing here touches a device, so this file is
-// compiled into both hipblaslt-test (where it runs in the existing CI lane) and
-// the standalone hipblaslt-test-hostunit binary (which needs no GPU).
-//
-// These tests are only as good as their coverage of each enum, so the enumerator
-// lists below are kept honest by the compiler rather than by review: each list is
-// expanded into a tripwire switch with no `default:` arm, with -Wswitch promoted
-// to an error, so adding an enumerator without listing it here breaks this file's
-// build. That fires in the developer's own build and does not depend on the
-// enumerator's numeric value.
-//
-// The names carry two selectors. The `HostUnit` suite prefix is the one that
-// picks these cases up in PR CI: every tier in clients/tests/test_categories.yaml
-// carries a "*HostUnit*" pattern, and ctest bakes the tier's patterns into the
-// hipblaslt-test entry as a gtest filter. The `smoke_` test-name prefix is
-// belt-and-braces: it keeps the cases selected by test/therock/test_hipblaslt.py,
-// which execs the binary directly with `--gtest_filter=*smoke*` on its quick
-// tier, and it follows the convention already used in
-// tests/src/caching_library_gtest.cpp.
-//
-// Motivated by the PR #6514 review (davidd-amd), observation #2 ("Do we have a
-// plan to start adding unit tests for functions that we are changing that can be
-// unit tested?"). Tracked as AIHPBLAS-3550.
+// hipblaslt_datatype2string.hpp. See README.md in this directory for the
+// dual-target build, the HostUnit/smoke_ naming, and the X-macro tripwire
+// pattern used below.
 
 #include "hipblaslt_datatype2string.hpp"
 
