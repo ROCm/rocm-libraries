@@ -7082,15 +7082,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       bTileInfo = self.states.b.tileInfo
       numASubtiles = int(aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1])
       numBSubtiles = int(bTileInfo.globalSubtileGrid[0] * bTileInfo.globalSubtileGrid[1])
-      readSize = 2*aTileInfo.subtileSize
-      # Align A and B sizes so a tensor's LDS region is a whole number of DTL
-      # reads.  gfx1250's DTL path reads two subtiles at once, so its regions
-      # must round up to readSize (2*subtileSize); gfx950 reads one subtile per
-      # DTL, so subtileSize alignment is enough.  Using the larger 2x granularity
-      # on gfx950 would waste up to a full readSize per operand whenever the
-      # unpadded size lands on a readSize boundary (e.g. the TLU=1 bank-conflict
-      # swizzle pad tipping a large tile into an extra 16KB block).
-      alignSize = readSize if self.states.version[:2] == (12, 5) else int(aTileInfo.subtileSize)
       # TDM-based solution use padding per row. Take that into account for size calculation.
       mtA = kernel["MacroTile0"]
       mtB = kernel["MacroTile1"]
@@ -7101,8 +7092,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
       from Tensile.Components.Subtile.SubtileTLUSwizzle import swizzlePadPerStrip
       swzPadA = swizzlePadPerStrip(aTileInfo) * numASubtiles
       swzPadB = swizzlePadPerStrip(bTileInfo) * numBSubtiles
-      sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + swzPadA + alignSize-1) // alignSize) * alignSize)
-      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + swzPadB + alignSize-1) // alignSize) * alignSize)
+      ldsRowBankSize = self.states.archCaps["LDSBankCount"] * self.states.archCaps["LDSBankWidth"]
+
+      def subtileRegionSize(ti, numSubtiles, rowPad, swzPad):
+        """Bytes reserved for one operand's subtile strips, including alignment.
+
+        The granularity is derived from *this* operand's subtileSize rather than
+        always from A's.  With an asymmetric tile -- e.g. the NT fp4 16x1 stack,
+        where A stacks 16 MFMA-M tiles per strip and B only 2 -- charging B the A
+        granularity rounds B's 2KB of strips up to A's 16KB.
+        """
+        raw = int(numSubtiles * ti.subtileSize + rowPad + swzPad)
+        if self.states.version[:2] == (12, 5):
+          # gfx1250's DTL reads two subtiles at a time, so a region needs
+          # headroom for the paired read of a trailing odd subtile.
+          align = int(2 * ti.subtileSize)
+        else:
+          # gfx950 reads one subtile per DTL, and the strips (subtileSize plus
+          # swizzle pad) already tile the region exactly, so no read runs past
+          # the end -- subtileSize alignment buys nothing here and only rounds
+          # the handful of swizzle pad bytes up to a whole extra strip.  Keep
+          # just enough to land each region on an LDS bank row, so the
+          # bank-conflict swizzle maps the same way in B's region as in A's.
+          align = int(ldsRowBankSize)
+        return int(((raw + align - 1) // align) * align)
+
+      sizeA = subtileRegionSize(aTileInfo, numASubtiles, padA, swzPadA)
+      sizeB = subtileRegionSize(bTileInfo, numBSubtiles, padB, swzPadB)
       self.ldsStartOffsetB = sizeA
       sizeMXSA = 0
       sizeMXSB = 0
