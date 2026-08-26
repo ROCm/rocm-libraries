@@ -57,7 +57,7 @@ void launch_chirp_kernel(const size_t           N,
     auto blockSize = CHIRP_THREADS;
     auto numBlocks = DivRoundingUp<size_t>(N, blockSize);
 
-    auto          kernel = RTCKernelChirp::generate(deviceProp.gcnArchName, precision);
+    auto          kernel = RTCKernelChirp::generate(deviceProp.gcnArchName, N, precision);
     RTCKernelArgs kargs;
     kargs.append_size_t(N);
     kargs.append_ptr(output);
