@@ -444,27 +444,15 @@ class TestCkTileGroupedGemm : public ::testing::Test
                                     kargs.size() * sizeof(ck_tile::GemmTransKernelArg<>),
                                     hipMemcpyHostToDevice,
                                     stream.stream_id_));
-#if CK_TILE_USE_WMMA
-            invoke_grouped_gemm_persistent<GroupedGemKernelParam_Wmma, ALayout, BLayout, CLayout>(
+            invoke_grouped_gemm_persistent<ActiveKernelParam, ALayout, BLayout, CLayout>(
                 stream, group_count, kargs_ptr);
-#else
-            invoke_grouped_gemm_persistent<GroupedGemKernelParam_Mfma, ALayout, BLayout, CLayout>(
-                stream, group_count, kargs_ptr);
-#endif
         }
         else
         {
-#if CK_TILE_USE_WMMA
-            invoke_grouped_gemm<GroupedGemKernelParam_Wmma, ALayout, BLayout, CLayout>(
+            invoke_grouped_gemm<ActiveKernelParam, ALayout, BLayout, CLayout>(
                 gemm_descs,
                 ck_tile::stream_config{nullptr, false, 1},
                 gemm_workspace.GetDeviceBuffer());
-#else
-            invoke_grouped_gemm<GroupedGemKernelParam_Mfma, ALayout, BLayout, CLayout>(
-                gemm_descs,
-                ck_tile::stream_config{nullptr, false, 1},
-                gemm_workspace.GetDeviceBuffer());
-#endif
         }
 
         // Copy results back to host for validation
