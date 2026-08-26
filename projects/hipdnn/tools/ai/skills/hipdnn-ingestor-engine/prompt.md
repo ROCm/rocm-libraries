@@ -195,6 +195,24 @@ yet?* The second is the stall, and it is indistinguishable from diligence from t
 inside. If you cannot name the row the source resolves, you are past the gate — write
 the file.
 
+**If you are the human or parent agent running this step, do not rely on the three rules
+above.** They were written after one agent stalled here for 110 minutes, and the agent
+that read them — and said unprompted that they were clear and binding — then drifted past
+them twice more in the same run, for 25 and 50 minutes. Its own diagnosis was accurate:
+*"there's no forcing function that fires until I choose to invoke it myself."*
+
+The check that works costs one command:
+
+```
+ls <worktree>/mining.md
+```
+
+Run it perhaps 20 minutes in. If the file is missing, interrupt with *do not read another
+file until `mining.md` exists* — that instruction produced a 331-line file within minutes,
+both times. And when asking a quiet agent for status, ask what it has **written**, not
+what it has **found**: a stalled agent answers the second question fluently and at length,
+and that fluency is the tell.
+
 
 Skipping this produces an engine that advertises a kernel it cannot correctly serve —
 and because a wrong layout is read in-bounds rather than faulting, the result is wrong
