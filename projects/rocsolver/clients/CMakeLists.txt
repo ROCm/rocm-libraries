@@ -105,6 +105,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/auxiliary/testing_ormlx_unmlx.cpp
     common/auxiliary/testing_ormbr_unmbr.cpp
     common/auxiliary/testing_ormtr_unmtr.cpp
+    common/auxiliary/testing_ormtr_unmtr_hb2st.cpp
   )
 
   set(roclapack_inst_files
