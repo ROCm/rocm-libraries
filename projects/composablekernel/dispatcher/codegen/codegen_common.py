@@ -630,27 +630,59 @@ def make_gemm_rowcolquant_kernel_name(
 # ============================================================================
 
 
-def fp8_warp_tile_k_for_arch(gfx_arch: str, *, preshuffle_quant: bool = False) -> int:
-    """Arch-derived WarpTileK for an 8-bit float operand with M_Warp_Tile=16.
+# Variant keys whose GEMM config instantiates an 8-bit *float* PrecType
+# (fp8_t / bf8_t).  The pk_int4 / pk_fp4 operands do not drive the K warp tile:
+# the aquant/bquant i4 configs still pass GemmConfig<fp8_t>/<bf8_t>, so they are
+# 8-bit-float here; abquant's fp4 genuinely instantiates a non-8-bit-float
+# PrecType and takes the gfx950 else-branch.
+_EIGHT_BIT_FLOAT_VARIANTS = frozenset(
+    {"fp8", "bf8", "fp8i4", "bf8i4", "mx_fp8", "mx_bf8"}
+)
 
-    Mirrors ``ck_tile::get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16, IsFlatMM>()``
-    (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp)::
 
-        gfx950                        -> 128  (both plain and preshufflequant)
-        gfx942/other, plain           ->  32
-        gfx942/other, preshufflequant ->  64
+def variant_is_8bit_float(variant_key: str) -> bool:
+    """Whether ``variant_key`` drives an 8-bit-float PrecType for warp-tile-K."""
+    return variant_key in _EIGHT_BIT_FLOAT_VARIANTS
 
-    This rule must exist exactly once. Using 128 on gfx942 compiles cleanly and
-    then produces **all-zeros output** -- there is no valid 16x16x128 fp8/bf8
-    warp-gemm on gfx942 -- so a second, drifting copy is a silent-wrong-answer
-    bug rather than a build failure.
 
-    ``preshuffle_quant`` applies to AQuant's preshufflequant configs; every
-    other quant operator passes the default.
+def quant_warp_tile_k(
+    gfx_arch: str,
+    *,
+    is_8bit_float: bool = True,
+    is_flat_mm: bool = False,
+) -> int:
+    """Arch-derived WarpTileK for a block-scale quant GEMM with M_Warp_Tile=16.
+
+    **This rule exists exactly once.**  Every quant bridge -- aquant, bquant,
+    abquant, rowcolquant, tensor_quant and their grouped twins, plus the codegen
+    default configs -- delegates here.  A second, drifting copy is a
+    silent-wrong-answer bug rather than a build failure: WarpTileK=128 on gfx942
+    compiles cleanly and then produces **all-zeros output**, because there is no
+    valid 16x16x128 fp8/bf8 warp-gemm on gfx942.
+
+    Mirrors ``ck_tile::get_k_warp_tile<PrecType, M_Warp_Tile=16, IsFlatMM>()``
+    (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp, non-WMMA path)::
+
+        gfx950 (CK_GFX950_SUPPORT), 8-bit float      -> 128 (IsFlatMM ignored)
+        gfx950,                     not 8-bit float  ->  32
+        gfx942/other, IsFlatMM == false              ->  32
+        gfx942/other, IsFlatMM == true               ->  64
+
+    ``is_flat_mm`` is true for the preshuffle-B / preshuffle-quant prefill
+    pipelines (Old-TE's ``GemmConfigPreshuffleB_*_Prefill`` derives WarpTileK
+    with ``IsFlatMM=true``); the decode and plain-prefill pipelines pass false.
+
+    On gfx942 the ``IsFlatMM`` branch is ``sizeof(PrecType) == 2 ? 32 : 64`` --
+    every quant variant is 1 byte, so it is not gated on ``is_8bit_float``.
     """
     if "gfx950" in gfx_arch:
-        return 128
-    return 64 if preshuffle_quant else 32
+        return 128 if is_8bit_float else 32
+    return 64 if is_flat_mm else 32
+
+
+def fp8_warp_tile_k_for_arch(gfx_arch: str, *, preshuffle_quant: bool = False) -> int:
+    """8-bit-float spelling of :func:`quant_warp_tile_k` (codegen call sites)."""
+    return quant_warp_tile_k(gfx_arch, is_8bit_float=True, is_flat_mm=preshuffle_quant)
 
 
 # ============================================================================

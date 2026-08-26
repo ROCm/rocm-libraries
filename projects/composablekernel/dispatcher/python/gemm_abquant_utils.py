@@ -69,7 +69,11 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "gemm_a
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_gemm_abquant_kernel_name  # noqa: E402
+from codegen_common import (  # noqa: E402
+    make_gemm_abquant_kernel_name,
+    quant_warp_tile_k,
+    variant_is_8bit_float,
+)
 
 # Tile-Engine perf flags -- single source of truth (quant_bridge_flags.py).
 if str(Path(__file__).parent) not in sys.path:
@@ -811,18 +815,11 @@ def _warp_tile_k_for(variant_key: str, gfx_arch: str, is_flat_mm: bool = False) 
     (GemmConfigPreshuffleBQuantPrefill, extends GemmConfigQuantPrefill) use the default
     IsFlatMM=false -> 32 on gfx942, so they must NOT pass is_flat_mm=True.
     """
-    is_8bit_float = variant_key in ("fp8", "bf8")
-    if "gfx950" in gfx_arch:
-        # CK_GFX950_SUPPORT branch: is_8bit_float ? 128 : 32.  IsFlatMM is IGNORED here
-        # (the gfx950 M_Warp_Tile==16 else-branch does not depend on IsFlatMM), so fp4
-        # preshuffleb stays 32 on gfx950 -- do NOT bump it to 64.
-        return 128 if is_8bit_float else 32
-    # gfx942/other (no CK_GFX950_SUPPORT, non-WMMA): M_Warp_Tile==16 else-branch is
-    #   (sizeof(PrecType)==2 || IsFlatMM==false) ? 32 : 64.
-    # abquant variants (fp8/bf8/pk_fp4) are all 1-byte, so IsFlatMM==true -> 64, else 32.
-    if is_flat_mm:
-        return 64
-    return 32
+    return quant_warp_tile_k(
+        gfx_arch,
+        is_8bit_float=variant_is_8bit_float(variant_key),
+        is_flat_mm=is_flat_mm,
+    )
 
 
 def _uses_eight_waves(variant_key: str, gfx_arch: str) -> bool:

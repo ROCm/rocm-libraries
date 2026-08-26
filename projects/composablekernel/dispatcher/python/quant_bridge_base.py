@@ -30,10 +30,10 @@ What deliberately does NOT live here (kept per-op -- see the report / each file)
   * ``_detect_gpu_arch`` -- five distinct implementations (different supported-arch
     sets, messages, and validation; tensor_quant's even differs subtly).
   * the ``_compile_<op>_kernel`` flag/define/timeout/static-lib bodies.
-  * the fp8/bf8 encode helpers -- rowcolquant and bquant DISAGREE on the gfx950
-    fp8 ml_dtype (``float8_e4m3`` vs ``float8_e4m3fn``), so merging them would be
-    a numerical behavior change.
-  * ``_warp_tile_k_for`` / ``default_*_config`` / ``KernelConfig`` / ``run()``.
+  * the fp8/bf8 encode helpers -- the surrounding tensor packing differs per op.
+    Every op agrees on the codec itself: OCP fp8 is ``float8_e4m3fn`` and OCP bf8
+    is ``float8_e5m2``; FNUZ is ``float8_e4m3fnuz`` / ``float8_e5m2fnuz``.
+  * ``default_*_config`` / ``KernelConfig`` / ``run()``.
 
 No GPU / hipcc is required to import or exercise the codegen path here.
 """

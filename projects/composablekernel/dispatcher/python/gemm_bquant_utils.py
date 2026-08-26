@@ -64,7 +64,10 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "gemm_b
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_bquant_kernel_name  # noqa: E402
+from codegen_common import (  # noqa: E402
+    make_bquant_kernel_name,
+    quant_warp_tile_k,
+)
 
 _DEFAULT_HIPCC = "hipcc"
 
@@ -1107,10 +1110,7 @@ def _warp_tile_k_for(gfx_arch: str, is_flatmm: bool = False) -> int:
     variants, which get_k_warp_tile<fp8_t,16>() never returns for M_Warp_Tile=16 --
     that was wrong on BOTH arches.
     """
-    if "gfx950" in gfx_arch:
-        return 128
-    # gfx942 / gfx90a / other: 8-bit-float PrecType, M_Warp_Tile=16 non-WMMA path.
-    return 64 if is_flatmm else 32
+    return quant_warp_tile_k(gfx_arch, is_8bit_float=True, is_flat_mm=is_flatmm)
 
 
 # =============================================================================

@@ -62,7 +62,11 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "gemm_r
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_gemm_rowcolquant_kernel_name  # noqa: E402
+from codegen_common import (  # noqa: E402
+    make_gemm_rowcolquant_kernel_name,
+    quant_warp_tile_k,
+    variant_is_8bit_float,
+)
 
 _DEFAULT_HIPCC    = "hipcc"
 
@@ -363,10 +367,15 @@ class RowColQuantGpuGemmRunner:
 
 
 # Map (variant_key, encoding) -> the ml_dtypes fp8 dtype name that matches the
-# kernel's on-device encoding. OCP is used on gfx950 (fp8 = e4m3, bf8 = e5m2);
+# kernel's on-device encoding. OCP is used on gfx950 (fp8 = e4m3fn, bf8 = e5m2);
 # FNUZ is used on gfx942/other (fp8 = e4m3fnuz, bf8 = e5m2fnuz), mirroring the
 # CK_USE_OCP_FP8 compile-time switch.
-_ML_DTYPE_FOR_VARIANT_OCP  = {"fp8": "float8_e4m3", "bf8": "float8_e5m2"}
+#
+# fp8 MUST be ``float8_e4m3fn`` (OCP finite-only, max 448), NOT ``float8_e4m3``
+# (IEEE-style with inf, max 240): 14 of the 256 byte patterns decode differently
+# and any operand in [256, 448] saturates to inf under the wrong one.  This is
+# the same dtype every other bridge site uses (conftest.py, gemm_bquant_utils.py).
+_ML_DTYPE_FOR_VARIANT_OCP  = {"fp8": "float8_e4m3fn", "bf8": "float8_e5m2"}
 _ML_DTYPE_FOR_VARIANT_FNUZ = {"fp8": "float8_e4m3fnuz", "bf8": "float8_e5m2fnuz"}
 
 
@@ -709,10 +718,11 @@ def _warp_tile_k_for(variant_key: str, gfx_arch: str) -> int:
     all-zeros output (confirmed on the sibling tensor_quant GPU tester). Old-TE
     uses 16x16x32 on gfx942 and is bit-exact there with warp_tile_k=32.
     """
-    is_8bit_float = variant_key in ("fp8", "bf8")
-    if "gfx950" in gfx_arch and is_8bit_float:
-        return 128
-    return 32
+    return quant_warp_tile_k(
+        gfx_arch,
+        is_8bit_float=variant_is_8bit_float(variant_key),
+        is_flat_mm=False,
+    )
 
 
 def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelConfig:

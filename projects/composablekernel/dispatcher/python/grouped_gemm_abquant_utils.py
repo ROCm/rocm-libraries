@@ -52,7 +52,11 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "groupe
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_abquant_kernel_name  # noqa: E402
+from codegen_common import (  # noqa: E402
+    make_abquant_kernel_name,
+    quant_warp_tile_k,
+    variant_is_8bit_float,
+)
 
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
@@ -719,24 +723,32 @@ def default_bf8_compv3_config(
     )
 
 
-def _eightwaves_warp_tile_k(gfx_arch: str) -> int:
+def _eightwaves_warp_tile_k(gfx_arch: str, variant_key: str = "fp8") -> int:
     """Return the correct warp_tile_k for the EightWaves pipeline on the given arch.
 
     Mirrors get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16, IsFlatMM=false>:
       gfx950: CK_GFX950_SUPPORT defined → returns 128
       gfx942: returns 32
     """
-    return 128 if gfx_arch.startswith("gfx950") else 32
+    return quant_warp_tile_k(
+        gfx_arch,
+        is_8bit_float=variant_is_8bit_float(variant_key),
+        is_flat_mm=False,
+    )
 
 
-def _preshuffleb_warp_tile_k(gfx_arch: str) -> int:
+def _preshuffleb_warp_tile_k(gfx_arch: str, variant_key: str = "fp8") -> int:
     """Return the correct warp_tile_k for the PreshuffleB pipeline on the given arch.
 
     Mirrors get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16, IsFlatMM=true>:
       gfx950: CK_GFX950_SUPPORT defined → returns 128
       gfx942: returns 64
     """
-    return 128 if gfx_arch.startswith("gfx950") else 64
+    return quant_warp_tile_k(
+        gfx_arch,
+        is_8bit_float=variant_is_8bit_float(variant_key),
+        is_flat_mm=True,
+    )
 
 
 def default_fp8_eightwaves_config(
@@ -760,7 +772,7 @@ def default_fp8_eightwaves_config(
         scheduler="intrawave",
         tile_m=192, tile_n=256, tile_k=128,
         warp_m=4, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_eightwaves_warp_tile_k(gfx_arch),
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_eightwaves_warp_tile_k(gfx_arch, "fp8"),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -788,7 +800,7 @@ def default_bf8_eightwaves_config(
         scheduler="intrawave",
         tile_m=192, tile_n=256, tile_k=128,
         warp_m=4, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_eightwaves_warp_tile_k(gfx_arch),
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_eightwaves_warp_tile_k(gfx_arch, "bf8"),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -819,7 +831,7 @@ def default_fp8_preshuffleb_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_preshuffleb_warp_tile_k(gfx_arch),
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_preshuffleb_warp_tile_k(gfx_arch, "fp8"),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=True, preshuffle_aq=False, preshuffle_bq=False,
@@ -848,7 +860,7 @@ def default_bf8_preshuffleb_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_preshuffleb_warp_tile_k(gfx_arch),
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_preshuffleb_warp_tile_k(gfx_arch, "bf8"),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=True, preshuffle_aq=False, preshuffle_bq=False,

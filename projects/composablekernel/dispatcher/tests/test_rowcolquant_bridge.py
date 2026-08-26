@@ -130,12 +130,26 @@ class TestFp8EncodingFlavourByArch(unittest.TestCase):
     def test_dtype_names_by_arch(self):
         import ml_dtypes
 
-        # gfx950 -> OCP e4m3/e5m2
-        self.assertIs(_ml_fp8_dtype("fp8", "gfx950"), ml_dtypes.float8_e4m3)
+        # gfx950 -> OCP e4m3fn/e5m2.  e4m3fn (finite-only, max 448) is the OCP
+        # encoding CK's fp8_t uses; ml_dtypes.float8_e4m3 is a DIFFERENT codec
+        # (IEEE-style, has inf, max 240) and saturates any operand >= 256.
+        self.assertIs(_ml_fp8_dtype("fp8", "gfx950"), ml_dtypes.float8_e4m3fn)
+        self.assertIsNot(_ml_fp8_dtype("fp8", "gfx950"), ml_dtypes.float8_e4m3)
         self.assertIs(_ml_fp8_dtype("bf8", "gfx950"), ml_dtypes.float8_e5m2)
         # gfx942 -> FNUZ e4m3fnuz/e5m2fnuz
         self.assertIs(_ml_fp8_dtype("fp8", "gfx942"), ml_dtypes.float8_e4m3fnuz)
         self.assertIs(_ml_fp8_dtype("bf8", "gfx942"), ml_dtypes.float8_e5m2fnuz)
+
+    @unittest.skipUnless(fp8_encoding_available(), "ml_dtypes fp8 not installed")
+    def test_ocp_fp8_round_trips_above_256(self):
+        """OCP fp8 must represent [256, 448]; the e4m3 codec saturates it to inf."""
+        import numpy as np
+
+        for value in (256.0, 288.0, 448.0):
+            a = np.array([value], dtype=np.float32)
+            back = quantize_dequantize_fp8(a, "fp8", "gfx950")
+            self.assertTrue(np.isfinite(back[0]), f"{value} decoded non-finite")
+            self.assertEqual(float(back[0]), value)
 
     @unittest.skipUnless(fp8_encoding_available(), "ml_dtypes fp8 not installed")
     def test_encode_flavour_bits_differ(self):

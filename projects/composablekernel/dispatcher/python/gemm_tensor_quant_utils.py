@@ -66,6 +66,7 @@ _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
 from unified_gemm_tensor_quant_codegen import make_tensor_quant_kernel_name  # noqa: E402
+from codegen_common import quant_warp_tile_k  # noqa: E402
 
 _DEFAULT_HIPCC    = "hipcc"
 
@@ -618,7 +619,7 @@ def fp8_warp_tile_k_for_arch(gfx_arch: str) -> int:
     all-zeros (confirmed on GPU, MI300X). 32 is bit-exact and at parity with
     Old-TE (which launches ...16x16x32 on gfx942).
     """
-    return 128 if "gfx950" in gfx_arch else 32
+    return quant_warp_tile_k(gfx_arch, is_8bit_float=True, is_flat_mm=False)
 
 
 def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
