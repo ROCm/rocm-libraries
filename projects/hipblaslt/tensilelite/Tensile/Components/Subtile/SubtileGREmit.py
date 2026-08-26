@@ -1155,7 +1155,7 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
     return None
   wavesPerStrip = int(getattr(tileInfo, "grWavesPerStrip", 1))
   if wavesPerStrip > 1:
-    # SubtileWideGR: the GR strip already spans every axis-wave's free-dim
+    # Shared strip: it already spans every axis-wave's free-dim
     # extent, so waves do not step along the free dim -- they share the strip
     # and split its K rows.  Wave a starts at K row a*kRowsPerWave.  K is the
     # strided dim for NT, so this needs the runtime K stride.
@@ -1279,7 +1279,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
 
   subtileOffset = int(math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize))
   # loadRatioGR folds in grLoadWaves, so subtileOffset is the bytes one
-  # *cooperative* load round covers.  Under SubtileWideGR the waves sharing a
+  # *cooperative* load round covers.  When waves share a strip they are
   # strip are separated by whole load-blocks (each takes a slice of the strip's
   # K rows) rather than interleaved within one block, so a wave still advances
   # m0 by its own single-wave block, not by the cooperative total.
@@ -1425,7 +1425,7 @@ def _globalReadDTLInitCommonSgpr_tlu(writer, kernel, module, tileInfoA, tileInfo
     localSub0 = int(ti.localSubtileGrid[0])
     wavesPerStrip = int(getattr(ti, "grWavesPerStrip", 1))
     if wavesPerStrip > 1:
-      # SubtileWideGR: all axis-waves write into the SAME strip, each owning a
+      # Shared strip: all axis-waves write into the SAME strip, each owning a
       # contiguous run of DTL load-blocks (its share of the strip's K rows).
       # numGRPerSubtile is already the per-wave load count, and one load block
       # occupies wavesize*loadWidth bytes plus the swizzle pad.
