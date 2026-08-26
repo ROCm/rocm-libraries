@@ -5,7 +5,6 @@
 
 #include "ResultReporter.hpp"
 #include "SynchronizerValidator.hpp"
-#include "TimingEvents.hpp"
 
 #include <Tensile/ContractionSolution.hpp>
 
@@ -50,6 +49,16 @@ namespace
         {
             m_dirtyInSolution = true;
         }
+        // The gate no longer shows through needMoreRunsInSolution (the listener
+        // is passive), so tests read it here.
+        bool usesSynchronizer() const
+        {
+            return m_usesSynchronizer;
+        }
+        bool isActive() const
+        {
+            return active();
+        }
     };
 
     po::variables_map enabledArgs()
@@ -81,48 +90,33 @@ namespace
         s.sizeMapping.streamKForceDPOnly = streamKForceDPOnly;
     }
 
-    // validateWarmups ignores the events; TimingEvents(0, 0) creates none, so
-    // this needs no GPU.
-    void driveWarmup(SynchronizerValidator& validator)
-    {
-        TimingEvents events(0, 0);
-        validator.validateWarmups(nullptr, events, events);
-    }
 }
 
-// With NumElementsToValidate 0 and SyncsPerBenchmark 0, ReferenceValidator and
-// BenchmarkTimer both decline to run the solution. The validator must drive the
-// loop itself or its warmup -- and so the whole check -- never happens.
-TEST(SynchronizerValidatorReporting, EnabledValidatorRequestsARunInSolution)
+// The listener is passive: it inspects launches other listeners drive and never
+// asks for one, so it cannot turn a zero-launch codegen config (validate 0,
+// syncs 0 -- the ductile family) into an execution one.
+TEST(SynchronizerValidatorReporting, ValidatorNeverDrivesARun)
 {
-    TestableSynchronizerValidator validator(enabledArgs());
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, 3, 0); // a consumer, so this is not the gate talking
 
-    validator.preSolution(nullptr);
-    EXPECT_TRUE(validator.needMoreRunsInSolution());
-}
-
-// One pass only, so it never extends a loop another listener is driving.
-TEST(SynchronizerValidatorReporting, RunIsRequestedOncePerSolution)
-{
-    TestableSynchronizerValidator validator(enabledArgs());
-
-    validator.preSolution(nullptr);
-    ASSERT_TRUE(validator.needMoreRunsInSolution());
-    driveWarmup(validator);
-    EXPECT_FALSE(validator.needMoreRunsInSolution());
-
-    // ...and it asks again for the next solution.
-    validator.preSolution(nullptr);
-    EXPECT_TRUE(validator.needMoreRunsInSolution());
-}
-
-TEST(SynchronizerValidatorReporting, DisabledValidatorRequestsNothing)
-{
-    TestableSynchronizerValidator validator(disabledArgs());
-
-    validator.preSolution(nullptr);
+    validator.preSolution(&solution);
+    ASSERT_TRUE(validator.usesSynchronizer());
     EXPECT_FALSE(validator.needMoreRunsInSolution());
     EXPECT_EQ(validator.numWarmupRuns(), 0u);
+}
+
+// Switched off, a consumer solution is still inert.
+TEST(SynchronizerValidatorReporting, DisabledValidatorChecksNothing)
+{
+    TestableSynchronizerValidator    validator(disabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, 3, 0);
+
+    validator.preSolution(&solution);
+    EXPECT_TRUE(validator.usesSynchronizer());
+    EXPECT_FALSE(validator.isActive());
 }
 
 // StreamK uses the buffer as its work-queue / fixup Flags.
@@ -133,8 +127,7 @@ TEST(SynchronizerValidatorReporting, StreamKSolutionIsChecked)
     setSolution(solution, 3, 0);
 
     validator.preSolution(&solution);
-    EXPECT_TRUE(validator.needMoreRunsInSolution());
-    EXPECT_EQ(validator.numWarmupRuns(), 1u);
+    EXPECT_TRUE(validator.usesSynchronizer());
 }
 
 // GSU MultipleBufferSingleKernel is the other consumer, and it is not StreamK
@@ -146,8 +139,17 @@ TEST(SynchronizerValidatorReporting, MbskSolutionIsChecked)
     setSolution(solution, 0, 3);
 
     validator.preSolution(&solution);
-    EXPECT_TRUE(validator.needMoreRunsInSolution());
-    EXPECT_EQ(validator.numWarmupRuns(), 1u);
+    EXPECT_TRUE(validator.usesSynchronizer());
+}
+
+// Unknown solution means unknown answer; scan rather than skip. This is what
+// the removed EnabledValidatorRequestsARunInSolution used to cover.
+TEST(SynchronizerValidatorReporting, UnknownSolutionIsChecked)
+{
+    TestableSynchronizerValidator validator(enabledArgs());
+
+    validator.preSolution(nullptr);
+    EXPECT_TRUE(validator.usesSynchronizer());
 }
 
 // Atomic StreamK reduces in place; the dispatcher never appends Flags for it.
@@ -158,7 +160,7 @@ TEST(SynchronizerValidatorReporting, AtomicStreamKSolutionIsSkipped)
     setSolution(solution, 3, 0, /*streamKAtomic=*/1);
 
     validator.preSolution(&solution);
-    EXPECT_FALSE(validator.needMoreRunsInSolution());
+    EXPECT_FALSE(validator.usesSynchronizer());
 }
 
 // StreamKForceDPOnly kernels drop AddressWS/AddressFlags from the SGPR define
@@ -170,7 +172,7 @@ TEST(SynchronizerValidatorReporting, ForceDPOnlyStreamKSolutionIsSkipped)
     setSolution(solution, 3, 0, /*streamKAtomic=*/0, /*streamKForceDPOnly=*/1);
 
     validator.preSolution(&solution);
-    EXPECT_FALSE(validator.needMoreRunsInSolution());
+    EXPECT_FALSE(validator.usesSynchronizer());
 }
 
 // Everything else never receives the buffer, so the scan could only come back
@@ -182,24 +184,7 @@ TEST(SynchronizerValidatorReporting, NonConsumerSolutionIsSkipped)
     setSolution(solution, 0, 0);
 
     validator.preSolution(&solution);
-    EXPECT_FALSE(validator.needMoreRunsInSolution());
-    EXPECT_EQ(validator.numWarmupRuns(), 0u);
-}
-
-// A skipped solution must not leave the gate closed: numWarmupRuns is consulted
-// once per problem before any solution is picked, and a 0 there would size the
-// rotating buffers below what a consumer solution in that problem needs.
-TEST(SynchronizerValidatorReporting, PreProblemReopensTheGate)
-{
-    TestableSynchronizerValidator    validator(enabledArgs());
-    TensileLite::ContractionSolution solution;
-    setSolution(solution, 0, 0);
-
-    validator.preSolution(&solution);
-    ASSERT_EQ(validator.numWarmupRuns(), 0u);
-
-    validator.preProblem(nullptr);
-    EXPECT_EQ(validator.numWarmupRuns(), 1u);
+    EXPECT_FALSE(validator.usesSynchronizer());
 }
 
 TEST(SynchronizerValidatorReporting, CleanSolutionReportsNothing)
