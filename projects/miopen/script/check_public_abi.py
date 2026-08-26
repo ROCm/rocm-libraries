@@ -329,6 +329,13 @@ three places, because it is exported without being declared in miopen.h:
 Update the two declarations to match the definition. These have C linkage, so a
 divergence links cleanly and corrupts arguments at run time.""".rstrip()
 
+PROVIDER_REMEDY = """
+--require-provider was passed, so the provider's copies must be readable rather
+than skipped. Make dnn-providers/miopen-provider part of the tree being checked:
+in a sparse checkout, add that directory to the checkout's path list. Drop
+--require-provider only for a tree that genuinely has no provider, such as a
+MIOpen-only checkout or a source tarball -- not to get past this message.""".rstrip()
+
 # The hipDNN provider's copies, relative to the repository root (the MIOpen
 # source root's grandparent in the monorepo layout).
 PROVIDER_RENAME_RELPATH = "dnn-providers/miopen-provider/MiopenApiPrivateRename.hpp"
@@ -504,10 +511,10 @@ def render_signature(sig: tuple[str, ...]) -> str:
 
 
 def parse_declarations(
-    path: Path, anchor: re.Pattern[str], what: str
+    source: str, anchor: re.Pattern[str], what: str
 ) -> dict[str, tuple[str, ...]]:
     """Collect every miopen* prototype introduced by ``anchor``, keyed by name."""
-    text = strip_comments(read_source(path, what))
+    text = strip_comments(source)
     out: dict[str, tuple[str, ...]] = {}
     for match in anchor.finditer(text):
         end = text.find(";", match.end())
@@ -537,6 +544,8 @@ def parse_range_prototypes(source: str, what: str) -> dict[str, tuple[str, ...]]
     out: dict[str, tuple[str, ...]] = {}
     for match in RANGE_DECL_RE.finditer(text):
         start = max(text.rfind(ch, 0, match.start()) for ch in DECLARATOR_STOPS)
+        if start < 0:
+            continue  # no declarator boundary precedes the match; not a declaration
         prefix = text[start + 1 : match.start()]
         prefix = prefix.replace('extern "C"', " ").replace("MIOPEN_EXPORT", " ")
         tokens = prefix.split()
@@ -551,9 +560,11 @@ def parse_range_prototypes(source: str, what: str) -> dict[str, tuple[str, ...]]
     return out
 
 
-def parse_wrapper(path: Path) -> tuple[dict[str, tuple[str, ...]], dict[str, set[str]]]:
+def parse_wrapper(
+    source: str,
+) -> tuple[dict[str, tuple[str, ...]], dict[str, set[str]]]:
     """Collect the wrapper's stub prototypes and the _impl symbols each one calls."""
-    text = strip_comments(read_source(path, "wrapper"))
+    text = strip_comments(source)
     protos: dict[str, tuple[str, ...]] = {}
     forwards: dict[str, set[str]] = {}
     for match in WRAPPER_DEF_RE.finditer(text):
@@ -565,12 +576,8 @@ def parse_wrapper(path: Path) -> tuple[dict[str, tuple[str, ...]], dict[str, set
     return protos, forwards
 
 
-def parse_renames(path: Path, what: str = "rename header") -> dict[str, str]:
-    """Collect the rename header's #defines, folding backslash continuations."""
-    return parse_renames_text(read_source(path, what), what)
-
-
-def parse_renames_text(source: str, what: str) -> dict[str, str]:
+def parse_renames(source: str, what: str = "rename header") -> dict[str, str]:
+    """Collect a rename header's #defines, folding backslash continuations."""
     text = strip_comments(source.replace("\\\n", " "))
     out: dict[str, str] = {}
     for name, target in RENAME_RE.findall(text):
@@ -580,21 +587,61 @@ def parse_renames_text(source: str, what: str) -> dict[str, str]:
     return out
 
 
-def read_sibling_source(path: Path, repo_root: Path) -> str | None:
+def describe_git_failure(repo_root: Path, rel: str, stderr: bytes) -> str:
+    """Say why git could not produce HEAD:<rel>.
+
+    These causes are not interchangeable. A path the commit does not carry is a
+    legitimately absent artifact and skipping it costs nothing. A path the commit
+    *does* carry whose blob git cannot materialize -- a blobless clone whose
+    promisor fetch failed -- is a broken checkout in which this gate silently
+    stops checking a file that is under test. Reporting both as "absent" would
+    make the second indistinguishable from the first in the log.
+    """
+    text = stderr.decode("utf-8", "replace").lower()
+    if "not a git repository" in text:
+        return "not on disk, and the source root is not a git checkout"
+    try:
+        listed = subprocess.run(
+            ["git", "-C", str(repo_root), "ls-tree", "--name-only", "HEAD", "--", rel],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        listed = None
+    if listed is not None and listed.returncode == 0 and listed.stdout.strip():
+        return (
+            "tracked at HEAD but its content could not be read; expect this when a"
+            " blobless clone's promisor fetch fails, and note that it leaves the"
+            " file unchecked rather than absent"
+        )
+    return "not tracked at HEAD"
+
+
+def read_tracked_source(
+    path: Path, repo_root: Path, reasons: dict[str, str] | None = None
+) -> str | None:
     """Read a file that a sparse checkout may not have materialized.
 
-    CI checks out only the subtrees a PR touches, so a file from a sibling
-    project can be missing from the working tree while still being part of the
-    commit under test. Skipping on "not on disk" alone would let this gate go
-    green on precisely the drift it exists to catch, so a missing file is only
-    treated as genuinely absent once git confirms the commit does not track it.
-    Returns None in that case, and the caller skips the check.
+    CI checks out only the subtrees a PR touches, so a file this check compares
+    can be missing from the working tree while still being part of the commit
+    under test -- the provider's copies for a MIOpen-only PR, MIOpen's own
+    sources for a provider-only PR. Skipping on "not on disk" alone would let
+    this gate go green on precisely the drift it exists to catch, so a missing
+    file is only treated as genuinely absent once git confirms the commit does
+    not track it. Returns None in that case, and the caller skips the check,
+    recording why in ``reasons`` so the skip line can name the actual cause.
     """
     if path.is_file():
         return path.read_text(encoding="utf-8")
+
+    def unavailable(key: str, reason: str) -> None:
+        if reasons is not None:
+            reasons[key] = reason
+
     try:
         rel = path.resolve().relative_to(repo_root.resolve()).as_posix()
     except ValueError:
+        unavailable(path.as_posix(), "not on disk, and outside the repository root")
         return None
     try:
         blob = subprocess.run(
@@ -603,8 +650,10 @@ def read_sibling_source(path: Path, repo_root: Path) -> str | None:
             check=False,
         )
     except OSError:  # no git available: a source tarball, not a checkout
+        unavailable(rel, "not on disk, and git is unavailable to read it from HEAD")
         return None
     if blob.returncode != 0:
+        unavailable(rel, describe_git_failure(repo_root, rel, blob.stderr))
         return None
     print(f"NOTE: {rel} is not checked out; reading it from HEAD")
     return blob.stdout.decode("utf-8")
@@ -907,37 +956,82 @@ def cmd_check_wrapper(args) -> int:
 
 
 def cmd_check_headers(args) -> int:
-    root = Path(args.source_root)
-    public_path = Path(args.public_header or root / "include/miopen/miopen.h")
-    impl_path = Path(args.impl_header or root / "src/private/miopen_impl.h")
-    rename_path = Path(
-        args.rename_header or root / "src/private/miopen_private_rename.h"
-    )
-    wrapper_path = Path(args.wrapper or root / "src/private/wrapper.cpp")
-    # The provider's mirror lives in a sibling project, which a MIOpen-only
-    # checkout does not ship at all. An explicitly requested path must exist;
-    # the default one is resolved through git so that a sparse checkout, where
-    # the file is part of the commit but not on disk, still gets checked.
+    root = Path(args.source_root).resolve()
     repo_root = root.parent.parent
-    if args.provider_rename:
-        provider_rename_path = Path(args.provider_rename)
-        provider_source = read_source(provider_rename_path, "provider rename header")
-    else:
-        provider_rename_path = repo_root / PROVIDER_RENAME_RELPATH
-        provider_source = read_sibling_source(provider_rename_path, repo_root)
-    if args.provider_api:
-        provider_api_source = read_source(Path(args.provider_api), "MiopenApi.hpp")
-    else:
-        provider_api_source = read_sibling_source(
-            repo_root / PROVIDER_API_RELPATH, repo_root
-        )
+    # Every input is resolved the same way: an explicitly requested path must
+    # exist, while a default one falls back to git so that a sparse checkout,
+    # where the file is part of the commit but not on disk, still gets checked.
+    # A file git does not track either is genuinely not part of this tree, and
+    # the caller decides whether that is a skip or a failure.
+    reasons: dict[str, str] = {}
 
-    public = parse_declarations(public_path, EXPORT_ANCHOR_RE, "miopen.h")
+    def resolve(override: str | None, default_rel: str, what: str) -> str | None:
+        if override:
+            return read_source(Path(override), what)
+        return read_tracked_source(repo_root / default_rel, repo_root, reasons)
+
+    miopen_rel = root.relative_to(repo_root).as_posix()
+    public_source = resolve(
+        args.public_header, f"{miopen_rel}/include/miopen/miopen.h", "miopen.h"
+    )
+    impl_source = resolve(
+        args.impl_header, f"{miopen_rel}/src/private/miopen_impl.h", "miopen_impl.h"
+    )
+    rename_source = resolve(
+        args.rename_header,
+        f"{miopen_rel}/src/private/miopen_private_rename.h",
+        "miopen_private_rename.h",
+    )
+    wrapper_source = resolve(
+        args.wrapper, f"{miopen_rel}/src/private/wrapper.cpp", "wrapper.cpp"
+    )
+    range_defs_source = resolve(
+        args.range_definitions,
+        f"{miopen_rel}/src/convolution_api.cpp",
+        "convolution_api.cpp",
+    )
+    range_test_source = resolve(
+        args.range_test,
+        f"{miopen_rel}/test/gtest/conv_workspace_size_range.cpp",
+        "conv_workspace_size_range.cpp",
+    )
+    provider_source = resolve(
+        args.provider_rename, PROVIDER_RENAME_RELPATH, "provider rename header"
+    )
+    provider_api_source = resolve(
+        args.provider_api, PROVIDER_API_RELPATH, "MiopenApi.hpp"
+    )
+
+    # A checkout that does not carry projects/miopen -- a provider-only PR,
+    # whose pre-commit lane materializes only the projects its diff touches --
+    # has no reference for this check to compare the provider against, so it is
+    # not a finding. Unreadable is never itself the drift the gate catches:
+    # drift is a content mismatch between files that are all part of the commit,
+    # and a file git cannot produce is one this commit does not carry.
+    miopen_sources = {
+        f"{miopen_rel}/include/miopen/miopen.h": public_source,
+        f"{miopen_rel}/src/private/miopen_impl.h": impl_source,
+        f"{miopen_rel}/src/private/miopen_private_rename.h": rename_source,
+        f"{miopen_rel}/src/private/wrapper.cpp": wrapper_source,
+        f"{miopen_rel}/src/convolution_api.cpp": range_defs_source,
+        f"{miopen_rel}/test/gtest/conv_workspace_size_range.cpp": range_test_source,
+    }
+    missing = sorted(rel for rel, source in miopen_sources.items() if source is None)
+    if missing:
+        print(
+            f"SKIP: {len(missing)} of MIOpen's own sources could not be read;"
+            " nothing to check the split against"
+        )
+        for rel in missing:
+            print(f"  {rel}: {reasons.get(rel, 'unreadable')}")
+        return 0
+
+    public = parse_declarations(public_source, EXPORT_ANCHOR_RE, "miopen.h")
     if not public:
-        raise AbiError(f"no MIOPEN_EXPORT declarations found in {public_path}")
-    impl = parse_declarations(impl_path, EXTERN_C_ANCHOR_RE, "miopen_impl.h")
-    renames = parse_renames(rename_path)
-    wrapper, forwards = parse_wrapper(wrapper_path)
+        raise AbiError("no MIOPEN_EXPORT declarations found in miopen.h")
+    impl = parse_declarations(impl_source, EXTERN_C_ANCHOR_RE, "miopen_impl.h")
+    renames = parse_renames(rename_source)
+    wrapper, forwards = parse_wrapper(wrapper_source)
 
     # The private declarations carry the suffix; strip it so every comparison
     # below is against the public header under one common set of names. An
@@ -957,33 +1051,31 @@ def cmd_check_headers(args) -> int:
     ok &= check_entry_point_set(set(public), set(wrapper), "wrapper.cpp")
     ok &= check_prototypes(public, wrapper, "wrapper.cpp")
     ok &= check_wrapper_forwards(forwards)
+    provider_missing = False
     if provider_source is None:
+        provider_missing = args.require_provider
         print(
-            f"SKIP: provider rename header is not part of this tree ({PROVIDER_RENAME_RELPATH})"
+            f"{'FAIL' if provider_missing else 'SKIP'}: provider rename header is"
+            f" not part of this tree ({PROVIDER_RENAME_RELPATH}:"
+            f" {reasons.get(PROVIDER_RENAME_RELPATH, 'unreadable')})"
         )
     else:
-        provider_renames = parse_renames_text(provider_source, "provider rename header")
+        provider_renames = parse_renames(provider_source, "provider rename header")
         ok &= check_provider_rename_mirror(renames, provider_renames)
     headers_ok = ok
 
     # The range entry points are a separate family: exported but undeclared in
     # miopen.h, so their reference is the definition rather than the header.
-    range_defs_path = Path(args.range_definitions or root / "src/convolution_api.cpp")
-    range_test_path = Path(
-        args.range_test or root / "test/gtest/conv_workspace_size_range.cpp"
-    )
-    definitions = parse_range_prototypes(
-        read_source(range_defs_path, "convolution_api.cpp"), "convolution_api.cpp"
-    )
+    definitions = parse_range_prototypes(range_defs_source, "convolution_api.cpp")
     range_ok = check_range_entry_point_set(definitions, "convolution_api.cpp")
-    consumers = [
-        (
-            "conv_workspace_size_range.cpp",
-            read_source(range_test_path, "conv_workspace_size_range.cpp"),
-        )
-    ]
+    consumers = [("conv_workspace_size_range.cpp", range_test_source)]
     if provider_api_source is None:
-        print(f"SKIP: {PROVIDER_API_RELPATH} is not part of this tree")
+        provider_missing |= args.require_provider
+        print(
+            f"{'FAIL' if args.require_provider else 'SKIP'}:"
+            f" {PROVIDER_API_RELPATH} is not part of this tree"
+            f" ({reasons.get(PROVIDER_API_RELPATH, 'unreadable')})"
+        )
     else:
         consumers.append(("MiopenApi.hpp", provider_api_source))
     for what, source in consumers:
@@ -995,7 +1087,12 @@ def cmd_check_headers(args) -> int:
         print(HEADERS_REMEDY)
     if not range_ok:
         print(RANGE_REMEDY)
+    if provider_missing:
+        print(PROVIDER_REMEDY)
     ok &= range_ok
+    # A skipped file is not a checked one. Folding this in last keeps it out of
+    # the two remedies above, which are about mismatches rather than readability.
+    ok &= not provider_missing
     print(f"public/private header consistency check: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
@@ -1054,7 +1151,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--source-root",
         default=str(Path(__file__).resolve().parent.parent),
         help="MIOpen source root; the checked files are located under it by "
-        "convention (default: the tree containing this script)",
+        "convention, read from HEAD when the checkout is sparse, and the check "
+        "skipped only when git confirms the commit tracks none of them "
+        "(default: the tree containing this script)",
     )
     p.add_argument("--public-header", help="override path to include/miopen/miopen.h")
     p.add_argument("--impl-header", help="override path to src/private/miopen_impl.h")
@@ -1082,6 +1181,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--range-test",
         help="override path to test/gtest/conv_workspace_size_range.cpp",
+    )
+    p.add_argument(
+        "--require-provider",
+        action="store_true",
+        help="fail instead of skipping when the provider's two copies cannot be "
+        "read, so that a tree which does not include them cannot report a pass "
+        "for files it never opened; pass this wherever the provider is expected "
+        "to be present, such as a monorepo CI lane",
     )
     p.set_defaults(func=cmd_check_headers)
 

@@ -5,26 +5,28 @@
 //
 // Provider translation units include this header instead of <miopen/miopen.h>
 // directly, for one reason: it also declares the three
-// miopenConvolution*GetWorkSpaceSizeRange entry points, which are exported from
-// libMIOpen but intentionally absent from the public <miopen/miopen.h>.
+// miopenConvolution*GetWorkSpaceSizeRange entry points, which the MIOpen
+// implementation library exports but the public <miopen/miopen.h> intentionally
+// does not declare.
 //
-// The provider always calls the public entry-point names. When MIOpen is built
-// with the public/private split (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON) the provider
-// links libMIOpen_private.so, whose miopen.h entry points carry an _impl suffix;
-// in that build the compiler force-includes MiopenApiPrivateRename.hpp (see
-// CMakeLists.txt), which renames those names to their _impl form before this
-// header is parsed. With the split OFF nothing is renamed and the provider binds
-// the public libMIOpen exactly as before the split.
+// Provider source always spells the public entry-point names; which library
+// those names bind to is a build-time choice. By default MIOpen is a single
+// library and they bind it directly. Under MIOPEN_ENABLE_HIPDNN_WRAPPER=ON the
+// provider links libMIOpen_private.so, whose miopen.h entry points carry an
+// _impl suffix, and CMakeLists.txt force-includes MiopenApiPrivateRename.hpp to
+// rewrite those names to their _impl form before this header is parsed. Keeping
+// the rename out of the source is what lets one set of call sites serve both
+// configurations.
 //
-// The three GetWorkSpaceSizeRange entry points declared below are the exception:
-// because they are not part of the miopen.h contract, the split leaves them
-// un-renamed on libMIOpen_private.so, so these declarations bind the same symbol
-// name in either build.
+// The three GetWorkSpaceSizeRange entry points below sit outside that scheme:
+// they are not part of the miopen.h contract, so they keep their original names
+// on libMIOpen_private.so and these declarations bind the same symbol either way.
 #pragma once
 
 #include <miopen/miopen.h>
 
-// Exported from libMIOpen but intentionally not declared in the public miopen.h.
+// Exported from the MIOpen implementation library but intentionally not declared
+// in the public miopen.h header.
 // The signatures are copied verbatim from MIOpen, whose no-op top-level `const` on
 // the pointer-typedef parameters trips clang-tidy, so we suppress those checks to
 // keep the prototypes identical.
