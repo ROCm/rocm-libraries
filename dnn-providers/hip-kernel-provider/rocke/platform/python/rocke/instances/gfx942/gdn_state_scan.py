@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""gfx942 gated-delta-rule / KDA chunked state scan (the "K5" stage).
+"""gfx942 gated-delta-rule / KDA chunked state scan (K5 + optional fused K6).
 
 The compute, for one chunk of ``BT`` tokens, with state ``h`` of shape
 ``[V, K]``::
@@ -9,6 +9,14 @@ The compute, for one chunk of ``BT`` tokens, with state ``h`` of shape
     v_new      = u - w @ h^T                        # GEMM1
     v_new     *= decay                              # scalar-gate path only
     h          = Diag(gate) @ h + k^T @ v_new       # GEMM2
+
+With ``COMPUTE_OUTPUT=True``, the same chunk also computes from the pre-update
+snapshot::
+
+    o_inter = q @ h_snapshot^T
+    A       = tril(q @ k^T)
+    o_intra = A @ v_new
+    o       = scale * combine_gates(o_inter, o_intra)
 
 **Why this is an arch-specific instance rather than a shared one.** ``k`` feeds
 GEMM2 as an A-operand contracted along ``K``, which wants a ``[K, BT]`` fragment
@@ -205,7 +213,7 @@ class GdnStateScanSpec:
     #: PERF_PLAN.md item P0.
     MFMA_VGPR_FORM: bool = False
 
-    # -- fused K6 stage (out of scope for the first study milestone) --
+    # -- fused K6 stage --
     COMPUTE_OUTPUT: bool = False
     SCALE: Optional[float] = None
 
@@ -482,7 +490,11 @@ def gdn_state_scan_signature(spec: GdnStateScanSpec) -> List[dict]:
         .ptr("Vnew", out)
         .ptr("Hout", out)
         .ptr("Ht", st)
-        .scalar("T_val", "i32")
+    )
+    if spec.COMPUTE_OUTPUT:
+        sig = sig.ptr("Qt", "bf16").ptr("O", "bf16")
+    sig = (
+        sig.scalar("T_val", "i32")
         .scalar("NT_val", "i32")
         .scalar("N_val", "i32")
     )
@@ -559,6 +571,14 @@ def _grp_col(b, row, col, ng):
 def _swz(b, row, col, ng):
     """``_grp_col`` when swizzling, identity when not."""
     return col if ng is None else _grp_col(b, row, col, ng)
+
+
+def _swz_elem(b, row, col, ng):
+    """Swizzled address of one element, preserving its in-group low bits."""
+    if ng is None:
+        return col
+    return b.add(_grp_col(b, row, col, ng),
+                 b.land(col, b.const_i32(3)))
 
 
 def _regroup(b, v, base, n=4):
@@ -830,7 +850,7 @@ def _pack_f32x4(b, vals):
 
 
 def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
-    """Full K5 chunk recurrence: snapshot, GEMM1, gate, GEMM2.
+    """Full K5 recurrence with the optional fused K6 output stage.
 
     The emitted kernel binds against :func:`gdn_state_scan_signature` and
     launches on :func:`gdn_state_scan_grid`. Call :func:`is_valid_spec` first if
@@ -841,6 +861,7 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
         Kt   bf16 [T, Hg, K]      Wt bf16 [T, H, K]      Ut bf16 [T, H, V]
         Gk   f32  [T, H,  K]      H0 f32  [N, H, V, K]
         Vnew out  [T, H,  V]      Hout out [NT, H, V, K]  Ht state [N, H, V, K]
+        Qt   bf16 [T, Hg, K]      O bf16 [T, H, V]       (fused K6 only)
 
     Grid ``(ceil(V/BV), N*H, 1)``.
     """
@@ -897,6 +918,11 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
     Vn = b.param("Vnew", PtrType(output_dt, "global"), noalias=True, align=16)
     Ho = b.param("Hout", PtrType(output_dt, "global"), noalias=True, align=16)
     Ht = b.param("Ht", PtrType(state_dt, "global"), noalias=True, align=16)
+    if spec.COMPUTE_OUTPUT:
+        Qt = b.param(
+            "Qt", PtrType(BF16, "global"), noalias=True, readonly=True, align=16
+        )
+        O_ptr = b.param("O", PtrType(BF16, "global"), noalias=True, align=16)
     T_val = b.param("T_val", I32)
     NT_val = b.param("NT_val", I32)
     N_val = b.param("N_val", I32)          # sequences; grid.y == N_val * H
@@ -911,8 +937,17 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
 
     sW = b.smem_alloc(BF16, [BT, wcols], name_hint="sW")
     sH = b.smem_alloc(BF16, [BV, wcols], name_hint="sH")
-    sKT = b.smem_alloc(BF16, [K, tcols], name_hint="sKT")
+    sKT = (
+        b.smem_alloc(BF16, [K, tcols], name_hint="sKT")
+        if spec.kt_transposed
+        else b.smem_alloc(BF16, [BT, wcols], name_hint="sK")
+    )
     sVN = b.smem_alloc(BF16, [BV, tcols], name_hint="sVN")
+    if spec.COMPUTE_OUTPUT:
+        # Keep A independent from q (sW) and the state snapshot (sH). Source
+        # order alone is not a cross-wave lifetime boundary; `exclusive`
+        # prevents the LDS pool packer from reusing either live tile.
+        sA = b.smem_alloc(BF16, [BT, BT], name_hint="sA", exclusive=True)
 
     tid = b.thread_id_x()
     cH, cV, cK = b.const_i32(H), b.const_i32(V), b.const_i32(K)
@@ -1015,8 +1050,17 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
         _u_row_base = b.mul(b.add(b.mul(bos, cH), i_h), cV)
     # u: fold this CTA's V window into the base
     _u_base = b.add(_u_row_base, v_base)
-    # scalar-gate row base (head-major [H, T_flat] varlen; [H, T] non-varlen)
-    _g_base = b.add(b.mul(i_h, T_flat if spec.IS_VARLEN else T_val), bos)
+    # Scalar gate is head-major. Preserve the established K5-only addressing;
+    # fused K6 uses the full dense [N, H, T] batch/head row.
+    if spec.IS_VARLEN:
+        _g_base = b.add(b.mul(i_h, T_flat), bos)
+    elif spec.COMPUTE_OUTPUT:
+        _g_base = b.mul(b.add(b.mul(i_n, cH), i_h), T_val)
+    else:
+        _g_base = b.add(b.mul(i_h, T_val), bos)
+    if spec.COMPUTE_OUTPUT:
+        # q shares k's token-major [T, Hg, K] layout.
+        _qk_base = b.mul(b.add(b.mul(bos, b.const_i32(Hg)), i_hg), cK)
 
     def wu_row_off(base, tok, stride):
         """Flat element offset of row `tok` (within-sequence) of a w/u tensor."""
@@ -1042,6 +1086,14 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
                            else (lambda: b.mul(cH, T_val)))
     ld_h0 = _Loader(b, H0, elem_bytes=state_bytes, use_desc=_bd,
                     n_elems=lambda: b.mul(b.mul(b.mul(N_val, cH), cV), cK))
+    if spec.COMPUTE_OUTPUT:
+        ld_q = _Loader(
+            b,
+            Qt,
+            elem_bytes=2,
+            use_desc=_bd,
+            n_elems=lambda: b.mul(b.mul(T_val, b.const_i32(Hg)), cK),
+        )
 
     # ---- P5: loop-carried prefetch -------------------------------------
     # Issue chunk i+1's HBM reads at the end of chunk i and carry the raw
@@ -1180,11 +1232,12 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
                                   elem_off=_w_base, clamp=T_local, ldr=ld_w))
         nxt_w = []
         k_staged = None
-        if spec.PREFETCH_K_EARLY or spec.PREFETCH_K_INTERLEAVE:
+        if (not spec.COMPUTE_OUTPUT
+                and (spec.PREFETCH_K_EARLY or spec.PREFETCH_K_INTERLEAVE)):
             k_staged = _init_k_transposed(
                 b, spec=spec, tid=tid, nthreads=nthreads,
             )
-        if spec.PREFETCH_K_EARLY:
+        if spec.PREFETCH_K_EARLY and not spec.COMPUTE_OUTPUT:
             for r in range(4):
                 _load_k_transposed_row(
                     b, src=Kt, staged=k_staged, row=r, spec=spec,
@@ -1192,6 +1245,26 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
                     ldr=ld_k, bos=bos,
                 )
         b.sync()
+
+        if spec.COMPUTE_OUTPUT:
+            # Keep K's VMEM reads after the sW/sH handoff barrier. AMDGPU
+            # barriers wait for vmcnt(0), so issuing these before sync would
+            # serialize the entire K fetch instead of hiding it under GEMM1.
+            # Fused K6 reads k most heavily as [BT, K], so retain that global
+            # orientation and store it to LDS after GEMM1.
+            k_staged = _stage_tile_load(
+                b,
+                src_ptr=Kt,
+                rows=BT,
+                cols=K,
+                row_stride_src=Hg * K,
+                src_row_base=t_base,
+                block_threads=nthreads,
+                tid=tid,
+                elem_off=_qk_base,
+                clamp=T_local,
+                ldr=ld_k,
+            )
 
         if spec.STORE_H:
             _drain_h(b, sH=sH, dst=Ho, spec=spec, tid=tid, nthreads=nthreads,
@@ -1221,7 +1294,8 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
             bv.append(acc)
 
         # -- last valid token of this chunk (shared by both gate paths) ----
-        t_last = b.sub(b.smin(b.add(t_base, b.const_i32(BT)), T_val),
+        t_bound = T_local if spec.COMPUTE_OUTPUT else T_val
+        t_last = b.sub(b.smin(b.add(t_base, b.const_i32(BT)), t_bound),
                        b.const_i32(1))
 
         # -- C-fragment row coordinates, derived ONCE ----------------------
@@ -1244,9 +1318,11 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
             gb = _g_base
             g_last = gate_pf[0] if _PF_G else ld_g.scalar(b.add(gb, t_last), F32)
             g_gate = []
+            g_query = []
             for e in range(atom.c_per_lane):
                 ge = (gate_pf[1+e] if _PF_G else ld_g.scalar(
                       b.add(gb, b.select(frag_ok[e], frag_t[e], b.const_i32(0))), F32))
+                g_query.append(ge)
                 g_gate.append(_exp_gate(b.fsub(g_last, ge)))
             h_decay = _exp_gate(g_last)
 
@@ -1284,11 +1360,24 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
             packed = _pack_f32x4(b, [vn[nr][e][1] for e in range(4)])
             b.smem_store_vN(sVN, [v_row[nr], _swz(b, v_row[nr], frag_bt[0], ng_t)],
                             _to_bf16_fast(b, packed, 4), 4)
-        _stage_k_transposed(b, src=Kt, smem=sKT, spec=spec, tid=tid,
-                            nthreads=nthreads, t_base=t_base, i_hg=i_hg,
-                            T_val=T_local, Hg=Hg, ng=ng_t, ldr=ld_k, bos=bos,
-                            staged=k_staged)
-        if spec.PREFETCH and spec.PREFETCH_W_EARLY:
+        if spec.COMPUTE_OUTPUT:
+            _stage_tile_store(
+                b,
+                smem=sKT,
+                regs=k_staged,
+                rows=BT,
+                cols=K,
+                block_threads=nthreads,
+                tid=tid,
+                ng=ng_k,
+            )
+        else:
+            _stage_k_transposed(b, src=Kt, smem=sKT, spec=spec, tid=tid,
+                                nthreads=nthreads, t_base=t_base, i_hg=i_hg,
+                                T_val=T_local, Hg=Hg, ng=ng_t, ldr=ld_k, bos=bos,
+                                staged=k_staged)
+        if (not spec.COMPUTE_OUTPUT
+                and spec.PREFETCH and spec.PREFETCH_W_EARLY):
             nxt_w, _, _ = _pf_issue_parts(
                 b.add(i_t, b.const_i32(1)),
                 issue_w=True,
@@ -1296,12 +1385,26 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
             )
         b.sync()
 
-        # P5/P8: issue chunk i+1's reads *before* GEMM2 — matching the parent's
-        # deliberate scheduling choice ("the whole MFMA chain sits between the
-        # loads and their consumption"). The loads are independent of GEMM2, so
-        # emitting them first lets the backend overlap their latency with the
-        # GEMM2 MFMA chain rather than exposing it at the next iteration's top.
-        if spec.PREFETCH and spec.PREFETCH_W_EARLY:
+        if spec.COMPUTE_OUTPUT:
+            # q is independent of the state update. Issue it now so GEMM2 hides
+            # its HBM latency; the LDS write follows the MFMA chain.
+            q_staged = _stage_tile_load(
+                b,
+                src_ptr=Qt,
+                rows=BT,
+                cols=K,
+                row_stride_src=Hg * K,
+                src_row_base=t_base,
+                block_threads=nthreads,
+                tid=tid,
+                elem_off=_qk_base,
+                clamp=T_local,
+                ldr=ld_q,
+            )
+            nxt = []
+        # P5/P8: K5 issues chunk i+1 before GEMM2. Fused K5+K6 defers it
+        # until after the output store, because this latency slot belongs to q.
+        elif spec.PREFETCH and spec.PREFETCH_W_EARLY:
             _, nxt_u, nxt_g = _pf_issue_parts(
                 b.add(i_t, b.const_i32(1)),
                 issue_w=False,
@@ -1331,12 +1434,202 @@ def build_gdn_state_scan(spec: GdnStateScanSpec) -> KernelDef:
                 k_row = b.add(k_tile[kb], lane_n)
                 for bs in range(spec.bt_steps):
                     bt0 = b.add(b.const_i32(bs * spec.mfma_k), k_lane)
-                    af = b.smem_load_vN(sKT, k_row, _swz(b, k_row, bt0, ng_t),
-                                        dtype=BF16, n=atom.a_per_lane)
+                    if spec.COMPUTE_OUTPUT:
+                        # sKT is [BT, K] on the fused path. GEMM2 needs k^T,
+                        # so gather the four contraction rows at fixed K.
+                        af = None
+                        for e in range(atom.a_per_lane):
+                            bt = b.add(bt0, b.const_i32(e))
+                            x = b.vec_extract(
+                                b.smem_load_vN(
+                                    sKT,
+                                    bt,
+                                    _swz_elem(b, bt, k_row, ng_k),
+                                    dtype=BF16,
+                                    n=1,
+                                ),
+                                0,
+                            )
+                            af = (
+                                b.vector_splat(x, atom.a_per_lane)
+                                if af is None
+                                else b.vec_insert(af, x, e)
+                            )
+                    else:
+                        af = b.smem_load_vN(
+                            sKT,
+                            k_row,
+                            _swz(b, k_row, bt0, ng_t),
+                            dtype=BF16,
+                            n=atom.a_per_lane,
+                        )
                     bf = b.smem_load_vN(sVN, v_row[nr], _swz(b, v_row[nr], bt0, ng_t),
                                         dtype=BF16, n=atom.b_per_lane)
                     dec = atom.emit(b, af, bf, dec)
                 out.append(dec)
+
+        # ================================================================
+        # Fused K6 output. sH still holds the pre-update state snapshot,
+        # while sKT and sVN hold this chunk's k and gated v_new.
+        # ================================================================
+        if spec.COMPUTE_OUTPUT:
+            # q aliases the now-dead w tile.
+            _stage_tile_store(
+                b,
+                smem=sW,
+                regs=q_staged,
+                rows=BT,
+                cols=K,
+                block_threads=nthreads,
+                tid=tid,
+                ng=ng_k,
+            )
+            b.sync()
+
+            # -- GEMM3: o_inter = q @ h_snapshot^T -----------------------
+            inter = []
+            for nr in range(NRL):
+                acc = atom.zero_acc(b)
+                for kb in range(NKB):
+                    for ks in range(spec.k_steps_per_block):
+                        k0 = b.add(
+                            b.const_i32(kb * 64 + ks * spec.mfma_k), k_lane
+                        )
+                        af = b.smem_load_vN(
+                            sW,
+                            bt_row,
+                            _swz(b, bt_row, k0, ng_k),
+                            dtype=BF16,
+                            n=atom.a_per_lane,
+                        )
+                        bf = b.smem_load_vN(
+                            sH,
+                            v_row[nr],
+                            _swz(b, v_row[nr], k0, ng_k),
+                            dtype=BF16,
+                            n=atom.b_per_lane,
+                        )
+                        acc = atom.emit(b, af, bf, acc)
+                inter.append(acc)
+
+            # -- GEMM4a: A = tril(q @ k^T) -------------------------------
+            # A is V-independent. wid_n partitions its key-column tiles
+            # across the V-split waves; every wave still owns one query tile.
+            a_tiles = []
+            for ns in range(spec.bt_steps_local):
+                a_tile = b.mul(
+                    b.add(b.const_i32(ns * spec.NR_SPLIT), wid_n),
+                    c16,
+                )
+                key_row = b.add(a_tile, lane_n)
+                acc = atom.zero_acc(b)
+                for kb in range(NKB):
+                    for ks in range(spec.k_steps_per_block):
+                        k0 = b.add(
+                            b.const_i32(kb * 64 + ks * spec.mfma_k), k_lane
+                        )
+                        af = b.smem_load_vN(
+                            sW,
+                            bt_row,
+                            _swz(b, bt_row, k0, ng_k),
+                            dtype=BF16,
+                            n=atom.a_per_lane,
+                        )
+                        bf = b.smem_load_vN(
+                            sKT,
+                            key_row,
+                            _swz(b, key_row, k0, ng_k),
+                            dtype=BF16,
+                            n=atom.b_per_lane,
+                        )
+                        acc = atom.emit(b, af, bf, acc)
+                a_tiles.append((key_row, acc))
+
+            for key_row, acc in a_tiles:
+                key_abs = b.add(t_base, key_row)
+                key_ok = b.cmp_lt(key_abs, T_local)
+                for e in range(atom.c_per_lane):
+                    causal = b.land(
+                        b.cmp_ge(frag_bt[e], key_row),
+                        b.land(frag_ok[e], key_ok),
+                    )
+                    a_val = b.select(
+                        causal, b.vec_extract(acc, e), b.const_f32(0.0)
+                    )
+                    query_row = frag_bt[e]
+                    b.smem_store_vN(
+                        sA,
+                        [query_row, _swz_elem(b, query_row, key_row, ng_t)],
+                        _to_bf16_fast(b, a_val),
+                        1,
+                    )
+            b.sync()
+
+            # -- GEMM4b: o_intra = A @ v_new_gated ----------------------
+            intra = []
+            for nr in range(NRL):
+                acc = atom.zero_acc(b)
+                for bs in range(spec.bt_steps):
+                    bt0 = b.add(b.const_i32(bs * spec.mfma_k), k_lane)
+                    af = b.smem_load_vN(
+                        sA,
+                        bt_row,
+                        _swz(b, bt_row, bt0, ng_t),
+                        dtype=BF16,
+                        n=atom.a_per_lane,
+                    )
+                    bf = b.smem_load_vN(
+                        sVN,
+                        v_row[nr],
+                        _swz(b, v_row[nr], bt0, ng_t),
+                        dtype=BF16,
+                        n=atom.b_per_lane,
+                    )
+                    acc = atom.emit(b, af, bf, acc)
+                intra.append(acc)
+
+            # USE_G applies distinct per-query factors to the inter and
+            # intra terms. USE_GK intentionally applies no K6 gate.
+            scale = b.const_f32(spec.SCALE)
+            o_base = b.add(
+                b.mul(b.add(b.mul(bos, cH), i_h), cV),
+                v_base,
+            )
+            for nr in range(NRL):
+                v_abs = b.add(v_base, v_row[nr])
+                v_ok = b.cmp_lt(v_abs, cV)
+                for e in range(atom.c_per_lane):
+                    oi = b.vec_extract(inter[nr], e)
+                    oa = b.vec_extract(intra[nr], e)
+                    if spec.USE_G:
+                        oi = b.fmul(oi, _exp_gate(g_query[e]))
+                        oa = b.fmul(
+                            oa, _exp_gate(b.fsub(g_query[e], g_last))
+                        )
+                    value = b.fmul(b.fadd(oi, oa), scale)
+                    store_ok = b.land(frag_ok[e], v_ok)
+                    off = b.add(
+                        b.add(
+                            o_base,
+                            b.mul(frag_t[e], b.const_i32(H * V)),
+                        ),
+                        v_row[nr],
+                    )
+                    with b.scf_if(store_ok):
+                        b.global_store(
+                            O_ptr,
+                            off,
+                            _to_bf16_fast(b, value),
+                            align=2,
+                        )
+
+            # Match the fused schedule: next-chunk reads are issued only after
+            # the output store, and the K6 MFMA chain hides their latency.
+            nxt = (
+                _pf_issue(b.add(i_t, b.const_i32(1)))
+                if spec.PREFETCH
+                else []
+            )
         # No third barrier here. The two hazards that cross the loop back edge
         # are both already ordered:
         #   GEMM2(i) reads sKT/sVN  vs  writes to sKT/sVN in i+1 — a thread can
