@@ -2,6 +2,10 @@
 
 ## Tensile 4.48.0 (Unreleased)
 
+### Resolved issues
+
+- Stopped emitting spurious "found ... in a non-default ROCm location" warnings for toolchain components outside `/opt/rocm` (e.g. TheRock builds).
+
 ## Tensile 4.47.0 for ROCm 7.15
 
 ### Changed
