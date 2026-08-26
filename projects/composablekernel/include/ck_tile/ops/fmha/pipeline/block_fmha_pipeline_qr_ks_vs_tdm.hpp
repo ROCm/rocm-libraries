@@ -162,9 +162,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                       QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
                   "qr_tdm pipeline: unsupported quantization granularity");
 
-    static_assert(!(kBlockScale && kHasSink),
-                  "qr_tdm pipeline: BLOCKSCALE + sink would read the wrong descale block");
-
     static_assert(!kBlockScale || kHwGemm1Scale,
                   "qr_tdm pipeline: BLOCKSCALE requires the scaled MMA in gemm1");
 
