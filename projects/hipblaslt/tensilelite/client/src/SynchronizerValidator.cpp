@@ -52,12 +52,37 @@ namespace TensileLite
         void SynchronizerValidator::preProblem(ContractionProblem* const problem)
         {
             m_problem = problem;
+            // numWarmupRuns() is consulted once here, before any solution is
+            // picked, to size the rotating buffers. Restore the permissive value
+            // so the previous problem's last solution cannot shrink it.
+            m_usesSynchronizer = true;
         }
 
         void SynchronizerValidator::preSolution(ContractionSolution* const solution)
         {
             m_dirtyInSolution = false;
             m_checkedSolution = false;
+            // Only two families are handed the Synchronizer; every other solution
+            // leaves it untouched, so scanning it could only ever come back
+            // clean. These mirror the conditions the dispatcher itself uses when
+            // it appends the pointer -- Flags in singleCallArgs for StreamK, and
+            // the dstD/Synchronizer block for MBSK. The one case not reproduced
+            // here is sk.reduction == parallel, which also passes a null Flags
+            // but needs a Problem and Hardware to evaluate; over-scanning there
+            // costs one readback and reports nothing.
+            //
+            // An unknown solution is scanned rather than skipped.
+            if(solution == nullptr)
+            {
+                m_usesSynchronizer = true;
+                return;
+            }
+
+            auto const& sm      = solution->sizeMapping;
+            bool const  streamK = sm.streamK > 0 && sm.streamKAtomic == 0
+                                 && sm.streamKForceDPOnly == 0;
+            bool const mbsk    = sm.globalAccumulation == 3;
+            m_usesSynchronizer = streamK || mbsk;
         }
 
         void SynchronizerValidator::postSolution()
@@ -85,7 +110,7 @@ namespace TensileLite
         void SynchronizerValidator::checkInputs(std::shared_ptr<ProblemInputs> inputs,
                                                 char const*                    stage)
         {
-            if(!m_enabled || m_problem == nullptr || inputs == nullptr)
+            if(!active() || m_problem == nullptr || inputs == nullptr)
                 return;
 
             if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
