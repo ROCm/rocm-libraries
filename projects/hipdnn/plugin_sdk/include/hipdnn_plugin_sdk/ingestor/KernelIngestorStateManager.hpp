@@ -7,10 +7,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -20,12 +20,14 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -43,7 +45,7 @@ struct KernelDispatcher
 struct ResolvedMatcher
 {
     MatchDescriptor descriptor;
-    GraphMatcherFn graphFn = nullptr;
+    GraphCriterionFn graphFn = nullptr;
     KernelMatcherFn kernelFn = nullptr;
 };
 
@@ -60,8 +62,22 @@ struct ResolvedDispatch
 /// (sortedDefinitions), getMaxWorkspaceSize (getDispatchDetails per survivor, max), and
 /// initializeExecutionContext (sortedDefinitions().front(), getDispatchDetails).
 ///
-/// Thread-safe: the cache is internally synchronized; matcher and scorer calls run
-/// outside the lock.
+/// Thread safety. Two independent caches, each guarding itself:
+///
+/// - `_catalogCache` (`LruCache`) synchronizes internally.
+/// - `_winnerCache` is guarded by `_winnerCacheMutex`, as is the one-shot growth warning.
+///
+/// Neither lock is ever held across a call that takes the other, so the two cannot
+/// deadlock. Matchers, the heuristic, and the accessors below all run outside both.
+///
+/// Everything between a lookup and a store is thread-local: `catalogFor` returns a
+/// `Catalog` by value and callers mutate that copy, so ordering a catalog touches no
+/// shared state. Returning a reference into `_catalogCache` instead would make those
+/// mutations a data race. `winnerFor` returns a copy for the same reason.
+///
+/// Concurrent callers can therefore duplicate work -- two threads may rank the same
+/// catalog, or record a ranking for the same key -- and the last store wins. Both
+/// stores are equally valid, so the cost is the redundant work, never a wrong answer.
 template <typename THandle>
 class KernelIngestorStateManager
 {
@@ -70,20 +86,37 @@ public:
     /// wrong answer.
     static constexpr size_t DEFAULT_CATALOG_CACHE_CAPACITY = 256;
 
+    /// A tripwire, not a cap: the winner cache never evicts, because discarding a
+    /// measured ranking costs a GPU sweep or a silent quality regression. Crossing this
+    /// logs once and changes nothing.
+    static constexpr size_t WINNER_CACHE_WARNING_THRESHOLD = 4096;
+
     /// @throws std::invalid_argument bad pack reference, or duplicate metadata tuple.
-    /// @throws std::runtime_error a UMD names a match symbol this build does not ship.
+    /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
+    /// build does not ship.
     ///
-    /// Matcher and dispatch symbols resolve here, eagerly, so a missing one excludes
-    /// this engine at construction instead of throwing later from isApplicable().
+    /// Matcher, dispatch, and graph_match symbols resolve here, eagerly, so a missing
+    /// one excludes this engine at construction instead of throwing later from
+    /// isApplicable().
+    ///
+    /// @param describedBy Names the engine in the graph_match resolution failure, which
+    ///        is the only one of the three that has no descriptor of its own to name:
+    ///        the symbol lives on the UED, so without this the diagnostic would carry
+    ///        the symbol string alone.
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
                                std::vector<DispatchDescriptor> dispatches,
                                std::vector<KernelDescriptorPack> packs,
                                std::shared_ptr<IKernelHeuristic> heuristic,
+                               const std::string& graphMatchSymbol,
+                               const std::string& describedBy = {},
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY)
         : _schema(std::move(schema))
         , _packs(std::move(packs))
         , _heuristic(std::move(heuristic))
+        , _graphMatchFn(graphMatchSymbol.empty()
+                            ? nullptr
+                            : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
         , _catalogCache(catalogCacheCapacity)
     {
         if(_heuristic == nullptr)
@@ -99,7 +132,7 @@ public:
             if(resolved.descriptor.scope == MatchScope::GRAPH)
             {
                 resolved.graphFn
-                    = GraphMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
+                    = GraphCriterionRegistry::resolve(resolved.descriptor.matchSymbol, description);
             }
             else
             {
@@ -156,16 +189,35 @@ public:
         return sortedCatalog(context).entries;
     }
 
-    /// The ranked catalog and the state matching bound, from one lookup.
+    /// The ordered catalog and the state matching bound, from one lookup.
+    ///
+    /// A benchmarked record covering the whole catalog supplies a measured order and
+    /// `rank()` is never called; otherwise the heuristic orders it.
     Catalog sortedCatalog(const MatchContext& context) const
     {
         Catalog catalog = catalogFor(context);
-        if(catalog.isSorted)
+
+        // A measured order is final; a heuristic one is provisional, so this lookup runs
+        // again even when the catalog is already sorted -- a sweep can postdate the
+        // memoized sort.
+        if(catalog.isSorted && catalog.orderedFromRecord)
         {
             return catalog;
         }
 
-        catalog.entries = _heuristic->rank(catalog, context);
+        if(auto ordered = orderFromWinnerRecord(catalog.entries, context); ordered.has_value())
+        {
+            catalog.entries = std::move(*ordered);
+            catalog.orderedFromRecord = true;
+        }
+        else
+        {
+            if(catalog.isSorted)
+            {
+                return catalog;
+            }
+            catalog.entries = _heuristic->rank(catalog, context);
+        }
         catalog.isSorted = true;
 
         if(const auto key = cacheKey(context); key.has_value())
@@ -175,6 +227,61 @@ public:
         }
 
         return catalog;
+    }
+
+    /// Records @p record under @p key, replacing any earlier ranking for it: a later
+    /// sweep measured the current candidate set, and the coverage gate only widens.
+    void recordWinner(const WinnerKey& key, WinnerRecord record) const
+    {
+        if(record.empty())
+        {
+            // An all-unusable sweep has nothing to record; an empty record would read
+            // as a covered hit for the empty candidate set.
+            return;
+        }
+
+        if(!key.graph.isUsable())
+        {
+            // Unkeyable graphs never match on lookup (GraphContentKey::operator==), so
+            // storing here would leak memory on an unreachable entry.
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: a benchmarked ranking could not be cached "
+                                   "because its graph yields no key");
+            return;
+        }
+
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        _winnerCache[key] = std::move(record);
+
+        if(_winnerCache.size() > WINNER_CACHE_WARNING_THRESHOLD && !_winnerCacheGrowthWarned)
+        {
+            _winnerCacheGrowthWarned = true;
+            HIPDNN_PLUGIN_LOG_WARN(
+                "ingestor: winner cache holds "
+                << _winnerCache.size() << " entries, past the soft threshold of "
+                << WINNER_CACHE_WARNING_THRESHOLD
+                << "; it does not evict, so this is reported once rather than acted on");
+        }
+    }
+
+    /// The ranking recorded for @p key, or nullopt. Returns a copy: the caller walks it
+    /// outside the lock, and a reference would outlive the guard.
+    std::optional<WinnerRecord> winnerFor(const WinnerKey& key) const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        const auto found = _winnerCache.find(key);
+        if(found == _winnerCache.end())
+        {
+            return std::nullopt;
+        }
+        return found->second;
+    }
+
+    /// How many rankings are held. For tests and diagnostics; the cache never evicts, so
+    /// this only grows.
+    size_t winnerCacheSize() const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        return _winnerCache.size();
     }
 
     /// Resolves how to size and launch @p kernel.
@@ -218,9 +325,12 @@ private:
     /// than completing each kernel's metadata again on every graph.
     void validateAndIndexPacks()
     {
-        // set, not a scanned vector: the check is quadratic otherwise, and the tuple is
-        // an ordered map, so it already orders.
-        std::set<MetadataValues> seenKeys;
+        // Two kernels may share a tuple when no single device can see both -- that is
+        // exactly the per-arch shard layout. Uniqueness is therefore per overlapping-arch
+        // group, not per engine: the tuple is the catalog key, and a catalog is built for
+        // one device. Keyed by the tuple (an ordered map, so it already orders) rather
+        // than scanned, which would be quadratic.
+        std::map<MetadataValues, std::vector<std::vector<std::string>>> archesClaimingTuple;
 
         _definitions.reserve(_packs.size());
         for(const auto& pack : _packs)
@@ -254,20 +364,37 @@ private:
                 }
 
                 auto key = completeMetadata(kernel);
-                if(!seenKeys.insert(key).second)
+                // A kernel that declared no arch of its own runs wherever its pack does;
+                // one that declared a narrower list claims only that. Claiming by the
+                // kernel rather than the pack is what lets two kernels of ONE pack share a
+                // tuple under disjoint arch -- one implementation per capability -- while
+                // still catching two that a single device would see together.
+                std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
+                // try_emplace, not operator[], only because misc-const-correctness
+                // misreads the operator[] form here and demands a const map.
+                std::vector<std::vector<std::string>>& claimants
+                    = archesClaimingTuple.try_emplace(key).first->second;
+                for(const auto& claimed : claimants)
                 {
-                    throw std::invalid_argument(
-                        "kernel '" + toString(kernel.id)
-                        + "' duplicates the metadata tuple of another kernel under schema '"
-                        + _schema.name + "'; the tuple is the catalog key and must be unique");
+                    if(archOverlaps(claimed, kernelArch))
+                    {
+                        throw std::invalid_argument(
+                            "kernel '" + toString(kernel.id)
+                            + "' duplicates the metadata tuple of another kernel under schema '"
+                            + _schema.name
+                            + "' on an arch both reach; the tuple is the catalog key "
+                            + "and must be unique per device");
+                    }
                 }
+                claimants.push_back(kernelArch);
 
                 packDefinitions.push_back(KernelDefinition{kernel.id,
                                                            pack.id,
                                                            pack.dispatchId,
                                                            kernel.source,
                                                            std::move(key),
-                                                           kernel.priority});
+                                                           kernel.priority,
+                                                           std::move(kernelArch)});
             }
             _definitions.push_back(std::move(packDefinitions));
         }
@@ -332,6 +459,15 @@ private:
 
     Catalog catalogFor(const MatchContext& context) const
     {
+        // Pack pruning and matchers both read the device, so nothing below can be
+        // answered without one. Checked here rather than in every provider's matchers,
+        // where an omission is invisible.
+        if(context.deviceId == NO_DEVICE)
+        {
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: no device resolved; no kernel applies");
+            return Catalog{};
+        }
+
         const auto key = cacheKey(context);
         if(key.has_value())
         {
@@ -362,22 +498,24 @@ private:
         return catalog;
     }
 
-    /// One graph-scoped matcher's verdict for one (graph, device); memoized per
-    /// matcher so a pack merges only the matchers it lists.
+    /// One graph-scoped criterion's verdict for one (graph, device); memoized per
+    /// matcher so a pack's matchers are evaluated only once each.
     struct GraphMatcherVerdict
     {
         bool passed = false;
-        BoundTokens bound;
     };
     using GraphMatcherMemo
         = std::unordered_map<DescriptorId, GraphMatcherVerdict, DescriptorIdHash>;
 
-    /// Runs every pack's matchers over @p context: arch, then graph-scoped (memoized
-    /// across packs), then kernel-scoped. A pruned pack's bindings are never merged.
+    /// Runs @p context's graph_match once (lazily, on the first pack that clears the
+    /// arch gate; absent means the engine binds nothing and always proceeds with an
+    /// empty map) and every pack's UMDs: graph-scoped criteria (memoized across
+    /// packs), then kernel-scoped ones.
     Catalog buildCatalog(const MatchContext& context) const
     {
         Catalog catalog;
         GraphMatcherMemo graphVerdicts;
+        std::optional<std::optional<BoundTokens>> graphMatch;
 
         for(size_t packIndex = 0; packIndex < _packs.size(); ++packIndex)
         {
@@ -391,24 +529,52 @@ private:
                 continue;
             }
 
-            BoundTokens packBound;
-            if(!graphLevelMatchersPass(pack, context, graphVerdicts, packBound))
+            if(!graphMatch.has_value())
+            {
+                graphMatch = _graphMatchFn == nullptr ? std::optional<BoundTokens>(BoundTokens{})
+                                                      : _graphMatchFn(context);
+                if(graphMatch->has_value())
+                {
+                    catalog.bound = std::move(**graphMatch);
+                }
+            }
+
+            if(!graphMatch->has_value())
+            {
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine declined graph_match for device "
+                                       << context.deviceId);
+                return catalog;
+            }
+
+            if(!graphLevelMatchersPass(pack, context, graphVerdicts, catalog.bound))
             {
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
                                                          << " declined at a graph-scoped matcher");
                 continue;
             }
 
-            mergeBound(catalog.bound, packBound, describeDescriptor("pack", pack.name, pack.id));
-
             size_t admitted = 0;
             for(const auto& precomputed : _definitions[packIndex])
             {
+                // The pack gate above answered for the pack's own list; a kernel that
+                // narrowed itself still has to be asked. Restating it for an unrestricted
+                // kernel is one empty-list test, and the alternative -- trusting the pack
+                // gate for some kernels and not others -- is the kind of conditional that
+                // stops being true the next time this loop changes.
+                if(!archSupports(precomputed.arch, context.deviceProperties.gcnArchName))
+                {
+                    HIPDNN_PLUGIN_LOG_INFO("ingestor: kernel "
+                                           << toString(precomputed.kernelId)
+                                           << " does not support device arch '"
+                                           << context.deviceProperties.gcnArchName << "'");
+                    continue;
+                }
+
                 // Copied, not rebuilt: every field was settled at construction, and the
                 // kernel matcher below reads the definition without mutating it.
                 KernelDefinition definition = precomputed;
 
-                if(kernelLevelMatchersPass(pack, context, definition))
+                if(kernelLevelMatchersPass(pack, context, catalog.bound, definition))
                 {
                     catalog.entries.push_back(std::move(definition));
                     ++admitted;
@@ -417,9 +583,11 @@ private:
 
             if(admitted == 0)
             {
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: pack "
-                                       << toString(pack.id) << " admitted no kernel of "
-                                       << pack.kernels.size() << " at a kernel-scoped matcher");
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
+                                                         << " admitted no kernel of "
+                                                         << pack.kernels.size()
+                                                         << " at the arch gate or a "
+                                                            "kernel-scoped matcher");
                 continue;
             }
 
@@ -434,29 +602,10 @@ private:
         return catalog;
     }
 
-    /// Folds @p source into @p bound; rejects a token bound to two disagreeing values,
-    /// across packs or within one pack's own matchers.
-    static void mergeBound(BoundTokens& bound, const BoundTokens& source, const std::string& scope)
-    {
-        for(const auto& [token, value] : source)
-        {
-            const auto [it, inserted] = bound.emplace(token, value);
-            if(!inserted && !(it->second == value))
-            {
-                std::string message = scope;
-                message += " binds token '";
-                message += token;
-                message += "' to a value that disagrees with another binding of the same "
-                           "token; one token name must mean one thing across an engine";
-                throw std::runtime_error(message);
-            }
-        }
-    }
-
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
                                 const MatchContext& context,
                                 GraphMatcherMemo& graphVerdicts,
-                                BoundTokens& packBound) const
+                                const BoundTokens& bound) const
     {
         for(const auto& matcherId : pack.matcherIds)
         {
@@ -470,7 +619,7 @@ private:
             if(memo == graphVerdicts.end())
             {
                 GraphMatcherVerdict verdict;
-                verdict.passed = matcher.graphFn(context, verdict.bound);
+                verdict.passed = matcher.graphFn(context, bound);
                 memo = graphVerdicts.emplace(matcherId, std::move(verdict)).first;
             }
 
@@ -478,17 +627,13 @@ private:
             {
                 return false;
             }
-
-            mergeBound(
-                packBound,
-                memo->second.bound,
-                describeDescriptor("matcher", matcher.descriptor.name, matcher.descriptor.id));
         }
         return true;
     }
 
     bool kernelLevelMatchersPass(const KernelDescriptorPack& pack,
                                  const MatchContext& context,
+                                 const BoundTokens& bound,
                                  const KernelDefinition& kernel) const
     {
         for(const auto& matcherId : pack.matcherIds)
@@ -498,12 +643,51 @@ private:
             {
                 continue;
             }
-            if(!matcher.kernelFn(context, kernel))
+            if(!matcher.kernelFn(context, bound, kernel))
             {
                 return false;
             }
         }
         return true;
+    }
+
+    /// The measured order for @p context's graph and device, or nullopt when no record
+    /// covers @p entries and the caller must rank as it always has.
+    ///
+    /// Full coverage is required: a partial record cannot order the rest, and
+    /// interleaving measured with unmeasured entries would not be a valid order.
+    std::optional<std::vector<KernelDefinition>>
+        orderFromWinnerRecord(const std::vector<KernelDefinition>& entries,
+                              const MatchContext& context) const
+    {
+        // Building a WinnerKey copies and folds the whole graph buffer, so reject on the
+        // never-benchmarked path before paying for one.
+        if(entries.empty() || winnerCacheSize() == 0)
+        {
+            return std::nullopt;
+        }
+
+        const WinnerKey key{GraphContentKey{context.graph}, DeviceKey{context.deviceProperties}};
+        if(!key.graph.isUsable())
+        {
+            // No bytes to key on; such graphs never match each other either.
+            return std::nullopt;
+        }
+
+        const auto record = winnerFor(key);
+        if(!record.has_value())
+        {
+            return std::nullopt;
+        }
+
+        auto ordered = orderIfFullyCovered(*record, entries);
+        if(ordered.has_value())
+        {
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << ordered->size()
+                                                        << " catalog entries from a benchmarked "
+                                                           "record; heuristic ranking skipped");
+        }
+        return ordered;
     }
 
     MetadataSchema _schema;
@@ -514,7 +698,15 @@ private:
     /// definitions, completed once at construction.
     std::vector<std::vector<KernelDefinition>> _definitions;
     std::shared_ptr<IKernelHeuristic> _heuristic;
+    GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
+
+    /// Unbounded, never evicted, own mutex (see WINNER_CACHE_WARNING_THRESHOLD). Separate
+    /// from _catalogCache's lock: a shared lock would serialize benchmarking write-back
+    /// against ordinary catalog lookups.
+    mutable std::unordered_map<WinnerKey, WinnerRecord, WinnerKeyHash> _winnerCache;
+    mutable std::mutex _winnerCacheMutex;
+    mutable bool _winnerCacheGrowthWarned = false;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

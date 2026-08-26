@@ -56,6 +56,14 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     (priority 10) whenever both would match the same gfx942 fp16 2D problem.
     The registry sorts ascending (lower = higher precedence).
     Callers can also force this path explicitly via algorithm="dense_pipe".
+
+    GEOMETRY OWNERSHIP: this engine owns the per-engine spec builder
+    ``builders.common.attention_spec_builder._spec_gfx942_fp16_flash`` -- the
+    GEMM-style ``spec_fn`` for this cohort. Geometry lives in the builder layer
+    (not here): the dispatcher's identity stays ``(path, head_size, block_size)``
+    and its C++ parity contract is unchanged. Both this candidate and the
+    ``_tiled_spec_from_problem`` cascade route the cohort through that one
+    function (single source).
     """
     spec_id = "gfx942_dense_pipe"
     name = "attention_gfx942_dense_pipe"

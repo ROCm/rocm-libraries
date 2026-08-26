@@ -174,7 +174,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         return asmInst;
     } else if (irInst->getOpcode() == logical::SchedulingFence) {
         static const HwInstDesc fenceMCID{
-            GFX::FENCE, GFX::FENCE, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::FENCE, GFX::FENCE, 0, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
         StinkyInstruction* asmInst = IRBase::createIR<StinkyInstruction>(&fenceMCID);
         if (!irInst->comment.empty()) {
             asmInst->addModifier(CommentData(irInst->comment));

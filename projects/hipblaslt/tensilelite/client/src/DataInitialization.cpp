@@ -2992,9 +2992,13 @@ namespace TensileLite
 
             inputs->ws = ws;
 
+            // Pre-size vector to avoid reallocation
+            inputs->grouped.resize(offsets[0].size());
+
             for(int idx = 0; idx < offsets[0].size(); idx++)
             {
-                ContractionInputs   unit;
+                ContractionInputs& unit = inputs->grouped[idx];
+
                 std::vector<size_t> maxElements;
                 for(size_t j = 0; j < offsets.size(); j++)
                 {
@@ -3009,7 +3013,6 @@ namespace TensileLite
                     }
                 }
                 setContractionInputs(u8Ptr, batchPtrs, ws, cdata, maxElements, isGPU, &unit);
-                inputs->grouped.push_back(unit);
 
                 u8Ptr[ContractionProblemGemm::TENSOR::A] += multiplyElementSize(
                     offsets[ContractionProblemGemm::TENSOR::A][idx], problem.a().elementBytes());
