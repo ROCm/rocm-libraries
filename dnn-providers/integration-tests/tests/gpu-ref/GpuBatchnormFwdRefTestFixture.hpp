@@ -24,17 +24,41 @@ using namespace hipdnn_test_sdk::utilities::batchnorm;
 using namespace hipdnn_gpu_ref;
 using namespace gpu_batchnorm_ref_test;
 
+// Used to generate random values for input tensor in a normal distribution around a mean
+// and standard deviation that can be used in the mean/invVar tensor values.
+template <typename T>
+struct NormalDistGenerator
+{
+    NormalDistGenerator(unsigned seed, float mean, float stddev)
+        : _seed(seed)
+        , _mean(mean)
+        , _stddev(stddev)
+    {
+    }
+    void operator()(T* data, size_t count) const
+    {
+        std::mt19937 generator(_seed);
+        std::normal_distribution<float> distribution(_mean, _stddev);
+
+        for(size_t i = 0; i < count; ++i)
+        {
+            data[i] = static_cast<T>(distribution(generator));
+        }
+    }
+
+private:
+    unsigned int _seed;
+    float _mean;
+    float _stddev;
+};
+
 template <typename InputDataType,
           typename OutputDataType = InputDataType,
           typename ScaleBiasDataType = InputDataType,
           typename MeanVarDataType = InputDataType,
           typename ComputeDataType = double>
-void runGpuVsCpuBatchnormFwd(const std::vector<int64_t>& ioDims,
-                             const TensorLayout& layout,
-                             float fillRange = 1.0f)
+void runGpuVsCpuBatchnormFwd(const std::vector<int64_t>& ioDims, const TensorLayout& layout)
 {
-    unsigned int seed = getGlobalTestSeed();
-
     std::vector<int64_t> affineDims(ioDims.size(), 1);
     affineDims[1] = ioDims[1];
 
@@ -46,18 +70,22 @@ void runGpuVsCpuBatchnormFwd(const std::vector<int64_t>& ioDims,
     auto outputCpu = Tensor<OutputDataType>(ioDims, layout);
     auto outputGpu = Tensor<OutputDataType>(ioDims, layout);
 
-    inputTensor.fillWithRandomValues(
-        static_cast<InputDataType>(-fillRange), static_cast<InputDataType>(fillRange), seed++);
-    scaleTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-fillRange),
-                                     static_cast<ScaleBiasDataType>(fillRange),
+    constexpr float MEAN = 1e-3f;
+    constexpr float STDDEV = 1e-2f;
+    constexpr float INV_VARIANCE = 1.0f / (STDDEV * STDDEV);
+
+    unsigned int seed = getGlobalTestSeed();
+    inputTensor.fillWithValues(NormalDistGenerator<InputDataType>(seed++, MEAN, STDDEV), true);
+
+    const float scaleBiasRange = 1e-5f;
+    scaleTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-scaleBiasRange),
+                                     static_cast<ScaleBiasDataType>(scaleBiasRange),
                                      seed++);
-    biasTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-fillRange),
-                                    static_cast<ScaleBiasDataType>(fillRange),
+    biasTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-scaleBiasRange),
+                                    static_cast<ScaleBiasDataType>(scaleBiasRange),
                                     seed++);
-    estimatedMeanTensor.fillWithRandomValues(
-        static_cast<MeanVarDataType>(-fillRange), static_cast<MeanVarDataType>(fillRange), seed++);
-    invVarTensor.fillWithRandomValues(
-        static_cast<MeanVarDataType>(-fillRange), static_cast<MeanVarDataType>(fillRange), seed++);
+    estimatedMeanTensor.fillWithValue(static_cast<MeanVarDataType>(MEAN));
+    invVarTensor.fillWithValue(static_cast<MeanVarDataType>(INV_VARIANCE));
 
     CpuFpReferenceBatchnorm::fwdInference<InputDataType,
                                           ScaleBiasDataType,
@@ -99,7 +127,7 @@ protected:
                                 OutputDataType,
                                 ScaleBiasDataType,
                                 MeanVarDataType,
-                                ComputeDataType>(bnTestCase.ioDims, layout, 1e-5f);
+                                ComputeDataType>(bnTestCase.ioDims, layout);
     }
 };
 
