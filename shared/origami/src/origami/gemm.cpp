@@ -2334,17 +2334,9 @@ double compute_tile_latency(const problem_t& problem,
                                  * tail_overhead_scale;
     L_tail = (L_tail_mem + L_tail_compute + L_tail_overhead) * eff_scale;
 
-    // Unamortised remainder of the DepthU window.  When the whole K fits in
-    // less than one MT_K-wide window (k_iters == 0, so this residual iter is
-    // the only one), the kernel runs a single fill+drain and pays for the full
-    // window though only tail_k / MT_K of it is useful.  Charge the wasted
-    // complement at full-iter cost.  (k_iters >= 1 has a steady-state loop that
-    // hides this, so nothing is charged.)
-    if (k_iters == 0) {
-      const double wasted_ratio =
-          static_cast<double>(MT_K) / static_cast<double>(tail_k) - 1.0;
-      L_tail += wasted_ratio * (L_main_per_iter + heuristic_defaults_t::K_ITER_LOOP_OVERHEAD);
-    }
+    // (The unamortised remainder of an oversized/partial DepthU window is now
+    // charged uniformly by depth_waste_ratio in the L_du_waste block below,
+    // covering both k_iters == 0 and the k_iters >= 1 tail consistently.)
   }
 
   // L_pgr_stall — PGR pipeline fill/drain exposure: PGR only pays off after
@@ -2413,9 +2405,27 @@ double compute_tile_latency(const problem_t& problem,
   //      tail nor (1) fires, but HW still sees the K-loop as a single fill+drain
   //      with no steady state.  Charge extra to reflect that.
   const double K_problem = static_cast<double>(K);
-  const double mt_k_oversize_ratio = (K_problem > 0.0)
-      ? std::max(0.0, static_cast<double>(MT_K) / K_problem - 1.0)
-      : 0.0;
+  // DepthU load waste: an MT_K that does not divide K rounds the K-loop up to a
+  // full final window, loading ceil(K/MT_K)*MT_K deep but using only K.  The
+  // extra (loaded - K) depth is wasted.  Measured against K, this is identical
+  // whether the waste shows up as an oversized single window (MT_K > K) or a
+  // partial tail iter, so a tail-leaving MT_K is never made to look better than
+  // an evenly-dividing one, and two equally-wasteful MT_K (e.g. 32 and 64 for
+  // K=41, both loading 64) tie instead of inverting toward the deeper tile.
+  // Generalizes the former MT_K-oversize term (its MT_K > K case) and subsumes
+  // the k_iters == 0 remainder that L_tail used to charge.  Zero when MT_K
+  // divides K.
+  const double loaded_depth = (K_problem > 0.0)
+      ? std::ceil(K_problem / mt_k_dd) * mt_k_dd : 0.0;
+  // An MT_K that exceeds the whole of K (oversize, MT_K > K -> a single window
+  // wider than the entire problem) is strictly worse than a mere tail, so weight
+  // its waste more heavily.  This keeps a tail-leaving-but-smaller MT_K preferred
+  // over an oversized one when K has no clean divisor (e.g. K=41: MT_K=32 tail
+  // beats MT_K=64 oversize, both loading 64).
+  const double oversize_weight = (mt_k_dd > K_problem)
+      ? heuristic_defaults_t::OVERSIZE_WASTE_WEIGHT : 1.0;
+  const double depth_waste_ratio = (K_problem > 0.0)
+      ? (loaded_depth - K_problem) / K_problem * oversize_weight : 0.0;
   // When k_iters == 1 and there's no tail, the kernel runs a single full K-iter
   // with no PGR pipeline fill.  Only penalise this when K is large enough that
   // smaller-MT_K alternatives would give a real multi-iter K-loop; for very
@@ -2462,7 +2472,8 @@ double compute_tile_latency(const problem_t& problem,
       : 0.0;
 
   const double L_du_waste =
-      (mt_k_oversize_ratio + no_steady_state_ratio + batched_fill_ratio)
+      (depth_waste_ratio * heuristic_defaults_t::TAIL_WASTE_PENALTY
+       + no_steady_state_ratio + batched_fill_ratio)
       * (L_main_per_iter + heuristic_defaults_t::K_ITER_LOOP_OVERHEAD);
 
   // MainLoop subtotal.
@@ -2568,7 +2579,7 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("pgr_mem_exposure: " << pgr_mem_exposure);
     OLOG_DEBUG("L_pgr_stall: " << L_pgr_stall);
     OLOG_DEBUG("L_loop_overhead: " << L_loop_overhead);
-    OLOG_DEBUG("mt_k_oversize_ratio: " << mt_k_oversize_ratio);
+    OLOG_DEBUG("depth_waste_ratio: " << depth_waste_ratio);
     OLOG_DEBUG("no_steady_state_ratio: " << no_steady_state_ratio);
     OLOG_DEBUG("batched_fill_ratio: " << batched_fill_ratio);
     OLOG_DEBUG("fill_depth_excess: " << fill_depth_excess);
