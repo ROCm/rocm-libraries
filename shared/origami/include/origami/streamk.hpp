@@ -231,6 +231,19 @@ struct gfx950_values : thresholds<gfx950_values>
   };
 };
 
+struct gfx1201_values : thresholds<gfx1201_values> 
+{
+  static constexpr int node_grid_waves = 0;
+  static constexpr int node_m          = 1;
+
+  static constexpr decision_node decision_tree[] = 
+  {
+      // node                 feature                          thr     <= thr         > thr
+      /* node_grid_waves */ {threshold_metrics::grid_waves, 1.25,   node_m,        dynamic_result},
+      /* node_m          */ {threshold_metrics::m_dim,      1289.0, static_result, dynamic_result},
+  };
+};
+
 /**
  * @brief Pick the SK3-vs-SK4 sub-path for a StreamK=5 hybrid kernel.
  *

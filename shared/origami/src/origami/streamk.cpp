@@ -492,6 +492,8 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
       return gfx942_values::select_hybrid_mode(problem, hardware, config, sm_count_target);
     case hardware_t::architecture_t::gfx950:
       return gfx950_values::select_hybrid_mode(problem, hardware, config, sm_count_target);
+    case hardware_t::architecture_t::gfx1201:
+      return gfx1201_values::select_hybrid_mode(problem, hardware, config, sm_count_target);
     default:
       return hybrid_mode_t::static_;
   }
