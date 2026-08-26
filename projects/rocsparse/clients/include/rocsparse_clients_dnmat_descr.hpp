@@ -26,8 +26,8 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "rocsparse.hpp"
-#include "rocsparse_matrix_dense.hpp"
 #include "rocsparse_check.hpp"
+#include "rocsparse_matrix_dense.hpp"
 #include "rocsparse_matrix_factory.hpp"
 #include "rocsparse_reproducibility.hpp"
 #include "rocsparse_reproducibility_test_save.hpp"
@@ -43,55 +43,55 @@ namespace rocsparse_clients
     {
 
     protected:
-      rocsparse_dnmat_descr         m_descr{};
+        rocsparse_dnmat_descr m_descr{};
 
-      size_t                        m_memory_in_bytes {};
-      void *                        m_device_memory {};
-      void *                        m_host_memory{};
-      host_dense_matrix_view<T,int64_t>     m_host_view{};
-      device_dense_matrix_view<T,int64_t>   m_device_view{};
-      rocsparse_datatype            m_datatype{};
-      int64_t                       m_M{};
-      int64_t                       m_N{};
-      int64_t                       m_ld{};
-      int64_t                       m_batch_count{1};
-      int64_t                       m_batch_stride{0};
-      rocsparse_direction           m_batch_layout_direction {};
-      rocsparse_order               m_order{};
+        size_t                               m_memory_in_bytes{};
+        void*                                m_device_memory{};
+        void*                                m_host_memory{};
+        host_dense_matrix_view<T, int64_t>   m_host_view{};
+        device_dense_matrix_view<T, int64_t> m_device_view{};
+        rocsparse_datatype                   m_datatype{};
+        int64_t                              m_M{};
+        int64_t                              m_N{};
+        int64_t                              m_ld{};
+        int64_t                              m_batch_count{1};
+        int64_t                              m_batch_stride{0};
+        rocsparse_direction                  m_batch_layout_direction{};
+        rocsparse_order                      m_order{};
 
     public:
-      int64_t get_M() const;
-      int64_t get_N() const;
-      int64_t get_ld() const;
-      int64_t get_batch_stride() const;
-      int64_t get_batch_count() const;
-      void dzero();
-      void hzero();
-      host_dense_matrix_view<T,int64_t>&         host();
-      device_dense_matrix_view<T,int64_t>&       device();
-      const host_dense_matrix_view<T,int64_t>&   host() const;
-      const device_dense_matrix_view<T,int64_t>& device() const;
-      ~dnmat_descr();
+        int64_t                                     get_M() const;
+        int64_t                                     get_N() const;
+        int64_t                                     get_ld() const;
+        int64_t                                     get_batch_stride() const;
+        int64_t                                     get_batch_count() const;
+        void                                        dzero();
+        void                                        hzero();
+        host_dense_matrix_view<T, int64_t>&         host();
+        device_dense_matrix_view<T, int64_t>&       device();
+        const host_dense_matrix_view<T, int64_t>&   host() const;
+        const device_dense_matrix_view<T, int64_t>& device() const;
+        ~dnmat_descr();
 
-      void to_device();
-      void to_host();
-      explicit dnmat_descr(rocsparse_order order,
-			   int64_t M,
-			   int64_t N,
-			   rocsparse_direction batch_layout_direction,
-			   int64_t batch_count,
-			   bool non_zero_stride,
-			   bool init);
+        void to_device();
+        void to_host();
+        explicit dnmat_descr(rocsparse_order     order,
+                             int64_t             M,
+                             int64_t             N,
+                             rocsparse_direction batch_layout_direction,
+                             int64_t             batch_count,
+                             bool                non_zero_stride,
+                             bool                init);
 
-      void near_check_values(const host_dense_vector<int64_t>& symbolic,
-			     const host_dense_vector<int64_t>& numeric);
+        void near_check_values(const host_dense_vector<int64_t>& symbolic,
+                               const host_dense_vector<int64_t>& numeric);
 
-      void print();
+        void print();
 
-      void unit_check();
+        void unit_check();
 
-      operator rocsparse_dnmat_descr&();
-      operator const rocsparse_dnmat_descr&() const;
+        operator rocsparse_dnmat_descr&();
+        operator const rocsparse_dnmat_descr&() const;
     };
 
 }

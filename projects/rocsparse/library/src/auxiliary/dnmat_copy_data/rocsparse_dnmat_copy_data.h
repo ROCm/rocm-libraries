@@ -80,11 +80,11 @@ extern "C" {
  *  \par Example
  *  \snippet example_rocsparse_dnmat_copy_data.cpp doc example
  */
-  ROCSPARSE_EXPORT rocsparse_status rocsparse_dnmat_copy_data(rocsparse_handle                handle,
-							      rocsparse_const_dnvec_descr     alpha,
-							      rocsparse_const_dnmat_descr     X,
-							      rocsparse_dnmat_descr           Y,
-							      rocsparse_error*                p_error);
+ROCSPARSE_EXPORT rocsparse_status rocsparse_dnmat_copy_data(rocsparse_handle            handle,
+                                                            rocsparse_const_dnvec_descr alpha,
+                                                            rocsparse_const_dnmat_descr X,
+                                                            rocsparse_dnmat_descr       Y,
+                                                            rocsparse_error*            p_error);
 
 #ifdef __cplusplus
 }

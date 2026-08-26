@@ -27,45 +27,40 @@
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_utility.hpp"
 
-rocsparse_status rocsparse::cscsm_analysis(rocsparse_handle      handle,
-					   int64_t nrhs,
-					   rocsparse_operation   op_A,
-					   rocsparse_operation   op_B,
-					   rocsparse_const_dnvec_descr     alpha,
-					   rocsparse_const_spmat_descr A,
-					   rocsparse_const_dnmat_descr B,
-					   rocsparse_analysis_policy analysis,
-					   rocsparse_csrsm_info*     p_csrsm_info,
-					   size_t                   buffer_size_in_bytes,
-					   void * buffer,
-					   rocsparse_error*p_error)
+rocsparse_status rocsparse::cscsm_analysis(rocsparse_handle            handle,
+                                           int64_t                     nrhs,
+                                           rocsparse_operation         op_A,
+                                           rocsparse_operation         op_B,
+                                           rocsparse_const_dnvec_descr alpha,
+                                           rocsparse_const_spmat_descr A,
+                                           rocsparse_const_dnmat_descr B,
+                                           rocsparse_analysis_policy   analysis,
+                                           rocsparse_csrsm_info*       p_csrsm_info,
+                                           size_t                      buffer_size_in_bytes,
+                                           void*                       buffer,
+                                           rocsparse_error*            p_error)
 {
 
-  ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_ROUTINE_TRACE;
 
-  _rocsparse_mat_descr   descr_csr;
-  _rocsparse_spmat_descr A_csr(A,
-			       rocsparse_format_csr,
-			       &descr_csr,
-			       A->info);
+    _rocsparse_mat_descr   descr_csr;
+    _rocsparse_spmat_descr A_csr(A, rocsparse_format_csr, &descr_csr, A->info);
 
-  op_A = (op_A == rocsparse_operation_none)
-    ? rocsparse_operation_transpose
-    : rocsparse_operation_none;
+    op_A = (op_A == rocsparse_operation_none) ? rocsparse_operation_transpose
+                                              : rocsparse_operation_none;
 
-  RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
-						      nrhs,
-						      op_A,
-						      op_B,
-						      alpha,
-						      &A_csr,
-						      B,
-						      analysis,
-						      p_csrsm_info,
-						      buffer_size_in_bytes,
-						      buffer,
-						      p_error));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
+                                                        nrhs,
+                                                        op_A,
+                                                        op_B,
+                                                        alpha,
+                                                        &A_csr,
+                                                        B,
+                                                        analysis,
+                                                        p_csrsm_info,
+                                                        buffer_size_in_bytes,
+                                                        buffer,
+                                                        p_error));
 
-  return rocsparse_status_success;
+    return rocsparse_status_success;
 }
-

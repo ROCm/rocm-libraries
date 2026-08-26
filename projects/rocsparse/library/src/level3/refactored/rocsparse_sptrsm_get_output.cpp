@@ -29,12 +29,11 @@
 
 #include "../../conversion/rocsparse_convert_array.hpp"
 #include "../../conversion/rocsparse_convert_scalar.hpp"
+#include "../rocsparse_sptrsm_descr.hpp"
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_common.h"
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_csrsm.hpp"
-#include "rocsparse_csrsm.hpp"
-#include "../rocsparse_sptrsm_descr.hpp"
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_output value)
@@ -50,7 +49,6 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_output value)
     }
     return true;
 };
-
 
 extern "C" rocsparse_status rocsparse_sptrsm_get_output(rocsparse_handle        handle,
                                                         rocsparse_sptrsm_descr  sptrsm_descr,
@@ -95,33 +93,35 @@ try
         rocsparse::singular_info_t* exact_pivot{};
         rocsparse::singular_info_t* near_pivot{};
 
-	auto csrsm_info = sptrsm_descr->get_csrsm_info();
-	if(csrsm_info != nullptr)
-	  {
-	    symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrsm_info);
-	    exact_pivot    = csrsm_info->get_singularity_numeric_exact();
-	  }
+        auto csrsm_info = sptrsm_descr->get_csrsm_info();
+        if(csrsm_info != nullptr)
+        {
+            symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrsm_info);
+            exact_pivot    = csrsm_info->get_singularity_numeric_exact();
+        }
 
         if(determine_singularity)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_async(handle,
-                                                                       sptrsm_descr->get_batch_count(),
-                                                                       symbolic_pivot,
-                                                                       exact_pivot,
-                                                                       near_pivot,
-                                                                       handle->pointer_mode,
-                                                                       data));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::singularity_get_async(handle,
+                                                 sptrsm_descr->get_batch_count(),
+                                                 symbolic_pivot,
+                                                 exact_pivot,
+                                                 near_pivot,
+                                                 handle->pointer_mode,
+                                                 data));
         }
         else
         {
-	  RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(handle,
-									      sptrsm_descr->get_batch_count(),
-									      symbolic_pivot,
-									      exact_pivot,
-									      near_pivot,
-									      handle->pointer_mode,
-									      rocsparse_indextype_i64,
-									      data));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::singularity_get_position_async(handle,
+                                                          sptrsm_descr->get_batch_count(),
+                                                          symbolic_pivot,
+                                                          exact_pivot,
+                                                          near_pivot,
+                                                          handle->pointer_mode,
+                                                          rocsparse_indextype_i64,
+                                                          data));
         }
 
         return rocsparse_status_success;

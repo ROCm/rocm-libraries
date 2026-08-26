@@ -22,130 +22,107 @@
  *
  * ************************************************************************ */
 
-
-
 #include "rocsparse_control.hpp"
 #include "rocsparse_cscsm.hpp"
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_utility.hpp"
 
-
-
-rocsparse_status rocsparse::cscsm_analysis_buffer_size(rocsparse_handle      handle,
-						       const int64_t nrhs,
-						       rocsparse_operation   op_A,
-						       rocsparse_operation   op_B,
-						       rocsparse_const_dnvec_descr     alpha,
-						       rocsparse_const_spmat_descr A,
-						       rocsparse_const_dnmat_descr X,
-						       size_t*                   p_buffer_size_in_bytes,
-						       rocsparse_error*p_error)
+rocsparse_status rocsparse::cscsm_analysis_buffer_size(rocsparse_handle            handle,
+                                                       const int64_t               nrhs,
+                                                       rocsparse_operation         op_A,
+                                                       rocsparse_operation         op_B,
+                                                       rocsparse_const_dnvec_descr alpha,
+                                                       rocsparse_const_spmat_descr A,
+                                                       rocsparse_const_dnmat_descr X,
+                                                       size_t*          p_buffer_size_in_bytes,
+                                                       rocsparse_error* p_error)
 {
 
-  ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_ROUTINE_TRACE;
 
-  _rocsparse_mat_descr   descr_csr;
-  _rocsparse_spmat_descr A_csr(A,
-			       rocsparse_format_csr,
-			       &descr_csr,
-			       A->info);
+    _rocsparse_mat_descr   descr_csr;
+    _rocsparse_spmat_descr A_csr(A, rocsparse_format_csr, &descr_csr, A->info);
 
-  RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_buffer_size(handle,
-								  nrhs,
-								  op_A,
-								  op_B,
-								  alpha,
-								  &A_csr,
-								  X,
-								  p_buffer_size_in_bytes,
-								  p_error));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_buffer_size(
+        handle, nrhs, op_A, op_B, alpha, &A_csr, X, p_buffer_size_in_bytes, p_error));
 
-  return rocsparse_status_success;
+    return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse::cscsm_solve_buffer_size(rocsparse_handle      handle,
-						    const int64_t nrhs,
-						    rocsparse_operation   op_A,
-						    rocsparse_operation   op_B,
-						    rocsparse_const_dnvec_descr     alpha,
-						    rocsparse_const_spmat_descr A,
-						    rocsparse_const_dnmat_descr X,
-						    size_t*                   p_buffer_size_in_bytes,
-						    rocsparse_error*p_error)
+rocsparse_status rocsparse::cscsm_solve_buffer_size(rocsparse_handle            handle,
+                                                    const int64_t               nrhs,
+                                                    rocsparse_operation         op_A,
+                                                    rocsparse_operation         op_B,
+                                                    rocsparse_const_dnvec_descr alpha,
+                                                    rocsparse_const_spmat_descr A,
+                                                    rocsparse_const_dnmat_descr X,
+                                                    size_t*          p_buffer_size_in_bytes,
+                                                    rocsparse_error* p_error)
 {
 
-  ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_ROUTINE_TRACE;
 
-  _rocsparse_mat_descr   descr_csr;
-  _rocsparse_spmat_descr A_csr(A,
-			       rocsparse_format_csr,
-			       &descr_csr,
-			       A->info);
+    _rocsparse_mat_descr   descr_csr;
+    _rocsparse_spmat_descr A_csr(A, rocsparse_format_csr, &descr_csr, A->info);
 
-  RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_buffer_size(handle,
-							       nrhs,
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_buffer_size(handle,
+                                                                 nrhs,
 
-							       (op_A == rocsparse_operation_none)
-							       ? rocsparse_operation_transpose
-							       : rocsparse_operation_none,
+                                                                 (op_A == rocsparse_operation_none)
+                                                                     ? rocsparse_operation_transpose
+                                                                     : rocsparse_operation_none,
 
-						      	       op_B,
-							       alpha,
-							       &A_csr,
-							       X,
-							       p_buffer_size_in_bytes,
-							       p_error));
+                                                                 op_B,
+                                                                 alpha,
+                                                                 &A_csr,
+                                                                 X,
+                                                                 p_buffer_size_in_bytes,
+                                                                 p_error));
 
-  return rocsparse_status_success;
+    return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse::cscsm_buffer_size(rocsparse_handle      handle,
-						const int64_t nrhs,
-						rocsparse_operation   op_A,
-						rocsparse_operation   op_B,
-						rocsparse_const_dnvec_descr     alpha,
-						rocsparse_const_spmat_descr A,
-						rocsparse_const_dnmat_descr X,
-						size_t*                   p_buffer_size_in_bytes,
-						rocsparse_error*p_error)
+rocsparse_status rocsparse::cscsm_buffer_size(rocsparse_handle            handle,
+                                              const int64_t               nrhs,
+                                              rocsparse_operation         op_A,
+                                              rocsparse_operation         op_B,
+                                              rocsparse_const_dnvec_descr alpha,
+                                              rocsparse_const_spmat_descr A,
+                                              rocsparse_const_dnmat_descr X,
+                                              size_t*                     p_buffer_size_in_bytes,
+                                              rocsparse_error*            p_error)
 {
-  ROCSPARSE_ROUTINE_TRACE;
-  RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_analysis_buffer_size(handle,
-								  nrhs,
+    ROCSPARSE_ROUTINE_TRACE;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_analysis_buffer_size(
+        handle,
+        nrhs,
 
-								  (op_A == rocsparse_operation_none)
-								  ? rocsparse_operation_transpose
-								  : rocsparse_operation_none,
+        (op_A == rocsparse_operation_none) ? rocsparse_operation_transpose
+                                           : rocsparse_operation_none,
 
-						      	       	  op_B,
-								  alpha,
-								  A,
-								  X,
-								  p_buffer_size_in_bytes,
-								  p_error));
+        op_B,
+        alpha,
+        A,
+        X,
+        p_buffer_size_in_bytes,
+        p_error));
 
-  size_t buffer_size_in_bytes;
-  RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_solve_buffer_size(handle,
-							       nrhs,
+    size_t buffer_size_in_bytes;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_solve_buffer_size(handle,
+                                                                 nrhs,
 
-							       (op_A == rocsparse_operation_none)
-							       ? rocsparse_operation_transpose
-							       : rocsparse_operation_none,
+                                                                 (op_A == rocsparse_operation_none)
+                                                                     ? rocsparse_operation_transpose
+                                                                     : rocsparse_operation_none,
 
-							       op_B,
-							       alpha,
-							       A,
-							       X,
-							       &buffer_size_in_bytes,
-							       p_error));
+                                                                 op_B,
+                                                                 alpha,
+                                                                 A,
+                                                                 X,
+                                                                 &buffer_size_in_bytes,
+                                                                 p_error));
 
-  p_buffer_size_in_bytes[0] = std::max(p_buffer_size_in_bytes[0],
-				       buffer_size_in_bytes);
+    p_buffer_size_in_bytes[0] = std::max(p_buffer_size_in_bytes[0], buffer_size_in_bytes);
 
-  return rocsparse_status_success;
+    return rocsparse_status_success;
 }
-
-
-
-
-

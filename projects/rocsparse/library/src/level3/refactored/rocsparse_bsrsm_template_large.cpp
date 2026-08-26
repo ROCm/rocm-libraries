@@ -174,16 +174,31 @@ namespace rocsparse
             // Leading dimension for transposed X
             ldimX = nrhs;
 
-	    _rocsparse_dnvec_descr alpha_dnvec(1,1,rocsparse::get_datatype<T>(),alpha,nullptr,1,0,handle->pointer_mode);
-	    _rocsparse_dnmat_descr source {true, mb * block_dim, nrhs, ldb, nullptr, B, rocsparse::get_datatype<T>(),rocsparse_order_column,1, 0};
-	    _rocsparse_dnmat_descr target {true, mb * block_dim, nrhs, ldimX, Xt, Xt, rocsparse::get_datatype<T>(),rocsparse_order_row,1, 0};
+            _rocsparse_dnvec_descr alpha_dnvec(
+                1, 1, rocsparse::get_datatype<T>(), alpha, nullptr, 1, 0, handle->pointer_mode);
+            _rocsparse_dnmat_descr source{true,
+                                          mb * block_dim,
+                                          nrhs,
+                                          ldb,
+                                          nullptr,
+                                          B,
+                                          rocsparse::get_datatype<T>(),
+                                          rocsparse_order_column,
+                                          1,
+                                          0};
+            _rocsparse_dnmat_descr target{true,
+                                          mb * block_dim,
+                                          nrhs,
+                                          ldimX,
+                                          Xt,
+                                          Xt,
+                                          rocsparse::get_datatype<T>(),
+                                          rocsparse_order_row,
+                                          1,
+                                          0};
 
-	    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnmat_switch_order(handle,
-								    &alpha_dnvec,
-								    &source,
-								    &target,
-								    nullptr));
-
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::dnmat_switch_order(handle, &alpha_dnvec, &source, &target, nullptr));
         }
         else
         {
@@ -281,13 +296,28 @@ namespace rocsparse
         // Transpose X back if X was not initially transposed
         if(trans_X == rocsparse_operation_none)
         {
-	  _rocsparse_dnmat_descr source {true, mb * block_dim, nrhs, ldimX, nullptr, Xt, rocsparse::get_datatype<T>(),rocsparse_order_row,1, 0};
-	  _rocsparse_dnmat_descr target {true, mb * block_dim, nrhs, ldx, X, X, rocsparse::get_datatype<T>(),rocsparse_order_column,1, 0};
-	  RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnmat_switch_order(handle,
-								  nullptr,
-								  &source,
-								  &target,
-								  nullptr));
+            _rocsparse_dnmat_descr source{true,
+                                          mb * block_dim,
+                                          nrhs,
+                                          ldimX,
+                                          nullptr,
+                                          Xt,
+                                          rocsparse::get_datatype<T>(),
+                                          rocsparse_order_row,
+                                          1,
+                                          0};
+            _rocsparse_dnmat_descr target{true,
+                                          mb * block_dim,
+                                          nrhs,
+                                          ldx,
+                                          X,
+                                          X,
+                                          rocsparse::get_datatype<T>(),
+                                          rocsparse_order_column,
+                                          1,
+                                          0};
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::dnmat_switch_order(handle, nullptr, &source, &target, nullptr));
         }
 
         return rocsparse_status_success;

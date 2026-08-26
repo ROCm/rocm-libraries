@@ -435,9 +435,9 @@ void testing_sptrsm_csr_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_sptrsm_csr(const Arguments& arg)
 {
-    static constexpr bool      verbose         = false;
-    J M = arg.M;
-    J N = arg.N;
+    static constexpr bool verbose = false;
+    J                     M       = arg.M;
+    J                     N       = arg.N;
     if(M != N)
     {
         return;

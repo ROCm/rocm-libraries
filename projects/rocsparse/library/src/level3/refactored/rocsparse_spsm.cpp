@@ -32,9 +32,9 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
-#include "rocsparse_csrsm.hpp"
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_cscsm.hpp"
+#include "rocsparse_csrsm.hpp"
 
 // LCOV_EXCL_START
 template <>
@@ -99,386 +99,358 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spsm_stage value_)
 namespace rocsparse
 {
 
-  rocsparse_status spsm(rocsparse_handle            handle,
-			rocsparse_operation         trans_A,
-			rocsparse_operation         trans_B,
-			const void*                 alpha_pointer,
-			rocsparse_const_spmat_descr matA,
-			rocsparse_const_dnmat_descr matB,
-			const rocsparse_dnmat_descr matC,
-			rocsparse_spsm_alg          alg,
-			rocsparse_spsm_stage        stage,
-			size_t*                     buffer_size,
-			void*                       temp_buffer)
-  {
-    ROCSPARSE_ROUTINE_TRACE;
+    rocsparse_status spsm(rocsparse_handle            handle,
+                          rocsparse_operation         trans_A,
+                          rocsparse_operation         trans_B,
+                          const void*                 alpha_pointer,
+                          rocsparse_const_spmat_descr matA,
+                          rocsparse_const_dnmat_descr matB,
+                          const rocsparse_dnmat_descr matC,
+                          rocsparse_spsm_alg          alg,
+                          rocsparse_spsm_stage        stage,
+                          size_t*                     buffer_size,
+                          void*                       temp_buffer)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
 
-    const rocsparse_datatype alpha_datatype = matA->data_type;
+        const rocsparse_datatype alpha_datatype = matA->data_type;
 
-    _rocsparse_dnvec_descr alpha_st(1,
-				    1,
-				    alpha_datatype,
-				    alpha_pointer,
-				    nullptr,
-				    1,
-				    0,
-				    handle->pointer_mode);
-    rocsparse_dnvec_descr alpha = &alpha_st;
+        _rocsparse_dnvec_descr alpha_st(
+            1, 1, alpha_datatype, alpha_pointer, nullptr, 1, 0, handle->pointer_mode);
+        rocsparse_dnvec_descr alpha = &alpha_st;
 
-    const bool is_C_column_order = (matC->order == rocsparse_order_column);
-    switch(stage)
-      {
-      case rocsparse_spsm_stage_buffer_size:
-	{
-	  _rocsparse_dnmat_descr matC_row_order
-	    {    true,
-		 matC->rows,
-		 matC->cols,
-		 matC->cols,
-		 (void*)0x4,
-		 (const void*)0x4,
-		 matC->data_type,
-		 rocsparse_order_row,
-		 1,
-		 0};
+        const bool is_C_column_order = (matC->order == rocsparse_order_column);
+        switch(stage)
+        {
+        case rocsparse_spsm_stage_buffer_size:
+        {
+            _rocsparse_dnmat_descr matC_row_order{true,
+                                                  matC->rows,
+                                                  matC->cols,
+                                                  matC->cols,
+                                                  (void*)0x4,
+                                                  (const void*)0x4,
+                                                  matC->data_type,
+                                                  rocsparse_order_row,
+                                                  1,
+                                                  0};
 
-	  switch(matA->format)
+            switch(matA->format)
             {
 #ifndef ROCSPARSE_WITH_CSC_TRSM
-	    case rocsparse_format_csc:
-	      {
+            case rocsparse_format_csc:
+            {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-	      }
+            }
 
 #else
 
-	    case rocsparse_format_csc:
-	      {
-		RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_buffer_size(handle,
-								       matC->cols,
-								       trans_A,
-								       trans_B,
-								       alpha,
-								       matA,
-								       &matC_row_order,
-								       buffer_size,
-								       nullptr));
+            case rocsparse_format_csc:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_buffer_size(handle,
+                                                                       matC->cols,
+                                                                       trans_A,
+                                                                       trans_B,
+                                                                       alpha,
+                                                                       matA,
+                                                                       &matC_row_order,
+                                                                       buffer_size,
+                                                                       nullptr));
                 break;
-	      }
+            }
 #endif
             case rocsparse_format_csr:
-	      {
+            {
 
-		RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_buffer_size(handle,
-								       matC->cols,
-								       trans_A,
-								       trans_B,
-								       alpha,
-								       matA,
-								       &matC_row_order,
-								       buffer_size,
-								       nullptr));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_buffer_size(handle,
+                                                                       matC->cols,
+                                                                       trans_A,
+                                                                       trans_B,
+                                                                       alpha,
+                                                                       matA,
+                                                                       &matC_row_order,
+                                                                       buffer_size,
+                                                                       nullptr));
                 break;
-	      }
+            }
 
             case rocsparse_format_coo:
-	      {
-		RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_buffer_size(handle,
-								       matC->cols,
-								       trans_A,
-								       trans_B,
-								       alpha,
-								       matA,
-								       &matC_row_order,
-								       buffer_size,
-								       nullptr));
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_buffer_size(handle,
+                                                                       matC->cols,
+                                                                       trans_A,
+                                                                       trans_B,
+                                                                       alpha,
+                                                                       matA,
+                                                                       &matC_row_order,
+                                                                       buffer_size,
+                                                                       nullptr));
 
                 break;
-	      }
+            }
 
             case rocsparse_format_coo_aos:
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
             case rocsparse_format_sell:
-	      {
+            {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-	      }
+            }
             }
 
-	  if(is_C_column_order)
-	    {
-	      *buffer_size += rocsparse::align_size(rocsparse::datatype_sizeof(matB->data_type) *
-						    matB->rows *
-						    matB->cols);
-	    }
-	  return rocsparse_status_success;
+            if(is_C_column_order)
+            {
+                *buffer_size += rocsparse::align_size(rocsparse::datatype_sizeof(matB->data_type)
+                                                      * matB->rows * matB->cols);
+            }
+            return rocsparse_status_success;
         }
 
-      case rocsparse_spsm_stage_preprocess:
+        case rocsparse_spsm_stage_preprocess:
         {
-	  void* csrsm_buffer = temp_buffer;
-	  if(is_C_column_order)
-	    {
-	      csrsm_buffer
-		= reinterpret_cast<char*>(temp_buffer)
-		+ rocsparse::align_size(rocsparse::datatype_sizeof(matB->data_type) * matB->rows * matB->cols);
+            void* csrsm_buffer = temp_buffer;
+            if(is_C_column_order)
+            {
+                csrsm_buffer = reinterpret_cast<char*>(temp_buffer)
+                               + rocsparse::align_size(rocsparse::datatype_sizeof(matB->data_type)
+                                                       * matB->rows * matB->cols);
             }
 
-	  const auto nrhs = matC->cols;
-	  //
-	  // Preprocess.
-	  //
-	  _rocsparse_dnmat_descr local_Z
-	    { true,
-	      matA->rows,
-	      nrhs,
-	      nrhs,
-	      (void*)0x4,
-	      (const void*)0x4,
-	      matC->data_type,
-	      rocsparse_order_row,
-	      1,
-	      0 };
+            const auto nrhs = matC->cols;
+            //
+            // Preprocess.
+            //
+            _rocsparse_dnmat_descr local_Z{true,
+                                           matA->rows,
+                                           nrhs,
+                                           nrhs,
+                                           (void*)0x4,
+                                           (const void*)0x4,
+                                           matC->data_type,
+                                           rocsparse_order_row,
+                                           1,
+                                           0};
 
-	  switch(matA->format)
+            switch(matA->format)
             {
 #ifndef ROCSPARSE_WITH_CSC_TRSM
-	    case rocsparse_format_csc:
-	      {
+            case rocsparse_format_csc:
+            {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-	      }
+            }
 
 #else
             case rocsparse_format_csc:
-	      {
-		auto csrsm_info = matA->info->get_csrsm_info();
+            {
+                auto csrsm_info = matA->info->get_csrsm_info();
                 if(csrsm_info->get(trans_A, matA->descr->fill_mode) == nullptr)
-		  {
-		    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_analysis(handle,
-									nrhs,
-									trans_A,
-									trans_B,
-									alpha,
-									matA,
-									&local_Z,
-									rocsparse_analysis_policy_force,
-									&csrsm_info,
-									std::numeric_limits<size_t>::max(),
-									csrsm_buffer,
-									nullptr));
-		  }
-		return rocsparse_status_success;
-	      }
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::cscsm_analysis(handle,
+                                                  nrhs,
+                                                  trans_A,
+                                                  trans_B,
+                                                  alpha,
+                                                  matA,
+                                                  &local_Z,
+                                                  rocsparse_analysis_policy_force,
+                                                  &csrsm_info,
+                                                  std::numeric_limits<size_t>::max(),
+                                                  csrsm_buffer,
+                                                  nullptr));
+                }
+                return rocsparse_status_success;
+            }
 #endif
 
             case rocsparse_format_csr:
-	      {
-		rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
+            {
+                rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
                 if(csrsm_info->get(trans_A, matA->descr->fill_mode) == nullptr)
-		  {
-		    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
-									nrhs,
-									trans_A,
-									trans_B,
-									alpha,
-									matA,
-									&local_Z,
-									rocsparse_analysis_policy_force,
-									&csrsm_info,
-									std::numeric_limits<size_t>::max(),
-									csrsm_buffer,
-									nullptr));
-		  }
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::csrsm_analysis(handle,
+                                                  nrhs,
+                                                  trans_A,
+                                                  trans_B,
+                                                  alpha,
+                                                  matA,
+                                                  &local_Z,
+                                                  rocsparse_analysis_policy_force,
+                                                  &csrsm_info,
+                                                  std::numeric_limits<size_t>::max(),
+                                                  csrsm_buffer,
+                                                  nullptr));
+                }
                 return rocsparse_status_success;
-	      }
+            }
 
             case rocsparse_format_coo:
-	      {
-		rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
+            {
+                rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
                 if(csrsm_info->get(trans_A, matA->descr->fill_mode) == nullptr)
-		  {
-		    RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_analysis(handle,
-									nrhs,
-									trans_A,
-									trans_B,
-									alpha,
-									matA,
-									&local_Z,
-									rocsparse_analysis_policy_force,
-									&csrsm_info,
-									std::numeric_limits<size_t>::max(),
-									csrsm_buffer,
-									nullptr));
-		  }
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::coosm_analysis(handle,
+                                                  nrhs,
+                                                  trans_A,
+                                                  trans_B,
+                                                  alpha,
+                                                  matA,
+                                                  &local_Z,
+                                                  rocsparse_analysis_policy_force,
+                                                  &csrsm_info,
+                                                  std::numeric_limits<size_t>::max(),
+                                                  csrsm_buffer,
+                                                  nullptr));
+                }
                 return rocsparse_status_success;
-	      }
-
+            }
 
             case rocsparse_format_coo_aos:
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
             case rocsparse_format_sell:
-	      {
+            {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-	      }
+            }
             }
         }
 
-      case rocsparse_spsm_stage_compute:
+        case rocsparse_spsm_stage_compute:
         {
 
-	  const bool is_B_row_order = (matB->order == rocsparse_order_row);
-	  const bool is_B_op_transpose = (trans_B != rocsparse_operation_none);
+            const bool is_B_row_order    = (matB->order == rocsparse_order_row);
+            const bool is_B_op_transpose = (trans_B != rocsparse_operation_none);
 
-	  rocsparse_error*p_error{};
-	  void * matsm_buffer = temp_buffer;
-	  size_t matsm_buffer_size_in_bytes = std::numeric_limits<size_t>::max();
-	  if (is_C_column_order)
-	    {
-	      const size_t nbytes = rocsparse::align_size(rocsparse::datatype_sizeof(matB->data_type) * matB->rows * matB->cols);
-	      matsm_buffer = reinterpret_cast<char*>(temp_buffer) + nbytes;
-	      matsm_buffer_size_in_bytes -= nbytes;
-	    }
+            rocsparse_error* p_error{};
+            void*            matsm_buffer               = temp_buffer;
+            size_t           matsm_buffer_size_in_bytes = std::numeric_limits<size_t>::max();
+            if(is_C_column_order)
+            {
+                const size_t nbytes = rocsparse::align_size(
+                    rocsparse::datatype_sizeof(matB->data_type) * matB->rows * matB->cols);
+                matsm_buffer = reinterpret_cast<char*>(temp_buffer) + nbytes;
+                matsm_buffer_size_in_bytes -= nbytes;
+            }
 
-	  const auto nrhs = matC->cols;
+            const auto nrhs = matC->cols;
 
-	  _rocsparse_dnmat_descr Z_st
-	    { true,
-	      matA->rows,
-	      nrhs,
-	      nrhs,
-	      temp_buffer,
-	      temp_buffer,
-	      matB->data_type,
-	      rocsparse_order_row,
-	      matB->batch_count,
+            _rocsparse_dnmat_descr Z_st{true,
+                                        matA->rows,
+                                        nrhs,
+                                        nrhs,
+                                        temp_buffer,
+                                        temp_buffer,
+                                        matB->data_type,
+                                        rocsparse_order_row,
+                                        matB->batch_count,
 
-	      (matB->batch_stride == 0)
-	      ? 0
-	      : ( matA->rows * nrhs ) };
+                                        (matB->batch_stride == 0) ? 0 : (matA->rows * nrhs)};
 
-  	  rocsparse_dnmat_descr Z  =
-	    ( is_C_column_order )
-	    ? &Z_st
-	    : matC;
+            rocsparse_dnmat_descr Z = (is_C_column_order) ? &Z_st : matC;
 
-	  if (is_B_op_transpose)
-	    {
-	      RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnmat_transpose(handle,
-								   nullptr,
-								   matB,
-								   Z,
-								   p_error));
+            if(is_B_op_transpose)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::dnmat_transpose(handle, nullptr, matB, Z, p_error));
+            }
+            else if(is_B_row_order)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::dnmat_copy_data(handle, nullptr, matB, Z, p_error));
+            }
+            else
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::dnmat_switch_order(handle, nullptr, matB, Z, p_error));
+            }
 
-	    }
-	  else if (is_B_row_order)
-	    {
-	      RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnmat_copy_data(handle,
-								   nullptr,
-								   matB,
-								   Z,
-								   p_error));
+            //
+            // Compute
+            //
+            switch(matA->format)
+            {
+            case rocsparse_format_csr:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_compute(handle,
+                                                                   nrhs,
+                                                                   trans_A,
+                                                                   trans_B,
+                                                                   alpha,
+                                                                   matA,
+                                                                   Z,
+                                                                   matA->info->get_csrsm_info(),
+                                                                   matsm_buffer_size_in_bytes,
+                                                                   matsm_buffer,
+                                                                   p_error));
 
-	    }
-	  else
-	    {
-	      RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnmat_switch_order(handle,
-								      nullptr,
-								      matB,
-								      Z,
-								      p_error));
-	    }
+                break;
+            }
 
-	  //
-	  // Compute
-	  //
-	  switch(matA->format)
-	    {
-	    case rocsparse_format_csr:
-	      {
-		RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_compute(handle,
-								   nrhs,
-								   trans_A,
-								   trans_B,
-								   alpha,
-								   matA,
-								   Z,
-								   matA->info->get_csrsm_info(),
-								   matsm_buffer_size_in_bytes,
-								   matsm_buffer,
-								   p_error));
+            case rocsparse_format_coo:
+            {
 
-		break;
-	      }
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_compute(handle,
+                                                                   nrhs,
+                                                                   trans_A,
+                                                                   trans_B,
+                                                                   alpha,
+                                                                   matA,
+                                                                   Z,
+                                                                   matA->info->get_csrsm_info(),
+                                                                   matsm_buffer_size_in_bytes,
+                                                                   matsm_buffer,
+                                                                   p_error));
 
-	    case rocsparse_format_coo:
-	      {
-
-
-		RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_compute(handle,
-								   nrhs,
-								   trans_A,
-								   trans_B,
-								   alpha,
-								   matA,
-								   Z,
-								   matA->info->get_csrsm_info(),
-								   matsm_buffer_size_in_bytes,
-								   matsm_buffer,
-								   p_error));
-
-		break;
-	      }
+                break;
+            }
 
 #ifndef ROCSPARSE_WITH_CSC_TRSM
 
-	    case rocsparse_format_csc:
-	      {
+            case rocsparse_format_csc:
+            {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-	      }
+            }
 
 #else
-	    case rocsparse_format_csc:
-	      {
+            case rocsparse_format_csc:
+            {
 
-		RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_compute(handle,
-								   nrhs,
-								   trans_A,
-								   trans_B,
-								   alpha,
-								   matA,
-								   Z,
-								   matA->info->get_csrsm_info(),
-								   matsm_buffer_size_in_bytes,
-								   matsm_buffer,
-								   p_error));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_compute(handle,
+                                                                   nrhs,
+                                                                   trans_A,
+                                                                   trans_B,
+                                                                   alpha,
+                                                                   matA,
+                                                                   Z,
+                                                                   matA->info->get_csrsm_info(),
+                                                                   matsm_buffer_size_in_bytes,
+                                                                   matsm_buffer,
+                                                                   p_error));
 
-		break;
-	      }
+                break;
+            }
 #endif
 
-	    case rocsparse_format_coo_aos:
-	    case rocsparse_format_bsr:
-	    case rocsparse_format_ell:
-	    case rocsparse_format_bell:
-	    case rocsparse_format_sell:
-	      {
-		RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-	      }
-	    }
+            case rocsparse_format_coo_aos:
+            case rocsparse_format_bsr:
+            case rocsparse_format_ell:
+            case rocsparse_format_bell:
+            case rocsparse_format_sell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+            }
 
-	  if (is_C_column_order)
-	    {
-	      RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnmat_switch_order(handle,
-								      nullptr,
-								      Z,
-								      matC,
-								      p_error));
-	    }
-  	  return rocsparse_status_success;
-
+            if(is_C_column_order)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::dnmat_switch_order(handle, nullptr, Z, matC, p_error));
+            }
+            return rocsparse_status_success;
         }
         }
     }

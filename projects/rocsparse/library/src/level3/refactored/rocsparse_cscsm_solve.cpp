@@ -27,50 +27,45 @@
 #include "rocsparse_enum_utils.hpp"
 #include "rocsparse_utility.hpp"
 
-
-rocsparse_status rocsparse::cscsm_compute(rocsparse_handle      handle,
-					    const int64_t nrhs,
-					    rocsparse_operation   op_A,
-					    rocsparse_operation   op_B,
-					    rocsparse_const_dnvec_descr     alpha,
-					    rocsparse_const_spmat_descr A,
-					    rocsparse_dnmat_descr     B,
-					    rocsparse_csrsm_info      csrsm_info,
-					    size_t buffer_size_in_bytes,
-					    void*                     buffer,
-					    rocsparse_error*p_error)
+rocsparse_status rocsparse::cscsm_compute(rocsparse_handle            handle,
+                                          const int64_t               nrhs,
+                                          rocsparse_operation         op_A,
+                                          rocsparse_operation         op_B,
+                                          rocsparse_const_dnvec_descr alpha,
+                                          rocsparse_const_spmat_descr A,
+                                          rocsparse_dnmat_descr       B,
+                                          rocsparse_csrsm_info        csrsm_info,
+                                          size_t                      buffer_size_in_bytes,
+                                          void*                       buffer,
+                                          rocsparse_error*            p_error)
 {
 
-  if (nrhs == 0)
+    if(nrhs == 0)
     {
-      return rocsparse_status_success;
+        return rocsparse_status_success;
     }
 
+    _rocsparse_mat_descr   descr_csr;
+    _rocsparse_spmat_descr A_csr(A, rocsparse_format_csr, &descr_csr, A->info);
 
-  _rocsparse_mat_descr   descr_csr;
-  _rocsparse_spmat_descr A_csr(A,
-			       rocsparse_format_csr,
-			       &descr_csr,
-			       A->info);
+    const auto A_csr_op         = (op_A == rocsparse_operation_none) ? rocsparse_operation_transpose
+                                                                     : rocsparse_operation_none;
+    const bool A_load_conjugate = (op_A == rocsparse_operation_conjugate_transpose);
 
-  const auto A_csr_op = (op_A == rocsparse_operation_none) ? rocsparse_operation_transpose : rocsparse_operation_none;
-  const bool A_load_conjugate = (op_A == rocsparse_operation_conjugate_transpose);
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_compute(handle,
+                                                       nrhs,
 
-  RETURN_IF_ROCSPARSE_ERROR( rocsparse::csrsm_compute(handle,
-						      nrhs,
+                                                       A_csr_op,
+                                                       A_load_conjugate,
 
-						      A_csr_op,
-						      A_load_conjugate,
+                                                       op_B,
+                                                       alpha,
+                                                       &A_csr,
+                                                       B,
+                                                       csrsm_info,
+                                                       buffer_size_in_bytes,
+                                                       buffer,
+                                                       p_error));
 
-						      op_B,
-						      alpha,
-						      &A_csr,
-						      B,
-						      csrsm_info,
-						      buffer_size_in_bytes,
-						      buffer,
-						      p_error) );
-
-  return rocsparse_status_success;
+    return rocsparse_status_success;
 }
-

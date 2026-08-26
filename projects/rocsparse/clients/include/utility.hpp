@@ -959,13 +959,13 @@ public:
         }
     }
 
-  template <memory_mode::value_t MODE, typename T, typename I>
-  explicit rocsparse_local_dnmat(dense_matrix<MODE, T, I>& h)
+    template <memory_mode::value_t MODE, typename T, typename I>
+    explicit rocsparse_local_dnmat(dense_matrix<MODE, T, I>& h)
         : rocsparse_local_dnmat(h.m, h.n, h.ld, (T*)h, get_datatype<T>(), h.order)
     {
     }
 
-  template <memory_mode::value_t MODE, typename T, typename I>
+    template <memory_mode::value_t MODE, typename T, typename I>
     explicit rocsparse_local_dnmat(dense_matrix_view<MODE, T, I>& h)
         : rocsparse_local_dnmat(h.m, h.n, h.ld, (T*)h, get_datatype<T>(), h.order)
     {

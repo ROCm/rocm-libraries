@@ -22,7 +22,7 @@
  *
  * ************************************************************************ */
 
-#ifdef  ROCSPARSE_DNMAT_TRANSPOSE_H
+#ifdef ROCSPARSE_DNMAT_TRANSPOSE_H
 #define ROCSPARSE_DNMAT_TRANSPOSE_H
 
 #include "rocsparse-types.h"
@@ -78,11 +78,11 @@ extern "C" {
  *  \par Example
  *  \snippet example_rocsparse_dnmat_transpose.cpp doc example
  */
-  ROCSPARSE_EXPORT rocsparse_status rocsparse_dnmat_transpose(rocsparse_handle                handle,
-							      rocsparse_const_dnvec_descr     alpha,
-							      rocsparse_const_dnmat_descr     X,
-							      rocsparse_dnmat_descr           Y,
-							      rocsparse_error*                p_error);
+ROCSPARSE_EXPORT rocsparse_status rocsparse_dnmat_transpose(rocsparse_handle            handle,
+                                                            rocsparse_const_dnvec_descr alpha,
+                                                            rocsparse_const_dnmat_descr X,
+                                                            rocsparse_dnmat_descr       Y,
+                                                            rocsparse_error*            p_error);
 #ifdef __cplusplus
 }
 #endif

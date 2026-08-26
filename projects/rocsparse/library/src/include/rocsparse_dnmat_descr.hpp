@@ -47,22 +47,22 @@ struct _rocsparse_dnmat_descr
 
 namespace rocsparse
 {
-  rocsparse_status dnmat_transpose(rocsparse_handle             handle,
-				   rocsparse_const_dnvec_descr  alpha,
-				   rocsparse_const_dnmat_descr  source,
-				   rocsparse_dnmat_descr        target,
-				   rocsparse_error*p_error);
+    rocsparse_status dnmat_transpose(rocsparse_handle            handle,
+                                     rocsparse_const_dnvec_descr alpha,
+                                     rocsparse_const_dnmat_descr source,
+                                     rocsparse_dnmat_descr       target,
+                                     rocsparse_error*            p_error);
 
-  rocsparse_status dnmat_switch_order(rocsparse_handle             handle,
-				      rocsparse_const_dnvec_descr  alpha,
-				      rocsparse_const_dnmat_descr  source,
-				      rocsparse_dnmat_descr        target,
-				      rocsparse_error*p_error);
+    rocsparse_status dnmat_switch_order(rocsparse_handle            handle,
+                                        rocsparse_const_dnvec_descr alpha,
+                                        rocsparse_const_dnmat_descr source,
+                                        rocsparse_dnmat_descr       target,
+                                        rocsparse_error*            p_error);
 
-  rocsparse_status dnmat_copy_data(rocsparse_handle             handle,
-				   rocsparse_const_dnvec_descr  alpha,
-				   rocsparse_const_dnmat_descr  source,
-				   rocsparse_dnmat_descr        target,
-				   rocsparse_error*p_error);
+    rocsparse_status dnmat_copy_data(rocsparse_handle            handle,
+                                     rocsparse_const_dnvec_descr alpha,
+                                     rocsparse_const_dnmat_descr source,
+                                     rocsparse_dnmat_descr       target,
+                                     rocsparse_error*            p_error);
 
 }

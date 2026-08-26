@@ -5297,7 +5297,6 @@ TEST(auxiliary_pre_checkin, DnmatGetSetStridedBatchRowMajor)
     ASSERT_EQ(rocsparse_destroy_dnmat_descr(descr), rocsparse_status_success);
 }
 
-
 // =============================================================================
 // SpGEAM Set Input / Get Output Tests
 // =============================================================================

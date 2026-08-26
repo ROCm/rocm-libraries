@@ -238,7 +238,12 @@ namespace rocsparse
     }
 #else
 
-  template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T,  bool OP_A_CONJUGATE = false>
+    template <uint32_t BLOCKSIZE,
+              bool     SLEEP,
+              typename I,
+              typename J,
+              typename T,
+              bool OP_A_CONJUGATE = false>
     ROCSPARSE_DEVICE_ILF void csrsm_device(rocsparse_operation transB,
                                            J                   m,
                                            J                   nrhs,
@@ -312,10 +317,10 @@ namespace rocsparse
 
                 scsr_val[hipThreadIdx_x]
                     = (hipThreadIdx_x < row_end - j) ? csr_val[hipThreadIdx_x + j] : -1;
-		if constexpr (OP_A_CONJUGATE)
-		  {
-		    scsr_val[hipThreadIdx_x] = rocsparse::conj(scsr_val[hipThreadIdx_x]);
-		  }
+                if constexpr(OP_A_CONJUGATE)
+                {
+                    scsr_val[hipThreadIdx_x] = rocsparse::conj(scsr_val[hipThreadIdx_x]);
+                }
                 // Wait for preload to finish
                 __syncthreads();
             }
@@ -450,9 +455,6 @@ namespace rocsparse
         }
     }
 
-
 #endif
-
-
 
 }

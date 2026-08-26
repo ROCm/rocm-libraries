@@ -26,13 +26,13 @@
 #include "testing_dnmat_transpose.hpp"
 
 TEST_ROUTINE(dnmat_transpose,
-	     auxiliary,
-	     arg.M,
-	     arg.N,
-	     arg.orderC,
-	     arg.batch_count_C,
-	     arg.alpha,
-	     arg.batch_count_A,
-	     arg.orderB,
-	     arg.batch_count_B,
-	     arg.direction);
+             auxiliary,
+             arg.M,
+             arg.N,
+             arg.orderC,
+             arg.batch_count_C,
+             arg.alpha,
+             arg.batch_count_A,
+             arg.orderB,
+             arg.batch_count_B,
+             arg.direction);

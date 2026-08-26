@@ -152,12 +152,12 @@ struct display_key_t
             return "order";
         }
 
-	case order_B:
+        case order_B:
         {
             return "orderB";
         }
 
-	case order_C:
+        case order_C:
         {
             return "orderC";
         }

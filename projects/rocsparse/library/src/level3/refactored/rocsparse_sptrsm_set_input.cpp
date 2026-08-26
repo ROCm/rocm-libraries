@@ -29,13 +29,11 @@
 
 #include "../../conversion/rocsparse_convert_array.hpp"
 #include "../../conversion/rocsparse_convert_scalar.hpp"
+#include "../rocsparse_sptrsm_descr.hpp"
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_common.h"
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_csrsm.hpp"
-#include "rocsparse_csrsm.hpp"
-#include "../rocsparse_sptrsm_descr.hpp"
-
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_input value)
@@ -187,4 +185,3 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-

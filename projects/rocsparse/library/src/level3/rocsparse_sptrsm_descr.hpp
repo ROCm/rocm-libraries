@@ -43,10 +43,9 @@ protected:
     rocsparse_analysis_policy              m_analysis_policy;
     std::shared_ptr<_rocsparse_csrsm_info> m_csrsm_info{};
     float                                  m_local_host_alpha_value[4];
-    int64_t m_batch_count{};
+    int64_t                                m_batch_count{};
 
 public:
-
     void* get_local_host_alpha()
     {
         return &this->m_local_host_alpha_value[0];
@@ -64,8 +63,8 @@ public:
     rocsparse_sptrsm_stage get_stage() const;
     rocsparse_sptrsm_alg   get_alg() const;
 
-  void set_batch_count(int64_t);
-    int64_t             get_batch_count() const;
+    void    set_batch_count(int64_t);
+    int64_t get_batch_count() const;
 
     int64_t             get_nrhs() const;
     rocsparse_operation get_operation_A() const;

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,62 +28,60 @@
 #include "rocsparse_csrsm_info.hpp"
 namespace rocsparse
 {
-  
-  rocsparse_status coosm_analysis_buffer_size(rocsparse_handle      handle,
-					      const int64_t nrhs,
-					      rocsparse_operation   op_A,
-					      rocsparse_operation   op_B,
-					      rocsparse_const_dnvec_descr     alpha,
-					      rocsparse_const_spmat_descr A,
-					      rocsparse_const_dnmat_descr X,
-					      size_t*                   p_buffer_size_in_bytes,
-					      rocsparse_error*p_error);
 
-  rocsparse_status coosm_solve_buffer_size(rocsparse_handle      handle,
-					   const int64_t nrhs,
-					   rocsparse_operation   op_A,
-					   rocsparse_operation   op_B,
-					   rocsparse_const_dnvec_descr     alpha,
-					   rocsparse_const_spmat_descr A,
-					   rocsparse_const_dnmat_descr X,
-					   size_t*                   p_buffer_size_in_bytes,
-					   rocsparse_error*p_error);
-  
-  rocsparse_status coosm_buffer_size(rocsparse_handle      handle,
-				     int64_t nrhs,
-				     rocsparse_operation   trans_A,
-				     rocsparse_operation   trans_B,
-				     rocsparse_const_dnvec_descr alpha,
-				     rocsparse_const_spmat_descr A,
-				     rocsparse_const_dnmat_descr B,
-				     size_t*                     p_buffer_size,
-				     rocsparse_error*            p_error);
-  
-  rocsparse_status coosm_analysis(rocsparse_handle      handle,
-				  int64_t nrhs,
-				  rocsparse_operation   trans_A,
-				  rocsparse_operation   trans_B,
-				  rocsparse_const_dnvec_descr     alpha,
-				  rocsparse_const_spmat_descr A,
-				  rocsparse_const_dnmat_descr B,
-				  rocsparse_analysis_policy analysis,
-				  rocsparse_csrsm_info*     p_csrsm_info,
-				  size_t                   buffer_size_in_bytes,
-				  void * buffer,
-				  rocsparse_error*p_error);
+    rocsparse_status coosm_analysis_buffer_size(rocsparse_handle            handle,
+                                                const int64_t               nrhs,
+                                                rocsparse_operation         op_A,
+                                                rocsparse_operation         op_B,
+                                                rocsparse_const_dnvec_descr alpha,
+                                                rocsparse_const_spmat_descr A,
+                                                rocsparse_const_dnmat_descr X,
+                                                size_t*                     p_buffer_size_in_bytes,
+                                                rocsparse_error*            p_error);
 
-  
-  rocsparse_status coosm_compute(rocsparse_handle      handle,
-				 int64_t nrhs,
-				 rocsparse_operation   trans_A,
-				 rocsparse_operation   trans_B,
-				 rocsparse_const_dnvec_descr     alpha,
-				 rocsparse_const_spmat_descr A,
-				 rocsparse_dnmat_descr     B,
-				 rocsparse_csrsm_info      csrsm_info,					  
-				 size_t buffer_eize_in_bytes,
-				 void*                     buffer,
-				 rocsparse_error*p_error);
+    rocsparse_status coosm_solve_buffer_size(rocsparse_handle            handle,
+                                             const int64_t               nrhs,
+                                             rocsparse_operation         op_A,
+                                             rocsparse_operation         op_B,
+                                             rocsparse_const_dnvec_descr alpha,
+                                             rocsparse_const_spmat_descr A,
+                                             rocsparse_const_dnmat_descr X,
+                                             size_t*                     p_buffer_size_in_bytes,
+                                             rocsparse_error*            p_error);
 
-  
+    rocsparse_status coosm_buffer_size(rocsparse_handle            handle,
+                                       int64_t                     nrhs,
+                                       rocsparse_operation         trans_A,
+                                       rocsparse_operation         trans_B,
+                                       rocsparse_const_dnvec_descr alpha,
+                                       rocsparse_const_spmat_descr A,
+                                       rocsparse_const_dnmat_descr B,
+                                       size_t*                     p_buffer_size,
+                                       rocsparse_error*            p_error);
+
+    rocsparse_status coosm_analysis(rocsparse_handle            handle,
+                                    int64_t                     nrhs,
+                                    rocsparse_operation         trans_A,
+                                    rocsparse_operation         trans_B,
+                                    rocsparse_const_dnvec_descr alpha,
+                                    rocsparse_const_spmat_descr A,
+                                    rocsparse_const_dnmat_descr B,
+                                    rocsparse_analysis_policy   analysis,
+                                    rocsparse_csrsm_info*       p_csrsm_info,
+                                    size_t                      buffer_size_in_bytes,
+                                    void*                       buffer,
+                                    rocsparse_error*            p_error);
+
+    rocsparse_status coosm_compute(rocsparse_handle            handle,
+                                   int64_t                     nrhs,
+                                   rocsparse_operation         trans_A,
+                                   rocsparse_operation         trans_B,
+                                   rocsparse_const_dnvec_descr alpha,
+                                   rocsparse_const_spmat_descr A,
+                                   rocsparse_dnmat_descr       B,
+                                   rocsparse_csrsm_info        csrsm_info,
+                                   size_t                      buffer_eize_in_bytes,
+                                   void*                       buffer,
+                                   rocsparse_error*            p_error);
+
 }
