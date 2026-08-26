@@ -544,6 +544,37 @@ def build_attention_d256_gfx942(arch):
     return _build
 
 
+def build_winograd(
+    sub_kernel, arch, N, Hi, Wi, C, K, pH, pW, out_tile, block_c, block_k, block_nhw
+):
+    def _build():
+        from rocke.instances.common.conv_winograd import (
+            WinogradConvSpec,
+            WinogradProblem,
+            build_winograd_data_transform,
+            build_winograd_filter_transform,
+            build_winograd_output_transform,
+        )
+
+        problem = WinogradProblem(N=N, Hi=Hi, Wi=Wi, C=C, K=K, pH=pH, pW=pW)
+        spec = WinogradConvSpec(
+            problem=problem,
+            name=f"irhash_winograd_{sub_kernel}",
+            out_tile=out_tile,
+            block_c=block_c,
+            block_k=block_k,
+            block_nhw=block_nhw,
+        )
+        builders = {
+            "data": build_winograd_data_transform,
+            "filter": build_winograd_filter_transform,
+            "output": build_winograd_output_transform,
+        }
+        return builders[sub_kernel](spec, arch=arch)
+
+    return _build
+
+
 def build_deep(kind, arch, **kw):
     def _build():
         if kind == "common":
@@ -1262,6 +1293,35 @@ def cases():
             tile_k=64,
         ),
     )
+
+    # Winograd conv: data / filter / output transform kernels.
+    # Two tile variants (F(2,3) and F(4,3)) on gfx942 and gfx950.
+    # The transform kernels are arch-neutral (no MFMA/WMMA), so the same
+    # shape covers all supported arches; we use gfx942 and gfx950 to anchor
+    # both CDNA families in the golden.
+    for _arch in ("gfx942", "gfx950"):
+        for _ot, _ot_tag in ((2, "f2x3"), (4, "f4x3")):
+            for _sub in ("data", "filter", "output"):
+                add(
+                    "conv_winograd",
+                    f"conv_winograd/{_arch}/N2H8W8C16K16/{_ot_tag}/{_sub}",
+                    _arch,
+                    build_winograd(
+                        _sub,
+                        _arch,
+                        N=2,
+                        Hi=8,
+                        Wi=8,
+                        C=16,
+                        K=16,
+                        pH=1,
+                        pW=1,
+                        out_tile=_ot,
+                        block_c=16,
+                        block_k=16,
+                        block_nhw=4,
+                    ),
+                )
 
     # MoE: sorting phases and fused-MoE streaming phases.
     for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):

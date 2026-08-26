@@ -522,6 +522,102 @@
           "sha256": "4912eee06481e49b03a3f5bae1e0d33a393d132782a641b5da8b196634ec5319",
           "status": "ok"
         },
+        "conv_winograd/gfx942/N2H8W8C16K16/f2x3/data": {
+          "arch": "gfx942",
+          "bytes": 23430,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "42a9d09bd68883e8d80df6906878bbc1cd6fd52f66cc9e6918d650661ba2404b",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f2x3/filter": {
+          "arch": "gfx942",
+          "bytes": 14704,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "b1b6c463ee7a8e36e2db116aeefd0dca7fddafb8cc25d8228746207dfaadf454",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f2x3/output": {
+          "arch": "gfx942",
+          "bytes": 11985,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "1cf857544b094c1d6269162b9510d0b476b89e4c9e8941f018019c3dc69f4571",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f4x3/data": {
+          "arch": "gfx942",
+          "bytes": 71309,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "04f1462becfcf3bcaaa9a084e9a42bdd20fc4be47d912e615c1efcd473bc3a1d",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f4x3/filter": {
+          "arch": "gfx942",
+          "bytes": 27465,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "35d329318c21f4475169f60199ab17fc4a3381a1f0dbdba6ecb40125c52de0a1",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f4x3/output": {
+          "arch": "gfx942",
+          "bytes": 39310,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "04f2187bbdc682e0a71a21e4ff4e3557f6fc42bcbf4bff98db3ae8e898341bb1",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f2x3/data": {
+          "arch": "gfx950",
+          "bytes": 23430,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "42a9d09bd68883e8d80df6906878bbc1cd6fd52f66cc9e6918d650661ba2404b",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f2x3/filter": {
+          "arch": "gfx950",
+          "bytes": 14704,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "b1b6c463ee7a8e36e2db116aeefd0dca7fddafb8cc25d8228746207dfaadf454",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f2x3/output": {
+          "arch": "gfx950",
+          "bytes": 11985,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "1cf857544b094c1d6269162b9510d0b476b89e4c9e8941f018019c3dc69f4571",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f4x3/data": {
+          "arch": "gfx950",
+          "bytes": 71309,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "04f1462becfcf3bcaaa9a084e9a42bdd20fc4be47d912e615c1efcd473bc3a1d",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f4x3/filter": {
+          "arch": "gfx950",
+          "bytes": 27465,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "35d329318c21f4475169f60199ab17fc4a3381a1f0dbdba6ecb40125c52de0a1",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f4x3/output": {
+          "arch": "gfx950",
+          "bytes": 39310,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "04f2187bbdc682e0a71a21e4ff4e3557f6fc42bcbf4bff98db3ae8e898341bb1",
+          "status": "ok"
+        },
         "deep/common_gfx950_wt16/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 53250,
@@ -779,8 +875,8 @@
           "gfx1201": 7,
           "gfx1250": 2,
           "gfx90a": 5,
-          "gfx942": 14,
-          "gfx950": 58
+          "gfx942": 20,
+          "gfx950": 64
         },
         "expected_failures": 0,
         "families": {
@@ -790,11 +886,12 @@
           "conv": 9,
           "conv_dgrad": 6,
           "conv_wgrad": 7,
+          "conv_winograd": 12,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 96
+        "ok_cases": 108
       }
     },
     "llvm22": {
@@ -1319,6 +1416,102 @@
           "sha256": "bb5279520cfdff6aa0d878e73dd517b917828155ab38c5e654abca6b97f185de",
           "status": "ok"
         },
+        "conv_winograd/gfx942/N2H8W8C16K16/f2x3/data": {
+          "arch": "gfx942",
+          "bytes": 23522,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "3c33178802f07d60dbbc4ac2152fa99d6dffa2fb5a87ac40317a2cdf3bf36dfc",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f2x3/filter": {
+          "arch": "gfx942",
+          "bytes": 14796,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "519a9087e5726ee746f55ffb3c1bc360026e8535f6e3f62ff56c29991513a161",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f2x3/output": {
+          "arch": "gfx942",
+          "bytes": 12077,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "8f05022a3c56442790ac8a742c7df47ce9b9ded0d8de1d22dc22f90f046c1dac",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f4x3/data": {
+          "arch": "gfx942",
+          "bytes": 71401,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "fddca3a07fe38701dae1d8f920a9332a9a02cf1ff18d748469d5e01875510a52",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f4x3/filter": {
+          "arch": "gfx942",
+          "bytes": 27557,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "9aaba2f33346c85278457bc274b54924e75bbdc49d1930601852d6ce4732cbce",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f4x3/output": {
+          "arch": "gfx942",
+          "bytes": 39402,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "e72339aa7a30a65a4eaa8e3ee90e09eef2c9d4bc084aa61c22dfe67657c4022f",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f2x3/data": {
+          "arch": "gfx950",
+          "bytes": 23522,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "3c33178802f07d60dbbc4ac2152fa99d6dffa2fb5a87ac40317a2cdf3bf36dfc",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f2x3/filter": {
+          "arch": "gfx950",
+          "bytes": 14796,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "519a9087e5726ee746f55ffb3c1bc360026e8535f6e3f62ff56c29991513a161",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f2x3/output": {
+          "arch": "gfx950",
+          "bytes": 12077,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "8f05022a3c56442790ac8a742c7df47ce9b9ded0d8de1d22dc22f90f046c1dac",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f4x3/data": {
+          "arch": "gfx950",
+          "bytes": 71401,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "fddca3a07fe38701dae1d8f920a9332a9a02cf1ff18d748469d5e01875510a52",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f4x3/filter": {
+          "arch": "gfx950",
+          "bytes": 27557,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "9aaba2f33346c85278457bc274b54924e75bbdc49d1930601852d6ce4732cbce",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f4x3/output": {
+          "arch": "gfx950",
+          "bytes": 39402,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "e72339aa7a30a65a4eaa8e3ee90e09eef2c9d4bc084aa61c22dfe67657c4022f",
+          "status": "ok"
+        },
         "deep/common_gfx950_wt16/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 53432,
@@ -1576,8 +1769,8 @@
           "gfx1201": 7,
           "gfx1250": 2,
           "gfx90a": 5,
-          "gfx942": 14,
-          "gfx950": 58
+          "gfx942": 20,
+          "gfx950": 64
         },
         "expected_failures": 0,
         "families": {
@@ -1587,11 +1780,12 @@
           "conv": 9,
           "conv_dgrad": 6,
           "conv_wgrad": 7,
+          "conv_winograd": 12,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 96
+        "ok_cases": 108
       }
     },
     "llvm23": {
@@ -2116,6 +2310,102 @@
           "sha256": "c70e36a69b080498830a50fa2aa3ec887aa633d5313cfd36e700f10920571e32",
           "status": "ok"
         },
+        "conv_winograd/gfx942/N2H8W8C16K16/f2x3/data": {
+          "arch": "gfx942",
+          "bytes": 23526,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "f08f603d184271dcceb3e53b644b3e6277737fd2d512802a193290feafe0178e",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f2x3/filter": {
+          "arch": "gfx942",
+          "bytes": 14800,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "ad2c10ee59e5a77711cf906a82e6e301d5cdb5a24afc9180ad8ce6f21b4b4454",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f2x3/output": {
+          "arch": "gfx942",
+          "bytes": 12081,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "4728466d028ec7891604bb122c6cafb8d4df6ce2ce200beaf8c3af4eaaec42e1",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f4x3/data": {
+          "arch": "gfx942",
+          "bytes": 71405,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "50c0fc6b307fe2d565df924c721d34353dd4a83c752426c435d9106316ecd596",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f4x3/filter": {
+          "arch": "gfx942",
+          "bytes": 27561,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "2c3f40e5484c4d4dd28fb1f95752f512509867e1e97280eb85876a7d95591b48",
+          "status": "ok"
+        },
+        "conv_winograd/gfx942/N2H8W8C16K16/f4x3/output": {
+          "arch": "gfx942",
+          "bytes": 39406,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "61f9b22fef9cf4ecdf39a5c95ed65a352e944e1a8fb358787879ec3dcd2a89da",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f2x3/data": {
+          "arch": "gfx950",
+          "bytes": 23526,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "f08f603d184271dcceb3e53b644b3e6277737fd2d512802a193290feafe0178e",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f2x3/filter": {
+          "arch": "gfx950",
+          "bytes": 14800,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "ad2c10ee59e5a77711cf906a82e6e301d5cdb5a24afc9180ad8ce6f21b4b4454",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f2x3/output": {
+          "arch": "gfx950",
+          "bytes": 12081,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f2x3_bc16bk16bnhw4",
+          "sha256": "4728466d028ec7891604bb122c6cafb8d4df6ce2ce200beaf8c3af4eaaec42e1",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f4x3/data": {
+          "arch": "gfx950",
+          "bytes": 71405,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_data_data_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "50c0fc6b307fe2d565df924c721d34353dd4a83c752426c435d9106316ecd596",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f4x3/filter": {
+          "arch": "gfx950",
+          "bytes": 27561,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_filter_filter_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "2c3f40e5484c4d4dd28fb1f95752f512509867e1e97280eb85876a7d95591b48",
+          "status": "ok"
+        },
+        "conv_winograd/gfx950/N2H8W8C16K16/f4x3/output": {
+          "arch": "gfx950",
+          "bytes": 39406,
+          "family": "conv_winograd",
+          "kernel_name": "irhash_winograd_output_output_xform_N2H8W8C16K16_f4x3_bc16bk16bnhw4",
+          "sha256": "61f9b22fef9cf4ecdf39a5c95ed65a352e944e1a8fb358787879ec3dcd2a89da",
+          "status": "ok"
+        },
         "deep/common_gfx950_wt16/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 53436,
@@ -2373,8 +2663,8 @@
           "gfx1201": 7,
           "gfx1250": 2,
           "gfx90a": 5,
-          "gfx942": 14,
-          "gfx950": 58
+          "gfx942": 20,
+          "gfx950": 64
         },
         "expected_failures": 0,
         "families": {
@@ -2384,11 +2674,12 @@
           "conv": 9,
           "conv_dgrad": 6,
           "conv_wgrad": 7,
+          "conv_winograd": 12,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 96
+        "ok_cases": 108
       }
     }
   },
