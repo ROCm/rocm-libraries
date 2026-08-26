@@ -36,6 +36,7 @@
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#include <hipblaslt/client/MatmulTestCase.hpp>
 #include <hipblaslt/host_validation/Epilogue.hpp>
 #include <hipblaslt/host_validation/HipblasltReferenceGemm.hpp>
 #include <hipblaslt/host_validation/MatmulValidation.hpp>
@@ -859,6 +860,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      Tbias,
                               hipDataType      Taux)
 {
+    const auto matmulCases = hipblaslt::client::normalizeMatmulCases(arg);
+    const auto& firstCase  = matmulCases.front();
+
     double gpu_time_used, cpu_time_used, gpu_mem_gbytes;
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
     bool                   HMM                     = arg.HMM;
@@ -870,16 +874,15 @@ void testing_matmul_with_bias(const Arguments& arg,
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_end));
 
-    hipblasOperation_t transA(char_to_hipblas_operation(arg.transA));
-    hipblasOperation_t transB(char_to_hipblas_operation(arg.transB));
+    const hipblasOperation_t transA = firstCase.operationA;
+    const hipblasOperation_t transB = firstCase.operationB;
 
     // If input type is complex then alpha is set to complex datatype else compute type 
     hipDataType Talpha = (TiA == HIP_C_32F || TiA == HIP_C_64F) ?  TiA : Tc;
 
-    bool    do_grouped_gemm = arg.grouped_gemm > 0;
-    const int32_t problem_count = std::max(1, arg.grouped_gemm);
-    // (batch_mode value : 0 for Strided Batched Gemm, 1 for General Batched Gemm)
-    hipblasLtBatchMode_t batchMode = static_cast<hipblasLtBatchMode_t>(arg.batch_mode);
+    const bool    do_grouped_gemm = arg.grouped_gemm > 0;
+    const int32_t problem_count   = static_cast<int32_t>(matmulCases.size());
+    const hipblasLtBatchMode_t batchMode = firstCase.batchMode;
     
     int64_t rotating  = arg.rotating * 1024 * 1024;
 
@@ -932,42 +935,35 @@ void testing_matmul_with_bias(const Arguments& arg,
     int64_t totalRotatingSizeNeeded = 0;
     for(int i = 0; i < problem_count; i++)
     {
-        M[i] = arg.M[i];
-        N[i] = arg.N[i];
-        K[i] = arg.K[i];
+        const auto& testCase = matmulCases[i];
+        M[i]                 = testCase.m;
+        N[i]                 = testCase.n;
+        K[i]                 = testCase.k;
         set_alpha_type(h_alpha[i], arg, Tc, TiA);
         set_beta_type(h_beta[i], arg, Tc, TiA);
-        lda[i] = arg.lda[i];
-        ldb[i] = arg.ldb[i];
-        ldc[i] = arg.ldc[i];
-        ldd[i] = arg.ldd[i];
-        lde[i] = arg.lde[i];
+        lda[i] = testCase.a.leadingDimension();
+        ldb[i] = testCase.b.leadingDimension();
+        ldc[i] = testCase.c.leadingDimension();
+        ldd[i] = testCase.d.leadingDimension();
+        lde[i] = testCase.auxiliary ? testCase.auxiliary->leadingDimension() : arg.lde[i];
 
-        A_row[i] = transA == HIPBLAS_OP_N ? M[i] : K[i];
-        A_col[i] = transA == HIPBLAS_OP_N ? K[i] : M[i];
-        B_row[i] = transB == HIPBLAS_OP_N ? K[i] : N[i];
-        B_col[i] = transB == HIPBLAS_OP_N ? N[i] : K[i];
+        A_row[i] = testCase.a.rows();
+        A_col[i] = testCase.a.columns();
+        B_row[i] = testCase.b.rows();
+        B_col[i] = testCase.b.columns();
 
-        do_batched[i]  = (arg.batch_count > 1);
-        num_batches[i] = (do_batched[i] ? arg.batch_count : 1);
+        do_batched[i]  = testCase.batchCount > 1;
+        num_batches[i] = testCase.batchCount;
 
-        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
-        {
-            stride_a[i] = do_batched[i] ? arg.stride_a[i] : lda[i] * A_col[i];
-            stride_b[i] = do_batched[i] ? arg.stride_b[i] : ldb[i] * B_col[i];
-            stride_c[i] = do_batched[i] ? arg.stride_c[i] : ldc[i] * N[i];
-            stride_d[i] = do_batched[i] ? arg.stride_c[i] : ldd[i] * N[i];
-            stride_e[i] = do_batched[i] ? arg.stride_e[i] : lde[i] * N[i];
-        }
-        else
-        {
-            // Keeping the stride logic same as how it is handled in Grouped GEMM case
-            stride_a[i] = lda[i] * A_col[i];
-            stride_b[i] = ldb[i] * B_col[i];
-            stride_c[i] = ldc[i] * N[i];
-            stride_d[i] = ldd[i] * N[i];
-            stride_e[i] = lde[i] * N[i];
-        }
+        stride_a[i] = testCase.a.batchStride();
+        stride_b[i] = testCase.b.batchStride();
+        stride_c[i] = testCase.c.batchStride();
+        stride_d[i] = testCase.d.batchStride();
+        stride_e[i] = testCase.auxiliary
+                          ? testCase.auxiliary->batchStride()
+                          : (batchMode == HIPBLASLT_BATCH_MODE_STRIDED && do_batched[i]
+                                 ? arg.stride_e[i]
+                                 : lde[i] * N[i]);
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
