@@ -4662,17 +4662,26 @@ class KernelWriterAssembly(KernelWriter):
           # this branch Srd+2 stays 0 and every buffer_load returns 0.
           #
           # Compute a per-window buffer limit along K instead of the free dim:
-          #   Srd+2 = (DepthU * unrollStride + MT) * bpe + prePad
-          # DepthU rows (each unrollStride apart) cover one main-loop K window that
-          # the per-lane K-ramp reads; MT adds the contiguous free-dim span of the
-          # widest load. DepthU and MT are compile-time bounded, so the multiply
-          # stays in 32 bits (same overflow-safety intent as the strided branch).
+          #   Srd+2 = ((DepthU - 1) * unrollStride + MT) * bpe + prePad
+          # One main-loop K window reads K-rows 0..DepthU-1 relative to the SRD
+          # base (the base itself is advanced by DepthU*unrollStride each iter), so
+          # the last row read sits (DepthU-1)*unrollStride elements past the base,
+          # not DepthU*unrollStride.  MT adds the contiguous free-dim span of the
+          # widest load.  Using DepthU here (instead of DepthU-1) overshoots the
+          # limit by exactly one unrollStride (= free-dim size M/N); for the final
+          # K window that pushes the limit one full row past the tensor end, and
+          # once the operand is large enough that the overrun lands on an unmapped
+          # page the buffer_load never retires and the mainloop deadlocks.  It is
+          # latent for small operands (the overrun stays inside a mapped heap
+          # allocation) but a hard hang once M/N and K are both large.  DepthU and
+          # MT are compile-time bounded, so the multiply stays in 32 bits (same
+          # overflow-safety intent as the strided branch).
           unrollIdx = kernel["ProblemType"]["IndexUnroll"]
           unrollStride = self.strideRef(tc, unrollIdx)
           freeSpan = kernel[tP["mt"]]  # MT free elements (unit stride)
           prePadElems = self.states.srdShiftLeft[tc]
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), \
-                    unrollStride, kernel["DepthU"], comment="DepthU * unrollStride (one K window)"))
+                    unrollStride, kernel["DepthU"] - 1, comment="(DepthU-1) * unrollStride (last K row in window)"))
           module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=(freeSpan + prePadElems), \
                     comment="+ MT free span (%u) + prePad (%u)"%(freeSpan, prePadElems)))
           module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), \
