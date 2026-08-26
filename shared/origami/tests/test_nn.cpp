@@ -1,26 +1,26 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <array>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <array>
 #include <cmath>
 #include <filesystem>
 #include <string>
 #include <vector>
 
 #include "common.hpp"
-#include "origami/nn/features/gemm_tilewright.hpp"
-#include "origami/nn/filter.hpp"
-#include "origami/nn/nn.hpp"
 #include "origami/origami.hpp"
 
 #if ORIGAMI_ENABLE_NN
+#include "origami/nn/features/gemm_tilewright.hpp"
+#include "origami/nn/filter.hpp"
+#include "origami/nn/nn.hpp"
 
 namespace {
 
 #ifndef ORIGAMI_TEST_TW_WEIGHTS_DIR
-#  define ORIGAMI_TEST_TW_WEIGHTS_DIR ""
+#define ORIGAMI_TEST_TW_WEIGHTS_DIR ""
 #endif
 
 bool tilewright_weights_available() {
@@ -44,8 +44,8 @@ TEST_CASE("NN: rank_options_t defaults", "[nn]") {
 }
 
 TEST_CASE("NN: rank_configs rank_options_t matches model_t overload", "[nn]") {
-  const auto hardware = make_hardware(950);
-  const auto problem  = make_problem(4096, 4096, 4096);
+  const auto hardware                    = make_hardware(950);
+  const auto problem                     = make_problem(4096, 4096, 4096);
   std::vector<origami::config_t> configs = {
       make_config(256, 256, 64),
       make_config(128, 128, 32),
@@ -66,8 +66,8 @@ TEST_CASE("NN: rank_configs rank_options_t matches model_t overload", "[nn]") {
 }
 
 TEST_CASE("NN: rank_configs inference=nn throws without model", "[nn]") {
-  const auto hardware = make_hardware(950);
-  const auto problem  = make_problem(1024, 1024, 1024);
+  const auto hardware                    = make_hardware(950);
+  const auto problem                     = make_problem(1024, 1024, 1024);
   std::vector<origami::config_t> configs = {make_config(128, 128, 32)};
 
   origami::rank_options_t options;
@@ -76,15 +76,15 @@ TEST_CASE("NN: rank_configs inference=nn throws without model", "[nn]") {
 }
 
 TEST_CASE("NN: rank_configs inference=nn_fallback uses analytical", "[nn]") {
-  const auto hardware = make_hardware(950);
-  const auto problem  = make_problem(2048, 2048, 2048);
+  const auto hardware                    = make_hardware(950);
+  const auto problem                     = make_problem(2048, 2048, 2048);
   std::vector<origami::config_t> configs = {
       make_config(256, 256, 64),
       make_config(128, 128, 32),
   };
 
   origami::rank_options_t options;
-  options.inference = origami::inference_mode_t::nn_fallback;
+  options.inference  = origami::inference_mode_t::nn_fallback;
   const auto results = origami::rank_configs(problem, hardware, configs, options);
   REQUIRE_FALSE(results.empty());
   REQUIRE(results.front().latency > 0.0);
@@ -108,20 +108,14 @@ TEST_CASE("NN: gemm_tilewright feature dimensions", "[nn]") {
   REQUIRE(item.size() == 12);
   REQUIRE(inter.size() == 37);
 
-  for (float v : query) {
-    REQUIRE(std::isfinite(v));
-  }
-  for (float v : item) {
-    REQUIRE(std::isfinite(v));
-  }
-  for (float v : inter) {
-    REQUIRE(std::isfinite(v));
-  }
+  for (float v : query) { REQUIRE(std::isfinite(v)); }
+  for (float v : item) { REQUIRE(std::isfinite(v)); }
+  for (float v : inter) { REQUIRE(std::isfinite(v)); }
 }
 
 TEST_CASE("NN: load_models_for_logic loads gfx950 tilewright weights", "[nn][tilewright]") {
 #ifndef ORIGAMI_TEST_TW_LOGIC_STEM
-#  define ORIGAMI_TEST_TW_LOGIC_STEM ""
+#define ORIGAMI_TEST_TW_LOGIC_STEM ""
 #endif
 
   const std::string weights_dir = ORIGAMI_TEST_TW_WEIGHTS_DIR;
@@ -152,9 +146,9 @@ TEST_CASE("NN: load_models_for_logic uses bundled gfx950 weights when hint_dir e
     return;
   }
 
-  const char* logic_stem =
-      "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950";
-  const auto models = origami::nn::load_models_for_logic(logic_stem, "");
+  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
+                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
+  const auto models      = origami::nn::load_models_for_logic(logic_stem, "");
   REQUIRE(models.tilewright >= 0);
 }
 
@@ -164,18 +158,17 @@ TEST_CASE("NN: rank_configs inference=nn ranks with loaded tilewright model", "[
     return;
   }
 
-  const char* logic_stem =
-      "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950";
-  const auto models = origami::nn::load_models_for_logic(logic_stem, "");
+  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
+                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
+  const auto models      = origami::nn::load_models_for_logic(logic_stem, "");
   REQUIRE(models.tilewright >= 0);
 
   const auto hardware = make_hardware(950);
-  auto problem =
-      make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
-  problem.a_dtype = origami::data_type_t::BFloat16;
-  problem.b_dtype = origami::data_type_t::BFloat16;
-  problem.c_dtype = origami::data_type_t::BFloat16;
-  problem.d_dtype = origami::data_type_t::BFloat16;
+  auto problem = make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
+  problem.a_dtype  = origami::data_type_t::BFloat16;
+  problem.b_dtype  = origami::data_type_t::BFloat16;
+  problem.c_dtype  = origami::data_type_t::BFloat16;
+  problem.d_dtype  = origami::data_type_t::BFloat16;
   problem.mi_dtype = origami::data_type_t::BFloat16;
 
   std::vector<origami::config_t> configs = {
@@ -204,10 +197,9 @@ TEST_CASE("NN: filter_configs rejects LDS-infeasible kernels", "[nn]") {
   auto problem        = make_problem(4096, 4096, 4096);
 
   origami::config_t huge = make_config(512, 512, 512);
-  origami::config_t ok    = make_config(128, 128, 32);
+  origami::config_t ok   = make_config(128, 128, 32);
 
-  const auto result =
-      origami::nn::filter::filter_configs(problem, hardware, {huge, ok});
+  const auto result = origami::nn::filter::filter_configs(problem, hardware, {huge, ok});
 
   REQUIRE(result.feasible_indices.size() + result.rejected_indices.size() == 2);
   REQUIRE(origami::gemm::check_lds_capacity(hardware, huge.mt, problem.a_dtype, problem.b_dtype) ==
@@ -237,8 +229,8 @@ TEST_CASE("NN: unload_model releases model info and payload", "[nn]") {
     return;
   }
 
-  const char* logic_stem =
-      "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950";
+  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
+                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
   const origami::nn::model_handle_t handle =
       origami::nn::load_models_for_logic(logic_stem, "").tilewright;
   REQUIRE(handle >= 0);
@@ -247,8 +239,8 @@ TEST_CASE("NN: unload_model releases model info and payload", "[nn]") {
   origami::nn::unload_model(handle);
   REQUIRE(origami::nn::model_info(handle) == nullptr);
 
-  const auto hardware = make_hardware(950);
-  const auto problem  = make_problem(1024, 3072, 2048);
+  const auto hardware                    = make_hardware(950);
+  const auto problem                     = make_problem(1024, 3072, 2048);
   std::vector<origami::config_t> configs = {make_config(128, 128, 128)};
 
   origami::rank_options_t options;
@@ -264,19 +256,18 @@ TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {
     return;
   }
 
-  const char* logic_stem =
-      "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950";
+  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
+                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
   const origami::nn::model_handle_t handle =
       origami::nn::load_models_for_logic(logic_stem, "").tilewright;
   REQUIRE(handle >= 0);
 
   const auto hardware = make_hardware(950);
-  auto problem =
-      make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
-  problem.a_dtype = origami::data_type_t::BFloat16;
-  problem.b_dtype = origami::data_type_t::BFloat16;
-  problem.c_dtype = origami::data_type_t::BFloat16;
-  problem.d_dtype = origami::data_type_t::BFloat16;
+  auto problem = make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
+  problem.a_dtype  = origami::data_type_t::BFloat16;
+  problem.b_dtype  = origami::data_type_t::BFloat16;
+  problem.c_dtype  = origami::data_type_t::BFloat16;
+  problem.d_dtype  = origami::data_type_t::BFloat16;
   problem.mi_dtype = origami::data_type_t::BFloat16;
 
   std::vector<origami::config_t> configs = {
@@ -290,7 +281,7 @@ TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {
   routed.nn_model   = handle;
 
   origami::rank_options_t forced = routed;
-  forced.nn.force_cell            = 0;
+  forced.nn.force_cell           = 0;
 
   const auto routed_results = origami::rank_configs(problem, hardware, configs, routed);
   const auto forced_results = origami::rank_configs(problem, hardware, configs, forced);
@@ -303,8 +294,8 @@ TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {
 #else
 
 TEST_CASE("NN: rank_configs inference=nn throws when compiled out", "[nn]") {
-  const auto hardware = make_hardware(950);
-  const auto problem  = make_problem(1024, 1024, 1024);
+  const auto hardware                    = make_hardware(950);
+  const auto problem                     = make_problem(1024, 1024, 1024);
   std::vector<origami::config_t> configs = {make_config(128, 128, 32)};
 
   origami::rank_options_t options;
