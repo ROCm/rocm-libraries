@@ -62,7 +62,12 @@ project_map = {
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_COMPOSABLE_KERNEL_FOR_MIOPEN_ONLY=ON",
         ],
-        "projects_to_test": ["miopen", "miopenprovider"],
+        # "miopen-dbsync" is not a project -- it's the GPU-free rocjitsu dbsync test component (defined
+        # in ROCm/TheRock fetch_test_configurations.py, keyed on this exact token). Listing it here
+        # selects it in the per-PR flow whenever the MIOpen bundle is tested; TheRock's multi-arch
+        # runs select it via projects_to_test="*". It runs on a CPU runner (linux_cpu_runner) and is
+        # gated to gfx942/gfx950 via the component's include_family.
+        "projects_to_test": ["miopen", "miopenprovider", "miopen-dbsync"],
     },
     "fft": {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
