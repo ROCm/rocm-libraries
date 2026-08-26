@@ -43,7 +43,7 @@ struct rocfft_spirv_cb_t
         else
             symbol_name = _symbol_name;
 
-        if(!_bitcode_data)
+        if(!_bitcode_data || _bitcode_len_bytes == 0)
             bitcode_data.clear();
         else
             bitcode_data.assign(static_cast<const char*>(_bitcode_data),
