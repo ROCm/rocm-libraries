@@ -51,6 +51,12 @@ FAMILY_MAP = {
 # as the known-good behavior; flip to False (or drop) once a CI run confirms it's unnecessary.
 SET_MIOPEN_DEVICE_ARCH = True
 
+# StaticFDBSync's default thread fan-out (min(hw_concurrency, 32)) can deadlock/stall under the
+# rocjitsu KMD interposer on some CK builds (observed: gfx942 hangs at ~200 find-db lines, gfx950
+# runs pathologically slowly). Cap it via MIOPEN_DBSYNC_MAX_THREADS; 1 = fully serial, which cannot
+# hit a concurrency deadlock. The check is CPU-only and completes fine single-threaded.
+DBSYNC_MAX_THREADS = 1
+
 
 def run(cmd, **kw):
     print(f"+ {' '.join(map(str, cmd))}", flush=True)
@@ -144,6 +150,7 @@ def main():
     env_base["ROCM_PATH"] = str(dist)
     env_base["LD_LIBRARY_PATH"] = f"{dist / 'lib'}:{env_base.get('LD_LIBRARY_PATH', '')}"
     env_base["LD_PRELOAD"] = str(kmd)
+    env_base["MIOPEN_DBSYNC_MAX_THREADS"] = str(DBSYNC_MAX_THREADS)
     if SET_MIOPEN_DEVICE_ARCH:
         env_base["MIOPEN_DEVICE_ARCH"] = arch
 

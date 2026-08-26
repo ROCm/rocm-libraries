@@ -68,6 +68,12 @@ namespace fs  = miopen::fs;
 namespace env = miopen::env;
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DBSYNC_CLEAN)
+// Caps StaticFDBSync's worker-thread fan-out (default: min(hardware_concurrency, 32)). CPU-affinity
+// limits (taskset, Docker --cpuset-cpus) do NOT reduce std::thread::hardware_concurrency() on
+// Linux/glibc, so this env var is the only reliable way to run with fewer threads. Needed under the
+// rocjitsu KMD interposer: the 32-thread fan-out can deadlock/stall there on some CK builds (the
+// GPU-free dbsync runner sets this to 1 to run serially). Unset -> unchanged default behavior.
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DBSYNC_MAX_THREADS)
 
 struct KDBKey
 {
@@ -1018,7 +1024,9 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
 
     std::atomic<size_t> counter = 0;
     const int total_threads =
-        std::min(std::thread::hardware_concurrency(), static_cast<unsigned int>(32));
+        MIOPEN_DBSYNC_MAX_THREADS
+            ? static_cast<int>(env::value(MIOPEN_DBSYNC_MAX_THREADS))
+            : std::min(static_cast<int>(std::thread::hardware_concurrency()), 32);
     std::vector<std::thread> agents;
     agents.reserve(total_threads);
     for(auto idx = 0; idx < total_threads; ++idx)
