@@ -1153,6 +1153,27 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
   if not _tluWaveAxisId(writer, kernel, module, tc, dst):
     writer.vgprPool.checkIn(dst)
     return None
+  wavesPerStrip = int(getattr(tileInfo, "grWavesPerStrip", 1))
+  if wavesPerStrip > 1:
+    # SubtileWideGR: the GR strip already spans every axis-wave's free-dim
+    # extent, so waves do not step along the free dim -- they share the strip
+    # and split its K rows.  Wave a starts at K row a*kRowsPerWave.  K is the
+    # strided dim for NT, so this needs the runtime K stride.
+    kRows = int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1])
+    kRowsPerWave = kRows // wavesPerStrip
+    unrollIdx = kernel["ProblemType"]["IndexUnroll"]
+    strideK = writer.strideRef(tc, unrollIdx)
+    tmpS = writer.sgprPool.checkOut(1, tag="_tluWaveAxisKOffset_s_%s" % tc, preventOverflow=False)
+    module.add(SMovB32(dst=sgpr(tmpS), src=hex(kRowsPerWave), comment="%s: K rows per wave" % tc))
+    module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr(tmpS), src1=vgpr(dst),
+          comment="%s: wave K-row base = axisId*%d" % (tc, kRowsPerWave)))
+    module.add(VMulLOU32(dst=vgpr(dst), src0=strideK, src1=vgpr(dst),
+          comment="%s: K row * strideK (elements)" % tc))
+    # elements -> bytes (bpe is 0.5 for fp4, so shift right by 1)
+    module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(1), src=vgpr(dst),
+          comment="%s: elements -> bytes (fp4)" % tc))
+    writer.sgprPool.checkIn(tmpS)
+    return dst
   localSub0 = int(tileInfo.localSubtileGrid[0])
   subtileM = int(tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0])
   strideBytes = int(localSub0 * subtileM * tileInfo.bpe)
@@ -1248,6 +1269,14 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   offsetK = sId1 * int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe)
 
   subtileOffset = int(math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize))
+  # loadRatioGR folds in grLoadWaves, so subtileOffset is the bytes one
+  # *cooperative* load round covers.  Under SubtileWideGR the waves sharing a
+  # strip are separated by whole load-blocks (each takes a slice of the strip's
+  # K rows) rather than interleaved within one block, so a wave still advances
+  # m0 by its own single-wave block, not by the cooperative total.
+  _wavesPerStrip = int(getattr(tileInfo, "grWavesPerStrip", 1))
+  if _wavesPerStrip > 1:
+    subtileOffset = int(subtileOffset // _wavesPerStrip)
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
   swz = selectTLUSwizzle(tileInfo)
   csc = selectTLUColScatter(tileInfo)
@@ -1385,7 +1414,19 @@ def _globalReadDTLInitCommonSgpr_tlu(writer, kernel, module, tileInfoA, tileInfo
     axisWaves = kernel["MIWaveGroup"][0] if tc == 'A' else kernel["MIWaveGroup"][1]
     stripStride = stripStrideBytes(ti)
     localSub0 = int(ti.localSubtileGrid[0])
-    perWaveBytes = int(localSub0 * stripStride)
+    wavesPerStrip = int(getattr(ti, "grWavesPerStrip", 1))
+    if wavesPerStrip > 1:
+      # SubtileWideGR: all axis-waves write into the SAME strip, each owning a
+      # contiguous run of DTL load-blocks (its share of the strip's K rows).
+      # numGRPerSubtile is already the per-wave load count, and one load block
+      # occupies wavesize*loadWidth bytes plus the swizzle pad.
+      from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter
+      _swz = selectTLUSwizzle(ti); _cs = selectTLUColScatter(ti)
+      _pad = int(_cs.padBytes) if _cs else (int(_swz.padBytes) if _swz else 0)
+      blkBytes = int(kernel["WavefrontSize"] * ti.gr.config.loadWidth + _pad)
+      perWaveBytes = int(ti.numGRPerSubtile * blkBytes)
+    else:
+      perWaveBytes = int(localSub0 * stripStride)
     if axisWaves > 1:
       wv = writer.vgprPool.checkOut(1, tag="_grDTLInit_tlu_wave_%s" % tc)
       _tluWaveAxisId(writer, kernel, module, tc, wv)
