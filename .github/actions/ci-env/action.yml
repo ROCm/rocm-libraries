@@ -7,7 +7,7 @@ outputs:
     value: "48ec94d7e3b52731c228f31457087f73b136c9b4" # 2026-08-17
   baseline-run-id:
     description: "TheRock workflow run ID for prebuilt stage artifacts"
-    value: "32050763862" # Updated by assistant-librarian[bot] on submodule bumps
+    value: "32777689015" # Manually updated 08/25/2026
   docker-image:
     description: "Docker container image for Linux builds"
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb"
