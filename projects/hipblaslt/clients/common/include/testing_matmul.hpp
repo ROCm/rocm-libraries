@@ -590,6 +590,7 @@ void testing_matmul_with_bias(
     std::span<const hipblaslt::client::MatmulTestCase> matmulCases,
     hipDataType                                       TiA,
     hipDataType                                       TiB,
+    hipDataType                                       TiC,
     hipDataType                                       To,
     hipDataType                                       Tc,
     hipDataType                                       TciA,
@@ -601,7 +602,8 @@ void testing_matmul(const Arguments& arg)
 {
     hipDataType tiA = arg.a_type;
     hipDataType tiB = arg.b_type;
-    hipDataType to  = arg.c_type;
+    hipDataType tiC = arg.c_type;
+    hipDataType to  = arg.d_type;
     hipDataType tc  = computeTypeToRealDataType(arg.compute_type);
     hipDataType tciA, tciB;
 
@@ -657,7 +659,7 @@ void testing_matmul(const Arguments& arg)
     // FP16 full-matrix accumulator probe (see hipblaslt_init_device fp16_accumulator_probe).
     if(arg.initialization == hipblaslt_initialization::fp16_accumulator_probe)
     {
-        if(tiA != HIP_R_16F || tiB != HIP_R_16F || to != HIP_R_16F || arg.d_type != HIP_R_16F
+        if(tiA != HIP_R_16F || tiB != HIP_R_16F || tiC != HIP_R_16F || to != HIP_R_16F
            || arg.compute_type != HIPBLAS_COMPUTE_32F)
         {
             hipblaslt_cout
@@ -726,6 +728,7 @@ void testing_matmul(const Arguments& arg)
                              matmulCases,
                              tiA,
                              tiB,
+                             tiC,
                              to,
                              tc,
                              tciA,
@@ -738,6 +741,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                               std::span<const hipblaslt::client::MatmulTestCase> matmulCases,
                               hipDataType                                        TiA,
                               hipDataType                                        TiB,
+                              hipDataType                                        TiC,
                               hipDataType                                        To,
                               hipDataType                                        Tc,
                               hipDataType                                        TciA,
@@ -776,10 +780,11 @@ void testing_matmul_with_bias(const Arguments&                                  
     }
 
     auto  preparation       = hipblaslt::client::prepareMatmulCases(arg,
-                                                                    matmulCases,
-                                                                    TiA,
-                                                                    TiB,
-                                                                    To,
+                                                                   matmulCases,
+                                                                   TiA,
+                                                                   TiB,
+                                                                   TiC,
+                                                                   To,
                                                                     Tc,
                                                                     Talpha,
                                                                     Tbias,
@@ -1029,7 +1034,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
             dB.emplace_back(TiB, preparedCase.b.elements * block_count, HMM);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
-            dC.emplace_back(To, testCase.c.allocationElements * block_count, HMM);
+            dC.emplace_back(TiC, testCase.c.allocationElements * block_count, HMM);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
 
             if(!firstCase.cEqualsD)
@@ -1107,7 +1112,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
             hA.emplace_back(TiA, testCase.a.allocationElements);
             hB.emplace_back(TiB, testCase.b.allocationElements);
-            hC.emplace_back(To, testCase.c.allocationElements);
+            hC.emplace_back(TiC, testCase.c.allocationElements);
             hD_gold.emplace_back(To, preparedCase.outputCopyElements);
             hD_1.emplace_back(To, preparedCase.outputCopyElements);
             if(preparedCase.biasElements * block_count != 0)
@@ -1171,7 +1176,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
                 dB.emplace_back(TiB, preparedCase.b.elements * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
-                dC.emplace_back(To, testCase.c.allocationElements * block_count, HMM);
+                dC.emplace_back(TiC, testCase.c.allocationElements * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
 
                 if(!firstCase.cEqualsD)
@@ -1205,7 +1210,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
                 hA.emplace_back(TiA, testCase.a.allocationElements);
                 hB.emplace_back(TiB, testCase.b.allocationElements);
-                hC.emplace_back(To, testCase.c.allocationElements);
+                hC.emplace_back(TiC, testCase.c.allocationElements);
                 hD_gold.emplace_back(To, preparedCase.outputCopyElements);
                 hD_1.emplace_back(To, preparedCase.outputCopyElements);
                 if(preparedCase.biasElements * block_count != 0)
@@ -1550,7 +1555,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                   testCase.m,
                                   testCase.n,
                                   testCase.c.leadingDimension(),
-                                  To,
+                                  TiC,
                                   testCase.c.batchStride(),
                                   testCase.batchCount,
                                   positiveOnlyInitialization);
@@ -1604,7 +1609,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                     hB[i].buf(),
                                                     "batch_" + std::to_string(batchId) + "_" + std::to_string(i) + "_B_input.txt");
                         hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                    To,
+                                                    TiC,
                                                     testCase.m,
                                                     testCase.n,
                                                     testCase.c.leadingDimension(),
@@ -1695,7 +1700,7 @@ void testing_matmul_with_bias(const Arguments&                                  
 
             if(arg.scaleC)
             {
-                if(To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ)
+                if(TiC == HIP_R_8F_E4M3_FNUZ || TiC == HIP_R_8F_E5M2_FNUZ)
                 {
                     hipblaslt_init_small(hScaleC[i].buf(), 1, 1, 1, Talpha);
                 }
@@ -1965,7 +1970,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                       testCase.m,
                                       testCase.n,
                                       testCase.c.leadingDimension(),
-                                      To,
+                                      TiC,
                                       testCase.c.batchStride(),
                                       1,
                                       positiveOnlyInitialization);
@@ -2014,7 +2019,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                   "batch_" + std::to_string(i) + "_B_"
                                                       + std::to_string(batchCount) + "_input.txt");
                     hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                  To,
+                                                  TiC,
                                                   testCase.m,
                                                   testCase.n,
                                                   testCase.c.leadingDimension(),
@@ -2059,7 +2064,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             }
             if(arg.scaleC)
             {
-                if(To == HIP_R_8F_E4M3_FNUZ || To == HIP_R_8F_E5M2_FNUZ)
+                if(TiC == HIP_R_8F_E4M3_FNUZ || TiC == HIP_R_8F_E5M2_FNUZ)
                 {
                     hipblaslt_init_small(hScaleC[i].buf(), 1, 1, 1, Talpha);
                 }
@@ -2395,7 +2400,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                          * realDataTypeSize(TiB)));
                 extinputs[b][gemmIdx].setC(
                     (void*)((dC[gemmIdx].as<char>())
-                            + b * testCase.c.allocationElements * realDataTypeSize(To)));
+                            + b * testCase.c.allocationElements * realDataTypeSize(TiC)));
                 extinputs[b][gemmIdx].setD((void*)(((*dDp)[gemmIdx].as<char>())
                                                    + b * testCase.d.allocationElements
                                                          * realDataTypeSize(To)));
@@ -2461,7 +2466,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                          + b * preparedCase.b.elements * realDataTypeSize(TiB));
                 dc[b][gemmIdx] = (void*)((dC[gemmIdx].as<char>())
                                          + b * testCase.c.allocationElements
-                                               * realDataTypeSize(To));
+                                               * realDataTypeSize(TiC));
                 dd[b][gemmIdx] = (void*)(((*dDp)[gemmIdx].as<char>())
                                          + b * testCase.d.allocationElements
                                                * realDataTypeSize(To));
@@ -2484,7 +2489,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                     + b * firstPreparedCase.b.elements * realDataTypeSize(TiB));
                 dc1[gemmIdx] = reinterpret_cast<uint64_t*>(
                     (dC[gemmIdx].as<char>())
-                    + b * firstCase.c.allocationElements * realDataTypeSize(To));
+                    + b * firstCase.c.allocationElements * realDataTypeSize(TiC));
                 dd1[gemmIdx] = reinterpret_cast<uint64_t*>(
                     (*dDp)[gemmIdx].as<char>()
                     + b * firstCase.d.allocationElements * realDataTypeSize(To));
@@ -2678,7 +2683,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                     firstRuntimeCase.matrixB,
                     &firstPreparedCase.beta,
                     dC[0].as<char>()
-                        + block * firstCase.c.allocationElements * realDataTypeSize(To),
+                        + block * firstCase.c.allocationElements * realDataTypeSize(TiC),
                     firstRuntimeCase.matrixC,
                     (*dDp)[0].as<char>()
                         + block * firstCase.d.allocationElements * realDataTypeSize(To),
@@ -2957,7 +2962,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         testCase.b.leadingDimension(),
                         betaTemp,
                         hC[gemmIdx].as<char>()
-                            + testCase.c.batchStride() * batchIdx * realDataTypeSize(To),
+                            + testCase.c.batchStride() * batchIdx * realDataTypeSize(TiC),
                         testCase.c.leadingDimension(),
                         hD_gold_epl[gemmIdx].as<char>()
                             + testCase.d.batchStride() * batchIdx * realDataTypeSize(Talpha),
@@ -2970,7 +2975,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         (arg.scaleB == hipblaslt_scaling_format::Vector),
                         isScaleAMXFormat ? HIP_R_32F : TiA,
                         isScaleBMXFormat ? HIP_R_32F : TiB,
-                        To,
+                        TiC,
                         Talpha,
                         Tc,
                         isScaleAMXFormat ? HIP_R_32F : TciA,
@@ -3136,7 +3141,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                (arg.scaleB == hipblaslt_scaling_format::Vector),
                                isScaleAMXFormat ? HIP_R_32F : TiA,
                                isScaleBMXFormat ? HIP_R_32F : TiB,
-                               To,
+                               TiC,
                                To,
                                Tc,
                                isScaleAMXFormat ? HIP_R_32F : TciA,
@@ -3169,7 +3174,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         testCase.b.leadingDimension(),
                         betaTemp,
                         hC[gemmIdx].as<char>()
-                            + testCase.c.batchStride() * batchIdx * realDataTypeSize(To),
+                            + testCase.c.batchStride() * batchIdx * realDataTypeSize(TiC),
                         testCase.c.leadingDimension(),
                         hD_gold[gemmIdx].as<char>()
                             + testCase.d.batchStride() * batchIdx * realDataTypeSize(To),
@@ -3182,7 +3187,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         (arg.scaleB == hipblaslt_scaling_format::Vector),
                         isScaleAMXFormat ? HIP_R_32F : TiA,
                         isScaleBMXFormat ? HIP_R_32F : TiB,
-                        To,
+                        TiC,
                         To,
                         Tc,
                         isScaleAMXFormat ? HIP_R_32F : TciA,
@@ -3865,7 +3870,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                 beta_ptr,
                                 dC[0].as<char>()
                                     + (i % block_count) * firstCase.c.allocationElements
-                                          * realDataTypeSize(To),
+                                          * realDataTypeSize(TiC),
                                 firstRuntimeCase.matrixC,
                                 (*dDp)[0].as<char>()
                                     + (i % block_count) * firstCase.d.allocationElements
@@ -3920,7 +3925,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                     beta_ptr,
                                     dC[0].as<char>()
                                         + b * firstCase.c.allocationElements
-                                              * realDataTypeSize(To),
+                                              * realDataTypeSize(TiC),
                                     firstRuntimeCase.matrixC,
                                     (*dDp)[0].as<char>()
                                         + b * firstCase.d.allocationElements
