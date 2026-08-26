@@ -127,11 +127,21 @@ inline uint16_t float_to_half_bits(float f) noexcept
             // Too small, return signed zero
             return static_cast<uint16_t>(sign);
         }
-        // Denormalized number
+        // Subnormal result. Restore the implicit leading 1 and shift the 24-bit significand
+        // into units of the smallest subnormal (2^-24). A single shift of (14 - exp) already
+        // covers the 23 -> 10 bit narrowing that the normal path spells as ">> 13".
         mant |= 0x00800000;
-        auto shift = static_cast<uint32_t>(14 - exp);
-        mant >>= shift;
-        return static_cast<uint16_t>(sign | (mant >> 13));
+        const auto shift = static_cast<uint32_t>(14 - exp); // 14..24 for exp in [-10, 0]
+        uint32_t halfMant = mant >> shift;
+        const uint32_t remainder = mant & ((1U << shift) - 1U);
+        const uint32_t roundThreshold = 1U << (shift - 1U);
+        if(remainder > roundThreshold || (remainder == roundThreshold && ((halfMant & 1) != 0U)))
+        {
+            // A carry out of the 10 subnormal bits yields 0x0400, the smallest normal, which
+            // is exactly the encoding IEEE 754 requires here.
+            halfMant++;
+        }
+        return static_cast<uint16_t>(sign | halfMant);
     }
     if(exp == 0xFF - 127 + 15)
     {

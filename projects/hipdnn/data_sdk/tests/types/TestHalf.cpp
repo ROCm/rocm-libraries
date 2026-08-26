@@ -13,6 +13,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <type_traits>
 
@@ -154,4 +155,145 @@ TEST_F(TestHalf, SignalingNaN)
 {
     const half snan = half::from_bits(0x7C01);
     EXPECT_TRUE(isnan(snan));
+}
+
+// ============================================================================
+// Subnormal (denormal) Conversion Tests
+// ============================================================================
+//
+// Half subnormals are the 1023 values k * 2^-24 for k in [1, 1023]. Every float in
+// (2^-25, 2^-14) must convert to one of them; a conversion that returns zero instead
+// silently destroys small-magnitude data (regression guard for the double-shifted
+// significand in float_to_half_bits).
+
+namespace
+{
+/// Exact float equal to k * 2^-24 (k <= 2^24, so the product is exact in float).
+float subnormalUnits(int k)
+{
+    return std::ldexp(static_cast<float>(k), -24);
+}
+
+/// Exact float equal to the midpoint between (k) and (k + 1) subnormal units.
+float subnormalMidpoint(int k)
+{
+    return std::ldexp(static_cast<float>(2 * k + 1), -25);
+}
+} // namespace
+
+TEST_F(TestHalf, SubnormalIsNotFlushedToZero)
+{
+    // Values well inside the subnormal range must not collapse to zero.
+    EXPECT_NE(half(1e-5f).data & 0x7FFFU, 0U);
+    EXPECT_NE(half(5e-5f).data & 0x7FFFU, 0U);
+    EXPECT_NE(half(6e-5f).data & 0x7FFFU, 0U);
+    EXPECT_NE(half(-1e-5f).data & 0x7FFFU, 0U);
+
+    // ... and must still be classified as finite, non-zero, and correctly signed.
+    EXPECT_TRUE(isfinite(half(1e-5f)));
+    EXPECT_NE(static_cast<float>(half(1e-5f)), 0.0f);
+    EXPECT_LT(static_cast<float>(half(-1e-5f)), 0.0f);
+}
+
+TEST_F(TestHalf, SubnormalExactBitPatterns)
+{
+    // Round-to-nearest-even results, in units of 2^-24.
+    EXPECT_EQ(half(1e-5f).data, 0x00A8); // 168 units
+    EXPECT_EQ(half(5e-5f).data, 0x0347); // 839 units
+    EXPECT_EQ(half(6e-5f).data, 0x03EF); // 1007 units
+    EXPECT_EQ(half(1e-7f).data, 0x0002); // 2 units
+
+    // Sign is carried through unchanged.
+    EXPECT_EQ(half(-1e-5f).data, 0x80A8);
+    EXPECT_EQ(half(-5e-5f).data, 0x8347);
+
+    // Decoding the result reproduces the encoded multiple of 2^-24 exactly.
+    EXPECT_EQ(static_cast<float>(half(1e-5f)), subnormalUnits(168));
+    EXPECT_EQ(static_cast<float>(half(5e-5f)), subnormalUnits(839));
+    EXPECT_EQ(static_cast<float>(half(6e-5f)), subnormalUnits(1007));
+}
+
+TEST_F(TestHalf, SubnormalExactMultiplesConvertExactly)
+{
+    for(int k = 1; k <= 1023; ++k)
+    {
+        const half value(subnormalUnits(k));
+        EXPECT_EQ(value.data, static_cast<uint16_t>(k)) << "k = " << k;
+        EXPECT_EQ(static_cast<float>(value), subnormalUnits(k)) << "k = " << k;
+
+        const half negative(-subnormalUnits(k));
+        EXPECT_EQ(negative.data, static_cast<uint16_t>(0x8000U | static_cast<uint32_t>(k)))
+            << "k = " << k;
+    }
+}
+
+TEST_F(TestHalf, SubnormalRoundToNearestEven)
+{
+    // k == 0 covers the underflow tie at 2^-25; k == 1023 covers rounding up out of the
+    // subnormal range into the smallest normal (0x0400).
+    for(int k = 0; k <= 1023; ++k)
+    {
+        const float midpoint = subnormalMidpoint(k);
+        const auto lower = static_cast<uint16_t>(k);
+        const auto upper = static_cast<uint16_t>(k + 1);
+
+        // Just below the midpoint rounds down, just above rounds up.
+        EXPECT_EQ(half(std::nextafter(midpoint, 0.0f)).data, lower) << "k = " << k;
+        EXPECT_EQ(half(std::nextafter(midpoint, 1.0f)).data, upper) << "k = " << k;
+
+        // Exact midpoint is a tie: round to the even significand.
+        const uint16_t tie = ((k % 2) == 0) ? lower : upper;
+        EXPECT_EQ(half(midpoint).data, tie) << "k = " << k;
+        EXPECT_EQ(half(-midpoint).data, static_cast<uint16_t>(0x8000U | tie)) << "k = " << k;
+    }
+}
+
+TEST_F(TestHalf, SubnormalRoundsUpIntoSmallestNormal)
+{
+    // Anything above 1023.5 * 2^-24 rounds up to 2^-14, the smallest normal.
+    const float justBelowNormal = std::nextafter(subnormalUnits(1024), 0.0f);
+    EXPECT_EQ(half(justBelowNormal).data, 0x0400);
+    EXPECT_EQ(half(justBelowNormal).data, std::numeric_limits<half>::min().data);
+    EXPECT_EQ(half(subnormalUnits(1024)).data, 0x0400);
+}
+
+TEST_F(TestHalf, SubnormalUnderflowToSignedZero)
+{
+    // Strictly below half the smallest subnormal: rounds to zero, sign preserved.
+    const float belowHalfUlp = std::nextafter(subnormalMidpoint(0), 0.0f);
+    EXPECT_EQ(half(belowHalfUlp).data, 0x0000);
+    EXPECT_EQ(half(-belowHalfUlp).data, 0x8000);
+    EXPECT_TRUE(signbit(half(-belowHalfUlp)));
+
+    // Exactly half the smallest subnormal is a tie to even, i.e. zero.
+    EXPECT_EQ(half(subnormalMidpoint(0)).data, 0x0000);
+
+    // Just above it is the smallest subnormal.
+    EXPECT_EQ(half(std::nextafter(subnormalMidpoint(0), 1.0f)).data, 0x0001);
+}
+
+TEST_F(TestHalf, SubnormalRoundTripThroughFloat)
+{
+    for(int k = 1; k <= 1023; ++k)
+    {
+        const auto bits = static_cast<uint16_t>(k);
+        const half original = half::from_bits(bits);
+        EXPECT_EQ(half(static_cast<float>(original)).data, bits) << "k = " << k;
+
+        const auto negativeBits = static_cast<uint16_t>(0x8000U | static_cast<uint32_t>(k));
+        const half negative = half::from_bits(negativeBits);
+        EXPECT_EQ(half(static_cast<float>(negative)).data, negativeBits) << "k = " << k;
+    }
+}
+
+TEST_F(TestHalf, DenormMinIsRepresentableFromFloat)
+{
+    const half denormMin = std::numeric_limits<half>::denorm_min();
+    EXPECT_EQ(denormMin.data, 0x0001);
+
+    const auto asFloat = static_cast<float>(denormMin);
+    EXPECT_EQ(asFloat, subnormalUnits(1));
+    EXPECT_EQ(half(asFloat).data, 0x0001);
+    EXPECT_LT(asFloat, static_cast<float>(std::numeric_limits<half>::min()));
+    EXPECT_GT(asFloat, 0.0f);
 }
