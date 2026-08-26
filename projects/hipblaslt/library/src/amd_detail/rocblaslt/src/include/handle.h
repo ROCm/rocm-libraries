@@ -135,11 +135,11 @@ struct _rocblaslt_handle
     // Sticky bypass for scan_D once any caller observes a NaN.
     std::atomic<bool>     check_numerics_short_circuit{false};
 
-    // HIPBLASLT_CHECK_SYNCHRONIZER state. Read once in the ctor; opt-in via
-    // env. See check_synchronizer.hpp for the checker protocol.
+    // HIPBLASLT_CHECK_SYNCHRONIZER state, read once in the ctor. See
+    // check_synchronizer.hpp for the checker protocol.
     bool check_synchronizer = false;
-    // Host staging buffer for the Synchronizer readback, grown once to full
-    // size on first use and reused across every scanned call.
+    // Host staging for the Synchronizer readback, sized on first use and
+    // reused across every scanned call.
     std::vector<int> check_synchronizer_host;
 
     // Kernels treat these buffers as inter-workgroup flags that they set, spin

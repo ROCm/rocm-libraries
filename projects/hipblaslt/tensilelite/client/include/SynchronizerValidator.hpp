@@ -4,20 +4,16 @@
 /*! \file
  * \brief Post-launch dirty-buffer check for the shared Synchronizer buffer.
  *
- * Two unrelated kernel families share one Synchronizer allocation across
- * launches and must leave it at zero on exit so the next launch starts clean:
- * StreamK (which uses it as its work-queue / fixup Flags) and GSU
+ * Two kernel families share one Synchronizer allocation across launches and
+ * must leave it at zero on exit: StreamK (work-queue / fixup Flags) and GSU
  * MultipleBufferSingleKernel. Residue is silent -- it corrupts a later launch,
- * not the one that left it -- so this listener reads the buffer back and fails
- * the run on any nonzero int, clearing the residue so it is reported once
- * rather than by every solution that follows. It also fails when the buffer is
- * declared too narrow to scan in full.
+ * not the one that left it -- so this listener reads the buffer back, fails the
+ * run on any nonzero int, and clears it so it is reported once. It also fails
+ * when the buffer is declared too narrow to scan in full.
  *
  * On by default (GlobalParameters CheckSynchronizer); --check-synchronizer=0
- * turns it off. Being a default, it is built not to change what a config does:
- * it is passive (it inspects launches other listeners drive and never requests
- * one), and it skips solutions that are handed no Synchronizer at all, rather
- * than paying for a scan that could only ever come back clean.
+ * turns it off. A default must not change what a config does, so the listener
+ * is passive and skips solutions handed no Synchronizer.
  */
 
 #pragma once
@@ -66,18 +62,13 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override;
             virtual void postSolution() override;
 
-            // Purely passive: the check inspects launches other listeners drive
-            // and never asks for one of its own. Being on by default, it must
-            // not change what a config runs -- the ductile family sets
-            // NumElementsToValidate 0 and SyncsPerBenchmark 0 precisely so no
-            // kernel launches, and driving a run there would turn a zero-launch
-            // codegen test into NumWarmups (10) launches per solution while
-            // observing nothing a kernel actually did. Where nothing launches
-            // there is no residue to find, so skipping costs no coverage.
-            //
-            // Configs that do launch are unaffected: they set
-            // NumElementsToValidate to -1 or 128, so ReferenceValidator already
-            // drives one warmup per solution and validateWarmups still fires.
+            // Passive: inspect launches other listeners drive, never request
+            // one. Configs with NumElementsToValidate 0 and SyncsPerBenchmark 0
+            // launch no kernels by design; requesting a run there would cost
+            // NumWarmups launches per solution and observe nothing. Where
+            // nothing launches there is no residue, so this costs no coverage.
+            // Configs that do launch already drive a warmup via
+            // ReferenceValidator, so validateWarmups still fires.
             virtual bool needMoreRunsInSolution() const override
             {
                 return false;
@@ -93,9 +84,8 @@ namespace TensileLite
                                     hipStream_t const&  stream) override
             {
             }
-            // Runs after the first warmup launch. Any further warmups other
-            // listeners ask for run past this point and are not observed, so a
-            // check covers the launches since the previous one.
+            // Runs after the first warmup launch; later warmups are not
+            // observed, so a check covers the launches since the previous one.
             virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
                                          TimingEvents const&            startEvents,
                                          TimingEvents const&            stopEvents) override;
@@ -119,9 +109,8 @@ namespace TensileLite
                                       hipStream_t const&  stream) override
             {
             }
-            // Deliberately unchecked. Back-to-back launches are where work-queue
-            // races surface, but the readback synchronizes the stream, so checking
-            // here would perturb the very cadence the enqueues exercise.
+            // Deliberately unchecked: the readback synchronizes the stream,
+            // perturbing the back-to-back cadence these enqueues exercise.
             virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
                                           TimingEvents const&            startEvents,
                                           TimingEvents const&            stopEvents) override
@@ -140,8 +129,8 @@ namespace TensileLite
             /// `stage` names the launch phase, for the diagnostic.
             void checkInputs(std::shared_ptr<ProblemInputs> inputs, char const* stage);
 
-            /// Reads back one buffer, re-zeroing it only if it was left dirty.
-            /// Returns false when it was left dirty.
+            /// Reads back one buffer, re-zeroing it only when dirty.
+            /// Returns false when dirty.
             bool checkBuffer(ContractionProblemGemm const& problem,
                              void*                         deviceSynchronizer,
                              char const*                   stage,
@@ -167,9 +156,8 @@ namespace TensileLite
             // Protected so a test-only subclass can drive these without a GPU.
             bool m_dirtyInSolution = false;
             int  m_errorsReported  = 0;
-            // Whether the solution in hand is one of the two Synchronizer
-            // consumers. Set per solution in preSolution; stays true when the
-            // solution is unknown, so an unrecognised launch is scanned rather
+            // Whether the solution in hand is a Synchronizer consumer. True for
+            // an unknown solution, so an unrecognised launch is scanned rather
             // than silently skipped.
             bool m_usesSynchronizer = true;
         };

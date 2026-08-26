@@ -49,8 +49,8 @@ namespace
         {
             m_dirtyInSolution = true;
         }
-        // The gate no longer shows through needMoreRunsInSolution (the listener
-        // is passive), so tests read it here.
+        // The listener is passive, so the gate is not visible through
+        // needMoreRunsInSolution; read it directly.
         bool usesSynchronizer() const
         {
             return m_usesSynchronizer;
@@ -75,9 +75,8 @@ namespace
         return vm;
     }
 
-    // Only sizeMapping is read by the consumer gate, so a default-constructed
-    // solution with those fields set is enough. ContractionSolution is
-    // non-copyable, so this fills one in place rather than returning it.
+    // The gate reads only sizeMapping. ContractionSolution is non-copyable, so
+    // fill one in place rather than returning it.
     void setSolution(TensileLite::ContractionSolution& s,
                      int                               streamK,
                      int                               globalAccumulation,
@@ -92,9 +91,8 @@ namespace
 
 }
 
-// The listener is passive: it inspects launches other listeners drive and never
-// asks for one, so it cannot turn a zero-launch codegen config (validate 0,
-// syncs 0 -- the ductile family) into an execution one.
+// Passive, so it cannot turn a zero-launch codegen config (validate 0, syncs 0)
+// into an execution one.
 TEST(SynchronizerValidatorReporting, ValidatorNeverDrivesARun)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
@@ -130,8 +128,8 @@ TEST(SynchronizerValidatorReporting, StreamKSolutionIsChecked)
     EXPECT_TRUE(validator.usesSynchronizer());
 }
 
-// GSU MultipleBufferSingleKernel is the other consumer, and it is not StreamK
-// -- gating on StreamK alone would drop gsu_mbsk.yaml's coverage silently.
+// GSU MultipleBufferSingleKernel is the other consumer and is not StreamK, so
+// gating on StreamK alone would silently drop gsu_mbsk.yaml's coverage.
 TEST(SynchronizerValidatorReporting, MbskSolutionIsChecked)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
@@ -142,8 +140,7 @@ TEST(SynchronizerValidatorReporting, MbskSolutionIsChecked)
     EXPECT_TRUE(validator.usesSynchronizer());
 }
 
-// Unknown solution means unknown answer; scan rather than skip. This is what
-// the removed EnabledValidatorRequestsARunInSolution used to cover.
+// Unknown solution means unknown answer; scan rather than skip.
 TEST(SynchronizerValidatorReporting, UnknownSolutionIsChecked)
 {
     TestableSynchronizerValidator validator(enabledArgs());
@@ -175,8 +172,8 @@ TEST(SynchronizerValidatorReporting, ForceDPOnlyStreamKSolutionIsSkipped)
     EXPECT_FALSE(validator.usesSynchronizer());
 }
 
-// Everything else never receives the buffer, so the scan could only come back
-// clean. Skipping it is what keeps the check free on those runs.
+// Everything else never receives the buffer, so a scan could only come back
+// clean; skipping is what keeps the check free on those runs.
 TEST(SynchronizerValidatorReporting, NonConsumerSolutionIsSkipped)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
