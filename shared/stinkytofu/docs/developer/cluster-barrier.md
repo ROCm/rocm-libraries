@@ -56,7 +56,8 @@ cluster signal:
 ## Rule 2 -- First kernel load wait
 
 A single `s_barrier_wait -3` immediately before the first `tensor_load_to_lds`
-of the whole kernel.
+of the whole kernel, above any wait-cnt drains that precede it (see
+[Drain hoisting](#drain-hoisting)).
 
 ---
 
@@ -87,6 +88,29 @@ If SIA hoisted a live loop-exit `s_cmp_eq LCL, imm` whose SCC a downstream
 `cbranch` consumes, and no instruction between the signal and wait anchors
 redefines SCC, a clone of that compare is re-emitted after the signal block.
 
+### Drain hoisting
+
+`StinkyWaitCntInsertionPass` runs before this pass and anchors its counter
+drains on the same instructions the cluster waits target, so the slot right
+before an anchor is usually already occupied by an `s_wait_tensorcnt` (or
+another `s_wait_*cnt`). Every cluster wait -- Rules 2, 3(b) and 4(b) -- is
+therefore emitted **above** that run of drains:
+
+```asm
+    s_barrier_wait -3
+    s_wait_tensorcnt N
+    s_barrier_signal -1
+```
+
+Both orders are correct; the inverted one measured materially slower, and that
+measurement is the entire justification. **The mechanism is not established.**
+Both instructions block on independent conditions -- a per-wave local counter,
+and peer arrival at the barrier -- and two such waits commute, so the obvious
+"the drain overlaps the barrier latency" argument does not actually hold.
+
+Wait-cnt instructions never write SCC, so hoisting past them does not disturb
+the SCC restore below.
+
 ### Emitted shape (separated anchors)
 
 ```asm
@@ -97,6 +121,7 @@ redefines SCC, a clone of that compare is re-emitted after the signal block.
     <optional SCC restore cmp>
     ...
     s_barrier_wait -3
+    <wait-cnt drains hoisted below the cluster wait>
     s_barrier_signal -1
     s_barrier_wait -1
     tensor_load_to_lds ...

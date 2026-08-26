@@ -117,6 +117,37 @@ TEST(TestPackedFp4Tensor, FillWithRandomValuesMirrorsUnpackedTensor)
     }
 }
 
+// The mirror must hold at every COORDINATE, not merely slot for slot, or the FP4 MX
+// suites compare a GPU bundle against a reference bundle holding different values.
+// Column-major strides separate the two: logical element i no longer lives in nibble
+// slot i, so a fill that ignores strides lands every draw on the wrong coordinate.
+TEST(TestPackedFp4Tensor, FillWithRandomValuesMirrorsUnpackedTensorWhenColumnMajor)
+{
+    const std::vector<int64_t> dims = {3, 8};
+    const std::vector<int64_t> strides = {1, 3}; // column-major, dense
+    const float minValue = -6.0f;
+    const float maxValue = 6.0f;
+    const unsigned int seedValue = 1337u;
+
+    PackedFp4Tensor packed(dims, strides);
+    Tensor<fp4_e2m1> unpacked(dims, strides);
+    packed.fillTensorWithRandomValues(minValue, maxValue, seedValue);
+    unpacked.fillTensorWithRandomValues(minValue, maxValue, seedValue);
+
+    const auto* packedHost = static_cast<const uint8_t*>(packed.rawHostData());
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            // Read the packed buffer the way a kernel does: nibble at the stride offset.
+            const auto slot = static_cast<size_t>((i0 * strides[0]) + (i1 * strides[1]));
+            EXPECT_EQ(nibbleAt(packedHost, slot),
+                      static_cast<uint8_t>(unpacked.getHostValue(i0, i1).data & 0x0F))
+                << "mismatch at coordinate (" << i0 << "," << i1 << ")";
+        }
+    }
+}
+
 TEST(TestPackedFp4Tensor, FillWithDataCopiesAtMostPackedBytes)
 {
     PackedFp4Tensor tensor({4}, {1}); // 2 packed bytes

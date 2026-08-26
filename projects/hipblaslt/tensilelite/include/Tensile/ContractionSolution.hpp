@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -224,6 +225,12 @@ namespace TensileLite
         std::array<int, 2> waveGroup;
     };
 
+    struct CustomKernel
+    {
+        std::string name;
+        bool        generated = false;
+    };
+
     struct StreamKSettings
     {
         origami::reduction_t reduction = origami::reduction_t::tree;
@@ -238,6 +245,22 @@ namespace TensileLite
     {
         size_t globalAccumulation = 0;
     };
+
+    /**
+     * Thrown when a launch requests uniform summation order but the resolved
+     * kernel configuration is not row-uniform. A distinct type so the rocblaslt
+     * host layer can map it to rocblaslt_status_invalid_value; a generic
+     * exception would be swallowed and reported as an internal error.
+     */
+    class UniformSummationOrderError : public std::runtime_error
+    {
+    public:
+        explicit UniformSummationOrderError(const std::string& what)
+            : std::runtime_error(what)
+        {
+        }
+    };
+
     /**
      * Represents a single kernel or set of kernels that can perform a single
      * tensor contraction.
@@ -417,6 +440,11 @@ namespace TensileLite
         // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
+        // Selection-time filter for uniform summation order. Permissive about
+        // facts that only exist at solve(); checkUniformSummationOrder() is
+        // authoritative. Wired into softwarePredicate().
+        bool                 uniformSummationOrderSupported(Problem const&  problem,
+                                                            Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -704,7 +732,8 @@ namespace TensileLite
         std::shared_ptr<Predicates::Predicate<Hardware>> hardwarePredicate
             = std::make_shared<Predicates::True<Hardware>>();
 
-        SizeMapping sizeMapping;
+        SizeMapping  sizeMapping;
+        CustomKernel customKernel;
 
         InternalArgsSupport internalArgsSupport;
 
@@ -741,6 +770,17 @@ namespace TensileLite
         origami::data_type_t getOrigamiDatatype(Problem const&  problem) const;
         AdaptiveGemmNTAB calculateAdaptiveGemmNTAB(Problem const&  problem,
                                                    Hardware const* hardware) const;
+
+    private:
+        bool handwrittenCustomKernel() const;
+
+        // Launch gate. Call once sk and resolvedGlobalAccumulation are final.
+        void checkUniformSummationOrder(Problem const&         problem,
+                                        Hardware const&        hardware,
+                                        StreamKSettings const& sk,
+                                        size_t                 resolvedGlobalAccumulation,
+                                        uint32_t               gsu,
+                                        void const*            synchronizer) const;
     };
 
     template <typename TAct>

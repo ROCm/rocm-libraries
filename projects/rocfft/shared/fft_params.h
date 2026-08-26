@@ -1889,30 +1889,6 @@ public:
         return true;
     }
 
-    // TODO: temporary workaround awaiting robust support for
-    // 64-bit indexing in rocfft kernels.
-    bool may_need_64bit_indexing() const
-    {
-        for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
-        {
-            const auto& io_stride     = io == fft_io::fft_io_in ? istride : ostride;
-            const auto& io_dist       = io == fft_io::fft_io_in ? idist : odist;
-            const auto& io_array_type = io == fft_io::fft_io_in ? itype : otype;
-            const auto& io_offset     = io == fft_io::fft_io_in ? ioffset : ooffset;
-            const auto  io_length     = io == fft_io::fft_io_in ? ilength() : olength();
-            const auto  max_offset
-                = io_offset.empty() ? 0 : *std::max_element(io_offset.begin(), io_offset.end());
-            // Hermitian interleaved data may be re-interpreted as real data internally.
-            if((max_offset + compute_ptrdiff(io_length, io_stride, nbatch, io_dist))
-                   * (io_array_type == fft_array_type_hermitian_interleaved ? 2 : 1)
-               > static_cast<size_t>(INT32_MAX) + 1)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
     // Fill in any missing parameters.
     void validate()
     {

@@ -34,12 +34,13 @@ add_kernels_for_embedding(TARGET hip_kernel_provider_tests FILES ${CMAKE_CURRENT
 # Test binary needs its own copy of each pack's kernel (embedding is per-target).
 # Copied via configure_file: registering the same source for embedding in two
 # directories doubles its CMAKE_CONFIGURE_DEPENDS entry, which Ninja rejects as two
-# rules for one file. A loop, so a new pack adds its kernel to one list.
+# rules for one file. The list itself is the engine's, so a new pack adds its kernel
+# once and both binaries pick it up.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    set(HIP_KERNEL_PROVIDER_INGESTOR_TEST_KERNELS PointwiseAdd PointwiseSub)
-    foreach(kernel IN LISTS HIP_KERNEL_PROVIDER_INGESTOR_TEST_KERNELS)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/IngestorKernels.cmake")
+    foreach(kernel IN LISTS HIPDNN_INGESTOR_PACK_KERNELS)
         configure_file(
-            ${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/kernels/${kernel}.cpp
+            ${HIPDNN_INGESTOR_PACK_KERNEL_DIR}/${kernel}.cpp
             ${CMAKE_CURRENT_BINARY_DIR}/kernels/${kernel}.cpp
             COPYONLY
         )
@@ -88,10 +89,37 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     add_subdirectory(engines/hip_mlops_engine)
 endif()
 
+if(ENABLE_HIP_FLASH2_ENGINE)
+    add_subdirectory(engines/hip_flash2_engine)
+endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_subdirectory(engines/kernel_ingestor_engine)
+
+    # descriptorSearchDirectory()'s tests assert which of its three sources answered, and
+    # the only way to tell branch 2 or 3 from a failed lookup is that both end in this
+    # fixed offset. Same value the provider is compiled with, so the test cannot drift
+    # into asserting a path the provider never builds.
+    #
+    # The staged tree's own path rides along so main() can point this binary at the
+    # descriptors with no ctest in the loop -- see the note there.
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
+        HIPDNN_TEST_DESCRIPTOR_DIR="${HIPDNN_DESCRIPTOR_BUILD_DIR}")
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
 
+# No ENVIRONMENT for the descriptors: main() applies the compiled-in path, so the binary
+# runs standalone and nothing machine-specific reaches the generated CTest files. The
+# install-time file is written from this same list, where a build-tree path would name a
+# directory that does not exist on the machine running the installed suite.
 add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# Published one scope up for the same reason the integration tests do it: under YAML
+# categorization the raw test name is never registered, so the tiered suites created by
+# apply_test_category_labels() in ../CMakeLists.txt are the only place the ambient test
+# environment -- an ASAN symbolizer path, a coverage profile destination -- can land.
+if(DEFINED hip_kernel_provider_tests_TEST_ENVIRONMENT)
+    set(hip_kernel_provider_tests_TEST_ENVIRONMENT
+        "${hip_kernel_provider_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
+endif()
