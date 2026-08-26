@@ -171,7 +171,23 @@ from .common.sparse_attention import (  # noqa: F401
     vsa_sparse_attention_signature,
 )
 
-# --- Convolution (dgrad) ---
+# --- Convolution ---
+from .common._conv_implicit_gemm_common import (  # noqa: F401
+    ConvAccumulatorEpilogue,
+    ConvDataSpec,
+    ConvProblem,
+    make_a_descriptor,
+)
+from .common.conv_implicit_gemm import (  # noqa: F401
+    ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
+    is_valid_spec as is_valid_fwd_spec,
+)
+from .common.conv_implicit_gemm_wgrad import (  # noqa: F401
+    WgradConvSpec,
+    build_implicit_gemm_conv_wgrad,
+    is_valid_wgrad_spec,
+)
 from .common.conv_implicit_gemm_dgrad import (  # noqa: F401
     DgradConvSpec,
     SubGemmParams,
@@ -180,4 +196,23 @@ from .common.conv_implicit_gemm_dgrad import (  # noqa: F401
     enumerate_sub_gemms,
     is_valid_dgrad_spec,
     pack_sub_gemm_buffer,
+)
+from .common.conv_direct_grouped import (  # noqa: F401
+    DirectConv16cSpec,
+    DirectConv4cSpec,
+    DirectConvProblem,
+    build_direct_conv_16c,
+    build_direct_conv_4c,
+)
+from .common.deep_fused_conv_pool import (  # noqa: F401
+    DeepFusedConvPoolSpec,
+    FusedConvPoolProblem,
+    build_deep_fused_conv_pool,
+    make_deep_fused_conv_pool_spec,
+)
+from .common.img2col import (  # noqa: F401
+    Img2ColSpec,
+    build_img2col,
+    img2col_grid,
+    img2col_signature,
 )
