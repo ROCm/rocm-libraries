@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "GpuRefCommonArgs.h"
 #include "GpuRefConvArgs.h"
 #include "GpuRefPointwiseArgs.h"
 #include "GpuRefRMSNormArgs.h"
