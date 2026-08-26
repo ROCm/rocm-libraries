@@ -114,49 +114,24 @@ prompt and go straight to Step 2.
 
 #### Before you commit to a kernel, check it can be verified
 
-Stage 8 needs a **reference** to compare against, and the shared executors only reference
-what they can express. Both are dense and stride-based, and both decline anything else
-up front:
+Stage 8 compares your engine against a shared reference executor, and those executors
+are dense and stride-based — they decline paged KV, varlen, ragged tensors and
+block-sparse/sinks rather than compute something wrong. **Read
+`dnn-providers/integration-tests/README.md` § *What the reference executors cannot
+verify*** for the current decline list and what closes a gap; that file owns this, and it
+is true of every engine, not just ingestor ones.
 
-| Graph feature | Attribute | CPU exec | GPU exec |
-|---|---|---|---|
-| paged KV | `page_table_k/v_tensor_uid` (node) | declines | declines |
-| varlen | `seq_len_q/kv_tensor_uid` (node) | declines | declines |
-| ragged | `ragged_offset_tensor_uid` (**tensor**) | declines | declines |
-| block-sparse / sinks | `block_mask_/sink_token_tensor_uid` | declines | declines |
+What is yours to do here is one check, before mining anything: **does this kernel have a
+path the reference can express?** Grep the builder for the feature's plumbing and see
+whether an `if` guards it. `attention_dense` branches on `if spec.paged:` around a real
+dense alternative, so a dense variant set is available. `attention_tiled_3d` routes every
+K/V access through a block table with no branch — paged-only, no dense subset to ship.
 
-(`test_sdk/.../cpu_graph_executor/detail/SdpaFwdPlan.hpp` and `PlanUtils.hpp`'s
-`CHECK_NO_RAGGED_TENSORS`; `integration-tests/src/harness/gpu-graph-executor/detail/
-GpuSdpaFwdPlan.hpp`.)
-
-**These three are different things, and conflating them produces a wrong matcher.**
-Paged is a block-table indirection into a physical cache. Varlen is per-batch valid
-lengths inside a *padded* buffer. Ragged is one contiguous buffer where batch `b` lives
-at `[off[b], off[b+1])` with *no* padding — a property of the TENSOR, not the node, and
-gated on plugin API version (`K_RAGGED_TENSOR_MIN_API_VERSION`). A kernel parameter named
-`seq_lens_ptr` could be any of them; settle it from the address arithmetic, never the
-name.
-
-So, before mining anything, ask: **does this kernel have a dense path at all?** Grep its
-builder for the feature's plumbing and check whether an `if` guards it. If every K/V
-access routes through a block table with no branch, the kernel is paged-*only* and there
-is no dense subset to ship.
-
-If it is dense-only-capable, proceed normally. If not, say so **now**, before Step 2, and
-get a decision — because the options are all expensive:
-
-- Write a gather/expand adapter (paged→dense via the block table, ragged→padded via the
-  offset table) so the existing reference can be reached. Pure address remapping, no new
-  math, and it unblocks every later engine of that shape. The right fix, but it is a
-  change to the shared harness, not to your engine.
-- Hand-roll a reference. **Weakest option** — a reference you write from the same kernel
-  you are integrating proves self-consistency, not correctness, and a shared
-  misunderstanding cancels out silently.
-- Pick a different kernel.
-
-**For a first integration, prefer a kernel the shared references already cover.** Reaching
-stage 8 on a dense kernel teaches the whole flow; a kernel needing harness work teaches
-the flow *plus* an unrelated problem, and the second one dominates.
+If a path exists, proceed. If not, say so **now** rather than at stage 8, and get a
+decision: adapt the harness, pick a different kernel, or accept the integration cannot be
+numerically verified yet. **For a first integration, prefer a kernel the shared
+references already cover** — stage 8 on a dense kernel teaches this flow, while an
+uncovered one adds an unrelated harness problem that will dominate the session.
 
 ### Step 2 — Infer aggressively from the source
 
