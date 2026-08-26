@@ -101,10 +101,12 @@ from .common.conv_winograd import (  # noqa: F401
     WINOGRAD_TILES,
     build_winograd_data_transform,
     build_winograd_filter_transform,
+    build_winograd_gemm,
     build_winograd_output_transform,
     is_valid_spec as is_valid_winograd_spec,
     winograd_data_transform_grid,
     winograd_filter_transform_grid,
+    winograd_gemm_grid,
     winograd_output_transform_grid,
 )
 from .common.conv_implicit_gemm_dgrad import (  # noqa: F401

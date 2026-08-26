@@ -3,17 +3,15 @@
 """Correctness tests for the Winograd convolution kernels.
 
 Tests input-to-output correctness: given an NHWC input and a KYXC filter,
-the Winograd pipeline must produce the same NHWK output as torch.nn.functional.conv2d.
+the full GPU Winograd pipeline must produce the same NHWK output as
+torch.nn.functional.conv2d.
 
-The Winograd pipeline is:
-  GPU  data_transform  : B^T × input_patch × B    per (n, tile_h, tile_w, c)
-  GPU  filter_transform: G × filter × G^T          per (k, c)   [once]
-  CPU  GEMM            : DataWs @ FilterWs^T        per (xh, xw) [batched matmul]
-  GPU  output_transform: A^T × gemm_result × A     per (n, tile_h, tile_w, k)
-
-The GEMM step runs on CPU (torch.matmul) so only the transform kernels are
-tested on GPU. This is the standard approach for validating transform-only
-kernel families before integrating the full GPU GEMM backend.
+Full GPU pipeline:
+  1. GPU  data_transform   : B^T × input_patch × B   → DataWs  (f16)
+  2. GPU  filter_transform : G × filter × G^T         → FilterWs (f16)
+  3. GPU  batched GEMM     : DataWs @ FilterWs^T       → GemmWs  (f16)
+                             (xs² strided-batched MFMA GEMM via gemm_universal)
+  4. GPU  output_transform : A^T × GemmWs × A          → D       (f16)
 
 Shapes: 3×3 filter, stride=1, dilation=1, NHWC layout.
 
@@ -27,7 +25,6 @@ from __future__ import annotations
 import ctypes
 import importlib.util
 import math
-import sys
 import unittest
 from dataclasses import dataclass
 from typing import List, Tuple
@@ -99,7 +96,7 @@ def _u8(t):
 
 
 def _winograd_sig(kern):
-    """Build a KernelLauncher signature from kernel params."""
+    """Build a KernelLauncher-compatible signature from a KernelDef's params."""
 
     def _size(type_name: str) -> int:
         return 8 if type_name.startswith("ptr") else 4
@@ -110,12 +107,18 @@ def _winograd_sig(kern):
     ]
 
 
+def _wave_size(arch: str) -> int:
+    from rocke.core.arch import ArchTarget
+
+    return ArchTarget.from_gfx(arch).wave_size
+
+
 def _run_winograd_conv(
     arch: str,
     shape: _Shape,
     out_tile: int,
 ) -> Tuple[bool, str]:
-    """Run the full Winograd pipeline and compare against torch F.conv2d.
+    """Run the full GPU Winograd pipeline and compare against torch F.conv2d.
 
     Input:  (N, Hi, Wi, C)  fp16 NHWC
     Filter: (K, 3, 3, C)    fp16 KYXC
@@ -132,16 +135,17 @@ def _run_winograd_conv(
         WinogradProblem,
         build_winograd_data_transform,
         build_winograd_filter_transform,
+        build_winograd_gemm,
         build_winograd_output_transform,
         is_valid_spec,
         winograd_data_transform_grid,
         winograd_filter_transform_grid,
+        winograd_gemm_grid,
         winograd_output_transform_grid,
     )
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-    # Problem object
     problem = WinogradProblem(
         N=shape.N,
         Hi=shape.Hi,
@@ -151,6 +155,9 @@ def _run_winograd_conv(
         pH=shape.pH,
         pW=shape.pW,
     )
+
+    wave = _wave_size(arch)
+    warp_mn = 16  # safe for all arches (wave32 WMMA or wave64 MFMA)
 
     block_c = min(32, shape.C)
     block_k = min(32, shape.K)
@@ -163,16 +170,26 @@ def _run_winograd_conv(
         block_c=block_c,
         block_k=block_k,
         block_nhw=block_nhw,
+        # GEMM tile — small so it's valid on all arches
+        gemm_tile_m=32,
+        gemm_tile_n=32,
+        gemm_tile_k=32,
+        gemm_warp_m=2,
+        gemm_warp_n=1 if wave == 32 else 2,
+        gemm_warp_tile_m=warp_mn,
+        gemm_warp_tile_n=warp_mn,
+        gemm_warp_tile_k=warp_mn,
     )
 
     ok, reason = is_valid_spec(spec, arch)
     if not ok:
         return True, f"skip (invalid spec): {reason}"
 
-    # Build all three transform kernels
+    # Build all four kernels
     try:
         kd = build_winograd_data_transform(spec, arch=arch)
         kf = build_winograd_filter_transform(spec, arch=arch)
+        kg = build_winograd_gemm(spec, arch=arch)
         ko = build_winograd_output_transform(spec, arch=arch)
     except (ValueError, Exception) as e:
         return False, f"IR build failed: {e}"
@@ -180,6 +197,7 @@ def _run_winograd_conv(
     try:
         art_d = compile_kernel(kd, arch=arch)
         art_f = compile_kernel(kf, arch=arch)
+        art_g = compile_kernel(kg, arch=arch)
         art_o = compile_kernel(ko, arch=arch)
     except Exception as e:
         return False, f"compile failed: {e}"
@@ -192,23 +210,22 @@ def _run_winograd_conv(
     W_t = torch.empty(shape.K, 3, 3, shape.C, dtype=torch.float16).uniform_(-1, 1)
     D_t = torch.zeros(shape.N, problem.Ho, problem.Wo, shape.K, dtype=torch.float16)
 
-    # Reference: torch F.conv2d (NCHW in, NCHW out → NHWK)
+    # Reference: torch F.conv2d
     A_nchw = A_t.float().permute(0, 3, 1, 2).contiguous()
     W_kcyx = W_t.float().permute(0, 3, 1, 2).contiguous()
     ref_nchw = F.conv2d(A_nchw, W_kcyx, padding=shape.pH)
     ref_nhwk = ref_nchw.permute(0, 2, 3, 1).contiguous().half()
 
-    # Workspace sizes (f32)
+    # Workspace sizes (all f16 = 2B per element)
     xs = spec.xform_size
     ntotal = shape.N * spec.num_tiles
-    dws_bytes = xs * xs * ntotal * shape.C * 4
-    fws_bytes = xs * xs * shape.K * shape.C * 4
-    gws_bytes = xs * xs * ntotal * shape.K * 4
+    dws_bytes = xs * xs * ntotal * shape.C * 2
+    fws_bytes = xs * xs * shape.K * shape.C * 2
+    gws_bytes = xs * xs * ntotal * shape.K * 2
 
-    if max(dws_bytes, fws_bytes, gws_bytes) > 2**31 - 1:
+    if max(dws_bytes, fws_bytes, gws_bytes, A_t.nbytes, W_t.nbytes) > 2**31 - 1:
         return True, "skip (workspace exceeds i32 range)"
 
-    # GPU allocations
     rt = Runtime()
     A_dev = rt.alloc(A_t.nbytes)
     W_dev = rt.alloc(W_t.nbytes)
@@ -228,7 +245,6 @@ def _run_winograd_conv(
         for dev in (A_dev, W_dev, DataWs_dev, FilterWs_dev, GemmWs_dev, D_dev):
             rt.free(dev)
 
-    # Launchers
     try:
         launch_d = KernelLauncher(
             hsaco=art_d.hsaco,
@@ -240,6 +256,11 @@ def _run_winograd_conv(
             kernel_name=art_f.kernel_name,
             signature=_winograd_sig(kf),
         )
+        launch_g = KernelLauncher(
+            hsaco=art_g.hsaco,
+            kernel_name=art_g.kernel_name,
+            signature=_winograd_sig(kg),
+        )
         launch_o = KernelLauncher(
             hsaco=art_o.hsaco,
             kernel_name=art_o.kernel_name,
@@ -249,7 +270,9 @@ def _run_winograd_conv(
         _free_all()
         return False, f"kernel load failed: {e}"
 
-    # ----- GPU Step 1: data transform -----
+    block_size = spec.gemm_warp_m * spec.gemm_warp_n * 1 * wave
+
+    # Step 1: data transform
     launch_d(
         {
             "A": A_dev,
@@ -259,12 +282,12 @@ def _run_winograd_conv(
         },
         config=LaunchConfig(
             grid=winograd_data_transform_grid(spec),
-            block=(block_nhw * block_c, 1, 1),
+            block=(block_c * block_nhw, 1, 1),
             fence=True,
         ),
     )
 
-    # ----- GPU Step 2: filter transform -----
+    # Step 2: filter transform
     launch_f(
         {
             "W": W_dev,
@@ -279,26 +302,28 @@ def _run_winograd_conv(
         ),
     )
 
-    # ----- CPU Step 3: GEMM in xform domain -----
-    DataWs_cpu = torch.zeros(xs * xs * ntotal * shape.C, dtype=torch.float32)
-    FilterWs_cpu = torch.zeros(xs * xs * shape.K * shape.C, dtype=torch.float32)
-    rt.memcpy_d2h(_u8(DataWs_cpu), DataWs_dev, dws_bytes)
-    rt.memcpy_d2h(_u8(FilterWs_cpu), FilterWs_dev, fws_bytes)
+    # Step 3: batched GEMM (xs^2 instances, M=ntotal, N=K, K_gemm=C)
+    # A=DataWs, B=FilterWs, C=GemmWs; strides in elements
+    stride_a = ntotal * shape.C  # between xform-domain slabs in DataWs
+    stride_b = shape.K * shape.C  # between slabs in FilterWs
+    stride_c = ntotal * shape.K  # between slabs in GemmWs
+    gx, gy, gz = winograd_gemm_grid(spec)
+    launch_g(
+        {
+            "A": DataWs_dev,
+            "B": FilterWs_dev,
+            "C": GemmWs_dev,
+            "M": ntotal,
+            "N": shape.K,
+            "K": shape.C,
+            "stride_a": stride_a,
+            "stride_b": stride_b,
+            "stride_c": stride_c,
+        },
+        config=LaunchConfig(grid=(gx, gy, gz), block=(block_size, 1, 1), fence=True),
+    )
 
-    # Reshape to (xs, xs, ntotal, C) and (xs, xs, K, C)
-    DataWs_4d = DataWs_cpu.view(xs, xs, ntotal, shape.C)
-    FilterWs_4d = FilterWs_cpu.view(xs, xs, shape.K, shape.C)
-
-    # Batched matmul: (xs, xs, ntotal, C) × (xs, xs, C, K) → (xs, xs, ntotal, K)
-    GemmWs_4d = torch.bmm(
-        DataWs_4d.view(xs * xs, ntotal, shape.C),
-        FilterWs_4d.view(xs * xs, shape.K, shape.C).transpose(1, 2),
-    ).view(xs, xs, ntotal, shape.K)
-
-    GemmWs_flat = GemmWs_4d.reshape(-1).contiguous()
-    rt.memcpy_h2d(GemmWs_dev, _u8(GemmWs_flat), gws_bytes)
-
-    # ----- GPU Step 4: output transform -----
+    # Step 4: output transform
     launch_o(
         {
             "GemmWs": GemmWs_dev,
@@ -317,7 +342,7 @@ def _run_winograd_conv(
     rt.memcpy_d2h(_u8(D_cpu), D_dev, D_t.nbytes)
     _free_all()
 
-    # ----- Compare -----
+    # Compare
     out_f32 = D_cpu.float()
     ref_f32 = ref_nhwk.float()
     abs_diff = (out_f32 - ref_f32).abs()
@@ -326,10 +351,7 @@ def _run_winograd_conv(
     passed = rel_err < _TOL
     msg = f"rel_err={rel_err:.2e} tol={_TOL:.1e}"
     if not passed:
-        msg += (
-            f"  max_abs_diff={float(abs_diff.max()):.4f}"
-            f"  ref_max={float(ref_f32.abs().max()):.4f}"
-        )
+        msg += f"  max_abs={float(abs_diff.max()):.4f}  ref_max={float(ref_f32.abs().max()):.4f}"
     return passed, msg
 
 
@@ -340,10 +362,10 @@ def _run_winograd_conv(
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
 class TestWinogradConvCorrectness(unittest.TestCase):
-    """End-to-end conv correctness: input NHWC → Winograd pipeline → output NHWK.
+    """End-to-end conv correctness: full GPU pipeline vs torch.nn.functional.conv2d.
 
-    Compares against torch.nn.functional.conv2d for each (shape, out_tile) pair.
-    The GEMM step runs on CPU (torch.bmm); only the transform kernels run on GPU.
+    All four steps (data_transform, filter_transform, batched GEMM, output_transform)
+    run on GPU. No CPU fallback.
     """
 
     def _check(self, shape: _Shape, out_tile: int) -> None:
@@ -357,16 +379,14 @@ class TestWinogradConvCorrectness(unittest.TestCase):
         )
         print(f"  PASS {shape.id} f{out_tile}x3  {msg}", flush=True)
 
-    # One test method per out_tile so failures are clearly attributed.
-
     def test_f2x3(self):
-        """F(2,3) — 4×4 transform domain."""
+        """F(2,3) — 4×4 transform domain, 16 GEMM batches."""
         for shape in _SHAPES:
             with self.subTest(shape=shape.id):
                 self._check(shape, out_tile=2)
 
     def test_f4x3(self):
-        """F(4,3) — 6×6 transform domain."""
+        """F(4,3) — 6×6 transform domain, 36 GEMM batches."""
         for shape in _SHAPES:
             with self.subTest(shape=shape.id):
                 self._check(shape, out_tile=4)
