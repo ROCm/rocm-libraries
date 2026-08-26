@@ -450,8 +450,17 @@ engine directly and do not have this problem.
 
 #### Build and confirm
 
+**Use `skill://hipdnn-superbuild` rather than hand-rolling a configure.** It carries the
+repo-root rule, the preset table, the `rocm-clang` toolchain and the stale-cache retry.
+Hand-rolling those loses ~30 minutes to a system-GCC fallback that presents as dozens of
+`-Werror` failures in files you never touched. That skill's configure step also lists the
+ingestor/rocKE flags, which are all default-off and set by no preset.
+
+If a build already exists, rebuild incrementally rather than reconfiguring:
+
 ```
-cmake --build <build-dir> --target hip_kernel_provider
+cmake --build <build-dir> -j48 --target hip_kernel_provider hipdnn_list_engines \
+    hipdnn_validate_descriptors hip_kernel_provider_integration_tests
 <build-dir>/bin/hipdnn_list_engines | grep <engine-name>
 ```
 
