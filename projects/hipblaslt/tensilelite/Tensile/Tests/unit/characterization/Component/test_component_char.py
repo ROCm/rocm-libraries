@@ -28,14 +28,18 @@ pytestmark = pytest.mark.unit
 
 
 def _writer(version=(9, 4, 2), asmCaps=None, archCaps=None, kernel=None):
-    states = types.SimpleNamespace(asmCaps=asmCaps or {}, archCaps=archCaps or {},
-                                   kernel=kernel or {})
+    states = types.SimpleNamespace(
+        asmCaps=asmCaps or {}, archCaps=archCaps or {}, kernel=kernel or {}
+    )
     return types.SimpleNamespace(version=version, states=states)
 
 
 # --- isolated test hierarchy (registered once at import) --------------------
 
-class _CharBase(Component):  # abstract (no __call__) -> a fresh implementations registry
+
+class _CharBase(
+    Component
+):  # abstract (no __call__) -> a fresh implementations registry
     pass
 
 
@@ -74,15 +78,16 @@ class _CharNestLeaf(_CharNestMid):
 # PartialMatch
 # ===========================================================================
 
+
 def test_partial_match_callable_true_false():
     assert PartialMatch(lambda o: o > 0, 5) is True
     assert PartialMatch(lambda o: o > 0, -1) is False
 
 
 def test_partial_match_mapping():
-    assert PartialMatch({"a": 1}, {"a": 1, "b": 2}) is True       # subset match
-    assert PartialMatch({"a": 1}, {"b": 2}) is False              # key missing
-    assert PartialMatch({"a": 1}, {"a": 2}) is False              # value mismatch
+    assert PartialMatch({"a": 1}, {"a": 1, "b": 2}) is True  # subset match
+    assert PartialMatch({"a": 1}, {"b": 2}) is False  # key missing
+    assert PartialMatch({"a": 1}, {"a": 2}) is False  # value mismatch
 
 
 def test_partial_match_nested_and_scalar():
@@ -103,6 +108,7 @@ def test_partial_match_debug_paths():
 # matches / versions
 # ===========================================================================
 
+
 def test_matches_capability():
     # asmCaps pattern present in the writer -> match; absent -> mismatch.
     assert _CharImplCap.matches(_writer(asmCaps={"capX": True})) is True
@@ -122,6 +128,7 @@ def test_component_base_matches_true():
 # ===========================================================================
 # findAll / find
 # ===========================================================================
+
 
 def test_find_single(snapshot):
     # Only _CharImplCap matches (wrong version excludes the versioned impl).
@@ -163,10 +170,54 @@ def test_findall_recurses_into_abstract(snapshot):
 # LocalRead helpers (called unbound with stubs — no registry pollution)
 # ===========================================================================
 
+
+def _tdm_split_writer(parity=0, half0=10, half1=20, boundary=128):
+    """Stub writer for the TDMSplit LocalRead mem-token helpers."""
+    return types.SimpleNamespace(
+        states=types.SimpleNamespace(
+            ldsReadTokenIdx=parity,
+            memTokenLdsSplit=[[half0, half1]],
+        ),
+        tdmSplitLdsBoundary=lambda kernel, tP: boundary,
+    )
+
+
+def _tdm_split_kernel_tP(swap=0, is_m=False):
+    kernel = {"TDMSplit": True, "ProblemType": {"Sparse": False}}
+    tP = {"isM": is_m, "localReadSwapByteOffset": swap}
+    return kernel, tP
+
+
 def test_localread_get_lds_read_mem_token():
     writer = types.SimpleNamespace(states=types.SimpleNamespace(ldsReadTokenIdx=3))
-    token, idx = LocalRead._getLdsReadMemToken(types.SimpleNamespace(), writer, {"TDMSplit": False}, None)
+    token, idx = LocalRead._getLdsReadMemToken(
+        types.SimpleNamespace(), writer, {"TDMSplit": False}, None
+    )
     assert idx == 3
+
+
+def test_localread_get_lds_read_mem_token_tdmsplit_both_halves():
+    # numVectorsPerTile==1 carries both half tokens so the half1 load is waited.
+    writer = _tdm_split_writer(half0=10, half1=20)
+    kernel, tP = _tdm_split_kernel_tP()
+    token, idx = LocalRead._getLdsReadMemToken(
+        types.SimpleNamespace(), writer, kernel, tP, ldsByteOffset=64, bothHalves=True
+    )
+    assert list(token.tokens) == [10, 20]
+    assert idx == 10
+
+
+def test_localread_get_lds_read_mem_token_tdmsplit_half_by_offset():
+    writer = _tdm_split_writer(half0=10, half1=20, boundary=128)
+    kernel, tP = _tdm_split_kernel_tP(swap=0)
+    _, idx0 = LocalRead._getLdsReadMemToken(
+        types.SimpleNamespace(), writer, kernel, tP, ldsByteOffset=64, bothHalves=False
+    )
+    _, idx1 = LocalRead._getLdsReadMemToken(
+        types.SimpleNamespace(), writer, kernel, tP, ldsByteOffset=200, bothHalves=False
+    )
+    assert idx0 == 10
+    assert idx1 == 20
 
 
 def test_localread_emit_lds_read():
@@ -185,19 +236,68 @@ def test_localread_emit_lds_read():
         _getLdsReadMemToken=lambda w, k, t, u, v: ("TOKEN", 5)
     )
     # comment set -> the "%s sync LDS%u" branch.
-    LocalRead._emitLdsRead(fake_self, None, None, None, _Inst, "dst", "src", "ds",
-                           module, comment="cmt")
+    LocalRead._emitLdsRead(
+        fake_self, None, None, None, _Inst, "dst", "src", "ds", module, comment="cmt"
+    )
     # comment empty -> the "sync LDS%u" branch.
-    LocalRead._emitLdsRead(fake_self, None, None, None, _Inst, "dst", "src", "ds", module)
+    LocalRead._emitLdsRead(
+        fake_self, None, None, None, _Inst, "dst", "src", "ds", module
+    )
     assert len(added) == 2
     assert added[0].tok == "TOKEN" and added[0].kw["comment"] == "cmt sync LDS5"
     assert added[1].kw["comment"] == "sync LDS5"
+
+
+def test_localread_emit_lds_read_both_halves_joins_sync_comments():
+    added = []
+
+    class _Inst:
+        def __init__(self, **kw):
+            self.kw = kw
+            self.tok = None
+
+        def setMemToken(self, t):
+            self.tok = t
+
+    writer = _tdm_split_writer(half0=10, half1=20)
+    kernel, tP = _tdm_split_kernel_tP()
+    module = types.SimpleNamespace(add=added.append)
+    fake_self = types.SimpleNamespace()
+    fake_self._getLdsReadMemToken = lambda *a, **k: LocalRead._getLdsReadMemToken(
+        fake_self, *a, **k
+    )
+    LocalRead._emitLdsRead(
+        fake_self,
+        writer,
+        kernel,
+        tP,
+        _Inst,
+        "dst",
+        "src",
+        "ds",
+        module,
+        ldsByteOffset=64,
+        bothHalves=True,
+        comment="cmt",
+    )
+    assert added[0].kw["comment"] == "cmt sync LDS10, sync LDS20"
+    assert list(added[0].tok.tokens) == [10, 20]
 
 
 # ===========================================================================
 # componentPath / commentHeader
 # ===========================================================================
 
+
 def test_component_path_and_comment_header(snapshot):
     inst = _CharImplCap()
-    assert {"path": _CharImplCap.componentPath(), "comment": inst.commentHeader()} == snapshot
+    assert {
+        "path": _CharImplCap.componentPath(),
+        "comment": inst.commentHeader(),
+    } == snapshot
+
+
+def test_component_path_explicit_bases_matches_default():
+    # Passing bases= skips the default `if bases is None` assignment.
+    explicit = _CharImplCap.componentPath(bases=_CharImplCap.__bases__)
+    assert explicit == _CharImplCap.componentPath()
