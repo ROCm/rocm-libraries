@@ -1506,8 +1506,8 @@ def cases():
     # Winograd conv: data / filter / output transform kernels.
     # Two tile variants (F(2,3) and F(4,3)) on gfx942 and gfx950.
     # The transform kernels are arch-neutral (no MFMA/WMMA), so the same
-    # shape covers all supported arches; we use gfx942 and gfx950 to anchor
-    # both CDNA families in the golden.
+    # shape covers all supported arches; we use gfx942 and gfx950 in
+    # the golden.
     for _arch in ("gfx942", "gfx950"):
         for _ot, _ot_tag in ((2, "f2x3"), (4, "f4x3")):
             for _sub in ("data", "filter", "output"):
