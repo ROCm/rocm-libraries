@@ -41,8 +41,8 @@ struct StockhamKernelRR : public StockhamKernel
     StatementList calculate_offsets() override
     {
         Variable d{"d", rtc_index_type(IndexType::U32)};
-        Variable index_along_d{"index_along_d", "index_type"};
-        Variable remaining{"remaining", "index_type"};
+        Variable index_along_d{"index_along_d", rtc_index_type(IndexType::U32)};
+        Variable remaining{"remaining", rtc_index_type(IndexType::U32)};
 
         StatementList stmts;
         stmts += Declaration{thread};

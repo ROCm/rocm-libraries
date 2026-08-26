@@ -1066,7 +1066,7 @@ struct StockhamTransform
     FFTBuffer X{"X", Variable{"offset_lds", rtc_index_type(IndexType::U32)}, Literal{1}};
 
     Variable dim{"dim", rtc_index_type(IndexType::U32)};
-    Variable nbatch{"nbatch", rtc_index_type(IndexType::U32)};
+    Variable nbatch{"nbatch", "index_type"};
     Variable lengths{"lengths", rtc_index_type(IndexType::U32), true, true};
     Variable stride{"stride", "index_type", true, true};
     Variable offset{"offset", "index_type"};
