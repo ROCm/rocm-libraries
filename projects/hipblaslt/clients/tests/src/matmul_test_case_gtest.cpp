@@ -43,6 +43,7 @@ namespace
                                                      arguments.a_type,
                                                      arguments.b_type,
                                                      arguments.c_type,
+                                                     arguments.d_type,
                                                      computeType,
                                                      coefficientType,
                                                      arguments.d_type,
@@ -233,6 +234,19 @@ TEST(MatmulPreparation, CountsPointerArrayStoragePerBatch)
     EXPECT_EQ(preparation.cases.front().a.elements, 28);
     EXPECT_EQ(preparation.cases.front().b.elements, 40);
     EXPECT_EQ(preparation.rotatingBytes, 948);
+}
+
+TEST(MatmulPreparation, CountsDistinctCAndDStorageTypes)
+{
+    auto arguments   = baseArguments();
+    arguments.c_type = HIP_R_16F;
+    arguments.d_type = HIP_R_32F;
+    arguments.beta   = 1.0;
+
+    const auto preparation = prepare(arguments);
+
+    ASSERT_EQ(preparation.cases.size(), 1);
+    EXPECT_EQ(preparation.rotatingBytes, 376);
 }
 
 TEST(MatmulPreparation, IsolatesSwizzledDeviceGeometry)

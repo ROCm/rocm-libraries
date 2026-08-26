@@ -156,6 +156,7 @@ namespace hipblaslt::client
                                          std::span<const MatmulTestCase> matmulCases,
                                          hipDataType                     inputTypeA,
                                          hipDataType                     inputTypeB,
+                                         hipDataType                     inputTypeC,
                                          hipDataType                     outputType,
                                          hipDataType                     computeScalarType,
                                          hipDataType                     coefficientType,
@@ -336,7 +337,7 @@ namespace hipblaslt::client
             const size_t inputCBytes
                 = get_computeInterface(preparedCase.beta, computeScalarType) == 0
                       ? 0
-                      : testCase.c.allocationElements * realDataTypeSize(outputType);
+                      : testCase.c.allocationElements * realDataTypeSize(inputTypeC);
             if(testCase.batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
             {
                 preparation.rotatingBytes
