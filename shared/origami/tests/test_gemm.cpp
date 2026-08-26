@@ -2091,3 +2091,47 @@ TEST_CASE("GEMM: hybrid_mode_to_string", "[gemm][hybrid]") {
   REQUIRE(origami::hybrid_mode_to_string(origami::hybrid_mode_t::dynamic) == "dynamic");
   REQUIRE(origami::hybrid_mode_to_string(origami::hybrid_mode_t::none) == "none");
 }
+
+// Verify skinny-M TN and skinny-N NT predicted latencies are finite and not
+// wildly inflated relative to equivalent NN shapes after the L1 headroom fix.
+//
+// Shape selection rationale (to satisfy the short-circuit guard):
+//   TN skinny-M: M=256 (grid_m=2), N=8192 (grid_n=32) → skinny_m fires.
+//     Short-circuit sees M<=MT_M*2 && !b_trans && N/M>5 → forces hints_b=4
+//     for both TN and NN, so both configs use hints_b=4.
+//   NT skinny-N: M=8192 (grid_m=32), N=256 (grid_n=2) → skinny_n fires.
+//     No NT condition fires for NT layout → hints_a=hints_b=0 for both.
+TEST_CASE("GEMM: skinny TN/NT L1 headroom fix", "[gemm]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hw = make_hardware(gpu_arch);
+
+      // skinny-M TN vs NN: both use hints_b=4 (short-circuit requirement).
+      auto prob_tn = make_problem(256, 8192, 4096, origami::transpose_t::T, origami::transpose_t::N);
+      auto prob_nn = make_problem(256, 8192, 4096, origami::transpose_t::N, origami::transpose_t::N);
+      // make_config: mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, hand_opt, wgm, occ, hints_a, hints_b
+      auto cfg_skinny_m = make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, /*hints_b=*/4);
+
+      double lat_tn = origami::gemm::compute_total_latency(prob_tn, hw, cfg_skinny_m);
+      double lat_nn = origami::gemm::compute_total_latency(prob_nn, hw, cfg_skinny_m);
+
+      INFO("TN lat=" << lat_tn << "  NN lat=" << lat_nn << "  ratio=" << lat_tn / lat_nn);
+      REQUIRE(lat_tn < std::numeric_limits<double>::max());
+      REQUIRE(lat_nn < std::numeric_limits<double>::max());
+      REQUIRE(lat_tn / lat_nn < 2.0);
+
+      // skinny-N NT vs NN: hints=0 for both (no NT short-circuit fires for NT layout).
+      auto prob_nt   = make_problem(8192, 256, 4096, origami::transpose_t::N, origami::transpose_t::T);
+      auto prob_nn_n = make_problem(8192, 256, 4096, origami::transpose_t::N, origami::transpose_t::N);
+      auto cfg_skinny_n = make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 0, 0);
+
+      double lat_nt   = origami::gemm::compute_total_latency(prob_nt, hw, cfg_skinny_n);
+      double lat_nn_n = origami::gemm::compute_total_latency(prob_nn_n, hw, cfg_skinny_n);
+
+      INFO("NT lat=" << lat_nt << "  NN lat=" << lat_nn_n << "  ratio=" << lat_nt / lat_nn_n);
+      REQUIRE(lat_nt < std::numeric_limits<double>::max());
+      REQUIRE(lat_nn_n < std::numeric_limits<double>::max());
+      REQUIRE(lat_nt / lat_nn_n < 2.0);
+    }
+  }
+}
