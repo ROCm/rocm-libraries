@@ -58,6 +58,7 @@ rocsparse_clients::dnmat_descr<T>::dnmat_descr(rocsparse_order order,
   if (non_zero_stride)
     {
 
+      
       switch(batch_layout_direction)
 	{
 	case rocsparse_direction_column:
