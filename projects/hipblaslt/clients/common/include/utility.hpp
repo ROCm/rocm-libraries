@@ -33,6 +33,7 @@
 #include <iostream>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 /*!\file
@@ -165,9 +166,17 @@ public:
 /*! \brief  local matrix descriptor which is automatically created and destroyed  */
 class hipblaslt_local_matrix_layout
 {
-    hipblasLtMatrixLayout_t m_descr;
+    hipblasLtMatrixLayout_t m_descr   = nullptr;
     hipblasStatus_t         m_status  = HIPBLAS_STATUS_NOT_INITIALIZED;
     static constexpr int    alignment = 16;
+
+    void reset() noexcept
+    {
+        if(m_status == HIPBLAS_STATUS_SUCCESS)
+            (void)hipblasLtMatrixLayoutDestroy(m_descr);
+        m_descr  = nullptr;
+        m_status = HIPBLAS_STATUS_NOT_INITIALIZED;
+    }
 
 public:
     hipblaslt_local_matrix_layout(int64_t row, int64_t col, int64_t ld, hipDataType type)
@@ -177,14 +186,28 @@ public:
 
     ~hipblaslt_local_matrix_layout()
     {
-        if(this->m_status == HIPBLAS_STATUS_SUCCESS)
-            hipblasLtMatrixLayoutDestroy(this->m_descr);
+        reset();
     }
 
     hipblaslt_local_matrix_layout(const hipblaslt_local_matrix_layout&)            = delete;
-    hipblaslt_local_matrix_layout(hipblaslt_local_matrix_layout&&)                 = delete;
     hipblaslt_local_matrix_layout& operator=(const hipblaslt_local_matrix_layout&) = delete;
-    hipblaslt_local_matrix_layout& operator=(hipblaslt_local_matrix_layout&&)      = delete;
+
+    hipblaslt_local_matrix_layout(hipblaslt_local_matrix_layout&& other) noexcept
+        : m_descr(std::exchange(other.m_descr, nullptr))
+        , m_status(std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED))
+    {
+    }
+
+    hipblaslt_local_matrix_layout& operator=(hipblaslt_local_matrix_layout&& other) noexcept
+    {
+        if(this != &other)
+        {
+            reset();
+            m_descr  = std::exchange(other.m_descr, nullptr);
+            m_status = std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED);
+        }
+        return *this;
+    }
 
     hipblasStatus_t status()
     {
