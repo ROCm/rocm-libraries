@@ -182,7 +182,7 @@ matcher's only gate.
 
 ---
 
-## Two traps worth stating outright
+## Three traps worth stating outright
 
 **A hard-fault condition may need a different variant, not a rejection.** If the kernel
 faults when `seqlen_q % 256 != 0` on the aligned path but a `ragged=True` variant handles
@@ -193,6 +193,57 @@ but wrong; ignoring is a fault.
 `paged` + plain-causal while accepting `paged` + sliding-window — the *narrower* case is
 the supported one. Read the guards; do not infer support from the general shape of the
 feature.
+
+**A baked constant is an applicability rule even when it looks like a shape.** This is
+the one that has actually shipped bugs.
+
+### Worked example: the `batch == 1` defect
+
+`attention_dense.py:360-361` reads:
+
+```python
+if self.batch != 1:
+    raise ValueError("paged multi-sequence (batch>1) not yet implemented")
+```
+
+`batch` looks like an ordinary problem dimension — the kind you assume any kernel handles.
+Here it is a hard capability bound on the paged path. A real integration missed it: the
+kernels were compiled for `batch == 1`, nothing in the matcher checked it, so the engine
+advertised itself for multi-batch graphs it could not serve. The symptom appeared far
+downstream as failures in the shared integration suite, where the cause is expensive to
+find.
+
+Two independent mistakes produced it, and both are avoidable here:
+
+1. **The applicability gap.** A constant baked into the compiled kernel was not mirrored
+   into `graph_match`/`kernel_match`. Anything a variant bakes in — batch, sequence
+   length, head count, dtype, a mode flag — is a matcher obligation. If the descriptor's
+   `spec` pins a value, the matcher must require the graph to match it, or the KMD must
+   carry it and `kernel_match` must compare it.
+2. **The variant gap.** Shipping only `batch == 1` left every other batch size unserved.
+   Once applicability is honest, the narrow variant set becomes visible as *declining
+   graphs* — the correct, loud failure, and the signal to widen the set.
+
+**The check to run:** for every field in your descriptor's `spec` block, ask "is this
+value pinned, and if so does the matcher enforce it?" A pinned value with no matcher
+check is this defect. Put it in your rejection checklist at Tier 1 — silent wrong
+answers — because the engine will accept work it cannot do.
+
+### When verification fails, suspect applicability first
+
+If a graph produces wrong numbers, faults, or fails in the shared suite, **check
+applicability before you debug the kernel.** In this system the overwhelmingly likely
+cause is that the matcher accepted a graph the kernel was never built for. Order of
+investigation:
+
+1. Which variant did the engine select, and what does its `spec` actually pin?
+2. Does the failing graph differ from those pinned values on *any* axis — batch, layout,
+   sequence length, head counts, dtype, a mode flag?
+3. If yes, the bug is the matcher, not the kernel. Tighten `graph_match`/`kernel_match`
+   so the graph is declined, then decide whether to add a variant that serves it.
+
+A kernel that computes the wrong answer for a problem it was never compiled for is
+behaving correctly. The defect is upstream.
 
 ---
 

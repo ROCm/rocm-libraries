@@ -555,6 +555,25 @@ how PR #10839's SDPA defect passed on gfx90a and failed 27/27 on gfx942.
 **Zero-filled inputs are not verification.** `softmax(0)·0 = 0`, and so is the output of a
 kernel that never wrote a byte. Use real values and compare against a reference.
 
+#### When a test fails, suspect applicability before the kernel
+
+Wrong numbers, a fault, or a shared-suite failure is **most often the matcher accepting a
+graph the kernel was never compiled for** — not a broken kernel. A real integration
+shipped kernels built for `batch == 1`, never checked it, and the defect surfaced as
+downstream shared-suite failures where the cause was expensive to find.
+
+Before touching the kernel:
+
+1. Which variant was selected, and what does its `spec` pin?
+2. Does the failing graph differ from those pinned values on any axis — batch, layout,
+   sequence length, head counts, dtype, a mode flag?
+3. If yes, fix `graph_match`/`kernel_match` so the graph is declined, then decide whether
+   to add a variant that serves it.
+
+See `rocke-mining.md` § Three traps for the worked example. A kernel that computes the
+wrong answer for a problem it was never built for is behaving correctly; the defect is
+upstream.
+
 ### Step 9 — Report and hand back the judgment calls
 
 Report against the nine stages in `SKILL.md`'s completion contract. Name the stage you
