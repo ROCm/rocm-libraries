@@ -91,6 +91,8 @@ class AttentionRequest(OperatorRequest):
     dtype: str = "fp16"
     algorithm: str = "auto"
     spec_id: str = "auto"
+    use_fp8: bool = False
+    fp8_fnuz: bool = False
     # --- gfx950 attention_dense knobs (only consumed by the opt-in
     #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
     #     Defaults deliver the persistent ~970-TFLOPS prefill path for large Sq:
@@ -126,6 +128,8 @@ class AttentionRequest(OperatorRequest):
             active.add("sliding_window")
         if bool(self.use_sinks):
             active.add("sinks")
+        if bool(self.use_fp8):
+            active.add("fp8")
         return frozenset(active)
 
 
@@ -140,7 +144,7 @@ ATTENTION_DIM_VOCABULARY = (
     "kv_block_size",
 )
 
-ATTENTION_FEATURES = frozenset({"causal", "sliding_window", "sinks"})
+ATTENTION_FEATURES = frozenset({"causal", "sliding_window", "sinks", "fp8"})
 
 
 def _request_errors(req: OperatorRequest) -> list[str]:
@@ -228,6 +232,8 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         dtype=req.dtype.lower(),
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
+        use_fp8=bool(req.use_fp8),
+        fp8_fnuz=bool(req.fp8_fnuz),
         num_cus=_resolve_num_cus(req),
         target_ctas=int(req.target_ctas),
     )
@@ -255,6 +261,12 @@ class AttentionSpec:
     dtype: str
     num_query_heads: int
     num_kv_heads: int
+    # fp8 KV-cache decode is a distinct kernel from the same-shape bf16 decode
+    # (per-element dequant in the inner loop), so it must not collapse onto the
+    # bf16 spec_hash/kernel_name -- consumers key their compile cache on
+    # kernel_name(), and the sweep space dedupes on asdict(spec).
+    use_fp8: bool = False
+    fp8_fnuz: bool = False
     name: str = "rocke_attention_unified"
     # When set, this verbatim kernel_name is returned by :meth:`kernel_name`
     # instead of the composed unified name. Used by the dense candidate to
@@ -271,11 +283,14 @@ class AttentionSpec:
             return self.kernel_name_override
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(
+        parts = [
             self.name,
             self.path,
             self.dtype,
             f"hd{self.head_size}",
             f"bs{self.block_size}",
             f"gqa{self.num_query_heads}x{self.num_kv_heads}",
-        )
+        ]
+        if self.use_fp8:
+            parts.append("fp8fnuz" if self.fp8_fnuz else "fp8")
+        return kernel_name_join(*parts)
