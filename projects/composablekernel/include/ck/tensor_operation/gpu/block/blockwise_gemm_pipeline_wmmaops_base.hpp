@@ -50,6 +50,8 @@ struct BlockwiseGemmWmmaops_pipeline_base
 
     using ThisThreadBlock = ThisThreadBlock<BlockSize>;
 
+    static constexpr bool TransposeC_ = TransposeC;
+
     static constexpr index_t WaveSize = 32;
 
     static constexpr index_t MWaves = MPerBlock / (MRepeat * MPerWmma);
@@ -424,6 +426,7 @@ struct BlockwiseGemmWmmaops_pipeline_base
                        AccStride));
     }
 
+    // C = A * B
     __host__ __device__ static constexpr auto
     GetCBlockDescriptor_MRepeat_MWave_MSubGroup_NRepeat_NWave_NThreadPerSubGroup_MAccVgprs()
     {
@@ -437,6 +440,23 @@ struct BlockwiseGemmWmmaops_pipeline_base
 
         return wmma_gemm
             .MakeCDesc_MBlockxRepeat_MWave_MSubGroup_NBlockxRepeat_NWave_NThreadPerSubGroup_MAccVgprs(
+                c_block_desc_mrepeat_mwave_mperwmma_nrepeat_nwave_nperwmma);
+    }
+
+    // C' = B' * A'
+    __host__ __device__ static constexpr auto
+    GetCBlockDescriptor_MRepeat_MWave_MThreadPerSubGroup_NRepeat_NWave_NSubGroup_MAccVgprs()
+    {
+        constexpr auto c_block_desc_mrepeat_mwave_mperwmma_nrepeat_nwave_nperwmma =
+            make_naive_tensor_descriptor_packed(make_tuple(Number<MRepeat>{},
+                                                           Number<MWaves>{},
+                                                           Number<MPerWmma>{},
+                                                           Number<NRepeat>{},
+                                                           Number<NWaves>{},
+                                                           Number<NPerWmma>{}));
+
+        return wmma_gemm
+            .MakeCDesc_MBlockxRepeat_MWave_MThreadPerSubGroup_NBlockxRepeat_NWave_NSubGroup_NAccVgprs(
                 c_block_desc_mrepeat_mwave_mperwmma_nrepeat_nwave_nperwmma);
     }
 
