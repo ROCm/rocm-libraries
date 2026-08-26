@@ -208,6 +208,14 @@ public:
             handle, numPluginPaths, pluginPaths, maxStringLen);
     }
 
+    hipdnnStatus_t getEngineNameByIdExt(hipdnnHandle_t handle,
+                                        int64_t engineId,
+                                        char* engineName,
+                                        size_t* engineNameLen) override
+    {
+        return hipdnnGetEngineNameById_ext(handle, engineId, engineName, engineNameLen);
+    }
+
     hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t handle, size_t* numPolicies) override
     {
         return hipdnnGetHeuristicPolicyCount_ext(handle, numPolicies);

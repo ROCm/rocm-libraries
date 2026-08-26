@@ -1,16 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-
 #include <gtest/gtest.h>
 
-#include <hipdnn_plugin_sdk/ingestor/GraphContentKey.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
+
+#include <optional>
 
 #include "ContentCarryingTestGraph.hpp"
-#include "KernelIngestorTestFixtures.hpp"
 
-namespace hipdnn_plugin_sdk::ingestor::testing
+namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing
 {
 namespace
 {
@@ -30,7 +29,7 @@ GraphContentKey keyFor(const ContentCarryingTestGraph& graph)
     return GraphContentKey{graph};
 }
 
-TEST(TestIngestorGraphContentKey, IdenticalContentComparesEqual)
+TEST(TestGraphContentKey, IdenticalContentComparesEqual)
 {
     const ContentCarryingTestGraph first{Spec{}};
     const ContentCarryingTestGraph second{Spec{}};
@@ -41,7 +40,7 @@ TEST(TestIngestorGraphContentKey, IdenticalContentComparesEqual)
 
 // Graph.id is minted per finalize, so two runs of the same computation produce
 // different ids. If the key saw it, every lookup would miss.
-TEST(TestIngestorGraphContentKey, ADifferentGraphIdStillComparesEqual)
+TEST(TestGraphContentKey, ADifferentGraphIdStillComparesEqual)
 {
     Spec first;
     first.graphId = makeGraphId(0xA1);
@@ -53,7 +52,7 @@ TEST(TestIngestorGraphContentKey, ADifferentGraphIdStillComparesEqual)
 
 // The preferred engine selects who runs the computation, never what is computed, so a
 // measurement transfers across it.
-TEST(TestIngestorGraphContentKey, ADifferentPreferredEngineIdStillComparesEqual)
+TEST(TestGraphContentKey, ADifferentPreferredEngineIdStillComparesEqual)
 {
     Spec first;
     first.preferredEngineId = 7;
@@ -65,7 +64,7 @@ TEST(TestIngestorGraphContentKey, ADifferentPreferredEngineIdStillComparesEqual)
 
 // The flag permits shapes to be overridden; it does not change them. The dims and
 // strides that will actually run are compared in full either way.
-TEST(TestIngestorGraphContentKey, ADifferentOverrideShapeFlagStillComparesEqual)
+TEST(TestGraphContentKey, ADifferentOverrideShapeFlagStillComparesEqual)
 {
     Spec enabled;
     enabled.isOverrideShapeEnabled = true;
@@ -80,7 +79,7 @@ TEST(TestIngestorGraphContentKey, ADifferentOverrideShapeFlagStillComparesEqual)
 /// differing only in that flag carry *different* versions, and the generated operator==
 /// compares it. Without clearing it, the exclusion above is defeated in production while
 /// its own test still passes.
-TEST(TestIngestorGraphContentKey, TheDerivedApiVersionDoesNotDefeatTheOverrideShapeExclusion)
+TEST(TestGraphContentKey, TheDerivedApiVersionDoesNotDefeatTheOverrideShapeExclusion)
 {
     Spec withOverride;
     withOverride.isOverrideShapeEnabled = true;
@@ -98,7 +97,7 @@ TEST(TestIngestorGraphContentKey, TheDerivedApiVersionDoesNotDefeatTheOverrideSh
 
 /// The version is excluded because it is *derived*: its content-bearing inputs are each
 /// compared directly on the tensors that carry them.
-TEST(TestIngestorGraphContentKey, ADifferentApiVersionAloneDoesNotSplitTheKey)
+TEST(TestGraphContentKey, ADifferentApiVersionAloneDoesNotSplitTheKey)
 {
     Spec early;
     early.minRequiredApiVersion = hipdnn_data_sdk::utilities::Version{1, 0, 0};
@@ -110,7 +109,7 @@ TEST(TestIngestorGraphContentKey, ADifferentApiVersionAloneDoesNotSplitTheKey)
            "their own";
 }
 
-TEST(TestIngestorGraphContentKey, ADifferentTensorShapeComparesUnequal)
+TEST(TestGraphContentKey, ADifferentTensorShapeComparesUnequal)
 {
     Spec narrow;
     narrow.tensors[0].dims = {4, 8};
@@ -120,7 +119,7 @@ TEST(TestIngestorGraphContentKey, ADifferentTensorShapeComparesUnequal)
     EXPECT_NE(keyFor(ContentCarryingTestGraph{narrow}), keyFor(ContentCarryingTestGraph{wide}));
 }
 
-TEST(TestIngestorGraphContentKey, ADifferentTensorStrideComparesUnequal)
+TEST(TestGraphContentKey, ADifferentTensorStrideComparesUnequal)
 {
     Spec packed;
     packed.tensors[0].strides = {8, 1};
@@ -130,7 +129,7 @@ TEST(TestIngestorGraphContentKey, ADifferentTensorStrideComparesUnequal)
     EXPECT_NE(keyFor(ContentCarryingTestGraph{packed}), keyFor(ContentCarryingTestGraph{strided}));
 }
 
-TEST(TestIngestorGraphContentKey, ADifferentTensorDataTypeComparesUnequal)
+TEST(TestGraphContentKey, ADifferentTensorDataTypeComparesUnequal)
 {
     Spec asFloat;
     asFloat.tensors[0].dataType = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
@@ -142,7 +141,7 @@ TEST(TestIngestorGraphContentKey, ADifferentTensorDataTypeComparesUnequal)
 
 /// Uids are caller-assigned labels, auto-filled when the caller leaves them unset
 /// (GraphTensorIds.hpp:17-58), so one computation can carry different numbers.
-TEST(TestIngestorGraphContentKey, ARenumberedGraphComparesEqual)
+TEST(TestGraphContentKey, ARenumberedGraphComparesEqual)
 {
     Spec low;
     low.tensors
@@ -164,7 +163,7 @@ TEST(TestIngestorGraphContentKey, ARenumberedGraphComparesEqual)
 
 /// Both graphs carry the same tensors in the same order and differ only in which operand
 /// slot the second one feeds, so only the canonicalized reference distinguishes them.
-TEST(TestIngestorGraphContentKey, MovingATensorToADifferentOperandSlotComparesUnequal)
+TEST(TestGraphContentKey, MovingATensorToADifferentOperandSlotComparesUnequal)
 {
     Spec asSecondInput;
     asSecondInput.nodes[0].in1TensorUid = 2;
@@ -180,7 +179,7 @@ TEST(TestIngestorGraphContentKey, MovingATensorToADifferentOperandSlotComparesUn
 /// Aliasing is invisible to tensor-list position: both graphs walk the same tensors in
 /// the same order, and only the operand references record that one add reads one tensor
 /// twice.
-TEST(TestIngestorGraphContentKey, AliasingTwoOperandsOntoOneTensorComparesUnequal)
+TEST(TestGraphContentKey, AliasingTwoOperandsOntoOneTensorComparesUnequal)
 {
     Spec distinct;
     distinct.nodes[0].in0TensorUid = 1;
@@ -195,7 +194,7 @@ TEST(TestIngestorGraphContentKey, AliasingTwoOperandsOntoOneTensorComparesUnequa
 }
 
 /// Renumbering does not rescue a rewiring, so the equality above is about labels alone.
-TEST(TestIngestorGraphContentKey, ARewiredGraphStaysUnequalAfterRenumbering)
+TEST(TestGraphContentKey, ARewiredGraphStaysUnequalAfterRenumbering)
 {
     Spec aliased;
     aliased.nodes[0].in1TensorUid = 1;
@@ -217,7 +216,7 @@ TEST(TestIngestorGraphContentKey, ARewiredGraphStaysUnequalAfterRenumbering)
 /// Both graphs are built as `buildGraphFromOperations` (GraphDescriptor.cpp:95-123)
 /// would, emitting tensors in first-encounter order over each operation's operands, so
 /// swapping two operands also swaps their positions in the tensor list.
-TEST(TestIngestorGraphContentKey, SwappingTwoIdenticallyDescribedOperandsComparesEqual)
+TEST(TestGraphContentKey, SwappingTwoIdenticallyDescribedOperandsComparesEqual)
 {
     Spec straight;
     straight.tensors = {ContentCarryingTestGraph::TensorSpec{1},
@@ -241,7 +240,7 @@ TEST(TestIngestorGraphContentKey, SwappingTwoIdenticallyDescribedOperandsCompare
 
 /// The companion: once the swapped tensors differ in shape, the same reordering permutes
 /// two unlike entries and the key must split.
-TEST(TestIngestorGraphContentKey, SwappingTwoDifferentlyDescribedOperandsComparesUnequal)
+TEST(TestGraphContentKey, SwappingTwoDifferentlyDescribedOperandsComparesUnequal)
 {
     ContentCarryingTestGraph::TensorSpec narrow{1};
     narrow.dims = {4, 8};
@@ -269,7 +268,7 @@ TEST(TestIngestorGraphContentKey, SwappingTwoDifferentlyDescribedOperandsCompare
 
 /// `(cache_uid)` canonicalizes a nullable reference's value but leaves presence alone:
 /// a ragged tensor is not a dense one.
-TEST(TestIngestorGraphContentKey, ARaggedTensorComparesUnequalToADenseOne)
+TEST(TestGraphContentKey, ARaggedTensorComparesUnequalToADenseOne)
 {
     const Spec dense;
     Spec ragged;
@@ -280,7 +279,7 @@ TEST(TestIngestorGraphContentKey, ARaggedTensorComparesUnequalToADenseOne)
 }
 
 /// The value behind that presence is a label, so renumbering it holds equal.
-TEST(TestIngestorGraphContentKey, ARenumberedRaggedReferenceComparesEqual)
+TEST(TestGraphContentKey, ARenumberedRaggedReferenceComparesEqual)
 {
     Spec low;
     low.tensors
@@ -302,7 +301,7 @@ TEST(TestIngestorGraphContentKey, ARenumberedRaggedReferenceComparesEqual)
 /// A ragged offset is an ordinary tensor reference, so which offset tensor a primary
 /// points at is content: sharing one offset across two inputs is different addressing
 /// from two separate ones.
-TEST(TestIngestorGraphContentKey, SharedAndSeparateRaggedOffsetsCompareUnequal)
+TEST(TestGraphContentKey, SharedAndSeparateRaggedOffsetsCompareUnequal)
 {
     Spec separate;
     separate.tensors = {ContentCarryingTestGraph::TensorSpec{1},
@@ -327,7 +326,7 @@ TEST(TestIngestorGraphContentKey, SharedAndSeparateRaggedOffsetsCompareUnequal)
     EXPECT_NE(keyFor(ContentCarryingTestGraph{separate}), keyFor(ContentCarryingTestGraph{shared}));
 }
 
-TEST(TestIngestorGraphContentKey, ADifferentNodeCountComparesUnequal)
+TEST(TestGraphContentKey, ADifferentNodeCountComparesUnequal)
 {
     const Spec single;
     Spec doubled;
@@ -336,7 +335,7 @@ TEST(TestIngestorGraphContentKey, ADifferentNodeCountComparesUnequal)
     EXPECT_NE(keyFor(ContentCarryingTestGraph{single}), keyFor(ContentCarryingTestGraph{doubled}));
 }
 
-TEST(TestIngestorGraphContentKey, ADifferentNodeComputeDataTypeComparesUnequal)
+TEST(TestGraphContentKey, ADifferentNodeComputeDataTypeComparesUnequal)
 {
     const Spec asFloat;
     Spec asHalf;
@@ -347,7 +346,7 @@ TEST(TestIngestorGraphContentKey, ADifferentNodeComputeDataTypeComparesUnequal)
 
 // Inside the union payload rather than only its discriminant: an ADD and a MUL are the
 // same node type and would collide on any key that stopped at attributes_type.
-TEST(TestIngestorGraphContentKey, ADifferentPointwiseOperationComparesUnequal)
+TEST(TestGraphContentKey, ADifferentPointwiseOperationComparesUnequal)
 {
     const Spec addition;
     Spec multiplication;
@@ -360,7 +359,7 @@ TEST(TestIngestorGraphContentKey, ADifferentPointwiseOperationComparesUnequal)
 /// The graph-level data types are defaults: the frontend stamps them onto each node and
 /// tensor left unset (Attributes::fill_from_context), and those are compared. Folding
 /// them would split the key between an explicit type and the same type defaulted.
-TEST(TestIngestorGraphContentKey, ADifferentGraphComputeDataTypeComparesEqual)
+TEST(TestGraphContentKey, ADifferentGraphComputeDataTypeComparesEqual)
 {
     const Spec asFloat;
     Spec asHalf;
@@ -370,7 +369,7 @@ TEST(TestIngestorGraphContentKey, ADifferentGraphComputeDataTypeComparesEqual)
 }
 
 /// The exclusion above holds only while the types it populates discriminate.
-TEST(TestIngestorGraphContentKey, TheStampedNodeDataTypeStillDiscriminates)
+TEST(TestGraphContentKey, TheStampedNodeDataTypeStillDiscriminates)
 {
     const Spec asFloat;
     Spec asHalf;
@@ -383,24 +382,24 @@ TEST(TestIngestorGraphContentKey, TheStampedNodeDataTypeStillDiscriminates)
 // fnv1aHash collapses null and empty input to sentinel 0, so a key of 0 would alias
 // every contentless graph onto one bucket -- the version tag and node count emitted
 // ahead of any content are what prevent it.
-TEST(TestIngestorGraphContentKey, AnEmptyGraphKeysToANonZeroHash)
+TEST(TestGraphContentKey, AnEmptyGraphKeysToANonZeroHash)
 {
-    const TestGraph empty(makeGraphId(0xC3));
+    const EmptyTestGraph empty(makeGraphId(0xC3));
 
     EXPECT_NE(GraphContentKey{empty}.hash(), 0U);
 }
 
-TEST(TestIngestorGraphContentKey, AnEmptyGraphStillComparesEqualToAnotherEmptyGraph)
+TEST(TestGraphContentKey, AnEmptyGraphStillComparesEqualToAnotherEmptyGraph)
 {
-    const TestGraph first(makeGraphId(0xC4));
-    const TestGraph second(makeGraphId(0xC5));
+    const EmptyTestGraph first(makeGraphId(0xC4));
+    const EmptyTestGraph second(makeGraphId(0xC5));
 
     EXPECT_EQ(GraphContentKey{first}, GraphContentKey{second});
 }
 
 /// Names carry `(cache_ignore)`: two identically shaped graphs run the same kernels
 /// whatever they are called.
-TEST(TestIngestorGraphContentKey, ADifferentGraphNameComparesEqual)
+TEST(TestGraphContentKey, ADifferentGraphNameComparesEqual)
 {
     const Spec named;
     Spec renamed;
@@ -409,7 +408,7 @@ TEST(TestIngestorGraphContentKey, ADifferentGraphNameComparesEqual)
     EXPECT_EQ(keyFor(ContentCarryingTestGraph{named}), keyFor(ContentCarryingTestGraph{renamed}));
 }
 
-TEST(TestIngestorGraphContentKey, ADifferentGraphIoDataTypeComparesEqual)
+TEST(TestGraphContentKey, ADifferentGraphIoDataTypeComparesEqual)
 {
     const Spec asFloat;
     Spec asHalf;
@@ -418,7 +417,7 @@ TEST(TestIngestorGraphContentKey, ADifferentGraphIoDataTypeComparesEqual)
     EXPECT_EQ(keyFor(ContentCarryingTestGraph{asFloat}), keyFor(ContentCarryingTestGraph{asHalf}));
 }
 
-TEST(TestIngestorGraphContentKey, ADifferentGraphIntermediateDataTypeComparesEqual)
+TEST(TestGraphContentKey, ADifferentGraphIntermediateDataTypeComparesEqual)
 {
     const Spec asFloat;
     Spec asHalf;
@@ -428,7 +427,7 @@ TEST(TestIngestorGraphContentKey, ADifferentGraphIntermediateDataTypeComparesEqu
 }
 
 /// The io/intermediate counterpart of the node-dtype case above.
-TEST(TestIngestorGraphContentKey, ThePerTensorDataTypeStillDiscriminates)
+TEST(TestGraphContentKey, ThePerTensorDataTypeStillDiscriminates)
 {
     const Spec asFloat;
     Spec asHalf;
@@ -438,7 +437,7 @@ TEST(TestIngestorGraphContentKey, ThePerTensorDataTypeStillDiscriminates)
 }
 
 /// One level down from the graph name: the node's attributes are compared in full.
-TEST(TestIngestorGraphContentKey, ADifferentNodeNameComparesEqual)
+TEST(TestGraphContentKey, ADifferentNodeNameComparesEqual)
 {
     const Spec named;
     Spec renamed;
@@ -449,7 +448,7 @@ TEST(TestIngestorGraphContentKey, ADifferentNodeNameComparesEqual)
 
 /// Inside the union payload again, on a field the discriminant cannot distinguish: two
 /// adds wired to different tensors are different computations.
-TEST(TestIngestorGraphContentKey, ADifferentPointwiseOperandUidComparesUnequal)
+TEST(TestGraphContentKey, ADifferentPointwiseOperandUidComparesUnequal)
 {
     const Spec wired;
     Spec rewired;
@@ -458,9 +457,9 @@ TEST(TestIngestorGraphContentKey, ADifferentPointwiseOperandUidComparesUnequal)
     EXPECT_NE(keyFor(ContentCarryingTestGraph{wired}), keyFor(ContentCarryingTestGraph{rewired}));
 }
 
-TEST(TestIngestorGraphContentKey, AnEmptyGraphDoesNotMatchAContentCarryingOne)
+TEST(TestGraphContentKey, AnEmptyGraphDoesNotMatchAContentCarryingOne)
 {
-    const TestGraph empty(makeGraphId(0xC6));
+    const EmptyTestGraph empty(makeGraphId(0xC6));
     const ContentCarryingTestGraph populated{Spec{}};
 
     EXPECT_NE(GraphContentKey{empty}, keyFor(populated));
@@ -514,7 +513,7 @@ private:
         _tensors;
 };
 
-TEST(TestIngestorGraphContentKey, AGraphWithNoBytesYieldsAnUnusableKey)
+TEST(TestGraphContentKey, AGraphWithNoBytesYieldsAnUnusableKey)
 {
     const UnkeyableGraph graph;
 
@@ -523,7 +522,7 @@ TEST(TestIngestorGraphContentKey, AGraphWithNoBytesYieldsAnUnusableKey)
 
 /// Hash 0, unusable, and matching nothing are one fact: a key with a live hash but no
 /// content would be bucketable yet not equal to itself.
-TEST(TestIngestorGraphContentKey, AnUnusableKeyHashesToZero)
+TEST(TestGraphContentKey, AnUnusableKeyHashesToZero)
 {
     const UnkeyableGraph graph;
     const GraphContentKey key{graph};
@@ -543,7 +542,7 @@ public:
     }
 };
 
-TEST(TestIngestorGraphContentKey, AValidGraphWithNoBytesIsStillUnkeyableAndSelfConsistent)
+TEST(TestGraphContentKey, AValidGraphWithNoBytesIsStillUnkeyableAndSelfConsistent)
 {
     const ValidButByteless graph;
     const GraphContentKey key{graph};
@@ -554,7 +553,7 @@ TEST(TestIngestorGraphContentKey, AValidGraphWithNoBytesIsStillUnkeyableAndSelfC
            "independent on IGraph and only the retained bytes decide keyability";
 }
 
-TEST(TestIngestorGraphContentKey, TwoUnkeyableGraphsDoNotMatchEachOther)
+TEST(TestGraphContentKey, TwoUnkeyableGraphsDoNotMatchEachOther)
 {
     const UnkeyableGraph first;
     const UnkeyableGraph second;
@@ -564,7 +563,7 @@ TEST(TestIngestorGraphContentKey, TwoUnkeyableGraphsDoNotMatchEachOther)
            "every other unkeyable graph";
 }
 
-TEST(TestIngestorGraphContentKey, AnUnkeyableGraphDoesNotMatchARealOne)
+TEST(TestGraphContentKey, AnUnkeyableGraphDoesNotMatchARealOne)
 {
     const UnkeyableGraph unkeyable;
     const ContentCarryingTestGraph real{Spec{}};
@@ -574,7 +573,7 @@ TEST(TestIngestorGraphContentKey, AnUnkeyableGraphDoesNotMatchARealOne)
 
 /// The hash narrows; the content decides. Hashes are forced to agree so the structural
 /// comparison is actually reached -- `operator==` short-circuits on a hash mismatch.
-TEST(TestIngestorGraphContentKey, EqualHashesWithDifferentContentStillCompareUnequal)
+TEST(TestGraphContentKey, EqualHashesWithDifferentContentStillCompareUnequal)
 {
     struct CollidingKey : GraphContentKey
     {
@@ -607,7 +606,7 @@ TEST(TestIngestorGraphContentKey, EqualHashesWithDifferentContentStillCompareUne
 
 /// The same forcing, in the direction that must still match: equal content plus equal
 /// hashes is a genuine hit.
-TEST(TestIngestorGraphContentKey, EqualHashesWithEqualContentStillCompareEqual)
+TEST(TestGraphContentKey, EqualHashesWithEqualContentStillCompareEqual)
 {
     struct CollidingKey : GraphContentKey
     {
@@ -631,7 +630,7 @@ TEST(TestIngestorGraphContentKey, EqualHashesWithEqualContentStillCompareEqual)
               static_cast<const GraphContentKey&>(secondKey));
 }
 
-TEST(TestIngestorGraphContentKey, StdHashAgreesWithTheKeysOwnHash)
+TEST(TestGraphContentKey, StdHashAgreesWithTheKeysOwnHash)
 {
     const ContentCarryingTestGraph graph{Spec{}};
     const auto key = keyFor(graph);
@@ -643,7 +642,7 @@ TEST(TestIngestorGraphContentKey, StdHashAgreesWithTheKeysOwnHash)
 /// every dangling reference to one shared sentinel instead would make these two graphs
 /// -- which point at different absent tensors -- compare equal and share a kernel.
 /// The generator test pins the emitted source; this pins the compiled behaviour.
-TEST(TestIngestorGraphContentKey, DanglingReferencesToDifferentUidsCompareUnequal)
+TEST(TestGraphContentKey, DanglingReferencesToDifferentUidsCompareUnequal)
 {
     Spec first;
     first.tensors
@@ -662,7 +661,7 @@ TEST(TestIngestorGraphContentKey, DanglingReferencesToDifferentUidsCompareUnequa
 /// An unresolved fold carries the raw uid, a resolved one carries an ordinal, and the
 /// two spaces must not overlap: uid 1 resolves to ordinal 0 here, so a dangling uid 0
 /// would collide with it if the resolved tag were dropped.
-TEST(TestIngestorGraphContentKey, ADanglingReferenceDoesNotAliasAResolvedOrdinal)
+TEST(TestGraphContentKey, ADanglingReferenceDoesNotAliasAResolvedOrdinal)
 {
     Spec resolved;
     resolved.tensors
@@ -678,7 +677,123 @@ TEST(TestIngestorGraphContentKey, ADanglingReferenceDoesNotAliasAResolvedOrdinal
     EXPECT_NE(keyFor(resolvedGraph), keyFor(danglingGraph));
 }
 
-} // namespace
-} // namespace hipdnn_plugin_sdk::ingestor::testing
+#ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+TEST(TestGraphContentKey, JsonRoundTripPreservesEquality)
+{
+    const ContentCarryingTestGraph graph{Spec{}};
+    const auto original = keyFor(graph);
 
-#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
+    const auto restored = GraphContentKey::fromJson(original.toJson());
+
+    ASSERT_TRUE(restored.has_value());
+    EXPECT_EQ(original, *restored);
+}
+
+TEST(TestGraphContentKey, JsonRoundTripPreservesDiscriminatingContent)
+{
+    Spec narrow;
+    narrow.tensors[0].dims = {4, 8};
+    Spec wide;
+    wide.tensors[0].dims = {4, 16};
+
+    const auto narrowRestored
+        = GraphContentKey::fromJson(keyFor(ContentCarryingTestGraph{narrow}).toJson());
+    const auto wideRestored
+        = GraphContentKey::fromJson(keyFor(ContentCarryingTestGraph{wide}).toJson());
+
+    ASSERT_TRUE(narrowRestored.has_value());
+    ASSERT_TRUE(wideRestored.has_value());
+    EXPECT_NE(*narrowRestored, *wideRestored)
+        << "a codec that lost discriminating content would make these collide";
+}
+
+TEST(TestGraphContentKey, ANonBase64FieldDeclinesWithoutThrowing)
+{
+    auto json = keyFor(ContentCarryingTestGraph{Spec{}}).toJson();
+    json["content_base64"] = std::string("not valid base64!!!");
+
+    std::optional<GraphContentKey> restored;
+    EXPECT_NO_THROW(restored = GraphContentKey::fromJson(json));
+    EXPECT_FALSE(restored.has_value());
+}
+
+TEST(TestGraphContentKey, ATruncatedBase64FieldDeclinesWithoutThrowing)
+{
+    auto json = keyFor(ContentCarryingTestGraph{Spec{}}).toJson();
+    const auto content = json["content_base64"].get<std::string>();
+    ASSERT_GT(content.size(), 4U);
+    json["content_base64"] = content.substr(0, content.size() - 1);
+
+    std::optional<GraphContentKey> restored;
+    EXPECT_NO_THROW(restored = GraphContentKey::fromJson(json));
+    EXPECT_FALSE(restored.has_value());
+}
+
+TEST(TestGraphContentKey, AMissingContentFieldDeclinesWithoutThrowing)
+{
+    const auto json = nlohmann::json::object();
+
+    std::optional<GraphContentKey> restored;
+    EXPECT_NO_THROW(restored = GraphContentKey::fromJson(json));
+    EXPECT_FALSE(restored.has_value());
+}
+
+TEST(TestGraphContentKey, NonObjectJsonDeclinesWithoutThrowing)
+{
+    const nlohmann::json json = "not an object";
+
+    std::optional<GraphContentKey> restored;
+    EXPECT_NO_THROW(restored = GraphContentKey::fromJson(json));
+    EXPECT_FALSE(restored.has_value());
+}
+
+/// Base64-decodable bytes that do not reverify as a `Graph` flatbuffer must also
+/// decline, not hand back a key that looks usable but reads nonsense.
+TEST(TestGraphContentKey, ValidBase64OfNonGraphBytesDeclinesWithoutThrowing)
+{
+    nlohmann::json json;
+    json["content_base64"] = std::string("AAAAAAAAAAAAAAAAAAAAAAAA");
+
+    std::optional<GraphContentKey> restored;
+    EXPECT_NO_THROW(restored = GraphContentKey::fromJson(json));
+    EXPECT_FALSE(restored.has_value());
+}
+
+/// `EmptyTestGraph` still retains real bytes and a non-zero hash, so it round-trips
+/// like any other usable key.
+TEST(TestGraphContentKey, AnEmptyGraphRoundTripsAndStillMatchesAnotherEmptyGraph)
+{
+    const EmptyTestGraph first(makeGraphId(0xD1));
+    const EmptyTestGraph second(makeGraphId(0xD2));
+
+    const auto restoredFirst = GraphContentKey::fromJson(GraphContentKey{first}.toJson());
+    const auto restoredSecond = GraphContentKey::fromJson(GraphContentKey{second}.toJson());
+
+    ASSERT_TRUE(restoredFirst.has_value());
+    ASSERT_TRUE(restoredSecond.has_value());
+    EXPECT_NE(restoredFirst->hash(), 0U);
+    EXPECT_EQ(*restoredFirst, *restoredSecond);
+}
+
+/// No retained bytes at all: `toJson()` still succeeds (an empty base64 field is
+/// well-formed, not corruption) but the restored key must stay unusable.
+TEST(TestGraphContentKey, AnUnusableKeyRoundTripsToAnUnusableKeyThatMatchesNothing)
+{
+    const UnkeyableGraph graph;
+    const GraphContentKey original{graph};
+    ASSERT_FALSE(original.isUsable());
+
+    const auto restored = GraphContentKey::fromJson(original.toJson());
+
+    ASSERT_TRUE(restored.has_value())
+        << "an empty content field is well-formed JSON, not corruption";
+    EXPECT_FALSE(restored->isUsable());
+    EXPECT_EQ(restored->hash(), 0U);
+    EXPECT_NE(original, *restored)
+        << "absence of content is a permanent miss; round-tripping an unusable key must "
+           "not make it start matching, including matching the key it came from";
+}
+#endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+
+} // namespace
+} // namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing

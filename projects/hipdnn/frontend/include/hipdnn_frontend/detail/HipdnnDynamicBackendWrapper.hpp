@@ -272,6 +272,16 @@ public:
                    : missingSymbolStatus();
     }
 
+    hipdnnStatus_t getEngineNameByIdExt(hipdnnHandle_t handle,
+                                        int64_t engineId,
+                                        char* engineName,
+                                        size_t* engineNameLen) override
+    {
+        return _getEngineNameByIdExt != nullptr
+                   ? _getEngineNameByIdExt(handle, engineId, engineName, engineNameLen)
+                   : missingSymbolStatus();
+    }
+
     hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t handle, size_t* numPolicies) override
     {
         return _getHeuristicPolicyCount != nullptr ? _getHeuristicPolicyCount(handle, numPolicies)
@@ -390,6 +400,8 @@ private:
             "hipdnnSetHeuristicPluginPaths_ext");
         _getLoadedEnginePluginPathsExt = resolve<decltype(&hipdnnGetLoadedEnginePluginPaths_ext)>(
             "hipdnnGetLoadedEnginePluginPaths_ext");
+        _getEngineNameByIdExt
+            = resolve<decltype(&hipdnnGetEngineNameById_ext)>("hipdnnGetEngineNameById_ext");
         _getHeuristicPolicyCount = resolve<decltype(&hipdnnGetHeuristicPolicyCount_ext)>(
             "hipdnnGetHeuristicPolicyCount_ext");
         _getHeuristicPolicyInfo = resolve<decltype(&hipdnnGetHeuristicPolicyInfo_ext)>(
@@ -440,6 +452,7 @@ private:
     decltype(&hipdnnSetEnginePluginPaths_ext) _setEnginePluginPathsExt = nullptr;
     decltype(&hipdnnSetHeuristicPluginPaths_ext) _setHeuristicPluginPathsExt = nullptr;
     decltype(&hipdnnGetLoadedEnginePluginPaths_ext) _getLoadedEnginePluginPathsExt = nullptr;
+    decltype(&hipdnnGetEngineNameById_ext) _getEngineNameByIdExt = nullptr;
     decltype(&hipdnnGetHeuristicPolicyCount_ext) _getHeuristicPolicyCount = nullptr;
     decltype(&hipdnnGetHeuristicPolicyInfo_ext) _getHeuristicPolicyInfo = nullptr;
     decltype(&hipdnnSetUserLogCallback_ext) _setUserLogCallbackExt = nullptr;

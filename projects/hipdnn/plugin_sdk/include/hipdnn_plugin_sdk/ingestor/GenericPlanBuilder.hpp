@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -182,7 +183,9 @@ public:
         // Coverage and orderability are checked against the knob-filtered candidates
         // here, independent of the same check against the full catalog in
         // sortedCatalog(): one can fail while the other passes.
-        const WinnerKey winnerKey{GraphContentKey{opGraph}, DeviceKey{context.deviceProperties}};
+        const WinnerKey winnerKey{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
+            DeviceKey{context.deviceProperties}};
         if(const auto record = _stateManager.winnerFor(winnerKey); record.has_value())
         {
             if(const auto ranked = orderIfFullyCovered(*record, filtered); ranked.has_value())
@@ -285,8 +288,8 @@ public:
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
             handle,
-            [&stateManager = _stateManager, winnerKey](std::vector<RankedEntry> ranking) {
-                stateManager.recordWinner(winnerKey, std::move(ranking));
+            [&stateManager = _stateManager, winnerKey](const std::vector<RankedEntry>& ranking) {
+                stateManager.recordWinner(winnerKey, ranking);
             }));
     }
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
