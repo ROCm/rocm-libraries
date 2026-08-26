@@ -99,18 +99,23 @@ inline Error
 // Initializes an AutotuneResult with the sub-set identity and config fields known
 // before a candidate is benchmarked. The benchmark loop fills the timing, succeeded,
 // rank, and compiledPlanIndex fields during/after timing.
+// engineName is the caller-resolved display name for engineId, resolved once per
+// engine rather than once per result. Left empty, it is resolved here from the
+// built-in registry, which is all a caller without a handle can reach anyway.
 inline AutotuneResult makeBenchmarkResult(int64_t engineId,
                                           const std::vector<KnobSetting>& knobSettings,
                                           int64_t estimatedWorkspaceSize,
                                           int64_t compiledWorkspaceSize,
-                                          const AutotuneConfig& config)
+                                          const AutotuneConfig& config,
+                                          const std::string& engineName = {})
 {
     AutotuneResult result;
     result.engineId = engineId;
     result.knobSettings = knobSettings;
     result.estimatedWorkspaceSize = estimatedWorkspaceSize;
     result.workspaceSize = compiledWorkspaceSize;
-    result.engineName = ::hipdnn_frontend::detail::resolveEngineName(engineId);
+    result.engineName
+        = engineName.empty() ? ::hipdnn_frontend::detail::resolveEngineName(engineId) : engineName;
     result.modeUsed = config.mode;
     result.strategyUsed = config.strategy;
 
@@ -121,7 +126,8 @@ inline AutotuneResult makeBenchmarkResult(int64_t engineId,
 // finalize-failed / compile-failed / filtered). They differ only in the two
 // workspace sizes and the error message; everything else is the common
 // non-benchmarked values (succeeded==false, rank==-1, compiledPlanIndex==-1).
-// A workspace size of -1 means "not applicable / never compiled".
+// A workspace size of -1 means "not applicable / never compiled". engineName is
+// resolved as it is for makeBenchmarkResult, so every wrapper below inherits that.
 inline AutotuneResult makeNonBenchmarkedResult(int64_t engineId,
                                                const std::vector<KnobSetting>& knobSettings,
                                                int64_t estimatedWorkspaceSize,
@@ -130,7 +136,8 @@ inline AutotuneResult makeNonBenchmarkedResult(int64_t engineId,
                                                const std::string& errorMessage,
                                                bool supportsExhaustive,
                                                bool ranExhaustive,
-                                               const std::string& exhaustiveNotRunReason)
+                                               const std::string& exhaustiveNotRunReason,
+                                               const std::string& engineName = {})
 {
     AutotuneResult result;
     result.engineId = engineId;
@@ -139,7 +146,8 @@ inline AutotuneResult makeNonBenchmarkedResult(int64_t engineId,
     result.workspaceSize = compiledWorkspaceSize;
     result.succeeded = false;
     result.errorMessage = errorMessage;
-    result.engineName = ::hipdnn_frontend::detail::resolveEngineName(engineId);
+    result.engineName
+        = engineName.empty() ? ::hipdnn_frontend::detail::resolveEngineName(engineId) : engineName;
     result.modeUsed = config.mode;
     result.supportsExhaustive = supportsExhaustive;
     result.ranExhaustive = ranExhaustive;
@@ -162,7 +170,8 @@ inline AutotuneResult makeSkippedResult(int64_t engineId,
                                         int64_t maxWorkspaceSize,
                                         bool supportsExhaustive,
                                         bool ranExhaustive,
-                                        const std::string& exhaustiveNotRunReason)
+                                        const std::string& exhaustiveNotRunReason,
+                                        const std::string& engineName = {})
 {
     return makeNonBenchmarkedResult(engineId,
                                     knobSettings,
@@ -173,7 +182,8 @@ inline AutotuneResult makeSkippedResult(int64_t engineId,
                                         + " exceeds limit " + std::to_string(maxWorkspaceSize),
                                     supportsExhaustive,
                                     ranExhaustive,
-                                    exhaustiveNotRunReason);
+                                    exhaustiveNotRunReason,
+                                    engineName);
 }
 
 // Non-benchmarked result for a plan barred by a persistent user filter (deselect_engines()
@@ -186,7 +196,8 @@ inline AutotuneResult makeBarredResult(int64_t engineId,
                                        const AutotuneConfig& config,
                                        bool supportsExhaustive,
                                        bool ranExhaustive,
-                                       const std::string& exhaustiveNotRunReason)
+                                       const std::string& exhaustiveNotRunReason,
+                                       const std::string& engineName = {})
 {
     return makeNonBenchmarkedResult(engineId,
                                     knobSettings,
@@ -196,7 +207,8 @@ inline AutotuneResult makeBarredResult(int64_t engineId,
                                     "Plan barred (engine ID or workspace deselect filter).",
                                     supportsExhaustive,
                                     ranExhaustive,
-                                    exhaustiveNotRunReason);
+                                    exhaustiveNotRunReason,
+                                    engineName);
 }
 
 // Failed result for a plan whose execution-plan descriptor could not be compiled.
@@ -207,7 +219,8 @@ inline AutotuneResult makeCompileFailedResult(int64_t engineId,
                                               const std::string& errorMessage,
                                               bool supportsExhaustive,
                                               bool ranExhaustive,
-                                              const std::string& exhaustiveNotRunReason)
+                                              const std::string& exhaustiveNotRunReason,
+                                              const std::string& engineName = {})
 {
     return makeNonBenchmarkedResult(engineId,
                                     knobSettings,
@@ -217,7 +230,8 @@ inline AutotuneResult makeCompileFailedResult(int64_t engineId,
                                     errorMessage,
                                     supportsExhaustive,
                                     ranExhaustive,
-                                    exhaustiveNotRunReason);
+                                    exhaustiveNotRunReason,
+                                    engineName);
 }
 
 // Failed result for a plan whose execution-plan descriptor could not be finalized.
@@ -227,7 +241,8 @@ inline AutotuneResult makeFinalizeFailedResult(int64_t engineId,
                                                const std::string& errorMessage,
                                                bool supportsExhaustive,
                                                bool ranExhaustive,
-                                               const std::string& exhaustiveNotRunReason)
+                                               const std::string& exhaustiveNotRunReason,
+                                               const std::string& engineName = {})
 {
     return makeNonBenchmarkedResult(engineId,
                                     knobSettings,
@@ -237,7 +252,8 @@ inline AutotuneResult makeFinalizeFailedResult(int64_t engineId,
                                     errorMessage,
                                     supportsExhaustive,
                                     ranExhaustive,
-                                    exhaustiveNotRunReason);
+                                    exhaustiveNotRunReason,
+                                    engineName);
 }
 
 // Non-benchmarked result for a plan excluded by config.engineIdFilter.
@@ -248,7 +264,8 @@ inline AutotuneResult makeFilteredResult(int64_t engineId,
                                          const AutotuneConfig& config,
                                          bool supportsExhaustive,
                                          bool ranExhaustive,
-                                         const std::string& exhaustiveNotRunReason)
+                                         const std::string& exhaustiveNotRunReason,
+                                         const std::string& engineName = {})
 {
     return makeNonBenchmarkedResult(engineId,
                                     knobSettings,
@@ -258,7 +275,8 @@ inline AutotuneResult makeFilteredResult(int64_t engineId,
                                     "Plan excluded by engineIdFilter.",
                                     supportsExhaustive,
                                     ranExhaustive,
-                                    exhaustiveNotRunReason);
+                                    exhaustiveNotRunReason,
+                                    engineName);
 }
 
 // Copy knob settings while dropping the internal global.benchmarking knob,
