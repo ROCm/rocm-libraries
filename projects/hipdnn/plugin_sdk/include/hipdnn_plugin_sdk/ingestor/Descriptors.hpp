@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <string>
@@ -136,7 +137,17 @@ struct HeuristicDescriptor
     DescriptorId id;
     std::string name;
     HeuristicKind kind = HeuristicKind::NATIVE;
+    /// NATIVE: a ScoreRegistry symbol name. MODEL: a `.uhd.fb` path, relative to
+    /// @ref baseDir.
     std::string payload;
+    /// Directory of the `.uhd.json` that declared this descriptor. MODEL resolves
+    /// `payload` against it; the loader then resolves the model artifact against the
+    /// `.uhd.fb`'s own directory, so the two hops together reach the model from a
+    /// descriptor set that may sit anywhere.
+    ///
+    /// Empty for descriptors built in memory rather than parsed from disk, and ignored
+    /// by NATIVE, which resolves a symbol rather than a path.
+    std::filesystem::path baseDir;
 };
 
 /// UED: the engine itself, carrying no logic of its own. `name` hashes into hipDNN's

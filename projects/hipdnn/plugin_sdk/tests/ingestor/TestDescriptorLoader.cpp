@@ -351,6 +351,9 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     EXPECT_EQ(set.schema.fields.size(), 2u);
     ASSERT_TRUE(set.heuristic.has_value());
     EXPECT_EQ(set.heuristic->payload, SCORE_SYMBOL);
+    // A MODEL payload is a path relative to the .uhd.json that declared it, so the
+    // descriptor has to carry that directory -- nothing downstream can recover it.
+    EXPECT_EQ(set.heuristic->baseDir, dir.path());
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
     ASSERT_EQ(set.packs.size(), 1u);

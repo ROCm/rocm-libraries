@@ -594,9 +594,12 @@ inline MetadataSchema parseMetadataSchema(const nlohmann::json& root, const std:
     return schema;
 }
 
+/// Takes the file's path rather than a description of it: a MODEL descriptor's payload is
+/// a relative artifact path, and the directory it resolves against is only knowable here.
 inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
-                                                    const std::string& where)
+                                                    const std::filesystem::path& path)
 {
+    const std::string where = path.string();
     requireKnownKeys(root, {"version", "id", "name", "kind", "payload"}, where);
 
     HeuristicDescriptor heuristic;
@@ -604,6 +607,7 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
     heuristic.name = requireString(root, "name", where);
     heuristic.kind = heuristicKindFromString(requireString(root, "kind", where), where);
     heuristic.payload = requireString(root, "payload", where);
+    heuristic.baseDir = path.parent_path();
     return heuristic;
 }
 
@@ -1284,7 +1288,7 @@ inline constexpr std::array FILE_TYPES{
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.heuristics, parseHeuristicDescriptor(d, p.string()), d, p);
+                 insertCatalogEntry(c.heuristics, parseHeuristicDescriptor(d, p), d, p);
              }},
     FileType{SUFFIX_UED,
              1,
@@ -1976,6 +1980,20 @@ inline std::vector<DescriptorSet>
                                     << set.engine.name << "' names unregistered score symbol '"
                                     << set.heuristic->payload << "'; dropping it");
             resolvable = false;
+        }
+
+        // A MODEL warns where NATIVE drops. The two failures are not alike: an
+        // unregistered symbol is a build fact, so the engine could never score and is
+        // better removed, while a missing artifact is a deployment fact, and RFC 0019 §5
+        // requires that to degrade to declared order with the engine still in play.
+        if(set.heuristic.has_value() && set.heuristic->kind == HeuristicKind::MODEL
+           && !std::filesystem::exists(set.heuristic->baseDir / set.heuristic->payload))
+        {
+            HIPDNN_PLUGIN_LOG_WARN("descriptor loader: engine '"
+                                   << set.engine.name << "' names model artifact '"
+                                   << (set.heuristic->baseDir / set.heuristic->payload).string()
+                                   << "', which is absent; kernels will rank by priority, then "
+                                      "descriptor id");
         }
 
         // A name hashing onto an engine someone else already registered is dropped and the
