@@ -62,7 +62,6 @@ from .gemm_universal import (
     mono_data_spec,
 )
 
-
 __all__ = [
     "FusedGateUpSiluGemmSpec",
     "FusedDownReduceGemmSpec",

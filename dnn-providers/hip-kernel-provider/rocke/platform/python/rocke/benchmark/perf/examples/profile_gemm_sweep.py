@@ -21,6 +21,7 @@ Run: `python -m rocke.benchmark.perf.examples.profile_gemm_sweep --arch gfx950 -
 (needs rocKE importable + a GPU). Identity = each variant's stable `cache_key`
 (so a re-run pairs); the compiled symbol is the profiler `match`. Stdlib only.
 """
+
 from __future__ import annotations
 
 import argparse

@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the reporting primitive (pure, no GPU)."""
+
 import unittest
 
 from rocke.benchmark.perf import report, schema

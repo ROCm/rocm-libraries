@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the CLI wiring (no-GPU paths, pure)."""
+
 import io
 import json
 import tempfile

@@ -86,7 +86,6 @@ from ...helpers.tensor_view import make_global_view
 from ...helpers.transforms import TensorDescriptor as RichTensorDescriptor
 from ...helpers.transforms import pass_through, unmerge
 
-
 DType = Literal["f16", "bf16"]
 MAX_RANK = 8
 

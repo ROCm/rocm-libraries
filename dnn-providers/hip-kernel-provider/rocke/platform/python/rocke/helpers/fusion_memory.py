@@ -27,7 +27,6 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .fusion_ir import FusionPlan
 
-
 __all__ = [
     "WorkspaceAllocation",
     "WorkspacePlanner",

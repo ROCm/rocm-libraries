@@ -49,7 +49,6 @@ from .core.lower_llvm import lower_kernel_to_llvm
 from .runtime.comgr import build_hsaco_from_llvm_ir
 from .instances import UniversalGemmSpec, build_universal_gemm
 
-
 # ---------------------------------------------------------------------
 # Build records
 # ---------------------------------------------------------------------

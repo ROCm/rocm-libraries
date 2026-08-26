@@ -25,7 +25,6 @@ except ImportError:  # pragma: no cover - older reference tree
 from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
 
-
 # Each tuple mirrors the C-side config table exactly:
 #   (tokens, experts, topk, hidden, intermediate, dtype, block_size, vec)
 # WIDE adversarial stress set: edge shapes (M/E/K=1, primes, very large),

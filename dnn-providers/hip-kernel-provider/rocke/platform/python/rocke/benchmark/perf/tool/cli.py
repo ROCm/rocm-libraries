@@ -14,6 +14,7 @@ Every command takes `--json` for structured output instead of
 the human text. Only this layer writes (via `store`, to the user cache dir).
 Stdlib only.
 """
+
 from __future__ import annotations
 
 import argparse

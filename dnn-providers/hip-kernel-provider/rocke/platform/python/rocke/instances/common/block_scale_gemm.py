@@ -70,7 +70,6 @@ from ...helpers.mfma_gemm_inner import (
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 
-
 QuantMode = Literal["aquant", "bquant", "abquant"]
 MantissaDType = Literal["fp8e4m3", "bf8e5m2", "i4_fp8", "i4_bf8"]
 

@@ -37,7 +37,6 @@ from typing import Optional, Sequence
 
 from ..core.ir import I32, IRBuilder, Value
 
-
 __all__ = [
     "lds_zero_i32",
     "block_histogram_i32",

@@ -20,7 +20,6 @@ except ImportError:  # pragma: no cover - older reference tree
 from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
 
-
 # (n_per_block, block_size, vec, dtype, save_mean_invstd)
 CONFIGS = [
     # --- original 6 sampled configs (regression anchor) ---

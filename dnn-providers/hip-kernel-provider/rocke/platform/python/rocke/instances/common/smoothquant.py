@@ -116,7 +116,6 @@ from ...helpers.tensor_view import (
     make_tile_window,
 )
 
-
 # ---------------------------------------------------------------------
 # Local helpers (kept inside this instance file to honour the
 # "instance files only" optimisation scope).

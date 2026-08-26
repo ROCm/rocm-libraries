@@ -25,7 +25,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
-
 __all__ = [
     "IOSpecRule",
     "SignatureBuilder",

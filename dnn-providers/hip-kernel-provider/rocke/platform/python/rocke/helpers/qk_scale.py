@@ -29,7 +29,6 @@ from typing import Literal
 
 from ..core.ir import F32, IRBuilder, PtrType, Value
 
-
 __all__ = [
     "QkScaleLayout",
     "QkScaleSpec",

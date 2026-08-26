@@ -32,7 +32,6 @@ from __future__ import annotations
 
 from ..core.ir import F16, BF16, IRBuilder, Value
 
-
 __all__ = [
     "mfma_attention_bwd_dot_do_o_inner_body",
     "mfma_attention_bwd_dq_dk_dv_inner_body",

@@ -33,7 +33,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Sequence
 
-
 __all__ = ["compile", "BackendError"]
 
 

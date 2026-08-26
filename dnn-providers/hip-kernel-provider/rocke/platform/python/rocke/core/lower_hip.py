@@ -27,7 +27,6 @@ from .ir import (
     VectorType,
 )
 
-
 _HIP_TYPE = {
     "i1": "bool",
     "i8": "int8_t",

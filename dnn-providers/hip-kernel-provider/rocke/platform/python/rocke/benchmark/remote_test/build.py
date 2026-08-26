@@ -4,6 +4,7 @@
 ``--no-verify --output-dir <stage>`` so it produces HSACO + manifest.json
 without trying to launch on this machine (which probably lacks the target GPU).
 """
+
 from __future__ import annotations
 
 import json

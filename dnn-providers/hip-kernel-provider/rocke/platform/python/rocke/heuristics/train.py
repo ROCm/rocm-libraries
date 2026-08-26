@@ -38,7 +38,6 @@ from sklearn.model_selection import GroupKFold
 
 from data_pipeline import build_training_dataset
 
-
 # Operation-specific target column mappings
 TARGET_COLUMNS = {
     "gemm_universal": {

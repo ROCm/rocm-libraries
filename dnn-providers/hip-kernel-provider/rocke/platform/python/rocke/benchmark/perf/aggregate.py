@@ -23,6 +23,7 @@ not one shot.
 Pure and stdlib-only: writes nothing, runs no profiler. Mixing identities is a
 caller bug, so it raises rather than silently averaging unrelated kernels.
 """
+
 from __future__ import annotations
 
 import copy

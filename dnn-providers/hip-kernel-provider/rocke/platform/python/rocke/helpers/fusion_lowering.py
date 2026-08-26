@@ -44,7 +44,6 @@ from .autotune import AutotuneConfig
 from .fusion_ir import FusionGraph, FusionRegion
 from .fusion_legalize import LegalResult
 
-
 __all__ = [
     "BuiltRegion",
     "ElementwiseLowerer",

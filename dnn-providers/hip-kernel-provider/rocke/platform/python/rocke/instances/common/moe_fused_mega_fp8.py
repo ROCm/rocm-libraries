@@ -79,7 +79,6 @@ from ...helpers.mfma_gemm_inner import (
 from ...helpers.quant import quant_max_abs
 from ...helpers.tensor_view import TensorDescriptor, TensorView
 
-
 __all__ = [
     "FusedMegaKernelSpecFp8",
     "build_moe_fused_mega_gemm_fp8",

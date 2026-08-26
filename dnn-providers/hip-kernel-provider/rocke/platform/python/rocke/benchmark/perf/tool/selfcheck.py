@@ -17,6 +17,7 @@ consumers can adopt their own policy.
 
 Defaults: threshold 5% (fraction 0.05), noise_k 3. Stdlib only.
 """
+
 from __future__ import annotations
 
 from typing import Any, Mapping, Sequence

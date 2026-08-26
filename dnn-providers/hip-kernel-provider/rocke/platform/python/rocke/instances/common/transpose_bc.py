@@ -156,7 +156,6 @@ from ...helpers.tensor_view import (
 from ...helpers.transforms import TensorDescriptor as RichTensorDescriptor
 from ...helpers.transforms import unmerge_magic
 
-
 DType = Literal["f16", "bf16"]
 
 

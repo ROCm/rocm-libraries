@@ -24,7 +24,6 @@ from typing import Tuple
 from ..core.ir import F32, IRBuilder, PtrType, Value
 from .i4_dequant import unpack_i4_byte_to_pair_i32
 
-
 __all__ = [
     "apply_per_tensor_scale",
     "codebook_lookup_i4_pair_to_bf8",

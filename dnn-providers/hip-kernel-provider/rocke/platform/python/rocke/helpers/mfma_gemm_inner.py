@@ -45,7 +45,6 @@ from typing import Callable, Optional, Tuple
 from ..core.ir import F16, F32, BF16, IRBuilder, Value
 from .atoms import MfmaAtom
 
-
 __all__ = [
     "LaneDecode",
     "decode_mfma_lanes",

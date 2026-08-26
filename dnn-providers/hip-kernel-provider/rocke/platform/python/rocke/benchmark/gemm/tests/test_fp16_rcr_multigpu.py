@@ -17,7 +17,6 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
 )
 from rocke.runtime.hip_module import get_device_arch, get_device_count
 
-
 # The sweep builds+launches gfx950 code objects across GPUs, so require both the exact
 # arch and >=2 visible devices. get_device_count respects HIP_VISIBLE_DEVICES.
 _ARCH = get_device_arch(0)

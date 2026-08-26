@@ -26,6 +26,7 @@ One record per measured kernel invocation, composed from several primitives:
 timing when the profiler is unavailable. Keep the schema **additive-only** so old
 records stay readable. Stdlib only.
 """
+
 from __future__ import annotations
 
 import json

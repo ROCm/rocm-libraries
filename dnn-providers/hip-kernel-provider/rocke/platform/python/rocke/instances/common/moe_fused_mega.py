@@ -78,7 +78,6 @@ from .moe_gemm_fused import (
     _silu_mul_f32,
 )
 
-
 __all__ = [
     "FusedMegaKernelSpec",
     "build_moe_fused_mega_gemm",

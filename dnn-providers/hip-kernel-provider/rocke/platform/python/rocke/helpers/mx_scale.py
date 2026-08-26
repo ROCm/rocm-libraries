@@ -41,7 +41,6 @@ from __future__ import annotations
 
 from ..core.ir import I8, I32, IRBuilder, PtrType, Value
 
-
 __all__ = [
     "apply_mx_scale",
     "decode_mx_scale_e8m0",

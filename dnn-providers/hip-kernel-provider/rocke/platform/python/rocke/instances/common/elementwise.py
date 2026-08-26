@@ -61,7 +61,6 @@ from ...helpers.io import io_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 from ...helpers.tensor_view import make_global_view, make_tile_window
 
-
 UnaryOp = Literal[
     "copy",
     "neg",

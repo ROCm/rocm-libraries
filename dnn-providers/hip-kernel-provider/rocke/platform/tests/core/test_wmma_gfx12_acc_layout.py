@@ -25,7 +25,6 @@ from typing import Callable, Tuple
 
 from rocke.core.arch.target import _MMA_FRAGMENT_INFO, _wmma_gfx12_acc_16x16
 
-
 # ---------------------------------------------------------------------------
 # Minimal constant-folding IR builder — evaluates lane-coord functions on the
 # host without the full IR machinery.

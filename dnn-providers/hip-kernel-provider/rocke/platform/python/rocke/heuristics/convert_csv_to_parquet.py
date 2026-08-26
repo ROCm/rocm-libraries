@@ -49,7 +49,6 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, Optional, Set
 
-
 # Known metric/metadata columns (will be excluded from problem features)
 METRIC_COLUMNS: Set[str] = {
     "kernel",

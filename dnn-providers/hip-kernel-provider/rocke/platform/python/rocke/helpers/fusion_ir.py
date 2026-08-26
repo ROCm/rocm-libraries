@@ -16,7 +16,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-
 Shape = Tuple[Optional[int], ...]
 Strides = Tuple[Optional[int], ...]
 

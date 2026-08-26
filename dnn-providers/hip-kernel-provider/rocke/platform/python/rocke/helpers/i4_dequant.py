@@ -43,7 +43,6 @@ from typing import Tuple
 from ..core.ir import I32, IRBuilder, Value
 from .quant import quantize_scalar_f32
 
-
 __all__ = [
     "dequant_i4_byte_to_bf8_pair",
     "dequant_i4_byte_to_f16_pair",

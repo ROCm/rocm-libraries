@@ -35,7 +35,6 @@ from rocke.instances.common.batched_gemm import build_batched_gemm
 from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
 
-
 # The six sampled configs (must match the C emitter's make_spec()).
 _CONFIGS = (
     dict(tokens=1, experts=8, topk=2, hidden=4096, intermediate=7168, dtype="f16"),

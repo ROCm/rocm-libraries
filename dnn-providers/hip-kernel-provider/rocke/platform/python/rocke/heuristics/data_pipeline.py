@@ -23,7 +23,6 @@ from typing import Optional
 
 import pandas as pd
 
-
 CANONICAL_COLUMNS = [
     "op_type",
     "dtype",

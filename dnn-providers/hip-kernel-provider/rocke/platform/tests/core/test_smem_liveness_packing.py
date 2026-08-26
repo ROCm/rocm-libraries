@@ -17,7 +17,6 @@ import unittest
 from rocke.core.ir import F16, F32, I8, KernelDef, Op, Region, SmemType, Value
 from rocke.core.lower_llvm import _Lowerer
 
-
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------

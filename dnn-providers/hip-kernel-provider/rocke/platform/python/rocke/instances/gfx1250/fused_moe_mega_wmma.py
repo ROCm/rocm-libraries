@@ -88,7 +88,6 @@ from ..common.moe_gemm_fused import (
     _vec_rowcol,
 )
 
-
 __all__ = [
     "FusedMegaWmmaSpec",
     "build_moe_fused_mega_wmma",

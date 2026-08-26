@@ -18,7 +18,6 @@ from typing import Tuple
 
 from ..core.ir import IRBuilder, Value
 
-
 __all__ = [
     "PHILOX_M0",
     "PHILOX_M1",

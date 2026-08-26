@@ -64,7 +64,6 @@ from typing import Any, Callable, Literal, Optional, Sequence, Tuple, Union
 
 from ..core.ir import IRBuilder, Type, Value
 
-
 StrideElem = Union[int, Value]
 """One stride element. Compile-time stride is :class:`int`; runtime stride
 (e.g. the row stride of a torch tensor whose ``W`` is only known at

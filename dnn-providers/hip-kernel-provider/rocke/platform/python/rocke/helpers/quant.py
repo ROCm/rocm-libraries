@@ -41,7 +41,6 @@ from typing import List, Literal
 
 from ..core.ir import BF8E5M2, F32, FP8E4M3, I8, I32, I64, IRBuilder, Type, Value
 
-
 __all__ = [
     "QDType",
     "QUANT_MAX_ABS",

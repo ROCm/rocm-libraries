@@ -24,7 +24,6 @@ from typing import Literal
 
 from ..core.ir import BF16, F16, IRBuilder, Type, Value
 
-
 __all__ = [
     "DType",
     "io_ir_type",

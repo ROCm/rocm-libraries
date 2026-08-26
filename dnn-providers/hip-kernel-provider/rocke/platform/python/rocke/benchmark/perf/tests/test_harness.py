@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the harness's pure logic (no GPU; profiler monkeypatched)."""
+
 import tempfile
 import unittest
 from pathlib import Path

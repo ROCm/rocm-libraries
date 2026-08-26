@@ -26,7 +26,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from ._ctypes_bind import _LazyFn
 from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
 
-
 HIP_LAUNCH_PARAM_BUFFER_POINTER = ctypes.c_void_p(1)
 HIP_LAUNCH_PARAM_BUFFER_SIZE = ctypes.c_void_p(2)
 HIP_LAUNCH_PARAM_END = ctypes.c_void_p(3)

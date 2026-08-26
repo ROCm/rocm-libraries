@@ -64,7 +64,6 @@ from ..instances import (
 from .. import sweep
 from .. import sweep_bench
 
-
 # ---------------------------------------------------------------------
 # Shape corpus (folded in from generate_wide_coverage / generate_edge_dims)
 # ---------------------------------------------------------------------

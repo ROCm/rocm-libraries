@@ -74,7 +74,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..core.ir import F16, I32, I64, IRBuilder, Type, Value
 
-
 # ---------------------------------------------------------------------
 # CoordVar: one symbolic coordinate (an SSA value + optional validity)
 # ---------------------------------------------------------------------

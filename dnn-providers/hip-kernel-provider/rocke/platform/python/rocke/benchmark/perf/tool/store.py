@@ -12,6 +12,7 @@ Resolution order for the cache dir: explicit arg > `$ROCKE_PERF_CACHE` >
 `$XDG_CACHE_HOME/rocke-perf` > `~/.cache/rocke-perf`. Records are grouped by
 `schema.identity` (arch, op, kernel_name, shape) for comparison. Stdlib only.
 """
+
 from __future__ import annotations
 
 import json

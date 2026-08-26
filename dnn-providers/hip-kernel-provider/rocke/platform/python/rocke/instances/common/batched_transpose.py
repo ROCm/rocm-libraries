@@ -65,7 +65,6 @@ from ...helpers.spec import (
 )
 from ...helpers.tensor_view import make_global_view, make_lds_view
 
-
 DType = Literal["f16", "bf16"]
 
 
