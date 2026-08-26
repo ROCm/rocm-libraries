@@ -4348,6 +4348,41 @@ class MFMAInstruction(Instruction):
         self.acc2_imm = acc2_imm
         self.neg = neg
 
+    def preStr(self) -> str:
+        """Port of rocisa MFMAInstruction::preStr (mfma.hpp)."""
+        from .base import getAsmCaps
+        caps = getAsmCaps()
+        m = self.variant[0] if len(self.variant) > 0 else 0
+        n = self.variant[1] if len(self.variant) > 1 else 0
+        k = self.variant[2] if len(self.variant) > 2 else 0
+        blocks = self.variant[3] if len(self.variant) > 3 else 1
+        variant_str = f"{m}x{n}x{k}"
+        has_wmma_v3 = bool(caps.get("HasWMMA_V3", 0))
+
+        if bool(caps.get("HasMFMA_explictB", 0)) and not self.mfma1k:
+            str_b = f"{blocks}b_" if blocks > 1 else ""
+            return (f"v_mfma_{_inst_type_to_str(self.accType)}_{variant_str}_"
+                    f"{str_b}{_wmma_type_convert(self.instType, m, n, k, has_wmma_v3)}")
+
+        is_mfma = bool(caps.get("HasMFMA", 0))
+        instruction_name = "mfma" if is_mfma else "wmma"
+        instruction_step = "" if is_mfma else "_"
+        mfma_1k = "_1k" if self.mfma1k else ""
+        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3)
+
+        # forceScaledWMMA: gfx1250 low-precision WMMA must use v_wmma_scale_*
+        try:
+            from . import rocIsa  # noqa: WPS433
+            isa = tuple(rocIsa.getInstance().getKernel().isa)
+        except Exception:  # noqa: BLE001
+            isa = ()
+        if not is_mfma and isa == (12, 5, 0) and type_str in ("f8f6f4", "f4"):
+            return (f"v_wmma_scale_{_inst_type_to_str(self.accType)}_{variant_str}"
+                    f"{instruction_step}{type_str}")
+
+        return (f"v_{instruction_name}_{_inst_type_to_str(self.accType)}_{variant_str}"
+                f"{instruction_step}{type_str}{mfma_1k}")
+
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         from .base import getAsmCaps
