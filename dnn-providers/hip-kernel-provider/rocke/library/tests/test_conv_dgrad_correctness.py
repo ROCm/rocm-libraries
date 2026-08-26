@@ -28,7 +28,12 @@ import unittest
 
 from rocke.runtime.hip_module import get_device_arch
 
-_PYDIR = os.path.join(os.path.dirname(__file__), "..", "..", "python")
+_LIBDIR = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+# platform/python is three levels up from library/tests/
+_PYDIR = os.path.normpath(os.path.join(_LIBDIR, "..", "platform", "python"))
+_BENCHMARK_SCRIPT = os.path.join(
+    _LIBDIR, "benchmarks", "common", "benchmark_implicit_gemm_conv.py"
+)
 
 ARCH = get_device_arch(0)
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
@@ -47,11 +52,14 @@ def _run_benchmark(*extra_args, timeout=600):
     """Run benchmark_implicit_gemm_conv in a subprocess and return (rc, output)."""
     import io
 
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": _PYDIR}
+    env = {
+        **os.environ,
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": os.pathsep.join([_PYDIR, _LIBDIR]),
+    }
     cmd = [
         sys.executable,
-        "-m",
-        "rocke.benchmark.benchmark_implicit_gemm_conv",
+        _BENCHMARK_SCRIPT,
         "--arch",
         ARCH,
         "--direction",
