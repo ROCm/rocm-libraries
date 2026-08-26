@@ -168,19 +168,30 @@ class DispatcherLibBase:
         cold_niters: Optional[int] = None,
         nrepeat: Optional[int] = None,
     ) -> int:
-        """Configure the measured launch, so it can match the Old-TE baseline.
+        """Configure the measured launch: warmup iterations and repeat count.
 
         The bridge is benchmarked against Old-TE's ``gemm_quant``, which defaults
-        to ``flush_cache=true`` / ``rotating_count=1000``; the bridge used to
-        hardcode ``false`` / ``1``, and nothing on the Python side could change
-        it -- a measurement bias in the bridge's own favour that no caller could
-        correct.  ``None`` leaves a field at its current value.
+        to ``cold_niters``/``nrepeat`` the caller can pick and to
+        ``flush_cache=true`` / ``rotating_count=1000``.  The bridge hardcoded all
+        four and nothing on the Python side could change any of them.
+        ``cold_niters`` and ``nrepeat`` are now settable; ``None`` leaves a field
+        at its current value.  The environment variables ``CK_BRIDGE_COLD_NITERS``
+        and ``CK_BRIDGE_NREPEAT`` set the same fields at first use.
 
-        Returns the library status: 0 on success, -1 if the loaded ``.so``
-        predates the knobs, -2 if it refuses ``flush_cache`` (the generated
-        ``launch()`` goes through ``ck_tile::launch_kernel``, which ignores
-        ``stream_config::flush_cache_``, so accepting the flag would report a
-        cache-flushed measurement that never happened).
+        ``flush_cache`` and ``rotating_count`` are **refused**, not stored.  The
+        generated ``launch()`` goes through ``ck_tile::launch_kernel``, which
+        ignores ``stream_config::flush_cache_`` and ``rotating_count_`` entirely
+        -- Old-TE implements the rotating-buffer flush in its own invoker.
+        Accepting them would make the bridge report a cache-flushed measurement
+        it never performed, which is worse than not offering the knob.  So this
+        remains a **disclosed asymmetry** against the Old-TE baseline: closing it
+        needs a flush-cache launch overload in the generated header, not Python
+        plumbing.
+
+        Returns the library status: 0 on success; -1 if the loaded ``.so``
+        predates the knobs; -2 if ``flush_cache``/``rotating_count`` were
+        requested, in which case **nothing** is applied -- call again with only
+        the supported fields.
         """
         fn = getattr(self._lib, "dispatcher_set_timing_config", None)
         if fn is None:
