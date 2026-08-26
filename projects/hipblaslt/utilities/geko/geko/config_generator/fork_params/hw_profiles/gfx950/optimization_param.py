@@ -324,6 +324,10 @@ class GFX950GAParams(BaseOptimizationParams):
         return self._make_param("StoreSyncOpt", [0, 1, 4])
 
     @param
+    def store_vector_width(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("StoreVectorWidth", [-1, 1, 2, 4, 8])
+
+    @param
     def work_group_mapping(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param(
             "WorkGroupMapping",
