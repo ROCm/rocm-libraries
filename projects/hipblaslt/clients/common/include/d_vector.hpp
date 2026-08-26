@@ -1,4 +1,3 @@
-~~~
 /*******************************************************************************
  *
  * MIT License
@@ -605,4 +604,3 @@ bool d_vector<T>::m_init_guard = false;
 
 #undef MEM_MAX_GUARD_PAD
 #undef MAX_DTYPE_SIZE
-~~~
