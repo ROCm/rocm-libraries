@@ -49,7 +49,15 @@ public:
     /// is undefined behaviour for stable_sort. Mapping it to -infinity keeps the order
     /// total, so a pack that returns NaN loses selection quality without costing
     /// determinism or reaching UB. Infinities are already well-ordered and pass through.
-    std::vector<KernelDefinition> rank(const Catalog& catalog, const MatchContext& context) const
+    ///
+    /// Virtual because an implementation may need the whole catalog at once where this
+    /// default needs only one kernel at a time. A model-backed heuristic has two such
+    /// needs: the problem and device parts of its feature row are the same for every
+    /// candidate and should be computed once, and a model that fails partway through must
+    /// abandon the whole ranking rather than leave a mix of real scores and sentinels,
+    /// which would be neither the model's order nor the fallback's.
+    virtual std::vector<KernelDefinition> rank(const Catalog& catalog,
+                                               const MatchContext& context) const
     {
         std::vector<std::pair<double, const KernelDefinition*>> scored;
         scored.reserve(catalog.entries.size());
