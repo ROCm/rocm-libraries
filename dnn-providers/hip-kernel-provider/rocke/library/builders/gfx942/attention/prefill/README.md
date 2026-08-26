@@ -145,6 +145,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 | Fused softmax rescale | all | exp2 → accumulate → cast → pack in one pass instead of materializing a full f32 `p_vals` matrix | **shipped** — pure live-range relief, bit-identical |
 | Per-config `waves_per_eu` | **bf16 D64** → 4 | forces the allocator low enough that a second workgroup co-resides (1 → 2 WG/CU) | **shipped** — large at long sequences |
 | D64 K-bank-conflict pad | **D64 both dtypes** | 2-row-group boundary pad takes the `do_qk` K reads from 32-way to 4-way | **shipped** — large, cross-part confirmed |
+| `lds_k_group_pad` default (8) confirmed | **D64 both dtypes** | gfx942 reuses the shared `AttentionDenseSpec.lds_k_group_pad` field; default 8 inherits from the gfx950 sweep (840 configs, pad ∈ {0,8,16,24,32} × bn × GQA × mode × seqlen). Whole-wave bank model and decision record: `library/builders/gfx950/attention/prefill/README.md §Tuning`. | **adopted** — default unchanged |
 | Persistent grid-stride | all | `num_persistent` CTAs grid-stride over decoded work items; qb-major and hkv-major decodes | **shipped** — large at long sequences; auto-on when work fills the grid |
 
 ### Evaluated and rejected
