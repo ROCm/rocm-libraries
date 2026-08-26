@@ -52,13 +52,13 @@ from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.schedule import DS_READ, MFMA, SchedulePolicy
 from rocke.helpers.spec import kernel_name_join
 from rocke.runtime.hip_module import Runtime
-from ..common._matmul_nbits_common import (
+from rocke.instances.common._matmul_nbits_common import (
     MatMulNBitsSpec,
     pack_i4_weights_for_matmul_nbits,
 )
 from ..common.conv_implicit_gemm import ConvProblem, _emit_frag_smem_load
-from ..common.gemm_universal import TileSpec
-from ..common.manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
+from rocke.instances.common.gemm_universal import TileSpec
+from rocke.runtime.host_buffers import as_u8_buffer, nbytes, require_numpy
 from ..gfx950.deep_fused_conv_pool import FusedConvPoolProblem
 
 _WMMA = 16
