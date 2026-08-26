@@ -49,29 +49,29 @@ RppStatus rppt_copy(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
 
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            copy_u8_u8_host_tensor(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes,
-                                   srcDescPtr,
-                                   static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes,
-                                   dstDescPtr, layoutParams, handle);
+            return copy_u8_u8_host_tensor(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes,
+                                          srcDescPtr,
+                                          static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes,
+                                          dstDescPtr, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
-            copy_f16_f16_host_tensor(
+            return copy_f16_f16_host_tensor(
                 (Rpp16f*)(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes), srcDescPtr,
                 (Rpp16f*)(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes), dstDescPtr,
                 layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
-            copy_f32_f32_host_tensor(
+            return copy_f32_f32_host_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
-            copy_i8_i8_host_tensor(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
-                                   srcDescPtr,
-                                   static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes,
-                                   dstDescPtr, layoutParams, handle);
+            return copy_i8_i8_host_tensor(static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes,
+                                          srcDescPtr,
+                                          static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes,
+                                          dstDescPtr, layoutParams, handle);
         }
 
         return RPP_SUCCESS;
@@ -124,26 +124,26 @@ RppStatus rppt_channel_permute(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            channel_permute_u8_u8_host_tensor(
+            return channel_permute_u8_u8_host_tensor(
                 static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                 permutationTensor, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
-            channel_permute_f16_f16_host_tensor(
+            return channel_permute_f16_f16_host_tensor(
                 (Rpp16f*)(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes), srcDescPtr,
                 (Rpp16f*)(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes), dstDescPtr,
                 permutationTensor, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
-            channel_permute_f32_f32_host_tensor(
+            return channel_permute_f32_f32_host_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, permutationTensor, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
-            channel_permute_i8_i8_host_tensor(
+            return channel_permute_i8_i8_host_tensor(
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                 permutationTensor, layoutParams, handle);
@@ -216,26 +216,26 @@ RppStatus rppt_color_to_greyscale(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPt
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            color_to_greyscale_u8_u8_host_tensor(
+            return color_to_greyscale_u8_u8_host_tensor(
                 static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, channelWeights,
                 layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
-            color_to_greyscale_f16_f16_host_tensor(
+            return color_to_greyscale_f16_f16_host_tensor(
                 (Rpp16f*)(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes), srcDescPtr,
                 (Rpp16f*)(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes), dstDescPtr,
                 channelWeights, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
-            color_to_greyscale_f32_f32_host_tensor(
+            return color_to_greyscale_f32_f32_host_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
                 dstDescPtr, channelWeights, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
-            color_to_greyscale_i8_i8_host_tensor(
+            return color_to_greyscale_i8_i8_host_tensor(
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, channelWeights,
                 layoutParams, handle);

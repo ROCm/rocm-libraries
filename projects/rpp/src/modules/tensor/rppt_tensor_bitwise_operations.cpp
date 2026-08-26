@@ -52,7 +52,7 @@ RppStatus rppt_bitwise_and(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            bitwise_and_u8_u8_host_tensor(
+            return bitwise_and_u8_u8_host_tensor(
                 static_cast<Rpp8u*>(srcPtr1) + srcDescPtr->offsetInBytes,
                 static_cast<Rpp8u*>(srcPtr2) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
@@ -97,7 +97,7 @@ RppStatus rppt_bitwise_xor(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            bitwise_xor_u8_u8_host_tensor(
+            return bitwise_xor_u8_u8_host_tensor(
                 static_cast<Rpp8u*>(srcPtr1) + srcDescPtr->offsetInBytes,
                 static_cast<Rpp8u*>(srcPtr2) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
@@ -141,7 +141,7 @@ RppStatus rppt_bitwise_or(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDes
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            bitwise_or_u8_u8_host_tensor(
+            return bitwise_or_u8_u8_host_tensor(
                 static_cast<Rpp8u*>(srcPtr1) + srcDescPtr->offsetInBytes,
                 static_cast<Rpp8u*>(srcPtr2) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
@@ -185,7 +185,7 @@ RppStatus rppt_bitwise_not(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
-            bitwise_not_u8_u8_host_tensor(
+            return bitwise_not_u8_u8_host_tensor(
                 static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
                 roiTensorPtrSrc, roiType, layoutParams, handle);
@@ -253,7 +253,7 @@ RppStatus rppt_tensor_and_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
              (dstGenericDescPtr->dataType == RpptDataType::U8)) ||
             ((srcPtr1GenericDescPtr->dataType == RpptDataType::I8) &&
              (dstGenericDescPtr->dataType == RpptDataType::I8))) {
-            tensor_binary_bitwise_op_dispatch_host_tensor(
+            return tensor_binary_bitwise_op_dispatch_host_tensor(
                 static_cast<Rpp8u*>(srcPtr1) + srcPtr1GenericDescPtr->offsetInBytes,
                 static_cast<Rpp8u*>(srcPtr2) + srcPtr2GenericDescPtr->offsetInBytes,
                 srcPtr1GenericDescPtr, srcPtr2GenericDescPtr,
@@ -263,7 +263,7 @@ RppStatus rppt_tensor_and_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                     (dstGenericDescPtr->dataType == RpptDataType::U16)) ||
                    ((srcPtr1GenericDescPtr->dataType == RpptDataType::I16) &&
                     (dstGenericDescPtr->dataType == RpptDataType::I16))) {
-            tensor_binary_bitwise_op_dispatch_host_tensor(
+            return tensor_binary_bitwise_op_dispatch_host_tensor(
                 reinterpret_cast<Rpp16u*>(static_cast<Rpp8u*>(srcPtr1) +
                                           srcPtr1GenericDescPtr->offsetInBytes),
                 reinterpret_cast<Rpp16u*>(static_cast<Rpp8u*>(srcPtr2) +
@@ -277,7 +277,7 @@ RppStatus rppt_tensor_and_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                     (dstGenericDescPtr->dataType == RpptDataType::U32)) ||
                    ((srcPtr1GenericDescPtr->dataType == RpptDataType::I32) &&
                     (dstGenericDescPtr->dataType == RpptDataType::I32))) {
-            tensor_binary_bitwise_op_dispatch_host_tensor(
+            return tensor_binary_bitwise_op_dispatch_host_tensor(
                 reinterpret_cast<Rpp32u*>(static_cast<Rpp8u*>(srcPtr1) +
                                           srcPtr1GenericDescPtr->offsetInBytes),
                 reinterpret_cast<Rpp32u*>(static_cast<Rpp8u*>(srcPtr2) +
@@ -388,7 +388,7 @@ RppStatus rppt_tensor_or_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
              (dstGenericDescPtr->dataType == RpptDataType::U8)) ||
             ((srcPtr1GenericDescPtr->dataType == RpptDataType::I8) &&
              (dstGenericDescPtr->dataType == RpptDataType::I8))) {
-            tensor_binary_bitwise_op_dispatch_host_tensor(
+            return tensor_binary_bitwise_op_dispatch_host_tensor(
                 static_cast<Rpp8u*>(srcPtr1) + srcPtr1GenericDescPtr->offsetInBytes,
                 static_cast<Rpp8u*>(srcPtr2) + srcPtr2GenericDescPtr->offsetInBytes,
                 srcPtr1GenericDescPtr, srcPtr2GenericDescPtr,
@@ -398,7 +398,7 @@ RppStatus rppt_tensor_or_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                     (dstGenericDescPtr->dataType == RpptDataType::U16)) ||
                    ((srcPtr1GenericDescPtr->dataType == RpptDataType::I16) &&
                     (dstGenericDescPtr->dataType == RpptDataType::I16))) {
-            tensor_binary_bitwise_op_dispatch_host_tensor(
+            return tensor_binary_bitwise_op_dispatch_host_tensor(
                 reinterpret_cast<Rpp16u*>(static_cast<Rpp8u*>(srcPtr1) +
                                           srcPtr1GenericDescPtr->offsetInBytes),
                 reinterpret_cast<Rpp16u*>(static_cast<Rpp8u*>(srcPtr2) +
@@ -412,7 +412,7 @@ RppStatus rppt_tensor_or_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                     (dstGenericDescPtr->dataType == RpptDataType::U32)) ||
                    ((srcPtr1GenericDescPtr->dataType == RpptDataType::I32) &&
                     (dstGenericDescPtr->dataType == RpptDataType::I32))) {
-            tensor_binary_bitwise_op_dispatch_host_tensor(
+            return tensor_binary_bitwise_op_dispatch_host_tensor(
                 reinterpret_cast<Rpp32u*>(static_cast<Rpp8u*>(srcPtr1) +
                                           srcPtr1GenericDescPtr->offsetInBytes),
                 reinterpret_cast<Rpp32u*>(static_cast<Rpp8u*>(srcPtr2) +
@@ -523,7 +523,7 @@ RppStatus rppt_tensor_xor_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
              (dstGenericDescPtr->dataType == RpptDataType::U8)) ||
             ((srcPtr1GenericDescPtr->dataType == RpptDataType::I8) &&
              (dstGenericDescPtr->dataType == RpptDataType::I8))) {
-            tensor_binary_bitwise_op_dispatch_host_tensor(
+            return tensor_binary_bitwise_op_dispatch_host_tensor(
                 static_cast<Rpp8u*>(srcPtr1) + srcPtr1GenericDescPtr->offsetInBytes,
                 static_cast<Rpp8u*>(srcPtr2) + srcPtr2GenericDescPtr->offsetInBytes,
                 srcPtr1GenericDescPtr, srcPtr2GenericDescPtr,
@@ -533,7 +533,7 @@ RppStatus rppt_tensor_xor_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                     (dstGenericDescPtr->dataType == RpptDataType::U16)) ||
                    ((srcPtr1GenericDescPtr->dataType == RpptDataType::I16) &&
                     (dstGenericDescPtr->dataType == RpptDataType::I16))) {
-            tensor_binary_bitwise_op_dispatch_host_tensor(
+            return tensor_binary_bitwise_op_dispatch_host_tensor(
                 reinterpret_cast<Rpp16u*>(static_cast<Rpp8u*>(srcPtr1) +
                                           srcPtr1GenericDescPtr->offsetInBytes),
                 reinterpret_cast<Rpp16u*>(static_cast<Rpp8u*>(srcPtr2) +
@@ -547,7 +547,7 @@ RppStatus rppt_tensor_xor_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
                     (dstGenericDescPtr->dataType == RpptDataType::U32)) ||
                    ((srcPtr1GenericDescPtr->dataType == RpptDataType::I32) &&
                     (dstGenericDescPtr->dataType == RpptDataType::I32))) {
-            tensor_binary_bitwise_op_dispatch_host_tensor(
+            return tensor_binary_bitwise_op_dispatch_host_tensor(
                 reinterpret_cast<Rpp32u*>(static_cast<Rpp8u*>(srcPtr1) +
                                           srcPtr1GenericDescPtr->offsetInBytes),
                 reinterpret_cast<Rpp32u*>(static_cast<Rpp8u*>(srcPtr2) +
