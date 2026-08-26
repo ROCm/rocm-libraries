@@ -744,6 +744,7 @@ def make_d_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
 
 def build_implicit_gemm_conv(
     spec: ImplicitGemmConvSpec,
+    *,
     arch: str = "gfx950",
     extra_params: Optional[Callable[[IRBuilder], object]] = None,
     m_index_fn: Optional[Callable[[IRBuilder, Value, WarpGrid], Value]] = None,

@@ -239,7 +239,7 @@ def is_valid_spec_16c(
     return True, "ok"
 
 
-def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> KernelDef:
+def build_direct_conv_16c(spec: DirectConv16cSpec, *, arch: str = "gfx950") -> KernelDef:
     """Build the IR for one direct conv 16c kernel instance.
 
     See the module docstring for the kernel structure. The Python
@@ -894,7 +894,7 @@ def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool
     return True, "ok"
 
 
-def build_direct_conv_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> KernelDef:
+def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> KernelDef:
     """Build the direct grouped 4c kernel using MFMA 4x4x4.
 
     Each lane has:

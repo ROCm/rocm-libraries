@@ -845,6 +845,7 @@ def _resolve_dgrad_op(spec: DgradConvSpec, arch: str):
 
 def build_implicit_gemm_conv_dgrad(
     spec: DgradConvSpec,
+    *,
     arch: str = "gfx950",
 ) -> KernelDef:
     """Build the IR for one implicit-GEMM backward-data conv kernel.

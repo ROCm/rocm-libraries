@@ -1211,7 +1211,7 @@ def _emit_inline_maxpool_from_registers(
             b.buffer_store_f16(y_rsrc, safe_off, b.const_i32(0), y_h)
 
 
-def build_deep_fused_conv_pool(spec: DeepFusedConvPoolSpec, arch: str = "gfx950"):
+def build_deep_fused_conv_pool(spec: DeepFusedConvPoolSpec, *, arch: str = "gfx950"):
     """Build the one-CTA conv0 -> conv1 -> maxpool fused kernel for ``arch``."""
 
     ok, why = is_valid_spec(spec, arch=arch)

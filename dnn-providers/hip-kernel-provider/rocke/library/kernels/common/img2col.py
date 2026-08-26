@@ -150,7 +150,7 @@ def is_valid_spec(spec: Img2ColSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     return True, "ok"
 
 
-def build_img2col(spec: Img2ColSpec, arch: str = "gfx950") -> KernelDef:
+def build_img2col(spec: Img2ColSpec, *, arch: str = "gfx950") -> KernelDef:
     """Build the IR for one image-to-column instance.
 
     Kernel signature::

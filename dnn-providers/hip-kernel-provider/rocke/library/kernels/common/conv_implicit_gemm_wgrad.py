@@ -636,6 +636,7 @@ def _resolve_wgrad_op(spec: WgradConvSpec, arch: str):
 
 def build_implicit_gemm_conv_wgrad(
     spec: WgradConvSpec,
+    *,
     arch: str = "gfx950",
 ) -> KernelDef:
     """Build the IR for one implicit-GEMM backward-weight conv kernel.
