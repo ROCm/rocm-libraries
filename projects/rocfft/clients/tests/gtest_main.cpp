@@ -340,7 +340,9 @@ int main(int argc, char* argv[])
                          gpus_per_rank,
                          "Maximum number of GPUs per process to be considered (cannot exceed 1 if "
                          "mp_lib == mpi). An upper bound of "
-                             + std::to_string(upper_bound_gpus_per_rank) + " is enforced.")
+                             + std::to_string(upper_bound_gpus_per_rank)
+                             + " is enforced. The number of GPUs must not exceed the available "
+                               "device count.")
               ->option_text("Default value is 1 if mp_lib == mpi; all visible "
                             "devices are considered if mp_lib == none")
               ->check(CLI::PositiveNumber);
@@ -498,6 +500,9 @@ int main(int argc, char* argv[])
             if(!mp_launch.empty())
                 throw std::invalid_argument(
                     "--mp_launch must be empty if mp_lib == none (see --help)");
+            if(gpus_per_rank > rocfft_scoped_device::device_count())
+                throw CLI::ValidationError(
+                    "ngpus", "ngpus must not exceed the number of visible devices (see --help)");
         }
     });
     // Filename for fftw and fftwf wisdom.
