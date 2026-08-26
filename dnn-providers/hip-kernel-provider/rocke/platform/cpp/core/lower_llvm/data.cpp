@@ -95,6 +95,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"s.barrier", "declare void @llvm.amdgcn.s.barrier()"},
     {"s.wait.dscnt", "declare void @llvm.amdgcn.s.wait.dscnt(i16)"},
     {"s.wait.loadcnt", "declare void @llvm.amdgcn.s.wait.loadcnt(i16)"},
+    {"s.wait.storecnt", "declare void @llvm.amdgcn.s.wait.storecnt(i16)"},
+    {"s.wait.kmcnt", "declare void @llvm.amdgcn.s.wait.kmcnt(i16)"},
+    {"s.wait.expcnt", "declare void @llvm.amdgcn.s.wait.expcnt(i16)"},
     {"s.wait.asynccnt", "declare void @llvm.amdgcn.s.wait.asynccnt(i16 immarg)"},
     {"global.load.async.to.lds.b32",
      "declare void @llvm.amdgcn.global.load.async.to.lds.b32(ptr addrspace(1) nocapture, ptr "

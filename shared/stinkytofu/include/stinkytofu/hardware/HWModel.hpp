@@ -70,18 +70,19 @@ struct HWModel {
         int numRules;
     };
 
+    /// s_delay_alu SW scoreboard depths plus 1
+    struct DelayAlu {
+        unsigned valuDepth;
+        unsigned transDepth;
+        unsigned saluCycleMax;
+    };
+
     Lds lds;
     Barrier barrier;
     Coexec coexec;
     Hazards hazards;
+    DelayAlu delayAlu;
 };
-
-// Deliberately NOT here: InsertDelayAluPass's s_delay_alu scoreboard depths
-// (VALU_MAX / TRANS_MAX / SALU_CYCLES_MAX). They describe the instruction's
-// encoding - how many DEP_1..4 and SALU_CYCLE_1..3 fields it has - rather than a
-// timing the scheduler can be retuned against, and they are compile-time constants
-// in that pass (default member initializers of a map value type). See the note in
-// InsertDelayAluPass.cpp.
 
 /// Collapse a {major, minor, stepping} arch triple to a switchable key.
 ///
@@ -104,6 +105,11 @@ constexpr int kArchKeyGfx1250 = archKey({12, 5, 0});
 // https://github.com/ROCm/rocm-libraries/pull/10273 landing the real gfx1250v0
 // ArchInfo. Changing it here retargets both the HWModel and the CDNA5 policy table.
 constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
+
+// Internal helper used by stinkytofu passes to model dynamic LDS drain latency
+// from per-arch HWModel facts. Not part of the exported API surface.
+int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
+                               int numWaves);
 
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple
 /// from GemmTileConfig). gfx1250 is the fallback for any unlisted arch.

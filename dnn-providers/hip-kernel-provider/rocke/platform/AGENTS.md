@@ -278,6 +278,47 @@ invariants.
   they are considered complete; workload-only benchmark scripts should not be
   wired into production dispatch by default.
 
+## Profiling (ATT traces)
+
+Instruction-level profiles come from `rocprofv3 --att`, decoded per dispatch and
+read in the WaveScope viewer. Everything for it lives in
+`dsl_docs/optimization/utilities/tools/wavescope/`, and one command there captures
+a source-correlated trace:
+
+```bash
+python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.py \
+    -- python3 bench.py
+```
+
+- Read `capture_wavescope_trace.py` before capturing by hand. Three things have to
+  line up for the Source tab to work and each fails quietly alone; it does all
+  three and reports which folder to open.
+- That folder's `README.md` covers installing the WaveScope extension (including
+  the remote-SSH case), opening a decoded folder, and what each file in one is
+  for. `dsl_docs/architecture/wavescope_integration.md` covers how the pieces fit
+  together and how to drive the viewer during an optimization pass.
+- Source correlation is **not** a compiler flag, and `compile_kernel()` has no
+  `debug=` parameter. A rocke kernel is Python that builds IR, so there is no C++
+  source for `-g` to point at; locations have to be captured while the kernel
+  builds. That means `ROCKE_DEBUG_LOC=1` on the process that *builds* the kernel
+  (or `IRBuilder(capture_loc=True)`). Without it `code.json`'s Source column is
+  empty and only ISA-level analysis is possible.
+- `emit_inline_frames.py <capture-generation-dir>` in that folder is the step to
+  re-run on its own against an already-decoded trace. Pass one explicit
+  `capture-<trace-id>` generation; the output root is intentionally ambiguous
+  because it can contain several immutable captures. rocprofv3 flattens DWARF to
+  the innermost frame only, so on a kernel assembled from helpers a single
+  one-line loader appears to own most of the stalls. The `inline_frames.json`
+  sidecar it writes restores the inlining call stack, and WaveScope's Source tab
+  gains a `+ inlined` attribution charging each call site with what was inlined
+  into it.
+- Read `code.json` columns 7 and 8 as totals summed over every execution, not
+  per-execution averages. Multiplying them by `Hit` counts each execution `Hit`
+  times and reports stall figures exceeding the kernel's wall-clock.
+- For the underlying rocprofv3 flags, the PMC fallback when the trace decoder is
+  unavailable, and ISA-only analysis, see
+  `dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md`.
+
 ## helpers/ placement
 
 **Default:** new kernel logic goes in `instances/`. Promote to `helpers/` only when
@@ -317,6 +358,7 @@ dual-engine vs Python-only split.
 |---|---|
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
+| `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (must match the ROCm `comgr` in use: <7.2, 7.2-7.12, 7.13+) |
 | `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
 | `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |

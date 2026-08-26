@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <unistd.h>
 
 namespace hipdnn_data_sdk::utilities
@@ -93,6 +94,31 @@ inline void* getSymbol(SharedLibraryHandle handle, const char* symbolName)
     return dlsym(handle, symbolName);
 }
 
+/// The directory of the module @p address belongs to, canonicalized because dladdr()
+/// reports the path the module was loaded with verbatim -- relative to the process's
+/// current directory, or a symlink rather than the file its siblings sit beside. Works
+/// under any dlopen flag and needs nothing exported, so prefer it over the symbol-name
+/// form when asking "where am I loaded from" about the calling module itself.
+inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* address)
+{
+    Dl_info info{};
+    if(dladdr(address, &info) == 0 || info.dli_fname == nullptr || info.dli_fname[0] == '\0')
+    {
+        throw std::runtime_error("Failed to find loaded library for address");
+    }
+
+    // error_code overload: a module path that cannot be canonicalized is still better
+    // answered as-is than by throwing out of a lookup the caller treats as best-effort.
+    std::error_code failed;
+    const auto resolved = std::filesystem::weakly_canonical(info.dli_fname, failed);
+    return (failed ? std::filesystem::path(info.dli_fname) : resolved).parent_path();
+}
+
+/// The directory of the module exporting @p symbolName.
+///
+/// Resolves through the dynamic linker's default scope, so the answer depends on what is
+/// loaded and how. To ask about the calling module itself, use
+/// getLoadedLibraryDirectoryForAddress() instead -- it cannot pick a different module.
 inline std::filesystem::path getLoadedLibraryDirectoryForSymbol(const char* symbolName)
 {
     auto _ = dlerror();
@@ -104,14 +130,15 @@ inline std::filesystem::path getLoadedLibraryDirectoryForSymbol(const char* symb
                                  + error + ")");
     }
 
-    Dl_info info{};
-    if(dladdr(symbol, &info) == 0 || info.dli_fname == nullptr || info.dli_fname[0] == '\0')
+    try
+    {
+        return getLoadedLibraryDirectoryForAddress(symbol);
+    }
+    catch(const std::runtime_error&)
     {
         throw std::runtime_error("Failed to find loaded library for symbol: "
                                  + std::string(symbolName));
     }
-
-    return std::filesystem::path(info.dli_fname).parent_path();
 }
 
 } // namespace hipdnn_data_sdk::utilities
