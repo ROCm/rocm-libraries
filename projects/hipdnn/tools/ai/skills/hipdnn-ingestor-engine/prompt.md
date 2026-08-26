@@ -588,16 +588,24 @@ The shared integration suite exercises the **winning** engine for a graph, not e
 engine that could serve it. A new attention engine competing against ASM SDPA may never
 execute while the suite passes — green, and blind to you.
 
-Two ways to get real signal, and you want at least one:
+Three ways to get real signal. The first is the durable one; the others are local aids.
 
-- **Build with `-DENABLE_ASM_SDPA_ENGINE=OFF`** so the incumbent is absent. Cleanest for
-  a focused integration run; the flag exists for this.
+- **Pin the engine in CI** with an `add_external_integration_test_target(...
+  ENGINE_NAME <yours> ...)` block, so a target exists whose entire job is to run the
+  suite against *your* engine via `--test-engine`. This is the only option that keeps
+  working after you stop looking, and it is a **stage-8 deliverable** — see
+  `RUNBOOK.md` § 8c for the block, its build-flag gating, and the
+  `Container::getEngineName` prerequisite without which `--test-engine` cannot select a
+  descriptor-backed engine at all.
+- **Build with `-DENABLE_ASM_SDPA_ENGINE=OFF`** so the incumbent is absent. Useful for a
+  focused local run; it proves nothing about CI, where the incumbent is present.
 - **Assert on engine identity**, not only on numbers. A test that checks the output is
   correct proves *something* computed it. One that also checks *which* engine was
   selected proves yours did.
 
 Provider-local tests under `src/integration_tests/kernel_ingestor_engine/` construct the
-engine directly and do not have this problem.
+engine directly and do not have this problem — but they also do not exercise the shared
+graph suite, so they are a complement to the pinned target, not a substitute.
 
 #### Build and confirm
 

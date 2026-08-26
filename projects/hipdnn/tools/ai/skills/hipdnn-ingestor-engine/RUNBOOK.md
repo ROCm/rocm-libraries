@@ -74,7 +74,7 @@ these boxes and a stray dep directory is not the project's convention.
 | 5 | Packed + validated tree | `success: true`, 0 ERROR |
 | 6 | Native pack | `grep -c "FILL THIS OUT"` = 0 |
 | 7 | Built, packed, staged | Engine id in `hipdnn_list_engines` |
-| 8 | Tests, on device | A real graph dispatched and matched a reference |
+| 8 | Tests + an engine-pinned CI target | A real graph dispatched and matched a reference, **and** `ENGINE_NAME` selects your engine |
 | 9 | Report | All nine stages named |
 
 **Commit after every step.** What you committed is the deliverable if you stop.
@@ -522,7 +522,77 @@ Every "must decline" row of your rejection checklist deserves a case. These belo
 not a bundle: a bundle for a graph you decline is just served by another engine. Model on
 a sibling pack test in `src/tests/engines/kernel_ingestor_engine/packs/`.
 
-### 8c. Run it, on `$ARCH`
+### 8c. Wire the engine into CI — otherwise the tests you wrote never run against it
+
+**This is a required deliverable, not a follow-up.** Bundles are discovered and run
+against whatever engine *wins* the graph. A new engine competing with an incumbent (ASM
+SDPA, for attention) may never execute while the suite passes — green, and blind to you.
+Adding tests without this step leaves no CI evidence that your engine works, and the next
+change to the matcher, the kernel or the packager breaks it silently.
+
+The mechanism is one target per engine, pinned with `--test-engine`:
+
+```cmake
+# dnn-providers/hip-kernel-provider/src/integration_tests/CMakeLists.txt
+if(NOT COMMAND add_external_integration_test_target)
+    find_package(hipdnn_integration_tests CONFIG QUIET)
+endif()
+
+# Gate on the engine actually being BUILT. The descriptors exist only when the ingestor
+# is on AND the rocKE producer ran over a source root; without that the engine never
+# appears and every case FAILS rather than skips.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    add_external_integration_test_target(
+        TARGET_NAME   <provider>_<engine>_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   <namespace:Engine>      # exactly as the UED spells it
+        INSTALL_SUBDIR hip_kernel_provider
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER  Smoke/<YourSuite>.Correctness/*
+    )
+endif()
+```
+
+Read `integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake` for the full option
+list (`TEST_CONFIG` for per-case tolerance, `ENVIRONMENT`, `TEST_CATEGORIES_YAML`), and
+copy the shape of an existing block — `ENGINE_NAME ASM_SDPA_ENGINE` in that same file is
+the worked example.
+
+Four things that decide whether this works:
+
+1. **`--test-engine` pins exactly ONE engine.** A case belonging to a different pack
+   reports not-applicable and skips. So it is **one target per engine**, not per provider
+   — and each target's TOML/comment should say which cases it expects to skip.
+2. **`REFERENCE_EXECUTOR gpu`** computes the reference live, which is what makes
+   golden-free bundles checkable. Confirm the GPU reference *accepts* your graphs first
+   (see step 1b) — it declines dropout, paging, varlen, stats and fp8 descale.
+3. **Gate on the build flags that produce your engine.** An ungated block turns "engine
+   not built" from a skip into a wall of failures.
+4. **Your engine must publish a NAME, not just an id.** `--test-engine` matches against
+   the loaded engines' `engineName`
+   (`integration-tests/src/main.cpp:312-321`); if it does not match, the binary exits
+   with `Error: Engine '<name>' is not loaded` before running anything.
+
+**Point 4 is the prerequisite, and it is easy to hit.** A descriptor-backed engine only
+publishes a name once the provider implements `Container::getEngineName` (engine plugin
+API 1.4.0). Without it the engine registers and dispatches perfectly but is nameless to
+the harness, so `--test-engine` rejects it as "not loaded" and this block cannot exist.
+
+The cheap tell, from step 7c: if `hipdnn_list_engines` shows your engine as a bare hex id
+rather than its scoped name, the name is not published. Check before writing the CMake:
+
+```bash
+grep -rn "getEngineName" <provider>/src/core/ || \
+  echo "provider does not publish engine names -- --test-engine cannot select this engine"
+```
+
+If it is missing, say so in the step-9 report as a **blocking dependency on the provider**,
+not as a testing gap: the tests are written and correct, and they become CI-visible the
+moment the provider adopts that API.
+
+### 8d. Run it, on `$ARCH`
 
 Use `skill://alola-gpu-test`. **Do not substitute another arch** — packs arch-prune before
 the matcher, so a clean run on the wrong GPU reads as success while proving nothing.

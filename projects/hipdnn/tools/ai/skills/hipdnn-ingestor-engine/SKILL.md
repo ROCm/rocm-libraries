@@ -51,7 +51,7 @@ The nine stages, in order. A run is **incomplete** until stage 8:
 | 5 | **Hook bodies implemented** | `graph_match`, `kernel_match`, `score`, dispatch all written — no `// TODO` left in a code path the engine reaches |
 | 6 | Spliced | Every applicable CMake/registration point applied, edits made not just described |
 | 7 | Built | Provider compiles with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`; engine appears in `hipdnn_list_engines` |
-| 8 | **Tested on device** | Quick-tier cases covering every supported feature of THIS op (many tiny graphs, budget-bounded) plus standard-tier cases at realistic sizes, added to `dnn-providers/integration-tests/`; a real graph dispatches on the target arch, verified against a reference |
+| 8 | **Tested on device, and wired into CI** | Quick-tier cases covering every supported feature of THIS op (many tiny graphs, budget-bounded) plus standard-tier cases at realistic sizes, added to `dnn-providers/integration-tests/`; **an `add_external_integration_test_target` pinned to this engine via `ENGINE_NAME`**, so the suite exercises yours rather than whichever engine wins; and a real graph dispatching on the target arch, verified against a reference |
 | 9 | Handed back | Residual judgment calls surfaced to the human with a recommendation |
 
 **Each stage leaves an artifact on disk, and you commit it before starting the next.**
@@ -190,6 +190,14 @@ Every completion report this skill produces states, explicitly:
    the edits, say so; where you only described them, say that instead.
 5. **The integration tests you added**, by tier and path — quick-tier for smoke, standard
    for the shape matrix. If you added neither, that is a stage-8 miss, not a footnote.
+   **And the CI target that runs them against YOUR engine**, by name: an
+   `add_external_integration_test_target(... ENGINE_NAME <yours> ...)` block, with the
+   build flags it is gated on. Bundles run against whichever engine *wins* a graph, so
+   without that target a new engine competing with an incumbent can sit unexercised while
+   the suite reports green. Tests with no engine-pinned target are tests that do not
+   defend your engine. If the provider cannot yet publish an engine name
+   (`Container::getEngineName`, plugin API 1.4.0), say so as a **blocking dependency** —
+   `--test-engine` rejects a nameless engine as "not loaded".
 6. **The judgment calls you are handing back**: rocKE restrictions you could not check
    from a graph, knobs you fixed that could be searched, and coverage the tests do not
    have. Each with a recommendation.
