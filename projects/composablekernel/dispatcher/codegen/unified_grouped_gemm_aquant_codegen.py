@@ -34,7 +34,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from codegen_common import make_aquant_kernel_name, aquant_effective_epilogue
+from codegen_common import (
+    TileConfig,
+    aquant_effective_epilogue,
+    generate_kernels_generic,
+    make_aquant_kernel_name,
+    run_codegen_cli,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -126,26 +132,9 @@ AQUANT_SCHEDULER_TO_CK = {
 # =============================================================================
 
 
-@dataclass
-class AQuantTileConfig:
-    tile_m: int
-    tile_n: int
-    tile_k: int
-    warp_m: int
-    warp_n: int
-    warp_k: int
-    warp_tile_m: int
-    warp_tile_n: int
-    warp_tile_k: int
-
-    def is_valid(self) -> bool:
-        if self.tile_m <= 0 or self.tile_n <= 0 or self.tile_k <= 0:
-            return False
-        return (
-            self.tile_m % (self.warp_m * self.warp_tile_m) == 0
-            and self.tile_n % (self.warp_n * self.warp_tile_n) == 0
-            and self.tile_k % (self.warp_k * self.warp_tile_k) == 0
-        )
+# Verbatim redeclaration of codegen_common.TileConfig; aliased so the tile
+# validity rule cannot drift between the generators that share it.
+AQuantTileConfig = TileConfig
 
 
 @dataclass
@@ -532,48 +521,17 @@ def generate_kernels(
     config: Optional[dict] = None,
     parallel: bool = True,
 ) -> List[Path]:
-    """Generate all AQuant kernel headers into output_dir.
+    """Generate all GroupedAQuant kernel headers into output_dir.
 
     Returns list of generated .hpp paths.
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    cfg = config or _default_config()
-    specs = _build_specs(cfg)
-
-    if not specs:
-        log.warning("No kernel specs produced from config — check variant_keys and tile_configs")
-        return []
-
-    log.info("Generating %d AQuant kernel headers into %s", len(specs), output_dir)
-
-    gen = AQuantKernelHeaderGenerator()
-    generated: List[Path] = []
-
-    def _generate_one(spec: AQuantKernelSpec) -> Path:
-        header = gen.generate(spec)
-        out_path = output_dir / f"{spec.name}.hpp"
-        out_path.write_text(header)
-        log.info("  wrote %s", out_path.name)
-        return out_path
-
-    if parallel and len(specs) > 1:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as ex:
-            futures = {ex.submit(_generate_one, s): s for s in specs}
-            for fut in concurrent.futures.as_completed(futures):
-                try:
-                    generated.append(fut.result())
-                except Exception as e:
-                    log.error("Failed generating %s: %s", futures[fut].name, e)
-    else:
-        for spec in specs:
-            try:
-                generated.append(_generate_one(spec))
-            except Exception as e:
-                log.error("Failed generating %s: %s", spec.name, e)
-
-    log.info("Generated %d / %d headers", len(generated), len(specs))
-    return generated
+    return generate_kernels_generic(
+        op_label="GroupedAQuant",
+        generator=AQuantKernelHeaderGenerator(),
+        specs=_build_specs(config or _default_config()),
+        output_dir=output_dir,
+        parallel=parallel,
+    )
 
 
 # =============================================================================
@@ -582,44 +540,13 @@ def generate_kernels(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="AQuantGrouped GEMM kernel header generator"
+    return run_codegen_cli(
+        description="AQuantGrouped GEMM kernel header generator",
+        op_label="GroupedAQuant",
+        make_generator=AQuantKernelHeaderGenerator,
+        build_specs=_build_specs,
+        default_config=_default_config,
     )
-    parser.add_argument("--output-dir", type=Path, required=True,
-                        help="Directory to write generated .hpp files")
-    parser.add_argument("--config", type=Path,
-                        help="JSON config file (defaults to built-in sweep)")
-    parser.add_argument("--config-json", type=str,
-                        help="Inline JSON config string")
-    parser.add_argument("--no-parallel", action="store_true",
-                        help="Disable parallel generation")
-    parser.add_argument("--list-names", action="store_true",
-                        help="Print kernel names that would be generated and exit")
-    args = parser.parse_args()
-
-    cfg: Optional[dict] = None
-    if args.config_json:
-        try:
-            cfg = json.loads(args.config_json)
-        except json.JSONDecodeError as e:
-            log.error("Invalid --config-json: %s", e)
-            return 1
-    elif args.config:
-        with open(args.config) as f:
-            cfg = json.load(f)
-
-    if args.list_names:
-        specs = _build_specs(cfg or _default_config())
-        for s in specs:
-            print(s.name)
-        return 0
-
-    paths = generate_kernels(
-        output_dir=args.output_dir,
-        config=cfg,
-        parallel=not args.no_parallel,
-    )
-    return 0 if paths else 1
 
 
 if __name__ == "__main__":

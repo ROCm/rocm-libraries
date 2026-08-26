@@ -145,7 +145,8 @@ foreach(_quant_test
         test_grouped_gemm_abquant_utils
         test_quant_bridge_shared
         test_quant_warp_tile_k
-        test_quant_bridge_invariants)
+        test_quant_bridge_invariants
+        test_codegen_byte_identity)
     add_test(
         NAME dispatcher_${_quant_test}
         COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/${_quant_test}.py -v
