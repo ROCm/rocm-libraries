@@ -4261,9 +4261,11 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
-        if(!sizeMapping.customKernelName.empty())
+        if(!sizeMapping.customKernelName.empty() || handwrittenCustomKernel())
         {
-            // Custom kernel currently only supports single-kernel reduction
+            // Custom kernels currently only support single-kernel (tree) reduction.
+            // YAML records set sizeMapping.customKernelName; handwritten kernels
+            // are identified by customKernel.name && !generated.
             reductionStrat = origami::reduction_t::tree;
         }
         else if(sizeMapping.streamKForceDPOnly != 0)
