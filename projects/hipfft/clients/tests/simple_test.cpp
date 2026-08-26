@@ -153,15 +153,12 @@ TEST(hipfftTest, ZeroSizePlan)
     hipDataType const xt_type     = HIP_C_32F;
     size_t            workSize;
 
-    // hipfftMakePlanMany_internal rejects a zero batch with HIPFFT_INVALID_SIZE before the
-    // plan is built; everything else falls through to hipfftMakePlan_internal
     auto expect_rejected = [](hipfftResult ret, hipfftResult expected = HIPFFT_INVALID_VALUE) {
         EXPECT_EQ(ret, expected) << "not rejected: " << hipfftResult_string(ret);
     };
 
     {
         hipfftHandle plan = INVALID_HIPFFT_PLAN_HANDLE;
-        // the call reported in the issue
         expect_rejected(hipfftPlan1d(&plan, 0, type, 1));
         ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
     }
