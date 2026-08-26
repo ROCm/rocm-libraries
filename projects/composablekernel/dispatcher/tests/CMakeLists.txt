@@ -21,6 +21,7 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_batched_gemm_gpu_correctness PROPERTIES
+    SKIP_RETURN_CODE 77
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
@@ -37,6 +38,7 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_batched_contraction_gpu_correctness PROPERTIES
+    SKIP_RETURN_CODE 77
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
@@ -49,6 +51,7 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_tensor_quant_gpu_correctness PROPERTIES
+    SKIP_RETURN_CODE 77
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
@@ -116,7 +119,8 @@ foreach(_gpu_test
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     set_tests_properties(dispatcher_${_gpu_test} PROPERTIES
-        LABELS "dispatcher;python;bridge;gpu"
+        SKIP_RETURN_CODE 77
+    LABELS "dispatcher;python;bridge;gpu"
         TIMEOUT 600
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
     )
@@ -136,7 +140,12 @@ endforeach()
 # =============================================================================
 foreach(_quant_test
         test_grouped_gemm_rowcolquant_utils
-        test_grouped_gemm_tensorquant_utils)
+        test_grouped_gemm_tensorquant_utils
+        test_grouped_gemm_aquant_utils
+        test_grouped_gemm_abquant_utils
+        test_quant_bridge_shared
+        test_quant_warp_tile_k
+        test_quant_bridge_invariants)
     add_test(
         NAME dispatcher_${_quant_test}
         COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/${_quant_test}.py -v
@@ -158,7 +167,8 @@ foreach(_quant_gpu_test
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     set_tests_properties(dispatcher_${_quant_gpu_test} PROPERTIES
-        LABELS "dispatcher;python;bridge;quant;gpu"
+        SKIP_RETURN_CODE 77
+    LABELS "dispatcher;python;bridge;quant;gpu"
         TIMEOUT 600
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
     )
@@ -258,6 +268,7 @@ add_test(
 )
 
 set_tests_properties(dispatcher_test_fmha_parity PROPERTIES
+    SKIP_RETURN_CODE 77
     LABELS "dispatcher;python;fmha;parity;gpu"
     TIMEOUT 600
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
@@ -517,7 +528,9 @@ if(BUILD_DISPATCHER_REAL_KERNEL_TESTS AND EXISTS "${CODEGEN_SCRIPT}")
             endif()
             
             add_test(NAME ${test_name} COMMAND ${test_name})
-            set_tests_properties(${test_name} PROPERTIES LABELS "dispatcher;cpp;gpu;kernel")
+            set_tests_properties(${test_name} PROPERTIES
+                SKIP_RETURN_CODE 77
+                LABELS "dispatcher;cpp;gpu;kernel")
         endforeach()
     endif()
 endif()
@@ -565,6 +578,7 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_gemm_rowcolquant_gpu_correctness PROPERTIES
+    SKIP_RETURN_CODE 77
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
@@ -578,6 +592,7 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_aquant_gpu_correctness PROPERTIES
+    SKIP_RETURN_CODE 77
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
@@ -591,6 +606,7 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_abquant_gpu_correctness PROPERTIES
+    SKIP_RETURN_CODE 77
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
@@ -640,12 +656,15 @@ set_tests_properties(dispatcher_test_grouped_gemm_bquant_utils PROPERTIES
 
 # bquant on-device GPU correctness test (SKIPs cleanly without a GPU/built lib),
 # registered consistently with the sibling *_gpu_correctness bridge tests.
+# Must run under pytest, not as a bare script: the script main() returns 0 and
+# never executes the parametrized MX/fp4/i4 matrix (test_bquant_gpu_c4_h3).
 add_test(
     NAME dispatcher_test_bquant_gpu_correctness
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_bquant_gpu_correctness.py
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_bquant_gpu_correctness.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_bquant_gpu_correctness PROPERTIES
+    SKIP_RETURN_CODE 77
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"

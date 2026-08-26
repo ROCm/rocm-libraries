@@ -98,6 +98,11 @@ def gpu_available() -> bool:
         return False
 
 
+# CTest's SKIP_RETURN_CODE: a standalone GPU script that cannot run its subject
+# must exit with this, so CTest reports Skipped rather than Passed.
+CTEST_SKIP_RETURN_CODE = 77
+
+
 def ml_dtypes_available() -> bool:
     try:
         import ml_dtypes  # noqa: F401
@@ -111,6 +116,19 @@ def detect_gpu_arch(default: str = "gfx950") -> str:
     """Best-effort running-device arch (via rocm_agent_enumerator/rocminfo)."""
     archs = _rocm_agent_archs()
     return archs[0] if archs else default
+
+
+# Archs on which the block-scale quant fp8/bf8 kernels are validated.  The CK
+# CompV3 pipelines these bridges select need native fp8 hardware; gfx90a (MI200)
+# has none and silently produces incorrect results rather than failing, so an
+# allowlist -- not a denylist -- is the safe form.  Lives here so the per-op GPU
+# tests share one list instead of each carrying (or dropping) a copy.
+NATIVE_FP8_ARCHES = ("gfx942", "gfx950")
+
+
+def arch_supports_native_fp8(arch: str) -> bool:
+    """Whether ``arch`` is on the validated native-fp8 allowlist."""
+    return any(arch.startswith(a) for a in NATIVE_FP8_ARCHES)
 
 
 # --- pytest skip fixtures --------------------------------------------------
@@ -138,8 +156,56 @@ def skip_without_ml_dtypes():
 
 @pytest.fixture
 def gpu_arch(skip_without_gpu) -> str:
-    """The detected GPU arch (only resolved after the GPU skip-gate passes)."""
-    return detect_gpu_arch()
+    """The detected GPU arch (only resolved after the GPU skip-gate passes).
+
+    The gate has already established that a device exists, so a failed probe is
+    a real error and must not fall back to a plausible-looking default.
+    """
+    archs = _rocm_agent_archs()
+    if not archs:
+        raise RuntimeError(
+            "a GPU was detected but its arch could not be read; refusing to "
+            "guess an arch for a correctness test"
+        )
+    return archs[0]
+
+
+@pytest.fixture
+def native_fp8_gpu_arch(gpu_arch) -> str:
+    """``gpu_arch``, skipping when the device is not on the fp8 allowlist."""
+    if not arch_supports_native_fp8(gpu_arch):
+        pytest.skip(
+            f"quant fp8/bf8 kernels are validated on "
+            f"{', '.join(NATIVE_FP8_ARCHES)}; detected arch={gpu_arch!r}"
+        )
+    return gpu_arch
+
+
+# --- CTest skip propagation ------------------------------------------------
+#
+# CTest reports a test as Skipped only when the command exits with
+# SKIP_RETURN_CODE.  pytest exits 0 when every collected test skipped, which
+# CTest reports as Passed -- so a GPU suite that ran no numerics at all looks
+# identical to one that validated everything.  Turn "collected something, ran
+# nothing" into the skip code.
+
+_saw_real_outcome = False
+
+
+def pytest_sessionstart(session):
+    global _saw_real_outcome
+    _saw_real_outcome = False
+
+
+def pytest_runtest_logreport(report):
+    global _saw_real_outcome
+    if report.failed or (report.when == "call" and report.passed):
+        _saw_real_outcome = True
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if exitstatus == 0 and session.testscollected > 0 and not _saw_real_outcome:
+        session.exitstatus = CTEST_SKIP_RETURN_CODE
 
 
 # =============================================================================

@@ -40,6 +40,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from conftest import (
     uses_ocp_fp8 as _uses_ocp_fp8,
     ml_fp8_dtype as _ml_fp8_dtype,
+    ml_dtypes_available as _ml_dtypes_available,
+    CTEST_SKIP_RETURN_CODE as _SKIP_EXIT_CODE,
     encode_e8m0 as _encode_e8m0,
     decode_e8m0 as _decode_e8m0,
     decode_fp4 as _decode_fp4,
@@ -71,26 +73,29 @@ TOLERANCE = 0.05  # 5% max relative error -- fp8/bf8 precision floor
 # ---------------------------------------------------------------------------
 # Dtype helpers.  _uses_ocp_fp8 / _ml_fp8_dtype and the e8m0 / fp4 / bf16
 # codecs come from conftest.py (single canonical copies).  The fp8/bf8
-# encode/decode wrappers below keep this test's ml_dtypes-missing fallback and
-# its direct (no float32-cast) ml_dtypes path, so the standalone script still
-# runs on a box without ml_dtypes.
+# wrappers below keep this test's direct (no float32-cast) ml_dtypes path.
+#
+# There is deliberately NO fallback when ml_dtypes is missing.  The old one
+# encoded linear int8 bytes that the GPU still read as fp8, turning an absent
+# codec into a numeric mismatch report -- an environment problem disguised as a
+# correctness failure.  A missing codec is a skip; see _require_ml_dtypes.
 # ---------------------------------------------------------------------------
+
+def _require_ml_dtypes() -> None:
+    """Skip (never re-encode) when the fp8/bf8 codecs are unavailable."""
+    if not _ml_dtypes_available():
+        pytest.skip("ml_dtypes not installed; fp8/bf8 codecs unavailable")
+
 
 def _encode_fp8(arr: np.ndarray, dtype: str, gfx_arch: str = "gfx950") -> np.ndarray:
     """Encode float32 -> fp8 bytes (uint8 view), ARCH-AWARE (FNUZ on gfx942)."""
-    try:
-        ml_t = _ml_fp8_dtype(dtype, gfx_arch)
-        return arr.astype(ml_t).view(np.uint8)
-    except ImportError:
-        return (np.clip(arr, -2.0, 2.0) * 64).astype(np.int8).view(np.uint8)
+    ml_t = _ml_fp8_dtype(dtype, gfx_arch)
+    return arr.astype(ml_t).view(np.uint8)
 
 
 def _decode_fp8(arr: np.ndarray, dtype: str, gfx_arch: str = "gfx950") -> np.ndarray:
-    try:
-        ml_t = _ml_fp8_dtype(dtype, gfx_arch)
-        return arr.view(ml_t).astype(np.float32)
-    except ImportError:
-        return arr.view(np.int8).astype(np.float32) / 64.0
+    ml_t = _ml_fp8_dtype(dtype, gfx_arch)
+    return arr.view(ml_t).astype(np.float32)
 
 
 def _encode_bf8(arr: np.ndarray, gfx_arch: str = "gfx950") -> np.ndarray:
@@ -425,6 +430,7 @@ def test_bquant_gpu_c4_h3(case_name, case_fn, gpu_arch, tmp_path):
     Runs on a real GPU (the gpu_arch fixture skips cleanly on CPU-only boxes).
     MX (H3) variants need gfx950 e8m0 hardware; on any other arch they skip.
     """
+    _require_ml_dtypes()
     try:
         status, detail = case_fn(tmp_path, gpu_arch)
     except Exception as exc:  # noqa: BLE001
@@ -461,7 +467,11 @@ def main():
 
     if not _gpu_and_hipcc_available():
         print("SKIP: no GPU/hipcc detected; skipping bquant GPU correctness")
-        return 0
+        return _SKIP_EXIT_CODE
+
+    if not _ml_dtypes_available():
+        print("SKIP: ml_dtypes not installed; fp8/bf8 codecs unavailable")
+        return _SKIP_EXIT_CODE
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

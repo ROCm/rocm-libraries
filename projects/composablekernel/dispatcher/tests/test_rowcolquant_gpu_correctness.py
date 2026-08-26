@@ -30,6 +30,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import NATIVE_FP8_ARCHES as _NATIVE_FP8_ARCHES
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from grouped_gemm_rowcolquant_utils import (
@@ -70,7 +72,8 @@ _GFX_ARCH = _detect_gfx_arch()
 # RowColQuant fp8/bf8 kernels use CK CompV3 pipelines that require native fp8 hardware.
 # gfx90a (MI200 series) lacks native fp8 support and produces incorrect results.
 # Only gfx942 (MI300X) and gfx950 (MI350X) are validated.
-_SUPPORTED_ARCHES = ("gfx942", "gfx950")
+# Single source of truth in conftest.py, shared with every quant GPU test.
+_SUPPORTED_ARCHES = _NATIVE_FP8_ARCHES
 
 requires_gpu = pytest.mark.skipif(
     not (_has_hipcc() and _GFX_ARCH in _SUPPORTED_ARCHES),

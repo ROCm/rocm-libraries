@@ -44,7 +44,6 @@ Run:
 """
 
 import math
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -97,27 +96,6 @@ def _encode(arr, dtype: str, arch: str) -> np.ndarray:
 
 def _qdq(arr, dtype: str, arch: str) -> np.ndarray:
     return _qdq_arch(arr, dtype, arch)
-
-
-def _coerce_flag_supported() -> bool:
-    """True if the local clang accepts -amdgpu-coerce-illegal-types (LLVM opt).
-
-    clang >= 22 (ROCm 7.2 roc-7.2) rejects it, which blocks the abquant .so
-    build; used to SKIP (not fail) on such toolchains.
-    """
-    try:
-        clang = subprocess.run(
-            ["hipcc", "-print-prog-name=clang++"], capture_output=True, text=True, timeout=30
-        ).stdout.strip() or "clang++"
-        probe = subprocess.run(
-            [clang, "-x", "c++", "-c", "-o", "/dev/null",
-             "-mllvm", "-amdgpu-coerce-illegal-types=1", "-"],
-            input="int main(){return 0;}", capture_output=True, text=True, timeout=60,
-        )
-        return "Unknown command line argument" not in (probe.stderr or "")
-    except Exception:
-        # If we cannot probe, don't block; let the build itself report.
-        return True
 
 
 # =============================================================================
@@ -186,14 +164,13 @@ def _run_case(dtype: str, M: int, N: int, K: int, agK: int, bgK: int, bgN: int, 
         return so_paths[0] if so_paths else None
 
     def _on_build_fail():
-        # Distinguish the known toolchain gate from a genuine failure.
-        if not _coerce_flag_supported():
-            pytest.skip(
-                "abquant .so build blocked: clang>=22 rejects "
-                "-amdgpu-coerce-illegal-types=1 (ROCm 7.2 toolchain); test logic "
-                "verified bit-accurate after removing only that flag"
-            )
-        pytest.fail("abquant kernel build failed for an unexpected reason")
+        # A build failure is always a failure.  It used to be converted into a
+        # skip on clang>=22 on the theory that the toolchain rejects
+        # -amdgpu-coerce-illegal-types=1, but quant_bridge_flags.te_perf_flags
+        # probe-gates that flag OUT of the build on exactly those toolchains, so
+        # it cannot be the cause there.  The branch could only mask genuine
+        # codegen regressions.
+        pytest.fail("abquant kernel build failed")
 
     def _run(so_path):
         runner = ABQuantGpuGemmRunner(so_path)
