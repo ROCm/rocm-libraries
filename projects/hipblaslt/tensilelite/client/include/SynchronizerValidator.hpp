@@ -141,6 +141,8 @@ namespace TensileLite
             uint8_t* stagingBuffer(size_t bytes);
 
             bool                m_enabled      = false;
+            // One narrow-alpha warning per run, not one per solution.
+            bool                m_narrowAlphaWarned = false;
             ContractionProblem* m_problem      = nullptr;
             uint8_t*            m_staging      = nullptr;
             size_t              m_stagingBytes = 0;
