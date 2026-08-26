@@ -161,6 +161,10 @@ set(rocsparse_source
   src/level2/rocsparse_coosv_solve_buffer_size.cpp
   src/level2/rocsparse_coosv_solve.cpp
   #
+  src/level2/rocsparse_ellsv.cpp
+  src/level2/rocsparse_ellsv_analysis.cpp
+  src/level2/rocsparse_ellsv_solve.cpp
+  #
   src/level2/rocsparse_ellmv.cpp
   src/level2/rocsparse_hybmv.cpp
   src/level2/rocsparse_v2_spmv.cpp
