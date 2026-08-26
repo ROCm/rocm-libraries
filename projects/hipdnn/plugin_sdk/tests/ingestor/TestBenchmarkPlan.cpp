@@ -35,8 +35,8 @@
 
 /**
  * @file TestBenchmarkPlan.cpp
- * @brief Unit tests for BenchmarkPlan.hpp: the composite plan GenericPlanBuilder
- *        constructs when `global.benchmarking` is on, plus the oracle proving the
+ * @brief Unit tests for BenchmarkPlan.hpp: construction, workspace sizing, execution
+ *        delegation, and ranked capture/write-back, plus the oracle proving buildPlan()'s
  *        benchmarking-off path never reaches it.
  */
 namespace
@@ -114,8 +114,8 @@ std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeThreeKernelStubState
 /// by BLOCK_SIZE, so kernel_256_float (0x65) outranks the two 64-block kernels.
 TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRankedFrontOnce)
 {
-    // A leaked override must not make this look benchmarked; the oracle asserts the
-    // no-knob path is untouched, so the environment must genuinely be unset here.
+    // A leaked override must not make this look benchmarked: the environment must
+    // genuinely be unset here.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter forceBenchmarkingGuard(
         hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME);
     const ScopedTestSymbols symbols;
@@ -166,8 +166,8 @@ TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRa
 /// records an event, so the null stream's behaviour never matters.
 struct BenchmarkTestHandle
 {
-    // Non-static: this models a real handle's instance accessor, which is what
-    // HasGetStream detects.
+    // Non-static: models a real handle's instance accessor, which is what HasGetStream
+    // detects.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     hipStream_t getStream() const
     {
@@ -496,9 +496,9 @@ TEST(TestIngestorBenchmarkPlan, AllCandidatesUnusableStillDelegatesToCandidateZe
 
     EXPECT_NO_THROW(plan.execute(handle, nullptr, 0, nullptr));
 
-    // Candidate 0 is the documented fallback: its second call (the real delegate,
-    // after its first sampling call threw) must have launched. Candidate 1 is faster
-    // by the timer, which never runs for a candidate that throws during warmup.
+    // Candidate 0 is the documented fallback: its second call, the real delegate, must
+    // have launched. Candidate 1 is faster by the timer, which never runs for a
+    // candidate that throws during warmup.
     EXPECT_EQ(firstRaw->launchCount(), 1);
     EXPECT_EQ(secondRaw->launchCount(), 0);
 }
@@ -524,6 +524,195 @@ TEST(TestIngestorBenchmarkPlan, BuffersAndWorkspaceArriveAtTheChosenSubPlanUnmod
     EXPECT_EQ(subRaw->lastDeviceBuffers(), buffers.data());
     EXPECT_EQ(subRaw->lastNumDeviceBuffers(), 1U);
     EXPECT_EQ(subRaw->lastWorkspace(), workspace);
+}
+
+// ---------------------------------------------------------------------------
+// Ranked capture and write-back
+// ---------------------------------------------------------------------------
+
+/// Supplies deterministic times through the Timer seam so ordering, omission and the
+/// all-unusable case are decided by the code under test, not by GPU availability. The
+/// real hipEvent path is proven separately on gfx942.
+///
+/// Times are keyed by candidate identity, since the timer sees the plan rather than its
+/// index.
+inline TestBenchmarkPlan::Timer
+    makeDeterministicTimer(const std::vector<TestBenchmarkPlan::Candidate>& candidates,
+                           std::vector<std::optional<double>> times)
+{
+    std::vector<const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>*> order;
+    order.reserve(candidates.size());
+    for(const auto& candidate : candidates)
+    {
+        order.push_back(candidate.plan.get());
+    }
+    return [order = std::move(order),
+            times = std::move(times)](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
+                                      const BenchmarkTestHandle&,
+                                      const hipdnnPluginDeviceBuffer_t*,
+                                      uint32_t,
+                                      void*) -> std::optional<double> {
+        const auto found = std::find(order.begin(), order.end(), &plan);
+        if(found == order.end())
+        {
+            return std::nullopt;
+        }
+        const auto index = static_cast<size_t>(std::distance(order.begin(), found));
+        return index < times.size() ? times[index] : std::nullopt;
+    };
+}
+
+/// Builds a plan whose sampling is driven by @p times, indexed by candidate order.
+inline TestBenchmarkPlan makeDeterministicPlan(std::vector<TestBenchmarkPlan::Candidate> candidates,
+                                               const BenchmarkTestHandle& handle,
+                                               std::vector<std::optional<double>> times,
+                                               TestBenchmarkPlan::RecordRankingFn recordRanking
+                                               = {})
+{
+    auto timer = makeDeterministicTimer(candidates, std::move(times));
+    return {std::move(candidates), handle, std::move(timer), std::move(recordRanking)};
+}
+
+std::vector<TestBenchmarkPlan::Candidate> threeCandidates()
+{
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back(
+        {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    candidates.push_back(
+        {testId(0x02), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    candidates.push_back(
+        {testId(0x03), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    return candidates;
+}
+
+TEST(TestIngestorBenchmarkPlan, SamplingRecordsEveryUsableCandidateInMeasuredOrder)
+{
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        threeCandidates(), handle, {5.0, 1.0, 3.0}, [&recorded](std::vector<RankedEntry> ranking) {
+            recorded = std::move(ranking);
+        });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), 3U);
+    EXPECT_EQ(recorded[0].kernelId, testId(0x02)) << "the fastest candidate must rank first";
+    EXPECT_EQ(recorded[1].kernelId, testId(0x03));
+    EXPECT_EQ(recorded[2].kernelId, testId(0x01));
+    EXPECT_EQ(recorded[0].packId, testId(0xF0)) << "the staleness ids must travel with the id";
+    EXPECT_EQ(recorded[0].dispatchId, testId(0xD0));
+}
+
+TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedSamplingNeverAppearsInTheRanking)
+{
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    // Candidate 1 failed to time; it must be omitted, not ranked last.
+    const auto plan = makeDeterministicPlan(
+        threeCandidates(),
+        handle,
+        {5.0, std::nullopt, 3.0},
+        [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), 2U);
+    for(const auto& entry : recorded)
+    {
+        EXPECT_NE(entry.kernelId, testId(0x02))
+            << "a known-broken kernel recorded as a fallback would be served ahead of the "
+               "normal ranked path on a later run";
+    }
+}
+
+TEST(TestIngestorBenchmarkPlan, AnAllUnusableSweepRecordsNothing)
+{
+    bool invoked = false;
+    const BenchmarkTestHandle handle;
+    const auto plan
+        = makeDeterministicPlan(threeCandidates(),
+                                handle,
+                                {std::nullopt, std::nullopt, std::nullopt},
+                                [&invoked](const std::vector<RankedEntry>&) { invoked = true; });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_FALSE(invoked) << "caching index 0 when nothing was usable would cache a guess";
+}
+
+/// The explicit no-caching path: every flag-off caller constructs a BenchmarkPlan
+/// without a callback, and selection must be unaffected.
+TEST(TestIngestorBenchmarkPlan, AnAbsentCallbackLeavesSelectionUnchanged)
+{
+    auto candidates = threeCandidates();
+    // Hold the deterministic winner's sub-plan to count its launches.
+    auto* const expectedWinner = static_cast<FakePlan*>(candidates[1].plan.get());
+
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(std::move(candidates), handle, {5.0, 1.0, 3.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+    const int afterFirst = expectedWinner->launchCount();
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_GT(afterFirst, 0) << "the fastest candidate must be the one that ran";
+    EXPECT_GT(expectedWinner->launchCount(), afterFirst)
+        << "the second execute must delegate to the same already-chosen winner";
+}
+
+/// Ties resolve to the lowest candidate index. std::sort would reorder equal times
+/// arbitrarily and silently change which kernel wins.
+TEST(TestIngestorBenchmarkPlan, EqualTimesKeepTheLowestCandidateIndexFirst)
+{
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        threeCandidates(), handle, {2.0, 2.0, 2.0}, [&recorded](std::vector<RankedEntry> ranking) {
+            recorded = std::move(ranking);
+        });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), 3U);
+    EXPECT_EQ(recorded[0].kernelId, testId(0x01));
+    EXPECT_EQ(recorded[1].kernelId, testId(0x02));
+    EXPECT_EQ(recorded[2].kernelId, testId(0x03));
+}
+
+/// The tie-break above cannot distinguish `sort` from `stable_sort`: libstdc++ drops to
+/// insertion sort below its introsort threshold, and that fallback happens to be stable,
+/// so three tied candidates order the same either way. This runs enough of them to clear
+/// the threshold, where an unstable sort genuinely reorders equal elements.
+TEST(TestIngestorBenchmarkPlan, EqualTimesKeepCandidateOrderPastTheInsertionSortThreshold)
+{
+    constexpr size_t TIED_CANDIDATES = 32;
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.reserve(TIED_CANDIDATES);
+    for(size_t index = 0; index < TIED_CANDIDATES; ++index)
+    {
+        candidates.push_back(
+            {testId(static_cast<uint8_t>(index + 1)), std::make_unique<FakePlan>(64)});
+    }
+
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        std::move(candidates),
+        handle,
+        std::vector<std::optional<double>>(TIED_CANDIDATES, 2.0),
+        [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), TIED_CANDIDATES);
+    for(size_t index = 0; index < TIED_CANDIDATES; ++index)
+    {
+        EXPECT_EQ(recorded[index].kernelId, testId(static_cast<uint8_t>(index + 1)))
+            << "candidate at index " << index << " moved; equal times must keep input order";
+    }
 }
 
 } // namespace

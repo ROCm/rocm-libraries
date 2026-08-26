@@ -27,6 +27,7 @@
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -61,8 +62,22 @@ struct ResolvedDispatch
 /// (sortedDefinitions), getMaxWorkspaceSize (getDispatchDetails per survivor, max), and
 /// initializeExecutionContext (sortedDefinitions().front(), getDispatchDetails).
 ///
-/// Thread-safe: the cache is internally synchronized; matcher and scorer calls run
-/// outside the lock.
+/// Thread safety. Two independent caches, each guarding itself:
+///
+/// - `_catalogCache` (`LruCache`) synchronizes internally.
+/// - `_winnerCache` is guarded by `_winnerCacheMutex`, as is the one-shot growth warning.
+///
+/// Neither lock is ever held across a call that takes the other, so the two cannot
+/// deadlock. Matchers, the heuristic, and the accessors below all run outside both.
+///
+/// Everything between a lookup and a store is thread-local: `catalogFor` returns a
+/// `Catalog` by value and callers mutate that copy, so ordering a catalog touches no
+/// shared state. Returning a reference into `_catalogCache` instead would make those
+/// mutations a data race. `winnerFor` returns a copy for the same reason.
+///
+/// Concurrent callers can therefore duplicate work -- two threads may rank the same
+/// catalog, or record a ranking for the same key -- and the last store wins. Both
+/// stores are equally valid, so the cost is the redundant work, never a wrong answer.
 template <typename THandle>
 class KernelIngestorStateManager
 {
@@ -70,6 +85,11 @@ public:
     /// How many (graph, device) catalogs to retain; eviction costs a rematch, never a
     /// wrong answer.
     static constexpr size_t DEFAULT_CATALOG_CACHE_CAPACITY = 256;
+
+    /// A tripwire, not a cap: the winner cache never evicts, because discarding a
+    /// measured ranking costs a GPU sweep or a silent quality regression. Crossing this
+    /// logs once and changes nothing.
+    static constexpr size_t WINNER_CACHE_WARNING_THRESHOLD = 4096;
 
     /// @throws std::invalid_argument bad pack reference, or duplicate metadata tuple.
     /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
@@ -169,16 +189,35 @@ public:
         return sortedCatalog(context).entries;
     }
 
-    /// The ranked catalog and the state matching bound, from one lookup.
+    /// The ordered catalog and the state matching bound, from one lookup.
+    ///
+    /// A benchmarked record covering the whole catalog supplies a measured order and
+    /// `rank()` is never called; otherwise the heuristic orders it.
     Catalog sortedCatalog(const MatchContext& context) const
     {
         Catalog catalog = catalogFor(context);
-        if(catalog.isSorted)
+
+        // A measured order is final; a heuristic one is provisional, so this lookup runs
+        // again even when the catalog is already sorted -- a sweep can postdate the
+        // memoized sort.
+        if(catalog.isSorted && catalog.orderedFromRecord)
         {
             return catalog;
         }
 
-        catalog.entries = _heuristic->rank(catalog, context);
+        if(auto ordered = orderFromWinnerRecord(catalog.entries, context); ordered.has_value())
+        {
+            catalog.entries = std::move(*ordered);
+            catalog.orderedFromRecord = true;
+        }
+        else
+        {
+            if(catalog.isSorted)
+            {
+                return catalog;
+            }
+            catalog.entries = _heuristic->rank(catalog, context);
+        }
         catalog.isSorted = true;
 
         if(const auto key = cacheKey(context); key.has_value())
@@ -188,6 +227,61 @@ public:
         }
 
         return catalog;
+    }
+
+    /// Records @p record under @p key, replacing any earlier ranking for it: a later
+    /// sweep measured the current candidate set, and the coverage gate only widens.
+    void recordWinner(const WinnerKey& key, WinnerRecord record) const
+    {
+        if(record.empty())
+        {
+            // An all-unusable sweep has nothing to record; an empty record would read
+            // as a covered hit for the empty candidate set.
+            return;
+        }
+
+        if(!key.graph.isUsable())
+        {
+            // Unkeyable graphs never match on lookup (GraphContentKey::operator==), so
+            // storing here would leak memory on an unreachable entry.
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: a benchmarked ranking could not be cached "
+                                   "because its graph yields no key");
+            return;
+        }
+
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        _winnerCache[key] = std::move(record);
+
+        if(_winnerCache.size() > WINNER_CACHE_WARNING_THRESHOLD && !_winnerCacheGrowthWarned)
+        {
+            _winnerCacheGrowthWarned = true;
+            HIPDNN_PLUGIN_LOG_WARN(
+                "ingestor: winner cache holds "
+                << _winnerCache.size() << " entries, past the soft threshold of "
+                << WINNER_CACHE_WARNING_THRESHOLD
+                << "; it does not evict, so this is reported once rather than acted on");
+        }
+    }
+
+    /// The ranking recorded for @p key, or nullopt. Returns a copy: the caller walks it
+    /// outside the lock, and a reference would outlive the guard.
+    std::optional<WinnerRecord> winnerFor(const WinnerKey& key) const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        const auto found = _winnerCache.find(key);
+        if(found == _winnerCache.end())
+        {
+            return std::nullopt;
+        }
+        return found->second;
+    }
+
+    /// How many rankings are held. For tests and diagnostics; the cache never evicts, so
+    /// this only grows.
+    size_t winnerCacheSize() const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        return _winnerCache.size();
     }
 
     /// Resolves how to size and launch @p kernel.
@@ -365,11 +459,9 @@ private:
 
     Catalog catalogFor(const MatchContext& context) const
     {
-        // Nothing below this line can be answered without a device: pack pruning reads
-        // the device's arch, matchers read its properties, and a kernel that somehow
-        // matched could not be launched. Answered once here rather than in every
-        // provider's matchers, where it is easy to leave out and impossible to see
-        // missing -- an empty catalog is what those matchers were producing anyway.
+        // Pack pruning and matchers both read the device, so nothing below can be
+        // answered without one. Checked here rather than in every provider's matchers,
+        // where an omission is invisible.
         if(context.deviceId == NO_DEVICE)
         {
             HIPDNN_PLUGIN_LOG_INFO("ingestor: no device resolved; no kernel applies");
@@ -559,6 +651,45 @@ private:
         return true;
     }
 
+    /// The measured order for @p context's graph and device, or nullopt when no record
+    /// covers @p entries and the caller must rank as it always has.
+    ///
+    /// Full coverage is required: a partial record cannot order the rest, and
+    /// interleaving measured with unmeasured entries would not be a valid order.
+    std::optional<std::vector<KernelDefinition>>
+        orderFromWinnerRecord(const std::vector<KernelDefinition>& entries,
+                              const MatchContext& context) const
+    {
+        // Building a WinnerKey copies and folds the whole graph buffer, so reject on the
+        // never-benchmarked path before paying for one.
+        if(entries.empty() || winnerCacheSize() == 0)
+        {
+            return std::nullopt;
+        }
+
+        const WinnerKey key{GraphContentKey{context.graph}, DeviceKey{context.deviceProperties}};
+        if(!key.graph.isUsable())
+        {
+            // No bytes to key on; such graphs never match each other either.
+            return std::nullopt;
+        }
+
+        const auto record = winnerFor(key);
+        if(!record.has_value())
+        {
+            return std::nullopt;
+        }
+
+        auto ordered = orderIfFullyCovered(*record, entries);
+        if(ordered.has_value())
+        {
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << ordered->size()
+                                                        << " catalog entries from a benchmarked "
+                                                           "record; heuristic ranking skipped");
+        }
+        return ordered;
+    }
+
     MetadataSchema _schema;
     std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
     std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
@@ -569,6 +700,13 @@ private:
     std::shared_ptr<IKernelHeuristic> _heuristic;
     GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
+
+    /// Unbounded, never evicted, own mutex (see WINNER_CACHE_WARNING_THRESHOLD). Separate
+    /// from _catalogCache's lock: a shared lock would serialize benchmarking write-back
+    /// against ordinary catalog lookups.
+    mutable std::unordered_map<WinnerKey, WinnerRecord, WinnerKeyHash> _winnerCache;
+    mutable std::mutex _winnerCacheMutex;
+    mutable bool _winnerCacheGrowthWarned = false;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor
