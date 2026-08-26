@@ -55,7 +55,7 @@ and the fix is to write down what you have and move.
 |---|---|---|
 | 0 | The dialect, stated in one line with the reason | Stated |
 | 1 | Source paths (or builder module + function) in hand | You can name the files |
-| 2 | **`mining.md` written to disk** — the five deliverables in full | The file exists and every row of the constraint table has a graph-derivable verdict |
+| 2 | **`mining.md` written to disk** — the five deliverables in full | The file exists and every row has a verdict. Draft it before your third source; five sources beyond the kernel module, max |
 | 3 | Batch message sent to the human, with your proposals | Sent. Then wait — this is the one blocking prompt |
 | 4 | `config.yaml` + `generate.py` exit 0 | Exit 0 and the output tree exists |
 | 5 | Validator exit 0, or the reason it could not run | Ran, or its absence stated by flag name |
@@ -167,6 +167,34 @@ keep reading.
 A row you are unsure about goes in the table marked `UNSURE`, and becomes a Step 3
 question. That is what Step 3 is for. Withholding the file until you are confident is
 how a two-hour mining step produces nothing at all.
+
+#### The source budget — this gate needs a number, not just a rule
+
+The stop condition above is not self-enforcing, and knowing that does not help. An agent
+that had read the rule, agreed with it, and said it was heading straight to the file
+then read nine more sources — because each next lookup was one grep away and felt
+individually justified, and "mark it UNSURE" kept losing to "let me verify this
+properly." Each trade is locally reasonable. The aggregate is a two-hour step with no
+artifact.
+
+So the gate carries a budget:
+
+**Draft `mining.md` after the kernel module and its spec — before ANY third source.**
+The draft will be full of `UNSURE`; that is its correct first state. Every later source
+you read edits a file that already exists, so a stop at any point leaves a usable
+artifact rather than nothing.
+
+**Then: five sources beyond the kernel module, maximum, before you commit and move on.**
+Count them. Name them in the file. Hitting the cap is not failure — it is the step
+working. Rows still `UNSURE` at the cap are Step 3 questions, which is where they were
+always going to end up.
+
+**The self-check, when you feel the "let me verify this properly" pull:** ask *is this
+file open because a specific UNSURE row needs it, or because I am not ready to write
+yet?* The second is the stall, and it is indistinguishable from diligence from the
+inside. If you cannot name the row the source resolves, you are past the gate — write
+the file.
+
 
 Skipping this produces an engine that advertises a kernel it cannot correctly serve —
 and because a wrong layout is read in-bounds rather than faulting, the result is wrong
