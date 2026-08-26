@@ -61,7 +61,7 @@ def show_node_info() {
         echo "NODE_NAME = \$NODE_NAME"
         lsb_release -sd
         uname -r
-        cat /sys/module/amdgpu/version
+        cat /sys/module/amdgpu/version 2>/dev/null || echo "amdgpu driver: not loaded"
         ls /opt/ -la
     """
 }
