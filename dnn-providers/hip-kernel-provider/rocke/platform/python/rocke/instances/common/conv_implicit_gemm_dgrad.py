@@ -1551,9 +1551,8 @@ def _build_tilde_dgrad(
 
         n_math_warps = spec.warp_m * spec.warp_n
         b.kernel.attrs["max_workgroup_size"] = spec.launch_block_size
-        _epi_barriers = compute_wavelet_epi_barriers(
-            spec.epilogue, spec.cshuffle_no_alias
-        )
+        _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
+        _epi_barriers = compute_wavelet_epi_barriers(spec.epilogue, _no_alias)
 
         def _dgrad_wavelet_epilogue(final_accs_in):
             fa = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs_in)
