@@ -22,8 +22,9 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_ellsv.hpp"
+#include "internal/level2/rocsparse_ellsv.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_ellsv.hpp"
 #include "rocsparse_mat_info.hpp"
 #include "rocsparse_one.hpp"
 #include "rocsparse_utility.hpp"
@@ -123,3 +124,58 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 }
+
+extern "C" rocsparse_status rocsparse_ellsv_zero_pivot(rocsparse_handle          handle,
+                                                       const rocsparse_mat_descr descr,
+                                                       rocsparse_mat_info        info,
+                                                       rocsparse_int*            position)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, info);
+    ROCSPARSE_CHECKARG_POINTER(2, position);
+
+    rocsparse::log_trace(
+        handle, "rocsparse_ellsv_zero_pivot", (const void*&)info, (const void*&)position);
+
+    auto ellsv_info = info->get_ellsv_info();
+
+    auto status = rocsparse::ellsv_zero_pivot(
+        handle, ellsv_info, rocsparse::get_indextype<rocsparse_int>(), position);
+    if(status == rocsparse_status_zero_pivot)
+    {
+        return status;
+    }
+    RETURN_IF_ROCSPARSE_ERROR(status);
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+extern "C" rocsparse_status rocsparse_ellsv_clear(rocsparse_handle          handle,
+                                                  const rocsparse_mat_descr descr,
+                                                  rocsparse_mat_info        info)
+try
+{
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    ROCSPARSE_CHECKARG_POINTER(2, info);
+
+    rocsparse::log_trace(handle, "rocsparse_ellsv_clear", (const void*&)descr, (const void*&)info);
+
+    info->clear_ellsv_info();
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP

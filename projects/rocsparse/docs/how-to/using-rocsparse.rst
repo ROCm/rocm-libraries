@@ -139,6 +139,8 @@ Function name                                                                 ye
 :cpp:func:`rocsparse_Xcsritsv_solve() <rocsparse_scsritsv_solve>`                 x
 :cpp:func:`rocsparse_Xcsritsv_solve() <rocsparse_scsritsvx_solve>`                x
 :cpp:func:`rocsparse_Xellmv() <rocsparse_sellmv>`                             x
+:cpp:func:`rocsparse_ellsv_zero_pivot`                                            x
+:cpp:func:`rocsparse_ellsv_clear`                                                 x
 :cpp:func:`rocsparse_Xgebsrmv() <rocsparse_sgebsrmv>`                         x
 :cpp:func:`rocsparse_Xgemvi_buffer_size() <rocsparse_sgemvi_buffer_size>`     x
 :cpp:func:`rocsparse_Xgemvi() <rocsparse_sgemvi>`                             x

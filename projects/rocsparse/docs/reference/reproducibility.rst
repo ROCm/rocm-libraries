@@ -47,6 +47,8 @@ Function name                                                                 ye
 :cpp:func:`rocsparse_csrsv_zero_pivot`                                        x
 :cpp:func:`rocsparse_csrsv_clear`                                             x
 :cpp:func:`rocsparse_Xcsrsv_solve() <rocsparse_scsrsv_solve>`                     x
+:cpp:func:`rocsparse_ellsv_zero_pivot`                                        x
+:cpp:func:`rocsparse_ellsv_clear`                                             x
 :cpp:func:`rocsparse_Xcsritsv_buffer_size() <rocsparse_scsritsv_buffer_size>` x
 :cpp:func:`rocsparse_Xcsritsv_analysis() <rocsparse_scsritsv_analysis>`           x
 :cpp:func:`rocsparse_csritsv_zero_pivot`                                      x

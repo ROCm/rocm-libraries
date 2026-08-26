@@ -240,6 +240,16 @@ rocsparse_ellmv()
   :outline:
 .. doxygenfunction:: rocsparse_zellmv
 
+rocsparse_ellsv_zero_pivot()
+-----------------------------
+
+.. doxygenfunction:: rocsparse_ellsv_zero_pivot
+
+rocsparse_ellsv_clear()
+-----------------------
+
+.. doxygenfunction:: rocsparse_ellsv_clear
+
 rocsparse_hybmv()
 -----------------
 

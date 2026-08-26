@@ -38,6 +38,7 @@
 #include "level2/rocsparse_csrmv.h"
 #include "level2/rocsparse_csrsv.h"
 #include "level2/rocsparse_ellmv.h"
+#include "level2/rocsparse_ellsv.h"
 #include "level2/rocsparse_gebsrmv.h"
 #include "level2/rocsparse_gemvi.h"
 #include "level2/rocsparse_hybmv.h"
