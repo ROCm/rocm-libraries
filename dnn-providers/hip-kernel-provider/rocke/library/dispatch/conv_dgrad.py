@@ -10,7 +10,7 @@ parameters::
     (A=dY, B=W, D=dX, A_bytes, B_bytes, D_bytes, sub_gemm_buf, num_sub_gemms)
 
 ``sub_gemm_buf`` carries the tilde-decomposition record(s) precomputed by
-:func:`~rocke.instances.common.conv_implicit_gemm_dgrad.pack_sub_gemm_buffer`.
+:func:`~kernels.common.conv_implicit_gemm_dgrad.pack_sub_gemm_buffer`.
 For stride=1 this holds exactly one record and the in-kernel binary search
 degenerates trivially.
 

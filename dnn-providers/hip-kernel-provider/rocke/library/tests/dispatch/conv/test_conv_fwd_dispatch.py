@@ -46,19 +46,17 @@ class TestConvFwdDispatch(unittest.TestCase):
     # ---- request validation ------------------------------------------------
 
     def test_rejects_unknown_arch(self):
-        with self.assertRaises((ValueError, KeyError, RuntimeError)):
+        with self.assertRaises(ValueError):
             dispatch_conv_grouped(_fwd("gfx000"))
 
     def test_rejects_unsupported_dtype(self):
-        with self.assertRaises((ValueError, KeyError, RuntimeError)):
+        with self.assertRaises(ValueError):
             dispatch_conv_grouped(_fwd("gfx950", dtype="fp8"))
 
-    def test_rejects_wgrad_direction_via_fwd_path(self):
-        # Passing direction="wgrad" still uses grouped dispatch; just verify it
-        # doesn't crash and selects a result (wgrad path is tested separately).
-        req = _fwd("gfx950", direction="wgrad")
-        result = dispatch_conv_grouped(req)
-        self.assertIsNotNone(result)
+    def test_gfx1250_wgrad_not_supported(self):
+        # gfx1250 has a fwd candidate but no wgrad candidate yet.
+        with self.assertRaises((ValueError, RuntimeError)):
+            dispatch_conv_grouped(_fwd("gfx1250", direction="wgrad"))
 
     # ---- gfx950 selection --------------------------------------------------
 
