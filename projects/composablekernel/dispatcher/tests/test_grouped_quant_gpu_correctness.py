@@ -125,17 +125,28 @@ _FP4_LUT = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
                      -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0], dtype=np.float32)
 
 
-def _pack_nibbles(codes, order):
-    """2 codes per byte along the first axis: even -> HIGH nibble, odd -> LOW.
+def _pack_nibbles(codes, order, hi_is_even):
+    """2 codes per byte along the first axis.  ``order`` is 'F' for a
+    column-major operand, 'C' for a row-major one.
 
-    The convention the in-repo bquant test establishes for pk_int4 B
-    (test_bquant_gpu_correctness.py:375-393): value = code - 8, and
-    pk_int4_t_to_fp32x2_t + the (k & 1) pick in load_b put the even-k code in
-    the high nibble.  ``order`` is 'F' for column-major B, 'C' for row-major A.
+    ``hi_is_even`` is NOT the same for the two 4-bit types, and assuming it was
+    is what made ``grouped_gemm_bquant.default_mx_bf16fp4_config`` read as a
+    1.75 wrong answer against a correct kernel:
+
+    * ``pk_int4`` -> True.  Under ``CK_TILE_USE_PK4_LAYOUT_SHUFFLE``,
+      ``pk_int4_t_to_fp32x2_t`` (core/numeric/pk_int4.hpp:118-131) returns
+      ``{x_h, x_l}``, so element 0 -- the even k -- is the HIGH nibble.  This is
+      also the convention the in-repo bquant test pins
+      (test_bquant_gpu_correctness.py:375-393), with value = code - 8.
+    * ``pk_fp4`` -> False.  ``pk_fp4_t::_unpack`` (core/numeric/pk_fp4.hpp:
+      253-261) returns ``data & 0b00001111`` for index 0 and ``data >> 4`` for
+      index 1, so element 0 is the LOW nibble -- the opposite order.
     """
     flat = np.asarray(codes, np.uint8).flatten(order=order)
     even, odd = flat[0::2] & 0x0F, flat[1::2] & 0x0F
-    return (odd | (even << 4)).astype(np.uint8)
+    if hi_is_even:
+        return (odd | (even << 4)).astype(np.uint8)
+    return (even | (odd << 4)).astype(np.uint8)
 
 
 def _global_max_rel(got, ref):
@@ -183,23 +194,13 @@ _EXPECTED_BROKEN = {
         "PreshuffleB B-weight path is numerically wrong on device (max_rel ~0.48)",
     ("grouped_gemm_abquant", "default_bf8_preshuffleb_config"):
         "PreshuffleB B-weight path is numerically wrong on device (max_rel ~0.46)",
-    # The grouped aquant ctypes lib copies pk_int4 A straight to the device; the
-    # non-grouped twin permutes it first (gemm_aquant_ctypes_lib.cpp:111-119).
-    # Pre-applying that permute on the host takes these from 1.445 to 0.00031,
-    # so the missing call is the whole remaining defect.
-    ("grouped_gemm_aquant", "default_fp8i4_config"):
-        "pk_int4 A is not permute_i4_inplace'd by grouped_gemm_aquant_ctypes_lib.cpp",
-    ("grouped_gemm_aquant", "default_bf8i4_config"):
-        "pk_int4 A is not permute_i4_inplace'd by grouped_gemm_aquant_ctypes_lib.cpp",
-    # Same defect on the B side: gemm_bquant_ctypes_lib.cpp:148-150 permutes a
-    # pk_int4 B, grouped_gemm_bquant_ctypes_lib.cpp:186 copies it straight
-    # through.  Pre-applying the permute on the host takes these from 1.343 /
-    # 1.372 to 0.00029 / 0.00030 (global metric), so the missing call is the
-    # whole remaining defect.
-    ("grouped_gemm_bquant", "default_fp8i4_config"):
-        "pk_int4 B is not permute_i4_inplace'd by grouped_gemm_bquant_ctypes_lib.cpp",
-    ("grouped_gemm_bquant", "default_bf8i4_config"):
-        "pk_int4 B is not permute_i4_inplace'd by grouped_gemm_bquant_ctypes_lib.cpp",
+    # The four grouped pk_int4 configs that used to be listed here -- aquant
+    # default_{fp8,bf8}i4_config and bquant default_{fp8,bf8}i4_config -- are
+    # fixed: the two grouped ctypes libs now call permute_i4_inplace on their
+    # pk_int4 operand, exactly as their non-grouped twins already did.  Measured
+    # on gfx950 after the fix: 0.00031 / 0.00030 (aquant) and 0.00047 / 0.00048
+    # (bquant), against 1.445 / 1.343 / 1.372 before it.  They are enforced by
+    # the normal path now, which is why they are gone from here.
 }
 
 
@@ -249,8 +250,9 @@ def _make_a(kind, rng, arch):
         raw = _bf16_raw(f)
         return raw, _bf16_f32(raw)
     codes = rng.integers(0, 16, size=(_M, _K), dtype=np.uint8)
-    dec = (codes.astype(np.float32) - 8.0) if kind == "pk_int4" else _FP4_LUT[codes]
-    return _pack_nibbles(codes, "C"), dec
+    is_i4 = kind == "pk_int4"
+    dec = (codes.astype(np.float32) - 8.0) if is_i4 else _FP4_LUT[codes]
+    return _pack_nibbles(codes, "C", hi_is_even=is_i4), dec
 
 
 def _make_b(kind, rng, arch):
@@ -262,8 +264,9 @@ def _make_b(kind, rng, arch):
         raw = _bf16_raw(f)
         return raw, _bf16_f32(raw)
     codes = rng.integers(0, 16, size=(_K, _N), dtype=np.uint8)
-    dec = (codes.astype(np.float32) - 8.0) if kind == "pk_int4" else _FP4_LUT[codes]
-    return _pack_nibbles(codes, "F"), dec
+    is_i4 = kind == "pk_int4"
+    dec = (codes.astype(np.float32) - 8.0) if is_i4 else _FP4_LUT[codes]
+    return _pack_nibbles(codes, "F", hi_is_even=is_i4), dec
 
 
 def _scale_a(A_dec, AQ, group_k):
