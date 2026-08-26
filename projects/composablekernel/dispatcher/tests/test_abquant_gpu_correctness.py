@@ -14,18 +14,23 @@ group and B per (k, n) group in the same kernel:
     A[m, k] *= AQ[m // aM, k // aK]
     B[k, n] *= BQ[k // bK, n // bN]
 
-Requires a gfx950 GPU (MI350X / MI355X) and hipcc in PATH. Skips cleanly
-(exit 77) when no GPU is visible or the detected arch is not gfx950, so it is
-safe to invoke unconditionally from a CI lane.
+Requires a gfx942 (MI300X) or gfx950 (MI350X / MI355X) GPU and hipcc in PATH.
+Skips cleanly (exit 77) when no GPU is visible or the detected arch is neither,
+so it is safe to invoke unconditionally from a CI lane.
+
+The fp8/bf8 host codec follows the target arch — OCP on gfx950, FNUZ on gfx942 —
+via the same dispatcher_common.fp8_uses_ocp predicate that drives the JIT
+defines, so the reference cannot end up encoding differently from the kernel.
 
 Tests:
-  fp8/compv3, bf8/compv3 — GPU output is non-zero, finite, and within 5%
-             max-relative-error vs. a fp32 CPU reference; time_ms is positive.
-             M=N=256 spans a 2x2 grid of 128x128 output tiles, so a constant
-             tile index cannot pass.
-  fp8/eightwaves — the gfx950-native 8-wave pipeline (192x256 tiles,
-             TransposeC=True, bquant_group_n=128), which exercises a different
-             MFMA path and B-scale granularity than compv3.
+  fp8/compv3, bf8/compv3 — GPU output is non-zero, non-constant, finite, and
+             within 5% max-relative-error vs. a fp32 CPU reference; time_ms is
+             positive. M=N=256 spans a 2x2 grid of 128x128 output tiles, so a
+             constant tile index cannot pass.
+  fp8/eightwaves — the 8-wave pipeline (192x256 tiles, TransposeC=True,
+             bquant_group_n=128), which exercises a different MFMA path and
+             B-scale granularity than compv3. gfx950 only for now; see
+             EIGHTWAVES_SUPPORTED_ARCHS.
 
 Run:
   python3 test_abquant_gpu_correctness.py
@@ -43,6 +48,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
+from dispatcher_common import fp8_uses_ocp
+
 from grouped_gemm_abquant_utils import (
     ABQuantGemmProblem,
     ABQuantGpuGemmRunner,
@@ -58,41 +65,60 @@ TOLERANCE = 0.05  # 5% max relative error — fp8/bf8 precision floor
 
 PASS = "PASS"
 FAIL = "FAIL"
+# Per-case skip, for a pipeline not yet enabled on the detected arch. Distinct
+# from SKIP_EXIT, which skips the whole file: here some cases did run, so the
+# process still exits 0/1 on their result.
+SKIP = "SKIP"
 
 # ctest reports this as "skipped" rather than passed. Without it, a CPU-only or
 # non-gfx950 runner would report every ABQuant test as a hard FAIL for a reason
 # that has nothing to do with the code under test.
 SKIP_EXIT = 77
 
-# ABQuant shares AQuant/BQuant's gfx950 (MI350X/MI355X) quantised-MFMA requirement.
-SUPPORTED_ARCHS = ("gfx950",)
+# ABQuant's compv3 pipeline uses standard fp8 MFMA (mfma_f32_16x16x32_fp8_fp8),
+# which gfx942 has; gemm_abquant/CMakeLists.txt lists gfx942 in DESIRED_TARGETS
+# too. The former gfx950-only restriction was a conservative default, not a
+# hardware limit -- what it was really working around was the fp8 encoding
+# mismatch, now fixed by threading the arch through the host codec.
+SUPPORTED_ARCHS = ("gfx942", "gfx950")
+
+# eightwaves is held back one release. Its warp_tile_k is arch-aware
+# (_eightwaves_warp_tile_k: 128 on gfx950, 32 elsewhere), so it *should* work,
+# but 8-wave scheduling with 192x256 tiles has never been run on gfx942 and the
+# failure mode if the tile is wrong is silent zeros rather than a build error.
+# Widen this once one CI run has shown compv3 green on gfx942.
+EIGHTWAVES_SUPPORTED_ARCHS = ("gfx950",)
 
 
 # ---------------------------------------------------------------------------
 # Dtype helpers
 # ---------------------------------------------------------------------------
 
-def _encode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
-    """Encode float32 → fp8 bytes (uint8 view of the fp8 bit pattern).
+def _fp8_ml_dtype(dtype: str, gfx_arch: str):
+    """The ml_dtypes fp8/bf8 type matching what the kernel for `gfx_arch` produces.
 
-    fp8 = OCP e4m3fn, bf8 = OCP e5m2. Unconditional OCP is correct here because
-    ABQuant is gfx950-only, and gfx950 kernels are compiled with
-    -DCK_TILE_USE_OCP_FP8 (see grouped_gemm_abquant_utils._compile_abquant_kernel).
-    Operators that also run on gfx942 need an arch-aware encoder instead, since
-    fp8_t there is the native FNUZ format.
+    gfx950 kernels are compiled OCP (e4m3fn / e5m2); gfx942 is native FNUZ
+    (e4m3fnuz / e5m2fnuz), which differs by one in the exponent bias. Encoding
+    with the wrong one shifts every value by a factor of two -- large enough to
+    be real error, small enough for a 5% relative gate to sometimes swallow. The
+    predicate is shared with the JIT flags (dispatcher_common.ocp_arch_defines)
+    so the reference and the kernel cannot disagree.
     """
     import ml_dtypes
 
-    ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
-    return arr.astype(ml_t).view(np.uint8)
+    if fp8_uses_ocp(gfx_arch):
+        return ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+    return ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else ml_dtypes.float8_e5m2fnuz
 
 
-def _decode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
-    """Decode fp8 bytes (uint8 view) back to float32."""
-    import ml_dtypes
+def _encode_fp8(arr: np.ndarray, dtype: str, gfx_arch: str) -> np.ndarray:
+    """Encode float32 → fp8/bf8 bytes (uint8 view of the bit pattern)."""
+    return arr.astype(_fp8_ml_dtype(dtype, gfx_arch)).view(np.uint8)
 
-    ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
-    return arr.view(ml_t).astype(np.float32)
+
+def _decode_fp8(arr: np.ndarray, dtype: str, gfx_arch: str) -> np.ndarray:
+    """Decode fp8/bf8 bytes (uint8 view) back to float32."""
+    return arr.view(_fp8_ml_dtype(dtype, gfx_arch)).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +185,8 @@ def _detect_arch() -> "str | None":
         return None
 
 
-def _make_inputs(problem: ABQuantGemmProblem, dtype: str, seed: int = 42):
+def _make_inputs(problem: ABQuantGemmProblem, dtype: str, gfx_arch: str,
+                 seed: int = 42):
     """Generate fp8-encoded A/B plus float32 AQ/BQ scales, and the decoded references.
 
     A and B are encoded to fp8 and decoded back so the CPU reference consumes the
@@ -175,13 +202,14 @@ def _make_inputs(problem: ABQuantGemmProblem, dtype: str, seed: int = 42):
     B_f32 = rng.uniform(-2.0, 2.0, (K, N)).astype(np.float32)
     AQ    = rng.uniform(0.5, 2.0, (problem.QM_A, problem.QK_A)).astype(np.float32)
     BQ    = rng.uniform(0.5, 2.0, (problem.QK_B, problem.QN_B)).astype(np.float32)
-    A_raw = _encode_fp8(A_f32, dtype)
-    B_raw = _encode_fp8(B_f32, dtype)
-    return A_raw, _decode_fp8(A_raw, dtype), B_raw, _decode_fp8(B_raw, dtype), AQ, BQ
+    A_raw = _encode_fp8(A_f32, dtype, gfx_arch)
+    B_raw = _encode_fp8(B_f32, dtype, gfx_arch)
+    return (A_raw, _decode_fp8(A_raw, dtype, gfx_arch),
+            B_raw, _decode_fp8(B_raw, dtype, gfx_arch), AQ, BQ)
 
 
 def _run_one(label: str, config, M: int, N: int, K: int, dtype: str,
-             out_dir: Path, gfx_arch: str = "gfx950",
+             out_dir: Path, gfx_arch: str,
              seed: int = 42) -> "tuple[str, str]":
     """Build, run, and verify one kernel. Returns (PASS|FAIL, detail_message)."""
     # The problem must repeat the config's quant grouping: the kernel bakes the
@@ -205,7 +233,9 @@ def _run_one(label: str, config, M: int, N: int, K: int, dtype: str,
     if not so_paths or so_paths[0] is None:
         return FAIL, f"{label}: kernel build failed"
 
-    A_raw, A_dec, B_raw, B_dec, AQ, BQ = _make_inputs(problem, dtype, seed=seed)
+    A_raw, A_dec, B_raw, B_dec, AQ, BQ = _make_inputs(
+        problem, dtype, gfx_arch, seed=seed
+    )
 
     runner = ABQuantGpuGemmRunner(so_paths[0])
 
@@ -213,10 +243,18 @@ def _run_one(label: str, config, M: int, N: int, K: int, dtype: str,
                         c_dtype=np.float16)
     C_gpu = result.C.astype(np.float32)
 
-    # An all-zero C is the signature of a kernel that launched but never wrote —
-    # e.g. an MFMA instruction unavailable on the target arch.
+    # A degenerate C is the signature of a kernel that launched but never did the
+    # work -- e.g. a warp_tile_k tuned for gfx950 built for gfx942, where
+    # get_k_warp_tile() takes the other branch of CK_GFX950_SUPPORT and the
+    # result is silently all zeros rather than a compile error. Random A/B/AQ/BQ
+    # make any correct output wildly varying, so a zero standard deviation is
+    # conclusive; check it before the tolerance gate, whose relative-error
+    # denominator would otherwise report a confusing near-1.0 on a zero matrix.
     if np.all(C_gpu == 0):
         return FAIL, f"{label}: GPU output is all-zero"
+    if float(C_gpu.std()) <= 0.0:
+        return FAIL, (f"{label}: GPU output is constant "
+                      f"(value={float(C_gpu.flat[0]):.6g}); kernel did not compute")
     nan_mask = ~np.isfinite(C_gpu)
     if np.any(nan_mask):
         nan_frac = nan_mask.mean()
@@ -267,6 +305,9 @@ def test_bf8_compv3(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
 
 
 def test_fp8_eightwaves(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
+    if gfx_arch not in EIGHTWAVES_SUPPORTED_ARCHS:
+        return SKIP, (f"fp8/eightwaves: not yet enabled on {gfx_arch} "
+                      f"(see EIGHTWAVES_SUPPORTED_ARCHS)")
     # eightwaves tiles are 192x256x128, so M must be a multiple of 192 and N of
     # 256. bquant_group_n=128 is the only granularity the C++ tests validate for
     # this pipeline.
@@ -332,12 +373,15 @@ def main():
         log.info("[%s] %s", status, detail)
 
     print("\n=== Summary ===")
-    passed = sum(1 for _, s, _ in results if s == PASS)
     for name, status, detail in results:
         print(f"  [{status:4s}] {detail}")
-    print(f"\n{passed}/{len(results)} passed")
+    passed = sum(1 for _, s, _ in results if s == PASS)
+    skipped = sum(1 for _, s, _ in results if s == SKIP)
+    failed = len(results) - passed - skipped
+    print(f"\n{passed}/{len(results) - skipped} passed"
+          + (f", {skipped} skipped" if skipped else ""))
 
-    return 0 if passed == len(results) else 1
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":

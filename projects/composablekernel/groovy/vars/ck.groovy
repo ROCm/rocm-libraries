@@ -1679,9 +1679,10 @@ def dispatcherVariantCmd(String arch, String variant) {
 // ---------------------------------------------------------------------------
 // Coverage against the 13 dispatcher operators with a bridge on develop.
 //
-// All 13 are invoked. Six are covered across their full documented dtype x
+// All 13 are invoked. Eleven are covered across their full documented dtype x
 // layout x arch surface: Multi-ABD, Batched GEMM, MX Gemm, grouped_gemm_bquant,
-// grouped_gemm_rowcol, grouped_gemm_tensor. The other seven run, but over a
+// grouped_gemm_rowcol, grouped_gemm_tensor, gemm_universal, StreamK, Multi-D,
+// Batched Contraction, grouped_gemm_abquant. The other two run, but over a
 // narrowed surface -- listed under "gaps" below.
 //
 // One non-obvious detail: gemm_universal's int8 coverage comes from
@@ -1694,24 +1695,15 @@ def dispatcherVariantCmd(String arch, String variant) {
 // this lane; none is a matter of adding a flag to the commands below, except
 // where noted:
 //
-//   StreamK on gfx950              test_streamk_gpu_correctness.py pins
-//                                  SUPPORTED_ARCHS = ("gfx942",); blocked on
-//                                  the arch-aware fp8 codec.
-//   gemm_universal + Grouped,      Blocked on the same thing from the other
-//   gfx950 fp8/bf8                 side: the sweep's JIT path never passes
-//                                  -DCK_TILE_USE_OCP_FP8, unlike the quant
-//                                  bridges. See dispatcherSweepDtypesFor.
-//   Multi-D layouts rrrr, ccrr,    Flag-only, and deferred by choice, not by
-//   crrr                           blocker -- the bridge handles all four (see
-//                                  gemm_multi_d_full_benchmark.py). Only rcrr
-//                                  runs today.
-//   Batched Contraction bf16,      Test is fp16-only and takes no dtype flag;
-//   fp32                           batched_contraction_utils exposes only
-//                                  default_fp16_config, though its _np_dtype()
-//                                  already resolves bf16 and fp32.
-//   grouped_gemm_aquant/abquant    Tests self-gate to gfx950 and their config
-//   on gfx942, and non-rcr         builders hardcode rcr.
-//   layouts
+//   grouped_gemm_aquant on         Its preshuffleaq builders hardcode
+//   gfx942                         warp_tile_k=128, the gfx950 value; gfx942
+//                                  wants 64. Needs abquant's arch-aware helper
+//                                  ported over before it can be widened.
+//   grouped_gemm_{a,ab,b}quant     All three config builders hardcode
+//   non-rcr layouts                layout="rcr", and the ctypes libs assert
+//                                  packed rcr strides, so a non-rcr kernel
+//                                  would build and then be rejected at every
+//                                  call.
 //
 // Seven further operators (preshuffle, the non-grouped gemm_*quant family,
 // batched-contraction multi-ABD) have no dispatcher bridge on develop and so
@@ -1719,11 +1711,8 @@ def dispatcherVariantCmd(String arch, String variant) {
 // exists in gemm_utils but is absent from test_gemm_search_space's _VARIANTS,
 // so wiring it up is a real change, not a flag.
 //
-// The first two gaps unblock together and neither is fixable alone: the fix is
-// _fp8_uses_ocp() (test_rowcolquant_gpu_correctness.py) ported into gemm_utils
-// for the host side, plus -DCK_TILE_USE_OCP_FP8 in the sweep's JIT compile
-// flags for the device side -- copying what the quant bridges already do.
-// Tracked as a follow-up.
+// Both remaining gaps are quant-side and share a shape: the arch-aware work is
+// already done in grouped_gemm_abquant_utils and needs porting, not inventing.
 // ---------------------------------------------------------------------------
 def runDispatcherCorrectnessTests(String arch, String compiler) {
     def budget = 64
@@ -1740,8 +1729,8 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
     // inside a function body only while the call is a NON-FINAL element of an
     // && list; when run_ok is the last element, set -e applies inside the body
     // and a bare "$@" exiting 77 kills the shell before rc=$? can run. Both
-    // arch chains below end on a run_ok (gfx942 on test_streamk_gpu_correctness,
-    // gfx950 on test_abquant_gpu_correctness), so a legitimate skip there would
+    // arch chains below end on a run_ok (test_abquant_gpu_correctness on both),
+    // so a legitimate skip there would
     // fail the lane. `cmd || rc=$?` puts the call in a tested context, which is
     // immune to set -e regardless of where run_ok is called from. Keep it that
     // way. rc=0 is a plain assignment, not `local`: /bin/sh is not bash and
@@ -1805,23 +1794,36 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
         run_ok python3 ../dispatcher/tests/test_streamk_registry.py --arch ${arch} --datatypes fp16 --layouts rcr && \
         run_ok python3 ../dispatcher/tests/test_streamk_gpu_correctness.py --gfx ${arch}"""
     }
-    // The block-scale quant operators are gfx950-only: their utils modules pin
-    // _DEFAULT_GFX_ARCH = "gfx950" and the tests self-gate to it. This is why the
-    // lane fans out to a gfx950 node as well as gfx942 -- see the stage
-    // comment in the Jenkinsfile.
+    // aquant and bquant are still gfx950-only: their config builders hardcode a
+    // warp_tile_k tuned for gfx950 (128), and on gfx942 get_k_warp_tile() takes
+    // the other branch of CK_GFX950_SUPPORT, so such a kernel builds and runs
+    // and returns zeros. Widening them means porting abquant's arch-aware
+    // _preshuffleb_warp_tile_k first. This is why the lane fans out to a gfx950
+    // node as well as gfx942 -- see the stage comment in the Jenkinsfile.
     //
-    // mx_gemm has no expand_sweep -- mx_gemm_utils exposes only
-    // default_fp8_config()/default_fp4_config() -- so it cannot join the
-    // --variant sweep above and instead runs the two-config smoke test merged
-    // in #10132. That test is unittest-based and self-gates to gfx950, so it
-    // takes no --gfx and needs no run_ok (unlike its neighbours, which do).
+    // mx_gemm is gfx950 for a harder reason: the scale-MFMA builtins
+    // (__builtin_amdgcn_mfma_scale_f32_*_f8f6f4) do not exist in the gfx942 ISA,
+    // so it fails at compile time rather than silently. It also has no
+    // expand_sweep -- mx_gemm_utils exposes only default_fp8_config() /
+    // default_fp4_config() -- so it cannot join the --variant sweep above and
+    // instead runs the two-config smoke test merged in #10132. That test is
+    // unittest-based and self-gates to gfx950, so it takes no --gfx and needs no
+    // run_ok (unlike its neighbours, which do).
     if (arch == "gfx950") {
         execute_cmd += """ && \
         run_ok python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \
         python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py && \
-        run_ok python3 ../dispatcher/tests/test_aquant_gpu_correctness.py --gfx ${arch} && \
-        run_ok python3 ../dispatcher/tests/test_abquant_gpu_correctness.py --gfx ${arch}"""
+        run_ok python3 ../dispatcher/tests/test_aquant_gpu_correctness.py --gfx ${arch}"""
     }
+    // abquant runs on both archs. Its Python layer was already arch-aware --
+    // _eightwaves_warp_tile_k / _preshuffleb_warp_tile_k carry correct gfx942
+    // branches -- and its compv3 pipeline uses standard fp8 MFMA that gfx942
+    // has; only the test's self-gate and its OCP-hardcoded host codec kept it
+    // off gfx942. Both are fixed, so this goes outside the arch block. The test
+    // still skips its eightwaves case on gfx942 (EIGHTWAVES_SUPPORTED_ARCHS)
+    // pending one green run, and reports that as a per-case SKIP, not a 77.
+    execute_cmd += """ && \
+        run_ok python3 ../dispatcher/tests/test_abquant_gpu_correctness.py --gfx ${arch}"""
     try {
         buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
     } finally {
