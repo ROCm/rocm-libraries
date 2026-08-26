@@ -8,6 +8,7 @@ This document describes the environment variables and runtime configuration opti
   - [Plugin Discovery](#plugin-discovery)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
+  - [Caching](#caching)
   - [Logging Variables](#logging-variables)
   - [MIOpen Plugin Logging](#miopen-plugin-logging)
   - [Test Configuration](#test-configuration)
@@ -116,13 +117,19 @@ Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`. Whe
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
 | (unset)    | Use the built-in static ordering (MIOpen-first, deterministic engines last). |
-| `<list>`   | Comma-separated engine names, applied in the order written. Whitespace is trimmed and empty tokens are skipped. |
+| `<list>`   | Comma-separated engine names or raw IDs, applied in the order written. Whitespace is trimmed and empty tokens are skipped. |
 
-Engine names that are not among the current candidates are silently skipped. If no listed engine matches any candidate, the policy declines so the outer loop can try the next plugin.
+Each entry accepts any spelling `hipdnn_list_engines` prints an engine under: the name it declares, or — for an engine that declares none — its ID in `0x`-prefixed hexadecimal. A decimal ID is also accepted. A registered name is resolved as a name even if it reads as a number.
+
+Entries that are not among the current candidates are silently skipped. If no listed engine matches any candidate, the policy declines so the outer loop can try the next policy.
 
 **Example:**
 ```bash
-export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOpenConvolutionFwdEngine,HipBLASLtMatmulEngine"
+# By name
+export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOPEN_ENGINE,HIPBLASLT_ENGINE"
+
+# By ID, in the form printed for an engine that declares no name, mixed with a name
+export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="0x1A2B3C4D5E6F7080,MIOPEN_ENGINE"
 ```
 
 ### Benchmarking
@@ -155,6 +162,65 @@ export HIPDNN_FORCE_BENCHMARKING=0
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
 - Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that.
+
+### Caching
+
+#### HIPDNN_CACHE_DIR
+
+The root directory hipDNN writes its on-disk caches to. Today one feature uses it: the kernel ingestor's winner cache, which persists the ranking a benchmarking run measured so a later process can reuse it instead of re-benchmarking.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | A per-user default is used: `~/.cache/hipdnn/` on Linux, `%USERPROFILE%\.hipdnn\cache\` on Windows (the default) |
+| `<path>`   | Use the given directory as the cache root instead       |
+
+A leading `~` (and, on Windows, a leading `%USERPROFILE%`) is expanded; every other character is left alone, so an embedded `~` is never substituted. If the relevant home variable is unset or empty, the value is used verbatim rather than being redirected somewhere unexpected. Relative paths resolve against the current working directory. The directory is created if it does not exist.
+
+Each feature owns a child directory beneath the root, so caches never collide: the ingestor's winner cache lives under `ingestor-winners/`, further split per hipDNN version, per engine, and per GPU architecture.
+
+**Example:**
+```bash
+# Point every hipDNN cache at a scratch directory, e.g. for a CI job
+export HIPDNN_CACHE_DIR=/tmp/hipdnn-cache
+
+# Isolate one reproduction from a developer's normal cache
+export HIPDNN_CACHE_DIR=$PWD/.hipdnn-cache
+```
+
+**Notes:**
+- Caching is **on by default**. Setting `HIPDNN_CACHE_DIR` to an empty string does **not**
+  disable caching -- an empty value is treated as unset and the per-user default applies,
+  leaving the cache enabled. Use `HIPDNN_DISABLE_CACHE` (below) to turn it off.
+- Cache entries are stamped with the hipDNN version that produced them, so an upgrade does not read measurements taken by a different build. Stale directories from older versions are not removed automatically; deleting the cache root is always safe.
+- Two checkouts, or two CI jobs, that should not share measurements need different values here. Records are keyed by graph content and device, not by checkout.
+- The winner cache is append-only and is never compacted, so a long-lived cache directory grows with the number of distinct graphs benchmarked.
+
+#### HIPDNN_DISABLE_CACHE
+
+Turns hipDNN's on-disk caching off entirely, regardless of `HIPDNN_CACHE_DIR`. This is the
+dedicated kill switch: no directory is created, no cache file is opened, and every consumer
+falls back to its in-memory-only behavior (e.g. the kernel ingestor re-benchmarks every
+process instead of reusing a persisted ranking).
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | No effect. Caching follows `HIPDNN_CACHE_DIR` as described above (the default) |
+| `1`, `true`, `on`, `yes`, `enable`, `enabled` | Disable on-disk caching |
+| Any other value | Ignored; treated as unset (fails open, not silently on) |
+
+Values are case-insensitive and tolerant of surrounding whitespace, matching
+`HIPDNN_FORCE_BENCHMARKING`'s parsing.
+
+**Example:**
+```bash
+# Disable the on-disk cache for one run, e.g. to force a clean re-benchmark
+export HIPDNN_DISABLE_CACHE=1
+```
+
+**Notes:**
+- Takes precedence over `HIPDNN_CACHE_DIR`: both set is not an error, but the disable wins.
+- Read once per `cacheRoot()` call, not cached across the process, so it can be toggled
+  between runs without restarting anything long-lived.
 
 ### Logging Variables
 
