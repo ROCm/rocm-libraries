@@ -288,8 +288,6 @@ MAX_MT0 = 1024
 MIN_MT1 = 4
 MAX_MT1 = 1024
 
-MAX_MT_AREA = 1024 * 1024 # Used by setupMTTuning.py. TODO - This should not be here.
-
 # <<< Controls for number of MIs in the config file
 # these params are only for MI_FILTER = 2
 # tip: lowering this number keeps more MI in the config 

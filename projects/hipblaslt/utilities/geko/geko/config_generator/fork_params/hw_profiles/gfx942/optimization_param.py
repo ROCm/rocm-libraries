@@ -448,9 +448,9 @@ class GFX942GAParams(BaseOptimizationParams):
     def transpose_lds(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("TransposeLDS", [-1, 0, 1, 2])
 
-    @param
-    def adaptive_gemm(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("AdaptiveGemm", [0, 1])
+    # @param
+    # def adaptive_gemm(self, ctx: SizeContext) -> ForkParameter:
+    #     return self._make_param("AdaptiveGemm", [0, 1])
 
     @param
     def tailloop_in_nll(self, ctx: SizeContext) -> ForkParameter:
