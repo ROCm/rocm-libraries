@@ -562,7 +562,7 @@ inline KernelDefinition makeDefinition(const DescriptorId& id,
     return {id,
             PACK_ID,
             DISPATCH_ID,
-            KernelSource{KernelSourceKind::EMBEDDED_SOURCE, "Test.cpp", "TestKernel"},
+            KernelSource{KernelSourceKind::EMBEDDED_SOURCE, "Test.cpp", "TestKernel", "", ""},
             {{BLOCK_SIZE, MetadataValue{blockSize}}},
             priority,
             arch};

@@ -308,17 +308,7 @@ public:
         for(const auto& knobName : _engine.knobs)
         {
             const auto values = KernelIngestorStateManager<THandle>::knobValues(ranked, knobName);
-
-            std::vector<int64_t> choices;
-            choices.reserve(values.size());
-            for(const auto& value : values)
-            {
-                if(const auto* intValue = std::get_if<int64_t>(&value))
-                {
-                    choices.push_back(*intValue);
-                }
-            }
-            if(choices.empty())
+            if(values.empty())
             {
                 continue;
             }
@@ -328,16 +318,66 @@ public:
             knob.description
                 = "Kernel metadata field '" + knobName + "' of engine '" + _engine.name + "'";
 
-            IntValueT defaultValue;
-            defaultValue.value = choices.front();
-            knob.default_value.Set(defaultValue);
+            // A knob's form follows its field's: the field supplies the type, the default
+            // and the legal values, and a knob is only a name. The first entry is the
+            // top-ranked kernel's value, which is what the engine picks when unset.
+            if(std::holds_alternative<int64_t>(values.front()))
+            {
+                std::vector<int64_t> choices;
+                choices.reserve(values.size());
+                for(const auto& value : values)
+                {
+                    if(const auto* intValue = std::get_if<int64_t>(&value))
+                    {
+                        choices.push_back(*intValue);
+                    }
+                }
+                if(choices.empty())
+                {
+                    continue;
+                }
 
-            IntConstraintT constraint;
-            constraint.min_value = *std::min_element(choices.begin(), choices.end());
-            constraint.max_value = *std::max_element(choices.begin(), choices.end());
-            constraint.step = 1;
-            constraint.valid_values = std::move(choices);
-            knob.constraint.Set(constraint);
+                IntValueT defaultValue;
+                defaultValue.value = choices.front();
+                knob.default_value.Set(defaultValue);
+
+                IntConstraintT constraint;
+                constraint.min_value = *std::min_element(choices.begin(), choices.end());
+                constraint.max_value = *std::max_element(choices.begin(), choices.end());
+                constraint.step = 1;
+                constraint.valid_values = std::move(choices);
+                knob.constraint.Set(constraint);
+            }
+            else if(std::holds_alternative<std::string>(values.front()))
+            {
+                std::vector<std::string> choices;
+                choices.reserve(values.size());
+                for(const auto& value : values)
+                {
+                    if(const auto* text = std::get_if<std::string>(&value))
+                    {
+                        choices.push_back(*text);
+                    }
+                }
+                if(choices.empty())
+                {
+                    continue;
+                }
+
+                StringValueT defaultValue;
+                defaultValue.value = choices.front();
+                knob.default_value.Set(defaultValue);
+
+                StringConstraintT constraint;
+                constraint.valid_values = std::move(choices);
+                knob.constraint.Set(constraint);
+            }
+            else
+            {
+                // Bool, float and int-list fields have no KnobT representation, so such a
+                // field is internal rather than reported as a broken knob.
+                continue;
+            }
 
             knobs.push_back(std::move(knob));
         }

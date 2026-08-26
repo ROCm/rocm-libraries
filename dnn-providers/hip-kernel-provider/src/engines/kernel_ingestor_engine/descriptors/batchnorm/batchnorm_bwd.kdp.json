@@ -1,0 +1,31 @@
+// The single-node backward pack, delegating to the existing BatchnormBwdParams/Plan.
+// That plan compiles one to five kernel entry points depending on device and problem
+// size (single-pass vs. multi-pass reduction), so as with fwd training the source
+// below names the file descriptively; the dispatch handler hands the whole graph to
+// the existing plan rather than reading this kernel's source fields.
+{
+  "version": "1.0",
+  "id": "c81e3e5f-7335-51c8-97f0-b6793e755285",
+  "name": "hipkernel:batchnorm_bwd",
+  "matchers": [
+    "da81113f-98dc-553c-a36a-bf69abb8be44"
+  ],
+  "engine": "a484c8ae-60ab-5647-95e9-739dbfbb5946",
+  "dispatch": "62f83a09-9bb8-5419-8b05-ba096085826a",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "6b1b2fc6-b12d-5c19-9396-c4543cba895e",
+      "name": "batchnorm_bwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "variant": "bwd"
+      },
+      "priority": 0
+    }
+  ]
+}

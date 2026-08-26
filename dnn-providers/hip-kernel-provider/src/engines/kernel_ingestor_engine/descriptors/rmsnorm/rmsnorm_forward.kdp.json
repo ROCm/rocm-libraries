@@ -1,0 +1,27 @@
+// The forward pack, over the one forward kernel. No arch list: the kernel is compiled for whatever device the call is for.
+{
+  "version": "1.0",
+  "id": "e51a4a0e-db74-57d6-a2d7-1a8ba20d5b3a",
+  "name": "hipkernel:rmsnorm_fwd",
+  "matchers": [
+    "2d589b2d-0967-5297-8c1b-54eeff1b06ee"
+  ],
+  "engine": "67e83ac7-6d91-57cb-b330-a5a565d92bfa",
+  "dispatch": "71916cc5-ebcb-595e-81ed-38d53ac8b437",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "ba835e62-3e63-5bc4-b980-2f2ba9e9f77e",
+      "name": "rmsnorm_fwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "RMSNormFwd.cpp",
+        "entry_point": "RMSnormFwd"
+      },
+      "metadata": {
+        "direction": "forward"
+      },
+      "priority": 0
+    }
+  ]
+}

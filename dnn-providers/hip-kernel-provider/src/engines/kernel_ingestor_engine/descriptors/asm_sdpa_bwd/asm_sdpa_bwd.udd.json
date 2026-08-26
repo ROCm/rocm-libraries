@@ -1,0 +1,7 @@
+// Loads the odo, dqdkdv and (a32 only) dq_convert code objects and launches them in sequence on one stream. Resolving the odo/dq_convert companions from the selected dqdkdv kernel's metadata, and packing the three kernarg structs, are runtime decisions no descriptor field can carry.
+{
+  "version": "1.0",
+  "id": "5db019aa-fa10-53be-9679-c033e34ad83a",
+  "name": "AsmSdpaBackwardDispatch",
+  "dispatch_symbol": "hipkernel.asm_sdpa_bwd.dispatch"
+}

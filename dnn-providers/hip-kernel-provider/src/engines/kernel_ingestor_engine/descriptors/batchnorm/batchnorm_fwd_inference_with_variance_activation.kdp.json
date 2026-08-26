@@ -1,0 +1,28 @@
+// The two-node fused pack: fwd inference with variance + activation, delegating to the
+// existing BatchnormFwdInferenceWithVarianceParams/Plan built from both nodes.
+{
+  "version": "1.0",
+  "id": "25aff07e-1f1a-50f9-aa95-2bb43c9ae1e9",
+  "name": "hipkernel:batchnorm_fwd_inference_with_variance_activation",
+  "matchers": [
+    "41a865f9-8790-5a88-aeee-679a8947089f"
+  ],
+  "engine": "a484c8ae-60ab-5647-95e9-739dbfbb5946",
+  "dispatch": "62f83a09-9bb8-5419-8b05-ba096085826a",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "50a3ca2d-0397-5539-aab6-f6154804dee2",
+      "name": "batchnorm_fwd_inference_with_variance_activation",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchNormFwdInferSpatial.cpp",
+        "entry_point": "BatchNormFwdInferSpatialEst"
+      },
+      "metadata": {
+        "variant": "fwd_inference_with_variance_activation"
+      },
+      "priority": 0
+    }
+  ]
+}

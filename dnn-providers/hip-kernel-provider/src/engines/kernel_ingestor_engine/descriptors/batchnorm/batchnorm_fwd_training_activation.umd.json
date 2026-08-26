@@ -1,0 +1,10 @@
+// Selects the fwd-training + activation fusion variant graph_match already
+// determined and validated: true only when the bound variant token names this pack's
+// own variant.
+{
+  "version": "1.0",
+  "id": "b46592f7-a229-5b64-bdea-11e7e33963a6",
+  "name": "BatchnormFwdTrainingActivation",
+  "scope": "graph",
+  "match_symbol": "hipkernel.batchnorm.fwd_training_activation_match"
+}

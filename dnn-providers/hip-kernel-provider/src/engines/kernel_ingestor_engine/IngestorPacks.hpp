@@ -43,6 +43,28 @@ void registerPointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& 
 /// @see packs/ConvNative.cpp
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 
+#ifdef HIPDNN_ENGINE_ASM_SDPA
+/// @see packs/AsmSdpaForwardNative.cpp
+void registerAsmSdpaForwardSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+
+/// @see packs/AsmSdpaBackwardNative.cpp
+void registerAsmSdpaBackwardSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+#endif
+
+#ifdef HIPDNN_ENGINE_HIP_MLOPS
+/// @see packs/BatchnormNative.cpp
+void registerBatchnormSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+
+/// @see packs/RMSnormNative.cpp
+void registerRMSnormSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+
+/// @see packs/LayernormForwardNative.cpp
+void registerLayernormForwardSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+
+/// @see packs/ResampleNative.cpp
+void registerResampleSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+#endif
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

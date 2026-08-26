@@ -1,0 +1,8 @@
+// Ranks the one kernel this engine ships. A heuristic is required even where there is nothing to choose between.
+{
+  "version": "1.0",
+  "id": "92ce553b-89b1-579e-9c49-ad88fc8b5fe9",
+  "name": "ResampleSelector",
+  "kind": "native",
+  "payload": "hipkernel.resample_fwd.score"
+}

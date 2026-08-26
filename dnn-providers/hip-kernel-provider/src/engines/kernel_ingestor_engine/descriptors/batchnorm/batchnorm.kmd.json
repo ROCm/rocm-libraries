@@ -1,0 +1,15 @@
+// The one field a batchnorm kernel varies along: which of the eight fusion variants it
+// implements. Every other launch input -- extents, layout, kernel selection within a
+// variant -- is derived from the graph at plan build, not keyed here. One field is also
+// enough to keep each pack's single kernel's metadata tuple unique engine-wide.
+{
+  "version": "1.0",
+  "id": "8ded9a58-5800-5e05-ae2d-79570438ff46",
+  "name": "BatchnormVariantFields",
+  "fields": [
+    {
+      "name": "variant",
+      "type": "string"
+    }
+  ]
+}

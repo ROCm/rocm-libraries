@@ -1,0 +1,100 @@
+// The gfx942 forward kernels, one entry per row of that architecture's fmha_v3_fwd/fmha_fwd.csv. Split per architecture because the code objects are, and because the arch list below is what prunes the other one on this device. The code object paths omit the MI300/MI308 directory: which of the two a device wants is a PCI chip-id probe the dispatch handler makes, not a property of the kernel.
+{
+  "version": "1.0",
+  "id": "eb69cfc1-0faa-5b95-a7e7-e57c2fea48d5",
+  "name": "hipkernel:asm_sdpa_fwd_gfx942",
+  "matchers": [
+    "dac1b0f2-526a-5f5b-bb71-190f9f65b9fd"
+  ],
+  "engine": "8a522d82-ed3e-5f80-8a39-a343cf4bb51c",
+  "dispatch": "97f991a4-b330-57a9-8491-821271248461",
+  "arch": [
+    "gfx942"
+  ],
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "6359ae75-2a73-5ace-b445-aa76a63fba20",
+      "name": "asm_sdpa_fwd.gfx942.fwd_hd128_bf16_rtne",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_fwd/fwd_hd128_bf16_rtne.co",
+        "code_object_symbol": "_ZN5aiter24fmha_fwd_hd128_bf16_rtneE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mask": 0,
+        "mode": 0,
+        "bf16_cvt": 0,
+        "ts_qo": 256,
+        "ts_kv": 32
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1b283dd5-d383-5db8-9a10-b398d77599ae",
+      "name": "asm_sdpa_fwd.gfx942.fwd_hd128_bf16_causal_rtne",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_fwd/fwd_hd128_bf16_causal_rtne.co",
+        "code_object_symbol": "_ZN5aiter31fmha_fwd_hd128_bf16_causal_rtneE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "mask": 2,
+        "mode": 0,
+        "bf16_cvt": 0,
+        "ts_qo": 256,
+        "ts_kv": 32
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d003d431-fe26-5c0d-9b09-837c20faed9a",
+      "name": "asm_sdpa_fwd.gfx942.fwd_hd192x128_bf16_rtne",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_fwd/fwd_hd192x128_bf16_rtne.co",
+        "code_object_symbol": "_ZN5aiter28fmha_fwd_hd192x128_bf16_rtneE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim_q": 192,
+        "hdim_v": 128,
+        "mask": 0,
+        "mode": 0,
+        "bf16_cvt": 0,
+        "ts_qo": 128,
+        "ts_kv": 32
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ac6a3203-dc02-5832-8eb5-ddaaf3aece20",
+      "name": "asm_sdpa_fwd.gfx942.fwd_hd192x128_bf16_causal_rtne",
+      "kernel_source": {
+        "kind": "hsaco_file",
+        "code_object_file": "gfx942/fmha_v3_fwd/fwd_hd192x128_bf16_causal_rtne.co",
+        "code_object_symbol": "_ZN5aiter35fmha_fwd_hd192x128_bf16_causal_rtneE"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "hdim_q": 192,
+        "hdim_v": 128,
+        "mask": 2,
+        "mode": 0,
+        "bf16_cvt": 0,
+        "ts_qo": 128,
+        "ts_kv": 32
+      },
+      "priority": 0
+    }
+  ]
+}

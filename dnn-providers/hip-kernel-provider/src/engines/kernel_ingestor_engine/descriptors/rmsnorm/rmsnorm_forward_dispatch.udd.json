@@ -1,0 +1,7 @@
+// Derives the normalized dimension, extents and element types from the graph, compiles the fwd kernel for them, and launches it.
+{
+  "version": "1.0",
+  "id": "71916cc5-ebcb-595e-81ed-38d53ac8b437",
+  "name": "RMSnormForwardDispatch",
+  "dispatch_symbol": "hipkernel.rmsnorm_fwd.dispatch"
+}

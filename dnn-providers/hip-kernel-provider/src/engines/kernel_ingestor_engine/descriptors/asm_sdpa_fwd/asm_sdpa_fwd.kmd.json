@@ -1,0 +1,40 @@
+// One field per column of AITER's fmha_fwd.csv. The tuple is what the kernel matcher compares the graph against, so every column that narrows kernel choice is here and nothing that does not is.
+{
+  "version": "1.0",
+  "id": "9109e8c8-3813-5935-827f-7e95fdc98f1e",
+  "name": "AsmSdpaForwardVariantFields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "hdim_q",
+      "type": "int"
+    },
+    {
+      "name": "hdim_v",
+      "type": "int"
+    },
+    {
+      "name": "mask",
+      "type": "int"
+    },
+    {
+      "name": "mode",
+      "type": "int"
+    },
+    {
+      "name": "bf16_cvt",
+      "type": "int"
+    },
+    {
+      "name": "ts_qo",
+      "type": "int"
+    },
+    {
+      "name": "ts_kv",
+      "type": "int"
+    }
+  ]
+}

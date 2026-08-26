@@ -192,16 +192,22 @@ enum class KernelSourceKind
 {
     EMBEDDED_SOURCE, ///< Source file plus entry point, compiled at plan-build time.
     KPACK, ///< Prebuilt kpack archive plus toc key and symbol. No adapter yet.
-    HSACO_FILE, ///< Standalone `.hsaco` code-object file. No adapter yet.
+    HSACO_FILE, ///< Standalone code-object file plus symbol, loaded at plan-build time.
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
 };
 
-/// UKD's source. Only `EMBEDDED_SOURCE` is implemented.
+/// UKD's source. `EMBEDDED_SOURCE` and `HSACO_FILE` are implemented.
 struct KernelSource
 {
     KernelSourceKind kind = KernelSourceKind::EMBEDDED_SOURCE;
     std::string sourceFile;
     std::string entryPoint;
+    /// `HSACO_FILE`: path relative to the root the provider's dispatch handler resolves
+    /// against. Relative because that tree moves between build and install prefixes and
+    /// can be redirected by environment; an absolute path here would pin one of them.
+    std::string codeObjectFile;
+    /// `HSACO_FILE`: the mangled symbol to resolve inside `codeObjectFile`.
+    std::string codeObjectSymbol;
 };
 
 /// UKD: one launchable kernel. Matchers, engine, and dispatch come from its pack.

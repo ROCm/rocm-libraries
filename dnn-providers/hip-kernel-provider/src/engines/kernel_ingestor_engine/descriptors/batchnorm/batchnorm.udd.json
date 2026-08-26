@@ -1,0 +1,9 @@
+// Compiles, prepares and launches a batchnorm kernel. Shared by every pack: the
+// dispatch ABI is one handler parameterised by the selected kernel's variant field,
+// not a different shape per pack.
+{
+  "version": "1.0",
+  "id": "62f83a09-9bb8-5419-8b05-ba096085826a",
+  "name": "BatchnormDispatch",
+  "dispatch_symbol": "hipkernel.batchnorm.dispatch"
+}

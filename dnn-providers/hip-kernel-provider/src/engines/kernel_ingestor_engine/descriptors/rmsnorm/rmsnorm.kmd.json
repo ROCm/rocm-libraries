@@ -1,0 +1,17 @@
+// One field, and it is not a tuning knob: each pack has exactly one kernel, and its
+// block size and its outer, inner and stride extents are all computed from the graph's
+// dims and stride order at plan build, so nothing about the launch is keyed here.
+// `direction` exists because the two packs share this schema and the catalog keys
+// kernels by their completed metadata tuple -- without it the forward and backward
+// kernels would present the same empty tuple to one engine's catalog and collide.
+{
+  "version": "1.0",
+  "id": "feabc38b-0fa7-5f70-85d5-dce8d77bc203",
+  "name": "RMSnormVariantFields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    }
+  ]
+}

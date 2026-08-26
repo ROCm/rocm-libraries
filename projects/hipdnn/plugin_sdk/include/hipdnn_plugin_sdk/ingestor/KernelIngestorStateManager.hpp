@@ -393,14 +393,20 @@ private:
 
             std::vector<KernelDefinition> packDefinitions;
             packDefinitions.reserve(pack.kernels.size());
+            const auto* dispatch = _dispatches.find(pack.dispatchId)->second.handler;
             for(const auto& kernel : pack.kernels)
             {
-                if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE)
+                // The source kind is the adapter dispatch point, and the pack's dispatch
+                // handler is that adapter, so it is what gets asked. Rejected here rather
+                // than left to prepare(): a kind with no adapter otherwise passes
+                // validation, passes matching, and throws after applicability already
+                // promised the graph.
+                if(!dispatch->supportsSourceKind(kernel.source.kind))
                 {
                     throw std::invalid_argument(
                         describeDescriptor("kernel", kernel.name, kernel.id)
-                        + " declares a source kind this build has no adapter for; only "
-                          "EMBEDDED_SOURCE is implemented");
+                        + " declares a source kind its pack's dispatch handler has no adapter "
+                          "for");
                 }
 
                 auto key = completeMetadata(kernel);

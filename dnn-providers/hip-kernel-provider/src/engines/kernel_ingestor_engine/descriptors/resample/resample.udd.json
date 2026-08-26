@@ -1,0 +1,7 @@
+// Derives the mode, padding, dims, strides and window from the graph, compiles the kernel for them, and launches it.
+{
+  "version": "1.0",
+  "id": "26d12bf1-b67a-55ab-a1a4-31e62fa734b3",
+  "name": "ResampleDispatch",
+  "dispatch_symbol": "hipkernel.resample_fwd.dispatch"
+}

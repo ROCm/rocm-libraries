@@ -1,0 +1,32 @@
+// The single-node fwd-training pack, delegating to the existing
+// BatchnormFwdTrainingParams/Plan. That plan picks among several kernel entry points at
+// compile time based on the device and problem size, so the source below names the
+// file its single-kernel path loads and is descriptive rather than load-bearing: the
+// dispatch handler hands the whole graph to the existing plan and never reads this
+// kernel's source fields.
+{
+  "version": "1.0",
+  "id": "d996c3e1-ef61-5238-92c3-d3d5bfb53acc",
+  "name": "hipkernel:batchnorm_fwd_training",
+  "matchers": [
+    "6ecd8246-3e04-5054-97e6-24f78b309269"
+  ],
+  "engine": "a484c8ae-60ab-5647-95e9-739dbfbb5946",
+  "dispatch": "62f83a09-9bb8-5419-8b05-ba096085826a",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "7d517be4-6ccd-55ed-a8d5-bb80969b0dd1",
+      "name": "batchnorm_fwd_training",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "variant": "fwd_training"
+      },
+      "priority": 0
+    }
+  ]
+}

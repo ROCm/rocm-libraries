@@ -1,0 +1,7 @@
+// Loads the code object, packs the kernarg struct and launches. Resolving the code object's directory, and picking the MI300 or MI308 copy on gfx942, are runtime decisions no descriptor field can carry.
+{
+  "version": "1.0",
+  "id": "97f991a4-b330-57a9-8491-821271248461",
+  "name": "AsmSdpaForwardDispatch",
+  "dispatch_symbol": "hipkernel.asm_sdpa_fwd.dispatch"
+}

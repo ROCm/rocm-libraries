@@ -1,0 +1,7 @@
+// Derives the normalized dimension, extents and element types from the graph, compiles the two bwd kernels for them, and launches both in sequence.
+{
+  "version": "1.0",
+  "id": "6236018a-07d5-50ed-b9f7-cc82e1ccd942",
+  "name": "RMSnormBackwardDispatch",
+  "dispatch_symbol": "hipkernel.rmsnorm_bwd.dispatch"
+}

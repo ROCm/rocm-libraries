@@ -1,0 +1,7 @@
+// Deliberately empty. The kernel's block size is fixed and its outer, inner and stride extents are computed from the graph's dims and stride order at plan build, so no field here would key anything: one kernel means one metadata tuple.
+{
+  "version": "1.0",
+  "id": "7b1cad10-1776-512d-8f35-a2edf1e9f237",
+  "name": "LayernormForwardVariantFields",
+  "fields": []
+}

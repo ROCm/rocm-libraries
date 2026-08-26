@@ -1,0 +1,10 @@
+// Selects the three-node backward + activation fusion variant graph_match already
+// determined and validated: true only when the bound variant token names this
+// pack's own variant.
+{
+  "version": "1.0",
+  "id": "e6a8cc41-d0a1-5fff-a7f7-51d39e15c794",
+  "name": "BatchnormBwdActivation",
+  "scope": "graph",
+  "match_symbol": "hipkernel.batchnorm.bwd_activation_match"
+}

@@ -3,12 +3,13 @@
 
 #include <algorithm>
 #include <array>
+#include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "core/Container.hpp"
 #include "core/Handle.hpp"
-#include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -24,18 +25,14 @@
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::core;
 
-/// Engines the provider exposes: one per compiled-in native engine, plus one per
-/// discovered descriptor set, read from the inventory rather than hardcoded so a
-/// newly shipped pack is never silently uncounted.
+/// Engines the provider exposes: one per discovered descriptor set, and nothing else.
+///
+/// Read from the inventory rather than hardcoded. A literal count goes wrong the moment
+/// a pack is added or an install drops one, and the failure it would report is a number
+/// mismatch rather than the missing engine.
 static uint32_t expectedEngines()
 {
     uint32_t expected = 0;
-#ifdef HIPDNN_ENGINE_ASM_SDPA
-    ++expected;
-#endif
-#ifdef HIPDNN_ENGINE_HIP_MLOPS
-    ++expected;
-#endif
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
     ++expected;
 #endif
@@ -48,7 +45,7 @@ static uint32_t expectedEngines()
 
 /// Upper bound for the fixed-size buffers below; only needs to be at least
 /// expectedEngines().
-constexpr uint32_t MAX_EXPECTED_ENGINES = 8;
+constexpr uint32_t MAX_EXPECTED_ENGINES = 16;
 
 TEST(TestContainer, ConstructsSuccessfully)
 {
@@ -64,9 +61,9 @@ TEST(TestContainer, CopyEngineIdsReturnsExpectedEngineCount)
     EXPECT_EQ(numEngines, expectedEngines());
 }
 
-TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
+TEST(TestContainer, CopyEngineIdsWithBufferContainsEveryDescriptorEngine)
 {
-#ifndef HIPDNN_ENGINE_HIP_MLOPS
+#ifndef HIPDNN_ENABLE_KERNEL_INGESTOR
     GTEST_SKIP();
 #else
     std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
@@ -77,12 +74,14 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
     EXPECT_EQ(totalEngines, expectedEngines());
     EXPECT_EQ(numEngines, expectedEngines());
 
-    bool containsHipMlopsEngine = false;
-    for(const int64_t engine : engineIds)
+    // Advertising an id the constructor then fails to build is the failure this
+    // guards: every set discovered must reach the copied-out list.
+    for(const auto& set : hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets())
     {
-        containsHipMlopsEngine |= (engine == hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_ID);
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+        EXPECT_NE(std::find(engineIds.begin(), engineIds.end(), engineId), engineIds.end())
+            << "no engine id copied out for descriptor set '" << set.engine.name << "'";
     }
-    EXPECT_EQ(containsHipMlopsEngine, true);
 #endif
 }
 
@@ -91,9 +90,10 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
 {
     using namespace hip_kernel_provider::kernel_ingestor_engine;
 
-    // Named rather than just counted: neither a count nor an emptiness check can tell
-    // a missing engine (e.g. a pack table dropped from a static-archive link) from a
-    // renamed one.
+    // Names the ids rather than counting them. A count cannot tell a missing ingestor
+    // engine from an extra one, and it cannot see the failure this is really guarding:
+    // the pack table being dropped from a binary that links the provider as a static
+    // archive, where an unreferenced member is discarded.
     const auto& sets = discoverDescriptorSets();
 
     std::vector<std::string> names;
@@ -103,7 +103,15 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
         names.push_back(set.engine.name);
     }
     std::sort(names.begin(), names.end());
-    EXPECT_EQ(names, (std::vector<std::string>{"hipkernel:ConvFwd", "hipkernel:Pointwise"}));
+    EXPECT_EQ(names,
+              (std::vector<std::string>{"hipkernel:AsmSdpaBackward",
+                                        "hipkernel:AsmSdpaForward",
+                                        "hipkernel:Batchnorm",
+                                        "hipkernel:ConvFwd",
+                                        "hipkernel:LayernormForward",
+                                        "hipkernel:Pointwise",
+                                        "hipkernel:RMSnorm",
+                                        "hipkernel:Resample"}));
 
     Container container;
     const auto allEngineIds = container.getEngineManager().getAllEngineIds();
@@ -158,9 +166,12 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
 
     auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
 
-#ifdef HIPDNN_ENGINE_ASM_SDPA
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    // The forward SDPA graph is served by the descriptor-backed engine, so the claim is
+    // about the id its UED name hashes to rather than a compile-time constant.
     ASSERT_EQ(applicableEngines.size(), 1);
-    EXPECT_EQ(applicableEngines.front(), asm_sdpa_engine::AsmSdpaEngine::staticId());
+    EXPECT_EQ(applicableEngines.front(),
+              hipdnn_data_sdk::utilities::engineNameToId("hipkernel:AsmSdpaForward"));
 #else
     EXPECT_TRUE(applicableEngines.empty());
 #endif

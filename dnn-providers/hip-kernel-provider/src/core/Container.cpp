@@ -4,25 +4,9 @@
 #include "Container.hpp"
 #include "device/CurrentDevicePropertyProvider.hpp"
 
-#ifdef HIPDNN_ENGINE_HIP_MLOPS
-#include "engines/hip_mlops_engine/HipMlopsEngine.hpp"
-#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormBwdPlanBuilder.hpp"
-#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormPlanBuilder.hpp"
-#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
-#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormPlanBuilder.hpp"
-#include "engines/hip_mlops_engine/plans/layernorm/LayernormPlanBuilder.hpp"
-#include "engines/hip_mlops_engine/plans/resample/ResamplePlanBuilder.hpp"
-#endif
-
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
 #include "engines/hip_flash2_engine/HipFlash2Engine.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
-#endif
-
-#ifdef HIPDNN_ENGINE_ASM_SDPA
-#include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
-#include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
-#include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #endif
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -48,32 +32,8 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
 {
     static const std::vector<EngineDefinition> s_engineDefinitions = [] {
         std::vector<EngineDefinition> definitions = {
-        // HIP_MLOPS_ENGINE
-#ifdef HIPDNN_ENGINE_HIP_MLOPS
-            {HIP_MLOPS_ENGINE_ID,
-             [](const device::IDevicePropertyProvider& devicePropertyProvider)
-                 -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
-                 auto engine = std::make_unique<HipMlopsEngine>(HIP_MLOPS_ENGINE_ID);
-                 const compilation::IKernelCompiler& kernelCompiler = engine->getKernelCompiler();
-                 engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormPlanBuilder>(
-                     kernelCompiler, devicePropertyProvider));
-                 engine->addPlanBuilder(
-                     std::make_unique<batchnorm::BatchnormFwdTrainingPlanBuilder>(
-                         kernelCompiler, devicePropertyProvider));
-                 engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormPlanBuilder>(
-                     kernelCompiler, devicePropertyProvider));
-                 engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormBwdPlanBuilder>(
-                     kernelCompiler, devicePropertyProvider));
-                 engine->addPlanBuilder(std::make_unique<layernorm::LayernormPlanBuilder>(
-                     kernelCompiler, devicePropertyProvider));
-                 engine->addPlanBuilder(std::make_unique<resample::ResamplePlanBuilder>(
-                     kernelCompiler, devicePropertyProvider));
-                 return engine;
-             }},
-#endif
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
             // HIP_FLASH2_ENGINE: FP16 Flash-Attention 2 V7 (rocWMMA MFMA + causal tile skip)
-            // Complements ASM_SDPA_ENGINE: handles FP16 on gfx942/gfx950.
             // Performance: 78.98 TFLOPS MI325X, 71.27 TFLOPS MI300X (seq=4096 causal D=128).
             {HIP_FLASH2_ENGINE_ID,
              [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
@@ -84,17 +44,6 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                  return engine;
              }},
 #endif // HIPDNN_ENGINE_HIP_FLASH2
-#ifdef HIPDNN_ENGINE_ASM_SDPA
-            // ASM_SDPA_ENGINE
-            {ASM_SDPA_ENGINE_ID,
-             [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
-                 -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
-                 auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
-                 engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
-                 engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
-                 return engine;
-             }},
-#endif
         };
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -123,7 +72,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                      {
                          // The loader validates each set, but its probe and this construction
                          // are different objects, so that's convention, not a guarantee.
-                         // Return null: throwing here would cost HIP_MLOPS and ASM_SDPA too.
+                         // Return null: throwing here would cost every other engine too.
                          HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
                                                  << set.engine.name
                                                  << "' failed to construct and is excluded: "

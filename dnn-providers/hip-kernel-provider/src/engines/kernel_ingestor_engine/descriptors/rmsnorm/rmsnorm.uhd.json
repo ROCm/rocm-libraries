@@ -1,0 +1,8 @@
+// Ranks the one kernel each pack ships. A heuristic is required even where there is nothing to choose between.
+{
+  "version": "1.0",
+  "id": "d0cd32c5-cf5b-5b6b-866b-fbea433adc57",
+  "name": "RMSnormSelector",
+  "kind": "native",
+  "payload": "hipkernel.rmsnorm.score"
+}

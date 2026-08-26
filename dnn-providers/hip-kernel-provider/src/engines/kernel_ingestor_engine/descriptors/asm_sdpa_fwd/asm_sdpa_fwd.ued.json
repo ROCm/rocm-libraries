@@ -1,0 +1,11 @@
+// The AITER assembly SDPA forward engine. Its kernels are prebuilt code objects, not runtime-compiled source, so it declares no runtime_compilation behavior note.
+{
+  "version": "1.0",
+  "id": "8a522d82-ed3e-5f80-8a39-a343cf4bb51c",
+  "name": "hipkernel:AsmSdpaForward",
+  "sdk_version": "1.2.0",
+  "graph_match": { "native": "hipkernel.asm_sdpa_fwd.graph_match" },
+  "heuristic": "d1383b0d-e248-504d-b54b-b31deffe2857",
+  "metadata": "9109e8c8-3813-5935-827f-7e95fdc98f1e",
+  "knobs": []
+}

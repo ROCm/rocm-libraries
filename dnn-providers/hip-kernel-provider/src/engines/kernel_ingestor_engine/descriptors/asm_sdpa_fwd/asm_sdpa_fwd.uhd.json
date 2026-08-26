@@ -1,0 +1,8 @@
+// Ranks the surviving kernels. Every kernel this engine ships is an exact shape match, so the ranking only has to be total, not clever.
+{
+  "version": "1.0",
+  "id": "d1383b0d-e248-504d-b54b-b31deffe2857",
+  "name": "AsmSdpaForwardSelector",
+  "kind": "native",
+  "payload": "hipkernel.asm_sdpa_fwd.score"
+}

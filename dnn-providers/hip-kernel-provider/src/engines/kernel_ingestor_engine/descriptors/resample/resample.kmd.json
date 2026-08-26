@@ -1,0 +1,7 @@
+// Deliberately empty. resample_mode and padding_mode are read off the graph and forwarded as compile-time macros alongside dims, strides and window -- the same single compile-and-launch shape as layernorm's derived extents, not a branch over different kernels. One kernel means one metadata tuple.
+{
+  "version": "1.0",
+  "id": "64f0823a-5e47-5418-b167-8f32f2faf86b",
+  "name": "ResampleVariantFields",
+  "fields": []
+}
