@@ -908,17 +908,20 @@ void testing_matmul_with_bias(
     };
     struct PreparedMatmulCase
     {
-        PreparedMatmulOperand   a;
-        PreparedMatmulOperand   b;
-        size_t                  outputCopyElements = 0;
-        size_t                  biasElements       = 0;
-        size_t                  scaleAlphaElements = 0;
-        hipblasLtEpilogue_t     epilogue           = HIPBLASLT_EPILOGUE_DEFAULT;
-        bool                    epilogueEnabled    = false;
-        float                   activation0        = 0.0f;
-        float                   activation1        = 0.0f;
-        computeTypeInterface    alpha{};
-        computeTypeInterface    beta{};
+        PreparedMatmulOperand a;
+        PreparedMatmulOperand b;
+        size_t                outputCopyElements = 0;
+        size_t                biasElements       = 0;
+        size_t                scaleAlphaElements = 0;
+        hipblasLtEpilogue_t   epilogue           = HIPBLASLT_EPILOGUE_DEFAULT;
+        bool                  epilogueEnabled    = false;
+        float                 activation0        = 0.0f;
+        float                 activation1        = 0.0f;
+        computeTypeInterface  alpha{};
+        computeTypeInterface  beta{};
+    };
+    struct MatmulRuntimeCase
+    {
         void*                   alphaPointer = nullptr;
         hipblasLtMatrixLayout_t matrixA      = nullptr;
         hipblasLtMatrixLayout_t matrixB      = nullptr;
@@ -926,7 +929,9 @@ void testing_matmul_with_bias(
         hipblasLtMatrixLayout_t matrixD      = nullptr;
     };
     std::vector<PreparedMatmulCase> preparedCases(problem_count);
+    std::vector<MatmulRuntimeCase>  runtimeCases(problem_count);
     const auto&                     firstPreparedCase = preparedCases.front();
+    const auto&                     firstRuntimeCase  = runtimeCases.front();
 
     std::vector<std::vector<hipblasLtMatmulDesc_t>> matmul;
 
@@ -1187,25 +1192,26 @@ void testing_matmul_with_bias(
     {
         const auto&   testCase     = matmulCases[i];
         auto&         preparedCase = preparedCases[i];
+        auto&         runtimeCase  = runtimeCases[i];
         const int64_t batchStrideC = testCase.c.batchStride();
         const int64_t batchStrideD = testCase.d.batchStride();
 
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(preparedCase.matrixA),
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(runtimeCase.matrixA),
                                                           arg.a_type,
                                                           testCase.a.rows(),
                                                           testCase.a.columns(),
                                                           testCase.a.leadingDimension()));
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(preparedCase.matrixB),
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(runtimeCase.matrixB),
                                                           arg.b_type,
                                                           testCase.b.rows(),
                                                           testCase.b.columns(),
                                                           testCase.b.leadingDimension()));
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(preparedCase.matrixC),
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(runtimeCase.matrixC),
                                                           arg.c_type,
                                                           testCase.m,
                                                           testCase.n,
                                                           testCase.c.leadingDimension()));
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(preparedCase.matrixD),
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&(runtimeCase.matrixD),
                                                           arg.d_type,
                                                           testCase.m,
                                                           testCase.n,
@@ -1215,57 +1221,57 @@ void testing_matmul_with_bias(
         {
             hipblasLtOrder_t orderA = orderForDatatype(TiA);
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                preparedCase.matrixA, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
+                runtimeCase.matrixA, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
         }
 
         if(do_swizzle_b)
         {
             hipblasLtOrder_t orderB = orderForDatatype(TiB);
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                preparedCase.matrixB, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderB, sizeof(orderB)));
+                runtimeCase.matrixB, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderB, sizeof(orderB)));
         }
 
         if((testCase.batchCount > 1) || batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
         {
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    preparedCase.matrixA, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
+                    runtimeCase.matrixA, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    preparedCase.matrixB, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
+                    runtimeCase.matrixB, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    preparedCase.matrixC, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
+                    runtimeCase.matrixC, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    preparedCase.matrixD, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
+                    runtimeCase.matrixD, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(testCase.batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
-                hipblasLtMatrixLayoutSetAttribute(preparedCase.matrixA,
+                hipblasLtMatrixLayoutSetAttribute(runtimeCase.matrixA,
                                                   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                                   &(preparedCase.a.batchStride),
                                                   sizeof(int64_t)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
-                hipblasLtMatrixLayoutSetAttribute(preparedCase.matrixB,
+                hipblasLtMatrixLayoutSetAttribute(runtimeCase.matrixB,
                                                   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                                   &(preparedCase.b.batchStride),
                                                   sizeof(int64_t)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
-                hipblasLtMatrixLayoutSetAttribute(preparedCase.matrixC,
+                hipblasLtMatrixLayoutSetAttribute(runtimeCase.matrixC,
                                                   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                                   &batchStrideC,
                                                   sizeof(int64_t)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
-                hipblasLtMatrixLayoutSetAttribute(preparedCase.matrixD,
+                hipblasLtMatrixLayoutSetAttribute(runtimeCase.matrixD,
                                                   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                                   &batchStrideD,
                                                   sizeof(int64_t)),
@@ -1276,21 +1282,21 @@ void testing_matmul_with_bias(
         {
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    preparedCase.matrixA, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
+                    runtimeCase.matrixA, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    preparedCase.matrixB, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
+                    runtimeCase.matrixB, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    preparedCase.matrixC, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
+                    runtimeCase.matrixC, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    preparedCase.matrixD, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
+                    runtimeCase.matrixD, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
         }
 
@@ -2068,7 +2074,7 @@ void testing_matmul_with_bias(
             if(arg.scaleAlpha_vector)
             {
                 CHECK_HIP_ERROR(synchronize(dScaleAlphaVec[i], hScaleAlphaVec[i], block_count));
-                preparedCase.alphaPointer = dScaleAlphaVec[i].buf();
+                runtimeCase.alphaPointer = dScaleAlphaVec[i].buf();
                 set_computeInterface(
                     preparedCase.alpha,
                     1.0,
@@ -2076,7 +2082,7 @@ void testing_matmul_with_bias(
                     TiA); // use dScaleAlphaVec instead, original alpha = 1.0 for verify
             }
             else
-                preparedCase.alphaPointer = &(preparedCase.alpha);
+                runtimeCase.alphaPointer = &(preparedCase.alpha);
 
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
                || arg.scaleA == hipblaslt_scaling_format::Vector)
@@ -2290,7 +2296,7 @@ void testing_matmul_with_bias(
         }
         else
         {
-            preparedCase.alphaPointer = &(preparedCase.alpha);
+            runtimeCase.alphaPointer = &(preparedCase.alpha);
             for(int batchCount = 0; batchCount < testCase.batchCount; batchCount++)
             {
                 hipblaslt_init_device(ABC_dims::C,
@@ -2952,14 +2958,16 @@ void testing_matmul_with_bias(
             matrixLayoutsB.reserve(preparedCases.size());
             matrixLayoutsC.reserve(preparedCases.size());
             matrixLayoutsD.reserve(preparedCases.size());
-            for(auto& preparedCase : preparedCases)
+            for(size_t i = 0; i < preparedCases.size(); ++i)
             {
+                auto& preparedCase = preparedCases[i];
+                auto& runtimeCase  = runtimeCases[i];
                 alphaPointers.push_back(&preparedCase.alpha);
                 betaPointers.push_back(&preparedCase.beta);
-                matrixLayoutsA.push_back(preparedCase.matrixA);
-                matrixLayoutsB.push_back(preparedCase.matrixB);
-                matrixLayoutsC.push_back(preparedCase.matrixC);
-                matrixLayoutsD.push_back(preparedCase.matrixD);
+                matrixLayoutsA.push_back(runtimeCase.matrixA);
+                matrixLayoutsB.push_back(runtimeCase.matrixB);
+                matrixLayoutsC.push_back(runtimeCase.matrixC);
+                matrixLayoutsD.push_back(runtimeCase.matrixD);
             }
             for(int32_t block = 0; block < block_count; ++block)
             {
@@ -3004,18 +3012,18 @@ void testing_matmul_with_bias(
             {
                 CHECK_HIPBLASLT_ERROR(gemmVec[block].setProblem(
                     matmul[block][0],
-                    firstPreparedCase.alphaPointer,
+                    firstRuntimeCase.alphaPointer,
                     dA[0].as<char>() + block * firstPreparedCase.a.elements * realDataTypeSize(TiA),
-                    firstPreparedCase.matrixA,
+                    firstRuntimeCase.matrixA,
                     dB[0].as<char>() + block * firstPreparedCase.b.elements * realDataTypeSize(TiB),
-                    firstPreparedCase.matrixB,
+                    firstRuntimeCase.matrixB,
                     &firstPreparedCase.beta,
                     dC[0].as<char>()
                         + block * firstCase.c.allocationElements * realDataTypeSize(To),
-                    firstPreparedCase.matrixC,
+                    firstRuntimeCase.matrixC,
                     (*dDp)[0].as<char>()
                         + block * firstCase.d.allocationElements * realDataTypeSize(To),
-                    firstPreparedCase.matrixD));
+                    firstRuntimeCase.matrixD));
             }
         }
         extProblem = &gemmVec.front();
@@ -3051,12 +3059,12 @@ void testing_matmul_with_bias(
                       const hipblasStatus_t supportStatus
                           = hipblaslt_ext::matmulIsAlgoSupported(handle,
                                                                  matmul[0][0],
-                                                                 firstPreparedCase.alphaPointer,
-                                                                 firstPreparedCase.matrixA,
-                                                                 firstPreparedCase.matrixB,
+                                                                 firstRuntimeCase.alphaPointer,
+                                                                 firstRuntimeCase.matrixA,
+                                                                 firstRuntimeCase.matrixB,
                                                                  &firstPreparedCase.beta,
-                                                                 firstPreparedCase.matrixC,
-                                                                 firstPreparedCase.matrixD,
+                                                                 firstRuntimeCase.matrixC,
+                                                                 firstRuntimeCase.matrixD,
                                                                  candidate.algo,
                                                                  requiredWorkspace);
                       if(supportStatus == HIPBLAS_STATUS_SUCCESS
@@ -3159,10 +3167,10 @@ void testing_matmul_with_bias(
             std::vector<hipblasLtMatmulHeuristicResult_t> candidates(requestAlgoCount);
             EXPECT_HIPBLAS_STATUS((hipblasLtMatmulAlgoGetHeuristic(handle,
                                                                    matmul[0][0],
-                                                                   firstPreparedCase.matrixA,
-                                                                   firstPreparedCase.matrixB,
-                                                                   firstPreparedCase.matrixC,
-                                                                   firstPreparedCase.matrixD,
+                                                                   firstRuntimeCase.matrixA,
+                                                                   firstRuntimeCase.matrixB,
+                                                                   firstRuntimeCase.matrixC,
+                                                                   firstRuntimeCase.matrixD,
                                                                    pref,
                                                                    requestAlgoCount,
                                                                    candidates.data(),
@@ -3793,16 +3801,16 @@ void testing_matmul_with_bias(
                     void* ptrB = firstPreparedCase.b.elements ? ddb[0] : nullptr;
                     EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
                                                           matmul[0][0],
-                                                          firstPreparedCase.alphaPointer,
+                                                          firstRuntimeCase.alphaPointer,
                                                           ptrA,
-                                                          firstPreparedCase.matrixA,
+                                                          firstRuntimeCase.matrixA,
                                                           ptrB,
-                                                          firstPreparedCase.matrixB,
+                                                          firstRuntimeCase.matrixB,
                                                           &(firstPreparedCase.beta),
                                                           ddc[0],
-                                                          firstPreparedCase.matrixC,
+                                                          firstRuntimeCase.matrixC,
                                                           ddd[0],
-                                                          firstPreparedCase.matrixD,
+                                                          firstRuntimeCase.matrixD,
                                                           &heuristicResult[sol].algo,
                                                           *dWorkspace,
                                                           workspace_size,
@@ -3816,14 +3824,14 @@ void testing_matmul_with_bias(
                                                           matmul[0][0],
                                                           alpha_ptr,
                                                           dA[0].buf(),
-                                                          firstPreparedCase.matrixA,
+                                                          firstRuntimeCase.matrixA,
                                                           dB[0].buf(),
-                                                          firstPreparedCase.matrixB,
+                                                          firstRuntimeCase.matrixB,
                                                           beta_ptr,
                                                           dC[0].buf(),
-                                                          firstPreparedCase.matrixC,
+                                                          firstRuntimeCase.matrixC,
                                                           (*dDp)[0].buf(),
-                                                          firstPreparedCase.matrixD,
+                                                          firstRuntimeCase.matrixD,
                                                           &heuristicResult[sol].algo,
                                                           *dWorkspace,
                                                           workspace_size,
@@ -4080,7 +4088,7 @@ void testing_matmul_with_bias(
                         auto ptr_alpha  = arg.scaleAlpha_vector
                                               ? (dScaleAlphaVec[0].as<char>())
                                                    + (i % block_count) * firstPreparedCase.scaleAlphaElements
-                                              : firstPreparedCase.alphaPointer;
+                                              : firstRuntimeCase.alphaPointer;
                         // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
                         // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
                         // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for
@@ -4096,14 +4104,14 @@ void testing_matmul_with_bias(
                                                               ptr_matmul,
                                                               ptr_alpha,
                                                               ptrA,
-                                                              firstPreparedCase.matrixA,
+                                                              firstRuntimeCase.matrixA,
                                                               ptrB,
-                                                              firstPreparedCase.matrixB,
+                                                              firstRuntimeCase.matrixB,
                                                               &(firstPreparedCase.beta),
                                                               ddc[i % block_count],
-                                                              firstPreparedCase.matrixC,
+                                                              firstRuntimeCase.matrixC,
                                                               ddd[i % block_count],
-                                                              firstPreparedCase.matrixD,
+                                                              firstRuntimeCase.matrixD,
                                                               &heuristicResult[sol].algo,
                                                               *dWorkspace,
                                                               workspace_size,
@@ -4140,21 +4148,21 @@ void testing_matmul_with_bias(
                             auto ptr_alpha  = arg.scaleAlpha_vector
                                                   ? (dScaleAlphaVec[0].as<char>())
                                                         + b * firstPreparedCase.scaleAlphaElements
-                                                  : firstPreparedCase.alphaPointer;
+                                                  : firstRuntimeCase.alphaPointer;
                             void* ptrA = firstPreparedCase.a.elements ? dda[b] : nullptr;
                             void* ptrB = firstPreparedCase.b.elements ? ddb[b] : nullptr;
                             EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
                                                                   ptr_matmul,
                                                                   ptr_alpha,
                                                                   ptrA,
-                                                                  firstPreparedCase.matrixA,
+                                                                  firstRuntimeCase.matrixA,
                                                                   ptrB,
-                                                                  firstPreparedCase.matrixB,
+                                                                  firstRuntimeCase.matrixB,
                                                                   &(firstPreparedCase.beta),
                                                                   ddc[b],
-                                                                  firstPreparedCase.matrixC,
+                                                                  firstRuntimeCase.matrixC,
                                                                   ddd[b],
-                                                                  firstPreparedCase.matrixD,
+                                                                  firstRuntimeCase.matrixD,
                                                                   &heuristicResult[sol].algo,
                                                                   *dWorkspace,
                                                                   workspace_size,
@@ -4182,7 +4190,7 @@ void testing_matmul_with_bias(
                         auto ptr_alpha  = arg.scaleAlpha_vector
                                               ? (dScaleAlphaVec[0].as<char>())
                                                    + (i % block_count) * firstPreparedCase.scaleAlphaElements
-                                              : firstPreparedCase.alphaPointer;
+                                              : firstRuntimeCase.alphaPointer;
 
                         EXPECT_HIPBLAS_STATUS(
                             hipblasLtMatmul(
@@ -4191,19 +4199,19 @@ void testing_matmul_with_bias(
                                 alpha_ptr,
                                 dA[0].as<char>()
                                     + (i % block_count) * firstPreparedCase.a.elements * realDataTypeSize(TiA),
-                                firstPreparedCase.matrixA,
+                                firstRuntimeCase.matrixA,
                                 dB[0].as<char>()
                                     + (i % block_count) * firstPreparedCase.b.elements * realDataTypeSize(TiB),
-                                firstPreparedCase.matrixB,
+                                firstRuntimeCase.matrixB,
                                 beta_ptr,
                                 dC[0].as<char>()
                                     + (i % block_count) * firstCase.c.allocationElements
                                           * realDataTypeSize(To),
-                                firstPreparedCase.matrixC,
+                                firstRuntimeCase.matrixC,
                                 (*dDp)[0].as<char>()
                                     + (i % block_count) * firstCase.d.allocationElements
                                           * realDataTypeSize(To),
-                                firstPreparedCase.matrixD,
+                                firstRuntimeCase.matrixD,
                                 &heuristicResult[sol].algo,
                                 *dWorkspace,
                                 workspace_size,
@@ -4240,25 +4248,25 @@ void testing_matmul_with_bias(
                             auto ptr_alpha  = arg.scaleAlpha_vector
                                                   ? (dScaleAlphaVec[0].as<char>())
                                                         + b * firstPreparedCase.scaleAlphaElements
-                                                  : firstPreparedCase.alphaPointer;
+                                                  : firstRuntimeCase.alphaPointer;
                             EXPECT_HIPBLAS_STATUS(
                                 hipblasLtMatmul(
                                     handle,
                                     ptr_matmul,
                                     alpha_ptr,
                                     dA[0].as<char>() + b * firstPreparedCase.a.elements * realDataTypeSize(TiA),
-                                    firstPreparedCase.matrixA,
+                                    firstRuntimeCase.matrixA,
                                     dB[0].as<char>() + b * firstPreparedCase.b.elements * realDataTypeSize(TiB),
-                                    firstPreparedCase.matrixB,
+                                    firstRuntimeCase.matrixB,
                                     beta_ptr,
                                     dC[0].as<char>()
                                         + b * firstCase.c.allocationElements
                                               * realDataTypeSize(To),
-                                    firstPreparedCase.matrixC,
+                                    firstRuntimeCase.matrixC,
                                     (*dDp)[0].as<char>()
                                         + b * firstCase.d.allocationElements
                                               * realDataTypeSize(To),
-                                    firstPreparedCase.matrixD,
+                                    firstRuntimeCase.matrixD,
                                     &heuristicResult[sol].algo,
                                     *dWorkspace,
                                     workspace_size,
@@ -4632,12 +4640,10 @@ void testing_matmul_with_bias(
         CHECK_HIP_ERROR(hipFree(d_userArgs));
 
     // Explicitly destroy opaque handles to avoid leaks.
-    for(auto& preparedCase : preparedCases)
+    for(auto& runtimeCase : runtimeCases)
     {
-        for(auto layout : {preparedCase.matrixA,
-                           preparedCase.matrixB,
-                           preparedCase.matrixC,
-                           preparedCase.matrixD})
+        for(auto layout : {
+                runtimeCase.matrixA, runtimeCase.matrixB, runtimeCase.matrixC, runtimeCase.matrixD})
         {
             if(layout)
                 (void)hipblasLtMatrixLayoutDestroy(layout);
