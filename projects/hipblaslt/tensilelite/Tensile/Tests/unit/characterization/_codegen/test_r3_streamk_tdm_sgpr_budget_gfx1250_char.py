@@ -227,6 +227,39 @@ def test_streamk_tdm_prefetchgl2_emits_real_kernel_bodies(emitted):
         )
 
 
+def test_streamk_tdm_general_batch_dereferences_inputs_before_first_load(emitted):
+    """Wave-separated TDM loads A[batch]/B[batch] before the first tensor load."""
+    for r in emitted:
+        src, variant = r["src"], r["variant"]
+        first_load = src.index("tensor_load_to_lds")
+        prologue = src[:first_load]
+        for tc in ("A", "B"):
+            pointer_load = f"load {tc} matrix address from pointer array"
+            assert pointer_load in prologue, (
+                f"{variant}: TDM {tc} loads the selected matrix from the pointer array"
+            )
+            batch_offset_load = f"load batchOffset{tc} from kernel args"
+            batch_offset_apply = f"apply batchOffset{tc} (low)"
+            assert batch_offset_load in prologue
+            assert batch_offset_apply in prologue
+            assert prologue.index(pointer_load) < prologue.index(batch_offset_load)
+            assert prologue.index(batch_offset_load) < prologue.index(batch_offset_apply)
+        pointer_loads = sum(
+            prologue.count(f"load {tc} matrix address from pointer array")
+            for tc in ("A", "B")
+        )
+        suppressed_strides = prologue.count(
+            "general batch uses an already-dereferenced matrix base"
+        )
+        assert suppressed_strides == pointer_loads, (
+            f"{variant}: {suppressed_strides} suppressed batch strides for "
+            f"{pointer_loads} dereferenced A/B pointers; MXSA/MXSB must retain "
+            "their direct-pointer batch strides"
+        )
+        for tc in ("MXSA", "MXSB"):
+            assert f"load {tc} matrix address from pointer array" not in prologue
+
+
 def test_streamk_tdm_no_waveidx_read_after_undefine(emitted):
     """No s[sgprWaveIdx] after UNDEF. Later parity uses ArgType bit 8 (or Serial remat)."""
     for r in emitted:

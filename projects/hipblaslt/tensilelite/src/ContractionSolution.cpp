@@ -45,6 +45,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <random>
+#include <stdexcept>
 
 #include <sstream>
 
@@ -725,6 +726,12 @@ namespace TensileLite
         TensorDescriptor const& bias       = problem.tensor(ContractionProblemGemm::TENSOR::BIAS);
         TensorDescriptor const& compressed = problem.compressed();
         TensorDescriptor const& metadata   = problem.metadata();
+        bool const pointerArrayBatch
+            = problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY;
+        if(pointerArrayBatch && problemType.sparse)
+            throw std::invalid_argument("pointer-array batching does not support sparse GEMM");
+        if(pointerArrayBatch && problemType.groupedGemm)
+            throw std::invalid_argument("pointer-array batching does not support grouped GEMM");
 
         auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
             = calculateAutoWGM(problem, hardware, sk.grid);
@@ -732,6 +739,14 @@ namespace TensileLite
             = calculateAutoStaggerU(problem, hardware, sk.grid, autoWGM);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+        if(pointerArrayBatch
+           && (sizeMapping.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1))
+            throw std::invalid_argument(
+                "pointer-array batching does not support MBSK or adaptive GSU");
+        if(pointerArrayBatch && sizeMapping.streamK == 0 && gsu > 1
+           && sizeMapping.globalAccumulation != 2)
+            throw std::invalid_argument(
+                "pointer-array batching with GSU>1 requires MultipleBuffer reduction");
         AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, hardware);
 
         {
@@ -775,8 +790,16 @@ namespace TensileLite
             }
             else
             {
-                args.template append<void const*>("d", inputs.d);
-                args.template append<void const*>("c", inputs.c);
+                args.template append<void const*>(
+                    "d",
+                    pointerArrayBatch && inputs.batchD
+                        ? static_cast<void const*>(inputs.batchD)
+                        : inputs.d);
+                args.template append<void const*>(
+                    "c",
+                    pointerArrayBatch && inputs.batchC
+                        ? static_cast<void const*>(inputs.batchC)
+                        : inputs.c);
             }
         }
         else
@@ -788,11 +811,17 @@ namespace TensileLite
         if(problemType.stridedBatched)
         {
             args.template append<void const*>(
-                "a", problemType.sparse == 1 ? inputs.compressed : inputs.a);
+                "a",
+                pointerArrayBatch && inputs.batchA
+                    ? static_cast<void const*>(inputs.batchA)
+                    : problemType.sparse == 1 ? inputs.compressed : inputs.a);
             if(problemType.mxBlockA)
                 args.template append<void const*>("mxsa", inputs.mxsa);
             args.template append<void const*>(
-                "b", problemType.sparse == 2 ? inputs.compressed : inputs.b);
+                "b",
+                pointerArrayBatch && inputs.batchB
+                    ? static_cast<void const*>(inputs.batchB)
+                    : problemType.sparse == 2 ? inputs.compressed : inputs.b);
             if(problemType.mxBlockB)
                 args.template append<void const*>("mxsb", inputs.mxsb);
         }
@@ -2572,6 +2601,8 @@ namespace TensileLite
         TensorDescriptor const& c = problem.c();
         TensorDescriptor const& d = problem.d();
         TensorDescriptor const& e = problem.tensor(ContractionProblemGemm::TENSOR::E);
+        bool const pointerArrayBatch
+            = problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY;
 
         if(problemType.useE)
         {
@@ -2582,14 +2613,22 @@ namespace TensileLite
         }
 
         if(problemType.stridedBatched)
-            args.template append<void*>("D", inputs.d);
+            args.template append<void*>(
+                "D",
+                pointerArrayBatch && inputs.batchD
+                    ? const_cast<void*>(static_cast<void const*>(inputs.batchD))
+                    : inputs.d);
         else
             args.template append<void const* const*>("batchD", inputs.batchD);
 
         args.template append<void*>("WS", (uint8_t*)inputs.ws + workspaceOffsetInByte);
 
         if(problemType.stridedBatched)
-            args.template append<void const*>("C", inputs.c);
+            args.template append<void const*>(
+                "C",
+                pointerArrayBatch && inputs.batchC
+                    ? static_cast<void const*>(inputs.batchC)
+                    : inputs.c);
         else
             args.template append<void const* const*>("batchC", inputs.batchC);
 
