@@ -2,13 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 import functools
-import logging
 import os
 import shutil
 import subprocess
 import tempfile
-
-log = logging.getLogger(__name__)
 
 
 @functools.lru_cache(None)
@@ -162,11 +159,9 @@ def canonical_instances(op_instances):
         # no longer available to compare, so this is the only point where the
         # loss is detectable.
         if kept is not op and kept != op:
-            log.error(
-                "ck4inductor: instances differ but share the name %r; keeping "
-                "the first and dropping the other, so one kernel is missing "
-                "from the pool. name() derives from dict_items(), so a template "
-                "parameter has stopped contributing to it.",
-                op.name(),
+            raise ValueError(
+                "ck4inductor instances differ but share the name "
+                f"{op.name()!r}; name() must uniquely encode every "
+                "template parameter"
             )
     return list(survivors.values())

@@ -239,10 +239,16 @@ class TestDeterministicOrder(unittest.TestCase):
         # Canonical means a fixed point: re-canonicalizing changes nothing.
         self.assertEqual([op.name() for op in canonical_instances(result)], names)
 
-    def test_name_collision_between_distinct_instances_is_reported(self):
+    def test_name_collision_between_distinct_instances_is_rejected(self):
         # Dropping a same-name op is only legal because `name()` is a total key:
         # it derives from dict_items(), so two ops sharing a name agree on every
         # template parameter. The helper enforces that rather than assuming it.
+        #
+        # Fail fast rather than dropping one: `name()` IS the generated kernel
+        # identity, so there is no safe winner. And because equal sort keys keep
+        # input order, keeping the first would make the survivor depend on
+        # grep/readdir order -- reintroducing exactly the nondeterminism this
+        # helper exists to remove.
         instances = gen_conv_ops_library()
         self.assertTrue(instances)
 
@@ -251,18 +257,11 @@ class TestDeterministicOrder(unittest.TestCase):
         self.assertNotEqual(impostor, instances[0])
         impostor.name = instances[0].name  # bind the victim's name onto it
 
-        with self.assertLogs("ck4inductor.util", level="ERROR") as captured:
-            result = canonical_instances([instances[0], impostor])
-        self.assertIn("share the name", "\n".join(captured.output))
+        with self.assertRaisesRegex(ValueError, "share the name"):
+            canonical_instances([instances[0], impostor])
 
-        # Reported, not raised: collisions cost coverage, not correctness, so
-        # the pool stays usable. One of the two is still dropped -- that is the
-        # loss the log exists to surface.
-        self.assertEqual(len(result), 1)
-
-        # And an honest pool logs nothing.
-        with self.assertNoLogs("ck4inductor.util", level="ERROR"):
-            names = [op.name() for op in canonical_instances(instances[:4])]
+        # An honest pool is unaffected.
+        names = [op.name() for op in canonical_instances(instances[:4])]
         self.assertEqual(names, sorted(op.name() for op in instances[:4]))
 
     def test_every_grep_based_enumerator_is_sorted(self):
