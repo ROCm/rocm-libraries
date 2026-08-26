@@ -35,6 +35,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <tuple>
 #include <unordered_set>
@@ -117,8 +118,16 @@ inline const CDNA5Config& cdna5ConfigForArch(const std::array<int, 3>& arch) {
     }
 }
 
-// mode2 WAR gate: min WMMAs between a WMMA reg-read and a ds_load overwriting it
-constexpr int kMode2WarGateWmmas = 7;
+// mode2 WAR gate: min WMMAs between a WMMA reg-read and a ds_load overwriting it.
+// Runtime-tunable via ST_WAR_GATE so an A/B sweep needs one build, not one per arm.
+// 0 disables the gate: codegen is then identical to gate-less develop.
+inline int mode2WarGateWmmas() {
+    static const int v = [] {
+        const char* e = std::getenv("ST_WAR_GATE");
+        return e != nullptr ? std::atoi(e) : 7;
+    }();
+    return v;
+}
 
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
@@ -869,15 +878,15 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
     return false;
 }
 
-// (C) mode2 WAR gate: true if this ds_load's dest reg was WMMA-read < kMode2WarGateWmmas ago.
+// (C) mode2 WAR gate: true if this ds_load's dest reg was WMMA-read < gate WMMAs ago.
 bool CDNA5ReadyQueue::warTooCloseToWmmaRead(DAGNode* node) const {
-    if (node == nullptr) return false;
+    const int gate = mode2WarGateWmmas();
+    if (gate <= 0 || node == nullptr) return false;
     for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
         if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
         for (unsigned off = 0; off < dstReg.reg.num; ++off) {
             auto it = regLastWmmaRead_.find(regDepKey(dstReg.reg.type, dstReg.reg.idx + off));
-            if (it != regLastWmmaRead_.end() &&
-                (wmmaIssuedCountThisBB_ - it->second) < kMode2WarGateWmmas)
+            if (it != regLastWmmaRead_.end() && (wmmaIssuedCountThisBB_ - it->second) < gate)
                 return true;
         }
     }

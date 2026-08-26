@@ -3073,6 +3073,10 @@ class Solution(collections.abc.Mapping):
     # Track VALU source operands on VA_VDST (src-operand WAR hazard). On only for
     # sparse; non-sparse kernels skip the stamp. Pre-armed for when sparse enables ESM2.
     def evaluateEnableESM2TrackValuVsrc() -> bool:
+      # LOCAL A/B HACK — do not commit. ST_ESM2_VAVSRC=0/1 forces the knob.
+      import os
+      ov = os.environ.get("ST_ESM2_VAVSRC")
+      if ov is not None: return ov == "1"
       return bool(state["ProblemType"]["Sparse"])
 
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
