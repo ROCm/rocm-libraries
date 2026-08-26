@@ -738,7 +738,26 @@ function(hkp_add_packaging)
     # hipcc is the perl/bat driver that honors --genco; on Windows it is
     # hipcc.exe or hipcc.bat. hipcc.bin.exe is the raw clang driver and is only
     # a last-resort fallback.
-    find_program(HKP_HIPCC NAMES hipcc hipcc.bat hipcc.bin.exe)
+    #
+    # The default name-major search is what holds that ordering: every directory
+    # is tried for hipcc before hipcc.bin.exe is tried anywhere, so the fallback
+    # wins only when no real driver exists anywhere on the path. NAMES_PER_DIR
+    # would demote this list to a tiebreak within one directory and let an early
+    # hipcc.bin.exe beat a later hipcc, which is the outcome the list exists to
+    # prevent.
+    #
+    # HIP_HIPCC_EXECUTABLE, when a toolchain has already resolved one, names the
+    # directory to consult first. A hint and not a replacement: it is consulted
+    # ahead of the default paths but does not stop the search, so a stale value
+    # narrows nothing.
+    if(DEFINED HIP_HIPCC_EXECUTABLE)
+        get_filename_component(_hipcc_hint "${HIP_HIPCC_EXECUTABLE}" DIRECTORY)
+    else()
+        set(_hipcc_hint "")
+    endif()
+    find_program(HKP_HIPCC
+        NAMES hipcc hipcc.bat hipcc.bin.exe
+        HINTS "${_hipcc_hint}")
 
     hkp_install_base(_install_base)
 
