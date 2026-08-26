@@ -42,24 +42,11 @@
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
 
 #include "dag/CDNA5.hpp"
+#include "dag/RegionDAG.hpp"
 
 namespace {
 using namespace stinkytofu;
-
-static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGraph,
-                         const DAGNodeList& dagNodes) {
-    std::cerr << "*** DAG Graph Dump: ***\n";
-    for (unsigned i = 0; i < dagGraph.size(); ++i) {
-        std::cerr << "Node " << i << ": ";
-        dagNodes[i].inst->dump(std::cerr);
-        std::cerr << "  successors: ";
-        for (unsigned succId : dagGraph[i]) {
-            std::cerr << succId << " ";
-        }
-        std::cerr << "\n";
-    }
-    std::cerr << "\n\n";
-}
+using namespace stinkytofu::dag;
 
 // collapseExecMaskedRegions()/expandExecMaskedGroups(): see ExecMaskGrouping.hpp and
 // docs/developer/exec-mask-grouping.md.
@@ -84,7 +71,12 @@ static void scheduleRegionWithMovableSideEffects(
     });
     PASS_DEBUG(std::cerr << "\n");
 
-    unsigned regionSize = std::distance(regionStart, regionEnd);
+    // Map each instruction to an unique id [0..n-1] and build register deps.
+    dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(regionStart, regionEnd);
+    dag::DAGNodeList& dagNodes = regionDag.nodes;
+    std::vector<std::unordered_set<unsigned>>& dagGraph = regionDag.graph;
+    std::unordered_map<StinkyInstruction*, unsigned>& instToId = regionDag.instToId;
+    const unsigned regionSize = static_cast<unsigned>(dagNodes.size());
 
     std::string regionBbLabel;
     if (regionStart != regionEnd) {
@@ -92,86 +84,7 @@ static void scheduleRegionWithMovableSideEffects(
             regionBbLabel = pbb->getLabel();
     }
 
-    // Map each instruction to an unique id [0..n-1]
-    DAGNodeList dagNodes;
-    dagNodes.reserve(regionSize);
-
-    unsigned id = 0;
-    for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
-        dagNodes.emplace_back(&getStinkyInst(it), id++);
-    }
-
-    // Reverse lookup for the hazard pre-scan below (find a consumer instruction's id
-    // in O(1) instead of rescanning dagNodes per BFS hit).
-    std::unordered_map<StinkyInstruction*, unsigned> instToId;
-    instToId.reserve(regionSize);
-    for (unsigned i = 0; i < regionSize; ++i) instToId[dagNodes[i].inst] = i;
-
-    // Graph
-    std::vector<std::unordered_set<unsigned>> dagGraph(regionSize);
-
-    // Track last read/write per physreg inside the region
-    /* To ensure correct node dependency, lastRead should track all
-     * previous read nodes until the register is overwritten. */
-    std::map<StinkyRegister, std::unordered_set<DAGNode*>> lastRead;
-    std::map<StinkyRegister, DAGNode*> lastWrite;
-
-    // Build deps graph - same as before for register dependencies
-    for (unsigned i = 0; i < dagNodes.size(); ++i) {
-        DAGNode& dagNode = dagNodes[i];
-        StinkyInstruction& inst = *dagNode.inst;
-
-        // RAW deps:
-        // For each source register, add an edge to the last writer of that register.
-        for (const StinkyRegister& srcReg : inst.getSrcRegs()) {
-            if (!srcReg.isRegister()) continue;
-
-            for (unsigned off = 0; off < srcReg.reg.num; ++off) {
-                StinkyRegister reg(srcReg.reg.type, srcReg.reg.idx + off, 1);
-                auto itLastWrite = lastWrite.find(reg);
-                // Only add edge if the last writer is in the region.
-                if (itLastWrite != lastWrite.end()) {
-                    DAGNode* lastWriter = itLastWrite->second;
-                    addEdgeById(lastWriter, &dagNode, dagGraph);
-                }
-                // Add node to track the last read of this register
-                lastRead[reg].insert(&dagNode);
-            }
-        }
-
-        // WAW/WAR deps for defs
-        for (const StinkyRegister& dstReg : inst.getDestRegs()) {
-            if (!dstReg.isRegister()) continue;
-
-            for (unsigned off = 0; off < dstReg.reg.num; ++off) {
-                StinkyRegister reg(dstReg.reg.type, dstReg.reg.idx + off, 1);
-
-                // WAW: previous writer of reg must come before this writer
-                auto itLastWrite = lastWrite.find(reg);
-
-                // Only add edge if the last writer is in the region.
-                if (itLastWrite != lastWrite.end()) {
-                    DAGNode* lastWriter = itLastWrite->second;
-                    addEdgeById(lastWriter, &dagNode, dagGraph);
-                }
-
-                // WAR: previous reader of r must come before this writer
-                auto itLastRead = lastRead.find(reg);
-
-                // Only add edge if the last reader is in the region.
-                if (itLastRead != lastRead.end()) {
-                    for (DAGNode* lastReader : itLastRead->second) {
-                        addEdgeById(lastReader, &dagNode, dagGraph);
-                    }
-                    // Clear last read tracking for this register due to it's overwritten
-                    lastRead.erase(reg);
-                }
-
-                // track the last write for this register
-                lastWrite[reg] = &dagNode;
-            }
-        }
-    }
+    if (regionSize == 0) return;
 
     // Pre-scan: assign dsReadPriority to each ds_read based on WMMA affinity
     // and DsReadOrder config. Lower priority = pick first.
@@ -409,7 +322,7 @@ static void scheduleRegionWithMovableSideEffects(
         if (!dagNodes[i].hazardFlags.empty()) dagNodes[i].hazardDeadline = bestDeadline;
     }
 
-    PASS_DEBUG(dumpDAGGraph(dagGraph, dagNodes));
+    PASS_DEBUG(dag::dumpDAGGraph(regionDag, std::cerr));
 
     readyQueue.onInitRegion(regionStart, regionEnd, blockBegin);
 

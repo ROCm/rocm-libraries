@@ -151,6 +151,51 @@ or `select_spec()` output. This is an executable invariant in
 engine into that copy (never the shipped singleton), and asserts every
 pre-existing candidate's behavior is byte-identical with and without it.
 
+## Per-engine spec_fn (geometry ownership)
+
+The long-run goal is the GEMM shape: each engine builds its own kernel spec
+(`platform/python/rocke/dispatch/gemm/bf16_rcr.py` — one `_spec_*` per candidate),
+instead of one shared `_tiled_spec_from_problem` cascade of `if` branches.
+
+Migration is incremental — one cohort at a time.
+
+1. **Extract** the cohort's branch from `_tiled_spec_from_problem`
+   (`builders/common/attention_spec_builder.py`) into a named
+   `_spec_<cohort>(problem)` — a self-contained builder (resolves its own arch /
+   spec class). Pure move: byte-identical, no value change.
+2. The cascade branch **delegates** to it (`return _spec_<cohort>(problem)`), so
+   the shared function shrinks by one branch.
+3. If the cohort has a matching dispatch candidate, that candidate **documents
+   ownership** of the `spec_fn` (a docstring linkage). Some cohorts have no
+   candidate yet (they ride the generic `unified_2d`) — those spec_fns are
+   ORPHANS awaiting a future engine; note that in the spec_fn docstring. Either
+   way, geometry stays in the **builder layer** — do NOT move it into a candidate.
+   The dispatcher still decides only `(path, head_size, block_size)`, and the C++
+   parity identity is unchanged (see the top of this doc).
+4. **Test** byte-identity + non-interference (see the
+   `test_per_engine_spec_fns.py` -- table-driven, one entry per cohort), then
+   GPU-verify the cohort's arch (kernel name / built spec unchanged vs pre-change).
+
+Migrated so far (all builder-layer spec_fns in
+`builders/common/attention_spec_builder.py`; `_tiled_spec_from_problem` and
+`_tiled_3d_spec_from_problem` are now clean arch dispatchers):
+- `_spec_gfx942_fp16_flash` — owned by `attention_gfx942_dense_pipe`.
+- `_spec_gfx942_bf16_flash` — ORPHAN (no dispatch candidate yet; routed via the
+  generic `unified_2d`). Needs a future `gfx942_bf16` engine.
+- `_spec_generic_2d_non_gfx950` — the non-flash 2D residual for EVERY non-gfx950
+  arch (gfx942, gfx1201, gfx1151, ...), built from the shared
+  `_base_2d_generic_fields` only. ORPHAN.
+- `_spec_gfx950_generic` — the shared `_base_2d_generic_fields` plus the
+  gfx950-only schedule tail + the D256 gfx950 fast-route override folded in (kept
+  behind the `_kau.` module handle for test-steering). The 2D `_spec_field_names`
+  guards are gone -- the per-arch split replaced them.
+- `_spec_generic_3d` — the shared gfx942/gfx950 3D split-KV fallthrough (one
+  function; the `_gfx942_3d_*` helpers self-gate, so no arch split).
+
+Remaining: gfx1250 (2D + 3D) -- still inline early-returns in both cascades,
+DEFERRED (no gfx1250 hardware to GPU-verify this pass). The `_kau.` D256
+indirection must be preserved by any code that touches the gfx950 override.
+
 ## Multi-engine benchmarking: `attention_sweep_space`
 
 `attention_sweep_space(req)` returns the deduped `select_spec` of every candidate
