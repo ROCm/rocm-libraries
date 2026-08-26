@@ -639,7 +639,12 @@ inline auto test_kernel_wrapper(F func, hipStream_t stream, const bool use_graph
     ASSERT_GT(temp_storage_size_bytes, 0);
 
     // allocate temporary storage
-    common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+    common::device_ptr<void> d_temp_storage;
+    if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+    {
+        std::cout << "Out of memory. Skipping test" << std::endl;
+        return;
+    }
 
     test_utils::GraphHelper gHelper;
     if(use_graphs)
@@ -736,6 +741,31 @@ struct merge_sequence<T1, T2, Ts...>
     using type = typename merge_sequence<typename merge_sequence<T1, T2>::type, Ts...>::type;
 };
 
+template<typename offset_type, typename segment_index_type>
+struct segments_index_to_offset_op
+{
+    segment_index_type empty_segments_count;
+    segment_index_type segments_count;
+    offset_type        segment_length;
+    offset_type        size;
+
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+    offset_type        operator()(segment_index_type i) const
+    {
+        if(i < empty_segments_count)
+        {
+            return 0;
+        }
+        else if(i < segments_count)
+        {
+            return segment_length * static_cast<segment_index_type>(i - empty_segments_count);
+        }
+        else
+        {
+            return size;
+        }
+    }
+};
 } // namespace test_utils
 
 #endif // TEST_TEST_UTILS_HPP_

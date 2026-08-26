@@ -46,18 +46,16 @@ struct inclusive_scan
 {
     template<class T, unsigned int WarpSize, unsigned int Trials>
     __device__
-    static auto run(const T* input, T* output, const T init)
+    static auto run(const T* input, T* output, [[maybe_unused]] const T init)
         -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
     {
-        (void)init;
-
         const unsigned int i     = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
         auto               value = input[i];
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
         auto                                     scan_op = benchmark_utils::plus{};
-        _CCCL_PRAGMA_NOUNROLL()
+        HIPCUB_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             wscan_t(storage).InclusiveScan(value, value, scan_op);
@@ -86,7 +84,7 @@ struct exclusive_scan
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
         auto                                     scan_op = benchmark_utils::plus{};
-        _CCCL_PRAGMA_NOUNROLL()
+        HIPCUB_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             wscan_t(storage).ExclusiveScan(value, value, init, scan_op);
@@ -105,12 +103,10 @@ struct broadcast
 {
     template<class T, unsigned int WarpSize, unsigned int Trials>
     __device__
-    static auto run(const T* input, T* output, const T init)
+    static auto run(const T* input, T* output, [[maybe_unused]] const T init)
         -> std::enable_if_t<(benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>
                              && benchmark_utils::is_power_of_two(WarpSize))>
     {
-        (void)init;
-
         const unsigned int i        = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
         const unsigned int warp_id  = i / WarpSize;
         const unsigned int src_lane = warp_id % WarpSize;
@@ -118,7 +114,7 @@ struct broadcast
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        _CCCL_PRAGMA_NOUNROLL()
+        HIPCUB_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             value = wscan_t(storage).Broadcast(value, src_lane);

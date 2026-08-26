@@ -63,6 +63,7 @@
         #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/std/LIB)
         #define _HIPCUB_LIBCXX ::cuda
         #define _HIPCUB_STD _CUDA_VSTD
+        #define _HIPCUB_STD_EXEC _CUDA_STD_EXEC
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
         #define _HIPCUB_STD_NAMESPACE_BEGIN _LIBCUDACXX_BEGIN_NAMESPACE_STD
         #define _HIPCUB_STD_NAMESPACE_END _LIBCUDACXX_END_NAMESPACE_STD
@@ -79,24 +80,24 @@
         #define _HIPCUB_LIBCXX ::hip
         // In 'libhipcxx' the macro '_CUDA_VSTD' is also defined.
         #define _HIPCUB_STD _CUDA_VSTD
+        #define _HIPCUB_STD_EXEC _CUDA_STD_EXEC
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
         #define _HIPCUB_STD_NAMESPACE_BEGIN _LIBCUDACXX_BEGIN_NAMESPACE_STD
         #define _HIPCUB_STD_NAMESPACE_END _LIBCUDACXX_END_NAMESPACE_STD
     #endif
 #endif
 
-// If 'libcudacxx' or 'libhipcxx' is not found, use fallback.
+// If 'libcudacxx' or 'libhipcxx' is not found:
 #ifndef _HIPCUB_HAS_DEVICE_SYSTEM_STD
-    #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(LIB)
-    #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(LIB)
-    #define _HIPCUB_LIBCXX
-    #define _HIPCUB_STD ::std
-    #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 0
-    #define _HIPCUB_STD_NAMESPACE_BEGIN \
-        namespace std                   \
-        {
-    #define _HIPCUB_STD_NAMESPACE_END }
-#endif
+    #if defined(__CUDACC__) || defined(_NVHPC_CUDA)
+        #error "libcudacxx could not be found"
+    #else
+        #error "libhipcxx could not be found"
+    #endif  // defined(__CUDACC__) || defined(_NVHPC_CUDA)
+#endif // _HIPCUB_HAS_DEVICE_SYSTEM_STD
+
+#include _HIPCUB_STD_INCLUDE(__cccl/cuda_toolkit.h)
+#define HIPCUB_CTK_AT_LEAST(...) _CCCL_CTK_AT_LEAST(__VA_ARGS__)
 
 // clang-format on
 

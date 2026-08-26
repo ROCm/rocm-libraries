@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -36,23 +36,15 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-template<
-    typename InputT,
-    int BLOCK_DIM_X,
-    int ITEMS_PER_THREAD,
-    bool WARP_TIME_SLICING = false, /* ignored */
-    int BLOCK_DIM_Y = 1,
-    int BLOCK_DIM_Z = 1,
-    int ARCH = HIPCUB_ARCH /* ignored */
->
+template<typename InputT,
+         int  BLOCK_DIM_X,
+         int  ITEMS_PER_THREAD,
+         bool WARP_TIME_SLICING = false, /* ignored */
+         int  BLOCK_DIM_Y       = 1,
+         int  BLOCK_DIM_Z       = 1>
 class BlockExchange
-    : private ::rocprim::block_exchange<
-        InputT,
-        BLOCK_DIM_X,
-        ITEMS_PER_THREAD,
-        BLOCK_DIM_Y,
-        BLOCK_DIM_Z
-      >
+    : private ::rocprim::
+          block_exchange<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, BLOCK_DIM_Y, BLOCK_DIM_Z>
 {
     static_assert(
         BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,

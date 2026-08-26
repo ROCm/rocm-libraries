@@ -132,13 +132,9 @@ struct RadixSortTwiddle
         {
             HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 
-            uint32_t result =
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
-                _HIPCUB_LIBCXX::bitfield_extract
-#else
-                BFE
-#endif
-                (this->ProcessFloatMinusZero(key), bit_start, num_bits);
+            uint32_t result = _HIPCUB_LIBCXX::bitfield_extract(this->ProcessFloatMinusZero(key),
+                                                               bit_start,
+                                                               num_bits);
 
             HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 

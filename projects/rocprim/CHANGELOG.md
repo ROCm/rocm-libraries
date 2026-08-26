@@ -2,6 +2,15 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM x.x.x for ROCm 10.1.0
+
+### Added
+
+* Added support for large number of segments and large number of items to `rocprim::device_segmented_radix_sort`.
+* Added fixed-size-segments variant for `rocprim::device_segmented_reduce`.
+* Added support for large number of segments to `rocprim::device_segmented_reduce`.
+* Added support for large sizes to `rocprim::device_run_length_encode` and `rocprim::device_run_length_encode_non_trivial_runs`.
+
 ## rocPRIM 5.0.0 for ROCm 10.0.0
 
 ### Added

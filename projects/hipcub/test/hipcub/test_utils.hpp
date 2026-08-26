@@ -44,6 +44,7 @@
     #include <thrust/iterator/counting_iterator.h>
     #include <thrust/iterator/discard_iterator.h>
     #include <thrust/iterator/transform_iterator.h>
+    #include <thrust/iterator/zip_iterator.h>
 #endif
 
 #include <hipcub/util_type.hpp>
@@ -668,6 +669,18 @@ inline auto make_transform_iterator(It      iterator,
     return transform_iterator<It, UnaryOp>(iterator, transform);
 }
 
+template<typename IteratorTuple>
+using zip_iterator = ::rocprim::zip_iterator<IteratorTuple>;
+
+template<class... Types>
+using tuple = ::rocprim::tuple<Types...>;
+
+template<typename... Types>
+auto make_tuple(Types&&... args) -> tuple<Types...>
+{
+    return ::rocprim::make_tuple<Types...>(::rocprim::detail::custom_forward<Types>(args)...);
+}
+
 struct discard_iterator : public ::rocprim::discard_iterator
 {
     using base_type         = ::rocprim::discard_iterator;
@@ -718,6 +731,18 @@ inline auto make_transform_iterator(It      iterator,
     return transform_iterator<It, UnaryOp>(iterator, transform);
 }
 
+template<typename IteratorTuple>
+using zip_iterator = ::thrust::zip_iterator<IteratorTuple>;
+
+template<class... Ts>
+using tuple = ::cuda::std::tuple<Ts...>;
+
+template<typename... Types>
+auto make_tuple(Types&&... args) -> tuple<Types...>
+{
+    return ::cuda::std::make_tuple(args...);
+}
+
 template<typename T = void>
 using discard_iterator = ::thrust::discard_iterator<T>;
 
@@ -731,6 +756,32 @@ inline auto make_discard_iterator() -> ::thrust::discard_iterator<T>
 }
 
 #endif
+
+template<typename offset_type, typename segment_index_type>
+struct segments_index_to_offset_op
+{
+    segment_index_type             empty_segments_count;
+    segment_index_type             segments_count;
+    offset_type                    segment_length;
+    offset_type                    size;
+
+    HIPCUB_HOST_DEVICE
+    HIPCUB_FORCEINLINE offset_type operator()(segment_index_type i) const
+    {
+        if(i < empty_segments_count)
+        {
+            return 0;
+        }
+        else if(i < segments_count)
+        {
+            return segment_length * static_cast<offset_type>(i - empty_segments_count);
+        }
+        else
+        {
+            return size;
+        }
+    }
+};
 
 } // namespace test_utils
 

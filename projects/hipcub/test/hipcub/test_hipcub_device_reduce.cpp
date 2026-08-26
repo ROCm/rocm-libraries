@@ -97,6 +97,86 @@ _HIPCUB_STD_NAMESPACE_END
 
 TYPED_TEST_SUITE(HipcubDeviceReduceTests, HipcubDeviceReduceTestsParams);
 
+TEST(HipcubDeviceReduceTests, EnvReduce)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = int;
+    using U = float;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size= " << size);
+            if(test_utils::precision<U>::value * size > 0.5)
+            {
+                std::cout << "Test is skipped from size " << size
+                          << " on, potential error of summation is more than 0.5 of the result "
+                             "with current or larger size"
+                          << std::endl;
+                break;
+            }
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1.0f, 100.0f, seed_value);
+            std::vector<U> output(1, (U)0.0f);
+
+            T* d_input;
+            U* d_output;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(
+                hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Calculate expected results on host using the same accumulator type than on device
+            using Sum = typename AlgebraicSelector<test_utils::plus, T, U>::
+                type; // For custom_type_test tests
+            using AccumT = hipcub::detail::accumulator_t<Sum, T, U>;
+            Sum    sum_op;
+            AccumT tmp_result
+                = AccumT(0.0f); // test_utils::plus uses as initial type the output type
+            for(unsigned int i = 0; i < input.size(); i++)
+            {
+                tmp_result = sum_op(tmp_result, input[i]);
+            }
+            const U expected = static_cast<U>(tmp_result);
+
+            // Run
+            HIP_CHECK(hipcub::DeviceReduce::Reduce(d_input,
+                                                   d_output,
+                                                   input.size(),
+                                                   test_utils::plus{},
+                                                   U(0.0f)));
+
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            HIP_CHECK(hipMemcpy(output.data(),
+                                d_output,
+                                output.size() * sizeof(U),
+                                hipMemcpyDeviceToHost));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output[0],
+                                        expected,
+                                        test_utils::precision<U>::value * size));
+
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+        }
+    }
+}
+
 TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();

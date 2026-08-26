@@ -2,6 +2,29 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-x.x.x for ROCm 10.1.0
+
+### Added
+
+* Added support for large number of segments and large number of items to `hipcub::DeviceSegmentedRadixSort::*`.
+* Added new `hipcub::WarpReduce` overloadings `hipcub::WarpReduce::Sum`, `hipcub::WarpReduce::Max` and `hipcub::WarpReduce::Min`.
+* Added fixed-size-segments variant for `hipcub::DeviceSegmentedReduce`.
+* Added support for large number of segments to `hipcub::DeviceSegmentedReduce::Reduce`'s fixed-size-segments variant.
+* Added support for large sizes to `hipcub::DeviceRunLengthEncode::Encode`.
+* Extended fixed-size-segments variant of `hipcub::DeviceSegmentedReduce` to support all operators (`Sum`, `Min/Max`, and `ArgMin/Max`).
+* Added support for large sizes to `hipcub::DeviceRunLengthEncode::NonTrivialRuns`.
+* Added env-based API for `hipcub::DeviceReduce::Reduce`.
+
+### Changed
+
+* Replaced `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `HIPCUB_PRAGMA_UNROLL_FULL()` and `HIPCUB_PRAGMA_NOUNROLL()`.
+* Replaced `_CCCL_SORT_MAYBE_UNROLL()` by `HIPCUB_SORT_MAYBE_UNROLL()`.
+* Changed `CCCL_MINIMUM_VERSION` to `3.1.4` to align with CUB.
+
+### Removed
+
+* Removed the deprecated thread operators `Equality`, `Inequality`, `Sum`, `Difference`, `Division`, `Max` and `Min`.
+
 ## hipCUB-5.0.0 for ROCm 10.0.0
 
 ### Added
