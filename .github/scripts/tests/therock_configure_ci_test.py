@@ -280,6 +280,27 @@ class ConfigureCITest(unittest.TestCase):
         )
         self.assertEqual(test_type, "quick")
 
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_runs_ci_for_rocjitsu_driver(self, mock_get_modified):
+        mock_get_modified.return_value = [
+            ".github/scripts/run_rocjitsu_hipblaslt_race_check.sh"
+        ]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "base_ref": "HEAD^"}
+        )
+
+        rocjitsu_rows = [
+            project for project in projects if project["run_rocjitsu_race_check"]
+        ]
+        self.assertGreaterEqual(len(projects), 3)
+        self.assertEqual(len(rocjitsu_rows), 1)
+        self.assertIn(
+            "tensilelite",
+            rocjitsu_rows[0]["projects_to_test"].split(","),
+        )
+        self.assertEqual(test_type, "quick")
+
     def test_parse_test_labels_single_project(self):
         labels = ["test:rocblas"]
         projects, test_type = therock_configure_ci.parse_test_labels(labels)

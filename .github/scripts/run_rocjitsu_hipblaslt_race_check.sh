@@ -8,6 +8,8 @@ set -euo pipefail
 # artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
 # The script runs small hipBLASLt and TensileLite GEMMs under the race detector.
+# The gfx950 row also runs a reduced FP8 QKV problem that preserves the kernel
+# implicated by ROCM-28430 while limiting emulation to one workgroup.
 # TODO(newling) expand the GEMM-space tested.
 #
 # Basic flow:
@@ -15,6 +17,7 @@ set -euo pipefail
 #   2. Build rocjitsu from the rocm-systems checkout in ROCJITSU_SOURCE_DIR.
 #   3. Select a rocjitsu config for gfx942 or gfx950.
 #   4. Run hipblaslt-bench and a reduced TensileLite smoke under RJ_RACE=1.
+#   5. On gfx950, run the reduced FP8 QKV kernel under the same detector.
 
 # These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
 # unpacked TheRock artifact tree, ROCJITSU_SOURCE_DIR is the checked-out
@@ -36,6 +39,11 @@ TENSILE_DRIVER="${TENSILE_DRIVER:-${TENSILELITE_ROOT}/Tensile/bin/Tensile}"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
 RACE_TIMEOUT_SECONDS="${RACE_TIMEOUT_SECONDS:-180}"
 TENSILELITE_TIMEOUT_SECONDS="${TENSILELITE_TIMEOUT_SECONDS:-420}"
+QKV_SOLUTION_INDEX="${QKV_SOLUTION_INDEX:-37796}"
+# SHA-256 of the exact generated kernel name printed by the current packaged
+# ID75a3 payload. This is the runtime name after derived parameters are applied,
+# not the shorter KernelNameMin serialized in the source logic file.
+QKV_KERNEL_NAME_SHA256="cc6ee07a30dba04bf4ac117100c3fe5907b84f4a72fd38f766ee6397ed56c721"
 TIMING_FILE="${RACE_REPORT_DIR}/timing.tsv"
 
 # Map TheRock's artifact-group name to the concrete GPU target used by both
@@ -298,6 +306,202 @@ run_hipblaslt_bench_check() {
 }
 
 
+write_qkv_rocjitsu_config() {
+  local output_config="$1"
+
+  # The ordinary gfx950 config advertises the MI350X PCI ID (0x75a0), but the
+  # QKV solution is packaged in the MI355X ID75a3/75a2 library leaf. Copy the
+  # pinned full-topology config and change only the emulated device identity.
+  python3 - "${ROCJITSU_CONFIG}" "${output_config}" <<'PY'
+import json
+import sys
+
+source_path, output_path = sys.argv[1:]
+with open(source_path, encoding="utf-8") as source:
+    config = json.load(source)
+
+device = config["vm"]["gpu"]["device"]
+if device["gfx_target_version"] != 90500:
+    raise SystemExit(
+        f"expected a gfx950 rocjitsu config, got "
+        f"gfx_target_version={device['gfx_target_version']}"
+    )
+device["device_id"] = 0x75A3
+device["marketing_name"] = "AMD Instinct MI355X"
+
+with open(output_path, "w", encoding="utf-8") as output:
+    json.dump(config, output, indent=2)
+    output.write("\n")
+PY
+}
+
+
+verify_qkv_kernel_identity() {
+  local log="$1"
+  local race_log="$2"
+
+  python3 - \
+    "${log}" \
+    "${race_log}" \
+    "${QKV_SOLUTION_INDEX}" \
+    "${QKV_KERNEL_NAME_SHA256}" <<'PY'
+import hashlib
+import re
+import sys
+
+log_path, race_log_path, solution_index, expected_digest = sys.argv[1:]
+
+
+def fail(message):
+    print(f"QKV race check identity failure: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+with open(log_path, encoding="utf-8") as log_file:
+    log_lines = log_file.read().splitlines()
+
+solution_marker = f"--Solution index: {solution_index}"
+if not any(line.strip() == solution_marker for line in log_lines):
+    fail(f"did not select solution index {solution_index}")
+
+kernel_marker = "--kernel name:"
+kernel_names = [
+    line.split(kernel_marker, 1)[1].strip()
+    for line in log_lines
+    if kernel_marker in line
+]
+if len(kernel_names) != 1:
+    fail(f"expected one kernel-info name, found {len(kernel_names)}")
+kernel_name = kernel_names[0]
+
+required_tokens = (
+    "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs",
+    "MT256x256x128",
+    "MI16x16x1",
+    "CMS",
+    "DTLA1_DTLB1",
+    "PGR2_PLR0",
+    "MIWT8_8",
+    "SK5",
+)
+for token in required_tokens:
+    if token not in kernel_name:
+        fail(f"kernel-info name is missing required token {token!r}")
+
+observed_digest = hashlib.sha256(kernel_name.encode()).hexdigest()
+if observed_digest != expected_digest:
+    fail(
+        "kernel-info name SHA-256 differs: "
+        f"expected {expected_digest}, observed {observed_digest}"
+    )
+
+with open(race_log_path, encoding="utf-8") as race_log_file:
+    race_log_lines = race_log_file.read().splitlines()
+
+dispatch_pattern = re.compile(
+    r'^\[rocjitsu\] Kernel dispatch: "([^"]+)" symbol="([^"]+)"$'
+)
+dispatches = [
+    match.groups()
+    for line in race_log_lines
+    if (match := dispatch_pattern.fullmatch(line))
+]
+if (kernel_name, kernel_name) not in dispatches:
+    fail("file sink did not record the exact kernel name and symbol dispatch")
+PY
+}
+
+
+run_qkv_hipblaslt_bench_check() {
+  local test_dir="${RACE_REPORT_DIR}/qkv-hipblaslt-bench"
+  local sink_dir="${test_dir}/sinks"
+  local runtime_dir="${test_dir}/runtime"
+  local qkv_config="${test_dir}/gfx950-mi355x-kmd.json"
+  local log="${test_dir}/hipblaslt-bench.log"
+  local race_log="${sink_dir}/race.log"
+  mkdir -p "${sink_dir}" "${runtime_dir}"
+  write_qkv_rocjitsu_config "${qkv_config}" || return $?
+
+  echo "running reduced FP8 QKV hipblaslt-bench under rocjitsu race detection"
+  echo "QKV_SOLUTION_INDEX=${QKV_SOLUTION_INDEX}"
+  # M=N=256 launches one MT256x256 workgroup. K=384 is the smallest tested K
+  # that enters the production kernel's normal preheader/MFMA path; retaining
+  # lda/ldb=3072 preserves the original QKV layout without emulating the full
+  # 9216x8192x3072 operation. This is deliberately a hazard probe rather than a
+  # numerical check: zero input keeps setup deterministic, and the kernel-info
+  # record below is the post-execution completion witness.
+  timeout "${RACE_TIMEOUT_SECONDS}" \
+    env \
+      HSA_ENABLE_SDMA=1 \
+      ROCJITSU_RUNTIME_DIR="${runtime_dir}" \
+      RJ_RACE=1 \
+      RJ_LOG=1 \
+      RJ_SINKS=stderr,file \
+      RJ_SINK_DIR="${sink_dir}" \
+      "${ROCJITSU_BIN}" \
+        --config "${qkv_config}" \
+        -- "${HIPBLASLT_BENCH}" \
+          --api_method c \
+          --transA T \
+          --transB N \
+          -m 256 \
+          -n 256 \
+          -k 384 \
+          --lda 3072 \
+          --ldb 3072 \
+          --ldc 256 \
+          --ldd 256 \
+          --stride_a 0 \
+          --stride_b 0 \
+          --stride_c 0 \
+          --stride_d 0 \
+          --any_stride \
+          --batch_count 1 \
+          --a_type f8_r \
+          --b_type f8_r \
+          --c_type bf16_r \
+          --d_type bf16_r \
+          --compute_type f32_r \
+          --scale_type f32_r \
+          --scaleA 1 \
+          --scaleB 1 \
+          --bias_vector \
+          --bias_source d \
+          --bias_type bf16_r \
+          --initialization zero \
+          --algo_method index \
+          --solution_index "${QKV_SOLUTION_INDEX}" \
+          --print_kernel_info \
+          --iters 1 \
+          --cold_iters 0 \
+    2>&1 | tee "${log}"
+  local status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    echo "QKV hipblaslt-bench race check command failed with status ${status}" >&2
+    return "${status}"
+  fi
+
+  # Solution indices are catalog-local selectors. Fail closed unless the client
+  # reports the exact expected generated name and the file sink records that
+  # same name and symbol in the actual dispatch. The name remains unchanged by
+  # the intended wait-count correction.
+  if [[ ! -f "${race_log}" ]]; then
+    echo "QKV race check file sink was not created: ${race_log}" >&2
+    return 1
+  fi
+  verify_qkv_kernel_identity "${log}" "${race_log}" || return $?
+
+  # Keep the same contract as the other workloads: a race report fails this
+  # check. Until the generator defect is fixed, the advisory sidecar is expected
+  # to expose the QKV dependency by failing here and uploading the full trace.
+  if grep -q '^RACE ' "${race_log}" || grep -q '^RACE ' "${log}"; then
+    echo "rocjitsu race detector reported a race in the reduced FP8 QKV kernel:" >&2
+    cat "${race_log}" >&2
+    return 1
+  fi
+}
+
+
 write_tensilelite_check_yaml() {
   local yaml="$1"
 
@@ -425,13 +629,20 @@ run_tensilelite_client_check() {
 run_timed "rocjitsu version" show_rocjitsu_version
 
 check_status=0
+qkv_status=0
 
-# Run both workload checks even if the first one fails. That gives the uploaded
-# race-reports artifact a complete picture for the failing CI attempt instead of
-# forcing a second long run just to learn whether the other workload also broke.
+# Run every applicable workload even if an earlier one fails. That gives the
+# uploaded race-reports artifact a complete picture for the failing CI attempt
+# instead of forcing another long run to learn whether a later workload broke.
 set +e
 run_timed "hipblaslt-bench race check" run_hipblaslt_bench_check
 hipblaslt_status=$?
+if [[ "${ROCJITSU_GPU_TARGET}" == "gfx950" ]]; then
+  run_timed "QKV hipblaslt-bench race check" run_qkv_hipblaslt_bench_check
+  qkv_status=$?
+else
+  echo "skipping gfx950-only QKV hipblaslt-bench race check on ${ROCJITSU_GPU_TARGET}"
+fi
 run_timed "tensilelite-client race check" run_tensilelite_client_check
 tensilelite_status=$?
 set -e
@@ -443,6 +654,11 @@ fi
 
 if [[ "${tensilelite_status}" -ne 0 ]]; then
   echo "tensilelite-client race check failed with status ${tensilelite_status}" >&2
+  check_status=1
+fi
+
+if [[ "${qkv_status}" -ne 0 ]]; then
+  echo "QKV hipblaslt-bench race check failed with status ${qkv_status}" >&2
   check_status=1
 fi
 

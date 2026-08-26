@@ -1,6 +1,7 @@
 # This reusable workflow is a narrow post-build instrumentation job for
 # hipBLASLt. It fetches BLAS artifacts from the just-finished TheRock build and
-# runs two small workloads under rocjitsu's race detector. The workloads run
+# runs two small workloads under rocjitsu's race detector on both supported
+# architectures, plus a reduced FP8 QKV workload on gfx950. The workloads run
 # entirely under CPU-side emulation, so the workflow uses the CPU build runner
 # instead of consuming GPU test capacity.
 
@@ -53,7 +54,7 @@ jobs:
       ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
-      # The driver uses these values for its two timeout commands. Both are
+      # The driver uses these values for its workload timeout commands. All are
       # shorter than the job timeout, so reports can still upload after a
       # workload timeout.
       RACE_TIMEOUT_SECONDS: "180"
