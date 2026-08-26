@@ -1,4 +1,3 @@
-/*! \file */
 /* ************************************************************************
  * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
@@ -22,38 +21,21 @@
  *
  * ************************************************************************ */
 
-#pragma once
+#include "test.hpp"
 
-#include "rocsparse_singular_info_t.hpp"
-#include "rocsparse_trm_data_t.hpp"
+#include "testing_sptrsv_ell.hpp"
 
-struct _rocsparse_ellsv_info : rocsparse::trm_data_t
-{
-protected:
-    rocsparse::singular_info_t m_singularity_numeric_exact;
-
-public:
-    ~_rocsparse_ellsv_info() = default;
-
-    void copy(const _rocsparse_ellsv_info* that, hipStream_t stream)
-    {
-        this->rocsparse::trm_data_t::copy(that, stream);
-        this->m_singularity_numeric_exact.copy_singular_info_async(
-            &that->m_singularity_numeric_exact, stream);
-        THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
-    }
-
-    rocsparse::singular_info_t* get_singularity_numeric_exact()
-    {
-        return &this->m_singularity_numeric_exact;
-    }
-
-    void create_singularity_numeric_exact(int64_t             batch_count,
-                                          rocsparse_indextype indextype,
-                                          hipStream_t         stream)
-    {
-        THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact.create_singular_pivot_async(
-            batch_count, indextype, stream));
-    }
-};
-typedef _rocsparse_ellsv_info* rocsparse_ellsv_info;
+TEST_ROUTINE_WITH_CONFIG(sptrsv_ell,
+                         level2,
+                         rocsparse_test_config_it,
+                         arg.M,
+                         arg.N,
+                         arg.alpha,
+                         arg.alphai,
+                         arg.transA,
+                         arg.baseA,
+                         arg.diag,
+                         arg.uplo,
+                         arg.sptrsv_alg,
+                         arg.matrix,
+                         arg.graph_test);

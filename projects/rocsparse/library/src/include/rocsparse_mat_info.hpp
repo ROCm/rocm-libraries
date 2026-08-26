@@ -29,7 +29,6 @@
 #include "rocsparse_csrgemm_info.hpp"
 #include "rocsparse_csritsv_info.hpp"
 #include "rocsparse_csrmv_info.hpp"
-#include "rocsparse_ellsv_info.hpp"
 #include "rocsparse_numeric_boost.hpp"
 #include "rocsparse_sorted_coo2csr_info.hpp"
 #include "rocsparse_trm_info.hpp"
@@ -51,7 +50,6 @@ protected:
     rocsparse_coomv_info coomv_info{};
 
     rocsparse::sorted_coo2csr_info_t* m_sorted_coo2csr_info{};
-    rocsparse::ellsv_info_t*          m_ellsv_info{};
     rocsparse::trm_t                  m_trm;
 
     rocsparse::numeric_boost m_boost{};
@@ -69,6 +67,7 @@ public:
     std::shared_ptr<_rocsparse_bsrsm_info>     get_shared_bsrsm_info();
     std::shared_ptr<_rocsparse_bsrilu0_info>   get_shared_bsrilu0_info();
     std::shared_ptr<_rocsparse_bsric0_info>    get_shared_bsric0_info();
+    std::shared_ptr<_rocsparse_ellsv_info>     get_shared_ellsv_info();
     void                                       clear_csrsv_info();
     void                                       clear_csrsm_info();
     void                                       clear_csrilu0_info();
@@ -78,6 +77,7 @@ public:
     void                                       clear_bsrsm_info();
     void                                       clear_bsrilu0_info();
     void                                       clear_bsric0_info();
+    void                                       clear_ellsv_info();
 
     rocsparse_bsric0_info  get_bsric0_info();
     rocsparse::trm_info_t* get_bsric0_info(rocsparse_operation operation,
@@ -142,6 +142,13 @@ public:
                                           rocsparse_fill_mode    fill_mode,
                                           rocsparse::trm_info_t* trm_info);
 
+    rocsparse_ellsv_info   get_ellsv_info();
+    rocsparse::trm_info_t* get_ellsv_info(rocsparse_operation operation,
+                                          rocsparse_fill_mode fill_mode);
+    void                   set_ellsv_info(rocsparse_operation    operation,
+                                          rocsparse_fill_mode    fill_mode,
+                                          rocsparse::trm_info_t* trm_info);
+
     rocsparse_csrgemm_info csrgemm_info{};
     rocsparse_csritsv_info csritsv_info{};
 
@@ -158,7 +165,4 @@ public:
 
     void set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value);
     rocsparse::sorted_coo2csr_info_t* get_sorted_coo2csr_info();
-
-    void                     set_ellsv_info(rocsparse::ellsv_info_t* value);
-    rocsparse::ellsv_info_t* get_ellsv_info();
 };

@@ -282,7 +282,7 @@ namespace rocsparse
                                                                  trans,
                                                                  datatype,
                                                                  alpha,
-                                                                 static_cast<int64_t>(0),
+                                                                 0,
                                                                  mat,
                                                                  x,
                                                                  y,
@@ -317,12 +317,16 @@ namespace rocsparse
             }
             case rocsparse_spsv_stage_preprocess:
             {
-                rocsparse::ellsv_info_t* ellsv_info = mat->info->get_ellsv_info();
-                if(ellsv_info == nullptr
-                   || !ellsv_info->matches(trans, mat->descr->fill_mode, mat->descr->diag_type))
+                rocsparse_ellsv_info ellsv_info = mat->info->get_ellsv_info();
+                if(ellsv_info->get(trans, mat->descr->fill_mode) == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
-                        (rocsparse::ellsv_analysis(handle, trans, mat, temp_buffer)));
+                        rocsparse::ellsv_analysis(handle,
+                                                  trans,
+                                                  mat,
+                                                  rocsparse_analysis_policy_reuse,
+                                                  &ellsv_info,
+                                                  temp_buffer));
                 }
                 return rocsparse_status_success;
             }
@@ -334,10 +338,11 @@ namespace rocsparse
                                                                  trans,
                                                                  datatype,
                                                                  alpha,
-                                                                 static_cast<int64_t>(0),
+                                                                 0,
                                                                  mat,
                                                                  x,
                                                                  y,
+                                                                 mat->info->get_ellsv_info(),
                                                                  temp_buffer));
                 return rocsparse_status_success;
             }

@@ -23,6 +23,7 @@
 
 #include "rocsparse_trm_info.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_datatype_utils.hpp"
 #include "rocsparse_utility.hpp"
 
 rocsparse::trm_info_t::~trm_info_t()
@@ -48,6 +49,9 @@ rocsparse::trm_info_t::~trm_info_t()
 
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->transposed_col_ind));
     this->transposed_col_ind = nullptr;
+
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->transposed_val));
+    this->transposed_val = nullptr;
 }
 
 void rocsparse::trm_info_t::set_max_nnz(const int64_t value)
@@ -134,6 +138,41 @@ void** rocsparse::trm_info_t::get_ref_transposed_col_ind()
     return &this->transposed_col_ind;
 }
 
+const void* rocsparse::trm_info_t::get_transposed_val() const
+{
+    return this->transposed_val;
+}
+
+void* rocsparse::trm_info_t::get_transposed_val()
+{
+    return this->transposed_val;
+}
+
+void** rocsparse::trm_info_t::get_ref_transposed_val()
+{
+    return &this->transposed_val;
+}
+
+int64_t rocsparse::trm_info_t::get_ell_width() const
+{
+    return this->ell_width;
+}
+
+void rocsparse::trm_info_t::set_ell_width(const int64_t value)
+{
+    this->ell_width = value;
+}
+
+rocsparse_datatype rocsparse::trm_info_t::get_value_datatype() const
+{
+    return this->value_datatype;
+}
+
+void rocsparse::trm_info_t::set_value_datatype(const rocsparse_datatype value)
+{
+    this->value_datatype = value;
+}
+
 void rocsparse::trm_info_t::set_m(const int64_t value)
 {
     this->m = value;
@@ -210,11 +249,13 @@ rocsparse::trm_info_t::trm_info_t() {}
 rocsparse::trm_info_t::trm_info_t(const rocsparse::trm_info_t& that)
 {
 
-    this->max_nnz      = that.max_nnz;
-    this->m            = that.m;
-    this->nnz          = that.nnz;
-    this->index_type_I = that.index_type_I;
-    this->index_type_J = that.index_type_J;
+    this->max_nnz        = that.max_nnz;
+    this->m              = that.m;
+    this->nnz            = that.nnz;
+    this->index_type_I   = that.index_type_I;
+    this->index_type_J   = that.index_type_J;
+    this->value_datatype = that.value_datatype;
+    this->ell_width      = that.ell_width;
 
     // Not owned by the info struct. Just pointers to externally allocated memory
     this->descr   = that.descr;
@@ -265,6 +306,15 @@ rocsparse::trm_info_t::trm_info_t(const rocsparse::trm_info_t& that)
                                                J_size * that.nnz,
                                                hipMemcpyDeviceToDevice));
     }
+
+    if(that.transposed_val != nullptr && that.ell_width > 0)
+    {
+        const size_t val_size = rocsparse::datatype_sizeof(that.value_datatype);
+        const size_t count    = static_cast<size_t>(that.m) * static_cast<size_t>(that.ell_width);
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_val), val_size * count));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            this->transposed_val, that.transposed_val, val_size * count, hipMemcpyDeviceToDevice));
+    }
 }
 
 rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_info_t& that)
@@ -275,6 +325,8 @@ rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_inf
     invalid |= (this->nnz != that.nnz);
     invalid |= (this->index_type_I != that.index_type_I);
     invalid |= (this->index_type_J != that.index_type_J);
+    invalid |= (this->value_datatype != that.value_datatype);
+    invalid |= (this->ell_width != that.ell_width);
     if(invalid)
     {
         THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
@@ -340,11 +392,25 @@ rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_inf
                                                hipMemcpyDeviceToDevice));
     }
 
-    this->max_nnz      = that.max_nnz;
-    this->m            = that.m;
-    this->nnz          = that.nnz;
-    this->index_type_I = that.index_type_I;
-    this->index_type_J = that.index_type_J;
+    if(that.transposed_val != nullptr && that.ell_width > 0)
+    {
+        const size_t val_size = rocsparse::datatype_sizeof(that.value_datatype);
+        const size_t count    = static_cast<size_t>(that.m) * static_cast<size_t>(that.ell_width);
+        if(this->transposed_val == nullptr)
+        {
+            THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_val), val_size * count));
+        }
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            this->transposed_val, that.transposed_val, val_size * count, hipMemcpyDeviceToDevice));
+    }
+
+    this->max_nnz        = that.max_nnz;
+    this->m              = that.m;
+    this->nnz            = that.nnz;
+    this->index_type_I   = that.index_type_I;
+    this->index_type_J   = that.index_type_J;
+    this->value_datatype = that.value_datatype;
+    this->ell_width      = that.ell_width;
 
     // Not owned by the info struct. Just pointers to externally allocated memory
     this->descr   = that.descr;

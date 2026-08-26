@@ -189,6 +189,24 @@ void _rocsparse_mat_info::set_csrildlt0_info(rocsparse_operation    operation,
     this->m_trm.create_csrildlt0_info()->set(operation, fill_mode, trm);
 }
 
+rocsparse_ellsv_info _rocsparse_mat_info::get_ellsv_info()
+{
+    return this->m_trm.create_ellsv_info();
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_ellsv_info(rocsparse_operation operation,
+                                                           rocsparse_fill_mode fill_mode)
+{
+    return this->get_ellsv_info()->get(operation, fill_mode);
+}
+
+void _rocsparse_mat_info::set_ellsv_info(rocsparse_operation    operation,
+                                         rocsparse_fill_mode    fill_mode,
+                                         rocsparse::trm_info_t* trm)
+{
+    this->get_ellsv_info()->set(operation, fill_mode, trm);
+}
+
 std::shared_ptr<_rocsparse_csrsv_info> _rocsparse_mat_info::get_shared_csrsv_info()
 {
     return this->m_trm.get_shared_csrsv_info();
@@ -263,6 +281,10 @@ void _rocsparse_mat_info::clear_bsric0_info()
 {
     this->m_trm.clear_bsric0_info();
 }
+void _rocsparse_mat_info::clear_ellsv_info()
+{
+    this->m_trm.clear_ellsv_info();
+}
 
 //
 // Duplicate all the trm_info_t.
@@ -312,14 +334,9 @@ rocsparse::sorted_coo2csr_info_t* _rocsparse_mat_info::get_sorted_coo2csr_info()
     return this->m_sorted_coo2csr_info;
 }
 
-void _rocsparse_mat_info::set_ellsv_info(rocsparse::ellsv_info_t* value)
+std::shared_ptr<_rocsparse_ellsv_info> _rocsparse_mat_info::get_shared_ellsv_info()
 {
-    this->m_ellsv_info = value;
-}
-
-rocsparse::ellsv_info_t* _rocsparse_mat_info::get_ellsv_info()
-{
-    return this->m_ellsv_info;
+    return this->m_trm.get_shared_ellsv_info();
 }
 
 _rocsparse_mat_info::~_rocsparse_mat_info()
@@ -370,15 +387,5 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
 
         delete sorted_coo2csr_info;
         this->set_sorted_coo2csr_info(nullptr);
-    }
-
-    rocsparse::ellsv_info_t* ellsv_info = this->get_ellsv_info();
-    if(ellsv_info != nullptr)
-    {
-        hipStream_t default_stream = 0;
-        std::ignore                = ellsv_info->free_memory(default_stream);
-
-        delete ellsv_info;
-        this->set_ellsv_info(nullptr);
     }
 }

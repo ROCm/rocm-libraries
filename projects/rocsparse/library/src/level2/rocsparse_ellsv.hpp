@@ -28,6 +28,11 @@
 
 namespace rocsparse
 {
+    rocsparse_status ellsv_zero_pivot(rocsparse_handle     handle,
+                                      rocsparse_ellsv_info info,
+                                      rocsparse_indextype  indextype,
+                                      void*                position);
+
     // Native ELL triangular solve. The analysis (preprocess) stage performs a
     // level-scheduling of the ELL matrix and stores the resulting row execution
     // order in the matrix info object; the compute stage then solves the system
@@ -40,6 +45,8 @@ namespace rocsparse
     rocsparse_status ellsv_analysis(rocsparse_handle            handle,
                                     rocsparse_operation         trans,
                                     rocsparse_const_spmat_descr A,
+                                    rocsparse_analysis_policy   analysis_policy,
+                                    rocsparse_ellsv_info*       p_ellsv_info,
                                     void*                       temp_buffer);
 
     rocsparse_status ellsv_solve_buffer_size(rocsparse_handle            handle,
@@ -57,5 +64,17 @@ namespace rocsparse
                                  rocsparse_const_spmat_descr A,
                                  rocsparse_const_dnvec_descr x,
                                  rocsparse_dnvec_descr       y,
+                                 rocsparse_ellsv_info        ellsv_info,
                                  void*                       temp_buffer);
+
+    inline size_t ellsv_align256(size_t bytes)
+    {
+        return ((bytes - 1) / 256 + 1) * 256;
+    }
+
+    void ellsv_select_launch(rocsparse_handle handle, bool* sleep, uint32_t* wfsize);
+
+    rocsparse_fill_mode ellsv_flip_fill(rocsparse_fill_mode fill_mode);
+
+    rocsparse_status ellsv_check(rocsparse_const_spmat_descr A);
 }

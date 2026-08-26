@@ -48,7 +48,9 @@ namespace rocsparse
                                      int64_t ell_width,
                                      const I* __restrict__ ell_col_ind,
                                      int* __restrict__ done_array,
-                                     rocsparse_index_base idx_base)
+                                     I* __restrict__ zero_pivot,
+                                     rocsparse_index_base idx_base,
+                                     rocsparse_diag_type  diag_type)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -65,7 +67,8 @@ namespace rocsparse
         }
 
         // Local dependency depth.
-        int local_max = 0;
+        int local_max      = 0;
+        int local_has_diag = 0;
 
         for(int64_t p = lid; p < ell_width; p += WF_SIZE)
         {
@@ -78,6 +81,11 @@ namespace rocsparse
                 continue;
             }
 
+            if(col == row)
+            {
+                local_has_diag = 1;
+            }
+
             // Only strictly-lower entries are dependencies.
             if(col < row)
             {
@@ -88,11 +96,17 @@ namespace rocsparse
         }
 
         rocsparse::wfreduce_max<WF_SIZE>(&local_max);
+        rocsparse::wfreduce_max<WF_SIZE>(&local_has_diag);
 
         __threadfence_block();
 
         if(lid == WF_SIZE - 1)
         {
+            if(local_has_diag == 0 && diag_type == rocsparse_diag_type_non_unit)
+            {
+                rocsparse::atomic_min(zero_pivot, row + idx_base);
+            }
+
             __hip_atomic_store(
                 &done_array[row], local_max + 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
         }
@@ -108,7 +122,9 @@ namespace rocsparse
                                      int64_t ell_width,
                                      const I* __restrict__ ell_col_ind,
                                      int* __restrict__ done_array,
-                                     rocsparse_index_base idx_base)
+                                     I* __restrict__ zero_pivot,
+                                     rocsparse_index_base idx_base,
+                                     rocsparse_diag_type  diag_type)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -124,7 +140,8 @@ namespace rocsparse
             return;
         }
 
-        int local_max = 0;
+        int local_max      = 0;
+        int local_has_diag = 0;
 
         for(int64_t p = lid; p < ell_width; p += WF_SIZE)
         {
@@ -137,6 +154,11 @@ namespace rocsparse
                 continue;
             }
 
+            if(col == row)
+            {
+                local_has_diag = 1;
+            }
+
             // Only strictly-upper entries are dependencies.
             if(col > row)
             {
@@ -147,11 +169,17 @@ namespace rocsparse
         }
 
         rocsparse::wfreduce_max<WF_SIZE>(&local_max);
+        rocsparse::wfreduce_max<WF_SIZE>(&local_has_diag);
 
         __threadfence_block();
 
         if(lid == WF_SIZE - 1)
         {
+            if(local_has_diag == 0 && diag_type == rocsparse_diag_type_non_unit)
+            {
+                rocsparse::atomic_min(zero_pivot, row + idx_base);
+            }
+
             __hip_atomic_store(
                 &done_array[row], local_max + 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
         }
@@ -174,6 +202,7 @@ namespace rocsparse
                                            int64_t y_inc,
                                            int* __restrict__ done_array,
                                            const I* __restrict__ map,
+                                           I* __restrict__ zero_pivot,
                                            rocsparse_index_base idx_base,
                                            rocsparse_fill_mode  fill_mode,
                                            rocsparse_diag_type  diag_type)
@@ -232,6 +261,7 @@ namespace rocsparse
                 {
                     if(local_val == static_cast<T>(0))
                     {
+                        rocsparse::atomic_min(zero_pivot, row + idx_base);
                         local_val = static_cast<T>(1);
                     }
                     diagonal[wid] = static_cast<T>(1) / local_val;

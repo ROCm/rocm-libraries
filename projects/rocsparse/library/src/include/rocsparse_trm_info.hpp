@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "rocsparse-types.h"
 #include "rocsparse_mat_descr.hpp"
 
 namespace rocsparse
@@ -48,6 +49,10 @@ namespace rocsparse
         void* transposed_perm{nullptr};
         void* transposed_row_ptr{nullptr};
         void* transposed_col_ind{nullptr};
+        void* transposed_val{nullptr};
+
+        // ELL transposed storage width (number of entries per column in A^T).
+        int64_t ell_width{0};
 
         // some data to verify correct execution
         int64_t                     m{0};
@@ -57,6 +62,7 @@ namespace rocsparse
         const void*                 col_ind{nullptr};
         rocsparse_indextype         index_type_I{(rocsparse_indextype)-1};
         rocsparse_indextype         index_type_J{(rocsparse_indextype)-1};
+        rocsparse_datatype          value_datatype{(rocsparse_datatype)-1};
 
     public:
         trm_info_t(const trm_info_t&);
@@ -87,6 +93,16 @@ namespace rocsparse
         const void* get_transposed_col_ind() const;
         void*       get_transposed_col_ind();
         void**      get_ref_transposed_col_ind();
+
+        const void* get_transposed_val() const;
+        void*       get_transposed_val();
+        void**      get_ref_transposed_val();
+
+        int64_t get_ell_width() const;
+        void    set_ell_width(int64_t);
+
+        rocsparse_datatype get_value_datatype() const;
+        void               set_value_datatype(rocsparse_datatype);
 
         const void* get_row_ptr();
         void        set_row_ptr(const void*);
