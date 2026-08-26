@@ -47,10 +47,8 @@ def handleCustomKernel(
     Returns:
         A tuple of (updated solution, whether it uses a custom kernel, the
         kernel's own config or None). The config is returned separately because
-        it is merged into the solution with ``sol.update()``: once merged, a key
-        the config did not define is indistinguishable from one it did, and
-        callers validating the kernel's declared ProblemType need that
-        distinction (a kernel that declares none inherits the logic's).
+        it is merged in with ``sol.update()``, after which a key the config did
+        not define is indistinguishable from one it did.
     """
     if not isCustomKernelConfig(sol):
         return sol, False, None

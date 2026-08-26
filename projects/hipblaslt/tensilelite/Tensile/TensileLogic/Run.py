@@ -158,10 +158,9 @@ def _runChecks(
                 continue
 
             if isCustom:
-                # Read the kernel's ProblemType from its config, not from the
-                # merged solution: handleCustomKernel does sol.update(config),
-                # after which a ProblemType the config never declared is
-                # indistinguishable from one it did.
+                # Read from the config, not the merged solution: after
+                # sol.update(config) an undeclared ProblemType is
+                # indistinguishable from a declared one.
                 mismatches = compareCustomKernelProblemTypes(
                     problemType, (customConfig or {}).get("ProblemType")
                 )

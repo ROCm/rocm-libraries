@@ -13,19 +13,10 @@ class CustomKernelProblemTypeMismatch(NamedTuple):
     kernel_value: Any
 
 
-# Capabilities are compared for exact equality, never as "the kernel supports
-# more, so it is safe". The kernarg ABI makes the permissive direction unsound:
-# LibraryIO discards the kernel's embedded ProblemType and installs the logic's
-# (LibraryIO.py, "overwrite problemType if any"), and the host then appends
-# epilogue arguments *conditionally* on that ProblemType --
-# ContractionSolution.cpp packs scaleA/B, scaleC/D, scaleAlphaVec, the bias
-# triple, factorDim, E and amaxD only when the corresponding capability is on.
-# A custom kernel's .s bakes in fixed kernarg offsets, so a kernel expecting a
-# capability the logic does not advertise reads a slot the host never wrote:
-# every argument after the missing one is shifted. Note this is the mirror of
-# the bug that motivated the checker (ROCm/rocm-libraries#11280) and is strictly
-# worse -- there the kernel merely ignored trailing arguments and produced a
-# wrong result, here it dereferences uninitialized kernarg memory.
+# Exact equality, in both directions. The host appends epilogue kernargs
+# conditionally on the logic's ProblemType, and a custom kernel's .s has fixed
+# kernarg offsets, so a kernel expecting a capability the logic does not
+# advertise reads a slot the host never wrote.
 _EXACT_CAPABILITY_FIELDS = (
     "Activation",
     "UseBias",
@@ -38,9 +29,7 @@ _EXACT_CAPABILITY_FIELDS = (
     "OutputAmaxD",
     "ActivationNoGuard",
 )
-# A custom kernel's ActivationType is a placeholder: kernels routinely declare
-# Activation with no type and let the logic pick. Ten shipped pairs depend on
-# this leniency (library "hipblaslt_all" vs kernel "none").
+# A kernel may declare Activation without a type and let the logic pick.
 _NON_AUTHORITATIVE_FIELDS = {"ActivationType"}
 _EXPLICIT_STRUCTURAL_FIELDS = (
     "IndexAssignmentsA",
@@ -75,10 +64,8 @@ def _canonicalProblemTypeValue(value: Any) -> Any:
         return [_canonicalProblemTypeValue(item) for item in value]
     if isinstance(value, tuple):
         return tuple(_canonicalProblemTypeValue(item) for item in value)
-    # DataType and ActivationType are the only wrappers ProblemType.state holds.
-    # Match them by type rather than duck-typing on `.value`, so a future field
-    # whose value happens to expose `.value` is not silently unwrapped into
-    # something that compares equal when it should not.
+    # Match by type rather than duck-typing on `.value`, so an unrelated value
+    # that happens to expose `.value` is not unwrapped.
     if isinstance(value, (DataType, ActivationType, Enum)):
         return _canonicalProblemTypeValue(value.value)
     return value
@@ -88,10 +75,8 @@ def _explicitStructuralDeclarations(problemType: Any) -> dict:
     """Structural fields a raw custom.config states outright, if any.
 
     These are normally derived from TransposeA/B and Batched. A config that
-    states one anyway is asserting something about its own index layout, which
-    is worth validating -- but only against what that same config derives, never
-    against the other side of the comparison (see the reflexivity note in
-    compareCustomKernelProblemTypes).
+    states one anyway is validated against its own derivation, never against the
+    other side of the comparison, which would break reflexivity.
     """
     if not isinstance(problemType, Mapping):
         return {}
@@ -105,13 +90,11 @@ def _explicitStructuralDeclarations(problemType: Any) -> dict:
 def _normalizeProblemType(problemType: Mapping) -> dict:
     """Reduce a ProblemType, or a raw config for one, to comparable values.
 
-    Runs the input through ProblemType so defaults are materialized and derived
-    fields settled, then unwraps DataType/ActivationType into plain values.
-    Both sides of a comparison go through this unchanged, which is what makes
-    the comparison reflexive.
+    Runs the input through ProblemType to materialize defaults and settle
+    derived fields, then unwraps DataType/ActivationType into plain values. Both
+    sides go through this unchanged, which is what makes comparison reflexive.
 
-    Raises whatever ProblemType raises on an input it cannot make sense of;
-    compareCustomKernelProblemTypes turns that into a reported mismatch.
+    Raises whatever ProblemType raises; the caller reports that as a mismatch.
     """
     # Keep this import local. Solution imports CustomKernels, so importing
     # ProblemType while parallel TensileLogic workers initialize modules creates
@@ -122,20 +105,16 @@ def _normalizeProblemType(problemType: Mapping) -> dict:
         state = problemType.state
     else:
         config = deepcopy(dict(problemType))
-        # Embedded custom configs historically bypassed ProblemType's type
-        # validator, and some shipped kernels use 0/1 for boolean fields. Keep
-        # their established meaning while normalizing before comparison.
+        # Some custom configs use 0/1 for boolean fields. Preserve that meaning.
         for field, defaultValue in _defaultProblemType.items():
             value = config.get(field)
             if type(defaultValue) is bool and type(value) is int and value in (0, 1):
                 config[field] = bool(value)
             elif type(defaultValue) is int and type(value) is bool:
                 config[field] = int(value)
-        # ProblemType treats a missing ActivationType as 'none' and then uses
-        # that to force UseE and ActivationNoGuard off. Custom kernels declare
-        # Activation without a type as a matter of course, so without this the
-        # "ActivationType is non-authoritative" contract would silently disable
-        # two fields that *are* compared for exact equality.
+        # ProblemType reads a missing ActivationType as 'none' and uses that to
+        # force UseE and ActivationNoGuard off, which would defeat treating
+        # ActivationType as non-authoritative.
         if config.get("Activation") and not config.get("ActivationType"):
             config["ActivationType"] = "hipblaslt_all"
         state = ProblemType(config, False).state
@@ -150,8 +129,8 @@ def _appendMismatch(
 ) -> None:
     """Record a mismatch for a field ProblemType always populates.
 
-    Indexes directly, unlike the generic loop, which walks the union of both
-    key sets and so must tolerate a field present on only one side.
+    Indexes directly, unlike the generic loop, which walks the union of both key
+    sets and must tolerate a field present on only one side.
     """
     mismatches.append(
         CustomKernelProblemTypeMismatch(field, library[field], kernel[field])
@@ -163,30 +142,22 @@ def compareCustomKernelProblemTypes(
 ) -> list[CustomKernelProblemTypeMismatch]:
     """Compare a logic ProblemType with a custom kernel's embedded ProblemType.
 
-    Structural fields and capabilities must match exactly -- a kernel that
-    supports *more* than the logic advertises is rejected, because the host packs
-    epilogue kernargs positionally and conditionally on the logic's ProblemType
+    Structural fields and capabilities must match exactly, in both directions
     (see _EXACT_CAPABILITY_FIELDS). Fields that only select among runtime values
-    without moving a kernarg offset -- BiasDataTypeList, GateResidualDataTypeList
-    -- are checked for coverage rather than equality. A custom ActivationType is
-    non-authoritative and is ignored.
+    without moving a kernarg offset -- BiasDataTypeList,
+    GateResidualDataTypeList -- are checked for coverage instead. A custom
+    ActivationType is non-authoritative and is ignored.
 
-    A kernel whose custom.config omits ProblemType entirely declares no
-    constraints and is accepted. Note this is *not* the same as omitting a
-    single field from a declared ProblemType: a declared block is authoritative,
-    so a capability missing from it normalizes to disabled and is enforced.
-    That distinction is load-bearing -- the gfx950 BF16 kernels that produced
-    wrong results in bias/ScaleAlphaVec logic tables declared a ProblemType and
-    simply left UseBias/UseScaleAlphaVec out of it.
+    A custom.config that omits ProblemType entirely declares no constraints and
+    is accepted. Omitting a single field from a declared ProblemType is
+    different: the block is authoritative, so a capability missing from it
+    normalizes to disabled and is enforced.
 
-    The comparison is reflexive: equal inputs always yield no mismatches. Both
-    sides are normalized identically, so a structural field that one side states
-    and the other derives cannot produce a phantom mismatch. A config that
-    contradicts *itself* is still caught, separately.
+    Reflexive: equal inputs yield no mismatches. A config that contradicts
+    itself is still caught, separately.
 
     Never raises. A ProblemType that cannot be constructed is reported as a
-    mismatch, so a malformed logic file or custom.config is counted and
-    attributed rather than taking down a parallel validator batch.
+    mismatch so it is counted and attributed.
     """
     if kernelProblemType is None:
         return []
@@ -215,10 +186,8 @@ def compareCustomKernelProblemTypes(
         ]
     mismatches: list[CustomKernelProblemTypeMismatch] = []
 
-    # A custom.config may state a structural field that is normally derived from
-    # TransposeA/B and Batched. Validate that against what the same config
-    # derives -- comparing it to the library side instead would break
-    # reflexivity, since the library's value is always the derived one.
+    # Validate a stated structural field against the same config's derivation;
+    # comparing it to the library side would break reflexivity.
     for field, declared in _explicitStructuralDeclarations(kernelProblemType).items():
         derived = kernel.get(field)
         if _canonicalProblemTypeValue(declared) != derived:
@@ -235,9 +204,7 @@ def compareCustomKernelProblemTypes(
                 )
             )
 
-    # Capabilities are exact (the generic loop above covers them), so a
-    # dependent field is worth comparing exactly when its capability is on and
-    # the two sides agree about it.
+    # A dependent field matters only when its capability is on and agreed.
     def enabledAndAgreed(field: str) -> bool:
         return bool(library[field]) and library[field] == kernel[field]
 

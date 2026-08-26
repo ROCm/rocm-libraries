@@ -76,12 +76,9 @@ def test_omitted_capabilities_normalize_to_disabled():
     ],
 )
 def test_kernel_capability_superset_is_rejected(field, library_value, kernel_value):
-    # A kernel supporting *more* than the logic advertises is not safe. The host
-    # appends epilogue kernargs conditionally on the logic's ProblemType, and a
-    # custom kernel's .s has fixed kernarg offsets -- so the kernel reads a slot
-    # the host never wrote, with every later argument shifted. This is the mirror
-    # of the ROCm/rocm-libraries#11280 bug and strictly worse: that one skipped
-    # the epilogue, this one dereferences uninitialized kernarg memory.
+    # The host appends epilogue kernargs conditionally on the logic's
+    # ProblemType, and a custom kernel's .s has fixed kernarg offsets, so a
+    # kernel expecting more reads a slot the host never wrote.
     library = _problem_type(**{field: library_value})
     kernel = _problem_type(
         **{field: kernel_value},
@@ -242,9 +239,8 @@ def test_omitted_structural_declarations_are_derived_and_compatible():
 
 
 def test_missing_embedded_problem_type_is_accepted():
-    # The shipped CustomGSUs_* kernels carry a custom.config holding only
-    # InternalSupportParams. Declaring no ProblemType declares no constraints,
-    # so there is nothing to contradict and the pairing stands.
+    # A custom.config may hold only InternalSupportParams. Declaring no
+    # ProblemType declares no constraints, so the pairing stands.
     library = _problem_type(
         UseBias=1,
         BiasDataTypeList=["S"],
@@ -266,18 +262,15 @@ def test_malformed_embedded_problem_type_is_rejected(kernel_problem_type):
 
 
 def test_declared_problem_type_omitting_bias_is_rejected():
-    # Regression guard for the gfx950 BF16 kernels that were listed in bias /
-    # ScaleAlphaVec selection tables they cannot service (norm error 0.87).
-    # Their custom.config declares a ProblemType but leaves UseBias and
-    # UseScaleAlphaVec out of it -- unlike the no-ProblemType case above, a
-    # declared block is authoritative, so the omission means "unsupported".
+    # A custom.config that declares a ProblemType but leaves out UseBias and
+    # UseScaleAlphaVec. Unlike the no-ProblemType case above, a declared block is
+    # authoritative, so the omission means "unsupported".
     library = _problem_type(UseBias=1, BiasDataTypeList=["S"], UseScaleAlphaVec=1)
     kernel = _problem_type()
 
     mismatches = compareCustomKernelProblemTypes(library, kernel)
 
-    # BetaOnlyUseBias is derived from UseBias, so it rides along; the two
-    # capabilities are what matter.
+    # BetaOnlyUseBias is derived from UseBias and rides along.
     assert {"UseBias", "UseScaleAlphaVec"}.issubset(_fields(mismatches))
 
 
@@ -345,10 +338,8 @@ def test_active_activation_compute_type_must_match():
     ],
 )
 def test_comparison_is_reflexive(overrides):
-    # Equal inputs must never mismatch. This broke when only the kernel side
-    # preserved explicitly declared structural fields while the library side had
-    # them derived, so the same dict compared against itself reported a phantom
-    # NumIndicesC / IndexAssignmentsLD difference.
+    # Equal inputs must never mismatch, including when one field is stated
+    # outright and would otherwise be derived on only one side.
     problem_type = _problem_type(**overrides)
 
     assert (
@@ -360,9 +351,8 @@ def test_comparison_is_reflexive(overrides):
 
 
 def test_self_contradictory_structural_declaration_is_rejected():
-    # Declaring NumIndicesC=2 on a batched GEMM contradicts what the same config
-    # derives (3). Caught against the config's own derivation, not the library's,
-    # so it stays reflexive.
+    # NumIndicesC=2 on a batched GEMM contradicts what the same config derives
+    # (3). Checked against its own derivation, so reflexivity holds.
     mismatches = compareCustomKernelProblemTypes(
         _problem_type(), _problem_type(NumIndicesC=2)
     )
@@ -371,10 +361,9 @@ def test_self_contradictory_structural_declaration_is_rejected():
 
 
 def test_activation_type_omission_does_not_disable_use_e():
-    # ProblemType reads a missing ActivationType as 'none' and uses that to force
-    # UseE and ActivationNoGuard off. Custom kernels routinely declare Activation
-    # without a type, so without normalization the "ActivationType is
-    # non-authoritative" contract would silently flip two exact-compared fields.
+    # ProblemType reads a missing ActivationType as 'none' and uses that to
+    # force UseE and ActivationNoGuard off, which must not happen when
+    # ActivationType is treated as non-authoritative.
     library = _problem_type(
         Activation=True, ActivationType="hipblaslt_all", UseE=True, DataTypeE="S"
     )
@@ -396,7 +385,7 @@ def test_activation_type_omission_does_not_disable_use_e():
 def test_unconstructible_problem_type_is_reported_not_raised(
     library_problem_type, kernel_problem_type
 ):
-    # _runChecks fans out over ParallelMap2, so an exception escaping here takes
+    # _runChecks fans out over ParallelMap2, where an escaping exception takes
     # down a whole batch instead of counting one rejected solution.
     mismatches = compareCustomKernelProblemTypes(
         library_problem_type, kernel_problem_type
@@ -417,9 +406,8 @@ _MIXED = {
 _BIAS_ON = {"UseBias": 1, "BiasDataTypeList": ["S"]}
 _ACTIVATION_ON = {"Activation": True, "ActivationType": "all"}
 
-# Every dependent field must be enforced when its gating capability is on. An
-# unenforced one lets a mismatched bias type, stride or aux data type reach the
-# kernel. Each entry is (id, library overrides, kernel overrides, field).
+# Each entry is (id, library overrides, kernel overrides, field). An unenforced
+# dependent field lets a mismatched bias type, stride or aux data type through.
 _DEPENDENT_ENFORCED = [
     ("UseBias-SetConstStrideBias",
      {**_BIAS_ON, "SetConstStrideBias": [[0, 1]]}, _BIAS_ON, "SetConstStrideBias"),
@@ -478,8 +466,8 @@ def test_dependent_field_enforced_when_capability_enabled(
 def test_dependent_field_ignored_when_capability_disabled(
     field, library_value, kernel_value
 ):
-    # With the gating capability off the field is dead weight, and rejecting a
-    # kernel over a leftover default it never reads would be a false positive.
+    # With the capability off the field is dead weight; rejecting a kernel over
+    # a leftover default it never reads would be a false positive.
     mismatches = compareCustomKernelProblemTypes(
         _problem_type(**{field: library_value}),
         _problem_type(**{field: kernel_value}),

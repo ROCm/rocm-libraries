@@ -3,14 +3,12 @@
 
 """Compatibility sweep over the custom kernels the shipped logic actually uses.
 
-The per-field unit tests in test_CustomKernels_compatibility.py all build
-synthetic ProblemTypes. That leaves a gap: a rule can be self-consistent and
-still reject pairings that ship today. This test closes it by running the real
-comparison over every (logic file, custom kernel) pair under the hipBLASLt logic
-root, which is exactly the set parseLibraryLogicData walks during a device
-library build.
+Runs the real comparison over every (logic file, custom kernel) pair under the
+hipBLASLt logic root -- the set parseLibraryLogicData walks during a device
+library build. The other tests build synthetic ProblemTypes, so a rule can be
+self-consistent there and still reject pairings that ship.
 
-The logic root lives outside tensilelite, so this test skips when tensilelite is
+The logic root lives outside tensilelite, so this skips when tensilelite is
 checked out or installed on its own.
 """
 
@@ -40,8 +38,8 @@ _LOGIC_ROOT = (
 
 
 def _mentionsCustomKernel(path: Path) -> bool:
-    # Cheap pre-filter: only ~1% of logic files reference a custom kernel, and
-    # parsing every one of them costs far more than a line scan.
+    # Few logic files reference a custom kernel, and parsing them all costs far
+    # more than a line scan.
     with open(path, encoding="utf-8", errors="ignore") as f:
         for line in f:
             stripped = line.strip()
@@ -67,10 +65,9 @@ def isolated_valid_parameters():
     """Keep ``getCustomKernelConfig``'s global side effect inside this test.
 
     It folds ``newMIValidParameters`` into the process-wide ``validParameters``
-    registry (CustomKernels.py). That is harmless during a build, which does it
-    once and exits, but in a test session it leaks into everything that runs
-    afterwards -- the registry and parameter-type tests assert on that dict's
-    exact contents and start failing depending on collection order.
+    registry. Harmless in a build, but in a test session it leaks into whatever
+    runs next: the registry and parameter-type tests assert on that dict's exact
+    contents.
     """
     from Tensile.Common.ValidParameters import validParameters
 
@@ -89,11 +86,10 @@ def test_shipped_logic_only_references_compatible_custom_kernels(
 
     incompatible = defaultdict(list)
     checked = 0
-    # Far fewer distinct kernels are referenced than there are solutions, and
-    # each lookup re-reads and re-parses a whole .s file. Cache per name: the
-    # embedded ProblemType is all this sweep reads, and InternalSupportParams --
-    # the only part of the config that varies with the solution -- cannot
-    # affect it.
+    # Each lookup re-reads and re-parses a whole .s file, and far fewer distinct
+    # kernels are referenced than there are solutions. Caching per name is safe:
+    # this reads only the embedded ProblemType, which InternalSupportParams --
+    # the one part of the config that varies per solution -- cannot affect.
     configs = {}
     for path in files:
         problemType, solutions = _customSolutions(readYAML(str(path)))
@@ -127,6 +123,6 @@ def test_shipped_logic_only_references_compatible_custom_kernels(
             f"{sum(len(v) for v in incompatible.values())} shipped solution(s) "
             f"reference a custom kernel that cannot service the logic's "
             f"ProblemType:\n{report}\n"
-            "Remove the solution from the logic file (see ROCm/rocm-libraries"
-            "#11280) or use a kernel whose custom.config covers it."
+            "Remove the solution from the logic file, or use a kernel whose "
+            "custom.config covers it."
         )
