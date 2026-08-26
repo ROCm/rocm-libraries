@@ -236,12 +236,24 @@ target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 # header so the provider's public C API calls bind the _impl entry points exported
 # by libMIOpen_private.so. This mirrors how MIOpen_private itself is built (a
 # force-included src/private/miopen_private_rename.h) and keeps the provider sources
-# free of _impl spellings. PUBLIC so the -include also reaches the unit-test targets,
-# which compile the provider headers. With the split OFF nothing is force-included
-# and the provider calls the public C API unchanged.
+# free of _impl spellings. PUBLIC so the force-include also reaches the unit-test
+# targets, which compile the provider headers. With the split OFF nothing is
+# force-included and the provider calls the public C API unchanged.
+#
+# The header is named without a directory: it resolves through the PUBLIC include
+# directory set above, which keeps the build-machine path -- and any space in it --
+# out of a flag that SHELL: splits on spaces. Force-include is spelled -include by
+# GNU-style drivers and /FI by MSVC-style ones (cl, clang-cl), and both accept the
+# filename as a separate argument.
 if(TARGET MIOpen_private)
+    if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        set(miopen_provider_force_include "/FI")
+    else()
+        set(miopen_provider_force_include "-include")
+    endif()
     target_compile_options(miopen_plugin_impl PUBLIC
-        "SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/MiopenApiPrivateRename.hpp")
+        "SHELL:${miopen_provider_force_include} MiopenApiPrivateRename.hpp")
+    unset(miopen_provider_force_include)
 endif()
 target_compile_options(miopen_plugin_impl PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
 set_target_properties(miopen_plugin_impl PROPERTIES

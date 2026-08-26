@@ -587,19 +587,25 @@ def parse_renames(source: str, what: str = "rename header") -> dict[str, str]:
     return out
 
 
-def describe_git_failure(repo_root: Path, rel: str, stderr: bytes) -> str:
-    """Say why git could not produce HEAD:<rel>.
+def describe_git_failure(repo_root: Path, rel: str, stderr: bytes) -> tuple[bool, str]:
+    """Say why git could not produce HEAD:<rel>, and whether that is fatal.
 
     These causes are not interchangeable. A path the commit does not carry is a
     legitimately absent artifact and skipping it costs nothing. A path the commit
     *does* carry whose blob git cannot materialize -- a blobless clone whose
-    promisor fetch failed -- is a broken checkout in which this gate silently
-    stops checking a file that is under test. Reporting both as "absent" would
-    make the second indistinguishable from the first in the log.
+    promisor fetch failed -- is a broken checkout in which this gate would
+    otherwise stop checking a file that is under test, and go green doing it.
+    That one is fatal: the drift this gate exists to catch links cleanly and
+    corrupts arguments at run time, so a broken checkout must be repaired and
+    the job rerun, not quietly narrowed. Returns (fatal, reason).
+
+    Only the case git positively confirms is escalated. If ls-tree cannot answer
+    -- it errors, or git is gone -- the cause is ambiguous and stays a skip,
+    because a false failure on every tarball build would be its own outage.
     """
     text = stderr.decode("utf-8", "replace").lower()
     if "not a git repository" in text:
-        return "not on disk, and the source root is not a git checkout"
+        return False, "not on disk, and the source root is not a git checkout"
     try:
         listed = subprocess.run(
             ["git", "-C", str(repo_root), "ls-tree", "--name-only", "HEAD", "--", rel],
@@ -609,12 +615,14 @@ def describe_git_failure(repo_root: Path, rel: str, stderr: bytes) -> str:
     except OSError:
         listed = None
     if listed is not None and listed.returncode == 0 and listed.stdout.strip():
-        return (
-            "tracked at HEAD but its content could not be read; expect this when a"
-            " blobless clone's promisor fetch fails, and note that it leaves the"
-            " file unchecked rather than absent"
+        detail = stderr.decode("utf-8", "replace").strip() or "(git printed nothing)"
+        return True, (
+            "tracked at HEAD but its content could not be read, so this checkout"
+            " cannot be checked for drift; expect this when a blobless clone's"
+            " promisor fetch fails, and retry the job or refetch the blob."
+            f" git cat-file said: {detail}"
         )
-    return "not tracked at HEAD"
+    return False, "not tracked at HEAD"
 
 
 def read_tracked_source(
@@ -630,6 +638,9 @@ def read_tracked_source(
     file is only treated as genuinely absent once git confirms the commit does
     not track it. Returns None in that case, and the caller skips the check,
     recording why in ``reasons`` so the skip line can name the actual cause.
+    Raises AbiError instead when git confirms the commit *does* track the file
+    and still cannot produce it, which is a broken checkout rather than an
+    absent artifact.
     """
     if path.is_file():
         return path.read_text(encoding="utf-8")
@@ -653,7 +664,10 @@ def read_tracked_source(
         unavailable(rel, "not on disk, and git is unavailable to read it from HEAD")
         return None
     if blob.returncode != 0:
-        unavailable(rel, describe_git_failure(repo_root, rel, blob.stderr))
+        fatal, reason = describe_git_failure(repo_root, rel, blob.stderr)
+        if fatal:
+            raise AbiError(f"{rel}: {reason}")
+        unavailable(rel, reason)
         return None
     print(f"NOTE: {rel} is not checked out; reading it from HEAD")
     return blob.stdout.decode("utf-8")
@@ -1005,9 +1019,11 @@ def cmd_check_headers(args) -> int:
     # A checkout that does not carry projects/miopen -- a provider-only PR,
     # whose pre-commit lane materializes only the projects its diff touches --
     # has no reference for this check to compare the provider against, so it is
-    # not a finding. Unreadable is never itself the drift the gate catches:
-    # drift is a content mismatch between files that are all part of the commit,
-    # and a file git cannot produce is one this commit does not carry.
+    # not a finding. Reaching here means git confirmed the commit does not carry
+    # the file, so it is absent rather than unreadable: a checkout that carries
+    # it but cannot produce it has already failed hard above. Absence is never
+    # itself the drift the gate catches, since drift is a content mismatch
+    # between files that are all part of the commit.
     miopen_sources = {
         f"{miopen_rel}/include/miopen/miopen.h": public_source,
         f"{miopen_rel}/src/private/miopen_impl.h": impl_source,
