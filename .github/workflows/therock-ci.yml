@@ -148,7 +148,11 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.linux_projects != '[]' }}
+    if: >-
+      ${{
+        (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:single-arch')) &&
+        needs.setup.outputs.linux_projects != '[]'
+      }}
     strategy:
       fail-fast: false
       matrix:
@@ -176,7 +180,11 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.windows_projects != '[]' }}
+    if: >-
+      ${{
+        (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:single-arch')) &&
+        needs.setup.outputs.windows_projects != '[]'
+      }}
     strategy:
       fail-fast: false
       matrix:
