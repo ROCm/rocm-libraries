@@ -496,7 +496,21 @@ class TileInfo:
       # strip's K rows, so its load math is cooperative over exactly that many
       # waves (not all numWaves -- the other axis' waves need the same data).
       _isTLU1 = isinstance(getattr(gr_cfg, "tag", None), GRTag_TLU1)
-      _grLoadWaves = self.grWavesPerStrip if _isTLU1 else self.numWaves
+      # Waves that COOPERATE ON THE FETCH.  Distinct from grWavesPerStrip, which
+      # counts the waves that share a strip when reading it back and which picks
+      # the bank-conflict layout -- that stays as it is.  An operand's contents
+      # depend on one axis only, so the other axis' waves need the same bytes in
+      # LDS but do not have to fetch them themselves.  Spreading the fetch over
+      # every wave covers the strip exactly once instead of once per other-axis
+      # wave.  Guarded on the strip's load blocks dividing evenly, else a wave
+      # would own a fractional block.
+      _coopWaves = self.grWavesPerStrip if _isTLU1 else self.numWaves
+      if _isTLU1 and self.grWavesPerStrip > 1 and self.numWaves > self.grWavesPerStrip:
+        _stripBytes = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
+        if _stripBytes % gr_cfg.bytesPerLoad(self.numWaves) == 0:
+          _coopWaves = self.numWaves
+      self.grCoopWaves = _coopWaves
+      _grLoadWaves = _coopWaves
       # Effective wave count for GR cooperative-load math (numGRPerSubtile,
       # localGRGranularity).  TLU=1 waves partition free-dim strips instead of
       # cooperating on K, so their per-strip load math is single-wave.
