@@ -26,6 +26,7 @@
 
 #include "../rocsparse_sptrsm_descr.hpp"
 #include "rocsparse_coosm.hpp"
+#include "rocsparse_cscsm.hpp"
 #include "rocsparse_csrsm.hpp"
 
 template <>
@@ -192,6 +193,33 @@ namespace rocsparse
         }
 
         case rocsparse_format_csc:
+        {
+            switch(sptrsm_stage)
+            {
+            case rocsparse_sptrsm_stage_analysis:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_analysis_buffer_size(
+                    handle, Y->cols, A_op, X_op, alpha, A, Z, p_buffer_size_in_bytes, nullptr));
+                return rocsparse_status_success;
+            }
+
+            case rocsparse_sptrsm_stage_compute:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_solve_buffer_size(
+                    handle, Y->cols, A_op, X_op, alpha, A, Z, p_buffer_size_in_bytes, nullptr));
+                if(is_Y_column_order)
+                {
+                    p_buffer_size_in_bytes[0] += Z_data_size_in_nbytes;
+                }
+                return rocsparse_status_success;
+            }
+            }
+
+            // LCOV_EXCL_START
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+            // LCOV_EXCL_STOP
+        }
+
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:

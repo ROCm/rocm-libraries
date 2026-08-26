@@ -129,30 +129,6 @@ namespace rocsparse_clients
             for(int64_t batch_index = 0; batch_index < batch_count; ++batch_index)
             {
                 J ap = -1, sp = -1;
-                //	    std::cout << "A_stride " << A.get_stride() << std::endl;
-                //	    std::cout << "Y_stride " << Y.get_batch_stride() << std::endl;
-                //	    host.ptr.print(std::cout);
-                //	    host.ptr.print(std::cout);
-                //	hY.print();
-                //	exit(1);
-#if 0
-	    std::cout << "host.nnz " << host.nnz << std::endl;
-	    std::cout << "host.nnz2 " << host.ptr[host.m] - host.base << std::endl;
-	    std::cout << "RESULTS HOST CSRSM " << host.val[host.ptr[host.m] - host.base]<< std::endl;
-	    std::cout << "RESULTS HOST CSRSM y0" << hY[0] << std::endl;
-	    std::cout << "RESULTS HOST CSRSM alpha " << halpha[0] << std::endl;
-	    for (int i=hY.m-2;i<hY.m;++i)
-	      {
-		for (int j=0;j<hY.n;++j)
-		  {
-		    std::cout <<" " << hY[(hY.order == rocsparse_order_column) ? (j*hY.ld + i):(i*hY.ld + j)] ;
-		  }
-		std::cout << " " << std::endl;
-	      }
-	    std::cout << "RESULTS HOST CSRSM Y last " << hY[hY.m-1]<< std::endl;
-	    host.val.print(std::cout);
-	    exit(1);
-#endif
                 host_csrsm<I, J, T>(hY.m,
                                     hY.n,
                                     host.nnz,
@@ -170,30 +146,36 @@ namespace rocsparse_clients
                                     host.base,
                                     &ap,
                                     &sp);
-#if 0
-	    for (int i=hY.m-2;i<hY.m;++i)
-	      {
-		for (int j=0;j<hY.n;++j)
-		  {
-		    std::cout <<" " << hY[(hY.order == rocsparse_order_column) ? (j*hY.ld + i):(i*hY.ld + j)] ;
-		  }
-		std::cout << " " << std::endl;
-	      }
+                symbolic[batch_index] = ap;
+                exact[batch_index]    = sp;
+            }
 
-	    for (int i=hY.m-2;i<hY.m;++i)
-	      {
-		std::cout << "LINE A i " << i << std::endl;
-		for (int k=host.ptr[i]-host.base;k<host.ptr[i+1]-host.base;++k)
-		  {
-		    int j = host.ind[k]-host.base;
-		    auto v = host.val[k];
-		    std::cout << "      " << j << " " << v << std::endl;
-		  }
-	      }
+            break;
+        }
 
-	    std::cout << "RESULTS HOST CSRSM----> " << hY[hY.m-1]<< std::endl;
-	    exit(1);
-#endif
+        case rocsparse_format_csc:
+        {
+            auto& host = A.template as<rocsparse_format_csc>().host();
+            for(int64_t batch_index = 0; batch_index < batch_count; ++batch_index)
+            {
+                J ap = -1, sp = -1;
+                host_cscsm<I, J, T>(hY.m,
+                                    hY.n,
+                                    host.nnz,
+                                    A_op,
+                                    rocsparse_operation_none,
+                                    *(halpha + batch_index * alpha_batch_stride),
+                                    host.ptr,
+                                    host.ind,
+                                    host.val.data() + batch_index * A.get_stride(),
+                                    hY.data() + batch_index * Y.get_batch_stride(),
+                                    hY.ld,
+                                    hY.order,
+                                    A_diag,
+                                    A_uplo,
+                                    host.base,
+                                    &ap,
+                                    &sp);
                 symbolic[batch_index] = ap;
                 exact[batch_index]    = sp;
             }
@@ -206,7 +188,6 @@ namespace rocsparse_clients
         case rocsparse_format_sell:
         case rocsparse_format_bell:
         case rocsparse_format_coo_aos:
-        case rocsparse_format_csc:
         {
             break;
         }

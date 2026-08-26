@@ -55,11 +55,6 @@ Definitions:
   - &alpha_range_nightly_one
     - { alpha:   1.0,  alphai:  0.0 }
 
-  - &alpha_range_stress
-    - { alpha:   1.0, alphai:  0.0}
-
-
-
 
 Tests:
 - name: sptrsm
@@ -82,7 +77,7 @@ Tests:
   batch_count_C: [1,2,8]
   batch_count_B: [-1,1]
   batch_count_A: [-1,1]
-  formatA: [rocsparse_format_csr, rocsparse_format_coo]
+  formatA: [rocsparse_format_csr, rocsparse_format_coo, rocsparse_format_csc]
   direction: [rocsparse_direction_row]
 
 - name: sptrsm_bad_arg
@@ -110,7 +105,7 @@ Tests:
   batch_count_C: [2, 4]
   batch_count_B: [-1,1]
   batch_count_A: [-1,1]
-  formatA: [rocsparse_format_csr, rocsparse_format_coo]
+  formatA: [rocsparse_format_csr, rocsparse_format_coo, rocsparse_format_csc]
   direction: [rocsparse_direction_column]
 
 - name: sptrsm
@@ -206,7 +201,7 @@ Tests:
   batch_count_C: [2]
   batch_count_B: [-1]
   batch_count_A: [1]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   direction: [rocsparse_direction_row]
 
 
@@ -230,7 +225,7 @@ Tests:
   batch_count_C: [32]
   batch_count_B: [-1]
   batch_count_A: [-1]
-  formatA: [rocsparse_format_coo]
+  formatA: [rocsparse_format_coo, rocsparse_format_csc]
   direction: [rocsparse_direction_row]
 
 - name: sptrsm
@@ -280,7 +275,7 @@ Tests:
   batch_count_C: [3]
   batch_count_B: [-1, 1]
   batch_count_A: [-1, 1]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   direction: [rocsparse_direction_row]
 
 - name: sptrsm_file
@@ -305,7 +300,7 @@ Tests:
   batch_count_C: [3]
   batch_count_B: [1]
   batch_count_A: [-1, 1]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   direction: [rocsparse_direction_row]
 
 
@@ -330,6 +325,7 @@ Tests:
   batch_count_C: [4]
   batch_count_B: [1]
   batch_count_A: [-1, 1]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo]
   graph_test: true
 
 

@@ -419,6 +419,8 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                           rocsparse_error*            p_error)
 {
 
+    rocsparse_host_assert(A_load_conjugate && op_A != rocsparse_operation_none,
+                          "That's not the supposed configuration");
     //
     // It is assumed that B is transposed and has dimension nrhs x M
     //
@@ -466,11 +468,10 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
         buffer_size_in_bytes -= nbytes;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                          op_A,
-
+                                                         A_load_conjugate,
                                                          alpha->data_type,
                                                          alpha->const_values,
                                                          alpha->batch_stride,
-
                                                          A,
                                                          b,
                                                          y,

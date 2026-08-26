@@ -87,6 +87,7 @@ namespace rocsparse
 
     inline rocsparse_status csrsv_solve(rocsparse_handle            handle,
                                         rocsparse_operation         trans,
+                                        bool                        operation_conjugate,
                                         rocsparse_datatype          alpha_datatype,
                                         const void*                 alpha,
                                         int64_t                     alpha_stride,
@@ -109,7 +110,7 @@ namespace rocsparse
                                               policy,
                                               csrsv_info,
                                               buffer,
-                                              false));
+                                              operation_conjugate));
 
         return rocsparse_status_success;
     }

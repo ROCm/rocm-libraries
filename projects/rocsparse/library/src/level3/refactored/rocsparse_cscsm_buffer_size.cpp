@@ -44,7 +44,18 @@ rocsparse_status rocsparse::cscsm_analysis_buffer_size(rocsparse_handle         
     _rocsparse_spmat_descr A_csr(A, rocsparse_format_csr, &descr_csr, A->info);
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_buffer_size(
-        handle, nrhs, op_A, op_B, alpha, &A_csr, X, p_buffer_size_in_bytes, p_error));
+        handle,
+        nrhs,
+
+        (op_A == rocsparse_operation_none) ? rocsparse_operation_transpose
+                                           : rocsparse_operation_none,
+
+        op_B,
+        alpha,
+        &A_csr,
+        X,
+        p_buffer_size_in_bytes,
+        p_error));
 
     return rocsparse_status_success;
 }
@@ -94,33 +105,11 @@ rocsparse_status rocsparse::cscsm_buffer_size(rocsparse_handle            handle
 {
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_analysis_buffer_size(
-        handle,
-        nrhs,
-
-        (op_A == rocsparse_operation_none) ? rocsparse_operation_transpose
-                                           : rocsparse_operation_none,
-
-        op_B,
-        alpha,
-        A,
-        X,
-        p_buffer_size_in_bytes,
-        p_error));
+        handle, nrhs, op_A, op_B, alpha, A, X, p_buffer_size_in_bytes, p_error));
 
     size_t buffer_size_in_bytes;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_solve_buffer_size(handle,
-                                                                 nrhs,
-
-                                                                 (op_A == rocsparse_operation_none)
-                                                                     ? rocsparse_operation_transpose
-                                                                     : rocsparse_operation_none,
-
-                                                                 op_B,
-                                                                 alpha,
-                                                                 A,
-                                                                 X,
-                                                                 &buffer_size_in_bytes,
-                                                                 p_error));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_solve_buffer_size(
+        handle, nrhs, op_A, op_B, alpha, A, X, &buffer_size_in_bytes, p_error));
 
     p_buffer_size_in_bytes[0] = std::max(p_buffer_size_in_bytes[0], buffer_size_in_bytes);
 
