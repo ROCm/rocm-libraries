@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <hipblaslt/client/MatmulTestCase.hpp>
+#include <hipblaslt/client/MatmulPreparation.hpp>
 
 #include <gtest/gtest.h>
 
@@ -28,6 +28,27 @@ namespace
         arguments.ldd[0] = 9;
         arguments.lde[0] = 10;
         return arguments;
+    }
+
+    hipblaslt::client::MatmulPreparation
+        prepare(const Arguments& arguments, bool swizzleA = false, bool swizzleB = false)
+    {
+        const auto cases           = hipblaslt::client::normalizeMatmulCases(arguments);
+        const auto computeType     = computeTypeToRealDataType(arguments.compute_type);
+        const auto coefficientType = arguments.a_type == HIP_C_32F || arguments.a_type == HIP_C_64F
+                                         ? arguments.a_type
+                                         : computeType;
+        return hipblaslt::client::prepareMatmulCases(arguments,
+                                                     cases,
+                                                     arguments.a_type,
+                                                     arguments.b_type,
+                                                     arguments.c_type,
+                                                     computeType,
+                                                     coefficientType,
+                                                     arguments.d_type,
+                                                     swizzleA,
+                                                     swizzleB,
+                                                     false);
     }
 
     void expectMatrix(const hipblaslt::client::MatmulMatrix& matrix,
@@ -184,4 +205,62 @@ TEST(MatmulTestCase, RejectsInvalidSerializedGeometry)
     arguments.c_equal_d = true;
     arguments.d_type    = HIP_R_16F;
     EXPECT_THROW(hipblaslt::client::normalizeMatmulCases(arguments), std::invalid_argument);
+}
+
+TEST(MatmulPreparation, ComputesLogicalStorageAndScalarState)
+{
+    const auto preparation = prepare(baseArguments());
+
+    ASSERT_EQ(preparation.cases.size(), 1);
+    const auto& preparedCase = preparation.cases.front();
+    EXPECT_EQ(preparedCase.a.elements, 28);
+    EXPECT_EQ(preparedCase.b.elements, 40);
+    EXPECT_EQ(preparedCase.outputCopyElements, 45);
+    EXPECT_EQ(preparedCase.alpha.f32, 1.0f);
+    EXPECT_EQ(preparedCase.beta.f32, 0.0f);
+    EXPECT_EQ(preparation.rotatingBytes, 316);
+}
+
+TEST(MatmulPreparation, CountsPointerArrayStoragePerBatch)
+{
+    auto arguments        = baseArguments();
+    arguments.batch_mode  = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+    arguments.batch_count = 3;
+
+    const auto preparation = prepare(arguments);
+
+    ASSERT_EQ(preparation.cases.size(), 1);
+    EXPECT_EQ(preparation.cases.front().a.elements, 28);
+    EXPECT_EQ(preparation.cases.front().b.elements, 40);
+    EXPECT_EQ(preparation.rotatingBytes, 948);
+}
+
+TEST(MatmulPreparation, IsolatesSwizzledDeviceGeometry)
+{
+    auto arguments        = baseArguments();
+    arguments.batch_count = 4;
+    arguments.stride_a[0] = 29;
+
+    const auto preparation = prepare(arguments, true);
+
+    ASSERT_EQ(preparation.cases.size(), 1);
+    const auto& preparedA = preparation.cases.front().a;
+    EXPECT_EQ(preparedA.batchStride, 512);
+    EXPECT_EQ(preparedA.elements, 2048);
+    EXPECT_TRUE(preparedA.replacedUnsupportedBatchStride);
+}
+
+TEST(MatmulPreparation, MakesScaleAlphaVectorAUnitScalarEpilogue)
+{
+    auto arguments              = baseArguments();
+    arguments.alpha             = 3.0;
+    arguments.scaleAlpha_vector = true;
+
+    const auto preparation = prepare(arguments);
+
+    ASSERT_EQ(preparation.cases.size(), 1);
+    const auto& preparedCase = preparation.cases.front();
+    EXPECT_EQ(preparedCase.scaleAlphaElements, 3);
+    EXPECT_EQ(preparedCase.alpha.f32, 1.0f);
+    EXPECT_TRUE(preparedCase.epilogueEnabled);
 }

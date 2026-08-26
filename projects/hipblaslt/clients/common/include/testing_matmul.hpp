@@ -36,6 +36,7 @@
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#include <hipblaslt/client/MatmulPreparation.hpp>
 #include <hipblaslt/client/MatmulTestCase.hpp>
 #include <hipblaslt/host_validation/Epilogue.hpp>
 #include <hipblaslt/host_validation/HipblasltReferenceGemm.hpp>
@@ -158,139 +159,6 @@ hipblasLtMatmulMatrixScale_t matmulScaleMode(hipblaslt_scaling_format format)
     }
 }
 
-hipblasLtEpilogue_t matmulEpilogue(const Arguments& arg)
-{
-    hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_DEFAULT;
-    switch(arg.activation_type)
-    {
-    case hipblaslt_activation_type::relu:
-        epilogue = arg.bias_vector ? HIPBLASLT_EPILOGUE_RELU_BIAS : HIPBLASLT_EPILOGUE_RELU;
-        break;
-    case hipblaslt_activation_type::gelu:
-        epilogue = arg.bias_vector ? HIPBLASLT_EPILOGUE_GELU_BIAS : HIPBLASLT_EPILOGUE_GELU;
-        break;
-    case hipblaslt_activation_type::swish:
-        epilogue
-            = arg.bias_vector ? HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT : HIPBLASLT_EPILOGUE_SWISH_EXT;
-        break;
-    case hipblaslt_activation_type::clamp:
-        epilogue
-            = arg.bias_vector ? HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT : HIPBLASLT_EPILOGUE_CLAMP_EXT;
-        break;
-    default:
-        if(arg.bias_vector)
-            epilogue = HIPBLASLT_EPILOGUE_BIAS;
-        break;
-    }
-
-    if(arg.gradient)
-    {
-        switch(epilogue)
-        {
-        case HIPBLASLT_EPILOGUE_BIAS:
-            if(arg.bias_source == hipblaslt_bias_source::a)
-                epilogue = HIPBLASLT_EPILOGUE_BGRADA;
-            else if(arg.bias_source == hipblaslt_bias_source::b)
-                epilogue = HIPBLASLT_EPILOGUE_BGRADB;
-            break;
-        case HIPBLASLT_EPILOGUE_GELU:
-            epilogue = HIPBLASLT_EPILOGUE_DGELU;
-            break;
-        case HIPBLASLT_EPILOGUE_GELU_BIAS:
-            epilogue = HIPBLASLT_EPILOGUE_DGELU_BGRAD;
-            break;
-        case HIPBLASLT_EPILOGUE_RELU:
-            epilogue = HIPBLASLT_EPILOGUE_DRELU;
-            break;
-        case HIPBLASLT_EPILOGUE_RELU_BIAS:
-            epilogue = HIPBLASLT_EPILOGUE_DRELU_BGRAD;
-            break;
-        default:
-            break;
-        }
-        if(epilogue == HIPBLASLT_EPILOGUE_DGELU || epilogue == HIPBLASLT_EPILOGUE_DGELU_BGRAD
-           || epilogue == HIPBLASLT_EPILOGUE_DRELU
-           || epilogue == HIPBLASLT_EPILOGUE_DRELU_BGRAD)
-        {
-            if(!arg.use_e)
-                throw std::invalid_argument(
-                    "Gradient ReLU/GELU matmul requires auxiliary E storage.");
-        }
-    }
-
-    if(!arg.use_e)
-        return epilogue;
-    switch(epilogue)
-    {
-    case HIPBLASLT_EPILOGUE_RELU:
-        return HIPBLASLT_EPILOGUE_RELU_AUX;
-    case HIPBLASLT_EPILOGUE_RELU_BIAS:
-        return HIPBLASLT_EPILOGUE_RELU_AUX_BIAS;
-    case HIPBLASLT_EPILOGUE_GELU:
-        return HIPBLASLT_EPILOGUE_GELU_AUX;
-    case HIPBLASLT_EPILOGUE_GELU_BIAS:
-        return HIPBLASLT_EPILOGUE_GELU_AUX_BIAS;
-    case HIPBLASLT_EPILOGUE_CLAMP_EXT:
-        return HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT;
-    case HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
-        return HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT;
-    case HIPBLASLT_EPILOGUE_DGELU:
-    case HIPBLASLT_EPILOGUE_DGELU_BGRAD:
-    case HIPBLASLT_EPILOGUE_DRELU:
-    case HIPBLASLT_EPILOGUE_DRELU_BGRAD:
-        return epilogue;
-    default:
-        throw std::invalid_argument("Selected matmul epilogue does not support auxiliary E.");
-    }
-}
-
-void calculateKforSwizzling(
-    hipDataType datatype, const Arguments& arg, size_t& MiK, size_t& MiKv, size_t& PackK)
-{
-    switch(datatype)
-    {
-    case HIP_R_32F:
-        if(arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32)
-        {
-            MiK  = 8;
-            MiKv = 2;
-        }
-        else
-        {
-            MiK  = 4;
-            MiKv = 1;
-        }
-        break;
-    case HIP_R_64F:
-        MiK  = 4;
-        MiKv = 1;
-        break;
-    case HIP_R_16F:
-    case HIP_R_16BF:
-        MiK  = 16;
-        MiKv = 4;
-        break;
-    case HIP_R_8I:
-    case HIP_R_8F_E5M2_FNUZ:
-    case HIP_R_8F_E4M3_FNUZ:
-    case HIP_R_8F_E4M3:
-    case HIP_R_8F_E5M2:
-        MiK  = 32;
-        MiKv = 8;
-        break;
-    case HIP_R_4F_E2M1:
-        // For fp4 viewed as uint8: matches shuffle_weight with layout=(16,16)
-        // BK=32 bytes, K=16 bytes, BK/K=2
-        MiK  = 16; // K inner block = 16 bytes
-        MiKv = 8;
-        break;
-    default:
-        throw std::runtime_error("unsupported datatype in calculateKforSwizzling");
-    }
-
-    PackK = 16 / MiKv / realDataTypeSize(datatype);
-}
-
 template <typename T>
 void swizzle_tensor(T*               dst,
                     const T*         src,
@@ -311,9 +179,12 @@ void swizzle_tensor(T*               dst,
     using roc::host_validation::Tensor;
 
     // currently, if A then it means MiM = 16, if B then it means MiN = 16
-    size_t MiM_N = 16;
-    size_t MiK = 0, MiKv = 0, PackK = 0;
-    calculateKforSwizzling(datatype, arg, MiK, MiKv, PackK);
+    constexpr size_t MiM_N = 16;
+    const auto parameters
+        = hipblaslt::client::matmulSwizzleParameters(datatype, arg.compute_type);
+    const size_t MiK   = parameters.innerBlock;
+    const size_t MiKv  = parameters.vectorWidth;
+    const size_t PackK = parameters.packingFactor;
     const size_t numElements = b * m_n * k;
     const ScalarType tensorType = datatype == HIP_R_4F_E2M1
                                       ? ScalarType::UInt8
@@ -863,19 +734,69 @@ void testing_matmul(const Arguments& arg)
                              real_aux_type);
 }
 
-void testing_matmul_with_bias(
-    const Arguments&                                  arg,
-    std::span<const hipblaslt::client::MatmulTestCase> matmulCases,
-    hipDataType                                       TiA,
-    hipDataType                                       TiB,
-    hipDataType                                       To,
-    hipDataType                                       Tc,
-    hipDataType                                       TciA,
-    hipDataType                                       TciB,
-    hipDataType                                       Tbias,
-    hipDataType                                       Taux)
+void testing_matmul_with_bias(const Arguments&                                   arg,
+                              std::span<const hipblaslt::client::MatmulTestCase> matmulCases,
+                              hipDataType                                        TiA,
+                              hipDataType                                        TiB,
+                              hipDataType                                        To,
+                              hipDataType                                        Tc,
+                              hipDataType                                        TciA,
+                              hipDataType                                        TciB,
+                              hipDataType                                        Tbias,
+                              hipDataType                                        Taux)
 {
     const auto& firstCase = matmulCases.front();
+
+    const hipblasOperation_t   transA           = firstCase.operationA;
+    const hipblasOperation_t   transB           = firstCase.operationB;
+    const hipblasLtBatchMode_t batchMode        = firstCase.batchMode;
+    const bool                 do_grouped_gemm  = arg.grouped_gemm > 0;
+    const int32_t              problem_count    = static_cast<int32_t>(matmulCases.size());
+    const hipDataType          Talpha           = (TiA == HIP_C_32F || TiA == HIP_C_64F) ? TiA : Tc;
+    const bool                 do_swizzle_a     = arg.swizzle_a && isSwizzleSupported(TiA);
+    const bool                 do_swizzle_b     = arg.swizzle_b && isSwizzleSupported(TiB);
+    const bool                 mx_use_rocroller = MXUseRocroller();
+
+    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+    {
+        if(arg.scaleA != hipblaslt_scaling_format::none
+           && arg.scaleA != hipblaslt_scaling_format::Scalar)
+        {
+            hipblaslt_cout << "Only Tensorwide scaling is supported for General Batched GEMM"
+                           << std::endl;
+            return;
+        }
+        if(arg.scaleB != hipblaslt_scaling_format::none
+           && arg.scaleB != hipblaslt_scaling_format::Scalar)
+        {
+            hipblaslt_cout << "Only Tensorwide scaling is supported for General Batched GEMM"
+                           << std::endl;
+            return;
+        }
+    }
+
+    auto  preparation       = hipblaslt::client::prepareMatmulCases(arg,
+                                                                    matmulCases,
+                                                                    TiA,
+                                                                    TiB,
+                                                                    To,
+                                                                    Tc,
+                                                                    Talpha,
+                                                                    Tbias,
+                                                                    do_swizzle_a,
+                                                                    do_swizzle_b,
+                                                                    mx_use_rocroller);
+    auto& preparedCases     = preparation.cases;
+    auto& firstPreparedCase = preparedCases.front();
+    for(const auto& preparedCase : preparedCases)
+    {
+        if(preparedCase.a.replacedUnsupportedBatchStride)
+            hipblaslt_cerr << "Warning: swizzle_a does not yet support arbitrary stride_a!"
+                           << std::endl;
+        if(preparedCase.b.replacedUnsupportedBatchStride)
+            hipblaslt_cerr << "Warning: swizzle_b does not yet support arbitrary stride_b!"
+                           << std::endl;
+    }
 
     double gpu_time_used, cpu_time_used, gpu_mem_gbytes;
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
@@ -888,38 +809,8 @@ void testing_matmul_with_bias(
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_end));
 
-    const hipblasOperation_t transA = firstCase.operationA;
-    const hipblasOperation_t transB = firstCase.operationB;
-
-    // If input type is complex then alpha is set to complex datatype else compute type 
-    hipDataType Talpha = (TiA == HIP_C_32F || TiA == HIP_C_64F) ?  TiA : Tc;
-
-    const bool    do_grouped_gemm = arg.grouped_gemm > 0;
-    const int32_t problem_count   = static_cast<int32_t>(matmulCases.size());
-    const hipblasLtBatchMode_t batchMode = firstCase.batchMode;
-
     int64_t rotating = arg.rotating * 1024 * 1024;
 
-    struct PreparedMatmulOperand
-    {
-        size_t  elements      = 0;
-        int64_t batchStride   = 0;
-        size_t  scaleElements = 0;
-    };
-    struct PreparedMatmulCase
-    {
-        PreparedMatmulOperand a;
-        PreparedMatmulOperand b;
-        size_t                outputCopyElements = 0;
-        size_t                biasElements       = 0;
-        size_t                scaleAlphaElements = 0;
-        hipblasLtEpilogue_t   epilogue           = HIPBLASLT_EPILOGUE_DEFAULT;
-        bool                  epilogueEnabled    = false;
-        float                 activation0        = 0.0f;
-        float                 activation1        = 0.0f;
-        computeTypeInterface  alpha{};
-        computeTypeInterface  beta{};
-    };
     struct MatmulRuntimeCase
     {
         void*                   alphaPointer = nullptr;
@@ -928,10 +819,8 @@ void testing_matmul_with_bias(
         hipblasLtMatrixLayout_t matrixC      = nullptr;
         hipblasLtMatrixLayout_t matrixD      = nullptr;
     };
-    std::vector<PreparedMatmulCase> preparedCases(problem_count);
-    std::vector<MatmulRuntimeCase>  runtimeCases(problem_count);
-    const auto&                     firstPreparedCase = preparedCases.front();
-    const auto&                     firstRuntimeCase  = runtimeCases.front();
+    std::vector<MatmulRuntimeCase> runtimeCases(problem_count);
+    const auto&                    firstRuntimeCase = runtimeCases.front();
 
     std::vector<std::vector<hipblasLtMatmulDesc_t>> matmul;
 
@@ -951,235 +840,20 @@ void testing_matmul_with_bias(
     // of converting the MX data to float again.
     std::vector<std::vector<float>> refA, refB;
 
-    bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
-    bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
-    bool mx_use_rocroller = MXUseRocroller();
-
-    // Need to split into two for loop to calculate the rotating buffer
-    auto divideRoundUp = [](size_t value, size_t divisor) {
-        return value / divisor + static_cast<size_t>(value % divisor != 0);
-    };
-    int64_t totalRotatingSizeNeeded = 0;
-    for(int i = 0; i < problem_count; i++)
-    {
-        const auto& testCase = matmulCases[i];
-        auto&       preparedCase = preparedCases[i];
-        set_alpha_type(preparedCase.alpha, arg, Tc, TiA);
-        set_beta_type(preparedCase.beta, arg, Tc, TiA);
-
-        // Logical allocation and stride are also the device layout unless A is swizzled.
-        preparedCase.a.elements    = testCase.a.allocationElements;
-        preparedCase.a.batchStride = testCase.a.batchStride();
-        if(do_swizzle_a)
-        {
-            size_t MiM = 16, MiK = 0, __ = 0, PackK = 0;
-            calculateKforSwizzling(TiA, arg, MiK, __, PackK);
-            size_t  K_block = MiK * PackK;
-            int64_t stride_swizzle
-                = ((testCase.m + MiM - 1) / MiM) * MiM
-                  * ((testCase.k + K_block - 1) / K_block) * K_block;
-            if((testCase.batchCount > 1) && testCase.a.batchStride() != 0)
-            {
-                preparedCase.a.batchStride = stride_swizzle;
-
-                //TODO: support arbitrary stride_a for both hipblaslt-bench and hipblaslt-test when swizzled
-                if(testCase.a.batchStride()
-                           != testCase.a.leadingDimension() * testCase.a.columns()
-                   && testCase.a.batchStride() != stride_swizzle)
-                    hipblaslt_cerr << "Warning: swizzle_a does not yet support arbitrary stride_a!"
-                                   << std::endl;
-            }
-            preparedCase.a.elements = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY
-                             ? stride_swizzle
-                             : testCase.batchCount * stride_swizzle;
-        }
-
-        // Logical allocation and stride are also the device layout unless B is swizzled.
-        preparedCase.b.elements    = testCase.b.allocationElements;
-        preparedCase.b.batchStride = testCase.b.batchStride();
-        if(do_swizzle_b)
-        {
-            size_t MiN = 16, MiK = 0, __ = 0, PackK = 0;
-            calculateKforSwizzling(TiB, arg, MiK, __, PackK);
-            size_t  K_block = MiK * PackK;
-            int64_t stride_swizzle
-                = ((testCase.n + MiN - 1) / MiN) * MiN
-                  * ((testCase.k + K_block - 1) / K_block) * K_block;
-            if((testCase.batchCount > 1) && testCase.b.batchStride() != 0)
-            {
-                preparedCase.b.batchStride = stride_swizzle;
-
-                //TODO: support arbitrary stride_b for both hipblaslt-bench and hipblaslt-test when swizzled
-                if(testCase.b.batchStride()
-                           != testCase.b.leadingDimension() * testCase.b.columns()
-                   && testCase.b.batchStride() != stride_swizzle)
-                    hipblaslt_cerr << "Warning: swizzle_b does not yet support arbitrary stride_b!"
-                                   << std::endl;
-            }
-            preparedCase.b.elements = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY
-                             ? stride_swizzle
-                             : testCase.batchCount * stride_swizzle;
-        }
-        preparedCase.outputCopyElements = (arg.unit_check || arg.norm_check || arg.allclose_check)
-                             ? testCase.d.allocationElements
-                             : 0;
-        preparedCase.scaleAlphaElements = arg.scaleAlpha_vector ? testCase.m : 0;
-        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
-        {
-            if(arg.scaleA == hipblaslt_scaling_format::Scalar)
-                preparedCase.a.scaleElements = 1;
-            else if(arg.scaleA == hipblaslt_scaling_format::Vector)
-                preparedCase.a.scaleElements = testCase.m;
-            else if(isBlockScaling(arg.scaleA))
-            {
-                if(!mx_use_rocroller)
-                {
-                    // Account for padding in the swizzled MX layout
-                    size_t MXBlock_A   = blockSize(arg.scaleA);
-                    size_t dimk        = 128 / MXBlock_A;
-                    size_t scaleA_r
-                        = transA == HIPBLAS_OP_T
-                              ? divideRoundUp(static_cast<size_t>(testCase.a.rows()), MXBlock_A)
-                              : static_cast<size_t>(testCase.a.rows());
-                    size_t scaleA_c
-                        = transA == HIPBLAS_OP_T
-                              ? static_cast<size_t>(testCase.a.columns())
-                              : divideRoundUp(static_cast<size_t>(testCase.a.columns()), MXBlock_A);
-                    bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
-                    size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
-                    size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
-                    size_t padDim      = kAlongRowsA ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    preparedCase.a.scaleElements  = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
-                }
-                else
-                {
-                    preparedCase.a.scaleElements = scaleBufferSize(testCase.a.rows(), testCase.a.columns(), arg.scaleA);
-                }
-            }
-            else
-                preparedCase.a.scaleElements = 0;
-            if(arg.scaleB == hipblaslt_scaling_format::Scalar)
-                preparedCase.b.scaleElements = 1;
-            else if(arg.scaleB == hipblaslt_scaling_format::Vector)
-                preparedCase.b.scaleElements = testCase.n;
-            else if(isBlockScaling(arg.scaleB))
-            {
-                if(!mx_use_rocroller)
-                {
-                    // Account for padding in the swizzled MX layout
-                    size_t MXBlock_B   = blockSize(arg.scaleB);
-                    size_t dimk        = 128 / MXBlock_B;
-                    size_t scaleB_r
-                        = transB == HIPBLAS_OP_T
-                              ? static_cast<size_t>(testCase.b.rows())
-                              : divideRoundUp(static_cast<size_t>(testCase.b.rows()), MXBlock_B);
-                    size_t scaleB_c
-                        = transB == HIPBLAS_OP_T
-                              ? divideRoundUp(static_cast<size_t>(testCase.b.columns()), MXBlock_B)
-                              : static_cast<size_t>(testCase.b.columns());
-                    bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
-                    size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
-                    size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
-                    size_t padDim      = kAlongRowsB ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    preparedCase.b.scaleElements  = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
-                }
-                else
-                {
-                    preparedCase.b.scaleElements = scaleBufferSize(testCase.b.rows(), testCase.b.columns(), arg.scaleB);
-                }
-            }
-            else
-                preparedCase.b.scaleElements = 0;
-        }
-        else
-        {
-            if(arg.scaleA == hipblaslt_scaling_format::Scalar)
-                preparedCase.a.scaleElements = 1;
-            else if(arg.scaleA == hipblaslt_scaling_format::none)
-                preparedCase.a.scaleElements = 0;
-            else
-            {
-                hipblaslt_cout << "Only Tensorwide scaling is supported for General Batched GEMM"
-                               << std::endl;
-                return;
-            }
-            if(arg.scaleB == hipblaslt_scaling_format::Scalar)
-                preparedCase.b.scaleElements = 1;
-            else if(arg.scaleB == hipblaslt_scaling_format::none)
-                preparedCase.b.scaleElements = 0;
-            else
-            {
-                hipblaslt_cout << "Only Tensorwide scaling is supported for General Batched GEMM"
-                               << std::endl;
-                return;
-            }
-        }
-        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
-        {
-            if(arg.bias_vector)
-            {
-                if(arg.bias_source == hipblaslt_bias_source::a
-                   || arg.bias_source == hipblaslt_bias_source::d)
-                    preparedCase.biasElements = testCase.m;
-                else if(arg.bias_source == hipblaslt_bias_source::b)
-                    preparedCase.biasElements = testCase.n;
-
-                if(arg.bias_stride > 0)
-                {
-                    preparedCase.biasElements = arg.bias_stride * testCase.batchCount;
-                }
-            }
-            else
-            {
-                preparedCase.biasElements = 0;
-            }
-        }
-        else
-        {
-            preparedCase.biasElements = 0;
-        }
-        auto biasSize = preparedCase.biasElements * realDataTypeSize(Tbias);
-        int64_t sizeC = get_computeInterface(preparedCase.beta, Tc) == 0
-                            ? 0
-                            : testCase.c.allocationElements * sizeof(To);
-        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
-        {
-            totalRotatingSizeNeeded
-                += preparedCase.a.elements * realDataTypeSize(TiA)
-                   + preparedCase.b.elements * realDataTypeSize(TiB) + sizeC
-                   + testCase.d.allocationElements * realDataTypeSize(To)
-                   + testCase.auxiliaryAllocationElements() * realDataTypeSize(To) + biasSize
-                   + preparedCase.scaleAlphaElements * realDataTypeSize(Talpha)
-                   + preparedCase.a.scaleElements * realDataTypeSize(Talpha)
-                   + preparedCase.b.scaleElements * realDataTypeSize(Talpha);
-        }
-        else
-        {
-            // For General Batched GEMM, the Matrices aren't stored in a continuous buffer across batches.
-            // Hence each prepared operand allocation describes one batch.
-            totalRotatingSizeNeeded += preparedCase.a.elements * realDataTypeSize(TiA) * testCase.batchCount
-                                       + preparedCase.b.elements * realDataTypeSize(TiB) * testCase.batchCount
-                                       + sizeC * testCase.batchCount
-                                       + testCase.d.allocationElements * realDataTypeSize(To)
-                                             * testCase.batchCount
-                                       + biasSize + preparedCase.scaleAlphaElements * realDataTypeSize(Talpha)
-                                       + preparedCase.a.scaleElements * realDataTypeSize(Talpha)
-                                       + preparedCase.b.scaleElements * realDataTypeSize(Talpha);
-        }
-    }
-
-    gpu_mem_gbytes = static_cast<double>(totalRotatingSizeNeeded) / (1024 * 1024 * 1024);
+    gpu_mem_gbytes = static_cast<double>(preparation.rotatingBytes) / (1024 * 1024 * 1024);
 
     // Calculating block count
-    auto plan = hipblaslt_bench::compute_rotating_buffer_plan(
-        arg.adaptive, arg.max_iters, arg.cold_iters, arg.iters, rotating, totalRotatingSizeNeeded);
+    auto    plan        = hipblaslt_bench::compute_rotating_buffer_plan(arg.adaptive,
+                                                                        arg.max_iters,
+                                                                        arg.cold_iters,
+                                                                        arg.iters,
+                                                                        rotating,
+                                                                        preparation.rotatingBytes);
     int32_t block_count = plan.block_count;
     if(rotating > 0)
     {
         hipblaslt_cout << "Rotating buffer " << rotating / (1024 * 1024) << " MiB. "
-                       << "Needed Size: " << totalRotatingSizeNeeded / (1024 * 1024) << " MiB. "
+                       << "Needed Size: " << preparation.rotatingBytes / (1024 * 1024) << " MiB. "
                        << "Needed block count: " << block_count;
         if(plan.capped)
             hipblaslt_cout << " (Capped to max iters: " << plan.iter_cap << ")";
@@ -1350,15 +1024,6 @@ void testing_matmul_with_bias(
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            preparedCase.epilogue    = matmulEpilogue(arg);
-            preparedCase.epilogueEnabled = preparedCase.epilogue != HIPBLASLT_EPILOGUE_DEFAULT
-                             || arg.scaleAlpha_vector;
-            if(preparedCase.epilogueEnabled)
-            {
-                preparedCase.activation0 = arg.activation_arg1;
-                preparedCase.activation1 = arg.activation_arg2;
-            }
-
             // allocate memory on device
             dA.emplace_back(TiA, preparedCase.a.elements * block_count, HMM);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
@@ -1430,7 +1095,6 @@ void testing_matmul_with_bias(
             }
             if(arg.amaxD)
             {
-                preparedCase.epilogueEnabled = true;
                 dAmaxD.emplace_back(Talpha, 1, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
@@ -2075,11 +1739,6 @@ void testing_matmul_with_bias(
             {
                 CHECK_HIP_ERROR(synchronize(dScaleAlphaVec[i], hScaleAlphaVec[i], block_count));
                 runtimeCase.alphaPointer = dScaleAlphaVec[i].buf();
-                set_computeInterface(
-                    preparedCase.alpha,
-                    1.0,
-                    Tc, 
-                    TiA); // use dScaleAlphaVec instead, original alpha = 1.0 for verify
             }
             else
                 runtimeCase.alphaPointer = &(preparedCase.alpha);

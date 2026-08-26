@@ -21,6 +21,7 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_test.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/host_vector.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipBuffer.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/client/MatmulPreparation.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/client/MatmulTestCase.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/host_validation/MatmulValidation.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/near.hpp"
