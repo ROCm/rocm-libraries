@@ -103,7 +103,7 @@ def _make_fp16_config(gfx_arch: str) -> BatchedGemmKernelConfig:
     )
 
 
-def test_batched_fp16(gfx_arch: str) -> tuple[str, str]:
+def _run_batched_fp16(gfx_arch: str) -> tuple[str, str]:
     # Small multi-batch problem; K=128 gives 4 tile-K iterations (128/32).
     batch, M, N, K = 3, 128, 128, 128
     cfg = _make_fp16_config(gfx_arch)
@@ -146,6 +146,20 @@ def test_batched_fp16(gfx_arch: str) -> tuple[str, str]:
                   f"time_ms={result.time_ms:.3f}, batch={batch} MNK={M}/{N}/{K}")
 
 
+def test_batched_fp16(gpu_arch: str) -> None:
+    """pytest entry point.
+
+    The worker above predates this file's registration in CTest and is shaped
+    for the ``__main__`` CLI: it takes a ``gfx_arch`` string and *returns*
+    (status, detail).  pytest collected it as a test, could not supply a
+    ``gfx_arch`` fixture (conftest provides ``gpu_arch``), and errored at
+    collection -- so this test had never executed.  Keep the worker for the CLI
+    and let pytest drive it through the real fixture.
+    """
+    status, detail = _run_batched_fp16(gpu_arch)
+    assert status == PASS, detail
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Batched GEMM GPU correctness test")
     parser.add_argument("--gfx", default=None, help="GPU arch (default: auto-detect)")
@@ -165,7 +179,7 @@ def main() -> int:
     log.info("Running batched GEMM GPU correctness on %s", gfx)
 
     try:
-        status, detail = test_batched_fp16(gfx)
+        status, detail = _run_batched_fp16(gfx)
     except Exception as exc:  # noqa: BLE001
         status, detail = FAIL, f"batched/fp16: exception: {exc}"
 

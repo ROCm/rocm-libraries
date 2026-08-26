@@ -59,6 +59,7 @@ from conftest import (  # noqa: E402
     encode_fp8 as _encode_arch,
     qdq_fp8 as _qdq_arch,
     gpu_available as _have_gpu,
+    native_fp8_skip_marker as _native_fp8_skip_marker,
     ml_dtypes_available as _have_ml_dtypes,
     run_and_verify,
 )
@@ -192,10 +193,14 @@ def _run_case(dtype: str, M: int, N: int, K: int, agK: int, bgK: int, bgN: int, 
 
 _SKIP_NO_GPU = pytest.mark.skipif(not _have_gpu(), reason="no ROCm GPU detected")
 _SKIP_NO_MLD = pytest.mark.skipif(not _have_ml_dtypes(), reason="ml_dtypes not installed")
+# The one shared native-fp8 capability predicate (conftest); gfx90a has no
+# native fp8 and returns wrong answers instead of failing.
+_SKIP_NO_FP8 = _native_fp8_skip_marker()
 
 
 @_SKIP_NO_GPU
 @_SKIP_NO_MLD
+@_SKIP_NO_FP8
 @pytest.mark.parametrize("dtype", ["fp8", "bf8"])
 def test_abquant_gpu_matches_reference(dtype, tmp_path):
     max_rel, _ = _run_case(dtype, M=256, N=256, K=512, agK=128, bgK=128, bgN=1, out_dir=tmp_path)
@@ -204,6 +209,7 @@ def test_abquant_gpu_matches_reference(dtype, tmp_path):
 
 @_SKIP_NO_GPU
 @_SKIP_NO_MLD
+@_SKIP_NO_FP8
 def test_abquant_gpu_not_all_zeros(tmp_path):
     _run_case("fp8", M=256, N=256, K=512, agK=128, bgK=128, bgN=1, out_dir=tmp_path)
 
@@ -220,13 +226,6 @@ if __name__ == "__main__":
             mr, t = _run_case(dt, 256, 256, 512, 128, 128, 1, d)
             print(f"PASS abquant {dt}: max_rel={mr:.4f} time_ms={t:.3f}")
         except Exception as e:
-            # A pytest.skip raised outside pytest surfaces as an exception; treat
-            # the known toolchain gate as a non-failure so standalone runs on a
-            # clang>=22 box report BLOCKED, not FAIL.
-            msg = str(e)
-            if "amdgpu-coerce-illegal-types" in msg or "build blocked" in msg:
-                print(f"BLOCKED abquant {dt}: {msg}")
-            else:
-                ok = False
-                print(f"FAIL abquant {dt}: {msg}")
+            ok = False
+            print(f"FAIL abquant {dt}: {e}")
     raise SystemExit(0 if ok else 1)

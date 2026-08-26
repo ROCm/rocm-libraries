@@ -52,7 +52,11 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "groupe
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_aquant_kernel_name  # noqa: E402
+from codegen_common import (  # noqa: E402
+    make_aquant_kernel_name,
+    quant_warp_tile_k,
+    variant_is_8bit_float,
+)
 
 # --- Tile-Engine perf flags: single source of truth (quant_bridge_flags.py) ---
 # Without these the .so is built with plain -O3 while the Old-TE baseline it is
@@ -61,6 +65,7 @@ from codegen_common import make_aquant_kernel_name  # noqa: E402
 if str(Path(__file__).parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent))
 from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
+from quant_bridge_base import build_dispatchers  # noqa: E402
 
 
 _DEFAULT_HIPCC    = "hipcc"
@@ -372,14 +377,32 @@ class AQuantGpuGemmRunner:
         """
         Run AQuantGrouped GEMM.
 
-        A       shape: (M, K)           dtype: fp8/bf8
-        B       shape: (K, N) col-major  dtype: fp8/bf8 or pk_int4
+        A       shape: (M, K)           dtype: fp8/bf8, or pk_int4 (2 nibbles per
+                byte, K-consecutive) for the fp8i4/bf8i4 variants -- AQuant
+                scales A, so A is the operand that may be int4
+        B       shape: (K, N) col-major  dtype: fp8/bf8
         AQ      shape: (QM_A, QK_A)     dtype: float (for fp8/bf8) or fp8/bf8 (for fp8i4/bf8i4)
         c_dtype numpy dtype for the output C buffer.  Defaults to np.float16.
                 Pass np.bfloat16 for MX variants whose CDataType is bf16.
         Returns AQuantGemmResult with C shape (M, N).
         """
         import numpy as np
+
+        # Split-K gate.  Only k_batch == 1 has ever been verified on device
+        # through this bridge: the round-3 default_config sweep recorded A6
+        # (split-K) as NOT-COVERED for all 74 shipped configs, on both arches.
+        # The underlying kernel does accept k_batch > 1 for some quant types
+        # (gemm_quant_kernel.hpp:1287-1296), and the per-launch C clear the
+        # split-K accumulation needs exists in quant_bridge_common.hpp -- but
+        # "the kernel accepts it" is not "this bridge produces the right answer
+        # with it".  Reject explicitly rather than return an unverified result;
+        # lifting this needs an on-device A6 gate, not a deleted check.
+        if problem.k_batch != 1:
+            raise ValueError(
+                f"k_batch={problem.k_batch} is not supported by the grouped_gemm_aquant "
+                f"bridge; only k_batch == 1 is verified on device. Split-K "
+                f"(k_batch > 1) would produce an unverified result."
+            )
 
         M, N, K = problem.M, problem.N, problem.K
         QK_A    = problem.QK_A
@@ -573,79 +596,62 @@ def setup_multiple_aquant_dispatchers(
         return []
 
     arch = gfx_arch or _detect_gpu_arch()
-    base_dir = output_dir or Path(tempfile.mkdtemp(prefix="aquant_dispatcher_"))
-    base_dir.mkdir(parents=True, exist_ok=True)
-
-    headers_dir = base_dir / "generated_kernels"
-    so_dir      = base_dir / "libs"
-    headers_dir.mkdir(exist_ok=True)
-    so_dir.mkdir(exist_ok=True)
-
-    log.info("Building %d AQuant kernel(s) for %s into %s", len(configs), arch, base_dir)
-
-    seen: Dict[str, int] = {}
-    deduped: List[Tuple[int, AQuantKernelConfig]] = []
-    for i, cfg in enumerate(configs):
-        if cfg.name not in seen:
-            seen[cfg.name] = i
-            deduped.append((i, cfg))
-
-    results: List[Optional[Path]] = [None] * len(configs)
-
-    def _build_one(idx: int, cfg: AQuantKernelConfig) -> Tuple[int, Optional[Path]]:
-        hpp = _generate_aquant_kernel(cfg, headers_dir)
-        if hpp is None:
-            return idx, None
-
-        so = so_dir / f"lib{cfg.name}_{arch}.so"
-        if so.exists():
-            log.info("  [cached] %s", so.name)
-            return idx, so
-
-        ok = _compile_aquant_kernel(
-            hpp_path=hpp,
-            so_path=so,
-            gfx_arch=arch,
-            hipcc=hipcc,
-            extra_include_dirs=extra_include_dirs,
+    def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
+        return _compile_aquant_kernel(
+            hpp_path=hpp, so_path=so, gfx_arch=a,
+            hipcc=hipcc, extra_include_dirs=extra_include_dirs,
         )
-        return idx, so if ok else None
 
-    if parallel and len(deduped) > 1:
-        workers = max_workers or min(len(deduped), os.cpu_count() or 4)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-            futures = {ex.submit(_build_one, idx, cfg): (idx, cfg) for idx, cfg in deduped}
-            for fut in concurrent.futures.as_completed(futures):
-                try:
-                    idx, so_path = fut.result()
-                    results[idx] = so_path
-                    if so_path:
-                        log.info("  built %s", so_path.name)
-                    else:
-                        _, cfg = futures[fut]
-                        log.error("  FAILED %s", cfg.name)
-                except Exception as e:
-                    _, cfg = futures[fut]
-                    log.error("  EXCEPTION for %s: %s", cfg.name, e)
-    else:
-        for idx, cfg in deduped:
-            _, so_path = _build_one(idx, cfg)
-            results[idx] = so_path
-
-    for i, cfg in enumerate(configs):
-        if results[i] is None:
-            first_idx = seen.get(cfg.name)
-            if first_idx is not None and first_idx != i:
-                results[i] = results[first_idx]
-
-    built = sum(1 for r in results if r is not None)
-    log.info("Built %d / %d AQuant kernels", built, len(configs))
-    return results
+    # Shared builder: dedupe-by-name, parallel fan-out, and -- the reason this
+    # module no longer rolls its own loop -- a ``.so`` filename that carries a
+    # digest of the compile flags.  Keyed on name+arch alone, flipping
+    # CK_BRIDGE_NO_TE_FLAGS (or moving to a toolchain where the coerce probe
+    # answers differently) silently reused a ``.so`` built with the other flag
+    # set.  This bridge only gained switchable TE flags this cycle, so the
+    # defect was newly live here.
+    return build_dispatchers(
+        configs,
+        arch=arch,
+        tmp_prefix="aquant_dispatcher_",
+        log_label="AQuant",
+        generate_fn=_generate_aquant_kernel,
+        compile_fn=_compile_fn,
+        output_dir=output_dir,
+        parallel=parallel,
+        max_workers=max_workers,
+        hipcc=hipcc,
+    )
 
 
 # =============================================================================
 # Default configs (mapped from reference examples)
+#
+# warp_tile_k is ARCH-DERIVED for every one of them.  Old-TE never writes a
+# literal here either: `GemmConfigQuantDecodeInterwave<PrecType>` and
+# `GemmConfigPreshuffleQuantDecode<PrecType>`
+# (example/ck_tile/38_block_scale_gemm/gemm_utils.hpp:110-162) both spell it
+# `get_k_warp_tile<PrecType, M_Warp_Tile=16[, IsFlatMM]>()`, with PrecType the
+# 8-bit *float* type even for the i4 variants -- Old-TE passes
+# `GemmConfig<ck_tile::fp8_t>` for `fp8i4` (gemm_aquant_quantgrouped.cpp:42).
+#
+# The literals these replaced were the gfx942 values (32 decode / 128 flat-mm)
+# shipped unconditionally.  On gfx950 the decode value must be 128: with the
+# corrected pk_int4 A operand, 32 does not even instantiate a tile distribution
+# (`sequence_merge<int, sequence<4, 8>>` has no `type`).
 # =============================================================================
+
+
+def _warp_tile_k_for(gfx_arch: str, variant_key: str, is_flatmm: bool = False) -> int:
+    """Arch-derived WarpTileK for one grouped-AQuant default config.
+
+    Thin spelling of :func:`codegen_common.quant_warp_tile_k` so that this module
+    holds no copy of the rule.
+    """
+    return quant_warp_tile_k(
+        gfx_arch,
+        is_8bit_float=variant_is_8bit_float(variant_key),
+        is_flat_mm=is_flatmm,
+    )
 
 
 def default_fp8_config(
@@ -655,9 +661,7 @@ def default_fp8_config(
 ) -> AQuantKernelConfig:
     """fp8 AQuant decode config (GemmConfigQuantDecodeInterwave<fp8_t>, Mem pipeline).
 
-    warp_tile_k=32 maps to the MFMA mfma_f32_16x16x32_fp8_fp8 instruction which is
-    valid on gfx9 (gfx942, gfx950). warp_tile_k=16 would select the gfx12-only WMMA
-    instruction and silently returns zeros on gfx9 hardware.
+    warp_tile_k = get_k_warp_tile<fp8_t, 16>(): 128 on gfx950, 32 on gfx942.
     """
     return AQuantKernelConfig(
         variant_key="fp8",
@@ -667,7 +671,8 @@ def default_fp8_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "fp8"),
         quant_group_m=quant_group_m,
         quant_group_n=1,
         quant_group_k=quant_group_k,
@@ -683,9 +688,7 @@ def default_bf8_config(
 ) -> AQuantKernelConfig:
     """bf8 AQuant decode config (GemmConfigQuantDecodeInterwave<bf8_t>, Mem pipeline).
 
-    warp_tile_k=32 maps to the MFMA mfma_f32_16x16x32_bf8_bf8 instruction which is
-    valid on gfx9 (gfx942, gfx950). warp_tile_k=16 would select the gfx12-only WMMA
-    instruction and silently returns zeros on gfx9 hardware.
+    warp_tile_k = get_k_warp_tile<bf8_t, 16>(): 128 on gfx950, 32 on gfx942.
     """
     return AQuantKernelConfig(
         variant_key="bf8",
@@ -695,7 +698,8 @@ def default_bf8_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "bf8"),
         quant_group_m=quant_group_m,
         quant_group_n=1,
         quant_group_k=quant_group_k,
@@ -709,9 +713,15 @@ def default_fp8i4_config(
     quant_group_m: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> AQuantKernelConfig:
-    """fp8i4 AQuant decode config (A=fp8, B=pk_int4, AQ=fp8; Mem pipeline).
+    """fp8i4 AQuant decode config (A=pk_int4, B=fp8, AQ=fp8; Mem pipeline).
 
-    warp_tile_k=32 maps to valid MFMA instructions on gfx9 (gfx942, gfx950).
+    A is the pk_int4 operand -- AQuant scales A, so the i4 weights are the ones
+    the AQ tensor makes meaningful.  Matches Old-TE
+    GemmQuantTypeConfig<pk_int4_t, fp8_t, half_t, fp8_t>
+    (gemm_aquant_quantgrouped.cpp:37-45) and the non-grouped bridge.
+
+    warp_tile_k = get_k_warp_tile<fp8_t, 16>() (Old-TE instantiates
+    GemmConfig<fp8_t> for fp8i4): 128 on gfx950, 32 on gfx942.
     """
     return AQuantKernelConfig(
         variant_key="fp8i4",
@@ -721,7 +731,8 @@ def default_fp8i4_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "fp8i4"),
         quant_group_m=quant_group_m,
         quant_group_n=1,
         quant_group_k=quant_group_k,
@@ -735,9 +746,11 @@ def default_bf8i4_config(
     quant_group_m: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> AQuantKernelConfig:
-    """bf8i4 AQuant decode config (A=bf8, B=pk_int4, AQ=bf8; Mem pipeline).
+    """bf8i4 AQuant decode config (A=pk_int4, B=bf8, AQ=bf8; Mem pipeline).
 
-    warp_tile_k=32 maps to valid MFMA instructions on gfx9 (gfx942, gfx950).
+    See :func:`default_fp8i4_config`; Old-TE instantiates GemmConfig<bf8_t>.
+
+    warp_tile_k = get_k_warp_tile<bf8_t, 16>(): 128 on gfx950, 32 on gfx942.
     """
     return AQuantKernelConfig(
         variant_key="bf8i4",
@@ -747,7 +760,8 @@ def default_bf8i4_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "bf8i4"),
         quant_group_m=quant_group_m,
         quant_group_n=1,
         quant_group_k=quant_group_k,
@@ -764,7 +778,9 @@ def default_fp8_preshuffleaq_config(
     """fp8 preshuffle-AQ config (GemmConfigPreshuffleQuantDecode<fp8_t>, CompV3 pipeline).
 
     APreshuffleQuant=true, BPreshuffleQuant=true — both scale tensors are preshuffled.
-    Tile: 16x64x256, warp_tile_k=128 (gfx950 FlatMM, 8-bit float).
+    Tile: 16x64x256.  warp_tile_k = get_k_warp_tile<fp8_t, 16, IsFlatMM=true>():
+    128 on gfx950, 64 on gfx942 (the 128 literal this replaced was the gfx950
+    value shipped to gfx942, where it compiles and returns all zeros).
     """
     return AQuantKernelConfig(
         variant_key="fp8",
@@ -774,7 +790,8 @@ def default_fp8_preshuffleaq_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "fp8", is_flatmm=True),
         quant_group_m=quant_group_m,
         quant_group_n=1,
         quant_group_k=quant_group_k,
@@ -788,7 +805,10 @@ def default_bf8_preshuffleaq_config(
     quant_group_m: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> AQuantKernelConfig:
-    """bf8 preshuffle-AQ config (GemmConfigPreshuffleQuantDecode<bf8_t>, CompV3 pipeline)."""
+    """bf8 preshuffle-AQ config (GemmConfigPreshuffleQuantDecode<bf8_t>, CompV3 pipeline).
+
+    warp_tile_k = get_k_warp_tile<bf8_t, 16, IsFlatMM=true>(): 128 gfx950, 64 gfx942.
+    """
     return AQuantKernelConfig(
         variant_key="bf8",
         layout="rcr",
@@ -797,7 +817,8 @@ def default_bf8_preshuffleaq_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "bf8", is_flatmm=True),
         quant_group_m=quant_group_m,
         quant_group_n=1,
         quant_group_k=quant_group_k,

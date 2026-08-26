@@ -30,7 +30,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from conftest import NATIVE_FP8_ARCHES as _NATIVE_FP8_ARCHES
+from conftest import (
+    NATIVE_FP8_ARCHES as _NATIVE_FP8_ARCHES,
+    arch_supports_native_fp8 as _arch_supports_native_fp8,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
@@ -76,7 +79,7 @@ _GFX_ARCH = _detect_gfx_arch()
 _SUPPORTED_ARCHES = _NATIVE_FP8_ARCHES
 
 requires_gpu = pytest.mark.skipif(
-    not (_has_hipcc() and _GFX_ARCH in _SUPPORTED_ARCHES),
+    not (_has_hipcc() and _arch_supports_native_fp8(_GFX_ARCH)),
     reason=(
         f"GPU test: requires hipcc and native fp8 GPU ({', '.join(_SUPPORTED_ARCHES)}); "
         f"detected arch='{_GFX_ARCH}'"

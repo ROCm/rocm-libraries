@@ -77,7 +77,7 @@ def _max_rel_err(E_gpu: np.ndarray, E_ref: np.ndarray) -> float:
     return float(np.max(np.abs(g - r)) / ref_scale)
 
 
-def test_contraction_fp16(gfx_arch: str) -> tuple[str, str]:
+def _run_contraction_fp16(gfx_arch: str) -> tuple[str, str]:
     cfg = default_fp16_config(gfx_arch=gfx_arch)
 
     so_paths = setup_multiple_batched_contraction_dispatchers([cfg], gfx_arch=gfx_arch)
@@ -122,6 +122,20 @@ def test_contraction_fp16(gfx_arch: str) -> tuple[str, str]:
                   f"time_ms={result.time_ms:.3f}, G={G} MNK={M}/{N}/{K}")
 
 
+def test_contraction_fp16(gpu_arch: str) -> None:
+    """pytest entry point.
+
+    The worker above predates this file's registration in CTest and is shaped
+    for the ``__main__`` CLI: it takes a ``gfx_arch`` string and *returns*
+    (status, detail).  pytest collected it as a test, could not supply a
+    ``gfx_arch`` fixture (conftest provides ``gpu_arch``), and errored at
+    collection -- so this test had never executed.  Keep the worker for the CLI
+    and let pytest drive it through the real fixture.
+    """
+    status, detail = _run_contraction_fp16(gpu_arch)
+    assert status == PASS, detail
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Batched-contraction GPU correctness test"
@@ -143,7 +157,7 @@ def main() -> int:
     log.info("Running batched-contraction GPU correctness on %s", gfx)
 
     try:
-        status, detail = test_contraction_fp16(gfx)
+        status, detail = _run_contraction_fp16(gfx)
     except Exception as exc:  # noqa: BLE001
         status, detail = FAIL, f"contraction/fp16: exception: {exc}"
 

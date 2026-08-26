@@ -37,6 +37,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 # Canonical numeric codecs (single copies shared with the sibling quant GPU
 # tests): e8m0, OCP-fp4 LUT/unpack, bf16<->f32, and the global-max-floored
 # max-rel-error helper all live in conftest.py.
+from conftest import (  # noqa: E402
+    NATIVE_FP8_ARCHES as _NATIVE_FP8_ARCHES,
+    arch_supports_native_fp8 as _arch_supports_native_fp8,
+)
 from conftest import (
     uses_ocp_fp8 as _uses_ocp_fp8,
     ml_fp8_dtype as _ml_fp8_dtype,
@@ -431,6 +435,11 @@ def test_bquant_gpu_c4_h3(case_name, case_fn, gpu_arch, tmp_path):
     MX (H3) variants need gfx950 e8m0 hardware; on any other arch they skip.
     """
     _require_ml_dtypes()
+    if not _arch_supports_native_fp8(gpu_arch):
+        pytest.skip(
+            f"quant fp8/bf8 kernels are validated on "
+            f"{', '.join(_NATIVE_FP8_ARCHES)}; detected arch={gpu_arch!r}"
+        )
     try:
         status, detail = case_fn(tmp_path, gpu_arch)
     except Exception as exc:  # noqa: BLE001

@@ -317,6 +317,22 @@ class TensorQuantGpuGemmRunner:
         """
         import numpy as np
 
+        # Split-K gate.  Only k_batch == 1 has ever been verified on device
+        # through this bridge: the round-3 default_config sweep recorded A6
+        # (split-K) as NOT-COVERED for all 74 shipped configs, on both arches.
+        # The underlying kernel does accept k_batch > 1 for some quant types
+        # (gemm_quant_kernel.hpp:1287-1296), and the per-launch C clear the
+        # split-K accumulation needs exists in quant_bridge_common.hpp -- but
+        # "the kernel accepts it" is not "this bridge produces the right answer
+        # with it".  Reject explicitly rather than return an unverified result;
+        # lifting this needs an on-device A6 gate, not a deleted check.
+        if problem.k_batch != 1:
+            raise ValueError(
+                f"k_batch={problem.k_batch} is not supported by the gemm_tensor_quant "
+                f"bridge; only k_batch == 1 is verified on device. Split-K "
+                f"(k_batch > 1) would produce an unverified result."
+            )
+
         M, N, K = problem.M, problem.N, problem.K
 
         if c_dtype is None:

@@ -56,14 +56,16 @@ def test_bridge_discovery_is_not_empty():
 # I1 -- on-device coverage
 # ---------------------------------------------------------------------------
 
-# Bridges with no on-device test.  Closing these is the "grouped-bquant lost its
-# only on-device coverage" work item; each needs a *_gpu_correctness.py that
-# imports the op's utils module.
-_KNOWN_GAPS_NO_GPU_TEST = {
-    "grouped_gemm_aquant",
-    "grouped_gemm_abquant",
-    "grouped_gemm_bquant",
-}
+# Bridges with no on-device test.  EMPTY, and it must stay empty: the three
+# entries that used to live here (grouped_gemm_{a,ab,b}quant) are now covered by
+# tests/test_grouped_quant_gpu_correctness.py, which enumerates every one of
+# their shipped default_*_config factories rather than a hand-picked few.
+#
+# This is the self-expiring form the exemption never had.  There is no date to
+# let lapse and no marker to forget: the table is empty, and
+# test_i1_bridge_has_on_device_test now fails outright for any bridge that
+# loses -- or ships without -- on-device coverage.
+_KNOWN_GAPS_NO_GPU_TEST = set()
 
 
 def _gpu_tests_importing(utils_module: str):

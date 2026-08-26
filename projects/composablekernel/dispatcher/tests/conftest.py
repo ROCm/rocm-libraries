@@ -123,12 +123,38 @@ def detect_gpu_arch(default: str = "gfx950") -> str:
 # has none and silently produces incorrect results rather than failing, so an
 # allowlist -- not a denylist -- is the safe form.  Lives here so the per-op GPU
 # tests share one list instead of each carrying (or dropping) a copy.
-NATIVE_FP8_ARCHES = ("gfx942", "gfx950")
+NATIVE_FP8_ARCHES = ("gfx942", "gfx950", "gfx1250")
 
 
 def arch_supports_native_fp8(arch: str) -> bool:
-    """Whether ``arch`` is on the validated native-fp8 allowlist."""
+    """Whether ``arch`` is on the validated native-fp8 allowlist.
+
+    ``startswith``, not equality: hipcc reports target-feature suffixes
+    (``gfx942:sramecc+:xnack-``), and an equality test silently skips the whole
+    quant GPU suite on a machine that reports them.
+    """
     return any(arch.startswith(a) for a in NATIVE_FP8_ARCHES)
+
+
+def native_fp8_skip_marker(arch: str = None):
+    """A ``pytest.mark.skipif`` for "this device cannot run quant fp8/bf8".
+
+    The single capability predicate for every quant GPU test.  Collection-time,
+    so it composes with the module-level ``skipif`` markers those tests already
+    carry; ``arch`` defaults to the detected device (empty string when there is
+    no device, in which case the GPU marker skips first anyway).
+    """
+    import pytest as _pytest
+    if arch is None:
+        archs = _rocm_agent_archs()
+        arch = archs[0] if archs else ""
+    return _pytest.mark.skipif(
+        bool(arch) and not arch_supports_native_fp8(arch),
+        reason=(
+            "quant fp8/bf8 kernels are validated on "
+            f"{', '.join(NATIVE_FP8_ARCHES)}; detected arch={arch!r}"
+        ),
+    )
 
 
 # --- pytest skip fixtures --------------------------------------------------
@@ -168,17 +194,6 @@ def gpu_arch(skip_without_gpu) -> str:
             "guess an arch for a correctness test"
         )
     return archs[0]
-
-
-@pytest.fixture
-def native_fp8_gpu_arch(gpu_arch) -> str:
-    """``gpu_arch``, skipping when the device is not on the fp8 allowlist."""
-    if not arch_supports_native_fp8(gpu_arch):
-        pytest.skip(
-            f"quant fp8/bf8 kernels are validated on "
-            f"{', '.join(NATIVE_FP8_ARCHES)}; detected arch={gpu_arch!r}"
-        )
-    return gpu_arch
 
 
 # --- CTest skip propagation ------------------------------------------------

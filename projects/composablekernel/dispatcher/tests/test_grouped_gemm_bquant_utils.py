@@ -28,18 +28,6 @@ from grouped_gemm_bquant_utils import (
     default_bf8_config,
     default_fp8i4_config,
     default_bf8i4_config,
-    default_fp8_preshuffleb_config,
-    default_bf8_preshuffleb_config,
-    default_fp8i4_preshuffleb_config,
-    default_bf8i4_preshuffleb_config,
-    default_fp8_preshufflequant_config,
-    default_bf8_preshufflequant_config,
-    default_fp8i4_preshufflequant_config,
-    default_bf8i4_preshufflequant_config,
-    default_fp8_preshuffleb_bquant_config,
-    default_bf8_preshuffleb_bquant_config,
-    default_fp8i4_preshuffleb_bquant_config,
-    default_bf8i4_preshuffleb_bquant_config,
     default_mx_bf16bf16_config,
     default_mx_bf16bf8_config,
     default_mx_bf16fp4_config,
@@ -341,137 +329,60 @@ class TestPhase3Infrastructure:
 # =============================================================================
 
 
-class TestPhase3Configs:
+class TestPreshuffleIsNotOffered:
+    """grouped_gemm_bquant ships no preshuffle default config, by design.
 
-    # ---- 3a: preshuffle_b only ----
+    It used to ship twelve, and all twelve failed to compile on gfx950: this op
+    pins BQLayout=RowMajor while every preshuffle pipeline static_asserts
+    ColumnMajor BQ, and the grouped generated header exports no BShuffleConfig
+    for shuffle_b to use.  The name-pinning tests that used to live here asserted
+    the spelling of configs that could not be built.
+    """
 
-    def test_fp8_preshuffleb_name(self):
-        cfg = default_fp8_preshuffleb_config()
-        assert cfg.name == (
-            "grouped_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_"
-            "128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb"
+    _PRESHUFFLE_NAMES = [
+        f"default_{v}_{p}_config"
+        for v in ("fp8", "bf8", "fp8i4", "bf8i4")
+        for p in ("preshuffleb", "preshufflequant", "preshuffleb_bquant")
+    ]
+
+    def test_no_preshuffle_default_factories_exist(self):
+        import grouped_gemm_bquant_utils as mod
+        present = [n for n in self._PRESHUFFLE_NAMES if hasattr(mod, n)]
+        assert not present, (
+            "grouped_gemm_bquant re-introduced preshuffle default configs "
+            f"{present}; they cannot compile (BQLayout is pinned RowMajor and "
+            "the generated header exports no BShuffleConfig)"
         )
 
-    def test_bf8_preshuffleb_name(self):
-        cfg = default_bf8_preshuffleb_config()
-        assert cfg.name == (
-            "grouped_gemm_bquant_bf8_rcr_preshuffleb_permute_n_intrawave_"
-            "128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb"
+    def test_no_shipped_default_sets_a_preshuffle_flag(self):
+        import inspect
+
+        import grouped_gemm_bquant_utils as mod
+        offenders = []
+        for name, fn in sorted(vars(mod).items()):
+            if not (name.startswith("default_") and name.endswith("_config")
+                    and inspect.isfunction(fn)):
+                continue
+            cfg = fn(gfx_arch="gfx950")
+            if cfg.preshuffle_b or cfg.preshuffle_bquant:
+                offenders.append(
+                    f"{name}: preshuffle_b={cfg.preshuffle_b} "
+                    f"preshuffle_bquant={cfg.preshuffle_bquant}")
+        assert not offenders, "\n".join(offenders)
+
+    def test_the_config_dataclass_still_carries_the_fields(self):
+        """The fields feed the kernel name and stay; only the defaults are gone."""
+        from grouped_gemm_bquant_utils import BQuantKernelConfig
+        cfg = BQuantKernelConfig(
+            variant_key="fp8", layout="rcr", pipeline="preshuffleb",
+            epilogue="cshuffle", scheduler="intrawave",
+            tile_m=128, tile_n=128, tile_k=128,
+            warp_m=1, warp_n=4, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+            quant_group_m=1, quant_group_n=1, quant_group_k=128,
+            preshuffle_b=True,
         )
-
-    def test_fp8i4_preshuffleb_name(self):
-        cfg = default_fp8i4_preshuffleb_config()
-        assert cfg.name == (
-            "grouped_gemm_bquant_fp8i4_rcr_preshuffleb_permute_n_intrawave_"
-            "128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb"
-        )
-
-    def test_bf8i4_preshuffleb_name(self):
-        cfg = default_bf8i4_preshuffleb_config()
-        assert cfg.name == (
-            "grouped_gemm_bquant_bf8i4_rcr_preshuffleb_permute_n_intrawave_"
-            "128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb"
-        )
-
-    def test_preshuffleb_flags(self):
-        cfg = default_fp8_preshuffleb_config()
-        assert cfg.preshuffle_b is True
-        assert cfg.preshuffle_bquant is False
-        assert cfg.double_smem_buffer is True
-        assert cfg.k_block_per_cu == 2
-        assert cfg.pipeline == "preshuffleb"
-
-    def test_preshuffleb_i4_warp_tile_k(self):
-        # pk_int4 is not 8-bit float → K_warp_tile=32 on gfx950
-        cfg = default_fp8i4_preshuffleb_config()
-        assert cfg.warp_tile_k == 32
-
-    def test_preshuffleb_fp8_warp_tile_k(self):
-        cfg = default_fp8_preshuffleb_config()
-        assert cfg.warp_tile_k == 128
-
-    # ---- 3b: preshuffle_bquant only ----
-
-    def test_fp8_preshufflequant_name(self):
-        cfg = default_fp8_preshufflequant_config()
-        assert cfg.name == (
-            "grouped_gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave_"
-            "128x128x128_1x4x1_16x16x128_qg1x1x128_preshufflebq"
-        )
-
-    def test_bf8_preshufflequant_name(self):
-        cfg = default_bf8_preshufflequant_config()
-        assert cfg.name == (
-            "grouped_gemm_bquant_bf8_rcr_compv3_cshuffle_intrawave_"
-            "128x128x128_1x4x1_16x16x128_qg1x1x128_preshufflebq"
-        )
-
-    def test_fp8i4_preshufflequant_name(self):
-        cfg = default_fp8i4_preshufflequant_config()
-        assert cfg.name == (
-            "grouped_gemm_bquant_fp8i4_rcr_compv3_cshuffle_intrawave_"
-            "128x128x128_1x4x1_16x16x32_qg1x1x128_preshufflebq"
-        )
-
-    def test_preshufflequant_flags(self):
-        cfg = default_fp8_preshufflequant_config()
-        assert cfg.preshuffle_b is False
-        assert cfg.preshuffle_bquant is True
-        assert cfg.double_smem_buffer is False
-        assert cfg.k_block_per_cu == 1
-        assert cfg.pipeline == "compv3"
-
-    def test_preshufflequant_16n_group(self):
-        # 1x16x128 is the extra quant group for 3b — verify config accepts it
-        cfg = default_fp8_preshufflequant_config(quant_group_n=16)
-        assert "qg1x16x128" in cfg.name
-
-    # ---- 3c: preshuffle_b + preshuffle_bquant ----
-
-    def test_fp8_preshuffleb_bquant_name(self):
-        cfg = default_fp8_preshuffleb_bquant_config()
-        assert cfg.name == (
-            "grouped_gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_"
-            "128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb_preshufflebq"
-        )
-
-    def test_bf8i4_preshuffleb_bquant_name(self):
-        cfg = default_bf8i4_preshuffleb_bquant_config()
-        assert cfg.name == (
-            "grouped_gemm_bquant_bf8i4_rcr_preshuffleb_permute_n_intrawave_"
-            "128x128x128_1x4x1_16x16x32_qg1x1x128_preshuffleb_preshufflebq"
-        )
-
-    def test_preshuffleb_bquant_flags(self):
-        cfg = default_fp8_preshuffleb_bquant_config()
-        assert cfg.preshuffle_b is True
-        assert cfg.preshuffle_bquant is True
-        assert cfg.double_smem_buffer is True
-        assert cfg.k_block_per_cu == 2
-        assert cfg.pipeline == "preshuffleb"
-
-    def test_all_preshuffle_names_unique(self):
-        configs = [
-            default_fp8_preshuffleb_config(),
-            default_bf8_preshuffleb_config(),
-            default_fp8i4_preshuffleb_config(),
-            default_bf8i4_preshuffleb_config(),
-            default_fp8_preshufflequant_config(),
-            default_bf8_preshufflequant_config(),
-            default_fp8i4_preshufflequant_config(),
-            default_bf8i4_preshufflequant_config(),
-            default_fp8_preshuffleb_bquant_config(),
-            default_bf8_preshuffleb_bquant_config(),
-            default_fp8i4_preshuffleb_bquant_config(),
-            default_bf8i4_preshuffleb_bquant_config(),
-        ]
-        names = [c.name for c in configs]
-        assert len(names) == len(set(names)), f"Duplicate: {[n for n in names if names.count(n) > 1]}"
-
-
-# =============================================================================
-# Phase 4 — MX microscale variants
-# =============================================================================
+        assert cfg.name.endswith("_preshuffleb")
 
 
 class TestPhase4MXConfigs:

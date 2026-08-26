@@ -299,10 +299,22 @@ class TestFp4PreshuffleBReject(unittest.TestCase):
     Python runner raises a clear RuntimeError instead of crashing."""
 
     def test_ctypes_lib_rejects_fp4_preshuffleb(self):
-        # Compile-time guard: fp4 (pk_fp4_t) + PreshuffleB returns -3 early.
+        # Compile-time guard: fp4 (pk_fp4_t) + PreshuffleB rejects early with the
+        # unsupported-combination code.  Accept either the literal or the named
+        # macro; assert separately that the macro really is -3, so renaming the
+        # constant cannot quietly change the value the Python runner matches on.
         self.assertIn("std::is_same_v<BDataType, ck_tile::pk_fp4_t>", _CTYPES_SRC)
-        self.assertIn("return -3;", _CTYPES_SRC)
+        self.assertTrue(
+            "return -3;" in _CTYPES_SRC
+            or "return QUANT_BRIDGE_UNSUPPORTED_COMBINATION;" in _CTYPES_SRC,
+            "the fp4+PreshuffleB branch no longer returns the unsupported-combination code",
+        )
         self.assertIn("SelectedKernel::PreshuffleB &&", _CTYPES_SRC)
+
+    def test_unsupported_combination_code_is_minus_three(self):
+        """The Python runners match on rc == -3; the macro must still be -3."""
+        common = (_DISP / "bindings" / "ctypes" / "quant_bridge_common.hpp").read_text()
+        self.assertIn("#define QUANT_BRIDGE_UNSUPPORTED_COMBINATION (-3)", common)
 
     def test_python_runner_maps_rc_minus3_to_clear_error(self):
         runner_src = (_DISP / "python" / "gemm_abquant_utils.py").read_text()

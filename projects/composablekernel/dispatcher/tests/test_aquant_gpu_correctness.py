@@ -52,6 +52,7 @@ from conftest import (  # noqa: E402
     encode_fp8 as _encode_arch,
     qdq_fp8 as _qdq_arch,
     gpu_available as _have_gpu,
+    native_fp8_skip_marker as _native_fp8_skip_marker,
     ml_dtypes_available as _have_ml_dtypes,
     run_and_verify,
 )
@@ -160,10 +161,14 @@ def _run_case(dtype: str, M: int, N: int, K: int, gK: int, out_dir: Path):
 
 _SKIP_NO_GPU = pytest.mark.skipif(not _have_gpu(), reason="no ROCm GPU detected")
 _SKIP_NO_MLD = pytest.mark.skipif(not _have_ml_dtypes(), reason="ml_dtypes not installed")
+# The one shared native-fp8 capability predicate (conftest); gfx90a has no
+# native fp8 and returns wrong answers instead of failing.
+_SKIP_NO_FP8 = _native_fp8_skip_marker()
 
 
 @_SKIP_NO_GPU
 @_SKIP_NO_MLD
+@_SKIP_NO_FP8
 @pytest.mark.parametrize("dtype", ["fp8", "bf8"])
 def test_aquant_gpu_matches_reference(dtype, tmp_path):
     max_rel, _ = _run_case(dtype, M=256, N=256, K=512, gK=128, out_dir=tmp_path)
@@ -172,6 +177,7 @@ def test_aquant_gpu_matches_reference(dtype, tmp_path):
 
 @_SKIP_NO_GPU
 @_SKIP_NO_MLD
+@_SKIP_NO_FP8
 def test_aquant_gpu_not_all_zeros(tmp_path):
     _run_case("fp8", M=256, N=256, K=512, gK=128, out_dir=tmp_path)
 

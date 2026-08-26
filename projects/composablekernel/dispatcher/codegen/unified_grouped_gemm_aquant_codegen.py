@@ -26,7 +26,6 @@ Reference:
     example/ck_tile/38_block_scale_gemm/gemm_utils.hpp  (GemmConfigQuantDecodeInterwave)
 """
 
-import argparse
 import itertools
 import json
 import logging
@@ -75,26 +74,35 @@ AQUANT_VARIANTS: Dict[str, Dict[str, str]] = {
         "ck_q": "float",
         "ck_acc": "float",
     },
-    # fp8i4/bf8i4: A is fp8/bf8 (scale side), B is int4 (weight)
-    # QDataType (AQDataType) is fp8/bf8 — the A-side scale
+    # fp8i4/bf8i4: A is pk_int4 -- AQuant scales the A operand, so the i4 operand
+    # is A and the AQ scale tensor is what makes it meaningful.  B is the 8-bit
+    # float operand.  Old-TE spells this
+    #   GemmQuantTypeConfig<pk_int4_t, fp8_t, half_t, fp8_t>   (A, B, C, Q)
+    # in gemm_aquant_quantgrouped.cpp:37-56, and the non-grouped bridge
+    # (unified_gemm_aquant_codegen.AQUANT_VARIANTS) agrees.
+    #
+    # The reverse assignment (A=fp8, B=pk_int4) does not merely underperform: it
+    # is rejected at compile time by
+    # block_universal_gemm_as_aquant_bs_cr.hpp:102, whose supported-combination
+    # static_assert requires BDataType in {fp8_t, bf8_t}.
     "fp8i4": {
-        "dtype_a": "fp8",
-        "dtype_b": "pk_int4",
+        "dtype_a": "pk_int4",
+        "dtype_b": "fp8",
         "dtype_c": "half",
         "dtype_q": "fp8",
-        "ck_a": "ck_tile::fp8_t",
-        "ck_b": "ck_tile::pk_int4_t",
+        "ck_a": "ck_tile::pk_int4_t",
+        "ck_b": "ck_tile::fp8_t",
         "ck_c": "ck_tile::half_t",
         "ck_q": "ck_tile::fp8_t",
         "ck_acc": "float",
     },
     "bf8i4": {
-        "dtype_a": "bf8",
-        "dtype_b": "pk_int4",
+        "dtype_a": "pk_int4",
+        "dtype_b": "bf8",
         "dtype_c": "half",
         "dtype_q": "bf8",
-        "ck_a": "ck_tile::bf8_t",
-        "ck_b": "ck_tile::pk_int4_t",
+        "ck_a": "ck_tile::pk_int4_t",
+        "ck_b": "ck_tile::bf8_t",
         "ck_c": "ck_tile::half_t",
         "ck_q": "ck_tile::bf8_t",
         "ck_acc": "float",

@@ -291,22 +291,25 @@ using SelectedKernel = {struct};
 # Config sweep
 # =============================================================================
 
+_DEFAULT_GFX_ARCH = "gfx950"
 
-def _default_config() -> dict:
+
+def _default_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> dict:
     """Default sweep config matching GemmConfigRowColQuant tile defaults.
 
     GemmConfigRowColQuant<fp8_t> is the shared decode tile (16x64x256).
     WarpTileK is arch-derived (128 on gfx950, 32 on gfx942; 128 silently
-    outputs all-zeros on gfx942). The Python driver
-    (gemm_rowcolquant_utils.default_*_config -> _warp_tile_k_for) sets this
-    per-arch; this standalone fallback uses the gfx950 value.
+    outputs all-zeros on gfx942) from ``gfx_arch``, which the CLI exposes as
+    ``--gfx-arch``.  The Python driver
+    (gemm_rowcolquant_utils.default_*_config -> _warp_tile_k_for) passes the
+    detected arch through the same rule.
 
     pad_k=False overrides the shared decode default (True): RowColQuant runs
     the unpadded-K pipeline for Old-TE perf parity, unlike tensor_quant and
     bquant which keep the padded default.
     """
     return quant_decode_default_config(
-        warp_tile_k=fp8_warp_tile_k_for_arch("gfx950"),
+        warp_tile_k=fp8_warp_tile_k_for_arch(gfx_arch),
         pad_k=False,
     )
 
@@ -360,6 +363,7 @@ def main() -> int:
         make_generator=RowColQuantKernelHeaderGenerator,
         build_specs=_build_specs,
         default_config=_default_config,
+        arch_aware=True,
     )
 
 

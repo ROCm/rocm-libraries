@@ -65,6 +65,7 @@ from codegen_common import (  # noqa: E402
 if str(Path(__file__).parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent))
 from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
+from quant_bridge_base import build_dispatchers  # noqa: E402
 
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
@@ -437,6 +438,22 @@ class ABQuantGpuGemmRunner:
         import numpy as np
         import re as _re
 
+        # Split-K gate.  Only k_batch == 1 has ever been verified on device
+        # through this bridge: the round-3 default_config sweep recorded A6
+        # (split-K) as NOT-COVERED for all 74 shipped configs, on both arches.
+        # The underlying kernel does accept k_batch > 1 for some quant types
+        # (gemm_quant_kernel.hpp:1287-1296), and the per-launch C clear the
+        # split-K accumulation needs exists in quant_bridge_common.hpp -- but
+        # "the kernel accepts it" is not "this bridge produces the right answer
+        # with it".  Reject explicitly rather than return an unverified result;
+        # lifting this needs an on-device A6 gate, not a deleted check.
+        if problem.k_batch != 1:
+            raise ValueError(
+                f"k_batch={problem.k_batch} is not supported by the grouped_gemm_abquant "
+                f"bridge; only k_batch == 1 is verified on device. Split-K "
+                f"(k_batch > 1) would produce an unverified result."
+            )
+
         M, N, K = problem.M, problem.N, problem.K
         QK_A = problem.QK_A
         QM_A = problem.QM_A
@@ -620,68 +637,31 @@ def setup_multiple_abquant_dispatchers(
         return []
 
     arch = gfx_arch or _detect_gpu_arch()
-    base_dir = output_dir or Path(tempfile.mkdtemp(prefix="abquant_dispatcher_"))
-    base_dir.mkdir(parents=True, exist_ok=True)
+    def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
+        return _compile_abquant_kernel(
+            hpp_path=hpp, so_path=so, gfx_arch=a,
+            hipcc=hipcc, extra_include_dirs=extra_include_dirs,
+        )
 
-    headers_dir = base_dir / "generated_kernels"
-    so_dir      = base_dir / "libs"
-    headers_dir.mkdir(exist_ok=True)
-    so_dir.mkdir(exist_ok=True)
-
-    log.info("Building %d ABQuant kernel(s) for %s into %s", len(configs), arch, base_dir)
-
-    seen: Dict[str, int] = {}
-    deduped: List[Tuple[int, ABQuantKernelConfig]] = []
-    for i, cfg in enumerate(configs):
-        if cfg.name not in seen:
-            seen[cfg.name] = i
-            deduped.append((i, cfg))
-
-    results: List[Optional[Path]] = [None] * len(configs)
-
-    def _build_one(idx: int, cfg: ABQuantKernelConfig) -> Tuple[int, Optional[Path]]:
-        hpp = _generate_abquant_kernel(cfg, headers_dir)
-        if hpp is None:
-            return idx, None
-
-        so = so_dir / f"lib{cfg.name}_{arch}.so"
-        if so.exists():
-            log.info("  [cached] %s", so.name)
-            return idx, so
-
-        ok = _compile_abquant_kernel(hpp, so, arch, hipcc, extra_include_dirs)
-        return idx, so if ok else None
-
-    if parallel and len(deduped) > 1:
-        workers = max_workers or min(len(deduped), os.cpu_count() or 4)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-            futures = {ex.submit(_build_one, idx, cfg): (idx, cfg) for idx, cfg in deduped}
-            for fut in concurrent.futures.as_completed(futures):
-                try:
-                    idx, so_path = fut.result()
-                    results[idx] = so_path
-                    if so_path:
-                        log.info("  built %s", so_path.name)
-                    else:
-                        _, cfg = futures[fut]
-                        log.error("  FAILED %s", cfg.name)
-                except Exception as e:
-                    _, cfg = futures[fut]
-                    log.error("  EXCEPTION for %s: %s", cfg.name, e)
-    else:
-        for idx, cfg in deduped:
-            _, so_path = _build_one(idx, cfg)
-            results[idx] = so_path
-
-    for i, cfg in enumerate(configs):
-        if results[i] is None:
-            first_idx = seen.get(cfg.name)
-            if first_idx is not None and first_idx != i:
-                results[i] = results[first_idx]
-
-    built = sum(1 for r in results if r is not None)
-    log.info("Built %d / %d ABQuant kernels", built, len(configs))
-    return results
+    # Shared builder: dedupe-by-name, parallel fan-out, and -- the reason this
+    # module no longer rolls its own loop -- a ``.so`` filename that carries a
+    # digest of the compile flags.  Keyed on name+arch alone, flipping
+    # CK_BRIDGE_NO_TE_FLAGS (or moving to a toolchain where the coerce probe
+    # answers differently) silently reused a ``.so`` built with the other flag
+    # set.  This bridge only gained switchable TE flags this cycle, so the
+    # defect was newly live here.
+    return build_dispatchers(
+        configs,
+        arch=arch,
+        tmp_prefix="abquant_dispatcher_",
+        log_label="ABQuant",
+        generate_fn=_generate_abquant_kernel,
+        compile_fn=_compile_fn,
+        output_dir=output_dir,
+        parallel=parallel,
+        max_workers=max_workers,
+        hipcc=hipcc,
+    )
 
 
 # =============================================================================
@@ -697,10 +677,15 @@ def default_fp8_compv3_config(
     """fp8 ABQuant CompV3 config (GemmConfigABQuantPrefill<fp8_t>, TransposeC=False).
 
     Tile: 128x128x128, warp 1x4x1. kPadK=false.
-    warp_tile_k=32 selects mfma_f32_16x16x32_fp8_fp8 (standard MFMA, valid on gfx942
-    and gfx950). CompV3 is a standard compute pipeline — it does NOT use FlatMM, so
-    WarpTileK must stay at 32 regardless of arch. Only the gfx950-native pipelines
-    (eightwaves, preshuffleb) use FlatMM and require WarpTileK=128.
+
+    warp_tile_k = get_k_warp_tile<fp8_t, 16, IsFlatMM=false>(): 128 on gfx950,
+    32 on gfx942.  The prior text here claimed CompV3 "must stay at 32 regardless
+    of arch because it does not use FlatMM"; that is not what the rule says.
+    get_k_warp_tile (tile_gemm_shape.hpp:122-128) ignores IsFlatMM entirely on
+    the CK_GFX950_SUPPORT branch, and GemmConfigABQuantPrefill -> GemmConfigQuantPrefill
+    (gemm_utils.hpp:256-269) derives K_Warp_Tile with the same call the eightwaves
+    sibling in this module already uses.  32 on gfx950 is the gfx942 value: it
+    computes correctly but is not the shipped Old-TE tile.
     """
     return ABQuantKernelConfig(
         variant_key="fp8",
@@ -710,7 +695,8 @@ def default_fp8_compv3_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "fp8"),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -726,7 +712,8 @@ def default_bf8_compv3_config(
 ) -> ABQuantKernelConfig:
     """bf8 ABQuant CompV3 config (GemmConfigABQuantPrefill<bf8_t>, TransposeC=False).
 
-    warp_tile_k=32 — CompV3 uses standard MFMA, not FlatMM. See default_fp8_compv3_config.
+    warp_tile_k = get_k_warp_tile<bf8_t, 16, IsFlatMM=false>(): 128 gfx950, 32 gfx942.
+    See :func:`default_fp8_compv3_config`.
     """
     return ABQuantKernelConfig(
         variant_key="bf8",
@@ -736,7 +723,8 @@ def default_bf8_compv3_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "bf8"),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -745,31 +733,21 @@ def default_bf8_compv3_config(
     )
 
 
-def _eightwaves_warp_tile_k(gfx_arch: str, variant_key: str = "fp8") -> int:
-    """Return the correct warp_tile_k for the EightWaves pipeline on the given arch.
+def _warp_tile_k_for(gfx_arch: str, variant_key: str, is_flatmm: bool = False) -> int:
+    """Arch-derived WarpTileK for one grouped-ABQuant default config.
 
-    Mirrors get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16, IsFlatMM=false>:
-      gfx950: CK_GFX950_SUPPORT defined → returns 128
-      gfx942: returns 32
+    Thin spelling of :func:`codegen_common.quant_warp_tile_k`; mirrors
+    get_k_warp_tile<PrecType, M_Warp_Tile=16, IsFlatMM>.  ``is_flatmm`` is true
+    only for the preshuffle-B prefill pipeline (Old-TE's
+    GemmConfigPreshuffleB_ABQuant_Prefill), false for compv3 and eightwaves.
+
+      is_flatmm=False -> gfx950 128, gfx942 32
+      is_flatmm=True  -> gfx950 128, gfx942 64
     """
     return quant_warp_tile_k(
         gfx_arch,
         is_8bit_float=variant_is_8bit_float(variant_key),
-        is_flat_mm=False,
-    )
-
-
-def _preshuffleb_warp_tile_k(gfx_arch: str, variant_key: str = "fp8") -> int:
-    """Return the correct warp_tile_k for the PreshuffleB pipeline on the given arch.
-
-    Mirrors get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16, IsFlatMM=true>:
-      gfx950: CK_GFX950_SUPPORT defined → returns 128
-      gfx942: returns 64
-    """
-    return quant_warp_tile_k(
-        gfx_arch,
-        is_8bit_float=variant_is_8bit_float(variant_key),
-        is_flat_mm=True,
+        is_flat_mm=is_flatmm,
     )
 
 
@@ -794,7 +772,7 @@ def default_fp8_eightwaves_config(
         scheduler="intrawave",
         tile_m=192, tile_n=256, tile_k=128,
         warp_m=4, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_eightwaves_warp_tile_k(gfx_arch, "fp8"),
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_warp_tile_k_for(gfx_arch, "fp8"),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -822,7 +800,7 @@ def default_bf8_eightwaves_config(
         scheduler="intrawave",
         tile_m=192, tile_n=256, tile_k=128,
         warp_m=4, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_eightwaves_warp_tile_k(gfx_arch, "bf8"),
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_warp_tile_k_for(gfx_arch, "bf8"),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -853,7 +831,7 @@ def default_fp8_preshuffleb_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_preshuffleb_warp_tile_k(gfx_arch, "fp8"),
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_warp_tile_k_for(gfx_arch, "fp8", is_flatmm=True),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=True, preshuffle_aq=False, preshuffle_bq=False,
@@ -882,7 +860,7 @@ def default_bf8_preshuffleb_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_preshuffleb_warp_tile_k(gfx_arch, "bf8"),
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_warp_tile_k_for(gfx_arch, "bf8", is_flatmm=True),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=True, preshuffle_aq=False, preshuffle_bq=False,

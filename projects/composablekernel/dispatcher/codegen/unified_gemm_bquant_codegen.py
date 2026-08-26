@@ -444,18 +444,19 @@ using SelectedKernel = {struct};
 # Config sweep
 # =============================================================================
 
+_DEFAULT_GFX_ARCH = "gfx950"
 
-def _default_config() -> dict:
+
+def _default_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> dict:
     """Default sweep config matching GemmConfigQuantDecode tile defaults.
 
-    NOTE: this built-in header-enumeration sweep is gfx950-only, hence the
-    literal arch below. Arch-correct warp_tile_k (gfx942 fp8/bf8 -> 32) is
-    produced by the bridge via gemm_bquant_utils._warp_tile_k_for(); a gfx942
-    sweep must pass a config with warp_tile_k=32 (128 silently outputs
-    all-zeros on gfx942).
+    WarpTileK is derived from ``gfx_arch`` (``--gfx-arch`` on the CLI, gfx950 by
+    default), not hardcoded: 128 on gfx950, 32 on gfx942, where 128 compiles and
+    silently outputs all-zeros.  The bridge passes the detected arch through the
+    same rule via gemm_bquant_utils._warp_tile_k_for().
     """
     return quant_decode_default_config(
-        warp_tile_k=fp8_warp_tile_k_for_arch("gfx950"),
+        warp_tile_k=fp8_warp_tile_k_for_arch(gfx_arch),
         quant_groups=[
             {"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128},
         ],
@@ -521,6 +522,7 @@ def main() -> int:
         make_generator=BQuantKernelHeaderGenerator,
         build_specs=_build_specs,
         default_config=_default_config,
+        arch_aware=True,
     )
 
 

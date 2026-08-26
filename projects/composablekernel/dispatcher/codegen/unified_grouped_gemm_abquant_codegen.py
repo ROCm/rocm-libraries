@@ -37,7 +37,6 @@ Reference:
     example/ck_tile/38_block_scale_gemm/gemm_utils.hpp
 """
 
-import argparse
 import itertools
 import json
 import logging

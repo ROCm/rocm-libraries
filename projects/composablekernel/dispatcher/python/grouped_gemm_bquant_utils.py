@@ -50,7 +50,11 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "groupe
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_bquant_kernel_name  # noqa: E402
+from codegen_common import (  # noqa: E402
+    make_bquant_kernel_name,
+    quant_warp_tile_k,
+    variant_is_8bit_float,
+)
 
 
 # --- Tile-Engine perf flags: single source of truth (quant_bridge_flags.py) ---
@@ -60,6 +64,13 @@ from codegen_common import make_bquant_kernel_name  # noqa: E402
 if str(Path(__file__).parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent))
 from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
+from quant_bridge_base import (  # noqa: E402
+    arch_from_so_path,
+    build_dispatchers,
+    coerce_a_for_variant,
+    encode_bq_for_variant,
+    variant_from_kernel_name,
+)
 
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
@@ -366,6 +377,9 @@ class BQuantGpuGemmRunner:
 
     def __init__(self, so_path: Path):
         self._lib = BQuantDispatcherLib(so_path)
+        # Needed to pick the fp8 flavour (OCP on gfx950/gfx12, FNUZ elsewhere)
+        # when encoding BQ to a 1-byte QDataType.
+        self._gfx_arch = arch_from_so_path(so_path)
 
     @property
     def kernel_name(self) -> str:
@@ -386,12 +400,42 @@ class BQuantGpuGemmRunner:
         """
         import numpy as np
 
+        # Split-K gate.  Only k_batch == 1 has ever been verified on device
+        # through this bridge: the round-3 default_config sweep recorded A6
+        # (split-K) as NOT-COVERED for all 74 shipped configs, on both arches.
+        # The underlying kernel does accept k_batch > 1 for some quant types
+        # (gemm_quant_kernel.hpp:1287-1296), and the per-launch C clear the
+        # split-K accumulation needs exists in quant_bridge_common.hpp -- but
+        # "the kernel accepts it" is not "this bridge produces the right answer
+        # with it".  Reject explicitly rather than return an unverified result;
+        # lifting this needs an on-device A6 gate, not a deleted check.
+        if problem.k_batch != 1:
+            raise ValueError(
+                f"k_batch={problem.k_batch} is not supported by the grouped_gemm_bquant "
+                f"bridge; only k_batch == 1 is verified on device. Split-K "
+                f"(k_batch > 1) would produce an unverified result."
+            )
+
         M, N, K = problem.M, problem.N, problem.K
         QK_B    = problem.QK_B
         QN_B    = problem.QN_B
 
         if c_dtype is None:
             c_dtype = np.float16
+
+        # QDataType-aware BQ encoding.  The .so reinterprets the BQ bytes as the
+        # kernel's compile-time QDataType: float for fp8/bf8, but fp8_t/bf8_t
+        # (1 byte) for fp8i4/bf8i4 and e8m0_t for the MX variants.  Without this
+        # a float32 BQ was read 4x short by the i4 kernels and
+        # default_{fp8,bf8}i4_config returned a non-finite C on gfx950 -- the
+        # same defect the non-grouped bridge fixed and this one did not inherit.
+        _variant = variant_from_kernel_name(self.kernel_name, "grouped_gemm_bquant")
+        BQ = encode_bq_for_variant(BQ, _variant, gfx_arch=self._gfx_arch)
+
+        # ADataType-aware A guard: the .so copies M*K * sizeof(ADataType) bytes
+        # from the host A pointer, so A must be exactly that wide.  MX kernels
+        # take a 2-byte bf16 A; every other variant takes 1 byte.
+        A = coerce_a_for_variant(A, _variant)
 
         # Output buffer — dtype must match the compiled kernel's CDataType.
         C = np.zeros((M, N), dtype=c_dtype)
@@ -641,80 +685,31 @@ def setup_multiple_bquant_dispatchers(
         return []
 
     arch = gfx_arch or _detect_gpu_arch()
-    base_dir = output_dir or Path(tempfile.mkdtemp(prefix="bquant_dispatcher_"))
-    base_dir.mkdir(parents=True, exist_ok=True)
-
-    headers_dir = base_dir / "generated_kernels"
-    so_dir      = base_dir / "libs"
-    headers_dir.mkdir(exist_ok=True)
-    so_dir.mkdir(exist_ok=True)
-
-    log.info(
-        "Building %d BQuant kernel(s) for %s into %s",
-        len(configs), arch, base_dir,
-    )
-
-    # Deduplicate by name so we don't build the same kernel twice
-    seen: Dict[str, int] = {}          # name → index of first occurrence
-    deduped: List[Tuple[int, BQuantKernelConfig]] = []
-    for i, cfg in enumerate(configs):
-        if cfg.name not in seen:
-            seen[cfg.name] = i
-            deduped.append((i, cfg))
-
-    # results[i] = Path or None, aligned with input configs
-    results: List[Optional[Path]] = [None] * len(configs)
-
-    def _build_one(idx: int, cfg: BQuantKernelConfig) -> Tuple[int, Optional[Path]]:
-        hpp = _generate_bquant_kernel(cfg, headers_dir)
-        if hpp is None:
-            return idx, None
-
-        so = so_dir / f"lib{cfg.name}_{arch}.so"
-        if so.exists():
-            log.info("  [cached] %s", so.name)
-            return idx, so
-
-        ok = _compile_bquant_kernel(
-            hpp_path=hpp,
-            so_path=so,
-            gfx_arch=arch,
-            hipcc=hipcc,
-            extra_include_dirs=extra_include_dirs,
+    def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
+        return _compile_bquant_kernel(
+            hpp_path=hpp, so_path=so, gfx_arch=a,
+            hipcc=hipcc, extra_include_dirs=extra_include_dirs,
         )
-        return idx, so if ok else None
 
-    if parallel and len(deduped) > 1:
-        workers = max_workers or min(len(deduped), os.cpu_count() or 4)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-            futures = {ex.submit(_build_one, idx, cfg): (idx, cfg) for idx, cfg in deduped}
-            for fut in concurrent.futures.as_completed(futures):
-                try:
-                    idx, so_path = fut.result()
-                    results[idx] = so_path
-                    if so_path:
-                        log.info("  built %s", so_path.name)
-                    else:
-                        _, cfg = futures[fut]
-                        log.error("  FAILED %s", cfg.name)
-                except Exception as e:
-                    _, cfg = futures[fut]
-                    log.error("  EXCEPTION for %s: %s", cfg.name, e)
-    else:
-        for idx, cfg in deduped:
-            _, so_path = _build_one(idx, cfg)
-            results[idx] = so_path
-
-    # Fill in duplicates
-    for i, cfg in enumerate(configs):
-        if results[i] is None:
-            first_idx = seen.get(cfg.name)
-            if first_idx is not None and first_idx != i:
-                results[i] = results[first_idx]
-
-    built = sum(1 for r in results if r is not None)
-    log.info("Built %d / %d BQuant kernels", built, len(configs))
-    return results
+    # Shared builder: dedupe-by-name, parallel fan-out, and -- the reason this
+    # module no longer rolls its own loop -- a ``.so`` filename that carries a
+    # digest of the compile flags.  Keyed on name+arch alone, flipping
+    # CK_BRIDGE_NO_TE_FLAGS (or moving to a toolchain where the coerce probe
+    # answers differently) silently reused a ``.so`` built with the other flag
+    # set.  This bridge only gained switchable TE flags this cycle, so the
+    # defect was newly live here.
+    return build_dispatchers(
+        configs,
+        arch=arch,
+        tmp_prefix="bquant_dispatcher_",
+        log_label="BQuant",
+        generate_fn=_generate_bquant_kernel,
+        compile_fn=_compile_fn,
+        output_dir=output_dir,
+        parallel=parallel,
+        max_workers=max_workers,
+        hipcc=hipcc,
+    )
 
 
 # =============================================================================
@@ -808,7 +803,38 @@ def expand_bquant_sweep(
 
 # =============================================================================
 # Convenience: default fp8 config (matches GemmConfigQuantDecode<fp8_t>)
+#
+# warp_tile_k is ARCH-DERIVED for every default config below.  Old-TE derives it
+# too -- every quant GemmConfig in
+# example/ck_tile/38_block_scale_gemm/gemm_utils.hpp spells
+# `get_k_warp_tile<PrecType, M_Warp_Tile=16[, IsFlatMM]>()` -- and crucially the
+# PrecType is the 8-bit *float* type even for the i4 variants:
+# gemm_bquant_quantgrouped_fp8i4.cpp:10 instantiates `GemmConfig<ck_tile::fp8_t>`
+# while its TypeConfig carries `pk_int4_t` as BDataType.  The pk_int4 operand
+# does not drive the K warp tile.
+#
+# The literals this replaced were wrong in two different directions:
+#   * fp8/bf8 shipped a flat 128 -- the gfx950 value -- to gfx942, where 128 has
+#     no valid 16x16 fp8 warp gemm and the kernel returns all zeros.
+#   * fp8i4/bf8i4 shipped 16 (decode) / 32 (preshuffle) on both arches.  16 is
+#     the gfx1250 WMMA value (GemmConfigPreshuffleB_BQuant_Prefill_Wmma);
+#     32 is the "not 8-bit float" gfx950 branch, which this variant never takes.
+#     On gfx950 `default_fp8i4_config` at 16 produced C with 98% of entries
+#     exactly zero.
 # =============================================================================
+
+
+def _warp_tile_k_for(gfx_arch: str, variant_key: str, is_flatmm: bool = False) -> int:
+    """Arch-derived WarpTileK for one grouped-BQuant default config.
+
+    Thin spelling of :func:`codegen_common.quant_warp_tile_k` so that this module
+    holds no copy of the rule.
+    """
+    return quant_warp_tile_k(
+        gfx_arch,
+        is_8bit_float=variant_is_8bit_float(variant_key),
+        is_flat_mm=is_flatmm,
+    )
 
 
 def default_fp8_config(
@@ -829,7 +855,8 @@ def default_fp8_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "fp8"),
         quant_group_m=1,
         quant_group_n=quant_group_n,
         quant_group_k=quant_group_k,
@@ -854,7 +881,8 @@ def default_bf8_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "bf8"),
         quant_group_m=1,
         quant_group_n=quant_group_n,
         quant_group_k=quant_group_k,
@@ -876,7 +904,8 @@ def default_fp8i4_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "fp8i4"),
         quant_group_m=1,
         quant_group_n=quant_group_n,
         quant_group_k=quant_group_k,
@@ -898,7 +927,8 @@ def default_bf8i4_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for(gfx_arch, "bf8i4"),
         quant_group_m=1,
         quant_group_n=quant_group_n,
         quant_group_k=quant_group_k,
@@ -907,243 +937,34 @@ def default_bf8i4_config(
 
 
 # =============================================================================
-# Phase 3a — preshuffle_b only (WPQuantBPipelineAgBgCrV2, prefill tile 128x128x128)
+# Phase 3 (preshuffle_b / preshuffle_bquant): NOT OFFERED by this op.
 #
-# Tile dims from GemmConfigPreshuffleB_BQuant_Prefill<PrecType>:
-#   M=128, N=128, K=128/sizeof(PrecType)
-#   Warp: 1x4x1, WarpTile: 16x16x K_warp
-#   K_warp from get_k_warp_tile<PrecType, 16, IsFlatMM=true> on gfx950:
-#     fp8/bf8  (8-bit float): K_warp = 128  → tile_k = 128
-#     pk_int4  (not 8b float): K_warp = 32   → tile_k = 128 (sizeof=0.5 → 128/0.5=256 packed)
-#   DoubleSmemBuffer=true, kBlockPerCu=2
-# =============================================================================
-
-
-def _preshuffleb_config(
-    variant_key: str,
-    warp_tile_k: int,
-    quant_group_k: int,
-    quant_group_n: int,
-    gfx_arch: str,
-) -> BQuantKernelConfig:
-    return BQuantKernelConfig(
-        variant_key=variant_key,
-        layout="rcr",
-        pipeline="preshuffleb",
-        epilogue="cshuffle",
-        scheduler="intrawave",
-        tile_m=128, tile_n=128, tile_k=128,
-        warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=warp_tile_k,
-        quant_group_m=1,
-        quant_group_n=quant_group_n,
-        quant_group_k=quant_group_k,
-        preshuffle_b=True,
-        preshuffle_bquant=False,
-        double_smem_buffer=True,
-        k_block_per_cu=2,
-        gfx_arch=gfx_arch,
-    )
-
-
-def default_fp8_preshuffleb_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """fp8 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<fp8_t>)."""
-    return _preshuffleb_config("fp8", warp_tile_k=128, quant_group_k=quant_group_k,
-                               quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-def default_bf8_preshuffleb_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """bf8 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<bf8_t>)."""
-    return _preshuffleb_config("bf8", warp_tile_k=128, quant_group_k=quant_group_k,
-                               quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-def default_fp8i4_preshuffleb_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """fp8i4 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<fp8_t>, B=pk_int4).
-
-    K_warp_tile=32: pk_int4 is not an 8-bit float type so get_k_warp_tile returns 32 on gfx950.
-    """
-    return _preshuffleb_config("fp8i4", warp_tile_k=32, quant_group_k=quant_group_k,
-                               quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-def default_bf8i4_preshuffleb_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """bf8i4 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<bf8_t>, B=pk_int4).
-
-    K_warp_tile=32: pk_int4 is not an 8-bit float type so get_k_warp_tile returns 32 on gfx950.
-    """
-    return _preshuffleb_config("bf8i4", warp_tile_k=32, quant_group_k=quant_group_k,
-                               quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-# =============================================================================
-# Phase 3b — preshuffle_bquant only (BQuantGemmPipelineAgBgCrCompV3, prefill tile 128x128x128)
+# The twelve default_*_preshuffle*_config factories that used to live here have
+# been removed.  None of them could ever work, and all twelve shipped -- 12 of
+# the 19 defaults this op advertised were build failures:
 #
-# Tile dims from GemmConfigPreshuffleBQuantPrefill<PrecType> (inherits GemmConfigQuantPrefill):
-#   M=128, N=128, K=128, Warp: 1x4x1, WarpTile: 16x16xK_warp
-#   K_warp from get_k_warp_tile<PrecType, 16, IsFlatMM=false> on gfx950:
-#     fp8/bf8: K_warp = 128  (is_8bit_float=true, M_Warp_Tile != 32)
-#     pk_int4: K_warp = 32
-#   DoubleSmemBuffer=false (default), kBlockPerCu=1 (default)
-#   Extra quant group: 1x16x128 (not in 3a)
-# =============================================================================
-
-
-def _preshufflequant_config(
-    variant_key: str,
-    warp_tile_k: int,
-    quant_group_k: int,
-    quant_group_n: int,
-    gfx_arch: str,
-) -> BQuantKernelConfig:
-    return BQuantKernelConfig(
-        variant_key=variant_key,
-        layout="rcr",
-        pipeline="compv3",
-        epilogue="cshuffle",
-        scheduler="intrawave",
-        tile_m=128, tile_n=128, tile_k=128,
-        warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=warp_tile_k,
-        quant_group_m=1,
-        quant_group_n=quant_group_n,
-        quant_group_k=quant_group_k,
-        preshuffle_b=False,
-        preshuffle_bquant=True,
-        gfx_arch=gfx_arch,
-    )
-
-
-def default_fp8_preshufflequant_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """fp8 preshuffle_bquant prefill config (GemmConfigPreshuffleBQuantPrefill<fp8_t>)."""
-    return _preshufflequant_config("fp8", warp_tile_k=128, quant_group_k=quant_group_k,
-                                   quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-def default_bf8_preshufflequant_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """bf8 preshuffle_bquant prefill config (GemmConfigPreshuffleBQuantPrefill<bf8_t>)."""
-    return _preshufflequant_config("bf8", warp_tile_k=128, quant_group_k=quant_group_k,
-                                   quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-def default_fp8i4_preshufflequant_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """fp8i4 preshuffle_bquant prefill config."""
-    return _preshufflequant_config("fp8i4", warp_tile_k=32, quant_group_k=quant_group_k,
-                                   quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-def default_bf8i4_preshufflequant_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """bf8i4 preshuffle_bquant prefill config."""
-    return _preshufflequant_config("bf8i4", warp_tile_k=32, quant_group_k=quant_group_k,
-                                   quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-# =============================================================================
-# Phase 3c — preshuffle_b + preshuffle_bquant (WPQuantBPipelineAgBgCrV2, prefill tile)
+#   * this op pins BQLayout = RowMajor, while every preshuffle pipeline
+#     static_asserts ColumnMajor BQ -- gemm_wp_bquant_pipeline_ag_bg_cr_v2.hpp:215
+#     ("Bq must be col major"), gemm_quant_kernel.hpp:921/943, and
+#     gemm_group_quant_utils.hpp:216.  All twelve translation units fail to
+#     compile on gfx950, which is also why the PreshuffleB reject in
+#     grouped_gemm_bquant_ctypes_lib.cpp is unreachable: the guard is inside a
+#     TU that never compiles.
+#   * even with the layout pin flipped, the grouped generated header exports
+#     neither BShuffleConfig nor TiledMMAPermuteN, which ck_tile::shuffle_b and
+#     shuffle_b_permuteN both require, so B could not be shuffled into the
+#     layout a PreshuffleB kernel reads.
 #
-# Tile dims from GemmConfigPreshuffleB_PreshuffleBQuant_Prefill<PrecType>
-#   (inherits GemmConfigPreshuffleB_BQuant_Prefill): identical tile/warp dims to 3a.
-#   PreshuffleB=true, BPreshuffleQuant=true, DoubleSmemBuffer=true, kBlockPerCu=2
+# A shipped ``default_*`` factory is a claim that a configuration works, so the
+# reachable refusal belongs here, where the config is constructed -- not in a
+# translation unit that never compiles.  The C++ guard stays as a backstop for
+# the day the header does compile.
+#
+# The non-grouped ``gemm_bquant`` bridge does support preshuffle and keeps its
+# factories.  ``BQuantKernelConfig`` still carries the ``preshuffle_b`` /
+# ``preshuffle_bquant`` fields, because they feed the kernel name and a caller
+# may construct one by hand; it simply will not build for this op.
 # =============================================================================
-
-
-def _preshuffleb_bquant_config(
-    variant_key: str,
-    warp_tile_k: int,
-    quant_group_k: int,
-    quant_group_n: int,
-    gfx_arch: str,
-) -> BQuantKernelConfig:
-    return BQuantKernelConfig(
-        variant_key=variant_key,
-        layout="rcr",
-        pipeline="preshuffleb",
-        epilogue="cshuffle",
-        scheduler="intrawave",
-        tile_m=128, tile_n=128, tile_k=128,
-        warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=warp_tile_k,
-        quant_group_m=1,
-        quant_group_n=quant_group_n,
-        quant_group_k=quant_group_k,
-        preshuffle_b=True,
-        preshuffle_bquant=True,
-        double_smem_buffer=True,
-        k_block_per_cu=2,
-        gfx_arch=gfx_arch,
-    )
-
-
-def default_fp8_preshuffleb_bquant_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """fp8 preshuffle_b+preshuffle_bquant config (GemmConfigPreshuffleB_PreshuffleBQuant_Prefill<fp8_t>)."""
-    return _preshuffleb_bquant_config("fp8", warp_tile_k=128, quant_group_k=quant_group_k,
-                                      quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-def default_bf8_preshuffleb_bquant_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """bf8 preshuffle_b+preshuffle_bquant config."""
-    return _preshuffleb_bquant_config("bf8", warp_tile_k=128, quant_group_k=quant_group_k,
-                                      quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-def default_fp8i4_preshuffleb_bquant_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """fp8i4 preshuffle_b+preshuffle_bquant config."""
-    return _preshuffleb_bquant_config("fp8i4", warp_tile_k=32, quant_group_k=quant_group_k,
-                                      quant_group_n=quant_group_n, gfx_arch=gfx_arch)
-
-
-def default_bf8i4_preshuffleb_bquant_config(
-    quant_group_k: int = 128,
-    quant_group_n: int = 1,
-    gfx_arch: str = _DEFAULT_GFX_ARCH,
-) -> BQuantKernelConfig:
-    """bf8i4 preshuffle_b+preshuffle_bquant config."""
-    return _preshuffleb_bquant_config("bf8i4", warp_tile_k=32, quant_group_k=quant_group_k,
-                                      quant_group_n=quant_group_n, gfx_arch=gfx_arch)
 
 
 # =============================================================================

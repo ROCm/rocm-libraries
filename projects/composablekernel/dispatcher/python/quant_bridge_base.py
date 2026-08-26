@@ -371,3 +371,183 @@ def build_dispatchers(
     built = sum(1 for r in results if r is not None)
     log.info("Built %d / %d %s kernels", built, len(configs), log_label)
     return results
+
+
+# ============================================================================
+# QDataType / ADataType host-buffer contract (shared by both bquant bridges)
+# ============================================================================
+#
+# The ctypes libs reinterpret the raw BQ and A bytes as the kernel's
+# compile-time QDataType / ADataType.  Hand them the wrong element width and
+# the .so reads a different number of bytes than the caller allocated: a
+# float32 BQ fed to an fp8i4 kernel (QDataType == fp8_t, 1 byte) is read 4x
+# short and the result is NaN, silently.
+#
+# The non-grouped gemm_bquant bridge learned this and encoded here; the grouped
+# twin did not, and shipped two default configs (fp8i4 / bf8i4) that returned a
+# 3.5%-non-finite C on gfx950.  One implementation, both bridges.
+
+# variant_key -> tag for the QDataType the kernel was compiled with.
+# "float32" means "no re-encode".
+BQ_QDTYPE_BY_VARIANT: Dict[str, str] = {
+    "fp8":         "float32",
+    "bf8":         "float32",
+    "fp8i4":       "fp8",
+    "bf8i4":       "bf8",
+    "mx_bf16bf16": "e8m0",
+    "mx_bf16bf8":  "e8m0",
+    "mx_bf16fp4":  "e8m0",
+}
+
+# variant_key -> numpy element size (bytes) of the kernel's ADataType.
+ADTYPE_ELEMSIZE_BY_VARIANT: Dict[str, int] = {
+    "fp8":         1,
+    "bf8":         1,
+    "fp8i4":       1,
+    "bf8i4":       1,
+    "mx_bf16bf16": 2,
+    "mx_bf16bf8":  2,
+    "mx_bf16fp4":  2,
+}
+
+
+def variant_from_kernel_name(name: str, name_prefix: str) -> Optional[str]:
+    """Extract the variant_key from a KERNEL_NAME of the form ``<prefix>_<variant>_...``.
+
+    Longest-token-first, so ``mx_bf16bf16`` is matched before any shorter
+    prefix would swallow it.
+    """
+    if not name or not name.startswith(name_prefix + "_"):
+        return None
+    rest = name[len(name_prefix) + 1:]
+    for v in sorted(BQ_QDTYPE_BY_VARIANT, key=len, reverse=True):
+        if rest.startswith(v + "_"):
+            return v
+    return None
+
+
+def uses_ocp_fp8(gfx_arch: Optional[str]) -> bool:
+    """True when the kernel is compiled with OCP fp8 (not FNUZ) for ``gfx_arch``.
+
+    gfx950 and gfx12* build with -DCK_TILE_USE_OCP_FP8 so ``ck_tile::fp8_t`` is
+    OCP e4m3 / e5m2; every other arch (notably gfx942 / gfx90a) falls back to
+    the FNUZ encodings.  Encoding host bytes in the wrong flavour makes gfx942
+    read NaN.  Unknown arch -> assume OCP, the historical gfx950 default.
+    """
+    if not gfx_arch:
+        return True
+    return ("gfx950" in gfx_arch) or ("gfx12" in gfx_arch)
+
+
+def ml_fp8_dtype(dtype: str, gfx_arch: Optional[str]):
+    """The ml_dtypes fp8 type matching this arch's ``ck_tile::fp8_t`` / ``bf8_t``."""
+    import ml_dtypes
+    if uses_ocp_fp8(gfx_arch):
+        return ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+    return ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else ml_dtypes.float8_e5m2fnuz
+
+
+def encode_fp8_bytes(arr, dtype: str, gfx_arch: Optional[str] = None):
+    """float32 -> fp8/bf8 raw bytes (uint8), arch-aware (FNUZ on gfx942)."""
+    import numpy as np
+    a = np.asarray(arr, dtype=np.float32)
+    try:
+        return a.astype(ml_fp8_dtype(dtype, gfx_arch)).view(np.uint8)
+    except ImportError:
+        # Deterministic fallback so CPU-only unit tests without ml_dtypes still
+        # exercise the byte-width contract.
+        return (np.clip(a, -2.0, 2.0) * 64).astype(np.int8).view(np.uint8)
+
+
+def encode_e8m0(arr):
+    """float32 scale -> e8m0 uint8 (block-scale exponent; byte b == 2^(b-127))."""
+    import numpy as np
+    a = np.clip(np.asarray(arr, dtype=np.float32), 0.0, np.float32(2.0 ** 127))
+    out = np.zeros(a.shape, dtype=np.uint8)
+    nonzero = a > 0.0
+    out[nonzero] = np.clip(
+        np.floor(np.log2(a[nonzero])).astype(np.int32) + 127, 0, 254
+    ).astype(np.uint8)
+    return out
+
+
+def encode_bq_for_variant(BQ, variant_key: Optional[str],
+                          gfx_arch: Optional[str] = None):
+    """Return BQ in the kernel's QDataType bytes for ``variant_key``.
+
+    fp8/bf8 -> float32 (unchanged); fp8i4 -> fp8 bytes, bf8i4 -> bf8 bytes
+    (arch-aware); mx_* -> e8m0 uint8.  Already-encoded 1-byte input is passed
+    through so a caller that pre-encoded is never double-encoded.  A None or
+    unknown variant is passed through unchanged.
+    """
+    import numpy as np
+    if variant_key is None:
+        return BQ
+    tag = BQ_QDTYPE_BY_VARIANT.get(variant_key, "float32")
+    arr = np.asarray(BQ)
+    if tag == "float32":
+        return arr.astype(np.float32) if arr.dtype != np.float32 else arr
+    if arr.dtype == np.uint8 or arr.dtype == np.int8:
+        return arr
+    if tag == "e8m0":
+        return encode_e8m0(arr)
+    if tag in ("fp8", "bf8"):
+        return encode_fp8_bytes(arr, tag, gfx_arch=gfx_arch)
+    return arr
+
+
+def coerce_a_for_variant(A, variant_key: Optional[str]):
+    """Return A whose element byte-width matches the kernel's ADataType.
+
+    The ctypes lib copies ``M*K * sizeof(ADataType)`` bytes from the host A
+    pointer, so A must be exactly that wide or the copy reads out of bounds --
+    harmless slack at small M*K, a host-pin failure and SEGFAULT at large M*K.
+    """
+    import numpy as np
+    if variant_key is None:
+        return A
+    want = ADTYPE_ELEMSIZE_BY_VARIANT.get(variant_key)
+    if want is None:
+        return A
+    arr = np.ascontiguousarray(A)
+    have = arr.dtype.itemsize
+    if have == want:
+        return arr
+    if want == 2:
+        try:
+            import ml_dtypes
+            bf16 = ml_dtypes.bfloat16
+        except Exception:  # pragma: no cover - ml_dtypes is present on GPU nodes
+            bf16 = None
+        if have == 1:
+            vals = arr.astype(np.float32)
+            return vals.astype(bf16) if bf16 is not None else vals.astype(np.float16)
+        return arr.astype(bf16) if bf16 is not None else arr.astype(np.float16)
+    if have != 1:
+        return arr.astype(np.uint8)
+    return arr
+
+
+_ARCH_IN_SO_NAME = None
+
+
+def arch_from_so_path(so_path) -> Optional[str]:
+    """Recover the gfx arch from a built ``.so`` filename.
+
+    Two shapes are in use and both must parse::
+
+        libgemm_bquant_fp8i4_..._gfx942.so             (pre-flags-tag)
+        libgemm_bquant_fp8i4_..._gfx942_9bf231b3.so    (with the flag digest)
+
+    A regex anchored at the end of the stem silently returns None for the
+    second, and None means "assume OCP fp8" -- correct on gfx950 and wrong on
+    gfx942, where ``ck_tile::fp8_t`` is FNUZ.  That is a silent wrong-answer
+    path, so parse both.
+    """
+    import re
+    from pathlib import Path as _Path
+    global _ARCH_IN_SO_NAME
+    if _ARCH_IN_SO_NAME is None:
+        _ARCH_IN_SO_NAME = re.compile(r"_(gfx[0-9a-zA-Z]+?)(?:_[0-9a-f]{6,16})?$")
+    m = _ARCH_IN_SO_NAME.search(_Path(so_path).stem)
+    return m.group(1) if m else None

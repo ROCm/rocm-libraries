@@ -146,6 +146,7 @@ foreach(_quant_test
         test_quant_bridge_shared
         test_quant_warp_tile_k
         test_quant_bridge_invariants
+        test_ctypes_symbol_uniqueness
         test_codegen_byte_identity)
     add_test(
         NAME dispatcher_${_quant_test}
@@ -161,7 +162,10 @@ endforeach()
 
 foreach(_quant_gpu_test
         test_rowcolquant_gpu_correctness
-        test_tensorquant_gpu_correctness)
+        test_tensorquant_gpu_correctness
+        # Covers every shipped default_*_config of the three grouped quant
+        # bridges that had no on-device test at all.
+        test_grouped_quant_gpu_correctness)
     add_test(
         NAME dispatcher_${_quant_gpu_test}
         COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/${_quant_gpu_test}.py -v
@@ -169,8 +173,9 @@ foreach(_quant_gpu_test
     )
     set_tests_properties(dispatcher_${_quant_gpu_test} PROPERTIES
         SKIP_RETURN_CODE 77
-    LABELS "dispatcher;python;bridge;quant;gpu"
-        TIMEOUT 600
+        LABELS "dispatcher;python;bridge;quant;gpu"
+        # 31 default configs, each a hipcc build plus a device run.
+        TIMEOUT 3600
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
     )
 endforeach()

@@ -650,33 +650,51 @@ def quant_warp_tile_k(
     *,
     is_8bit_float: bool = True,
     is_flat_mm: bool = False,
+    m_warp_tile: int = 16,
 ) -> int:
-    """Arch-derived WarpTileK for a block-scale quant GEMM with M_Warp_Tile=16.
+    """Arch-derived WarpTileK for a block-scale quant GEMM.
 
     **This rule exists exactly once.**  Every quant bridge -- aquant, bquant,
     abquant, rowcolquant, tensor_quant and their grouped twins, plus the codegen
     default configs -- delegates here.  A second, drifting copy is a
     silent-wrong-answer bug rather than a build failure: WarpTileK=128 on gfx942
     compiles cleanly and then produces **all-zeros output**, because there is no
-    valid 16x16x128 fp8/bf8 warp-gemm on gfx942.
+    valid 16x16x128 fp8/bf8 warp-gemm on gfx942.  The mirror-image mistake is
+    just as quiet: WarpTileK=16 with M_Warp_Tile=16 on gfx950 (the gfx1250 WMMA
+    value) compiled and returned a C that was 98% exactly zero.
 
-    Mirrors ``ck_tile::get_k_warp_tile<PrecType, M_Warp_Tile=16, IsFlatMM>()``
-    (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp, non-WMMA path)::
+    Mirrors ``ck_tile::get_k_warp_tile<PrecType, M_Warp_Tile, IsFlatMM>()``
+    (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp:105-135, non-WMMA
+    path)::
 
-        gfx950 (CK_GFX950_SUPPORT), 8-bit float      -> 128 (IsFlatMM ignored)
-        gfx950,                     not 8-bit float  ->  32
-        gfx942/other, IsFlatMM == false              ->  32
-        gfx942/other, IsFlatMM == true               ->  64
+        gfx950, M_Warp_Tile == 32:  8-bit float ->  64, else -> 16
+        gfx950, M_Warp_Tile != 32:  8-bit float -> 128, else -> 32
+                                    (IsFlatMM is ignored on this branch)
+        gfx942/other, M_Warp_Tile == 32: IsFlatMM ? 32 : 16
+        gfx942/other, M_Warp_Tile != 32: IsFlatMM ? 64 : 32
 
-    ``is_flat_mm`` is true for the preshuffle-B / preshuffle-quant prefill
-    pipelines (Old-TE's ``GemmConfigPreshuffleB_*_Prefill`` derives WarpTileK
-    with ``IsFlatMM=true``); the decode and plain-prefill pipelines pass false.
+    ``is_flat_mm`` is true for the preshuffle-B prefill pipelines and for
+    aquant's ``GemmConfigPreshuffleQuantDecode``; the decode, compv3 and
+    plain-prefill pipelines pass false.  Note bquant's *preshufflequant*
+    (``GemmConfigPreshuffleBQuantPrefill`` -> ``GemmConfigQuantPrefill``)
+    is **not** flat-mm, while aquant's preshuffle-quant is -- the two ops
+    genuinely differ, which is why the axis is a parameter and not derived
+    from the pipeline string.
 
-    On gfx942 the ``IsFlatMM`` branch is ``sizeof(PrecType) == 2 ? 32 : 64`` --
+    ``is_8bit_float`` follows the PrecType Old-TE instantiates the GemmConfig
+    with, **not** the operand dtypes: the fp8i4/bf8i4 variants pass
+    ``GemmConfig<fp8_t>``/``<bf8_t>`` while carrying a ``pk_int4_t`` operand
+    (e.g. gemm_bquant_quantgrouped_fp8i4.cpp:10), so they are 8-bit float here.
+
+    On gfx942 the ``IsFlatMM`` branch is ``sizeof(PrecType) == 2 ? .. : ..`` --
     every quant variant is 1 byte, so it is not gated on ``is_8bit_float``.
     """
     if "gfx950" in gfx_arch:
+        if m_warp_tile == 32:
+            return 64 if is_8bit_float else 16
         return 128 if is_8bit_float else 32
+    if m_warp_tile == 32:
+        return 32 if is_flat_mm else 16
     return 64 if is_flat_mm else 32
 
 

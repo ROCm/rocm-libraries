@@ -41,6 +41,7 @@ log = logging.getLogger(__name__)
 if str(Path(__file__).parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent))
 from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
+from quant_bridge_base import build_dispatchers  # noqa: E402
 
 
 # =============================================================================
@@ -359,6 +360,22 @@ class RowColQuantGpuGemmRunner:
         """
         import numpy as np
 
+        # Split-K gate.  Only k_batch == 1 has ever been verified on device
+        # through this bridge: the round-3 default_config sweep recorded A6
+        # (split-K) as NOT-COVERED for all 74 shipped configs, on both arches.
+        # The underlying kernel does accept k_batch > 1 for some quant types
+        # (gemm_quant_kernel.hpp:1287-1296), and the per-launch C clear the
+        # split-K accumulation needs exists in quant_bridge_common.hpp -- but
+        # "the kernel accepts it" is not "this bridge produces the right answer
+        # with it".  Reject explicitly rather than return an unverified result;
+        # lifting this needs an on-device A6 gate, not a deleted check.
+        if problem.k_batch != 1:
+            raise ValueError(
+                f"k_batch={problem.k_batch} is not supported by the grouped_gemm_rowcolquant "
+                f"bridge; only k_batch == 1 is verified on device. Split-K "
+                f"(k_batch > 1) would produce an unverified result."
+            )
+
         M, N, K = problem.M, problem.N, problem.K
         QK_A = problem.QK_A  # == M
         QK_B = problem.QK_B  # == N
@@ -594,74 +611,31 @@ def setup_multiple_rowcolquant_dispatchers(
         return []
 
     arch = gfx_arch or _detect_gpu_arch()
-    base_dir = output_dir or Path(tempfile.mkdtemp(prefix="rowcolquant_dispatcher_"))
-    base_dir.mkdir(parents=True, exist_ok=True)
-
-    headers_dir = base_dir / "generated_kernels"
-    so_dir      = base_dir / "libs"
-    headers_dir.mkdir(exist_ok=True)
-    so_dir.mkdir(exist_ok=True)
-
-    log.info("Building %d RowColQuant kernel(s) for %s into %s", len(configs), arch, base_dir)
-
-    seen: Dict[str, int] = {}
-    deduped: List[Tuple[int, RowColQuantKernelConfig]] = []
-    for i, cfg in enumerate(configs):
-        if cfg.name not in seen:
-            seen[cfg.name] = i
-            deduped.append((i, cfg))
-
-    results: List[Optional[Path]] = [None] * len(configs)
-
-    def _build_one(idx: int, cfg: RowColQuantKernelConfig) -> Tuple[int, Optional[Path]]:
-        hpp = _generate_rowcolquant_kernel(cfg, headers_dir)
-        if hpp is None:
-            return idx, None
-
-        so = so_dir / f"lib{cfg.name}_{arch}.so"
-        if so.exists():
-            log.info("  [cached] %s", so.name)
-            return idx, so
-
-        ok = _compile_rowcolquant_kernel(
-            hpp_path=hpp, so_path=so, gfx_arch=arch,
+    def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
+        return _compile_rowcolquant_kernel(
+            hpp_path=hpp, so_path=so, gfx_arch=a,
             hipcc=hipcc, extra_include_dirs=extra_include_dirs,
         )
-        return idx, so if ok else None
 
-    if parallel and len(deduped) > 1:
-        workers = max_workers or min(len(deduped), os.cpu_count() or 4)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-            futures = {ex.submit(_build_one, idx, cfg): (idx, cfg) for idx, cfg in deduped}
-            for fut in concurrent.futures.as_completed(futures):
-                try:
-                    idx, so_path = fut.result()
-                    results[idx] = so_path
-                    if so_path:
-                        log.info("  built %s", so_path.name)
-                    else:
-                        _, cfg = futures[fut]
-                        log.error("  FAILED %s", cfg.name)
-                except Exception as e:
-                    _, cfg = futures[fut]
-                    log.error("  EXCEPTION for %s: %s", cfg.name, e)
-    else:
-        for idx, cfg in deduped:
-            _, so_path = _build_one(idx, cfg)
-            results[idx] = so_path
-
-    for i, cfg in enumerate(configs):
-        if results[i] is None:
-            first_idx = seen.get(cfg.name)
-            if first_idx is not None and first_idx != i:
-                results[i] = results[first_idx]
-                if results[i] is None:
-                    log.debug("  dedup: %s (index %d) inherits failed build from index %d",
-                              cfg.name, i, first_idx)
-
-    built = sum(1 for r in results if r is not None)
-    log.info("Built %d / %d RowColQuant kernels", built, len(configs))
-    return results
+    # Shared builder: dedupe-by-name, parallel fan-out, and -- the reason this
+    # module no longer rolls its own loop -- a ``.so`` filename that carries a
+    # digest of the compile flags.  Keyed on name+arch alone, flipping
+    # CK_BRIDGE_NO_TE_FLAGS (or moving to a toolchain where the coerce probe
+    # answers differently) silently reused a ``.so`` built with the other flag
+    # set.  This bridge only gained switchable TE flags this cycle, so the
+    # defect was newly live here.
+    return build_dispatchers(
+        configs,
+        arch=arch,
+        tmp_prefix="rowcolquant_dispatcher_",
+        log_label="RowColQuant",
+        generate_fn=_generate_rowcolquant_kernel,
+        compile_fn=_compile_fn,
+        output_dir=output_dir,
+        parallel=parallel,
+        max_workers=max_workers,
+        hipcc=hipcc,
+    )
 
 
 # =============================================================================

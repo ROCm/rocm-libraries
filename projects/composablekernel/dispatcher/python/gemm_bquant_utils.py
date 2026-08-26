@@ -43,10 +43,20 @@ log = logging.getLogger(__name__)
 if str(Path(__file__).parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent))
 from quant_bridge_base import (  # noqa: E402
+    arch_from_so_path,
     DispatcherLibBase,
     build_dispatchers,
     find_ck_include_dir,
     generate_kernel,
+    coerce_a_for_variant,
+    encode_bq_for_variant,
+    encode_e8m0,
+    encode_fp8_bytes,
+    ml_fp8_dtype,
+    uses_ocp_fp8,
+    variant_from_kernel_name,
+    ADTYPE_ELEMSIZE_BY_VARIANT,
+    BQ_QDTYPE_BY_VARIANT,
 )
 
 # =============================================================================
@@ -413,118 +423,38 @@ class BQuantDispatcherLib(DispatcherLibBase):
 # variant_key -> the numpy encoder that produces the kernel's QDataType bytes.
 # "float32" means "no re-encode" (fp8/bf8 plain).  The value is a tag consumed
 # by _encode_bq_for_variant so callers never need to know the QDataType.
-_BQ_QDTYPE_BY_VARIANT: Dict[str, str] = {
-    "fp8":         "float32",
-    "bf8":         "float32",
-    "fp8i4":       "fp8",
-    "bf8i4":       "bf8",
-    "mx_bf16bf16": "e8m0",
-    "mx_bf16bf8":  "e8m0",
-    "mx_bf16fp4":  "e8m0",
-}
+_BQ_QDTYPE_BY_VARIANT: Dict[str, str] = BQ_QDTYPE_BY_VARIANT
 
 
 def _variant_from_kernel_name(name: str) -> Optional[str]:
-    """Extract the variant_key (fp8/bf8/fp8i4/bf8i4/mx_*) from a KERNEL_NAME.
-
-    KERNEL_NAME is "{NAME_PREFIX}_{variant}_{layout}_...", where NAME_PREFIX is
-    "gemm_bquant".  The MX variants embed underscores (mx_bf16bf16), so match the
-    longest known variant token rather than splitting on "_".
-    """
-    if not name.startswith(NAME_PREFIX + "_"):
-        return None
-    rest = name[len(NAME_PREFIX) + 1:]
-    # Longest-first so "mx_bf16bf16" is matched before any shorter prefix.
-    for v in sorted(_BQ_QDTYPE_BY_VARIANT, key=len, reverse=True):
-        if rest.startswith(v + "_"):
-            return v
-    return None
+    """This op's spelling of :func:`quant_bridge_base.variant_from_kernel_name`."""
+    return variant_from_kernel_name(name, NAME_PREFIX)
 
 
 def _encode_e8m0(arr) -> "object":
-    """float32 scale -> e8m0 uint8 (block-scale exponent; byte b == 2^(b-127))."""
-    import numpy as np
-    a = np.asarray(arr, dtype=np.float32)
-    a = np.clip(a, 0.0, np.float32(2.0 ** 127))
-    nonzero = a > 0.0
-    out = np.zeros(a.shape, dtype=np.uint8)
-    exp = np.floor(np.log2(a[nonzero])).astype(np.int32) + 127
-    out[nonzero] = np.clip(exp, 0, 254).astype(np.uint8)
-    return out
+    """Thin spelling of :func:`quant_bridge_base.encode_e8m0`."""
+    return encode_e8m0(arr)
 
 
 def _uses_ocp_fp8(gfx_arch: Optional[str]) -> bool:
-    """True when the kernel is compiled with OCP fp8 (not FNUZ) for ``gfx_arch``.
-
-    Mirrors the C++ arch defines in ``_compile_bquant_kernel``: gfx950 and gfx12*
-    build with -DCK_TILE_USE_OCP_FP8 so ``ck_tile::fp8_t`` is OCP e4m3 / e5m2.
-    Every other arch (notably gfx942 / gfx90a) has no OCP define, so ck_tile
-    falls back to the FNUZ encodings e4m3fnuz / e5m2fnuz.  Encoding host bytes
-    in the wrong format makes gfx942 read NaN / mismatched values.  When the
-    arch is unknown (None) assume OCP to preserve the historical gfx950 default.
-    """
-    if not gfx_arch:
-        return True
-    return ("gfx950" in gfx_arch) or ("gfx12" in gfx_arch)
+    """Thin spelling of :func:`quant_bridge_base.uses_ocp_fp8`."""
+    return uses_ocp_fp8(gfx_arch)
 
 
 def _ml_fp8_dtype(dtype: str, gfx_arch: Optional[str]):
-    """Return the ml_dtypes fp8 type matching the kernel's ck_tile::fp8_t/bf8_t.
-
-    fp8 -> e4m3 (OCP) or e4m3fnuz (gfx942); bf8 -> e5m2 (OCP) or e5m2fnuz.
-    """
-    import ml_dtypes
-    if _uses_ocp_fp8(gfx_arch):
-        return ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
-    return ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else ml_dtypes.float8_e5m2fnuz
+    """Thin spelling of :func:`quant_bridge_base.ml_fp8_dtype`."""
+    return ml_fp8_dtype(dtype, gfx_arch)
 
 
 def _encode_fp8_bytes(arr, dtype: str, gfx_arch: Optional[str] = None) -> "object":
-    """float32 -> fp8/bf8 raw bytes (uint8), ARCH-AWARE.
-
-    gfx950 / gfx12* -> OCP e4m3fn (fp8) / e5m2 (bf8).
-    gfx942 / gfx90a -> FNUZ e4m3fnuz (fp8) / e5m2fnuz (bf8).
-    Hardcoding OCP produced NaN / mismatches on gfx942, whose ck_tile::fp8_t is
-    FNUZ (no CK_TILE_USE_OCP_FP8 define).
-    """
-    import numpy as np
-    a = np.asarray(arr, dtype=np.float32)
-    try:
-        ml_t = _ml_fp8_dtype(dtype, gfx_arch)
-        return a.astype(ml_t).view(np.uint8)
-    except ImportError:
-        # Deterministic fallback matching the GPU-test encoder so CPU unit tests
-        # (which do not have ml_dtypes) still exercise the byte-width contract.
-        return (np.clip(a, -2.0, 2.0) * 64).astype(np.int8).view(np.uint8)
+    """Thin spelling of :func:`quant_bridge_base.encode_fp8_bytes`."""
+    return encode_fp8_bytes(arr, dtype, gfx_arch=gfx_arch)
 
 
 def _encode_bq_for_variant(BQ, variant_key: Optional[str],
                            gfx_arch: Optional[str] = None) -> "object":
-    """Return BQ in the kernel's QDataType bytes for ``variant_key``.
-
-    * fp8 / bf8  -> float32 (unchanged).
-    * fp8i4      -> fp8 bytes; bf8i4 -> bf8 bytes.  ARCH-AWARE (FNUZ on gfx942).
-    * mx_*       -> e8m0 uint8.
-
-    If BQ is already the target dtype (e.g. a caller pre-encoded MX scales to
-    uint8, as the GPU test does), it is passed through untouched so we never
-    double-encode.  A None/unknown variant is passed through unchanged.
-    """
-    import numpy as np
-    if variant_key is None:
-        return BQ
-    tag = _BQ_QDTYPE_BY_VARIANT.get(variant_key, "float32")
-    arr = np.asarray(BQ)
-    if tag == "float32":
-        return arr.astype(np.float32) if arr.dtype != np.float32 else arr
-    # 1-byte QDataTypes: only re-encode when the caller handed us float32 scales.
-    if arr.dtype == np.uint8 or arr.dtype == np.int8:
-        return arr  # already encoded bytes
-    if tag == "e8m0":
-        return _encode_e8m0(arr)
-    if tag in ("fp8", "bf8"):
-        return _encode_fp8_bytes(arr, tag, gfx_arch=gfx_arch)
-    return arr
+    """Thin spelling of :func:`quant_bridge_base.encode_bq_for_variant`."""
+    return encode_bq_for_variant(BQ, variant_key, gfx_arch=gfx_arch)
 
 
 # variant_key -> the numpy element size (bytes) of the kernel's compile-time
@@ -540,65 +470,12 @@ def _encode_bq_for_variant(BQ, variant_key: Optional[str],
 # resource!") -> SEGFAULT.  _ADTYPE_ELEMSIZE_BY_VARIANT lets the runner coerce A
 # to the kernel's element width before the ctypes call so the copy is always
 # in-bounds.
-_ADTYPE_ELEMSIZE_BY_VARIANT: Dict[str, int] = {
-    "fp8":         1,
-    "bf8":         1,
-    "fp8i4":       1,
-    "bf8i4":       1,
-    "mx_bf16bf16": 2,
-    "mx_bf16bf8":  2,
-    "mx_bf16fp4":  2,
-}
+_ADTYPE_ELEMSIZE_BY_VARIANT: Dict[str, int] = ADTYPE_ELEMSIZE_BY_VARIANT
 
 
 def _coerce_a_for_variant(A, variant_key: Optional[str]) -> "object":
-    """Return A whose element byte-width matches the kernel's ADataType.
-
-    The ctypes lib copies ``M*K * sizeof(ADataType)`` bytes from the host A
-    pointer, so A MUST be that many bytes or the copy reads out of bounds.  MX
-    kernels have ADataType == bf16 (2 bytes); every other bquant variant has a
-    1-byte ADataType.  When the supplied array's element size does not match the
-    kernel's, coerce it:
-
-      * 1-byte kernel, A already 1 byte  -> unchanged.
-      * 2-byte MX kernel, A given as float/bf16 (2 bytes) -> cast to bf16.
-      * 2-byte MX kernel, A given as 1-byte (uint8/int8)  -> reinterpret the
-        bytes as bf16 element values (contiguous view), matching how the .so
-        would have read them had A been laid out as bf16.
-
-    This guard makes an out-of-bounds device copy impossible regardless of the
-    dtype the caller chose for A.
-    """
-    import numpy as np
-    if variant_key is None:
-        return A
-    want = _ADTYPE_ELEMSIZE_BY_VARIANT.get(variant_key)
-    if want is None:
-        return A
-    arr = np.ascontiguousarray(A)
-    have = arr.dtype.itemsize
-    if have == want:
-        return arr
-    if want == 2:
-        # MX kernel expects a 2-byte (bf16) A.
-        try:
-            import ml_dtypes
-            bf16 = ml_dtypes.bfloat16
-        except Exception:  # pragma: no cover - ml_dtypes always present on nodes
-            bf16 = None
-        if have == 1:
-            # 1-byte payload -> promote to bf16 element values so the buffer is
-            # M*K*2 bytes and the .so copy stays in bounds.  Cast the integer
-            # byte values into bf16 (finite, small) rather than a raw bit-view,
-            # which could produce NaN/Inf bit patterns.
-            vals = arr.astype(np.float32)
-            return vals.astype(bf16) if bf16 is not None else vals.astype(np.float16)
-        # >2-byte float (e.g. float32/float64) -> narrow to the kernel width.
-        return arr.astype(bf16) if bf16 is not None else arr.astype(np.float16)
-    # want == 1: MX-free variants; A must be a single byte per element.
-    if have != 1:
-        return arr.astype(np.uint8)
-    return arr
+    """Thin spelling of :func:`quant_bridge_base.coerce_a_for_variant`."""
+    return coerce_a_for_variant(A, variant_key)
 
 
 # =============================================================================
@@ -622,10 +499,14 @@ class BQuantGpuGemmRunner:
 
     @staticmethod
     def _arch_from_so_path(so_path: Path) -> Optional[str]:
-        stem = so_path.stem  # e.g. "libgemm_bquant_fp8i4_..._gfx942"
-        import re as _re
-        m = _re.search(r"_(gfx[0-9a-fA-F]+)$", stem)
-        return m.group(1) if m else None
+        """Thin spelling of :func:`quant_bridge_base.arch_from_so_path`.
+
+        The local regex this replaced was anchored at the end of the stem and so
+        stopped matching once the flag digest was folded into the filename
+        (``..._gfx942_9bf231b3``).  It then returned None, which the fp8 codec
+        reads as "assume OCP" -- right on gfx950, wrong on gfx942.
+        """
+        return arch_from_so_path(so_path)
 
     @property
     def kernel_name(self) -> str:
