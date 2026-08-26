@@ -337,7 +337,8 @@ endfunction()
 #   packaged artifacts. Without that edge the kpacks would keep shipping kernels
 #   compiled from stale wheel contents.
 #
-#   Empty ARCHES wires nothing.
+#   Empty ARCHES wires nothing and warns either way, never fatally; the body says
+#   why each root gets its own wording.
 # ---------------------------------------------------------------------------
 function(hkp_wire_root)
     set(_one NAME GROUP SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR
@@ -346,15 +347,28 @@ function(hkp_wire_root)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
     if(NOT ARG_ARCHES)
-        # Only warn for a root that ships. A test fixture with no arch selected
-        # is a developer choice; a release that installs an empty descriptor
-        # tree and says so nowhere is the silent-empty-package failure.
+        # Every root speaks. The wording differs because the consequences do: a
+        # release installs an empty descriptor tree, while a fixture root leaves
+        # hkp_descriptor_staging undefined and every test that loads it skipping.
+        # Both are silent-empty-package failures, and a lane that packs nothing
+        # is indistinguishable from a lane that works unless the root says so.
+        #
+        # Warning, never FATAL_ERROR: GPU_TARGETS values that hkp_selected_arches
+        # drops are reachable in normal use, and a fatal here would turn a lane
+        # that packs nothing into a lane that does not configure.
         if(ARG_INSTALL_BASE)
             message(WARNING
                 "hkp: source root '${ARG_NAME}' is set but no GPU architectures "
                 "are selected, so descriptor packaging will produce and install "
                 "NOTHING. Set GPU_TARGETS (or AMDGPU_TARGETS) to the arches you "
                 "want packed.")
+        else()
+            message(WARNING
+                "hkp: source root '${ARG_NAME}' has no GPU architectures selected"
+                ", so nothing is staged for it and every test that loads it will "
+                "skip. GPU_TARGETS='${GPU_TARGETS}' AMDGPU_TARGETS="
+                "'${AMDGPU_TARGETS}' -- see the per-label notes above for which "
+                "were dropped and why.")
         endif()
         return()
     endif()
