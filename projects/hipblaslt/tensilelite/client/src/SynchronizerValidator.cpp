@@ -45,7 +45,7 @@ namespace TensileLite
         }
 
         SynchronizerValidator::SynchronizerValidator(po::variables_map const& args)
-            : m_enabled(args["check-streamk-sync"].as<bool>())
+            : m_enabled(args["check-synchronizer"].as<bool>())
         {
         }
 
@@ -174,7 +174,7 @@ namespace TensileLite
                 std::ostringstream msg;
                 msg << "Synchronizer is declared with a type narrower than int (" << bytes
                     << " bytes for " << tensor.totalAllocatedElements()
-                    << " elements), so --check-streamk-sync cannot cover the range the kernel "
+                    << " elements), so --check-synchronizer cannot cover the range the kernel "
                        "uses.";
                 throw std::runtime_error(msg.str());
             }

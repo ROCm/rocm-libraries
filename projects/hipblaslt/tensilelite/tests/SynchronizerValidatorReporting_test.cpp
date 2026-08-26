@@ -64,14 +64,14 @@ namespace
     po::variables_map enabledArgs()
     {
         po::variables_map vm;
-        vm["check-streamk-sync"].value() = true;
+        vm["check-synchronizer"].value() = true;
         return vm;
     }
 
     po::variables_map disabledArgs()
     {
         po::variables_map vm;
-        vm["check-streamk-sync"].value() = false;
+        vm["check-synchronizer"].value() = false;
         return vm;
     }
 
