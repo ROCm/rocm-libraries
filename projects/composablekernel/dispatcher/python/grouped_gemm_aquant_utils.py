@@ -54,6 +54,15 @@ if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
 from codegen_common import make_aquant_kernel_name  # noqa: E402
 
+# --- Tile-Engine perf flags: single source of truth (quant_bridge_flags.py) ---
+# Without these the .so is built with plain -O3 while the Old-TE baseline it is
+# compared against carries the full TE -mllvm set, which biases every parity
+# number AGAINST the bridge.
+if str(Path(__file__).parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent))
+from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
+
+
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
 
@@ -209,7 +218,7 @@ class AQuantDispatcherLib:
 
     Expected .so exports:
       int  dispatcher_initialize()
-      int  dispatcher_run_aquant_gemm(A, B, AQ, C, M, N, K,
+      int  dispatcher_run_grouped_aquant_gemm(A, B, AQ, C, M, N, K,
                                       stride_A, stride_B, stride_AQ, stride_C,
                                       QK_A, QM_A, k_batch, *time_ms)
       char* dispatcher_get_kernel_name()
@@ -233,8 +242,8 @@ class AQuantDispatcherLib:
         lib.dispatcher_initialize.restype  = ctypes.c_int
         lib.dispatcher_initialize.argtypes = []
 
-        lib.dispatcher_run_aquant_gemm.restype  = ctypes.c_int
-        lib.dispatcher_run_aquant_gemm.argtypes = [
+        lib.dispatcher_run_grouped_aquant_gemm.restype  = ctypes.c_int
+        lib.dispatcher_run_grouped_aquant_gemm.argtypes = [
             ctypes.c_void_p,   # A
             ctypes.c_void_p,   # B
             ctypes.c_void_p,   # AQ
@@ -279,7 +288,7 @@ class AQuantDispatcherLib:
         k_batch: int = 1,
     ) -> Tuple[int, float]:
         """
-        Call dispatcher_run_aquant_gemm with ctypes-wrapped pointers.
+        Call dispatcher_run_grouped_aquant_gemm with ctypes-wrapped pointers.
 
         A, B, AQ, C must be numpy arrays (C-contiguous, packed).
         Returns (status, time_ms).
@@ -304,7 +313,7 @@ class AQuantDispatcherLib:
 
         time_ms = ctypes.c_float(0.0)
 
-        rc = self._lib.dispatcher_run_aquant_gemm(
+        rc = self._lib.dispatcher_run_grouped_aquant_gemm(
             A.ctypes.data_as(ctypes.c_void_p),
             B.ctypes.data_as(ctypes.c_void_p),
             AQ.ctypes.data_as(ctypes.c_void_p),
@@ -401,7 +410,7 @@ class AQuantGpuGemmRunner:
 
         if rc != 0:
             raise RuntimeError(
-                f"dispatcher_run_aquant_gemm failed with code {rc} "
+                f"dispatcher_run_grouped_aquant_gemm failed with code {rc} "
                 f"for kernel {self.kernel_name}"
             )
 
@@ -508,7 +517,7 @@ def _compile_aquant_kernel(
     """Compile a generated .hpp into a .so via hipcc. Returns True on success."""
     ck_include = _get_ck_include_dir()
 
-    cmd = [hipcc] + _HIPCC_BASE_FLAGS + [
+    cmd = [hipcc] + _HIPCC_BASE_FLAGS + _te_perf_flags(hipcc) + [
         f"--offload-arch={gfx_arch}",
         f"-DGFX_ARCH=\"{gfx_arch}\"",
         "-include", str(hpp_path),

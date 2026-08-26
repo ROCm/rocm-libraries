@@ -729,19 +729,53 @@ class TestFairCodegenFlags(unittest.TestCase):
 
     def test_te_flags_present_and_coerce_probe_gated(self):
         import gemm_bquant_utils as gbu
-        # The unconditional TE flag set must match Old-TE (mx_gemm_utils) exactly.
-        for pair in ("-amdgpu-early-inline-all=true",
-                     "-amdgpu-function-calls=false",
-                     "--lsr-drop-solution=1",
-                     "-enable-post-misched=0"):
-            self.assertIn(pair, gbu._BQUANT_CODEGEN_FLAGS)
-        self.assertIn("-fno-offload-uniform-block", gbu._BQUANT_CODEGEN_FLAGS)
-        self.assertIn("--offload-compress", gbu._BQUANT_CODEGEN_FLAGS)
+        import quant_bridge_flags as qbf
+
+        # The unconditional TE flag set must match Old-TE exactly, in Old-TE's
+        # order (flag order can change codegen), with --offload-compress last.
+        original = qbf.coerce_flag_supported
+        try:
+            qbf.coerce_flag_supported = lambda _hipcc: False
+            unconditional = gbu._bquant_codegen_flags("hipcc")
+        finally:
+            qbf.coerce_flag_supported = original
+
+        self.assertEqual(unconditional, (
+            "-mllvm", "-amdgpu-early-inline-all=true",
+            "-mllvm", "-amdgpu-function-calls=false",
+            "-mllvm", "--lsr-drop-solution=1",
+            "-mllvm", "-enable-post-misched=0",
+            "-fno-offload-uniform-block",
+            "--offload-compress",
+        ))
         # coerce-illegal-types is probe-gated (not unconditional) so the build
-        # stays portable to toolchains that reject it (ROCm 7.2).
-        self.assertNotIn("-amdgpu-coerce-illegal-types=1", gbu._BQUANT_CODEGEN_FLAGS)
-        self.assertEqual(gbu._BQUANT_PROBED_CODEGEN_FLAGS,
-                         (("-mllvm", "-amdgpu-coerce-illegal-types=1"),))
+        # stays portable to toolchains that reject it (ROCm 7.2), and when it is
+        # accepted it goes FIRST, as Old-TE's gemm_quant TU emits it.
+        self.assertNotIn("-amdgpu-coerce-illegal-types=1", unconditional)
+        try:
+            qbf.coerce_flag_supported = lambda _hipcc: True
+            probed = gbu._bquant_codegen_flags("hipcc")
+        finally:
+            qbf.coerce_flag_supported = original
+        self.assertEqual(
+            probed,
+            ("-mllvm", "-amdgpu-coerce-illegal-types=1") + unconditional,
+        )
+
+    def test_ck_bridge_no_te_flags_escape_hatch(self):
+        """bquant must honour the same opt-out every other bridge has."""
+        import os
+        import gemm_bquant_utils as gbu
+
+        previous = os.environ.get("CK_BRIDGE_NO_TE_FLAGS")
+        os.environ["CK_BRIDGE_NO_TE_FLAGS"] = "1"
+        try:
+            self.assertEqual(gbu._bquant_codegen_flags("hipcc"), ())
+        finally:
+            if previous is None:
+                os.environ.pop("CK_BRIDGE_NO_TE_FLAGS", None)
+            else:
+                os.environ["CK_BRIDGE_NO_TE_FLAGS"] = previous
 
 
 if __name__ == "__main__":

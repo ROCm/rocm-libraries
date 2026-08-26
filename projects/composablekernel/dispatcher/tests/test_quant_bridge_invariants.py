@@ -176,13 +176,8 @@ def test_i2_legacy_exemptions_all_exist():
 # I3 -- shared-layer adoption
 # ---------------------------------------------------------------------------
 
-# Bridges not yet on quant_bridge_common.hpp.  These are the two that landed on
-# develop in the old copy-paste style; porting them is the "port the two
-# develop-landed bridges onto the shared layer" work item.
-_KNOWN_GAPS_NOT_ON_SHARED_LAYER = {
-    "grouped_gemm_rowcolquant",
-    "grouped_gemm_tensorquant",
-}
+# Bridges not yet on quant_bridge_common.hpp.  Empty: all ten are ported.
+_KNOWN_GAPS_NOT_ON_SHARED_LAYER = set()
 
 _SHARED_HEADER = "quant_bridge_common.hpp"
 
@@ -261,3 +256,114 @@ def test_output_buffer_contiguity_is_validated(path):
         f"{path.name} does not validate that the output buffer C is "
         f"C-contiguous before handing its pointer to the library."
     )
+
+
+# ---------------------------------------------------------------------------
+# Measurement integrity: the instrument must be configurable and fair
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", _QUANT_UTILS, ids=_QUANT_UTILS_IDS)
+def test_every_bridge_compiles_with_te_perf_flags(path):
+    """A bridge built with plain -O3 is measured against a TE-flagged baseline.
+
+    That biases every parity number against the bridge, and the repo rule is
+    that a >15% gap is a bug, never an artifact -- so an unfair instrument
+    manufactures bugs.
+    """
+    text = path.read_text()
+    assert "quant_bridge_flags" in text, (
+        f"{path.name} does not import the shared TE perf flags; its .so would "
+        f"be built with plain -O3 while Old-TE carries the full -mllvm set."
+    )
+    assert "_te_perf_flags(" in text or "te_perf_flags(" in text, (
+        f"{path.name} imports the TE perf flags but never applies them."
+    )
+
+
+def test_te_flag_strings_are_defined_once():
+    """Only quant_bridge_flags may spell the TE -mllvm flag strings."""
+    owner = _PYTHON / "quant_bridge_flags.py"
+    needles = (
+        "-amdgpu-early-inline-all",
+        "-amdgpu-function-calls",
+        "--lsr-drop-solution",
+        "-enable-post-misched",
+        "-amdgpu-coerce-illegal-types",
+    )
+    offenders = []
+    for path in _QUANT_UTILS:
+        if path == owner:
+            continue
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            code = line.split("#", 1)[0]
+            for needle in needles:
+                if needle in code:
+                    offenders.append(f"{path.name}:{lineno}: {needle}")
+    assert not offenders, (
+        "TE perf flag strings must be defined once in quant_bridge_flags.py; "
+        "found copies:\n" + "\n".join(offenders)
+    )
+
+
+def test_so_cache_key_includes_compile_flags():
+    """Two different flag sets must not collide on one cached .so filename."""
+    import os
+    import sys
+
+    sys.path.insert(0, str(_PYTHON))
+    import quant_bridge_flags as flags
+
+    flags.coerce_flag_supported.cache_clear()
+    previous = os.environ.get("CK_BRIDGE_NO_TE_FLAGS")
+    try:
+        os.environ["CK_BRIDGE_NO_TE_FLAGS"] = "1"
+        without = flags.flags_cache_tag("hipcc")
+        os.environ.pop("CK_BRIDGE_NO_TE_FLAGS")
+        with_flags = flags.flags_cache_tag("hipcc")
+    finally:
+        if previous is None:
+            os.environ.pop("CK_BRIDGE_NO_TE_FLAGS", None)
+        else:
+            os.environ["CK_BRIDGE_NO_TE_FLAGS"] = previous
+    assert without != with_flags, (
+        "CK_BRIDGE_NO_TE_FLAGS does not change the .so cache tag, so flipping "
+        "it silently reuses a .so built with the other flag set."
+    )
+
+    base = (_PYTHON / "quant_bridge_base.py").read_text()
+    assert "flags_tag" in base, (
+        "quant_bridge_base does not fold the flag tag into the .so filename."
+    )
+
+
+def test_bquant_flag_order_is_preserved():
+    """bquant emits Old-TE's flag order with the coerce flag FIRST."""
+    import sys
+
+    sys.path.insert(0, str(_PYTHON))
+    import quant_bridge_flags as flags
+
+    expected_tail = [
+        "-mllvm", "-amdgpu-early-inline-all=true",
+        "-mllvm", "-amdgpu-function-calls=false",
+        "-mllvm", "--lsr-drop-solution=1",
+        "-mllvm", "-enable-post-misched=0",
+        "-fno-offload-uniform-block",
+        "--offload-compress",
+    ]
+    original = flags.coerce_flag_supported
+    try:
+        flags.coerce_flag_supported = lambda _hipcc: False
+        assert flags.te_perf_flags(
+            "hipcc", extra=("--offload-compress",),
+            order=flags.TE_ORDER_BQUANT, coerce_first=True,
+        ) == expected_tail
+
+        flags.coerce_flag_supported = lambda _hipcc: True
+        assert flags.te_perf_flags(
+            "hipcc", extra=("--offload-compress",),
+            order=flags.TE_ORDER_BQUANT, coerce_first=True,
+        ) == ["-mllvm", "-amdgpu-coerce-illegal-types=1"] + expected_tail
+    finally:
+        flags.coerce_flag_supported = original

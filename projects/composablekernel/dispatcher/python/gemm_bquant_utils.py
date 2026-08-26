@@ -69,6 +69,14 @@ from codegen_common import (  # noqa: E402
     quant_warp_tile_k,
 )
 
+# --- Tile-Engine perf flags: single source of truth (quant_bridge_flags.py) ---
+if str(Path(__file__).parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent))
+from quant_bridge_flags import (  # noqa: E402
+    TE_ORDER_BQUANT as _TE_ORDER_BQUANT,
+    te_perf_flags as _te_perf_flags,
+)
+
 _DEFAULT_HIPCC = "hipcc"
 
 # Placeholder arch used ONLY for pure name-construction in the convenience
@@ -120,45 +128,26 @@ _HIPCC_BASE_FLAGS = [
 # flag is probe-gated: CK's CMake only adds it when check_cxx_compiler_flag
 # passes, and ROCm 7.2's clang REJECTS -amdgpu-coerce-illegal-types=1, so the
 # probe drops it on that toolchain -- keeping BOTH sides codegen-identical.
-_BQUANT_CODEGEN_FLAGS = (
-    "-mllvm", "-amdgpu-early-inline-all=true",
-    "-mllvm", "-amdgpu-function-calls=false",
-    "-mllvm", "--lsr-drop-solution=1",
-    "-mllvm", "-enable-post-misched=0",
-    "-fno-offload-uniform-block",
-    "--offload-compress",
-)
-_BQUANT_PROBED_CODEGEN_FLAGS = (
-    ("-mllvm", "-amdgpu-coerce-illegal-types=1"),
-)
+# The exact backend flag set Old-TE's gemm_quant TU is built with.  The flag
+# strings and the coerce probe live in quant_bridge_flags (single source of
+# truth); only bquant's emitted ORDER -- Old-TE's order, coerce flag first --
+# is specified here, because flag order can change codegen.
+_BQUANT_EXTRA_FLAGS = ("--offload-compress",)
 
 
-@functools.lru_cache(maxsize=None)
-def _hipcc_accepts(flag_tuple: "Tuple[str, ...]", hipcc: str = _DEFAULT_HIPCC) -> bool:
-    """Mirror CMake check_cxx_compiler_flag: does hipcc compile a trivial TU with
-    these flags?  Cached so the probe runs at most once per distinct flag set."""
-    try:
-        with tempfile.TemporaryDirectory() as d:
-            src = Path(d) / "probe.cpp"
-            src.write_text("int main(){}\n")
-            r = subprocess.run(
-                [hipcc, *flag_tuple, "-c", str(src), "-o", str(Path(d) / "probe.o")],
-                capture_output=True, timeout=120,
-            )
-            return r.returncode == 0
-    except Exception:
-        return False
-
-
-@functools.lru_cache(maxsize=None)
 def _bquant_codegen_flags(hipcc: str = _DEFAULT_HIPCC) -> "Tuple[str, ...]":
     """Old-TE's gemm_quant codegen flags plus any probe-gated flags the compiler
-    accepts -- the exact backend flag set the TE benchmark TU is built with."""
-    flags = list(_BQUANT_CODEGEN_FLAGS)
-    for pair in _BQUANT_PROBED_CODEGEN_FLAGS:
-        if _hipcc_accepts(pair, hipcc):
-            flags = list(pair) + flags
-    return tuple(flags)
+    accepts -- the exact backend flag set the TE benchmark TU is built with.
+
+    Honours ``CK_BRIDGE_NO_TE_FLAGS=1`` like every other bridge; before the
+    de-fork this one op had no such escape hatch.
+    """
+    return tuple(_te_perf_flags(
+        hipcc,
+        extra=_BQUANT_EXTRA_FLAGS,
+        order=_TE_ORDER_BQUANT,
+        coerce_first=True,
+    ))
 
 
 # =============================================================================

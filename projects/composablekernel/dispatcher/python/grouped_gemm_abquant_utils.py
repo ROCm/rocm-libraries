@@ -58,6 +58,14 @@ from codegen_common import (  # noqa: E402
     variant_is_8bit_float,
 )
 
+# --- Tile-Engine perf flags: single source of truth (quant_bridge_flags.py) ---
+# Without these the .so is built with plain -O3 while the Old-TE baseline it is
+# compared against carries the full TE -mllvm set, which biases every parity
+# number AGAINST the bridge.
+if str(Path(__file__).parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent))
+from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
+
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
 
@@ -255,7 +263,7 @@ class ABQuantDispatcherLib:
 
     Expected .so exports:
       int  dispatcher_initialize()
-      int  dispatcher_run_abquant_gemm(A, B, AQ, BQ, C, M, N, K,
+      int  dispatcher_run_grouped_abquant_gemm(A, B, AQ, BQ, C, M, N, K,
                                        stride_A, stride_B, stride_AQ, stride_BQ, stride_C,
                                        QK_A, QM_A, QK_B, QN_B, k_batch, *time_ms)
       char* dispatcher_get_kernel_name()
@@ -279,8 +287,8 @@ class ABQuantDispatcherLib:
         lib.dispatcher_initialize.restype  = ctypes.c_int
         lib.dispatcher_initialize.argtypes = []
 
-        lib.dispatcher_run_abquant_gemm.restype  = ctypes.c_int
-        lib.dispatcher_run_abquant_gemm.argtypes = [
+        lib.dispatcher_run_grouped_abquant_gemm.restype  = ctypes.c_int
+        lib.dispatcher_run_grouped_abquant_gemm.argtypes = [
             ctypes.c_void_p,   # A
             ctypes.c_void_p,   # B
             ctypes.c_void_p,   # AQ
@@ -320,7 +328,7 @@ class ABQuantDispatcherLib:
         QK_A: int, QM_A: int, QK_B: int, QN_B: int,
         k_batch: int = 1,
     ) -> Tuple[int, float]:
-        """Call dispatcher_run_abquant_gemm. Returns (status, time_ms)."""
+        """Call dispatcher_run_grouped_abquant_gemm. Returns (status, time_ms)."""
         import numpy as np
 
         A  = np.ascontiguousarray(A)
@@ -343,7 +351,7 @@ class ABQuantDispatcherLib:
 
         time_ms = ctypes.c_float(0.0)
 
-        rc = self._lib.dispatcher_run_abquant_gemm(
+        rc = self._lib.dispatcher_run_grouped_abquant_gemm(
             A.ctypes.data_as(ctypes.c_void_p),
             B.ctypes.data_as(ctypes.c_void_p),
             AQ.ctypes.data_as(ctypes.c_void_p),
@@ -471,7 +479,7 @@ class ABQuantGpuGemmRunner:
 
         if rc != 0:
             raise RuntimeError(
-                f"dispatcher_run_abquant_gemm failed with code {rc} "
+                f"dispatcher_run_grouped_abquant_gemm failed with code {rc} "
                 f"for kernel {self.kernel_name}"
             )
 
@@ -560,7 +568,11 @@ def _compile_abquant_kernel(
 ) -> bool:
     ck_include = _get_ck_include_dir()
 
-    cmd = [hipcc] + _HIPCC_BASE_FLAGS + [
+    cmd = [hipcc] + _HIPCC_BASE_FLAGS + _te_perf_flags(
+        hipcc,
+        extra=["-mllvm", "-enable-noalias-to-md-conversion=1",
+               "-mllvm", "-greedy-reverse-local-assignment=1"],
+    ) + [
         f"--offload-arch={gfx_arch}",
         f"-DGFX_ARCH=\"{gfx_arch}\"",
         "-include", str(hpp_path),

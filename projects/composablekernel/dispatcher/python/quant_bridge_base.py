@@ -51,6 +51,10 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 log = logging.getLogger(__name__)
 
+if str(Path(__file__).parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent))
+from quant_bridge_flags import flags_cache_tag  # noqa: E402
+
 
 # ============================================================================
 # Include-directory probe (canonical _get_ck_include_dir)
@@ -107,6 +111,12 @@ def install_dispatcher_lib_api(
     lib.dispatcher_cleanup.restype = None
     lib.dispatcher_cleanup.argtypes = []
 
+    # Optional: older .so builds predate the timing knobs.
+    set_timing = getattr(lib, "dispatcher_set_timing_config", None)
+    if set_timing is not None:
+        set_timing.restype = ctypes.c_int
+        set_timing.argtypes = [ctypes.c_int] * 4
+
 
 class DispatcherLibBase:
     """Common ctypes wrapper for a compiled quant-bridge ``.so``.
@@ -150,6 +160,37 @@ class DispatcherLibBase:
 
     def get_kernel_count(self) -> int:
         return self._lib.dispatcher_get_kernel_count()
+
+    def set_timing_config(
+        self,
+        flush_cache: Optional[bool] = None,
+        rotating_count: Optional[int] = None,
+        cold_niters: Optional[int] = None,
+        nrepeat: Optional[int] = None,
+    ) -> int:
+        """Configure the measured launch, so it can match the Old-TE baseline.
+
+        The bridge is benchmarked against Old-TE's ``gemm_quant``, which defaults
+        to ``flush_cache=true`` / ``rotating_count=1000``; the bridge used to
+        hardcode ``false`` / ``1``, and nothing on the Python side could change
+        it -- a measurement bias in the bridge's own favour that no caller could
+        correct.  ``None`` leaves a field at its current value.
+
+        Returns the library status: 0 on success, -1 if the loaded ``.so``
+        predates the knobs, -2 if it refuses ``flush_cache`` (the generated
+        ``launch()`` goes through ``ck_tile::launch_kernel``, which ignores
+        ``stream_config::flush_cache_``, so accepting the flag would report a
+        cache-flushed measurement that never happened).
+        """
+        fn = getattr(self._lib, "dispatcher_set_timing_config", None)
+        if fn is None:
+            return -1
+        return int(fn(
+            -1 if flush_cache is None else int(bool(flush_cache)),
+            -1 if rotating_count is None else int(rotating_count),
+            -1 if cold_niters is None else int(cold_niters),
+            -1 if nrepeat is None else int(nrepeat),
+        ))
 
     def cleanup(self):
         self._lib.dispatcher_cleanup()
@@ -223,6 +264,8 @@ def build_dispatchers(
     output_dir: Optional[Path] = None,
     parallel: bool = True,
     max_workers: Optional[int] = None,
+    hipcc: str = "hipcc",
+    flags_tag: Optional[str] = None,
 ) -> List[Optional[Path]]:
     """codegen -> compile -> ``.so`` for each config, deduped by name, in parallel.
 
@@ -246,6 +289,12 @@ def build_dispatchers(
     """
     base_dir = output_dir or Path(tempfile.mkdtemp(prefix=tmp_prefix))
     base_dir.mkdir(parents=True, exist_ok=True)
+
+    # The .so cache key must include the compile flags, not just name + arch:
+    # otherwise CK_BRIDGE_NO_TE_FLAGS (or a toolchain whose coerce probe answers
+    # differently) silently reuses a .so built with the other flag set.
+    if flags_tag is None:
+        flags_tag = flags_cache_tag(hipcc)
 
     headers_dir = base_dir / "generated_kernels"
     so_dir = base_dir / "libs"
@@ -272,7 +321,7 @@ def build_dispatchers(
         if hpp is None:
             return idx, None
 
-        so = so_dir / f"lib{cfg.name}_{arch}.so"
+        so = so_dir / f"lib{cfg.name}_{arch}_{flags_tag}.so"
         if so.exists():
             log.info("  [cached] %s", so.name)
             return idx, so
