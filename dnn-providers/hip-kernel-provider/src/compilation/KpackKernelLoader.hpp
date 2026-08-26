@@ -40,6 +40,9 @@ public:
     /// symbol. Folding `symbol` into KpackModuleCache::makeKey would defeat the sharing
     /// of one module across kernels differing only by entry point.
     ///
+    /// `deviceOrdinal` both keys the cache entry and is made current across the load. A
+    /// device that cannot be made current fails the load rather than yielding a foreign module.
+    ///
     /// @throws HipdnnPluginException, one distinct message per failing stage: archive
     ///         missing, archive unreadable, arch mismatch, toc_key absent, decompress
     ///         or module-load failure. The sixth, a missing symbol, is raised by
@@ -47,6 +50,7 @@ public:
     std::unique_ptr<ICompiledProgram> load(const std::filesystem::path& archive,
                                            const std::string& tocKey,
                                            const std::string& deviceArch,
+                                           int deviceOrdinal,
                                            const std::string& symbol,
                                            const std::string& descriptorLabel) const;
 

@@ -165,7 +165,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingArchive)
 
     try
     {
-        _loader.load(absent, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, "PointwiseAdd", descriptorLabel());
+        _loader.load(absent, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, 0, "PointwiseAdd", descriptorLabel());
         FAIL() << "expected a missing archive to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -191,7 +191,7 @@ TEST_F(TestKpackKernelLoader, ReportsACorruptArchive)
 
     try
     {
-        _loader.load(garbage, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, "PointwiseAdd", descriptorLabel());
+        _loader.load(garbage, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, 0, "PointwiseAdd", descriptorLabel());
         FAIL() << "expected an unreadable archive to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -213,7 +213,7 @@ TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
 
     try
     {
-        _loader.load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, "gfx942", "PointwiseAdd", descriptorLabel());
+        _loader.load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, "gfx942", 0, "PointwiseAdd", descriptorLabel());
         FAIL() << "expected an arch mismatch to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -237,7 +237,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingTocKey)
     try
     {
         _loader.load(
-            REAL_ARCHIVE, "no/such/entry#7", ARCHIVE_ARCH, "PointwiseAdd", descriptorLabel());
+            REAL_ARCHIVE, "no/such/entry#7", ARCHIVE_ARCH, 0, "PointwiseAdd", descriptorLabel());
         FAIL() << "expected a missing toc_key to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -276,7 +276,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingSymbol)
     // symbol -- so the failure this case is after is raised by KpackProgram::getKernel
     // against a module HIP has accepted.
     const auto program
-        = _loader.load(packed.archive, packed.tocKey, arch, ABSENT_SYMBOL, descriptorLabel());
+        = _loader.load(packed.archive, packed.tocKey, arch, 0, ABSENT_SYMBOL, descriptorLabel());
     ASSERT_NE(program, nullptr);
 
     try
@@ -324,9 +324,9 @@ TEST_F(TestKpackKernelLoader, TwoSymbolsResolveAgainstOneModule)
 
     // Both symbols resolve...
     const auto first
-        = _loader.load(packed.archive, packed.tocKey, arch, PACKED_SYMBOL, descriptorLabel());
+        = _loader.load(packed.archive, packed.tocKey, arch, 0, PACKED_SYMBOL, descriptorLabel());
     const auto second = _loader.load(
-        packed.archive, packed.tocKey, arch, PACKED_SECOND_SYMBOL, descriptorLabel());
+        packed.archive, packed.tocKey, arch, 0, PACKED_SECOND_SYMBOL, descriptorLabel());
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
     EXPECT_NE(first->getKernel(PACKED_SYMBOL), nullptr);

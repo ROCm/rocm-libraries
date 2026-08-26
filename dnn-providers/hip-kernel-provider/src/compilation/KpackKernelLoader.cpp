@@ -15,6 +15,7 @@ namespace hip_kernel_provider::compilation
 std::unique_ptr<ICompiledProgram> KpackKernelLoader::load(const std::filesystem::path& archive,
                                                           const std::string& tocKey,
                                                           const std::string& deviceArch,
+                                                          int deviceOrdinal,
                                                           const std::string& symbol,
                                                           const std::string& descriptorLabel) const
 {
@@ -23,10 +24,10 @@ std::unique_ptr<ICompiledProgram> KpackKernelLoader::load(const std::filesystem:
     CachedKpackModule module;
     try
     {
-        // The cache key is (archivePath, tocKey, deviceArch). `symbol` is deliberately
-        // absent: kernels differing only by entry point name the same blob and must
-        // share one hipModule_t. It is used below for the message only.
-        module = _moduleCache.getOrLoad(archivePath, tocKey, deviceArch);
+        // The cache key is (archivePath, tocKey, deviceArch, deviceOrdinal). `symbol` is
+        // deliberately absent: kernels differing only by entry point name the same blob
+        // and must share one hipModule_t. It is used below for the message only.
+        module = _moduleCache.getOrLoad(archivePath, tocKey, deviceArch, deviceOrdinal);
     }
     catch(const KpackModuleLoadFailure& failure)
     {

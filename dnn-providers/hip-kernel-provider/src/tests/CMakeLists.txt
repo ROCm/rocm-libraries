@@ -25,6 +25,7 @@ add_executable(
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp
+    device/TestScopedDevice.cpp
     utilities/TestScratchDirectory.cpp
 )
 

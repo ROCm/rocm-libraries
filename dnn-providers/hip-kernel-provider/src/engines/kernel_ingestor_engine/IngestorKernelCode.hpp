@@ -118,6 +118,7 @@ inline IngestorKernelCode
         auto program = kpackLoader.load(resolved,
                                         kernel.source.tocKey,
                                         context.deviceProperties.gcnArchName,
+                                        context.deviceId,
                                         kernel.source.symbol,
                                         label);
         auto runnableKernel = program->getKernel(kernel.source.symbol);
