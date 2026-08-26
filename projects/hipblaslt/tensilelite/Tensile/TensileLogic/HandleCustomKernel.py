@@ -25,7 +25,7 @@
 
 from pprint import pformat
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from Tensile.Common import print1, print2, IsaVersion, IsaInfo
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
@@ -34,7 +34,9 @@ from Tensile.CustomKernels import isCustomKernelConfig, getCustomKernelConfig
 from Tensile import CUSTOM_KERNEL_PATH
 
 
-def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tuple[dict, bool]:
+def handleCustomKernel(
+    sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]
+) -> Tuple[dict, bool, Optional[dict]]:
     """
     Process custom kernel configuration for a given solution.
 
@@ -43,11 +45,15 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
         isaInfoMap: Dictionary mapping IsaVersion to IsaInfo.
 
     Returns:
-        A tuple containing the updated solution dictionary and a boolean indicating
-        whether the solution uses a custom kernel.
+        A tuple of (updated solution, whether it uses a custom kernel, the
+        kernel's own config or None). The config is returned separately because
+        it is merged into the solution with ``sol.update()``: once merged, a key
+        the config did not define is indistinguishable from one it did, and
+        callers validating the kernel's declared ProblemType need that
+        distinction (a kernel that declares none inherits the logic's).
     """
     if not isCustomKernelConfig(sol):
-        return sol, False
+        return sol, False, None
 
     name = sol["CustomKernelName"]
     dir = CUSTOM_KERNEL_PATH
@@ -73,7 +79,7 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
             f">>     Hint: Replace 'MatrixInstruction' in {name}.s with following diff:\n"
             f"{prepareCustomKernelConfig(miParams, mi)}"
         )
-    return sol, True
+    return sol, True, config
 
 
 def hasCustomKernel(file: Path) -> bool:

@@ -62,19 +62,34 @@ def test_omitted_capabilities_normalize_to_disabled():
     assert compareCustomKernelProblemTypes(library, kernel) == []
 
 
-def test_kernel_capability_superset_is_compatible():
-    library = _problem_type()
+@pytest.mark.parametrize(
+    "field,library_value,kernel_value",
+    [
+        ("UseBias", 0, 1),
+        ("UseBias", 1, 3),
+        ("UseScaleAlphaVec", 0, 1),
+        ("UseScaleAlphaVec", 1, 3),
+        ("UseScaleAB", "", "Vector"),
+        ("UseScaleAB", "", "Scalar"),
+        ("UseScaleCD", False, True),
+        ("Activation", False, True),
+    ],
+)
+def test_kernel_capability_superset_is_rejected(field, library_value, kernel_value):
+    # A kernel supporting *more* than the logic advertises is not safe. The host
+    # appends epilogue kernargs conditionally on the logic's ProblemType, and a
+    # custom kernel's .s has fixed kernarg offsets -- so the kernel reads a slot
+    # the host never wrote, with every later argument shifted. This is the mirror
+    # of the ROCm/rocm-libraries#11280 bug and strictly worse: that one skipped
+    # the epilogue, this one dereferences uninitialized kernarg memory.
+    library = _problem_type(**{field: library_value})
     kernel = _problem_type(
-        UseBias=3,
-        BiasDataTypeList=["S"],
-        UseScaleAlphaVec=3,
-        Activation=True,
-        ActivationType="all",
-        UseScaleAB="Vector",
-        UseScaleCD=True,
+        **{field: kernel_value},
+        **({"BiasDataTypeList": ["S"]} if field == "UseBias" else {}),
+        **({"ActivationType": "all"} if field == "Activation" else {}),
     )
 
-    assert compareCustomKernelProblemTypes(library, kernel) == []
+    assert field in _fields(compareCustomKernelProblemTypes(library, kernel))
 
 
 @pytest.mark.parametrize(
@@ -114,16 +129,6 @@ def test_exact_boolean_fields_require_equality(
     assert field in _fields(mismatches)
 
 
-def test_scale_cd_kernel_superset_is_compatible():
-    assert (
-        compareCustomKernelProblemTypes(
-            _problem_type(UseScaleCD=False),
-            _problem_type(UseScaleCD=True),
-        )
-        == []
-    )
-
-
 def test_scale_cd_insufficient_kernel_is_rejected():
     mismatches = compareCustomKernelProblemTypes(
         _problem_type(UseScaleCD=True),
@@ -131,17 +136,6 @@ def test_scale_cd_insufficient_kernel_is_rejected():
     )
 
     assert _fields(mismatches) == {"UseScaleCD"}
-
-
-@pytest.mark.parametrize("field", ["UseBias", "UseScaleAlphaVec"])
-def test_direction_bitmask_superset_is_compatible(field):
-    assert (
-        compareCustomKernelProblemTypes(
-            _problem_type(**{field: 1}),
-            _problem_type(**{field: 3}),
-        )
-        == []
-    )
 
 
 @pytest.mark.parametrize("field", ["UseBias", "UseScaleAlphaVec"])
@@ -158,17 +152,6 @@ def test_insufficient_direction_bitmask_is_rejected(
     )
 
     assert field in _fields(mismatches)
-
-
-@pytest.mark.parametrize("kernel_mode", ["Scalar", "Vector"])
-def test_disabled_scale_ab_accepts_enabled_kernel_mode(kernel_mode):
-    assert (
-        compareCustomKernelProblemTypes(
-            _problem_type(UseScaleAB=""),
-            _problem_type(UseScaleAB=kernel_mode),
-        )
-        == []
-    )
 
 
 @pytest.mark.parametrize(
@@ -293,7 +276,9 @@ def test_declared_problem_type_omitting_bias_is_rejected():
 
     mismatches = compareCustomKernelProblemTypes(library, kernel)
 
-    assert _fields(mismatches) == {"UseBias", "UseScaleAlphaVec"}
+    # BetaOnlyUseBias is derived from UseBias, so it rides along; the two
+    # capabilities are what matter.
+    assert {"UseBias", "UseScaleAlphaVec"}.issubset(_fields(mismatches))
 
 
 def test_bias_data_types_use_directional_coverage():
@@ -338,6 +323,169 @@ def test_active_activation_compute_type_must_match():
     mismatches = compareCustomKernelProblemTypes(library, kernel)
 
     assert _fields(mismatches) == {"ActivationComputeDataType"}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {},
+        {"NumIndicesC": 3},
+        {"IndexAssignmentsLD": [4, 5, 6, 7]},
+        {"UseBias": 1, "BiasDataTypeList": ["S"]},
+        {"Activation": True, "ActivationType": "hipblaslt_all"},
+        {"Activation": True},
+        {"UseE": True, "Activation": True, "DataTypeE": "S"},
+        {"UseScaleAB": "Vector"},
+        {"UseScaleCD": True},
+        {"Batched": False},
+        {"TransposeA": True, "TransposeB": False},
+        {"UseGateResidual": True},
+        {"OutputAmaxD": True, "DataTypeAmaxD": "S"},
+        {"Gradient": True, "UseBias": 1, "BiasDataTypeList": ["S"], "BiasSrc": "A"},
+    ],
+)
+def test_comparison_is_reflexive(overrides):
+    # Equal inputs must never mismatch. This broke when only the kernel side
+    # preserved explicitly declared structural fields while the library side had
+    # them derived, so the same dict compared against itself reported a phantom
+    # NumIndicesC / IndexAssignmentsLD difference.
+    problem_type = _problem_type(**overrides)
+
+    assert (
+        compareCustomKernelProblemTypes(
+            deepcopy(problem_type), deepcopy(problem_type)
+        )
+        == []
+    )
+
+
+def test_self_contradictory_structural_declaration_is_rejected():
+    # Declaring NumIndicesC=2 on a batched GEMM contradicts what the same config
+    # derives (3). Caught against the config's own derivation, not the library's,
+    # so it stays reflexive.
+    mismatches = compareCustomKernelProblemTypes(
+        _problem_type(), _problem_type(NumIndicesC=2)
+    )
+
+    assert _fields(mismatches) == {"NumIndicesC"}
+
+
+def test_activation_type_omission_does_not_disable_use_e():
+    # ProblemType reads a missing ActivationType as 'none' and uses that to force
+    # UseE and ActivationNoGuard off. Custom kernels routinely declare Activation
+    # without a type, so without normalization the "ActivationType is
+    # non-authoritative" contract would silently flip two exact-compared fields.
+    library = _problem_type(
+        Activation=True, ActivationType="hipblaslt_all", UseE=True, DataTypeE="S"
+    )
+    kernel = _problem_type(Activation=True, UseE=True, DataTypeE="S")
+
+    assert compareCustomKernelProblemTypes(library, kernel) == []
+
+
+@pytest.mark.parametrize(
+    "library_problem_type,kernel_problem_type",
+    [
+        (None, {"OperationType": "GEMM", "DataType": "S"}),
+        ({}, {"OperationType": "GEMM"}),
+        (_problem_type(), {"OperationType": "GEMM", "DataType": "S",
+                           "DestDataType": "D", "ComputeDataType": "D"}),
+        (_problem_type(), {"UseScaleAB": 0}),
+    ],
+)
+def test_unconstructible_problem_type_is_reported_not_raised(
+    library_problem_type, kernel_problem_type
+):
+    # _runChecks fans out over ParallelMap2, so an exception escaping here takes
+    # down a whole batch instead of counting one rejected solution.
+    mismatches = compareCustomKernelProblemTypes(
+        library_problem_type, kernel_problem_type
+    )
+
+    assert mismatches
+    assert "ProblemType" in _fields(mismatches)
+
+
+# ActivationComputeDataType is only independently settable on a mixed-precision
+# problem; on an all-f32 one ProblemType derives it and both sides collapse.
+_MIXED = {
+    "DataType": "H",
+    "DestDataType": "H",
+    "ComputeDataType": "S",
+    "HighPrecisionAccumulate": True,
+}
+_BIAS_ON = {"UseBias": 1, "BiasDataTypeList": ["S"]}
+_ACTIVATION_ON = {"Activation": True, "ActivationType": "all"}
+
+# Every dependent field must be enforced when its gating capability is on. An
+# unenforced one lets a mismatched bias type, stride or aux data type reach the
+# kernel. Each entry is (id, library overrides, kernel overrides, field).
+_DEPENDENT_ENFORCED = [
+    ("UseBias-SetConstStrideBias",
+     {**_BIAS_ON, "SetConstStrideBias": [[0, 1]]}, _BIAS_ON, "SetConstStrideBias"),
+    ("UseBias-BiasDataTypeList",
+     {"UseBias": 1, "BiasDataTypeList": ["S", "H"]}, _BIAS_ON, "BiasDataTypeList"),
+    ("Activation-ActivationComputeDataType",
+     {**_MIXED, **_ACTIVATION_ON, "ActivationComputeDataType": "S"},
+     {**_MIXED, **_ACTIVATION_ON, "ActivationComputeDataType": "H"},
+     "ActivationComputeDataType"),
+    ("UseE-DataTypeE",
+     {**_MIXED, **_ACTIVATION_ON, "UseE": True, "DataTypeE": "S"},
+     {**_MIXED, **_ACTIVATION_ON, "UseE": True, "DataTypeE": "H"}, "DataTypeE"),
+    ("OutputAmaxD-DataTypeAmaxD",
+     {"OutputAmaxD": True, "DataTypeAmaxD": "S"},
+     {"OutputAmaxD": True, "DataTypeAmaxD": "H"}, "DataTypeAmaxD"),
+    ("UseGateResidual-GateResidualDataTypeList",
+     {"UseGateResidual": True, "GateResidualDataTypeList": ["S", "H"]},
+     {"UseGateResidual": True, "GateResidualDataTypeList": ["S"]},
+     "GateResidualDataTypeList"),
+    ("UseGateResidual-SetConstStrideGate",
+     {"UseGateResidual": True, "SetConstStrideGate": [[0, 1]]},
+     {"UseGateResidual": True}, "SetConstStrideGate"),
+    ("Gradient-BiasSrc",
+     {**_BIAS_ON, "Gradient": True, "BiasSrc": "A"},
+     {**_BIAS_ON, "Gradient": True, "BiasSrc": "B"}, "BiasSrc"),
+]
+
+
+@pytest.mark.parametrize(
+    "library_overrides,kernel_overrides,field",
+    [case[1:] for case in _DEPENDENT_ENFORCED],
+    ids=[case[0] for case in _DEPENDENT_ENFORCED],
+)
+def test_dependent_field_enforced_when_capability_enabled(
+    library_overrides, kernel_overrides, field
+):
+    mismatches = compareCustomKernelProblemTypes(
+        _problem_type(**library_overrides), _problem_type(**kernel_overrides)
+    )
+
+    assert field in _fields(mismatches)
+
+
+@pytest.mark.parametrize(
+    "field,library_value,kernel_value",
+    [
+        ("SetConstStrideBias", [[0, 1]], []),
+        ("BiasDataTypeList", ["S", "H"], ["S"]),
+        ("DataTypeE", "S", "H"),
+        ("DataTypeAmaxD", "S", "H"),
+        ("GateResidualDataTypeList", ["S", "H"], ["S"]),
+        ("SetConstStrideGate", [[0, 1]], []),
+        ("BiasSrc", "A", "B"),
+    ],
+)
+def test_dependent_field_ignored_when_capability_disabled(
+    field, library_value, kernel_value
+):
+    # With the gating capability off the field is dead weight, and rejecting a
+    # kernel over a leftover default it never reads would be a false positive.
+    mismatches = compareCustomKernelProblemTypes(
+        _problem_type(**{field: library_value}),
+        _problem_type(**{field: kernel_value}),
+    )
+
+    assert field not in _fields(mismatches)
 
 
 def test_formatter_includes_actionable_context_and_values():

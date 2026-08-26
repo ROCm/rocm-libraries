@@ -89,10 +89,11 @@ def test_shipped_logic_only_references_compatible_custom_kernels(
 
     incompatible = defaultdict(list)
     checked = 0
-    # 323 solutions reference only ~100 distinct kernels, and each lookup
-    # re-reads and re-parses a whole .s file. Cache per name: the embedded
-    # ProblemType is all this sweep reads, and InternalSupportParams -- the only
-    # part of the config that varies with the solution -- does not affect it.
+    # Far fewer distinct kernels are referenced than there are solutions, and
+    # each lookup re-reads and re-parses a whole .s file. Cache per name: the
+    # embedded ProblemType is all this sweep reads, and InternalSupportParams --
+    # the only part of the config that varies with the solution -- cannot
+    # affect it.
     configs = {}
     for path in files:
         problemType, solutions = _customSolutions(readYAML(str(path)))

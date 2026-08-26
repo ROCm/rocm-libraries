@@ -153,13 +153,17 @@ def _runChecks(
             solutions = all_solutions
 
         for list_idx, s in enumerate(solutions):
-            s, isCustom = handleCustomKernel(s, isaInfoMap)
+            s, isCustom, customConfig = handleCustomKernel(s, isaInfoMap)
             if check.OnlyCustomKernels and not isCustom:
                 continue
 
             if isCustom:
+                # Read the kernel's ProblemType from its config, not from the
+                # merged solution: handleCustomKernel does sol.update(config),
+                # after which a ProblemType the config never declared is
+                # indistinguishable from one it did.
                 mismatches = compareCustomKernelProblemTypes(
-                    problemType, s.get("ProblemType")
+                    problemType, (customConfig or {}).get("ProblemType")
                 )
                 if mismatches:
                     print(
