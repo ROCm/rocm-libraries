@@ -18,14 +18,18 @@
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "compilation/KpackProgram.hpp"
+#include "tests/utilities/ScratchDirectory.hpp"
 
 namespace hip_kernel_provider::compilation
 {
 namespace
 {
 
+using hip_kernel_provider::tests::claimScratchDirectory;
 using hipdnn_plugin_sdk::HipdnnPluginException;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+constexpr const char* SCRATCH_LABEL = "kpackloader";
 
 /// rocm-kpack's own test archive, path supplied by CMake from ROCM_KPACK_SOURCE_DIR.
 /// It holds gfx1100 and gfx1101 binaries under the toc keys "lib/libhip.so#0" and
@@ -153,8 +157,10 @@ protected:
 
 TEST_F(TestKpackKernelLoader, ReportsAMissingArchive)
 {
-    const std::filesystem::path absent
-        = std::filesystem::temp_directory_path() / "hipdnn-kpack-there-is-no-archive-here.kpack";
+    // Inside a directory this case owns, so the name is absent because nothing has had
+    // the chance to create it -- not merely because nothing usually does.
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path absent = scratch.path() / "there-is-no-archive-here.kpack";
     ASSERT_FALSE(std::filesystem::exists(absent));
 
     try
@@ -173,8 +179,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingArchive)
 
 TEST_F(TestKpackKernelLoader, ReportsACorruptArchive)
 {
-    const ScopedDirectory scratch(std::filesystem::temp_directory_path()
-                                  / "hipdnn-kpack-corrupt-archive");
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
     const std::filesystem::path garbage = scratch.path() / "corrupt.kpack";
     {
         std::ofstream out(garbage, std::ios::binary);

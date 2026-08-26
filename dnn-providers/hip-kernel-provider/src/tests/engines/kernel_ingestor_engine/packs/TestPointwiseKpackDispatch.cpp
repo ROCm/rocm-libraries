@@ -38,6 +38,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+#include "utilities/ScratchDirectory.hpp"
 
 /**
  * @file TestPointwiseKpackDispatch.cpp
@@ -66,6 +67,10 @@ using hip_kernel_provider::kernel_ingestor_engine::testing::GraphFixture;
 using hip_kernel_provider::kernel_ingestor_engine::testing::matchesGraph;
 using hip_kernel_provider::kernel_ingestor_engine::testing::POINTWISE_ADD;
 using hip_kernel_provider::kernel_ingestor_engine::testing::testDeviceProperties;
+using hip_kernel_provider::tests::claimScratchDirectory;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+constexpr const char* SCRATCH_LABEL = "pointwisekpack";
 
 /// Where this build stages the descriptors it packed, one subdirectory per arch. Same
 /// value main.cpp points the binary at.
@@ -399,8 +404,7 @@ TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
     const NoHipDispatchHandler siblingHandler;
     scope.add(SIBLING_DISPATCH_SYMBOL, &siblingHandler);
 
-    const hipdnn_test_sdk::utilities::ScopedDirectory emptyDirectory(
-        std::filesystem::temp_directory_path() / "hipdnn-kpack-absent-archive");
+    const ScopedDirectory emptyDirectory = claimScratchDirectory(SCRATCH_LABEL);
 
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
