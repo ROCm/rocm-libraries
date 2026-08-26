@@ -481,12 +481,14 @@ class _Lowerer:
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
         ptr, idx = op.operands
-        vec = int(op.attrs["vec"])
-        elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        # Reinterpret to the result's real HIP vector type (i32xN / f32xN /
+        # i8xN / ...), not a hard-coded f16x default -- the elem-prefix guess
+        # mis-typed every non-f16/bf16 vector load (see smem_store_vN, which
+        # already carries the full map).
+        vec_ty = _type_to_hip(op.result.type)
         self._emit(
-            f"{prefix}{vec} {_name(op.result)} = "
-            f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
+            f"{vec_ty} {_name(op.result)} = "
+            f"*reinterpret_cast<const {vec_ty}*>({_name(ptr)} + {_name(idx)});"
         )
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
@@ -1270,18 +1272,6 @@ class _Lowerer:
     def _op_tile_s_setprio(self, op: Op) -> None:
         self._emit(f"__builtin_amdgcn_s_setprio({int(op.attrs['level'])});")
 
-    def _op_memref_global_store_vN(self, op: Op) -> None:
-        ptr, idx, val = op.operands
-        vec = int(op.attrs["vec"])
-        self._emit(
-            f"*reinterpret_cast<f16x{vec}*>({_name(ptr)} + {_name(idx)}) = "
-            f"{_name(val)};"
-        )
-
-    def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
-        ptr, idx, val = op.operands
-        self._emit(f"atomicAdd({_name(ptr)} + {_name(idx)}, {_name(val)});")
-
     def _op_vector_extract(self, op: Op) -> None:
         (v,) = op.operands
         i = op.attrs["index"]
@@ -1960,11 +1950,11 @@ class _Lowerer:
 
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands
-        n = int(op.attrs["vec"])
-        elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        # Reinterpret to the stored value's real HIP vector type, not a
+        # hard-coded f16x default (which mis-typed every non-f16/bf16 store).
+        vec_ty = _type_to_hip(val.type)
         self._emit(
-            f"*reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)}) = "
+            f"*reinterpret_cast<{vec_ty}*>({_name(ptr)} + {_name(idx)}) = "
             f"{_name(val)};"
         )
 
@@ -2252,6 +2242,37 @@ class _Lowerer:
             f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
         )
         self._emit(f"{vec_prefix}8 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 16);")
+
+    def _op_tile_ds_read_tr_b8(self, op: Op) -> None:
+        # ``ds_read_b64_tr_b8`` -- gfx950 transpose-read of an 8-bit LDS tile.
+        # ROCm 7.0's public intrinsic list exposes only the b16 transpose-read,
+        # so the LLVM path lowers this through inline asm; mirror that here with
+        # an ``asm volatile`` (see lower_llvm.py::_op_tile_ds_read_tr_b8). The
+        # instruction returns 64 bits as two VGPRs (``i32x2``); memcpy into the
+        # logical ``<8 x i8>`` (fp8/bf8/i8) result, matching the b64/b128 shims.
+        self._require_ds_read_tr("ds_read_tr_b8")
+        smem = op.operands[0]
+        indices = op.operands[1:]
+        storage = smem.op.attrs.get("_storage")
+        if storage is None:
+            raise RuntimeError("ds_read_tr_b8 before smem_alloc was lowered")
+        idx_str = "][".join(_name(i) for i in indices)
+        nice = _name(op.result)
+        raw_tmp = f"_trraw_{nice.lstrip('%')}"
+        addr_tmp = f"_traddr_{nice.lstrip('%')}"
+        res_ty = _type_to_hip(op.result.type)
+        # LDS byte offset (addrspace(3) pointers are 32-bit) -> VGPR vaddr,
+        # matching the LLVM path's ``ptrtoint ptr addrspace(3) ... to i32``.
+        self._emit(
+            f"unsigned {addr_tmp} = (unsigned)(__attribute__((address_space(3))) "
+            f"void*)&{storage}[{idx_str}];"
+        )
+        self._emit(f"i32x2 {raw_tmp};")
+        self._emit(
+            f'asm volatile("ds_read_b64_tr_b8 %0, %1" : '
+            f'"=v"({raw_tmp}) : "v"({addr_tmp}));'
+        )
+        self._emit(f"{res_ty} {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 8);")
 
     def _op_tile_inline_asm(self, op: Op) -> None:
         """General AMDGPU inline asm -> GCC/clang extended ``asm volatile``.

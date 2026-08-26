@@ -318,6 +318,28 @@ def _micro_cases() -> List[Case]:
         b.ret()
         return b.kernel
 
+    def _ds_read_tr_b8() -> object:
+        # ``ds_read_b64_tr_b8`` transpose-read of an 8-bit LDS tile (gfx950).
+        # Bitcast the ``<8 x fp8e4m3>`` result to ``<2 x i32>`` and store that,
+        # so the case exercises only the transpose-read path (not the fp8
+        # global-store path).
+        from rocke.core.ir import (  # noqa: PLC0415
+            FP8E4M3,
+            I32,
+            PtrType,
+            VectorType,
+        )
+
+        b = IRBuilder("micro_ds_read_tr_b8")
+        O = b.param("O", PtrType(I32, "global"))
+        tid = b.thread_id_x()
+        smem = b.smem_alloc(FP8E4M3, [256], "lds")
+        raw = b.ds_read_tr_b8(smem, tid, dtype=FP8E4M3)
+        packed = b.vec_bitcast(raw, VectorType(I32, 2))
+        b.global_store_vN(O, tid, packed, 2)
+        b.ret()
+        return b.kernel
+
     def _inline_asm_mov() -> object:
         # Minimal single-output / single-input inline asm (``v_mov_b32``).
         # Exercises the output-lvalue + input binding of the general
@@ -367,6 +389,7 @@ def _micro_cases() -> List[Case]:
         Case("micro.cvt_scalef32_bf8", "micro", lambda: _cvt_scalef32("bf8")),
         Case("micro.mfma_f32_16x16x128_fp8", "micro", _mfma_hero, arch="gfx950"),
         Case("micro.global_load_lds", "micro", _global_load_lds, arch="gfx950"),
+        Case("micro.ds_read_tr_b8", "micro", _ds_read_tr_b8, arch="gfx950"),
         # -- P1: arch-gated ops pinned to a supporting arch --
         Case(
             "micro.wmma_bf16",
@@ -401,6 +424,14 @@ def _micro_cases() -> List[Case]:
             lambda: _wmma_bf16("micro_wmma_gfx12_bf16_rej", 8, True),
             expect="reject",
             arch="gfx950",
+        ),
+        # ds_read_*_tr_* is gfx950-class; gfx942 has no such instruction.
+        Case(
+            "micro.ds_read_tr_b8.reject_cdna",
+            "micro",
+            _ds_read_tr_b8,
+            expect="reject",
+            arch="gfx942",
         ),
     ]
 
