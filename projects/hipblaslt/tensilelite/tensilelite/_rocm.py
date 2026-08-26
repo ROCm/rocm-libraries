@@ -195,15 +195,16 @@ def _validate_therock_ci(
     version = _canonical_rocm_version(therock_package_version)
     executable_search_paths = _therock_ci_executable_search_paths()
     selected_path = executable_search_paths[0]
-    if expected != "BYPASS":
-        _validate_compatibility(
-            distribution=distribution,
-            distribution_version=distribution_version,
-            expected_version=expected,
-            actual_version=version,
-            path=selected_path,
-            source=_THEROCK_CI_SOURCE,
-        )
+
+    _validate_compatibility(
+        distribution=distribution,
+        distribution_version=distribution_version,
+        expected_version=expected,
+        actual_version=version,
+        path=selected_path,
+        source=_THEROCK_CI_SOURCE,
+    )
+
     return TheRockCIRocm(
         path=selected_path,
         version=version,
@@ -242,15 +243,16 @@ def _validate_python_sdk(
     version = _canonical_rocm_version(python_sdk_version)
     path = _python_sdk_location()
     executable_search_paths = _python_sdk_executable_search_paths()
-    if expected != "BYPASS":
-        _validate_compatibility(
-            distribution=distribution,
-            distribution_version=distribution_version,
-            expected_version=expected,
-            actual_version=version,
-            path=path,
-            source=_PYTHON_SDK_SOURCE,
-        )
+
+    _validate_compatibility(
+        distribution=distribution,
+        distribution_version=distribution_version,
+        expected_version=expected,
+        actual_version=version,
+        path=path,
+        source=_PYTHON_SDK_SOURCE,
+    )
+
     return PythonRocm(
         path=path,
         version=version,
@@ -321,15 +323,16 @@ def _validate_system_rocm(
         # TODO: Enable once conventional prefixes ship tensilelite-client here.
         # path / "libexec" / "hipblaslt" / "tensilelite",
     )
-    if expected != "BYPASS":
-        _validate_compatibility(
-            distribution=distribution,
-            distribution_version=distribution_version,
-            expected_version=_rocm_base_version(expected),
-            actual_version=actual,
-            path=path,
-            source=resolved.source,
-        )
+
+    _validate_compatibility(
+        distribution=distribution,
+        distribution_version=distribution_version,
+        expected_version=_rocm_base_version(expected),
+        actual_version=actual,
+        path=path,
+        source=resolved.source,
+    )
+
     return SystemRocm(
         path=path,
         version=actual,
