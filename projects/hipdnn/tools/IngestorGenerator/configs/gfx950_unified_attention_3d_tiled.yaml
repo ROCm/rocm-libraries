@@ -1,0 +1,1297 @@
+# rocKE split-KV 3D tiled attention (gfx950) + its paired reduce kernel, packaged.
+#
+# Two builders cooperate: build_unified_attention_3d_tiled (per-segment partial
+# softmax state into a workspace) and build_unified_attention_reduce_tiled
+# (combines segments into the final output). They are NOT independent operations --
+# every shipped (dtype, head_size, GQA-ratio, block_size, num_segments) capability
+# point ships as a PAIR of kernels distinguished by the KMD field `role`
+# ("segment"/"reduce"), sharing every other metadata value. See
+# rocke/library/kernels/gfx950/mining.md Sec 6 for why this shape was chosen over
+# the alternatives (a single kernel entry cannot represent two code objects; two
+# independent packs would lose the invariant that score() sees one candidate and
+# cannot see its silently-required reduce partner).
+#
+# This kernel ALWAYS reads K/V through a page table (paged_kv_desc with an
+# indirect() block-table lookup) -- there is no dense-K/V path in the source at
+# all. graph_match therefore requires page_table_k_tensor_uid AND
+# page_table_v_tensor_uid on the graph; a dense-KV SDPA graph is out of scope for
+# this engine and must be declined, not silently misread as paged.
+#
+# block_size is the exposed knob (rocke-mining.md's KNOB-SEL note is UNSURE on a
+# strict seqlen_kv%block_size relationship, but it is treated as a tuning knob per
+# the Step 3 batch answer, step3_batch.md). num_segments is a KMD field only, never
+# a knob: it is a launch-geometry constant baked into a specific compiled
+# segment/reduce PAIR, not something a caller can pick independently.
+#
+# use_sinks, use_alibi, sliding_window, use_qq_bias, has_softcap are OFF in every
+# shipped variant -- see step3_batch.md item 7 for why each is declined for this
+# first integration (two are unrepresentable in the SDPA graph schema at all;
+# the others are declined as a stated scope limit, not silently unserved).
+#
+dialect: packaged
+authored_subpath: rocKE/gfx950_unified_attention_3d_tiled
+engine:
+  name: hipkernel:UnifiedAttention3DTiled
+  sdk_version: 1.0.0
+  knobs:
+  - block_size
+  heuristic: native
+kmd_fields:
+- name: role
+  type: string
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+- name: num_query_heads
+  type: int
+- name: num_kv_heads
+  type: int
+- name: block_size
+  type: int
+  default_value: 0
+- name: num_segments
+  type: int
+graph_match:
+  shape: shared_shape
+  discriminator: none
+kernel_source_kind: rocke
+workspace_policy: derived
+delegates_to_existing_plan: false
+packs:
+- name: unified_attention_3d_tiled
+  arch:
+  - gfx950
+  kernels:
+  - name: uattn3d.fp16_d64_mha_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 64
+        block_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: fp16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d64_mha_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: fp16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d64_gqa_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 64
+        block_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: fp16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d64_gqa_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: fp16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d128_mha_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: fp16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d128_mha_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: fp16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d128_gqa_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: fp16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d128_gqa_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: fp16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d256_mha_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 256
+        block_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: fp16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: FP16
+      head_size: 256
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d256_mha_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 256
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: fp16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: FP16
+      head_size: 256
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d256_gqa_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 256
+        block_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: fp16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: FP16
+      head_size: 256
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.fp16_d256_gqa_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 256
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: fp16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: FP16
+      head_size: 256
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d64_mha_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 64
+        block_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d64_mha_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d64_gqa_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 64
+        block_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d64_gqa_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d256_mha_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 256
+        block_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 256
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d256_mha_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 256
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 256
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d256_gqa_bs64_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 256
+        block_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 256
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d256_gqa_bs64_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 256
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 256
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs16_seg8.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 16
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 8
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 16
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs16_seg8.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 8
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs16_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 16
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 16
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs16_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs16_seg32.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 16
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 32
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 16
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs16_seg32.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 32
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs32_seg8.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 32
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 8
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 32
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs32_seg8.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 8
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs32_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 32
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 32
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs32_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs32_seg32.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 32
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 32
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 32
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs32_seg32.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 32
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs64_seg8.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 8
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs64_seg8.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 8
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs64_seg32.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 32
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_mha_bs64_seg32.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 32
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs16_seg8.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 16
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 8
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 16
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs16_seg8.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 8
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs16_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 16
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 16
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs16_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs16_seg32.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 16
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 32
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 16
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs16_seg32.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 32
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs32_seg8.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 32
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 8
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 32
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs32_seg8.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 8
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs32_seg16.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 32
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 16
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 32
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs32_seg16.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 16
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 16
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs32_seg32.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 32
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 32
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 32
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs32_seg32.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 32
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs64_seg8.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 8
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs64_seg8.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 8
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 8
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs64_seg32.segment
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_3d_tiled
+      spec:
+        head_size: 128
+        block_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        use_sinks: false
+        sliding_window: 0
+        has_softcap: false
+        num_segments: 32
+    metadata:
+      role: segment
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 64
+      num_segments: 32
+    priority: 0
+  - name: uattn3d.bf16_d128_gqa_bs64_seg32.reduce
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_tiled_3d.py
+      builder: build_unified_attention_reduce_tiled
+      spec:
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        dtype: bf16
+        num_segments: 32
+    metadata:
+      role: reduce
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      block_size: 0
+      num_segments: 32
+    priority: 0
