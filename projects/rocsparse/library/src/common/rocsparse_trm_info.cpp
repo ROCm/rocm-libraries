@@ -23,7 +23,58 @@
 
 #include "rocsparse_trm_info.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_datatype_utils.hpp"
+#include "rocsparse_spmat_descr.hpp"
 #include "rocsparse_utility.hpp"
+
+namespace
+{
+    // Duplicates a cached transpose, including the arrays it owns, so that the
+    // clone can outlive the original.
+    rocsparse_spmat_descr clone_transposed_matrix(rocsparse_const_spmat_descr that)
+    {
+        if(that == nullptr)
+        {
+            return nullptr;
+        }
+
+        // Only the ELL layout is ever cached here; anything else would need its
+        // own array inventory to be duplicated correctly.
+        if(that->format != rocsparse_format_ell)
+        {
+            THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+        }
+
+        const size_t count = static_cast<size_t>(that->rows) * static_cast<size_t>(that->ell_width);
+        const size_t col_bytes = count * rocsparse::indextype_sizeof(that->col_type);
+        const size_t val_bytes = count * rocsparse::datatype_sizeof(that->data_type);
+
+        void* col_data{nullptr};
+        void* val_data{nullptr};
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&col_data, col_bytes));
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&val_data, val_bytes));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            col_data, that->const_col_data, col_bytes, hipMemcpyDeviceToDevice));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            val_data, that->const_val_data, val_bytes, hipMemcpyDeviceToDevice));
+
+        rocsparse_spmat_descr clone{nullptr};
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_create_ell_descr(&clone,
+                                                            that->rows,
+                                                            that->cols,
+                                                            col_data,
+                                                            val_data,
+                                                            that->ell_width,
+                                                            that->col_type,
+                                                            that->idx_base,
+                                                            that->data_type));
+
+        clone->descr->fill_mode = that->descr->fill_mode;
+        clone->descr->diag_type = that->descr->diag_type;
+
+        return clone;
+    }
+}
 
 rocsparse::trm_info_t::~trm_info_t()
 {
@@ -48,6 +99,8 @@ rocsparse::trm_info_t::~trm_info_t()
 
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->transposed_col_ind));
     this->transposed_col_ind = nullptr;
+
+    this->clear_transposed_matrix();
 }
 
 void rocsparse::trm_info_t::set_max_nnz(const int64_t value)
@@ -132,6 +185,42 @@ void* rocsparse::trm_info_t::get_transposed_col_ind()
 void** rocsparse::trm_info_t::get_ref_transposed_col_ind()
 {
     return &this->transposed_col_ind;
+}
+
+rocsparse_const_spmat_descr rocsparse::trm_info_t::get_transposed_matrix() const
+{
+    return this->transposed_matrix;
+}
+
+rocsparse_spmat_descr rocsparse::trm_info_t::get_transposed_matrix()
+{
+    return this->transposed_matrix;
+}
+
+void rocsparse::trm_info_t::set_transposed_matrix(rocsparse_spmat_descr value)
+{
+    if(this->transposed_matrix == value)
+    {
+        return;
+    }
+    this->clear_transposed_matrix();
+    this->transposed_matrix = value;
+}
+
+void rocsparse::trm_info_t::clear_transposed_matrix()
+{
+    if(this->transposed_matrix == nullptr)
+    {
+        return;
+    }
+
+    // rocsparse_destroy_spmat_descr releases the descriptor and its nested
+    // objects but never the matrix arrays, which this info struct owns.
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->transposed_matrix->col_data));
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->transposed_matrix->val_data));
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse_destroy_spmat_descr(this->transposed_matrix));
+
+    this->transposed_matrix = nullptr;
 }
 
 void rocsparse::trm_info_t::set_m(const int64_t value)
@@ -265,6 +354,8 @@ rocsparse::trm_info_t::trm_info_t(const rocsparse::trm_info_t& that)
                                                J_size * that.nnz,
                                                hipMemcpyDeviceToDevice));
     }
+
+    this->transposed_matrix = clone_transposed_matrix(that.transposed_matrix);
 }
 
 rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_info_t& that)
@@ -339,6 +430,8 @@ rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_inf
                                                J_size * that.nnz,
                                                hipMemcpyDeviceToDevice));
     }
+
+    this->set_transposed_matrix(clone_transposed_matrix(that.transposed_matrix));
 
     this->max_nnz      = that.max_nnz;
     this->m            = that.m;

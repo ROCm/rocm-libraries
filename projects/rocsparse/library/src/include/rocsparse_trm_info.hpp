@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "rocsparse-types.h"
 #include "rocsparse_mat_descr.hpp"
 
 namespace rocsparse
@@ -48,6 +49,12 @@ namespace rocsparse
         void* transposed_perm{nullptr};
         void* transposed_row_ptr{nullptr};
         void* transposed_col_ind{nullptr};
+
+        // Materialized transpose of the analyzed matrix, held as a sparse matrix
+        // descriptor so that it carries its own dimensions, width, index base,
+        // types and fill mode. The descriptor owns the index and value arrays it
+        // points at; they are released together with it.
+        rocsparse_spmat_descr transposed_matrix{nullptr};
 
         // some data to verify correct execution
         int64_t                     m{0};
@@ -87,6 +94,14 @@ namespace rocsparse
         const void* get_transposed_col_ind() const;
         void*       get_transposed_col_ind();
         void**      get_ref_transposed_col_ind();
+
+        rocsparse_const_spmat_descr get_transposed_matrix() const;
+        rocsparse_spmat_descr       get_transposed_matrix();
+
+        // Takes ownership of the descriptor and of the arrays it points at,
+        // releasing any transpose already held.
+        void set_transposed_matrix(rocsparse_spmat_descr);
+        void clear_transposed_matrix();
 
         const void* get_row_ptr();
         void        set_row_ptr(const void*);
