@@ -1,0 +1,184 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# NT F4 subtile GEMM -- MAF (max achievable FLOPs) benchmark.
+#
+# Companion to f4_nt.yaml.  Where f4_nt validates correctness across small
+# sizes, this drives each MFMA-M stack config at its compute-bound roofline:
+# one workgroup per CU (256 WGs on gfx950 MI35x, a 16x16 tile grid) and a
+# large K (65536) so the mainloop dominates and launch/tail overhead is
+# negligible.
+#
+# Every config uses MIWaveGroup 2x2 (4 waves) since that maximizes per-CU
+# occupancy and therefore FLOPs.  With wg2x2 fixed, the LDS stack size is set
+# purely by the per-wave M extent (MIWaveTile M), giving exactly one macro
+# tile per stack -- no packing of multiple subtiles into a single macro tile.
+# M and N are pinned to MT*16 so the grid is exactly 256 tiles.
+#
+# DepthU is the largest that generates without overflowing the 160KB LDS
+# budget for each stack (K=65536 is a multiple of every DepthU below):
+#   MIWT 2x2  -> MT64x64   -> 2x1  stack -> M=N=1024        -> DepthU 1024
+#   MIWT 4x4  -> MT128x128 -> 4x1  stack -> M=N=2048        -> DepthU 512
+#   MIWT 8x8  -> MT256x256 -> 8x1  stack -> M=N=4096        -> DepthU 256
+#   MIWT 16x4 -> MT512x128 -> 16x1 stack -> M=8192, N=2048  -> DepthU 128
+#
+# The 16x1 entry breaks the square-tile pattern because it has to: acc VGPRs
+# scale as MIWaveTile[0]*MIWaveTile[1]*4, so the square MIWT 16x16 (MT512x512)
+# would need 1024 and cannot be built.  16x1 is only reachable with
+# MIWaveTile[1] <= 4, and MIWT 16x4 keeps acc at 256 -- the same budget the
+# 8x8 entry uses.  Expect it to land *below* the 8x1 point: a rectangular tile
+# moves more operand bytes per output (MT512x128 reads 640 units per K step vs
+# 512 for MT256x256, for the same 65536 outputs), so its arithmetic intensity
+# is strictly worse.  It is here to quantify that cost, not to beat 8x1.
+#
+# Timing: 10 warmup enqueues, 100 timed enqueues per solution.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  NumWarmups: 10
+  EnqueuesPerSync: 100
+  SyncsPerBenchmark: 1
+  PrintSolutionRejectionReason: True
+  NumElementsToValidate: 0
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+
+  # --- 2x1 stack: MT64x64 wg2x2, DepthU 1024 ------------------------------
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64 wg2x2
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [1024]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1024, 1024, 1, 65536]
+
+  # --- 4x1 stack: MT128x128 wg2x2, DepthU 512 -----------------------------
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128 wg2x2
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2048, 2048, 1, 65536]
+
+  # --- 8x1 stack: MT256x256 wg2x2, DepthU 256 -----------------------------
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256 wg2x2
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 4096, 1, 65536]
+
+  # --- 16x1 stack: MT512x128 wg2x2, DepthU 128 ----------------------------
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 16, 4,  2, 2]  # MT 512x128 wg2x2 (A 16x1, B 4x1)
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 2048, 1, 65536]
