@@ -1,4 +1,4 @@
-# Origami: Analytical Solution Selection for GEMM Kernels
+#Origami : Analytical Solution Selection for GEMM Kernels
 
 **Origami** provides a fast, analytical, deterministic methodology to select optimal GEMM configuration (such as tile size) for out-of-the-box GEMM performance. Origami estimates performance by sweeping over candidate configs (tile sizes and mapping) to select the optimal configuration based on **compute** and **memory latencies**.
 
@@ -48,11 +48,10 @@ pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/o
 
 ```python
 import origami
-
-# Get hardware information for device 0
+#Get hardware information for device 0
 hardware = origami.get_hardware_for_device(0)
 
-# Create a problem description
+#Create a problem description
 problem = origami.problem_t()
 problem.size = origami.dim3_t(2048, 2048, 2048)  # M, N, K dimensions
 problem.batch = 1
@@ -66,7 +65,7 @@ problem.mi_dtype = origami.data_type_t.Half
 problem.a_mx_block_size = 0
 problem.b_mx_block_size = 0
 
-# Create candidate configurations
+#Create candidate configurations
 configs = []
 config = origami.config_t()
 config.mt = origami.dim3_t(256, 256, 64)  # Macro tile dimensions
@@ -74,7 +73,7 @@ config.mi = origami.dim3_t(16, 16, 32)    # Matrix instruction dimensions
 config.occupancy = 4
 configs.append(config)
 
-# Select best configuration
+#Select best configuration
 best_result = origami.select_config(problem, hardware, configs)
 print(f"Best latency: {best_result.latency}")
 print(f"Best config: MT=({best_result.config.mt.m}, {best_result.config.mt.n}, {best_result.config.mt.k})")
@@ -83,69 +82,67 @@ print(f"Best config: MT=({best_result.config.mt.m}, {best_result.config.mt.n}, {
 ### C++ API
 
 ```cpp
+#include <iostream>
+#include <vector>
 #include "origami/origami.hpp"
 #include "origami/types.hpp"
-#include <vector>
-#include <iostream>
 
 int main() {
-    // Get hardware information for device 0
-    auto hardware = origami::hardware_t::get_hardware_for_device(0);
-    
-    // Create a problem description
-    origami::problem_t problem;
-    problem.size.m = 2048;  // M dimension
-    problem.size.n = 2048;  // N dimension
-    problem.size.k = 2048;  // K dimension
-    problem.batch = 1;
-    problem.a_transpose = origami::transpose_t::T;
-    problem.b_transpose = origami::transpose_t::N;
-    problem.a_dtype = origami::data_type_t::Half;
-    problem.b_dtype = origami::data_type_t::Half;
-    problem.c_dtype = origami::data_type_t::Half;
-    problem.d_dtype = origami::data_type_t::Half;
-    problem.mi_dtype = origami::data_type_t::Half;
-    problem.a_mx_block_size = 0;
-    problem.b_mx_block_size = 0;
-    
-    // Create candidate configurations
-    std::vector<origami::config_t> configs;
-    origami::config_t config;
-    config.mt.m = 256;  // Macro tile M
-    config.mt.n = 256;  // Macro tile N
-    config.mt.k = 64;   // Macro tile K
-    config.mi.m = 16;   // Matrix instruction M
-    config.mi.n = 16;   // Matrix instruction N
-    config.mi.k = 32;   // Matrix instruction K
-    config.occupancy = 4;
-    configs.push_back(config);
-    
-    // Select best configuration
-    auto best_result = origami::select_config(problem, hardware, configs);
-    std::cout << "Best latency: " << best_result.latency << std::endl;
-    std::cout << "Best config: MT=(" 
-              << best_result.config.mt.m << ", " 
-              << best_result.config.mt.n << ", " 
-              << best_result.config.mt.k << ")" << std::endl;
-    
-    // Alternative: Simple selection using just M, N, K
-    auto best_result_simple = origami::select_config_mnk(2048, 2048, 2048, hardware, configs);
-    
-    // Rank all configurations by performance
-    auto ranked_configs = origami::rank_configs(problem, hardware, configs);
-    std::cout << "Top 5 configs:" << std::endl;
-    for (size_t i = 0; i < std::min(ranked_configs.size(), size_t(5)); ++i) {
-        const auto& result = ranked_configs[i];
-        std::cout << "  Rank " << (i+1) << ": latency=" << result.latency 
-                  << ", MT=(" << result.config.mt.m << ", " 
-                  << result.config.mt.n << ", " << result.config.mt.k << ")" << std::endl;
-    }
-    
-    // Compute performance in GFLOPS
-    double gflops = origami::compute_perf_gflops(hardware, problem, best_result.latency);
-    std::cout << "Performance: " << gflops << " GFLOPS" << std::endl;
-    
-    return 0;
+  // Get hardware information for device 0
+  auto hardware = origami::hardware_t::get_hardware_for_device(0);
+
+  // Create a problem description
+  origami::problem_t problem;
+  problem.size.m          = 2048;  // M dimension
+  problem.size.n          = 2048;  // N dimension
+  problem.size.k          = 2048;  // K dimension
+  problem.batch           = 1;
+  problem.a_transpose     = origami::transpose_t::T;
+  problem.b_transpose     = origami::transpose_t::N;
+  problem.a_dtype         = origami::data_type_t::Half;
+  problem.b_dtype         = origami::data_type_t::Half;
+  problem.c_dtype         = origami::data_type_t::Half;
+  problem.d_dtype         = origami::data_type_t::Half;
+  problem.mi_dtype        = origami::data_type_t::Half;
+  problem.a_mx_block_size = 0;
+  problem.b_mx_block_size = 0;
+
+  // Create candidate configurations
+  std::vector<origami::config_t> configs;
+  origami::config_t config;
+  config.mt.m      = 256;  // Macro tile M
+  config.mt.n      = 256;  // Macro tile N
+  config.mt.k      = 64;   // Macro tile K
+  config.mi.m      = 16;   // Matrix instruction M
+  config.mi.n      = 16;   // Matrix instruction N
+  config.mi.k      = 32;   // Matrix instruction K
+  config.occupancy = 4;
+  configs.push_back(config);
+
+  // Select best configuration
+  auto best_result = origami::select_config(problem, hardware, configs);
+  std::cout << "Best latency: " << best_result.latency << std::endl;
+  std::cout << "Best config: MT=(" << best_result.config.mt.m << ", " << best_result.config.mt.n
+            << ", " << best_result.config.mt.k << ")" << std::endl;
+
+  // Alternative: Simple selection using just M, N, K
+  auto best_result_simple = origami::select_config_mnk(2048, 2048, 2048, hardware, configs);
+
+  // Rank all configurations by performance
+  auto ranked_configs = origami::rank_configs(problem, hardware, configs);
+  std::cout << "Top 5 configs:" << std::endl;
+  for (size_t i = 0; i < std::min(ranked_configs.size(), size_t(5)); ++i) {
+    const auto& result = ranked_configs[i];
+    std::cout << "  Rank " << (i + 1) << ": latency=" << result.latency << ", MT=("
+              << result.config.mt.m << ", " << result.config.mt.n << ", " << result.config.mt.k
+              << ")" << std::endl;
+  }
+
+  // Compute performance in GFLOPS
+  double gflops = origami::compute_perf_gflops(hardware, problem, best_result.latency);
+  std::cout << "Performance: " << gflops << " GFLOPS" << std::endl;
+
+  return 0;
 }
 ```
 
@@ -213,7 +210,7 @@ Build Python bindings using CMake from the `shared/origami` directory:
 ```bash
 cd shared/origami
 
-# configure with python bindings and tests enabled 
+#configure with python bindings and tests enabled 
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
@@ -221,10 +218,10 @@ cmake -S . -B build/ \
   -DORIGAMI_ENABLE_PYTHON=ON \
   -DORIGAMI_BUILD_TESTING=ON
 
-# build 
+#build 
 cmake --build build/ --parallel
 
-# run tests
+#run tests
 cd build/
 ctest --output-on-failure
 ```
@@ -236,20 +233,20 @@ Build the C++ library from the `shared/origami` directory:
 ```bash
 cd shared/origami
 
-# configure
+#configure
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
   -DCMAKE_INSTALL_PREFIX=/opt/rocm
 
-# build
+#build
 cmake --build build/ --parallel
 ```
 
 After configuring and building, run the following command to install:
 
 ```bash
-# install
+#install
 cmake --install build/
 ```
 
@@ -372,7 +369,7 @@ cmake -S . -B build/ \
 cmake --build build/ --parallel
 ```
 
-With `ORIGAMI_ENABLE_NN=ON`, YAML weights under `data/nn/tilewright/` ship in-tree; when `hint_dir` is empty, `load_models_for_logic` falls back to the bundled gfx950 directory at build time.
+With `ORIGAMI_ENABLE_NN=ON`, Origami can load TWREC YAML manifests/sidecars from `data/nn/tilewright/,<arch>` (typically fetched externally).
 
 **hipBLASLt** uses the same `ORIGAMI_ENABLE_NN` option (default **OFF**). Enable NN when configuring hipBLASLt:
 
@@ -547,7 +544,8 @@ If you want to submit an issue, you can do so on
 If you use Origami or reference it in your research, please cite our work:
 
 ```bibtex
-@misc{Swann:2025:TTB,
+@misc{
+Swann:2025:TTB,
   title={{tritonBLAS}: Triton-based Analytical Approach for GEMM Kernel Parameter Selection}, 
   author={Ryan Swann and Muhammad Osama and Xiaohu Guo and Bryant Nelson and Lixun Zhang and Alex Brown and Yen Ong and Ali Yazdani and Sean Siddens and Ganesh Dasika and Alex Underwood},
   year={2025},
