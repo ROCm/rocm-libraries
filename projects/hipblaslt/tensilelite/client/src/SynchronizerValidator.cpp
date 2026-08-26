@@ -52,16 +52,11 @@ namespace TensileLite
         void SynchronizerValidator::preProblem(ContractionProblem* const problem)
         {
             m_problem = problem;
-            // numWarmupRuns() is consulted once here, before any solution is
-            // picked, to size the rotating buffers. Restore the permissive value
-            // so the previous problem's last solution cannot shrink it.
-            m_usesSynchronizer = true;
         }
 
         void SynchronizerValidator::preSolution(ContractionSolution* const solution)
         {
             m_dirtyInSolution = false;
-            m_checkedSolution = false;
             // Only two families are handed the Synchronizer; every other solution
             // leaves it untouched, so scanning it could only ever come back
             // clean. These mirror the conditions the dispatcher itself uses when
@@ -103,7 +98,6 @@ namespace TensileLite
                                                     TimingEvents const&            startEvents,
                                                     TimingEvents const&            stopEvents)
         {
-            m_checkedSolution = true;
             checkInputs(inputs, "warmup");
         }
 

@@ -13,9 +13,11 @@
  * rather than by every solution that follows. It also fails when the buffer is
  * declared too narrow to scan in full.
  *
- * Enabled by --check-streamk-sync (GlobalParameters CheckStreamKSync).
- * Solutions that are handed no Synchronizer at all are skipped, rather than
- * paying for a scan that could only ever come back clean.
+ * Enabled by --check-streamk-sync (GlobalParameters CheckStreamKSync). It is
+ * built not to change what a config does: it is passive (it inspects launches
+ * other listeners drive and never requests one), and it skips solutions that
+ * are handed no Synchronizer at all, rather than paying for a scan that could
+ * only ever come back clean.
  */
 
 #pragma once
@@ -64,23 +66,24 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override;
             virtual void postSolution() override;
 
-            // The loop hosting the warmup only turns if some listener asks for a
-            // run, and with NumElementsToValidate 0 and SyncsPerBenchmark 0 none
-            // does. One pass, so it never extends a loop someone else drives.
+            // Purely passive: the check inspects launches other listeners drive
+            // and never asks for one of its own. The ductile family sets
+            // NumElementsToValidate 0 and SyncsPerBenchmark 0 precisely so no
+            // kernel launches, and driving a run there would turn a zero-launch
+            // codegen test into NumWarmups (10) launches per solution while
+            // observing nothing a kernel actually did. Where nothing launches
+            // there is no residue to find, so skipping costs no coverage.
+            //
+            // Configs that do launch are unaffected: they set
+            // NumElementsToValidate to -1 or 128, so ReferenceValidator already
+            // drives one warmup per solution and validateWarmups still fires.
             virtual bool needMoreRunsInSolution() const override
             {
-                return active() && !m_checkedSolution;
+                return false;
             }
-
-            // Request one warmup so validateWarmups always has a launch to
-            // inspect, even when no other listener asks for warmups.
-            // Also reached once per problem, before any preSolution, to size the
-            // rotating buffers. preProblem restores m_usesSynchronizer first, so
-            // a non-consumer solution from the previous problem cannot size that
-            // allocation below what a consumer solution here would need.
             virtual size_t numWarmupRuns() override
             {
-                return active() ? 1 : 0;
+                return 0;
             }
             virtual void setNumWarmupRuns(size_t count) override {}
             virtual void preWarmup() override {}
@@ -132,13 +135,6 @@ namespace TensileLite
             }
 
         private:
-            /// Whether the check should do anything right now: switched on, and
-            /// the solution in hand actually touches the Synchronizer.
-            bool active() const
-            {
-                return m_enabled && m_usesSynchronizer;
-            }
-
             /// Checks every Synchronizer buffer reachable from *inputs*.
             /// `stage` names the launch phase, for the diagnostic.
             void checkInputs(std::shared_ptr<ProblemInputs> inputs, char const* stage);
@@ -160,17 +156,21 @@ namespace TensileLite
             size_t              m_stagingBytes = 0;
 
         protected:
+            /// Whether the check should do anything right now: switched on, and
+            /// the solution in hand actually touches the Synchronizer.
+            bool active() const
+            {
+                return m_enabled && m_usesSynchronizer;
+            }
+
             // Protected so a test-only subclass can drive these without a GPU.
             bool m_dirtyInSolution = false;
             int  m_errorsReported  = 0;
             // Whether the solution in hand is one of the two Synchronizer
-            // consumers. Set per solution in preSolution and restored to true in
-            // preProblem; stays true when the solution is unknown, so an
-            // unrecognised launch is scanned rather than silently skipped.
+            // consumers. Set per solution in preSolution; stays true when the
+            // solution is unknown, so an unrecognised launch is scanned rather
+            // than silently skipped.
             bool m_usesSynchronizer = true;
-            // Set once validateWarmups has run, so needMoreRunsInSolution stops
-            // asking. Reset per solution in preSolution.
-            bool m_checkedSolution = false;
         };
     } // namespace Client
 } // namespace TensileLite
