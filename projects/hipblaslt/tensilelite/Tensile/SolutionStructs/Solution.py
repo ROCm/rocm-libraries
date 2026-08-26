@@ -1132,8 +1132,10 @@ class Solution(collections.abc.Mapping):
             # buffer_load covers G*instM contiguous elements instead of
             # stack*instM.  Only meaningful when the axis splits across waves.
             if state.get("SubtileWideGR", False) and waveGroup > 1:
-              grStack = stack * waveGroup
-              key = f"AB_B4_TLU1_GR{grStack}_LR{stack}"
+              # GR spans the whole macro-tile free dim; LR stays per-wave.
+              grStack = mtFree // state["MatrixInstM"]
+              lrStack = perWaveMTiles
+              key = f"AB_B4_TLU1_GR{grStack}_LR{lrStack}"
               from Tensile.Components.Subtile.Kernel import AB_GEOMETRY_MAP
               if key not in AB_GEOMETRY_MAP:
                 reject(state, printRejectionReason,
