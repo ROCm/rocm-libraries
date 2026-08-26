@@ -519,7 +519,7 @@ int main(int argc, char* argv[])
             if(!mp_launch.empty())
                 throw std::invalid_argument(
                     "--mp_launch must be empty if mp_lib == none (see --help)");
-            if(gpus_per_rank > rocfft_scoped_device::device_count())
+            if(gpus_per_rank > static_cast<size_t>(rocfft_scoped_device::device_count()))
                 throw CLI::ValidationError(
                     "ngpus", "ngpus must not exceed the number of visible devices (see --help)");
         }
