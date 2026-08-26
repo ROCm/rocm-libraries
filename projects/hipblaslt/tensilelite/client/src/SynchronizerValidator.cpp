@@ -15,10 +15,9 @@ namespace TensileLite
     {
         bool scanSynchronizerResidue(uint8_t const* host, size_t bytes, SynchronizerResidue& out)
         {
-            // Ints are both the scan step and the reported unit: the buffer is
-            // declared with the alpha type but every consumer writes 32-bit
-            // counters into it, so an offset in ints names the counter left set.
-            // The element count is a multiple of 8 and alpha is at least
+            // The buffer is declared with the alpha type but every consumer
+            // writes 32-bit counters, so an int offset names the counter left
+            // set. The element count is a multiple of 8 and alpha is at least
             // int-sized, so bytes always divides evenly.
             size_t const    ints    = bytes / sizeof(uint32_t);
             uint32_t const* v       = reinterpret_cast<uint32_t const*>(host);
@@ -57,14 +56,12 @@ namespace TensileLite
         void SynchronizerValidator::preSolution(ContractionSolution* const solution)
         {
             m_dirtyInSolution = false;
-            // Only two families are handed the Synchronizer; every other solution
-            // leaves it untouched, so scanning it could only ever come back
-            // clean. These mirror the conditions the dispatcher itself uses when
-            // it appends the pointer -- Flags in singleCallArgs for StreamK, and
-            // the dstD/Synchronizer block for MBSK. The one case not reproduced
-            // here is sk.reduction == parallel, which also passes a null Flags
-            // but needs a Problem and Hardware to evaluate; over-scanning there
-            // costs one readback and reports nothing.
+            // Mirrors the conditions under which the dispatcher appends the
+            // pointer: Flags in singleCallArgs for StreamK, the dstD/Synchronizer
+            // block for MBSK. Any other solution is never handed the buffer, so
+            // its scan could only come back clean. Not reproduced here is
+            // sk.reduction == parallel, which also passes a null Flags but needs
+            // a Problem and Hardware to evaluate; scanning it reports nothing.
             //
             // An unknown solution is scanned rather than skipped.
             if(solution == nullptr)
@@ -85,9 +82,8 @@ namespace TensileLite
             if(m_dirtyInSolution)
             {
                 m_errorsReported++;
-                // Overrides the reference verdict so the result row, and the CSV
-                // and library logic fed from it, cannot crown a solution that
-                // corrupts the shared buffer.
+                // Overrides the reference verdict so the CSV and library logic
+                // fed from it cannot crown a solution that corrupts the buffer.
                 m_reporter->report(ResultKey::Validation, "FAILED");
             }
 
@@ -163,14 +159,13 @@ namespace TensileLite
             if(bytes == 0)
                 return true;
 
-            // The buffer is declared with the alpha type but written as int
-            // counters. A narrower alpha leaves the tail of the kernel's range
+            // A narrower-than-int alpha leaves the tail of the kernel's range
             // outside the allocation, where residue is unreadable rather than
             // merely unreported.
             if(bytes < tensor.totalAllocatedElements() * sizeof(int))
             {
-                // Thrown, not reported: this is a client configuration limit, not
-                // a kernel that failed to self-clean.
+                // Thrown, not reported: a client configuration limit, not a
+                // kernel that failed to self-clean.
                 std::ostringstream msg;
                 msg << "Synchronizer is declared with a type narrower than int (" << bytes
                     << " bytes for " << tensor.totalAllocatedElements()
@@ -179,8 +174,8 @@ namespace TensileLite
                 throw std::runtime_error(msg.str());
             }
 
-            // Runs once per solution, so the copy is hot: pinned staging avoids
-            // the pageable bounce buffer.
+            // Once per solution, so the copy is hot: pinned staging avoids the
+            // pageable bounce buffer.
             uint8_t* host = stagingBuffer(bytes);
             HIP_CHECK_EXC(hipMemcpy(host, deviceSynchronizer, bytes, hipMemcpyDeviceToHost));
 
@@ -195,10 +190,9 @@ namespace TensileLite
                 << " -- the kernel did not reset the shared Synchronizer buffer on exit.\n";
             m_reporter->log(LogLevel::Error, msg.str());
 
-            // The client zeroes the Synchronizer only on the first
-            // prepareGPUInputs -- it is not an output tensor, so the per-solution
-            // resetOutput skips it. Clear the residue so it is reported once
-            // instead of again by every solution that follows.
+            // resetOutput skips the Synchronizer (it is not an output tensor),
+            // so clear the residue here to report it once rather than for every
+            // solution that follows.
             HIP_CHECK_EXC(hipMemset(deviceSynchronizer, 0, bytes));
 
             return false;
