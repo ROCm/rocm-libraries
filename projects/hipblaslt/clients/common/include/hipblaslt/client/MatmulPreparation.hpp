@@ -59,6 +59,7 @@ namespace hipblaslt::client
                                          std::span<const MatmulTestCase> matmulCases,
                                          hipDataType                     inputTypeA,
                                          hipDataType                     inputTypeB,
+                                         hipDataType                     inputTypeC,
                                          hipDataType                     outputType,
                                          hipDataType                     computeScalarType,
                                          hipDataType                     coefficientType,
