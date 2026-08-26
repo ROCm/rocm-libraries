@@ -7,6 +7,8 @@
 #include "SynchronizerValidator.hpp"
 #include "TimingEvents.hpp"
 
+#include <Tensile/ContractionSolution.hpp>
+
 #include <memory>
 #include <string>
 #include <utility>
@@ -64,6 +66,21 @@ namespace
         return vm;
     }
 
+    // Only sizeMapping is read by the consumer gate, so a default-constructed
+    // solution with those fields set is enough. ContractionSolution is
+    // non-copyable, so this fills one in place rather than returning it.
+    void setSolution(TensileLite::ContractionSolution& s,
+                     int                               streamK,
+                     int                               globalAccumulation,
+                     int                               streamKAtomic      = 0,
+                     int                               streamKForceDPOnly = 0)
+    {
+        s.sizeMapping.streamK            = streamK;
+        s.sizeMapping.globalAccumulation = globalAccumulation;
+        s.sizeMapping.streamKAtomic      = streamKAtomic;
+        s.sizeMapping.streamKForceDPOnly = streamKForceDPOnly;
+    }
+
     // validateWarmups ignores the events; TimingEvents(0, 0) creates none, so
     // this needs no GPU.
     void driveWarmup(SynchronizerValidator& validator)
@@ -106,6 +123,83 @@ TEST(SynchronizerValidatorReporting, DisabledValidatorRequestsNothing)
     validator.preSolution(nullptr);
     EXPECT_FALSE(validator.needMoreRunsInSolution());
     EXPECT_EQ(validator.numWarmupRuns(), 0u);
+}
+
+// StreamK uses the buffer as its work-queue / fixup Flags.
+TEST(SynchronizerValidatorReporting, StreamKSolutionIsChecked)
+{
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, 3, 0);
+
+    validator.preSolution(&solution);
+    EXPECT_TRUE(validator.needMoreRunsInSolution());
+    EXPECT_EQ(validator.numWarmupRuns(), 1u);
+}
+
+// GSU MultipleBufferSingleKernel is the other consumer, and it is not StreamK
+// -- gating on StreamK alone would drop gsu_mbsk.yaml's coverage silently.
+TEST(SynchronizerValidatorReporting, MbskSolutionIsChecked)
+{
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, 0, 3);
+
+    validator.preSolution(&solution);
+    EXPECT_TRUE(validator.needMoreRunsInSolution());
+    EXPECT_EQ(validator.numWarmupRuns(), 1u);
+}
+
+// Atomic StreamK reduces in place; the dispatcher never appends Flags for it.
+TEST(SynchronizerValidatorReporting, AtomicStreamKSolutionIsSkipped)
+{
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, 3, 0, /*streamKAtomic=*/1);
+
+    validator.preSolution(&solution);
+    EXPECT_FALSE(validator.needMoreRunsInSolution());
+}
+
+// StreamKForceDPOnly kernels drop AddressWS/AddressFlags from the SGPR define
+// entirely, so the buffer argument the check reads is never passed.
+TEST(SynchronizerValidatorReporting, ForceDPOnlyStreamKSolutionIsSkipped)
+{
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, 3, 0, /*streamKAtomic=*/0, /*streamKForceDPOnly=*/1);
+
+    validator.preSolution(&solution);
+    EXPECT_FALSE(validator.needMoreRunsInSolution());
+}
+
+// Everything else never receives the buffer, so the scan could only come back
+// clean. Skipping it is what keeps the check free on those runs.
+TEST(SynchronizerValidatorReporting, NonConsumerSolutionIsSkipped)
+{
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, 0, 0);
+
+    validator.preSolution(&solution);
+    EXPECT_FALSE(validator.needMoreRunsInSolution());
+    EXPECT_EQ(validator.numWarmupRuns(), 0u);
+}
+
+// A skipped solution must not leave the gate closed: numWarmupRuns is consulted
+// once per problem before any solution is picked, and a 0 there would size the
+// rotating buffers below what a consumer solution in that problem needs.
+TEST(SynchronizerValidatorReporting, PreProblemReopensTheGate)
+{
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, 0, 0);
+
+    validator.preSolution(&solution);
+    ASSERT_EQ(validator.numWarmupRuns(), 0u);
+
+    validator.preProblem(nullptr);
+    EXPECT_EQ(validator.numWarmupRuns(), 1u);
 }
 
 TEST(SynchronizerValidatorReporting, CleanSolutionReportsNothing)
