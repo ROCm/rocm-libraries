@@ -241,7 +241,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     {
         const auto& target = GetTargetProperties();
         const auto db_id   = target.DbId();
-        if(db_id == "gfx1100" || db_id == "gfx1102" || db_id == "gfx1201")
+        if(db_id == "gfx1100" || db_id == "gfx1102" || db_id == "gfx1151" || db_id == "gfx1200" ||
+           db_id == "gfx1201")
         {
             std::ostringstream ss;
             ss << db_id << std::hex << GetMaxHardwareComputeUnits();

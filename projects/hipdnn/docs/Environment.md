@@ -116,13 +116,19 @@ Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`. Whe
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
 | (unset)    | Use the built-in static ordering (MIOpen-first, deterministic engines last). |
-| `<list>`   | Comma-separated engine names, applied in the order written. Whitespace is trimmed and empty tokens are skipped. |
+| `<list>`   | Comma-separated engine names or raw IDs, applied in the order written. Whitespace is trimmed and empty tokens are skipped. |
 
-Engine names that are not among the current candidates are silently skipped. If no listed engine matches any candidate, the policy declines so the outer loop can try the next plugin.
+Each entry accepts any spelling `hipdnn_list_engines` prints an engine under: the name it declares, or — for an engine that declares none — its ID in `0x`-prefixed hexadecimal. A decimal ID is also accepted. A registered name is resolved as a name even if it reads as a number.
+
+Entries that are not among the current candidates are silently skipped. If no listed engine matches any candidate, the policy declines so the outer loop can try the next policy.
 
 **Example:**
 ```bash
-export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOpenConvolutionFwdEngine,HipBLASLtMatmulEngine"
+# By name
+export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOPEN_ENGINE,HIPBLASLT_ENGINE"
+
+# By ID, in the form printed for an engine that declares no name, mixed with a name
+export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="0x1A2B3C4D5E6F7080,MIOPEN_ENGINE"
 ```
 
 ### Benchmarking
