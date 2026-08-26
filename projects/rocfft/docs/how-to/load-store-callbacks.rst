@@ -90,10 +90,10 @@ launched to decompose a transform, which means that separate kernels
 might call the load and store callbacks for a transform if both are
 specified.
 
-Callbacks functions are only supported for transforms that do not use planar format for input or output.
+Callback functions are only supported for transforms that do not use planar format for input or output.
 
-Compiling callback functions to SPIR-V
---------------------------------------
+Compiling functions to SPIR-V for JIT callbacks
+-----------------------------------------------
 
 :cpp:func:`rocfft_plan_description_set_load_callback` and
 :cpp:func:`rocfft_plan_description_set_store_callback` accept
@@ -202,7 +202,7 @@ functions in an array do not behave the same.
    device code by passing the ``-fgpu-rdc`` option to the compiler
    and linker.
 
-SPIR-V callbacks are preferred over legacy function pointer callbacks
+JIT callbacks are preferred over legacy function pointer callbacks
 because they allow for rocFFT to properly optimize the combined
 callback and FFT code.  Legacy callback functions are already
 compiled by the time they are passed to rocFFT, and no further
