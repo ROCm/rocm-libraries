@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/autotune/AutotuneBenchmark.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
@@ -440,4 +441,229 @@ TEST(TestAutotune, RankAndSelectWinnerSortsSucceededAndSelectsFastest)
     EXPECT_EQ(results[3].rank, -1);
 
     EXPECT_EQ(activePlanIndex, 1u);
+}
+
+// ============================================================================
+// AutotuneResult factories
+//
+// The trailing string parameters are same-typed, so each case passes a distinct
+// self-identifying value and asserts the exact field it lands in.
+// ============================================================================
+
+namespace
+{
+constexpr int64_t FACTORY_ENGINE_ID = 4242;
+constexpr int64_t ESTIMATED_WORKSPACE = 111;
+constexpr int64_t COMPILED_WORKSPACE = 222;
+constexpr const char* ENGINE_NAME_VALUE = "engine-name-value";
+constexpr const char* REASON_VALUE = "reason-value";
+constexpr const char* ERROR_MESSAGE_VALUE = "error-value";
+
+std::vector<KnobSetting> factoryKnobSettings()
+{
+    return {KnobSetting("knob-id-value", int64_t{7})};
+}
+
+// Non-default mode and strategy so the pass-through of both is observable.
+AutotuneConfig factoryConfig()
+{
+    AutotuneConfig config;
+    config.mode = TuneMode::EXHAUSTIVE;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    return config;
+}
+
+// Fields every non-benchmarked factory sets identically.
+void expectNonBenchmarkedCommonFields(const AutotuneResult& result)
+{
+    EXPECT_EQ(result.engineId, FACTORY_ENGINE_ID);
+    EXPECT_EQ(result.engineName, ENGINE_NAME_VALUE);
+    EXPECT_EQ(result.exhaustiveNotRunReason, REASON_VALUE);
+    EXPECT_EQ(result.knobSettings, factoryKnobSettings());
+    EXPECT_TRUE(result.supportsExhaustive);
+    EXPECT_FALSE(result.ranExhaustive);
+    EXPECT_FALSE(result.succeeded);
+    EXPECT_EQ(result.rank, -1);
+    EXPECT_EQ(result.compiledPlanIndex, -1);
+    EXPECT_EQ(result.modeUsed, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(result.strategyUsed, AutotuneStrategy::FIXED_AVERAGE);
+}
+} // namespace
+
+TEST(TestAutotune, MakeBenchmarkResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeBenchmarkResult(FACTORY_ENGINE_ID,
+                                                              factoryKnobSettings(),
+                                                              ESTIMATED_WORKSPACE,
+                                                              COMPILED_WORKSPACE,
+                                                              factoryConfig(),
+                                                              ENGINE_NAME_VALUE);
+
+    EXPECT_EQ(result.engineId, FACTORY_ENGINE_ID);
+    EXPECT_EQ(result.engineName, ENGINE_NAME_VALUE);
+    EXPECT_EQ(result.knobSettings, factoryKnobSettings());
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
+    EXPECT_EQ(result.modeUsed, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(result.strategyUsed, AutotuneStrategy::FIXED_AVERAGE);
+    EXPECT_TRUE(result.errorMessage.empty());
+    EXPECT_TRUE(result.exhaustiveNotRunReason.empty());
+}
+
+TEST(TestAutotune, MakeNonBenchmarkedResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeNonBenchmarkedResult(FACTORY_ENGINE_ID,
+                                                                   factoryKnobSettings(),
+                                                                   ESTIMATED_WORKSPACE,
+                                                                   COMPILED_WORKSPACE,
+                                                                   factoryConfig(),
+                                                                   ERROR_MESSAGE_VALUE,
+                                                                   /*supportsExhaustive=*/true,
+                                                                   /*ranExhaustive=*/false,
+                                                                   REASON_VALUE,
+                                                                   ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.errorMessage, ERROR_MESSAGE_VALUE);
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
+}
+
+TEST(TestAutotune, MakeSkippedResultAssignsEveryField)
+{
+    constexpr int64_t MAX_WORKSPACE_SIZE = 128;
+    const auto result = autotune::detail::makeSkippedResult(FACTORY_ENGINE_ID,
+                                                            factoryKnobSettings(),
+                                                            ESTIMATED_WORKSPACE,
+                                                            COMPILED_WORKSPACE,
+                                                            factoryConfig(),
+                                                            MAX_WORKSPACE_SIZE,
+                                                            /*supportsExhaustive=*/true,
+                                                            /*ranExhaustive=*/false,
+                                                            REASON_VALUE,
+                                                            ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
+    EXPECT_EQ(result.errorMessage, "Workspace size 222 exceeds limit 128");
+}
+
+TEST(TestAutotune, MakeBarredResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeBarredResult(FACTORY_ENGINE_ID,
+                                                           factoryKnobSettings(),
+                                                           ESTIMATED_WORKSPACE,
+                                                           COMPILED_WORKSPACE,
+                                                           factoryConfig(),
+                                                           /*supportsExhaustive=*/true,
+                                                           /*ranExhaustive=*/false,
+                                                           REASON_VALUE,
+                                                           ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
+    EXPECT_EQ(result.errorMessage, "Plan barred (engine ID or workspace deselect filter).");
+}
+
+TEST(TestAutotune, MakeCompileFailedResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeCompileFailedResult(FACTORY_ENGINE_ID,
+                                                                  factoryKnobSettings(),
+                                                                  ESTIMATED_WORKSPACE,
+                                                                  factoryConfig(),
+                                                                  ERROR_MESSAGE_VALUE,
+                                                                  /*supportsExhaustive=*/true,
+                                                                  /*ranExhaustive=*/false,
+                                                                  REASON_VALUE,
+                                                                  ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.errorMessage, ERROR_MESSAGE_VALUE);
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, -1);
+}
+
+TEST(TestAutotune, MakeFinalizeFailedResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeFinalizeFailedResult(FACTORY_ENGINE_ID,
+                                                                   factoryKnobSettings(),
+                                                                   factoryConfig(),
+                                                                   ERROR_MESSAGE_VALUE,
+                                                                   /*supportsExhaustive=*/true,
+                                                                   /*ranExhaustive=*/false,
+                                                                   REASON_VALUE,
+                                                                   ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.errorMessage, ERROR_MESSAGE_VALUE);
+    EXPECT_EQ(result.estimatedWorkspaceSize, -1);
+    EXPECT_EQ(result.workspaceSize, -1);
+}
+
+TEST(TestAutotune, MakeFilteredResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeFilteredResult(FACTORY_ENGINE_ID,
+                                                             factoryKnobSettings(),
+                                                             ESTIMATED_WORKSPACE,
+                                                             COMPILED_WORKSPACE,
+                                                             factoryConfig(),
+                                                             /*supportsExhaustive=*/true,
+                                                             /*ranExhaustive=*/false,
+                                                             REASON_VALUE,
+                                                             ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
+    EXPECT_EQ(result.errorMessage, "Plan excluded by engineIdFilter.");
+}
+
+TEST(TestAutotune, MakeBenchmarkResultResolvesAnOmittedEngineName)
+{
+    // Omitting the name is the arity a caller with no handle has. The registry
+    // answers for an engine it carries, and the hexadecimal rendering for one it
+    // does not, rather than the result carrying an empty name.
+    const auto registered
+        = autotune::detail::makeBenchmarkResult(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                                                factoryKnobSettings(),
+                                                ESTIMATED_WORKSPACE,
+                                                COMPILED_WORKSPACE,
+                                                factoryConfig());
+    EXPECT_EQ(registered.engineName, "MIOPEN_ENGINE");
+
+    const auto unregistered = autotune::detail::makeBenchmarkResult(FACTORY_ENGINE_ID,
+                                                                    factoryKnobSettings(),
+                                                                    ESTIMATED_WORKSPACE,
+                                                                    COMPILED_WORKSPACE,
+                                                                    factoryConfig());
+    EXPECT_EQ(unregistered.engineName, "0x0000000000001092");
+}
+
+TEST(TestAutotune, NonBenchmarkedFactoriesResolveAnOmittedEngineName)
+{
+    // The shared factory resolves the name, so every wrapper over it inherits the
+    // behavior; makeFilteredResult stands in for the five.
+    const auto shared
+        = autotune::detail::makeNonBenchmarkedResult(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                                                     factoryKnobSettings(),
+                                                     ESTIMATED_WORKSPACE,
+                                                     COMPILED_WORKSPACE,
+                                                     factoryConfig(),
+                                                     ERROR_MESSAGE_VALUE,
+                                                     /*supportsExhaustive=*/true,
+                                                     /*ranExhaustive=*/false,
+                                                     REASON_VALUE);
+    EXPECT_EQ(shared.engineName, "MIOPEN_ENGINE");
+
+    const auto wrapped = autotune::detail::makeFilteredResult(FACTORY_ENGINE_ID,
+                                                              factoryKnobSettings(),
+                                                              ESTIMATED_WORKSPACE,
+                                                              COMPILED_WORKSPACE,
+                                                              factoryConfig(),
+                                                              /*supportsExhaustive=*/true,
+                                                              /*ranExhaustive=*/false,
+                                                              REASON_VALUE);
+    EXPECT_EQ(wrapped.engineName, "0x0000000000001092");
 }

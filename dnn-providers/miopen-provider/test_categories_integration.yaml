@@ -83,6 +83,28 @@ test_categories:
       - "ffm-quick"
       - "ffm-full"
 
+# GPU-arch-specific exclusions. `"*"` means "this whole suite does not run on
+# gfx110X Windows"; the shared parser emits the suite with CTest's DISABLED
+# property rather than a gtest filter, so the binary is never launched.
+#
+# Rationale, inherited by analogy rather than directly: TheRock's legacy
+# test_miopenprovider.py carved gfx110X Windows out with
+#
+#     # TODO(#3709): Re-enable gfx110X tests once issues are resolved
+#     "gfx110X-all": {"windows": ["miopen_plugin_integration_tests"]},
+#
+# That entry names miopen_plugin_integration_tests, a different binary from
+# the hipdnn_integration_tests this file governs. The sibling
+# test_categories.yaml is the direct port of it (pattern "*Integration*",
+# scoping the carve-out to the integration binary because its categories match
+# both binaries). This file's categories match only hipdnn_integration_tests,
+# so `"*"` is the whole target.
+#
+# ROCm/TheRock#3709 is a *timeout* on the Windows gfx110X runner, not a
+# correctness failure, and it is still open. No failure list was ever recorded
+# for hipdnn_integration_tests specifically on gfx110X, and this suite has not
+# been observed running a case there, so the carve-out is retained rather than
+# narrowed. Re-enabling needs real signal from a Windows gfx110X runner.
 exclude_gpu:
   exclude_gpu_gfx110X_windows:
     test_patterns:
