@@ -498,13 +498,13 @@ void testing_matmul_bad_arg(const Arguments& arg)
 }
 
 void copy_gemm_to_host(hipStream_t                   stream,
-                       const uint32_t&               gemm_count,
+                       const uint32_t&               problem_count,
                        std::vector<HipHostBuffer>&   hDst,
                        std::vector<HipDeviceBuffer>& dSrc)
 {
 
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
-    for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+    for(int gemmIdx = 0; gemmIdx < problem_count; gemmIdx++)
     {
         CHECK_HIP_ERROR(synchronize(hDst[gemmIdx], dSrc[gemmIdx], 0, 0, 0, 0, 1, false, stream));
     }
@@ -763,8 +763,8 @@ void testing_matmul(const Arguments& arg)
             // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
             const int32_t k_limit
                 = (arg.alpha == 2.0f && (arg.beta == 0.0f || arg.beta == -2.0f)) ? 256 : 512;
-            const int32_t gemm_count = std::max(1, arg.grouped_gemm);
-            for(int32_t i = 0; i < gemm_count; i++)
+            const int32_t problem_count = std::max(1, arg.grouped_gemm);
+            for(int32_t i = 0; i < problem_count; i++)
             {
                 if(arg.K[i] > k_limit)
                 {
@@ -877,31 +877,31 @@ void testing_matmul_with_bias(const Arguments& arg,
     hipDataType Talpha = (TiA == HIP_C_32F || TiA == HIP_C_64F) ?  TiA : Tc;
 
     bool    do_grouped_gemm = arg.grouped_gemm > 0;
-    int32_t gemm_count      = std::max(1, arg.grouped_gemm);
+    const int32_t problem_count = std::max(1, arg.grouped_gemm);
     // (batch_mode value : 0 for Strided Batched Gemm, 1 for General Batched Gemm)
     hipblasLtBatchMode_t batchMode = static_cast<hipblasLtBatchMode_t>(arg.batch_mode);
     
     int64_t rotating  = arg.rotating * 1024 * 1024;
 
-    std::vector<int64_t> M(gemm_count), N(gemm_count), K(gemm_count), lda(gemm_count),
-        ldb(gemm_count), ldc(gemm_count), ldd(gemm_count), lde(gemm_count);
-    std::vector<computeTypeInterface> h_alpha(gemm_count, computeTypeInterface{}),
-        h_beta(gemm_count, computeTypeInterface{});
-    std::vector<int64_t> A_row(gemm_count), A_col(gemm_count), B_row(gemm_count), B_col(gemm_count);
-    std::vector<int64_t> stride_a(gemm_count), stride_da(gemm_count), stride_b(gemm_count),
-        stride_db(gemm_count), stride_c(gemm_count), stride_d(gemm_count), stride_e(gemm_count);
-    std::vector<bool>   do_batched(gemm_count), epilogue_on(gemm_count, false);
-    std::vector<int>    num_batches(gemm_count);
-    std::vector<size_t> size_A(gemm_count), size_dA(gemm_count), size_B(gemm_count),
-        size_dB(gemm_count), size_C(gemm_count), size_D(gemm_count), size_D_copy(gemm_count),
-        size_E(gemm_count), size_bias(gemm_count), size_scaleAlphaVec(gemm_count),
-        size_scaleAVec(gemm_count), size_scaleBVec(gemm_count);
+    std::vector<int64_t> M(problem_count), N(problem_count), K(problem_count), lda(problem_count),
+        ldb(problem_count), ldc(problem_count), ldd(problem_count), lde(problem_count);
+    std::vector<computeTypeInterface> h_alpha(problem_count, computeTypeInterface{}),
+        h_beta(problem_count, computeTypeInterface{});
+    std::vector<int64_t> A_row(problem_count), A_col(problem_count), B_row(problem_count), B_col(problem_count);
+    std::vector<int64_t> stride_a(problem_count), stride_da(problem_count), stride_b(problem_count),
+        stride_db(problem_count), stride_c(problem_count), stride_d(problem_count), stride_e(problem_count);
+    std::vector<bool>   do_batched(problem_count), epilogue_on(problem_count, false);
+    std::vector<int>    num_batches(problem_count);
+    std::vector<size_t> size_A(problem_count), size_dA(problem_count), size_B(problem_count),
+        size_dB(problem_count), size_C(problem_count), size_D(problem_count), size_D_copy(problem_count),
+        size_E(problem_count), size_bias(problem_count), size_scaleAlphaVec(problem_count),
+        size_scaleAVec(problem_count), size_scaleBVec(problem_count);
 
-    std::vector<hipblasLtMatrixLayout_t> matA(gemm_count), matB(gemm_count), matC(gemm_count),
-        matD(gemm_count);
+    std::vector<hipblasLtMatrixLayout_t> matA(problem_count), matB(problem_count), matC(problem_count),
+        matD(problem_count);
     std::vector<std::vector<hipblasLtMatmulDesc_t>> matmul;
-    std::vector<hipblasLtEpilogue_t> epilogue(gemm_count, HIPBLASLT_EPILOGUE_DEFAULT);
-    std::vector<float>               act0(gemm_count), act1(gemm_count);
+    std::vector<hipblasLtEpilogue_t> epilogue(problem_count, HIPBLASLT_EPILOGUE_DEFAULT);
+    std::vector<float>               act0(problem_count), act1(problem_count);
 
     std::vector<HipDeviceBuffer>  dA, dB, dC, dD, dE, dBias;
     std::vector<HipDeviceBuffer>* dDp;
@@ -919,7 +919,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     // of converting the MX data to float again.
     std::vector<std::vector<float>> refA, refB;
 
-    std::vector<void*> alpha_in(gemm_count);
+    std::vector<void*> alpha_in(problem_count);
 
     bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
@@ -930,7 +930,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         return value / divisor + static_cast<size_t>(value % divisor != 0);
     };
     int64_t totalRotatingSizeNeeded = 0;
-    for(int i = 0; i < gemm_count; i++)
+    for(int i = 0; i < problem_count; i++)
     {
         M[i] = arg.M[i];
         N[i] = arg.N[i];
@@ -1217,9 +1217,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipblaslt_cout << std::endl;
     }
     // Calculating block count end
-    matmul.resize(block_count, std::vector<hipblasLtMatmulDesc_t>(gemm_count));
+    matmul.resize(block_count, std::vector<hipblasLtMatmulDesc_t>(problem_count));
 
-    for(int i = 0; i < gemm_count; i++)
+    for(int i = 0; i < problem_count; i++)
     {
         CHECK_HIPBLASLT_ERROR(
             hipblasLtMatrixLayoutCreate(&(matA[i]), arg.a_type, A_row[i], A_col[i], lda[i]));
@@ -2601,32 +2601,36 @@ void testing_matmul_with_bias(const Arguments& arg,
     std::vector<hipblaslt_ext::GroupedGemm>             groupedGemmVec;
     std::vector<std::vector<hipblaslt_ext::GemmInputs>> extinputs;
 
-    //Updating the gemm_count for the below section of the code
-    // as batch_count for reusing existing GroupedGEMM code for General Batched GEMM
-    batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? gemm_count = arg.batch_count : gemm_count;
+    // Pointer-array GEMM has one logical problem with one pointer binding per batch.
+    const int32_t binding_count = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+                                      ? arg.batch_count
+                                      : problem_count;
     // C to Cpp API for GG
     const auto groupedGemmBlockCount = do_grouped_gemm ? block_count : 0;
-    std::vector<std::vector<void*>> da(groupedGemmBlockCount, std::vector<void*>(gemm_count));
-    std::vector<std::vector<void*>> db(groupedGemmBlockCount, std::vector<void*>(gemm_count));
-    std::vector<std::vector<void*>> dc(groupedGemmBlockCount, std::vector<void*>(gemm_count));
-    std::vector<std::vector<void*>> dd(groupedGemmBlockCount, std::vector<void*>(gemm_count)); 
-
+    std::vector<std::vector<void*>> da(groupedGemmBlockCount,
+                                       std::vector<void*>(problem_count));
+    std::vector<std::vector<void*>> db(groupedGemmBlockCount,
+                                       std::vector<void*>(problem_count));
+    std::vector<std::vector<void*>> dc(groupedGemmBlockCount,
+                                       std::vector<void*>(problem_count));
+    std::vector<std::vector<void*>> dd(groupedGemmBlockCount,
+                                       std::vector<void*>(problem_count));
     std::vector<uint64_t*> dda, ddb, ddc, ddd;
     if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
         for(int i = 0; i < block_count; i++)
         {
             uint64_t* ptr = nullptr;
-            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            CHECK_HIP_ERROR(hipMalloc(&ptr, binding_count * sizeof(uint64_t*)));
             dda.push_back(ptr);
 
-            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            CHECK_HIP_ERROR(hipMalloc(&ptr, binding_count * sizeof(uint64_t*)));
             ddb.push_back(ptr);
 
-            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            CHECK_HIP_ERROR(hipMalloc(&ptr, binding_count * sizeof(uint64_t*)));
             ddc.push_back(ptr);
 
-            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            CHECK_HIP_ERROR(hipMalloc(&ptr, binding_count * sizeof(uint64_t*)));
             ddd.push_back(ptr);
         }
     }
@@ -2657,10 +2661,10 @@ void testing_matmul_with_bias(const Arguments& arg,
     hipblaslt_ext::GemmProblemType           extproblemtype;
     if(arg.use_ext_setproblem && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
-        extinputs.resize(block_count, std::vector<hipblaslt_ext::GemmInputs>(gemm_count));
-        extepilogue.resize(gemm_count);
+        extinputs.resize(block_count, std::vector<hipblaslt_ext::GemmInputs>(problem_count));
+        extepilogue.resize(problem_count);
 
-        for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+        for(int gemmIdx = 0; gemmIdx < problem_count; gemmIdx++)
         {
             auto  bias_type = HIPBLASLT_DATATYPE_INVALID;
             auto  aux_type  = HIPBLASLT_DATATYPE_INVALID;
@@ -2742,7 +2746,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
     else if(arg.grouped_gemm)
     {
-        for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+        for(int gemmIdx = 0; gemmIdx < problem_count; gemmIdx++)
         {
             for(int32_t b = 0; b < block_count; b++)
             {
@@ -2759,10 +2763,11 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
     else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
-        std::vector<uint64_t*> da1(gemm_count), db1(gemm_count), dc1(gemm_count), dd1(gemm_count);
+        std::vector<uint64_t*> da1(binding_count), db1(binding_count), dc1(binding_count),
+            dd1(binding_count);
         for(int32_t b = 0; b < block_count; b++)
         {
-            for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+            for(int gemmIdx = 0; gemmIdx < binding_count; gemmIdx++)
             {
                 da1[gemmIdx] = reinterpret_cast<uint64_t*>(
                     (dA[gemmIdx].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA));
@@ -2774,13 +2779,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                     (*dDp)[gemmIdx].as<char>() + b * size_D[0] * realDataTypeSize(To));
             }
             CHECK_HIP_ERROR(hipMemcpy(
-                dda[b], da1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                dda[b], da1.data(), binding_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemcpy(
-                ddb[b], db1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                ddb[b], db1.data(), binding_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemcpy(
-                ddc[b], dc1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                ddc[b], dc1.data(), binding_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemcpy(
-                ddd[b], dd1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                ddd[b], dd1.data(), binding_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
         }
     }
 
@@ -3087,9 +3092,9 @@ void testing_matmul_with_bias(const Arguments& arg,
     if(arg.use_user_args)
     {
         CHECK_HIP_ERROR(
-            hipHostMalloc(&userArgs, gemm_count * sizeof(hipblaslt_ext::UserArguments)));
+            hipHostMalloc(&userArgs, problem_count * sizeof(hipblaslt_ext::UserArguments)));
         CHECK_HIP_ERROR(hipMalloc(&d_userArgs,
-                                  block_count * gemm_count * sizeof(hipblaslt_ext::UserArguments)));
+                                  block_count * problem_count * sizeof(hipblaslt_ext::UserArguments)));
     }
 
     auto ptrs = benchmark_allocation();
@@ -3131,8 +3136,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             cpu_time_used = get_time_us_no_sync();
         }
 
-        gemm_count = std::max(1, arg.grouped_gemm); //Resetting the gemm_count for GroupedGemm
-        for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+        for(int gemmIdx = 0; gemmIdx < problem_count; gemmIdx++)
         {
             auto                 alpha    = h_alpha[gemmIdx];
             auto                 betaTemp = h_beta[gemmIdx];
@@ -3430,7 +3434,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     void* alpha_ptr = nullptr;
     void* beta_ptr  = nullptr;
 
-    if(gemm_count > 0)
+    if(problem_count > 0)
     {
         if(TiA == HIP_C_32F || TiA == HIP_C_64F)
         {
@@ -3486,7 +3490,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             return;
 
-        for(int gemmIdx = 0; gemmIdx < gemm_count; ++gemmIdx)
+        for(int gemmIdx = 0; gemmIdx < problem_count; ++gemmIdx)
         {
             if(!arg.gradient && arg.use_e)
             {
@@ -3565,8 +3569,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                   return cases;
               }
 
-              cases.reserve(gemm_count);
-              for(int gemmIdx = 0; gemmIdx < gemm_count; ++gemmIdx)
+              cases.reserve(problem_count);
+              for(int gemmIdx = 0; gemmIdx < problem_count; ++gemmIdx)
               {
                   MatmulValidationCase testCase;
                   testCase.pointwiseTolerance = pointwiseTolerances[gemmIdx];
@@ -3654,7 +3658,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
-                    for(int i = 0; i < gemm_count; i++)
+                    for(int i = 0; i < problem_count; i++)
                     {
                         CHECK_HIP_ERROR(synchronize(dC[i], hC[i], block_count));
                     }
@@ -3737,7 +3741,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     // Copy them to device memory
                     CHECK_HIP_ERROR(hipMemcpy(d_userArgs,
                                               userArgs,
-                                              gemm_count * sizeof(hipblaslt_ext::UserArguments),
+                                              problem_count * sizeof(hipblaslt_ext::UserArguments),
                                               hipMemcpyHostToDevice));
 
                     CHECK_HIPBLASLT_ERROR(groupedGemmVec[0].run(d_userArgs, stream));
@@ -3770,7 +3774,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
-                    copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                    copy_gemm_to_host(stream, problem_count, hD_1, (*dDp));
                 }
                 validateOutputs({hipblaslt_error,
                                  hipblaslt_atol,
@@ -3897,7 +3901,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
-                    for(int i = 0; i < gemm_count; i++)
+                    for(int i = 0; i < problem_count; i++)
                     {
                         CHECK_HIP_ERROR(synchronize(dC[i], hC[i], block_count));
                     }
@@ -3923,7 +3927,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     {
                         CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                            copy_gemm_to_host(stream, problem_count, hD_1, (*dDp));
                     }
                     if(arg.skip_slow_solution_ratio)
                     {
@@ -4098,7 +4102,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 stream),
                             HIPBLAS_STATUS_SUCCESS);
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                            copy_gemm_to_host(stream, problem_count, hD_1, (*dDp));
                     }
                     if(arg.skip_slow_solution_ratio)
                     {
@@ -4178,11 +4182,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                             ((unsigned char*)(*dWorkspace) + b * workspace_size)));
                         groupedGemmVec[b].getDefaultValueForDeviceUserArguments(userArgs);
                         d_userArgsVec[b] = (unsigned char*)d_userArgs
-                                           + b * gemm_count * sizeof(hipblaslt_ext::UserArguments);
+                                           + b * problem_count * sizeof(hipblaslt_ext::UserArguments);
                         // Copy them to device memory
                         CHECK_HIP_ERROR(hipMemcpy(d_userArgsVec[b],
                                                   userArgs,
-                                                  gemm_count * sizeof(hipblaslt_ext::UserArguments),
+                                                  problem_count * sizeof(hipblaslt_ext::UserArguments),
                                                   hipMemcpyHostToDevice));
                     }
                     if(arg.skip_slow_solution_ratio)
@@ -4193,7 +4197,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
                             d_userArgsVec[i % block_count], stream));
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                            copy_gemm_to_host(stream, problem_count, hD_1, (*dDp));
                     }
                     if(arg.skip_slow_solution_ratio)
                     {
@@ -4252,7 +4256,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     {
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                            copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                            copy_gemm_to_host(stream, problem_count, hD_1, (*dDp));
                     }
                     if(arg.skip_slow_solution_ratio)
                     {
@@ -4292,7 +4296,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
 
             double flops = 0;
-            for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+            for(int gemmIdx = 0; gemmIdx < problem_count; gemmIdx++)
             {
                 flops += gemm_gflop_count(M[gemmIdx], N[gemmIdx], K[gemmIdx], Talpha);
                 switch(arg.activation_type)
