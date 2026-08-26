@@ -43,7 +43,8 @@ public:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scale() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* mean() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVariance() const;
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* epsilon() const;
+    std::optional<double> epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                       uint32_t numDeviceBuffers) const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dx() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dscale() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dbias() const;
@@ -56,7 +57,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _mean;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invVariance;
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _epsilon;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> _epsilon;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dx;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dscale;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dbias;

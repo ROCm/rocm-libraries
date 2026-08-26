@@ -19,6 +19,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
 using namespace hip_kernel_provider::core::utils;
 
@@ -40,8 +41,9 @@ LayernormBwdParams::LayernormBwdParams(
                        ? tensorMap.at(attributes.inv_variance_tensor_uid().value())
                        : nullptr)
     , _epsilon(attributes.epsilon_tensor_uid().has_value()
-                   ? tensorMap.at(attributes.epsilon_tensor_uid().value())
-                   : nullptr)
+                   ? std::make_optional(hipdnn_plugin_sdk::makeScalarOperand(
+                         tensorMap, attributes.epsilon_tensor_uid().value(), "Epsilon"))
+                   : std::nullopt)
     , _dx(tensorMap.at(attributes.dx_tensor_uid()))
     , _dscale(tensorMap.at(attributes.dscale_tensor_uid()))
     , _dbias(tensorMap.at(attributes.dbias_tensor_uid()))
@@ -74,9 +76,14 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _invVariance;
 }
 
-const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormBwdParams::epsilon() const
+std::optional<double>
+    LayernormBwdParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                     uint32_t numDeviceBuffers) const
 {
-    return _epsilon;
+    return _epsilon.has_value() ? std::make_optional(hipdnn_plugin_sdk::toDouble(
+                                      hipdnn_plugin_sdk::resolveScalarOperand(
+                                          _epsilon.value(), deviceBuffers, numDeviceBuffers)))
+                                : std::nullopt;
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormBwdParams::dx() const
@@ -295,14 +302,10 @@ void LayernormBwdPlan::execute(const Handle& handle,
     auto dbiasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _params.dbias()->uid(), deviceBuffers, numDeviceBuffers);
 
-    double epsilon = hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON;
-    if(_params.epsilon() != nullptr)
-    {
-        hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
-        _params.epsilon()->UnPackTo(&epsilonTensor);
-        epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor,
-                                                                                  "Epsilon");
-    }
+    auto optionalEpsilon = _params.epsilonValue(deviceBuffers, numDeviceBuffers);
+    auto epsilon = optionalEpsilon.has_value()
+                       ? optionalEpsilon.value()
+                       : hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON;
 
     // Launch kernels
     _runnableKernels[0]->launch(handle.getStream(),
