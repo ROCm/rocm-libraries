@@ -3,17 +3,20 @@
 
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
+
 // NOLINTNEXTLINE
 thread_local char
     hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
     = "";
 
-class ExecuteFailsPlugin : public TestPluginBase
+// A well-behaved plugin whose engine id is the hash of its own engine name, the
+// identity HIPDNN_REGISTER_ENGINE gives production plugins.
+class HashedNamePlugin : public TestPluginBase
 {
 public:
     const char* getPluginName() const override
     {
-        return "test_ExecuteFailsPlugin";
+        return "test_HashedNamePlugin";
     }
     const char* getPluginVersion() const override
     {
@@ -27,11 +30,11 @@ public:
 
     int64_t getEngineId() const override
     {
-        return hipdnn_tests::plugin_constants::engineId<ExecuteFailsPlugin>();
+        return hipdnn_tests::plugin_constants::engineId<HashedNamePlugin>();
     }
     const char* getEngineName() const override
     {
-        return hipdnn_tests::plugin_constants::K_EXECUTE_FAILS_PLUGIN_ENGINE_NAME;
+        return hipdnn_tests::plugin_constants::K_HASHED_NAME_PLUGIN_ENGINE_NAME;
     }
     uint32_t getNumEngines() const override
     {
@@ -41,22 +44,13 @@ public:
     {
         return 1;
     }
-
-    // Override executeGraph to simulate execution failure
-    void executeGraph() const override
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "Simulated execution failure for testing");
-    }
 };
 
 // Initialize plugin instance on load
 __attribute__((constructor)) static void initializePlugin()
 {
-    TestPluginBase::setInstance(std::make_unique<ExecuteFailsPlugin>());
+    TestPluginBase::setInstance(std::make_unique<HashedNamePlugin>());
 }
 
-// Paired with test_good_plugin, which omits the engine-name entry point, this gives
-// the engine-filtering tests one named and one unnamed engine in the same load set.
 REGISTER_TEST_PLUGIN_API()
 REGISTER_TEST_PLUGIN_ENGINE_NAME_API()

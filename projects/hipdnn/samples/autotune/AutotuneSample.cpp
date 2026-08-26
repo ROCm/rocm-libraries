@@ -20,7 +20,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
@@ -29,24 +28,6 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
-
-// --- Helpers ---
-
-/// Retrieves the engine name for a given engine ID. Returns a hex-formatted
-/// fallback string when the engine ID is not in the registered engine map.
-static std::string getEngineName(int64_t engineId)
-{
-    try
-    {
-        return std::string(utilities::getEngineNameFromId(engineId));
-    }
-    catch(const std::out_of_range&)
-    {
-        std::ostringstream oss;
-        oss << "engine_0x" << std::hex << std::uppercase << engineId;
-        return oss.str();
-    }
-}
 
 // --- ConvGraph helper ---
 
@@ -253,10 +234,9 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
     for(const auto& result : results)
     {
         const std::string rankStr = result.rank >= 0 ? std::to_string(result.rank) : "FAIL";
-        const std::string name
-            = result.engineName.empty() ? getEngineName(result.engineId) : result.engineName;
 
-        std::cout << "  " << std::left << std::setw(6) << rankStr << std::setw(30) << name;
+        std::cout << "  " << std::left << std::setw(6) << rankStr << std::setw(30)
+                  << result.engineName;
 
         if(result.succeeded)
         {
@@ -331,14 +311,12 @@ static void demonstrateFilteredAutotune(hipdnnHandle_t handle,
 
     // Step 1: Discover available engines
     std::vector<EngineConfigInfo> configs;
-    HIPDNN_FE_CHECK(state.graph->get_engine_configs(configs));
+    HIPDNN_FE_CHECK(state.graph->get_engine_configs(handle, configs));
 
     std::cout << "  Discovered " << configs.size() << " engine(s):\n";
     for(const auto& cfg : configs)
     {
-        const std::string name
-            = cfg.engineName.empty() ? getEngineName(cfg.engineId) : cfg.engineName;
-        std::cout << "    " << name << " (workspace=" << cfg.estimatedWorkspaceSize
+        std::cout << "    " << cfg.engineName << " (workspace=" << cfg.estimatedWorkspaceSize
                   << ", exhaustive=" << (cfg.supportsExhaustive ? "yes" : "no")
                   << ", knobs=" << cfg.knobs.size() << ")\n";
     }
@@ -507,10 +485,8 @@ static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle,
     for(size_t i = 0; i < results.size(); ++i)
     {
         const auto& result = results[i];
-        const std::string name
-            = result.engineName.empty() ? getEngineName(result.engineId) : result.engineName;
 
-        std::cout << "  " << std::left << std::setw(6) << i << std::setw(30) << name
+        std::cout << "  " << std::left << std::setw(6) << i << std::setw(30) << result.engineName
                   << std::setw(14) << result.workspaceSize;
 
         if(result.succeeded)
@@ -532,7 +508,7 @@ static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle,
     HIPDNN_FE_CHECK(state.graph->execute(handle, state.variantPack, execWorkspace.get()));
 
     std::string winnerName;
-    HIPDNN_FE_CHECK(state.graph->get_plan_name(winnerName));
+    HIPDNN_FE_CHECK(state.graph->get_plan_name(handle, winnerName));
     std::cout << "  Winner: " << winnerName << '\n';
     std::cout << "  Compiled-plan autotune completed successfully.\n";
 }
@@ -563,7 +539,7 @@ static void demonstrateManualBenchmarkLoop(hipdnnHandle_t handle, bool largeMode
     for(int64_t i = 0; i < planCount; ++i)
     {
         std::string name;
-        HIPDNN_FE_CHECK(state.graph->get_plan_name_at_index(i, name));
+        HIPDNN_FE_CHECK(state.graph->get_plan_name_at_index(handle, i, name));
         const int64_t planWs = state.graph->get_workspace_size_plan_at_index(i);
         std::cout << "  " << std::left << std::setw(8) << i << std::setw(30) << name
                   << std::setw(14) << planWs << '\n';
@@ -593,7 +569,7 @@ static void demonstrateManualBenchmarkLoop(hipdnnHandle_t handle, bool largeMode
         if(planWs > workspaceBudget)
         {
             std::string name;
-            HIPDNN_FE_CHECK(state.graph->get_plan_name_at_index(i, name));
+            HIPDNN_FE_CHECK(state.graph->get_plan_name_at_index(handle, i, name));
             std::cout << "    [" << i << "] " << name << " -- skipped (workspace " << planWs
                       << " exceeds budget)\n";
             continue;
@@ -608,7 +584,7 @@ static void demonstrateManualBenchmarkLoop(hipdnnHandle_t handle, bool largeMode
         if(!result.is_good())
         {
             std::string name;
-            HIPDNN_FE_CHECK(state.graph->get_plan_name_at_index(i, name));
+            HIPDNN_FE_CHECK(state.graph->get_plan_name_at_index(handle, i, name));
             std::cout << "    [" << i << "] " << name << " -- failed (" << result.get_message()
                       << ")\n";
             continue;
@@ -618,7 +594,7 @@ static void demonstrateManualBenchmarkLoop(hipdnnHandle_t handle, bool largeMode
         HIP_CHECK(hipEventElapsedTime(&elapsedMs, startEvent, stopEvent));
 
         std::string name;
-        HIPDNN_FE_CHECK(state.graph->get_plan_name_at_index(i, name));
+        HIPDNN_FE_CHECK(state.graph->get_plan_name_at_index(handle, i, name));
         std::cout << "    [" << i << "] " << name << " -- " << std::fixed << std::setprecision(4)
                   << elapsedMs << " ms\n";
 
@@ -648,7 +624,7 @@ static void demonstrateManualBenchmarkLoop(hipdnnHandle_t handle, bool largeMode
     HIPDNN_FE_CHECK(state.graph->execute(handle, state.variantPack, execWorkspace.get()));
 
     std::string winnerName;
-    HIPDNN_FE_CHECK(state.graph->get_plan_name(winnerName));
+    HIPDNN_FE_CHECK(state.graph->get_plan_name(handle, winnerName));
     std::cout << "  Winner: " << winnerName << " (" << std::fixed << std::setprecision(4)
               << bestTimeMs << " ms)\n";
     std::cout << "  Manual benchmark loop completed successfully.\n";
