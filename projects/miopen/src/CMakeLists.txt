@@ -62,7 +62,6 @@ set( MIOpen_Source
     addlayernorm_api.cpp
     api/find2_0_commons.cpp
     api/tuning.cpp
-    base64.cpp
     batch_norm.cpp
     batch_norm_api.cpp
     batchnorm/problem_description.cpp
