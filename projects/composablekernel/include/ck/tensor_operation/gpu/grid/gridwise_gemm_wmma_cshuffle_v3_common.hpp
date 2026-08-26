@@ -82,7 +82,8 @@ template <typename ALayout,
           bool IsBPreShuffled          = false,
           bool ForceThreadTileTransfer = false, // only needed for convolution (limitation)
           bool IsFusedKernel           = false,
-          bool UseLdsTranspose         = false>
+          bool UseLdsTranspose         = false,
+          bool TransposeC              = false>
 struct GridwiseGemm_wmma_cshuffle_v3_base
 {
 
@@ -703,7 +704,7 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                                                            NRepeat,
                                                            KPack,
                                                            KInner,
-                                                           false, // TransposeC
+                                                           TransposeC,
                                                            IsBPreShuffled,
                                                            UseLdsTransposeA,
                                                            UseLdsTransposeB>())>;
