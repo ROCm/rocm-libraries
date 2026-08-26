@@ -1,0 +1,21 @@
+outs:
+- path: Small.tensor0.bin
+  remote: golden-data
+- path: Small.tensor1.bin
+  remote: golden-data
+- path: Small.tensor10.bin
+  remote: golden-data
+- path: Small.tensor11.bin
+  remote: golden-data
+- path: Small.tensor12.bin
+  remote: golden-data
+- path: Small.tensor13.bin
+  remote: golden-data
+- path: Small.tensor2.bin
+  remote: golden-data
+- path: Small.tensor3.bin
+  remote: golden-data
+- path: Small.tensor5.bin
+  remote: golden-data
+- path: Small.tensor6.bin
+  remote: golden-data

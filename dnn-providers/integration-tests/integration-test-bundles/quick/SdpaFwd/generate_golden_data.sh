@@ -169,6 +169,35 @@ if [[ "${GENERATE_TIER_B:-0}" == "1" ]]; then
     echo ""
 fi
 
+# --- Ragged (RFC-0014) and ragged+group bundles (generator-complete; not yet
+# validated by the CPU reference executor, which rejects ragged tensors and
+# variable seq-lens). Gated independently of the tiers above so they can be
+# generated in isolation without rewriting existing data:
+#   GENERATE_RAGGED=1 bash generate_golden_data.sh none ---
+if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
+    echo "=== Generating ragged / ragged+group bundles ==="
+
+    # Ragged (packed RFC-0014 BSHD), uniform S_max blocks, no seq-lens
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_nomask_ragged"
+    generate_bundle "$OUTDIR" "Small" --ragged-offsets --layout bshd \
+        --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_causal_ragged"
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --ragged-offsets --layout bshd \
+        --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
+
+    # Ragged + variable seq-lens (group), compact per-batch padding
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_nomask_ragged_group"
+    generate_bundle "$OUTDIR" "Small" --ragged-offsets --layout bshd \
+        --seq-lens-q 256 384 448 --seq-lens-kv 256 384 448 \
+        --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_causal_ragged_group"
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --ragged-offsets --layout bshd \
+        --seq-lens-q 256 384 448 --seq-lens-kv 256 384 448 \
+        --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
+
+    echo ""
+fi
+
 echo "=== Done ==="
 echo "Generated bundles:"
 find "$GOLDEN_ROOT/quick/SdpaFwd" "$GOLDEN_ROOT/standard/SdpaFwd" -name "*.json" ! -name "*.meta.json" 2>/dev/null | sort
