@@ -267,3 +267,50 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [256, 256, 1, 128]
           - Exact: [512, 512, 1, 256]
+
+  -
+    - # ProblemType (macro tile 96 on either dim: MIWaveTile 6, 3 strips per wave)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 6,  1, 1]   # MT32x96 wg1x1
+          - [16, 16, 128, 1,  1, 4, 6,  1, 1]   # MT64x96 wg1x1
+          - [16, 16, 128, 1,  1, 2, 6,  2, 1]   # MT64x96 wg2x1
+          - [16, 16, 128, 1,  1, 6, 2,  1, 1]   # MT96x32 wg1x1
+          - [16, 16, 128, 1,  1, 6, 4,  1, 1]   # MT96x64 wg1x1
+          - [16, 16, 128, 1,  1, 6, 2,  1, 2]   # MT96x64 wg1x2
+          - [16, 16, 128, 1,  1, 6, 6,  1, 1]   # MT96x96 wg1x1
+          - [16, 16, 128, 1,  1, 6, 8,  1, 1]   # MT96x128 wg1x1
+          - [16, 16, 128, 1,  1, 6, 4,  1, 2]   # MT96x128 wg1x2
+          - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128 wg1x4
+          - [16, 16, 128, 1,  1, 6, 8,  1, 2]   # MT96x256 wg1x2
+          - [16, 16, 128, 1,  1, 6, 4,  1, 4]   # MT96x256 wg1x4
+          - [16, 16, 128, 1,  1, 8, 6,  1, 1]   # MT128x96 wg1x1
+          - [16, 16, 128, 1,  1, 4, 6,  2, 1]   # MT128x96 wg2x1
+          - [16, 16, 128, 1,  1, 2, 6,  4, 1]   # MT128x96 wg4x1
+          - [16, 16, 128, 1,  1, 8, 6,  2, 1]   # MT256x96 wg2x1
+          - [16, 16, 128, 1,  1, 4, 6,  4, 1]   # MT256x96 wg4x1
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128, 256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [384, 768, 1, 512]
