@@ -18,6 +18,7 @@ namespace hipblaslt::client
         hipDataType                      apiType;
         roc::host_validation::ScalarType hostType;
         roc::host_validation::Layout     layout;
+        size_t                           allocationElements;
 
         int64_t rows() const
         {
@@ -58,6 +59,11 @@ namespace hipblaslt::client
         std::optional<MatmulMatrix> auxiliary;
 
         bool cEqualsD;
+
+        size_t auxiliaryAllocationElements() const
+        {
+            return auxiliary ? auxiliary->allocationElements : 0;
+        }
     };
 
     std::vector<MatmulTestCase> normalizeMatmulCases(const Arguments& arguments);
