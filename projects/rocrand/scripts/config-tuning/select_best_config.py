@@ -16,6 +16,14 @@ env = Environment(
     loader=PackageLoader("select_best_config"), lstrip_blocks=True, trim_blocks=True
 )
 
+def is_pow_2(x : int) -> bool:
+    return x > 0 and (x & (x - 1)) == 0
+
+# Generators whose device kernel maps threads to engines with a bitwise-AND mask
+# (engine_id = id & (num_engines - 1)) instead of a modulo. This is only correct
+# when num_engines == block_size * grid_size is a power of two, so their tuned
+# configs must be restricted to power-of-two total thread counts.
+POWER_OF_TWO_GRID_GENERATORS = {"lfsr113"}
 
 def load_default_configs_json(in_dir: str) -> dict:
     """
@@ -77,6 +85,10 @@ def get_best_config_for_arch(benchmark_data: DataFrame, default_configs: dict):
         best_config_for_generator = {}
         default_block_size = default_configs[gen]["block_size"]
         default_grid_size = default_configs[gen]["grid_size"]
+
+        if gen in POWER_OF_TWO_GRID_GENERATORS:
+            total_threads = generator_df["block_size"] * generator_df["grid_size"]
+            generator_df = generator_df[total_threads.map(is_pow_2)]
 
         for arch, arch_df in generator_df.groupby("arch"):
 
