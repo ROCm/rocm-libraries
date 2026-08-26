@@ -242,6 +242,18 @@ private:
     std::unique_ptr<char, decltype(&hipHostFree)> m_d{nullptr, &hipHostFree};
 };
 
+#ifdef GOOGLE_TEST
+// FAIL() expands to a void return; call from a void helper so memory_pool<M>::get()
+// (which returns M) can still instantiate for M = d_memory.
+inline void hipblaslt_fail_pinned_host_memory_exhausted(size_t bytes)
+{
+    FAIL() << "Fatal: cannot allocate " << (bytes >> 20)
+           << " MiB of pinned host memory even with an empty pool. This "
+              "problem does not fit in the memory available to this "
+              "process.";
+}
+#endif
+
 /* ============================================================================================ */
 /*! \brief  memory pool class to keep track of memory in either M = d_memory, or M = h_memory objects */
 template <typename M>
@@ -333,10 +345,7 @@ private:
             if(!retry.get() && std::is_same<M, h_memory>::value)
             {
 #ifdef GOOGLE_TEST
-                FAIL() << "Fatal: cannot allocate " << (bytes >> 20)
-                       << " MiB of pinned host memory even with an empty pool. This "
-                          "problem does not fit in the memory available to this "
-                          "process.";
+                hipblaslt_fail_pinned_host_memory_exhausted(bytes);
                 return retry;
 #else
                 hipblaslt_cerr << "Fatal: cannot allocate " << (bytes >> 20)
