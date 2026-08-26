@@ -15,7 +15,6 @@ REPO=<path to rocm-libraries checkout>          # the worktree you are working i
 PROVIDER=$REPO/dnn-providers/hip-kernel-provider
 GEN=$REPO/projects/hipdnn/tools/IngestorGenerator
 BUILD=$REPO/<build-dir>                          # existing build, or one you configure at step 7
-PYDEPS=$REPO/.kpack-python                       # jinja2 + msgpack + zstandard live here
 
 MODULE=kernels/<arch>/<module>.py                # e.g. kernels/gfx950/attention_dense.py
 BUILDER=build_<op>                               # e.g. build_attention_dense
@@ -25,18 +24,41 @@ SLUG=<arch>_<op>                                 # e.g. gfx950_attention_dense
 OPTABLE=<Op>Attributes                           # the .fbs table, e.g. SdpaAttributes
 ```
 
-`PYTHONPATH` for anything touching rocKE or the packager:
+### Two Python environments, and they are not interchangeable
+
+**The generator** runs from the tool's own venv, per `IngestorGenerator/README.md` — the
+same convention as its sibling `DescriptorGenerator`. Its deps are declared in
+`requirements.txt`; create it once:
 
 ```bash
-export PYTHONPATH=$GEN:$PROVIDER/descriptor-packaging/python:$PROVIDER/rocke/library:$PROVIDER/rocke/platform/python:$PYDEPS
+cd $GEN && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
-If `jinja2`, `msgpack` or `zstandard` are missing, the generator and packer fail with a
-bare `ModuleNotFoundError`. Create the dir once:
+Then invoke the generator as `$GEN/.venv/bin/python generate.py …` — never bare
+`python3`, which will not see Jinja2.
+
+**The packer and the introspector** run on **system `python3`**, and take their imports
+from `PYTHONPATH` rather than a venv:
 
 ```bash
-pip install --quiet --target=$PYDEPS jinja2 msgpack zstandard
+export PYTHONPATH=$GEN:$PROVIDER/descriptor-packaging/python:$PROVIDER/rocke/library:$PROVIDER/rocke/platform/python
 ```
+
+`hkp_pack` additionally needs `msgpack` and `zstandard` (the kpack reader's own deps) and
+`rocm_kpack`. On a provisioned dev box these are already present — `msgpack`/`zstandard`
+system-wide, and `rocm_kpack` at **`/opt/rocm-kpack/python`**, which is what you pass as
+`rocm_kpack_dir`. Check before assuming, since this is environment-dependent:
+
+```bash
+python3 -c "import msgpack, zstandard; print('kpack reader deps OK')"
+ls -d /opt/rocm-kpack/python/rocm_kpack || find / -maxdepth 6 -name rocm_kpack -type d 2>/dev/null
+```
+
+The tool venv deliberately does **not** inherit system site-packages, so it has Jinja2 but
+not `msgpack`/`zstandard`; system `python3` is the reverse. That split is fine — each
+environment serves the step that needs it. Do not try to make one venv do both, and do
+not `pip install --target` into the worktree: PEP 668 blocks a plain `pip install` on
+these boxes and a stray dep directory is not the project's convention.
 
 ---
 
@@ -223,8 +245,8 @@ Then:
 
 ```bash
 cd $GEN
-python3 generate.py --config configs/$SLUG.yaml --output-dir /tmp/$SLUG --dry-run   # shape check
-python3 generate.py --config configs/$SLUG.yaml --output-dir /tmp/$SLUG
+$GEN/.venv/bin/python generate.py --config configs/$SLUG.yaml --output-dir /tmp/$SLUG --dry-run
+$GEN/.venv/bin/python generate.py --config configs/$SLUG.yaml --output-dir /tmp/$SLUG
 echo "EXIT=$?"
 python3 -c "
 import json; d=json.load(open('/tmp/$SLUG/descriptors/rocKE/$SLUG/'+'$SLUG'.split('_',1)[1]+'.kdp.json'))
@@ -264,7 +286,7 @@ python3 -c "
 from hkp_pack.pipeline import run_pipeline
 res = run_pipeline(source_root='/tmp/$SLUG/descriptors', arches=['$ARCH'],
                    out_root='/tmp/${SLUG}_pack', hipcc='/opt/rocm/bin/hipcc',
-                   rocm_kpack_dir='$PYDEPS')
+                   rocm_kpack_dir='/opt/rocm-kpack/python')
 print({a: (r.skipped, str(r.kpack_path)) for a, r in res.items()})"
 
 # 5c. Shipped form -- through the real runtime loader. PACKED tree, never the authored one.
