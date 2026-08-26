@@ -40,6 +40,12 @@
 
 namespace rocsparse
 {
+    static rocsparse_fill_mode ellsv_flip_fill(rocsparse_fill_mode fill_mode)
+    {
+        return (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
+                                                        : rocsparse_fill_mode_lower;
+    }
+
     static void ellsv_clear_trm_slots(rocsparse_ellsv_info ei)
     {
         const rocsparse_operation operations[]
@@ -69,9 +75,17 @@ namespace rocsparse
             return false;
         }
 
-        return trm_info->get_m() == A->rows && trm_info->get_index_indextype() == A->col_type
-               && trm_info->get_value_datatype() == A->data_type
-               && trm_info->get_descr() == A->descr;
+        if(trm_info->get_m() != A->rows || trm_info->get_index_indextype() != A->col_type
+           || trm_info->get_descr() != A->descr)
+        {
+            return false;
+        }
+
+        // A cached transpose was materialized from the values of A, so it is only
+        // reusable while the value type still agrees.
+        rocsparse_const_spmat_descr transposed = trm_info->get_transposed_matrix();
+
+        return transposed == nullptr || transposed->data_type == A->data_type;
     }
 
     static bool ellsv_info_matrix_matches(rocsparse_ellsv_info ei, rocsparse_const_spmat_descr A)
@@ -101,36 +115,48 @@ namespace rocsparse
         return true;
     }
 
-    static rocsparse_status ellsv_allocate_transposed(rocsparse::trm_info_t* trm_info,
-                                                      int64_t                width,
-                                                      hipStream_t            stream)
+    // Hands the trm info a freshly allocated, still uninitialized ELL matrix to
+    // hold the transpose of the analyzed matrix. Triangular solve only accepts
+    // square matrices, so the transpose has the same dimensions as the original,
+    // and it is described with the opposite fill mode.
+    static rocsparse_status ellsv_create_transposed(rocsparse::trm_info_t*    trm_info,
+                                                    int64_t                   m,
+                                                    int64_t                   width,
+                                                    rocsparse_indextype       index_type,
+                                                    rocsparse_datatype        value_type,
+                                                    rocsparse_index_base      base,
+                                                    const rocsparse_mat_descr descr,
+                                                    hipStream_t               stream)
     {
-        if(trm_info->get_transposed_col_ind() != nullptr)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(trm_info->get_transposed_col_ind(), stream));
-            *trm_info->get_ref_transposed_col_ind() = nullptr;
-        }
+        trm_info->clear_transposed_matrix();
 
-        if(trm_info->get_transposed_val() != nullptr)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(trm_info->get_transposed_val(), stream));
-            *trm_info->get_ref_transposed_val() = nullptr;
-        }
+        const int64_t count = rocsparse::max(m * width, static_cast<int64_t>(1));
+        const size_t  col_bytes
+            = rocsparse::indextype_sizeof(index_type) * static_cast<size_t>(count);
+        const size_t val_bytes
+            = rocsparse::datatype_sizeof(value_type) * static_cast<size_t>(count);
 
-        trm_info->set_ell_width(width);
-
-        const int64_t m         = trm_info->get_m();
-        const int64_t count     = rocsparse::max(m * width, static_cast<int64_t>(1));
-        const size_t  col_bytes = rocsparse::indextype_sizeof(trm_info->get_index_indextype())
-                                 * static_cast<size_t>(count);
-        const size_t val_bytes = rocsparse::datatype_sizeof(trm_info->get_value_datatype())
-                                 * static_cast<size_t>(count);
-
-        RETURN_IF_HIP_ERROR(
-            rocsparse_hipMallocAsync(trm_info->get_ref_transposed_col_ind(), col_bytes, stream));
-        RETURN_IF_HIP_ERROR(
-            rocsparse_hipMallocAsync(trm_info->get_ref_transposed_val(), val_bytes, stream));
+        void* col_ind = nullptr;
+        void* val     = nullptr;
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&col_ind, col_bytes, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&val, val_bytes, stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+
+        rocsparse_spmat_descr  transposed = nullptr;
+        const rocsparse_status status     = rocsparse_create_ell_descr(
+            &transposed, m, m, col_ind, val, width, index_type, base, value_type);
+
+        if(status != rocsparse_status_success)
+        {
+            WARNING_IF_HIP_ERROR(rocsparse_hipFreeAsync(col_ind, stream));
+            WARNING_IF_HIP_ERROR(rocsparse_hipFreeAsync(val, stream));
+            RETURN_IF_ROCSPARSE_ERROR(status);
+        }
+
+        transposed->descr->fill_mode = rocsparse::ellsv_flip_fill(descr->fill_mode);
+        transposed->descr->diag_type = descr->diag_type;
+
+        trm_info->set_transposed_matrix(transposed);
 
         return rocsparse_status_success;
     }
@@ -318,15 +344,16 @@ namespace rocsparse
     }
 
     template <typename I, typename T>
-    static rocsparse_status ellsv_build_transpose(rocsparse_handle       handle,
-                                                  I                      m,
-                                                  I                      n,
-                                                  int64_t                ell_width,
-                                                  const void*            ell_col_ind,
-                                                  const void*            ell_val,
-                                                  rocsparse_index_base   base,
-                                                  bool                   conj,
-                                                  rocsparse::trm_info_t* trm_info)
+    static rocsparse_status ellsv_build_transpose(rocsparse_handle          handle,
+                                                  I                         m,
+                                                  I                         n,
+                                                  int64_t                   ell_width,
+                                                  const void*               ell_col_ind,
+                                                  const void*               ell_val,
+                                                  rocsparse_index_base      base,
+                                                  bool                      conj,
+                                                  const rocsparse_mat_descr descr,
+                                                  rocsparse::trm_info_t*    trm_info)
     {
         constexpr uint32_t BLOCKSIZE = 256;
 
@@ -368,21 +395,29 @@ namespace rocsparse
             t_width = rocsparse::max(t_width, static_cast<int64_t>(h_counts[i]));
         }
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_allocate_transposed(trm_info, t_width, stream));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_create_transposed(trm_info,
+                                                                     static_cast<int64_t>(m),
+                                                                     t_width,
+                                                                     rocsparse::get_indextype<I>(),
+                                                                     rocsparse::get_datatype<T>(),
+                                                                     base,
+                                                                     descr,
+                                                                     stream));
+
+        rocsparse_spmat_descr transposed = trm_info->get_transposed_matrix();
 
         const int64_t total = static_cast<int64_t>(m) * t_width;
         if(total > 0)
         {
             dim3 fill_blocks((total - 1) / BLOCKSIZE + 1);
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::ellsv_fill_col_ind_kernel<BLOCKSIZE, I>),
-                fill_blocks,
-                threads,
-                0,
-                stream,
-                total,
-                reinterpret_cast<I*>(trm_info->get_transposed_col_ind()),
-                static_cast<I>(m + base));
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::ellsv_fill_col_ind_kernel<BLOCKSIZE, I>),
+                                               fill_blocks,
+                                               threads,
+                                               0,
+                                               stream,
+                                               total,
+                                               reinterpret_cast<I*>(transposed->col_data),
+                                               static_cast<I>(m + base));
         }
 
         RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
@@ -402,8 +437,8 @@ namespace rocsparse
             base,
             conj,
             counts,
-            reinterpret_cast<I*>(trm_info->get_transposed_col_ind()),
-            reinterpret_cast<T*>(trm_info->get_transposed_val()));
+            reinterpret_cast<I*>(transposed->col_data),
+            reinterpret_cast<T*>(transposed->val_data));
 
         RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(counts, stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
@@ -428,8 +463,7 @@ namespace rocsparse
                                                   void*                     temp_buffer,
                                                   size_t                    buffer_size)
     {
-        const rocsparse_fill_mode uplo = descr->fill_mode;
-        rocsparse_fill_mode       fill = uplo;
+        rocsparse_fill_mode fill = descr->fill_mode;
 
         const void* col_ind  = ell_col_ind;
         I           n_solver = n;
@@ -437,15 +471,26 @@ namespace rocsparse
 
         if(trans != rocsparse_operation_none)
         {
-            fill                 = rocsparse::ellsv_flip_fill(fill);
             const bool conjugate = (trans == rocsparse_operation_conjugate_transpose);
 
-            RETURN_IF_ROCSPARSE_ERROR((rocsparse::ellsv_build_transpose<I, T>(
-                handle, m, n, ell_width, ell_col_ind, ell_val, idx_base, conjugate, trm_info)));
+            RETURN_IF_ROCSPARSE_ERROR((rocsparse::ellsv_build_transpose<I, T>(handle,
+                                                                              m,
+                                                                              n,
+                                                                              ell_width,
+                                                                              ell_col_ind,
+                                                                              ell_val,
+                                                                              idx_base,
+                                                                              conjugate,
+                                                                              descr,
+                                                                              trm_info)));
 
-            col_ind  = trm_info->get_transposed_col_ind();
-            n_solver = m;
-            width    = trm_info->get_ell_width();
+            // The transpose describes itself, including the flipped fill mode.
+            rocsparse_const_spmat_descr transposed = trm_info->get_transposed_matrix();
+
+            col_ind  = transposed->const_col_data;
+            n_solver = static_cast<I>(transposed->cols);
+            width    = transposed->ell_width;
+            fill     = transposed->descr->fill_mode;
         }
 
         return rocsparse::ellsv_analysis_dispatch<I>(handle,
@@ -489,7 +534,6 @@ namespace rocsparse
         info->set_descr(descr);
         info->set_offset_indextype(ell_col_ind_indextype);
         info->set_index_indextype(ell_col_ind_indextype);
-        info->set_value_datatype(ell_val_datatype);
 
         const size_t num_bytes
             = rocsparse::indextype_sizeof(ell_col_ind_indextype) * static_cast<size_t>(m);

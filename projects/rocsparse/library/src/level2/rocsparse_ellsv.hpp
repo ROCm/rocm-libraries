@@ -76,7 +76,5 @@ namespace rocsparse
 
     void ellsv_select_launch(rocsparse_handle handle, bool* sleep, uint32_t* wfsize);
 
-    rocsparse_fill_mode ellsv_flip_fill(rocsparse_fill_mode fill_mode);
-
     rocsparse_status ellsv_check(rocsparse_const_spmat_descr A);
 }

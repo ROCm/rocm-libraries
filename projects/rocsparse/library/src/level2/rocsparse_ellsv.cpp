@@ -40,12 +40,6 @@ namespace rocsparse
         *wfsize = (*sleep) ? 64 : handle->wavefront_size;
     }
 
-    rocsparse_fill_mode ellsv_flip_fill(rocsparse_fill_mode fill_mode)
-    {
-        return (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                        : rocsparse_fill_mode_lower;
-    }
-
     rocsparse_status ellsv_check(rocsparse_const_spmat_descr A)
     {
         rocsparse_mat_descr descr = A->descr;
