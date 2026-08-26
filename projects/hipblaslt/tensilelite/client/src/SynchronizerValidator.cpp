@@ -7,6 +7,7 @@
 
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <cassert>
 #include <sstream>
 
 namespace TensileLite
@@ -17,8 +18,9 @@ namespace TensileLite
         {
             // The buffer is declared with the alpha type but every consumer
             // writes 32-bit counters, so an int offset names the counter left
-            // set. The element count is a multiple of 8 and alpha is at least
-            // int-sized, so bytes always divides evenly.
+            // set. Callers guarantee an int-sized-or-wider alpha, so the byte
+            // count always divides evenly.
+            assert(bytes % sizeof(uint32_t) == 0);
             size_t const    ints    = bytes / sizeof(uint32_t);
             uint32_t const* v       = reinterpret_cast<uint32_t const*>(host);
             size_t          nonzero = 0;
@@ -56,12 +58,13 @@ namespace TensileLite
         void SynchronizerValidator::preSolution(ContractionSolution* const solution)
         {
             m_dirtyInSolution = false;
-            // Mirrors the conditions under which the dispatcher appends the
-            // pointer: Flags in singleCallArgs for StreamK, the dstD/Synchronizer
-            // block for MBSK. Any other solution is never handed the buffer, so
-            // its scan could only come back clean. Not reproduced here is
-            // sk.reduction == parallel, which also passes a null Flags but needs
-            // a Problem and Hardware to evaluate; scanning it reports nothing.
+            // Mirrors the three conditions under which the dispatcher appends
+            // the pointer: Flags in singleCallArgs for StreamK, the
+            // dstD/Synchronizer block for MBSK, and AmaxSync for amaxD. Any
+            // other solution is never handed the buffer, so its scan could only
+            // come back clean. Not reproduced here is sk.reduction == parallel,
+            // which also passes a null Flags but needs a Problem and Hardware to
+            // evaluate; scanning it reports nothing.
             //
             // An unknown solution is scanned rather than skipped.
             if(solution == nullptr)
@@ -74,7 +77,7 @@ namespace TensileLite
             bool const  streamK = sm.streamK > 0 && sm.streamKAtomic == 0
                                  && sm.streamKForceDPOnly == 0;
             bool const mbsk    = sm.globalAccumulation == 3;
-            m_usesSynchronizer = streamK || mbsk;
+            m_usesSynchronizer = streamK || mbsk || solution->problemType.outputAmaxD;
         }
 
         void SynchronizerValidator::postSolution()
@@ -135,11 +138,11 @@ namespace TensileLite
             if(m_stagingBytes >= bytes)
                 return m_staging;
 
-            if(m_staging != nullptr)
-                HIP_CHECK_EXC(hipHostFree(m_staging));
-
+            uint8_t* old   = m_staging;
             m_staging      = nullptr;
             m_stagingBytes = 0;
+            if(old != nullptr)
+                HIP_CHECK_EXC(hipHostFree(old));
             HIP_CHECK_EXC(hipHostMalloc(&m_staging, bytes));
             m_stagingBytes = bytes;
 
@@ -164,14 +167,19 @@ namespace TensileLite
             // merely unreported.
             if(bytes < tensor.totalAllocatedElements() * sizeof(int))
             {
-                // Thrown, not reported: a client configuration limit, not a
-                // kernel that failed to self-clean.
-                std::ostringstream msg;
-                msg << "Synchronizer is declared with a type narrower than int (" << bytes
-                    << " bytes for " << tensor.totalAllocatedElements()
-                    << " elements), so --check-synchronizer cannot cover the range the kernel "
-                       "uses.";
-                throw std::runtime_error(msg.str());
+                // Skipped, not failed: a limit of the checker, not a kernel that
+                // failed to self-clean. Warned once so it cannot pass unnoticed.
+                if(!m_narrowAlphaWarned)
+                {
+                    m_narrowAlphaWarned = true;
+                    std::ostringstream msg;
+                    msg << "Synchronizer is declared with a type narrower than int (" << bytes
+                        << " bytes for " << tensor.totalAllocatedElements()
+                        << " elements); --check-synchronizer cannot cover the range the kernel "
+                           "uses and is skipped for these problems.\n";
+                    m_reporter->log(LogLevel::Error, msg.str());
+                }
+                return true;
             }
 
             // Once per solution, so the copy is hot: pinned staging avoids the

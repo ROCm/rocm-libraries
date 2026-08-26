@@ -730,7 +730,9 @@ rocblaslt_status
                                         matmul_descr[i]->act0,
                                         matmul_descr[i]->act1,
                                         0,
-                                        (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
+                                        (char*)handle->Synchronizer
+                                            + (hipblaslt_synchronizer_ints_per_gemm * i
+                                               * sizeof(int)),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
@@ -1408,7 +1410,9 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
+                                        (char*)handle->Synchronizer
+                                            + (hipblaslt_synchronizer_ints_per_gemm * i
+                                               * sizeof(int)),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,

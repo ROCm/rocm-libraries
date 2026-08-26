@@ -47,9 +47,11 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
     constexpr size_t count = hipblaslt_synchronizer_ints;
     constexpr size_t bytes = count * sizeof(int);
 
-    if(handle->check_synchronizer_host.size() != count)
-        handle->check_synchronizer_host.assign(count, 0);
-    std::vector<int>& host = handle->check_synchronizer_host;
+    // Thread-local, so two threads sharing a handle do not race on it.
+    static thread_local std::vector<int> staging;
+    if(staging.size() != count)
+        staging.assign(count, 0);
+    std::vector<int>& host = staging;
 
     hipError_t err = hipStreamSynchronize(stream);
     if(err == hipSuccess)
@@ -88,14 +90,22 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
         if(!sink)
             sink = &std::cerr;
         *sink << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": Synchronizer left dirty ("
-              << nonzero << "/" << count << " ints nonzero, first at offset " << first
+              << nonzero << "/" << count << " ints nonzero, first at int offset " << first
               << ") -- the kernel did not reset the shared Synchronizer buffer on exit."
               << std::endl;
     }
 
     // Restore the zero baseline, so this residue is reported once rather than
-    // by every call after it.
-    static_cast<void>(hipMemset(handle->Synchronizer, 0, bytes));
+    // by every call after it. A failure here would re-report it forever.
+    if(hipError_t merr = hipMemset(handle->Synchronizer, 0, bytes); merr != hipSuccess)
+    {
+        std::lock_guard<std::mutex> lk(log_mutex);
+        std::ostream*               sink = get_logger_os();
+        if(!sink)
+            sink = &std::cerr;
+        *sink << "[hipBLASLt CHECK_SYNCHRONIZER] " << label << ": could not clear the buffer ("
+              << hipGetErrorString(merr) << "); residue will be re-reported." << std::endl;
+    }
 }
 
 #endif // HIPBLASLT_CHECK_SYNCHRONIZER_HPP

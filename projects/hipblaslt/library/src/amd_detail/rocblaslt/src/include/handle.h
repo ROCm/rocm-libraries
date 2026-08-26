@@ -70,10 +70,13 @@ private:
     size_t _data_size = 0;
 };
 
-// Size (ints) of the Synchronizer buffer allocated once in hipblasLtCreate and
-// shared by StreamK and GSU MBSK across every launch. See
-// check_synchronizer.hpp.
-constexpr size_t hipblaslt_synchronizer_ints = 16 * 409600;
+// The Synchronizer buffer allocated once in hipblasLtCreate and shared by
+// StreamK, GSU MBSK and amaxD across every launch. Grouped GEMM gives each of
+// its GEMMs one per-GEMM chunk. See check_synchronizer.hpp.
+constexpr size_t hipblaslt_synchronizer_ints_per_gemm = 409600;
+constexpr size_t hipblaslt_synchronizer_max_gemms     = 16;
+constexpr size_t hipblaslt_synchronizer_ints
+    = hipblaslt_synchronizer_max_gemms * hipblaslt_synchronizer_ints_per_gemm;
 
 /********************************************************************************
  * \brief rocblaslt_handle is a structure holding the rocblaslt library context.
@@ -138,9 +141,6 @@ struct _rocblaslt_handle
     // HIPBLASLT_CHECK_SYNCHRONIZER state, read once in the ctor. See
     // check_synchronizer.hpp for the checker protocol.
     bool check_synchronizer = false;
-    // Host staging for the Synchronizer readback, sized on first use and
-    // reused across every scanned call.
-    std::vector<int> check_synchronizer_host;
 };
 
 /********************************************************************************
