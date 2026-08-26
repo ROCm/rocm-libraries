@@ -1115,34 +1115,23 @@ class Solution(collections.abc.Mapping):
           if dtype.isBFloat16() or dtype.isHalf():
             state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
           elif dtype.is6bitFloat() or dtype.isFloat4():
-            # Pick the largest power-of-2 MFMA-M stack (2,4,8,16) that tiles this
-            # operand's per-wave M extent, so bigger macro tiles use one taller
-            # contiguous LDS strip instead of many 2x1 strips.  Each stack keeps
-            # the 128-bit GR/LR width; the GR loop tiles M across its b128 loads.
+            # The LDS strip spans the operand's whole macro-tile free dim, so one
+            # buffer_load covers as long a contiguous run as the tile allows (a
+            # full 128B cacheline once that dim reaches 256 fp4 elements).  The
+            # strip height is therefore MacroTile/instM, taken down to the
+            # largest power of two that divides it because the bank-conflict
+            # layout is defined on power-of-two stacks; for a power-of-two macro
+            # tile that is MacroTile/instM exactly.  Waves then either share a
+            # strip or own several, which TileInfo derives.
+            # Capped at 16: 16*instM*bpe is 128B, one whole cacheline, and a
+            # longer contiguous run buys nothing from the memory system.
             mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
-            waveGroup = state["MIWaveGroup"][0] if tc == 'A' else state["MIWaveGroup"][1]
-            perWaveMTiles = mtFree // (state["MatrixInstM"] * waveGroup)
+            mtTiles = mtFree // state["MatrixInstM"]
             stack = 2
             for cand in (16, 8, 4):
-              if perWaveMTiles % cand == 0:
+              if mtTiles % cand == 0:
                 stack = cand
                 break
-            # SubtileWideGR widens the GR strip to the full macro-tile free dim
-            # (G = stack * waveGroup) while LR keeps the per-wave stack, so one
-            # buffer_load covers G*instM contiguous elements instead of
-            # stack*instM.  Only meaningful when the axis splits across waves.
-            if state.get("SubtileWideGR", False) and waveGroup > 1:
-              # GR spans the whole macro-tile free dim; LR stays per-wave.
-              grStack = mtFree // state["MatrixInstM"]
-              lrStack = perWaveMTiles
-              key = f"AB_B4_TLU1_GR{grStack}_LR{lrStack}"
-              from Tensile.Components.Subtile.Kernel import AB_GEOMETRY_MAP
-              if key not in AB_GEOMETRY_MAP:
-                reject(state, printRejectionReason,
-                       f"SubtileWideGR: no geometry {key} for stack {stack} x waveGroup {waveGroup}")
-                return
-              state[f"_ABTilePair{tc}"] = key
-              continue
             state[f"_ABTilePair{tc}"] = {
               2: "AB_B4_TLU1",
               4: "AB_B4_TLU1_4x1",

@@ -546,14 +546,6 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
-    # NT (TLU=1) fp4 only.  Widen the *global read* subtile strip to span the
-    # full macro-tile free dim while the *local read* strip stays at the
-    # per-wave extent, so one buffer_load covers a maximally contiguous run of
-    # the unit-stride free dim (a full 128B cacheline once the macro tile
-    # reaches 256 fp4 elements).  The waves sharing a strip then split its K
-    # rows rather than each owning a separate M strip.  Only differs from the
-    # coupled layout when MIWaveGroup[0] > 1; ignored otherwise.
-    "SubtileWideGR": [False, True],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:

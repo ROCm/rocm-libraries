@@ -148,8 +148,8 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
     Guarded to the fp4 (bpe 0.5) TLU stacks the bank model covers; anything
     else returns None so the emit paths keep their baseline addressing.
     """
-    # SubtileWideGR: the XOR acts on the physical chunk index, and under wide
-    # GR the wave contributes a high chunk bit that the XOR then transforms
+    # When waves share a strip the XOR cannot be used: it acts on the physical
+    # chunk index, and the wave contributes a high chunk bit that the XOR transforms
     # (e.g. chunk[7] for the 4x1 stack), so the wave cannot be expressed as an
     # offset applied afterwards.  col_scatter has no such coupling -- there the
     # load index enters purely additively as a K-column shift -- so wide GR uses
@@ -181,7 +181,7 @@ def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
         return None
     if float(tileInfo.bpe) != 0.5:
         return None
-    # Under SubtileWideGR every stack uses col_scatter: the XOR path cannot
+    # When waves share a strip every stack uses col_scatter: the XOR path cannot
     # absorb the wave's contribution to the physical chunk index, and the bank
     # model shows col_scatter reaches 1-way at stacks 2, 4, 8 and 16 alike (the
     # XOR is only preferred elsewhere because it costs fewer VALU ops).
