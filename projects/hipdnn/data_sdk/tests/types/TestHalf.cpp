@@ -14,6 +14,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <ios>
 #include <limits>
 #include <type_traits>
 
@@ -179,6 +181,14 @@ float subnormalMidpoint(int k)
 {
     return std::ldexp(static_cast<float>(2 * k + 1), -25);
 }
+
+/// float with the given IEEE 754 bit pattern.
+float floatFromBits(uint32_t bits)
+{
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
+}
 } // namespace
 
 TEST_F(TestHalf, SubnormalIsNotFlushedToZero)
@@ -300,4 +310,56 @@ TEST_F(TestHalf, DenormMinIsRepresentableFromFloat)
     EXPECT_EQ(half(asFloat).data, 0x0001);
     EXPECT_LT(asFloat, static_cast<float>(std::numeric_limits<half>::min()));
     EXPECT_GT(asFloat, 0.0f);
+}
+
+// ============================================================================
+// NaN Conversion Tests
+// ============================================================================
+//
+// float -> half discards the low 13 payload bits. A NaN whose payload lives entirely in
+// those bits must still convert to a NaN, not to the infinity encoding, and IEEE 754
+// requires the result to be quiet. Both properties match HIP's __float2half.
+
+TEST_F(TestHalf, NanFromFloatNeverEncodesInfinity)
+{
+    for(uint32_t payload = 1; payload <= 0x1FFFU; ++payload)
+    {
+        const half positive(floatFromBits(0x7F800000U | payload));
+        EXPECT_TRUE(isnan(positive)) << "payload 0x" << std::hex << payload;
+        EXPECT_FALSE(isinf(positive)) << "payload 0x" << std::hex << payload;
+        EXPECT_EQ(positive.data, 0x7E00) << "payload 0x" << std::hex << payload;
+
+        const half negative(floatFromBits(0xFF800000U | payload));
+        EXPECT_TRUE(isnan(negative)) << "payload 0x" << std::hex << payload;
+        EXPECT_EQ(negative.data, 0xFE00) << "payload 0x" << std::hex << payload;
+    }
+}
+
+TEST_F(TestHalf, NanFromFloatIsQuieted)
+{
+    // Signaling float NaN (payload MSB clear) must convert to a quiet half NaN.
+    const half fromSignaling(floatFromBits(0x7F800001U));
+    EXPECT_TRUE(isnan(fromSignaling));
+    EXPECT_NE(fromSignaling.data & 0x0200U, 0U);
+
+    const half fromLimitsSignaling(std::numeric_limits<float>::signaling_NaN());
+    EXPECT_TRUE(isnan(fromLimitsSignaling));
+    EXPECT_NE(fromLimitsSignaling.data & 0x0200U, 0U);
+}
+
+TEST_F(TestHalf, NanPayloadTopBitsSurviveConversion)
+{
+    // The 10 payload bits that fit are carried through, with the quiet bit forced on.
+    EXPECT_EQ(half(std::numeric_limits<float>::quiet_NaN()).data, 0x7E00);
+    EXPECT_EQ(half(floatFromBits(0x7FE00000U)).data, 0x7F00);
+    EXPECT_EQ(half(floatFromBits(0x7FFFFFFFU)).data, 0x7FFF);
+    EXPECT_EQ(half(floatFromBits(0xFFFFFFFFU)).data, 0xFFFF);
+}
+
+TEST_F(TestHalf, InfinityFromFloatIsUnchanged)
+{
+    EXPECT_EQ(half(std::numeric_limits<float>::infinity()).data, 0x7C00);
+    EXPECT_EQ(half(-std::numeric_limits<float>::infinity()).data, 0xFC00);
+    EXPECT_TRUE(isinf(half(std::numeric_limits<float>::infinity())));
+    EXPECT_FALSE(isnan(half(std::numeric_limits<float>::infinity())));
 }

@@ -150,7 +150,10 @@ inline uint16_t float_to_half_bits(float f) noexcept
         {
             return static_cast<uint16_t>(sign | 0x7C00); // Infinity
         }
-        return static_cast<uint16_t>(sign | 0x7C00 | (mant >> 13)); // NaN
+        // Quiet the NaN, as IEEE 754 conversion requires, and keep the payload bits that
+        // survive the narrowing. Truncating the payload alone leaves 0 whenever it lives in
+        // the discarded low 13 bits, which would encode infinity instead of NaN.
+        return static_cast<uint16_t>(sign | 0x7E00 | (mant >> 13));
     }
     if(exp > 30)
     {
