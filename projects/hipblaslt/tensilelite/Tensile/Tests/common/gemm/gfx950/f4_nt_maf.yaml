@@ -9,11 +9,18 @@
 # large K (65536) so the mainloop dominates and launch/tail overhead is
 # negligible.
 #
-# Every config uses MIWaveGroup 2x2 (4 waves) since that maximizes per-CU
-# occupancy and therefore FLOPs.  With wg2x2 fixed, the LDS stack size is set
-# purely by the per-wave M extent (MIWaveTile M), giving exactly one macro
-# tile per stack -- no packing of multiple subtiles into a single macro tile.
-# M and N are pinned to MT*16 so the grid is exactly 256 tiles.
+# Every config uses MIWaveGroup 2x2 (4 waves).  That is a deliberately fixed
+# control, not a claim that 4 waves is fastest: holding the wave group constant
+# makes the MFMA-M stack the only variable across entries, so the numbers below
+# compare stacks rather than a mix of stack and wave count.  M and N are pinned
+# to MT*16 so the grid is exactly 256 tiles.
+#
+# For the record, 4 waves is NOT the peak at the smaller tiles -- measured on
+# gfx950 MI355X, a single wave is substantially faster wherever it can form the
+# same macro tile, because the stack it implies is correspondingly taller:
+# MT256x256 cannot be built with fewer than 4 waves (1 wave needs MIWT 16x16 =
+# 1024 acc VGPRs), so its 4-wave entry really is that tile's peak.  Treat these
+# entries as per-stack comparisons, not as the machine's best achievable FLOPs.
 #
 # DepthU is the largest that generates without overflowing the 160KB LDS
 # budget for each stack (K=65536 is a multiple of every DepthU below):
