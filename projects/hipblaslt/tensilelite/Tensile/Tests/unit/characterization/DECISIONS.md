@@ -301,9 +301,3 @@ available where this change was authored.
 **ADR:** [`adr/0012-decouple-bigfile-tests-from-library-src.md`](adr/0012-decouple-bigfile-tests-from-library-src.md)
 
 **Decision:** Replace the 10 `_BIG` entries' live `library/src` tuning-data references with vendored, trimmed, self-contained fixtures under `_codegen/data/bigfiles/`; add `test_no_library_src_dependency_char.py` as a standing AST-scan regression guard against the coupling reappearing.
-
-**Open item:** a full ADR under `adr/` is likely not required per the
-hipblaslt-pr-quality overlay (that's triggered by a *behavior-changing*
-`.ambr` diff, and this change is explicitly designed to produce none) — to be
-confirmed with the characterization suite owner (David Dixon) during review;
-add one if he disagrees.
