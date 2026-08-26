@@ -145,6 +145,10 @@ def discover_captures(capture_dir: Path) -> list[CapturedCase]:
 
         tier = TIER_MAP.get(suite_rel.parts[0], "quick") if suite_rel.parts else "quick"
 
+        # Hotfix: remove "id" from graph as it prevents generating the graph template
+        if "id" in graph:
+            del graph["id"]
+
         cases.append(
             CapturedCase(
                 suite=suite_name,
