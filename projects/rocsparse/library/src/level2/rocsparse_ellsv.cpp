@@ -22,8 +22,8 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_control.hpp"
 #include "rocsparse_ellsv.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_mat_info.hpp"
 #include "rocsparse_one.hpp"
 #include "rocsparse_utility.hpp"

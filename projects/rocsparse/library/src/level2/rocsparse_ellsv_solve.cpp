@@ -344,7 +344,7 @@ rocsparse_status rocsparse::ellsv_solve_buffer_size(rocsparse_handle            
                                                     rocsparse_const_spmat_descr A,
                                                     rocsparse_const_dnvec_descr x,
                                                     rocsparse_const_dnvec_descr y,
-                                                    size_t*                     buffer_size_in_bytes)
+                                                    size_t* buffer_size_in_bytes)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
