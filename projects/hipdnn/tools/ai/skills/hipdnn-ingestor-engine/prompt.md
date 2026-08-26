@@ -324,6 +324,22 @@ cannot settle alone:**
 Wait for the user's answers before proceeding — this is the one blocking prompt in the
 create flow.
 
+**Exhaust the sources before you ask.** This batch is for decisions only a human can
+make: scope, naming, what they intend to run. It is *not* for facts the tree already
+answers, and a question that turns out to be answerable reads as not having looked. Two
+that look like judgment calls and are not:
+
+- **A numeric mapping between the kernel and the graph** (an off-by-one, a units
+  difference). The stage-8 reference executor defines it — read its predicate. See
+  `rocke-mining.md` § *The rule the graph spells differently from the kernel*.
+- **What an unfamiliar graph attribute means.** Grep the frontend and the cuDNN
+  compatibility shim; both spell out intent and defaults in comments.
+
+If you must ask about something source-derivable anyway, ask with your answer and its
+evidence attached, as a confirmation rather than a question. And if the human replies
+"go and check" — the correct reply to a question you should not have asked — go and
+check; do not re-ask, and do not stall waiting.
+
 #### Sizing the variant set — a real integration ships many kernels
 
 **A one-kernel engine is not an integration, it is a demo.** With a single variant
@@ -349,13 +365,22 @@ same shape. Real production engines go much wider.
 
 - **The rocKE dispatcher for this kernel family** (`rocke/library/dispatch/<family>/`) —
   it already encodes which configurations are worth generating and which are
-  best-performing per regime. For attention, `dispatch/attention/common.py` declares
-  `UNIFIED_HEAD_SIZES = (64, 128, 256)`, `UNIFIED_BLOCK_SIZES = (16, 32, 64)`,
-  `UNIFIED_DTYPES = ("fp16", "bf16")` and
-  `ATTENTION_FEATURES = {"causal", "sliding_window", "sinks"}`. Read the per-arch module
-  too — `gfx950.py` picks `_DENSE_BLOCK_N = 64` as its best-config default and switches
-  the persistent variant on above a work threshold. That is a tuned answer, and it is
-  telling you both the axis and the sensible values.
+  best-performing per regime.
+
+  **Read the module for YOUR kernel, not the family's shared one.** `dispatch/attention/`
+  holds several unrelated families side by side and the names do not say so.
+  `common.py`'s `UNIFIED_HEAD_SIZES` / `UNIFIED_BLOCK_SIZES` / `UNIFIED_DTYPES` /
+  `ATTENTION_FEATURES` belong to the **unified** kernels; they are **not**
+  `attention_dense`'s axes and sizing a dense variant set from them is wrong. Dense's
+  answer is one constant in the per-arch module: `gfx950.py`'s
+  `_DENSE_BLOCK_N = 64`, commented as the resource-efficient peak. Grep for the builder
+  you are integrating and read only what that call path touches.
+
+  The per-arch module is also where the *policy* lives — `gfx950.py` switches the
+  persistent variant on above a work threshold, and marks the dense candidate **opt-in
+  only** (it matches solely when a request names `algorithm="attention_dense"`). If the
+  dispatcher does not auto-select your kernel, say so in the Step 9 report: you are
+  exposing something rocKE itself does not route to by default.
 - **The spec dataclass's own knob comments**, which frequently record measured results
   ("64 and 128 both match ~peak; 3+ waves_per_eu is a measured trap at -20%"). Prefer a
   knob the kernel author says matters; skip one they say is neutral.
@@ -590,9 +615,46 @@ cmake --build <build-dir> -j48 --target hip_kernel_provider hipdnn_list_engines 
 <build-dir>/bin/hipdnn_list_engines | grep <engine-name>
 ```
 
-A missing engine here is usually splice point 4 (the `ingestorPacks()` table row) or a
-symbol-string mismatch between the pack `.cpp` and the descriptors. Re-run
-`hipdnn_validate_descriptors --native-source <pack.cpp>` to isolate which.
+**Packaged dialect: none of those targets pack your descriptors.** Building the provider
+compiles your native pack, and nothing else. The authored tree under the packager's source
+root is consumed by a separate target, which you MUST build or your engine is simply
+absent at runtime — with every other check green:
+
+```
+cmake --build <build-dir> -j48 --target hkp_packaging_product
+```
+
+That step lowers each rocKE builder through comgr, writes the per-arch `.kpack`, rewrites
+the descriptors to `kind: kpack`, and **stages the result into
+`<build-dir>/lib/hipdnn_plugins/engines/arch_content/<provider>/`** — which is where the
+runtime loader actually looks (`KernelIngestorEngine.cpp` resolves the descriptor
+directory relative to the loaded module). Confirm with:
+
+```
+find <build-dir>/lib/hipdnn_plugins/engines/arch_content -name '*.kdp.json'
+```
+
+`hkp_packaging_testfixture` is the *other* root and is not yours; packing it proves
+nothing about your bundle. Check `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` in
+`CMakeCache.txt` points at the tree you authored into — if it is empty, production
+packaging is dormant and your descriptors are never packed at all.
+
+A missing engine here has three likely causes, in the order worth checking:
+
+1. **The pack step never ran** (packaged dialect only) — the symptom above.
+2. **Splice point 4** — the `ingestorPacks()` table row. Note the real `IngestorPack`
+   struct in this repo has **three** fields (`label`, `registerSymbols`,
+   `resetModuleCache`); the generator's fragment emits a two-field row, which does not
+   compile. Splice against the struct, not the fragment. Pass `nullptr` for the third
+   when your pack loads no kpack archive, and your reset function when it does.
+3. **A symbol-string mismatch** between the pack `.cpp` and the descriptors. Re-run
+   `hipdnn_validate_descriptors --native-source <pack.cpp>` to isolate.
+
+**`hipdnn_list_engines` prints a hash, not your name.** It only spells out engines in its
+own interning table, so a new engine appears as e.g. `0x26F2B0BF1CCFD052`. That is the
+FNV-1a of the scoped name (`engineNameToId`, `data_sdk/utilities/EngineNames.hpp`), not a
+failure. `grep <engine-name>` therefore finds nothing even on success — compute the hash
+and grep for that instead.
 
 ### Step 8 — Contribute integration tests, and dispatch on device
 

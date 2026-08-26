@@ -58,6 +58,30 @@ verify*, which owns that list. A kernel requiring one of those has nothing to be
 against, and you will not find out until stage 8, after the descriptors, hooks and build
 are already done. For a first integration, pick a kernel the shared references cover.
 
+**Stage 8 has a second prerequisite, and it is hardware.** The engine's `arch` list is
+the arch the test must run on — packs arch-prune before the matcher, so a clean run on
+any other GPU proves nothing. Check at stage 1 that a node of that arch is actually
+*schedulable to you*, not merely listed:
+
+```
+ssh <slurm-login> "sinfo -N -h -o '%P|%N|%t|%G' | grep <arch>"      # live? drained?
+ssh <slurm-login> "squeue -h -o '%b' | grep -c <arch>"              # how deep is the queue
+ssh <slurm-login> "sbatch --test-only -p <part> -A <acct> --gres=gpu:<type>:1 \
+    --time=00:20:00 --wrap=hostname"                                # may I, and when
+```
+
+`--test-only` is the one that answers it: it reports the estimated start time, and it
+reports an access failure without consuming a submission. A partition can be visible in
+`sinfo` and still reject you (`invalid partition specified`) when your account has no
+association with it. Do this before mining, not after the build: a scarce single-GPU arch
+class behind a deep queue can turn a 9-stage run into a 7b run for reasons that have
+nothing to do with the integration, and knowing on day one lets you stage artifacts to a
+less contended site while the other work proceeds.
+
+If the arch is unreachable, say so at stage 1 and get a decision, exactly as with an
+unverifiable feature. A run that reaches stage 7b with the device test queued is a
+legitimate outcome — but it must be *reported* as stage 7b, never as stage 8.
+
 **Stage 5 is where agents quit, and it is the stage that matters most.** The generator
 emits a native stub whose every body is `// TODO - FILL THIS OUT` because those bodies
 need kernel knowledge no tool can infer. *You* are the one expected to supply it — from

@@ -9,6 +9,25 @@ Reference implementation to read before writing anything:
 SDPA pack). `PointwiseNative.cpp` in the working tree shows the same shapes with a
 non-trivial `workspaceBytes` and multiple `GraphCriterionFn`s.
 
+**Copy its SHAPES, not its RULES.** It is the right model for structure — the
+match/prepare/launch split, the ownership rules, the layout-neutral stand-in — and it has
+at least two *applicability* defects that a copier inherits silently:
+
+- Its `causal` derivation reads only the deprecated `causal_mask` /
+  `causal_mask_bottom_right` booleans. Every shipped `quick/SdpaFwd` bundle leaves those
+  `false` and expresses causality through `left_bound`/`right_bound`, so it computes
+  `causal = 0` for a causal graph and matches a **non-causal kernel**. Wrong numbers, no
+  fault, matcher green.
+- Its `mma_core_mode != UNSET` rejection declines every shipped SdpaFwd bundle, because
+  they all set `"float"` (`FLOAT = 1`, `data_types.fbs`). The engine then serves nothing
+  and the suite stays green because another engine wins.
+
+Both are the failure classes this file and `rocke-mining.md` warn about, present in the
+file they point at. **Derive your rules from the kernel source and the op's `.fbs`, then
+use this pack to check your structure** — not the other way round. And validate any
+rejection you write against real bundle data (`integration-tests/integration-test-bundles/`):
+a check that declines every shipped case is as broken as one that admits a bad graph.
+
 ---
 
 ## The five hooks
@@ -100,6 +119,17 @@ bool hasBshdStrides(const data_objects::TensorAttributes* tensor)
 
 Only call it after rank and extents are validated.
 
+**Exempt unit-extent axes, or you over-reject.** A stride multiplies an index; when an
+axis has extent 1 that index is always 0, so no address depends on its stride and a
+producer may declare anything there. A one-head tensor is byte-identically BSHD and BHSD
+while the two spellings disagree on `strides[H]` — a strict comparison declines a graph
+the kernel serves perfectly, and `graph_match` returning `nullopt` empties the **whole
+engine catalog**. Guard each axis as `dims->Get(i) == 1 || strides->Get(i) == expected`.
+
+Write the degenerate case as a test. It is invisible by inspection and it is the reason
+to have a layout test at all: assert both that multi-head BHSD is declined *and* that
+single-head is accepted under either spelling.
+
 **Do not layout-check the OUTPUT tensor here.** Its shape is inferred by the frontend and
 is not reliably populated during matching; requiring it at match time makes the provider
 decline graphs it can serve. Check the output in `prepare()` instead — the reference does
@@ -182,6 +212,10 @@ Python line in a comment — nothing checks this correspondence.
 **The ownership rule:** the returned `PreparedDispatch` **MUST NOT reference the
 `MatchContext` or `BoundTokens` it was built from.** Copy out UIDs and scalars. Storing a
 `DeviceProperties` reference compiles and dangles on the next `launch()`.
+
+**The kernel is a VIEW into its program's module,** so a `PreparedDispatch` holding only
+the `IRunnableKernel` dangles. Hold the `ICompiledProgram` alongside it for the plan's
+lifetime — `buildIngestorKernelCode` hands you both for this reason.
 
 `prepare()` is also where checks that were unreliable at match time go — the output
 tensor's layout above all. Re-deriving the problem here and throwing on failure is

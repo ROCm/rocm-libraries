@@ -62,7 +62,7 @@ gfx950 dense-attention kernel:
 | `head_size in (64, 128)` | YES — last dim | `graph_match` |
 | `num_query_heads % num_kv_heads == 0` | YES — both are dims | `graph_match` (GQA) |
 | `sliding_window > 0 requires causal` | YES — node attributes | `graph_match` |
-| `paged` requires `head_size == 128`, `batch == 1`, `sliding_window > 0` | YES | `graph_match` |
+| `paged` requires `head_size == 128`, `batch == 1`, `sliding_window > 0` | **NO — SCOPE.** These fire only when `paged=True`. If you ship dense-only variants, no graph can reach them, and writing them into `graph_match` rejects nothing while *reading* as if paged were supported | decline `paged` outright; do NOT encode its sub-rules |
 | `seqlen_kv % block_n == 0` | PARTIAL — graph fact vs. a knob | `kernel_match`, against `$kernel.block_n` (KNOB-SEL) |
 | `block_n % 32 == 0` | NO — a knob you pick | spec construction |
 | `waves_per_eu` in `[1,8]`, `lds_k_group_pad % 8 == 0` | NO — tuning knobs | spec construction |
@@ -70,6 +70,40 @@ gfx950 dense-attention kernel:
 
 **Over-rejecting is a real bug too.** A knob that does not fit is a reason to pick a
 different knob, not to decline the graph.
+
+### The rule the graph spells differently from the kernel
+
+A spec field is not always a graph field, even when both exist and mean the same thing.
+Before you write `attrs.<x>() == spec.<x>` for any rule, **find the field in the op's
+`.fbs` and confirm it is spelled the same way**. Where it is not, the rule is a
+*derivation*, not a comparison, and the derivation is yours to get right.
+
+The gfx950 dense kernel has two such fields, and they are its two most important:
+
+| Spec field | hipDNN spelling | Derivation |
+|---|---|---|
+| `causal` (bool) | **no such field** | `left_bound`/`right_bound`/`diagonal_alignment`, with the deprecated `causal_mask`/`causal_mask_bottom_right` booleans taking precedence when set |
+| `sliding_window` (int) | **no such field** | `left_bound + 1` — see below |
+
+**Get the off-by-one from the reference executor, not from a convention.** Stage 8
+compares you against `integration-tests/gpu-ref/kernels/sdpa/GpuRefSdpaFwd.cpp`, so its
+predicate *defines* the mapping. Read the two key-sets and equate them:
+
+```
+kernel    (attention_dense.py:832,843):  keep iff ktok > q - W      -> keys [q-W+1, q], W keys
+reference (GpuRefSdpaFwd.cpp:141-147):   drop iff skv < sq - L      -> keys [q-L,   q], L+1 keys
+                                          => W = L + 1
+```
+
+and note the asymmetry the reference states in its own comment — *"+1 on the right bound,
+none on the left bound"* — so `right_bound == 0` maps with **no** offset. Guessing either
+direction is a silent one-key error on every masked graph.
+
+Alignment is the same shape of problem: the reference shifts by
+`offset = topLeft ? 0 : (Skv - Sq)` (`:92`); a kernel masking on raw absolute token
+indices implements TOP_LEFT only, so `BOTTOM_RIGHT` is servable **iff `Sq == Skv`**.
+Declining it outright is the over-rejection trap — every shipped causal `SdpaFwd` bundle
+is BOTTOM_RIGHT *and* square, so a blanket decline serves none of them.
 
 ### A third kind: the knob-selection constraint
 
