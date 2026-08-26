@@ -4,6 +4,7 @@
 #include <hipblaslt/client/MatmulPreparation.hpp>
 
 #include "hipblaslt_datatype2string.hpp"
+#include "utility.hpp"
 
 #include <stdexcept>
 
@@ -16,6 +17,70 @@ namespace hipblaslt::client
             return value / divisor + static_cast<size_t>(value % divisor != 0);
         }
     } // namespace
+
+    bool supportsMatmulSwizzle(hipDataType dataType)
+    {
+        switch(dataType)
+        {
+        case HIP_R_16BF:
+        case HIP_R_16F:
+        case HIP_R_8F_E4M3_FNUZ:
+        case HIP_R_4F_E2M1:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    bool usesRocrollerMxLayout()
+    {
+#ifdef HIPBLASLT_USE_ROCROLLER
+        return hipblaslt_get_arch() != 1250;
+#else
+        return false;
+#endif
+    }
+
+    hipblasLtOrder_t matmulOrderForDataType(hipDataType dataType)
+    {
+        switch(dataType)
+        {
+        case HIP_R_16F:
+        case HIP_R_16BF:
+            return HIPBLASLT_ORDER_COL16_4R8;
+        case HIP_R_8F_E4M3_FNUZ:
+            return HIPBLASLT_ORDER_COL16_4R16;
+        case HIP_R_4F_E2M1:
+            return HIPBLASLT_ORDER_COL16_4R32;
+        default:
+            throw std::runtime_error("Unsupported datatype for a swizzled matmul layout.");
+        }
+    }
+
+    hipblasLtMatmulMatrixScale_t matmulScaleMode(hipblaslt_scaling_format format)
+    {
+        switch(format)
+        {
+        case hipblaslt_scaling_format::Vector:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+        case hipblaslt_scaling_format::Block_32_UE8M0:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+        case hipblaslt_scaling_format::Block_16_UE8M0:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
+        case hipblaslt_scaling_format::Block_32_UE4M3:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT;
+        case hipblaslt_scaling_format::Block_16_UE4M3:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+        case hipblaslt_scaling_format::Block_32_UE5M3:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT;
+        case hipblaslt_scaling_format::Block_16_UE5M3:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
+        case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+        default:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+        }
+    }
 
     hipblasLtEpilogue_t matmulEpilogue(const Arguments& arguments)
     {
