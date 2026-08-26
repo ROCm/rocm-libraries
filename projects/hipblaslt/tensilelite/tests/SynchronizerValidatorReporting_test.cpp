@@ -149,6 +149,19 @@ TEST(SynchronizerValidatorReporting, UnknownSolutionIsChecked)
     EXPECT_TRUE(validator.usesSynchronizer());
 }
 
+// amaxD is the third consumer: the dispatcher appends the buffer as AmaxSync
+// whenever outputAmaxD is set, independent of streamK and globalAccumulation.
+TEST(SynchronizerValidatorReporting, AmaxDSolutionIsChecked)
+{
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, 0, 0);
+    solution.problemType.outputAmaxD = true;
+
+    validator.preSolution(&solution);
+    EXPECT_TRUE(validator.usesSynchronizer());
+}
+
 // Atomic StreamK reduces in place; the dispatcher never appends Flags for it.
 TEST(SynchronizerValidatorReporting, AtomicStreamKSolutionIsSkipped)
 {
