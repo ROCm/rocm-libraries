@@ -180,6 +180,61 @@ def _f32_literal(val: float) -> str:
     return f"{val}f"
 
 
+def _llvm_asm_template_to_hip(template: str) -> str:
+    """Translate an LLVM inline-asm template into GCC/clang extended-asm form.
+
+    LLVM IR and C/C++ extended asm share the same AMDGPU mnemonics but differ
+    in operand-reference / escape syntax:
+
+    * operand reference ``$0`` (LLVM) -> ``%0`` (C++)
+    * literal dollar ``$$`` (LLVM)    -> ``$`` (C++)
+    * literal percent ``%`` (C++)     must be doubled to ``%%``
+
+    Operand *modifiers* (``${0:v}``) have no portable C++ extended-asm spelling
+    and are rejected -- none of the rocke asm helpers emit them. The returned
+    string still contains real newline/tab characters; :func:`_c_str_escape`
+    turns it into a C++ string-literal body.
+    """
+    out: List[str] = []
+    i, n = 0, len(template)
+    while i < n:
+        c = template[i]
+        if c == "%":
+            out.append("%%")
+            i += 1
+        elif c == "$":
+            nxt = template[i + 1] if i + 1 < n else ""
+            if nxt == "$":
+                out.append("$")  # LLVM literal '$'
+                i += 2
+            elif nxt == "{":
+                raise NotImplementedError(
+                    "inline asm operand modifier '${...}' has no portable HIP "
+                    "extended-asm spelling"
+                )
+            elif nxt.isdigit():
+                out.append("%")  # operand reference -> %N
+                i += 1
+            else:
+                out.append("$")  # bare '$', emit literally
+                i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _c_str_escape(s: str) -> str:
+    """Escape a string for embedding as a C++ string literal body."""
+    return (
+        s.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+        .replace("\r", "\\r")
+    )
+
+
 def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     """Encode `s_waitcnt` for the gfx9/gfx10 layout used by gfx950.
 
@@ -2197,6 +2252,81 @@ class _Lowerer:
             f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
         )
         self._emit(f"{vec_prefix}8 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 16);")
+
+    def _op_tile_inline_asm(self, op: Op) -> None:
+        """General AMDGPU inline asm -> GCC/clang extended ``asm volatile``.
+
+        The op carries an LLVM-form ``template`` plus a flat ``constraints``
+        string (see :meth:`IRBuilder.inline_asm`). Both map deterministically
+        onto C++ extended asm because the operand model is identical -- outputs
+        first, then inputs in ``operands`` order -- and only the surface syntax
+        differs:
+
+        * ``$N`` operand refs -> ``%N`` (:func:`_llvm_asm_template_to_hip`).
+        * the flat constraint list is split by role into the three
+          ``:``-delimited C++ sections: outputs (``=``/``+``), inputs
+          (everything else, including tied digits like ``0``), and clobbers
+          (``~{reg}`` -> ``"reg"``). LLVM already orders the string
+          outputs-then-inputs-then-clobbers, matching ``op.results`` /
+          ``op.operands`` position-for-position.
+        * each output constraint gets a freshly declared lvalue that becomes
+          the op's result value; a tied input (``"0"``) then shares that
+          register, giving the read-modify-write accumulator the MFMA needs.
+        * ``sideeffect`` -> ``volatile``.
+
+        Arch-legality of the mnemonics and register classes is the kernel
+        author's responsibility (they branch per arch). Anything illegal for
+        the target fails *loudly* at hipcc/assembler time -- a wrong-arch
+        instruction, an ``a`` (AGPR) constraint on an AGPR-less RDNA target, an
+        operand width mismatch -- never as a silent mis-compile. ``convergent``
+        has no extended-asm spelling and is dropped, exactly as the LLVM path
+        drops it (``volatile`` already blocks DCE/dup/reorder).
+        """
+        constraints = op.attrs.get("constraints", "") or ""
+        sideeffect = bool(op.attrs.get("sideeffect", True))
+
+        outs: List[str] = []
+        ins: List[str] = []
+        clobbers: List[str] = []
+        for raw in constraints.split(","):
+            c = raw.strip()
+            if not c:
+                continue
+            if c.startswith("~{"):
+                clobbers.append(c[2:].rstrip("}"))
+            elif c[0] in "=+":
+                outs.append(c)
+            else:
+                ins.append(c)
+
+        if len(outs) != len(op.results):
+            raise NotImplementedError(
+                f"inline asm has {len(outs)} output constraints but "
+                f"{len(op.results)} results"
+            )
+        if len(ins) != len(op.operands):
+            raise NotImplementedError(
+                f"inline asm has {len(ins)} input constraints but "
+                f"{len(op.operands)} operands"
+            )
+
+        # Declare an lvalue per output; it is the op's result value.
+        out_binds: List[str] = []
+        for res, cons in zip(op.results, outs):
+            self._emit(f"{_type_to_hip(res.type)} {_name(res)};")
+            out_binds.append(f'"{cons}"({_name(res)})')
+
+        in_binds = [f'"{cons}"({_name(v)})' for cons, v in zip(ins, op.operands)]
+        clobber_binds = [f'"{c}"' for c in clobbers]
+
+        tmpl = _c_str_escape(_llvm_asm_template_to_hip(op.attrs["template"]))
+        vol = "volatile " if sideeffect else ""
+        self._emit(
+            f'asm {vol}("{tmpl}"'
+            f' : {", ".join(out_binds)}'
+            f' : {", ".join(in_binds)}'
+            f' : {", ".join(clobber_binds)});'
+        )
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
         a, b, c = op.operands

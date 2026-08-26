@@ -318,9 +318,51 @@ def _micro_cases() -> List[Case]:
         b.ret()
         return b.kernel
 
+    def _inline_asm_mov() -> object:
+        # Minimal single-output / single-input inline asm (``v_mov_b32``).
+        # Exercises the output-lvalue + input binding of the general
+        # ``asm volatile`` lowering on any AMDGPU target (no arch gate).
+        b = IRBuilder("micro_inline_asm_mov")
+        A = b.param("A", PtrType(I32, "global"))
+        O = b.param("O", PtrType(I32, "global"))
+        tid = b.thread_id_x()
+        x = b.global_load(A, tid, I32)
+        r = b.inline_asm("v_mov_b32 $0, $1", "=v,v", [x], result_type=I32)
+        b.global_store(O, tid, r)
+        b.ret()
+        return b.kernel
+
+    def _inline_asm_mfma_agpr() -> object:
+        # The real register-pinning use case: unscaled
+        # ``v_mfma_f32_16x16x128_f8f6f4`` with AGPR srcA/srcB and a tied VGPR
+        # accumulator (constraints ``=v,0,a,a``). Validates the tied-operand,
+        # vector-operand, and AGPR-constraint translation together. gfx950-only
+        # (the f8f6f4 hero atom does not exist on gfx942).
+        from rocke.helpers.asm import mfma_f8f6f4_agpr  # noqa: PLC0415
+
+        b = IRBuilder("micro_inline_asm_mfma_agpr")
+        A = b.param("A", PtrType(I32, "global"))
+        B = b.param("B", PtrType(I32, "global"))
+        C = b.param("C", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        a = b.global_load_vN(A, tid, I32, 8)
+        bb = b.global_load_vN(B, tid, I32, 8)
+        acc = b.global_load_vN(C, tid, F32, 4)
+        out = mfma_f8f6f4_agpr(b, a, bb, acc)
+        b.global_store_vN(C, tid, out, 4)
+        b.ret()
+        return b.kernel
+
     return [
         # -- P0: available on the default CDNA target --
         Case("micro.vector_max", "micro", _vector_max),
+        Case("micro.inline_asm_mov", "micro", _inline_asm_mov),
+        Case(
+            "micro.inline_asm_mfma_agpr",
+            "micro",
+            _inline_asm_mfma_agpr,
+            arch="gfx950",
+        ),
         Case("micro.cvt_scalef32_fp8", "micro", lambda: _cvt_scalef32("fp8")),
         Case("micro.cvt_scalef32_bf8", "micro", lambda: _cvt_scalef32("bf8")),
         Case("micro.mfma_f32_16x16x128_fp8", "micro", _mfma_hero, arch="gfx950"),
