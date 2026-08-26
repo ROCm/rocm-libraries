@@ -8,8 +8,15 @@
 #   - MI 16x16x128; DepthU 128 and 256 (multiple MFMA K-windows per strip).
 #   - Sizes cover single/multi K-iteration, larger macro tiles, and wg2x2.
 #   - Stack (MFMA-M tiles per contiguous LDS strip) is chosen from the per-wave
-#     M extent: 2x1 (MT32 wg1, MT64 wg2, MT128 wg4), 4x1 (MT64 wg1, MT128 wg2,
-#     MT256 wg4), 8x1 (MT128 wg1, MT256 wg2).  This suite exercises all three.
+#     M extent, which reduces exactly to MIWaveTile: 2x1 (MT32 wg1, MT64 wg2,
+#     MT128 wg4), 4x1 (MT64 wg1, MT128 wg2, MT256 wg4), 8x1 (MT128 wg1,
+#     MT256 wg2), 16x1 (MT256 wg1, MT512 wg2).  This suite exercises all four.
+#   - The 16x1 blocks are rectangular on purpose.  Since acc VGPRs scale as
+#     MIWaveTile[0]*MIWaveTile[1]*4, a square 16x16 wave tile would need 1024
+#     and is unbuildable; 16x1 is only reachable with MIWaveTile[1] <= 4.  That
+#     also makes them the only tiles here where A and B pick *different* stacks
+#     (A 16x1, B 2x1 or 4x1), so they cover the two swizzle families coexisting
+#     in one kernel.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
@@ -138,3 +145,72 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 512]
           - Exact: [128, 128, 1, 512]
           - Exact: [256, 256, 1, 512]
+
+  -
+    - # ProblemType (16x1 stack: A takes a 256-row strip, B stays 2x1/4x1)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 16, 2,  1, 1]   # MT 256x32  1 wave   A 16x1, B 2x1
+          - [16, 16, 128, 1,  1, 16, 4,  1, 1]   # MT 256x64  1 wave   A 16x1, B 4x1
+          - [16, 16, 128, 1,  1, 16, 2,  2, 2]   # MT 512x64  wg2x2    A 16x1, B 2x1
+          - [16, 16, 128, 1,  1, 16, 4,  2, 2]   # MT 512x128 wg2x2    A 16x1, B 4x1
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [128]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 128, 1, 128]
+          - Exact: [1024, 256, 1, 512]
+
+  -
+    - # ProblemType (16x1 stack at DepthU 256; wg2x2 exceeds 160KB LDS here so
+      # only the single-wave shapes fit)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 16, 2,  1, 1]   # MT 256x32  1 wave  (128KB LDS)
+          - [16, 16, 128, 1,  1, 16, 4,  1, 1]   # MT 256x64  1 wave  (128KB LDS)
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 64, 1, 256]
+          - Exact: [512, 128, 1, 512]
