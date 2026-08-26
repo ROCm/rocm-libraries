@@ -301,6 +301,10 @@ namespace rocsparse
         }
         case rocsparse_format_ell:
         {
+#ifndef ROCSPARSE_WITH_ELL_TRSV
+            // ELL support disabled at build time (BUILD_WITH_ELL_TRSV=OFF).
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
             switch(stage)
             {
             case rocsparse_spsv_stage_buffer_size:
@@ -368,6 +372,7 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
             // LCOV_EXCL_STOP
             break;
+#endif
         }
         case rocsparse_format_bsr:
         case rocsparse_format_bell:
