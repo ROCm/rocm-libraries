@@ -3,10 +3,14 @@
 
 #include <hipblaslt/client/MatmulTestCase.hpp>
 
+#include "hipblaslt_datatype2string.hpp"
+
 #include <algorithm>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 
 namespace hipblaslt::client
@@ -89,7 +93,115 @@ namespace hipblaslt::client
                 static_cast<size_t>(allocationElements),
             };
         }
+
+        hipDataType resolveBiasType(const Arguments& arguments)
+        {
+            static const std::set<hipDataType> supportedTypes
+                = {HIP_R_32F, HIP_R_16F, HIP_R_16BF, HIP_R_64F, HIP_R_32I, HIP_C_32F, HIP_C_64F};
+
+            hipDataType result = arguments.bias_type;
+            if(result == HIPBLASLT_DATATYPE_INVALID)
+            {
+                if(arguments.compute_type == HIPBLAS_COMPUTE_32I)
+                    result = HIP_R_32I;
+                else if(arguments.compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32)
+                    result = HIP_R_32F;
+                else if(((arguments.a_type == HIP_R_8F_E4M3_FNUZ
+                          || arguments.a_type == HIP_R_8F_E5M2_FNUZ)
+                         && (arguments.b_type == HIP_R_8F_E4M3_FNUZ
+                             || arguments.b_type == HIP_R_8F_E5M2_FNUZ))
+                        || ((arguments.a_type == HIP_R_8F_E4M3 || arguments.a_type == HIP_R_8F_E5M2)
+                            && (arguments.b_type == HIP_R_8F_E4M3
+                                || arguments.b_type == HIP_R_8F_E5M2))
+                        || (arguments.a_type == HIP_R_6F_E2M3 && arguments.b_type == HIP_R_6F_E2M3)
+                        || (arguments.a_type == HIP_R_6F_E3M2 && arguments.b_type == HIP_R_6F_E3M2)
+                        || (arguments.a_type == HIP_R_4F_E2M1 && arguments.b_type == HIP_R_4F_E2M1))
+                {
+                    result = arguments.d_type == HIP_R_32F || arguments.d_type == HIP_R_16BF
+                                 ? HIP_R_16BF
+                                 : HIP_R_16F;
+                }
+                else
+                    result = arguments.d_type;
+            }
+
+            if(!supportedTypes.contains(result))
+                throw std::invalid_argument("Invalid bias type "
+                                            + std::string(hip_datatype_to_string(result)));
+            return result;
+        }
+
+        hipDataType resolveAuxiliaryType(const Arguments& arguments)
+        {
+            static const std::set<hipDataType> supportedTypes
+                = {HIP_R_16F, HIP_R_16BF, HIP_R_8F_E4M3_FNUZ, HIP_R_8F_E4M3};
+
+            const hipDataType result = arguments.aux_type == HIPBLASLT_DATATYPE_INVALID
+                                           ? arguments.d_type
+                                           : arguments.aux_type;
+            if(result != arguments.d_type && !supportedTypes.contains(result))
+                throw std::invalid_argument("Invalid aux type "
+                                            + std::string(hip_datatype_to_string(result)));
+            return result;
+        }
+
+        std::pair<hipDataType, hipDataType> resolveComputeInputTypes(const Arguments& arguments)
+        {
+            static const std::set<hipDataType> supportedTypes = {
+                HIP_R_32F,
+                HIP_R_16BF,
+                HIP_R_16F,
+                HIP_R_8F_E4M3,
+                HIP_R_8F_E5M2,
+                HIP_R_8F_E4M3_FNUZ,
+                HIP_R_8F_E5M2_FNUZ,
+                static_cast<hipDataType>(HIP_R_6F_E2M3),
+                static_cast<hipDataType>(HIP_R_6F_E3M2),
+                static_cast<hipDataType>(HIP_R_4F_E2M1),
+            };
+
+            auto inputA = arguments.compute_input_typeA;
+            auto inputB = arguments.compute_input_typeB;
+            if(inputA != HIPBLASLT_DATATYPE_INVALID && !supportedTypes.contains(inputA))
+                throw std::invalid_argument("Invalid compute_input_typeA "
+                                            + std::string(hip_datatype_to_string(inputA)));
+            if(inputB != HIPBLASLT_DATATYPE_INVALID && !supportedTypes.contains(inputB))
+                throw std::invalid_argument("Invalid compute_input_typeB "
+                                            + std::string(hip_datatype_to_string(inputB)));
+
+            const auto computeScalar = computeTypeToRealDataType(arguments.compute_type);
+            if(inputA == HIPBLASLT_DATATYPE_INVALID)
+                inputA = computeScalar;
+            if(inputB == HIPBLASLT_DATATYPE_INVALID)
+                inputB = computeScalar;
+            return {inputA, inputB};
+        }
     } // namespace
+
+    MatmulDataTypes resolveMatmulDataTypes(const Arguments& arguments)
+    {
+        MatmulDataTypes types;
+        types.computeScalar = computeTypeToRealDataType(arguments.compute_type);
+        std::tie(types.computeInputA, types.computeInputB) = resolveComputeInputTypes(arguments);
+        types.coefficient = arguments.a_type == HIP_C_32F || arguments.a_type == HIP_C_64F
+                                ? arguments.a_type
+                                : types.computeScalar;
+        types.bias        = resolveBiasType(arguments);
+        types.auxiliary   = resolveAuxiliaryType(arguments);
+
+        const bool lowPrecisionInput
+            = (realDataTypeSize(arguments.a_type) == 1 || realDataTypeSize(arguments.b_type) == 1)
+              && types.computeScalar != HIP_R_32I;
+        types.biasStorage = arguments.d_type;
+        if(lowPrecisionInput || arguments.d_type == HIP_R_16F || arguments.d_type == HIP_R_16BF)
+        {
+            const hipDataType preferredNarrowBias
+                = arguments.d_type == HIP_R_16BF || arguments.d_type == HIP_R_32F ? HIP_R_16BF
+                                                                                  : HIP_R_16F;
+            types.biasStorage = types.bias == preferredNarrowBias ? preferredNarrowBias : HIP_R_32F;
+        }
+        return types;
+    }
 
     std::vector<MatmulTestCase> normalizeMatmulCases(const Arguments& arguments)
     {
