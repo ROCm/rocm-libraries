@@ -327,8 +327,7 @@ def wgrad_reference_gfx1250(
     Cg = C // g  # input channels per group
     Kg = K // g  # output channels per group
 
-    dW = np.zeros((K, p.Y, p.X, C), dtype=np.float32)
-
+    dW = np.zeros((K, p.Y, p.X, Cg), dtype=np.float32)
     for grp in range(g):
         x_grp = X_np[:, :, :, grp * Cg : (grp + 1) * Cg]  # (N, Hi, Wi, Cg)
         for n in range(N):
