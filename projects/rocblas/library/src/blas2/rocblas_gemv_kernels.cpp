@@ -128,12 +128,15 @@ inline size_t rocblas_gemvn_sm_min_elems()
 // given m. This matches the blocks formula in the launcher:
 //   real / complex-float: (m - 1) / (DIM_X * 4) + 1
 //   double-complex:       (m - 1) / DIM_X + 1   (DIM_X * 4 is too wide)
-// Both use DIM_X = 32.
+// Both use DIM_X = 32. The launcher keys the double-complex formula off the
+// element (Tex) type, so strip pointer/cv from T to recognise the batched
+// case, where T is a pointer (e.g. rocblas_double_complex* const).
 template <typename T>
 inline rocblas_int rocblas_gemvn_output_tiles(rocblas_int m)
 {
     constexpr int DIM_X = 32;
-    if constexpr(std::is_same_v<T, rocblas_double_complex>)
+    using element       = std::remove_cv_t<std::remove_pointer_t<T>>;
+    if constexpr(std::is_same_v<element, rocblas_double_complex>)
         return (m - 1) / DIM_X + 1;
     return (m - 1) / (DIM_X * 4) + 1;
 }
@@ -178,8 +181,8 @@ inline bool rocblas_gemvt_fat_n(rocblas_int m, rocblas_int n, int gfx_arch)
         bool fat = n / 4 >= m;
         return fat
                && ((std::is_same_v<T, float> && m <= 768)
-                   || ((std::is_same_v<T, double> || std::is_same_v<T, rocblas_float_complex>)
-                       && m <= 384)
+                   || ((std::is_same_v<T, double> || std::is_same_v<T, rocblas_float_complex>)&&m
+                       <= 384)
                    || (std::is_same_v<T, rocblas_double_complex> && m <= 128));
     }
     else if(gfx_arch == 942)
@@ -278,10 +281,13 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
     static constexpr bool is_float = std::is_same_v<Ti, float> || std::is_same_v<Ti, float const*>;
     static constexpr bool is_double
         = std::is_same_v<Ti, double> || std::is_same_v<Ti, double const*>;
-    static constexpr bool is_complex_float = std::is_same_v<Ti, rocblas_float_complex>
-                                             || std::is_same_v<Ti, rocblas_float_complex const*>;
-    static constexpr bool is_complex_double = std::is_same_v<Ti, rocblas_double_complex>
-                                              || std::is_same_v<Ti, rocblas_double_complex const*>;
+    static constexpr bool is_complex_float
+        = std::is_same_v<Ti,
+                         rocblas_float_complex> || std::is_same_v<Ti, rocblas_float_complex const*>;
+    static constexpr bool is_complex_double
+        = std::is_same_v<
+              Ti,
+              rocblas_double_complex> || std::is_same_v<Ti, rocblas_double_complex const*>;
     const bool is_atomics_allowed = handle->atomics_mode == rocblas_atomics_allowed ? true : false;
 
     //Identifying the architecture to have an appropriate optimization
