@@ -249,7 +249,6 @@ RppStatus hip_exec_blend_single_image(T* srcPtr1, T* srcPtr2, RpptDescPtr srcDes
     int globalThreads_y = dstDescPtr->h;
     int globalThreads_z = 1;
 
-    RppStatus status = RPP_SUCCESS;
     if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
         hipLaunchKernelGGL(
             blend_pkd_hip_tensor,
@@ -261,7 +260,6 @@ RppStatus hip_exec_blend_single_image(T* srcPtr1, T* srcPtr2, RpptDescPtr srcDes
             make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride), alphaTensor,
             roiSrc);
         HIP_CHECK_LAUNCH_RETURN();
-        if (hipGetLastError() != hipSuccess) status = RPP_ERROR_HIP_LAUNCH;
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW)) {
         hipLaunchKernelGGL(blend_pln_hip_tensor,
@@ -277,7 +275,6 @@ RppStatus hip_exec_blend_single_image(T* srcPtr1, T* srcPtr2, RpptDescPtr srcDes
                                       dstDescPtr->strides.hStride),
                            dstDescPtr->c, alphaTensor, roiSrc);
         HIP_CHECK_LAUNCH_RETURN();
-        if (hipGetLastError() != hipSuccess) status = RPP_ERROR_HIP_LAUNCH;
     } else if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3)) {
         if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW)) {
             hipLaunchKernelGGL(blend_pkd3_pln3_hip_tensor,
@@ -292,7 +289,6 @@ RppStatus hip_exec_blend_single_image(T* srcPtr1, T* srcPtr2, RpptDescPtr srcDes
                                           dstDescPtr->strides.hStride),
                                alphaTensor, roiSrc);
             HIP_CHECK_LAUNCH_RETURN();
-            if (hipGetLastError() != hipSuccess) status = RPP_ERROR_HIP_LAUNCH;
         } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             globalThreads_x = (srcDescPtr->strides.hStride + 7) >> 3;
@@ -308,11 +304,10 @@ RppStatus hip_exec_blend_single_image(T* srcPtr1, T* srcPtr2, RpptDescPtr srcDes
                                make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                                alphaTensor, roiSrc);
             HIP_CHECK_LAUNCH_RETURN();
-            if (hipGetLastError() != hipSuccess) status = RPP_ERROR_HIP_LAUNCH;
         }
     }
 
-    return status;
+    return RPP_SUCCESS;
 }
 
 template RppStatus hip_exec_blend_tensor<Rpp8u>(Rpp8u*, Rpp8u*, RpptDescPtr, Rpp8u*, RpptDescPtr,

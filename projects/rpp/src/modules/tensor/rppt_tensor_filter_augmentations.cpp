@@ -122,8 +122,6 @@ RppStatus rppt_box_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
             } else
                 return RPP_ERROR_NOT_IMPLEMENTED;
         }
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -193,8 +191,6 @@ RppStatus rppt_box_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
             } else
                 return RPP_ERROR_NOT_IMPLEMENTED;
         }
-
-        return RPP_SUCCESS;
     }
 #endif
 
@@ -291,8 +287,6 @@ RppStatus rppt_median_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t d
             } else
                 return RPP_ERROR_NOT_IMPLEMENTED;
         }
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -366,8 +360,6 @@ RppStatus rppt_median_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t d
             } else
                 return RPP_ERROR_NOT_IMPLEMENTED;
         }
-
-        return RPP_SUCCESS;
     }
 #endif
 
@@ -469,8 +461,6 @@ RppStatus rppt_gaussian_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
             } else
                 return RPP_ERROR_NOT_IMPLEMENTED;
         }
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -544,8 +534,6 @@ RppStatus rppt_gaussian_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
             } else
                 return RPP_ERROR_NOT_IMPLEMENTED;
         }
-
-        return RPP_SUCCESS;
     }
 #endif
 
@@ -735,8 +723,6 @@ RppStatus rppt_emboss(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                 kernelSize, roiTensorPtrSrc, roiType, layoutParams, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
-
-        return RPP_SUCCESS;
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -771,8 +757,6 @@ RppStatus rppt_emboss(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                 kernelSize, roiTensorPtrSrc, roiType, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
-
-        return RPP_SUCCESS;
     }
 #endif
 

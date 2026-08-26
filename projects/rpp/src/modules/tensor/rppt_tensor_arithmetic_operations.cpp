@@ -60,18 +60,14 @@ RppStatus rppt_fused_multiply_add_scalar(RppPtr_t srcPtr, RpptGenericDescPtr src
                  (dstGenericDescPtr->layout == RpptLayout::NDHWC))
             layoutParams = get_layout_params(srcGenericDescPtr->layout, srcGenericDescPtr->dims[4]);
 
-        if ((srcGenericDescPtr->dataType == RpptDataType::F32) &&
-            (dstGenericDescPtr->dataType == RpptDataType::F32)) {
-            return fused_multiply_add_scalar_f32_f32_host_tensor(
-                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) +
-                                          srcGenericDescPtr->offsetInBytes),
-                srcGenericDescPtr,
-                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
-                                          dstGenericDescPtr->offsetInBytes),
-                dstGenericDescPtr, mulTensor, addTensor, roiGenericPtrSrc, roiType, layoutParams,
-                handle);
-        }
-        return RPP_SUCCESS;
+        return fused_multiply_add_scalar_f32_f32_host_tensor(
+            reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) +
+                                      srcGenericDescPtr->offsetInBytes),
+            srcGenericDescPtr,
+            reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
+                                      dstGenericDescPtr->offsetInBytes),
+            dstGenericDescPtr, mulTensor, addTensor, roiGenericPtrSrc, roiType, layoutParams,
+            handle);
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -115,17 +111,13 @@ RppStatus rppt_add_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr,
                  (dstGenericDescPtr->layout == RpptLayout::NDHWC))
             layoutParams = get_layout_params(srcGenericDescPtr->layout, srcGenericDescPtr->dims[4]);
 
-        if ((srcGenericDescPtr->dataType == RpptDataType::F32) &&
-            (dstGenericDescPtr->dataType == RpptDataType::F32)) {
-            return add_scalar_f32_f32_host_tensor(
-                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) +
-                                          srcGenericDescPtr->offsetInBytes),
-                srcGenericDescPtr,
-                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
-                                          dstGenericDescPtr->offsetInBytes),
-                dstGenericDescPtr, addTensor, roiGenericPtrSrc, roiType, layoutParams, handle);
-        }
-        return RPP_SUCCESS;
+        return add_scalar_f32_f32_host_tensor(
+            reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) +
+                                      srcGenericDescPtr->offsetInBytes),
+            srcGenericDescPtr,
+            reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
+                                      dstGenericDescPtr->offsetInBytes),
+            dstGenericDescPtr, addTensor, roiGenericPtrSrc, roiType, layoutParams, handle);
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -170,17 +162,13 @@ RppStatus rppt_subtract_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDes
                  (dstGenericDescPtr->layout == RpptLayout::NDHWC))
             layoutParams = get_layout_params(srcGenericDescPtr->layout, srcGenericDescPtr->dims[4]);
 
-        if ((srcGenericDescPtr->dataType == RpptDataType::F32) &&
-            (dstGenericDescPtr->dataType == RpptDataType::F32)) {
-            return subtract_scalar_f32_f32_host_tensor(
-                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) +
-                                          srcGenericDescPtr->offsetInBytes),
-                srcGenericDescPtr,
-                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
-                                          dstGenericDescPtr->offsetInBytes),
-                dstGenericDescPtr, subtractTensor, roiGenericPtrSrc, roiType, layoutParams, handle);
-        }
-        return RPP_SUCCESS;
+        return subtract_scalar_f32_f32_host_tensor(
+            reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) +
+                                      srcGenericDescPtr->offsetInBytes),
+            srcGenericDescPtr,
+            reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
+                                      dstGenericDescPtr->offsetInBytes),
+            dstGenericDescPtr, subtractTensor, roiGenericPtrSrc, roiType, layoutParams, handle);
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -225,17 +213,13 @@ RppStatus rppt_multiply_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDes
                  (dstGenericDescPtr->layout == RpptLayout::NDHWC))
             layoutParams = get_layout_params(srcGenericDescPtr->layout, srcGenericDescPtr->dims[4]);
 
-        if ((srcGenericDescPtr->dataType == RpptDataType::F32) &&
-            (dstGenericDescPtr->dataType == RpptDataType::F32)) {
-            return multiply_scalar_f32_f32_host_tensor(
-                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) +
-                                          srcGenericDescPtr->offsetInBytes),
-                srcGenericDescPtr,
-                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
-                                          dstGenericDescPtr->offsetInBytes),
-                dstGenericDescPtr, mulTensor, roiGenericPtrSrc, roiType, layoutParams, handle);
-        }
-        return RPP_SUCCESS;
+        return multiply_scalar_f32_f32_host_tensor(
+            reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) +
+                                      srcGenericDescPtr->offsetInBytes),
+            srcGenericDescPtr,
+            reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
+                                      dstGenericDescPtr->offsetInBytes),
+            dstGenericDescPtr, mulTensor, roiGenericPtrSrc, roiType, layoutParams, handle);
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -448,28 +432,20 @@ RppStatus rppt_log1p(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppP
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
-        if ((srcGenericDescPtr->dataType == RpptDataType::I16) &&
-            (dstGenericDescPtr->dataType == RpptDataType::F32)) {
-            return log1p_i16_f32_host_tensor(
-                static_cast<Rpp16s*>(srcPtr) + srcGenericDescPtr->offsetInBytes, srcGenericDescPtr,
-                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
-                                          dstGenericDescPtr->offsetInBytes),
-                dstGenericDescPtr, roiTensor, handle);
-        }
-        return RPP_SUCCESS;
+        return log1p_i16_f32_host_tensor(
+            static_cast<Rpp16s*>(srcPtr) + srcGenericDescPtr->offsetInBytes, srcGenericDescPtr,
+            reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
+                                      dstGenericDescPtr->offsetInBytes),
+            dstGenericDescPtr, roiTensor, handle);
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
-        if ((srcGenericDescPtr->dataType == RpptDataType::I16) &&
-            (dstGenericDescPtr->dataType == RpptDataType::F32)) {
-            return hip_exec_log1p_i16_f32_tensor(
-                static_cast<Rpp16s*>(srcPtr) + srcGenericDescPtr->offsetInBytes, srcGenericDescPtr,
-                reinterpret_cast<Rpp32f*>(static_cast<Rpp16s*>(dstPtr) +
-                                          dstGenericDescPtr->offsetInBytes),
-                dstGenericDescPtr, roiTensor, handle);
-        }
-        return RPP_SUCCESS;
+        return hip_exec_log1p_i16_f32_tensor(
+            static_cast<Rpp16s*>(srcPtr) + srcGenericDescPtr->offsetInBytes, srcGenericDescPtr,
+            reinterpret_cast<Rpp32f*>(static_cast<Rpp16s*>(dstPtr) +
+                                      dstGenericDescPtr->offsetInBytes),
+            dstGenericDescPtr, roiTensor, handle);
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
