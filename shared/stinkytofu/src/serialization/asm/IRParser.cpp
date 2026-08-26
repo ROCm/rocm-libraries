@@ -660,7 +660,8 @@ bool IRParser::parseAttributes(ParsedInstruction& inst) {
 
     // Parse comma-separated attributes
     while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof) {
-        skipNewlines();
+        skipNewlines();  // the block may span lines
+
         // Check for end of attributes
         if (peek().kind == TokenKind::RightBrace) {
             consume();
@@ -726,8 +727,8 @@ bool IRParser::parseAttributes(ParsedInstruction& inst) {
             return false;
         }
 
-        skipNewlines();
         // Check for comma or end of attributes
+        skipNewlines();
         if (peek().kind == TokenKind::Comma) {
             consume();
             continue;

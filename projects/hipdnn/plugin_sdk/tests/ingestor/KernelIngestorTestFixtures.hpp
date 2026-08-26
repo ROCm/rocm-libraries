@@ -627,6 +627,28 @@ inline std::unique_ptr<StateManager>
         cacheCapacity);
 }
 
+/// The same engine as makeStateManager(), but carrying @p engineName so its on-disk
+/// winner-cache shard resolves. makeStateManager() leaves the name empty, which
+/// disables the disk cache, so every test that does not opt in stays in-memory only.
+inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
+{
+    std::vector<MatchDescriptor> matchers{
+        {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
+    ensureNoopDispatchRegistered<TestHandle>();
+    std::vector<DispatchDescriptor> dispatches{{DISPATCH_ID, "test dispatch", "test.dispatch"}};
+
+    return std::make_unique<StateManager>(
+        makeSchema(),
+        std::move(matchers),
+        std::move(dispatches),
+        std::vector<KernelDescriptorPack>{makePack({KERNEL_MATCHER_ID})},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph",
+        "engine 'test fixture'",
+        StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
+        engineName);
+}
+
 /// Installs @p handler under @p symbol for the object's lifetime, replacing
 /// makeTestDispatches()'s no-op and restoring it after.
 template <typename THandle>
