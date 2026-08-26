@@ -182,8 +182,24 @@ int dispatcher_run_grouped_bquant_gemm(const void* A,
     // Copy inputs to device
     BRIDGE_HIP_CHECK(
         kFn, hipMemcpy(A_dev, A, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
-    BRIDGE_HIP_CHECK(
-        kFn, hipMemcpy(B_dev, B, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
+    // Copy B. For pk_int4 B the raw i4x4 values must be permuted for the device
+    // implementation (run_gemm_quant_example.inc:784-786). pk_fp4_t is left
+    // alone -- Old-TE applies this permute only to pk_int4_t.
+    if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
+    {
+        auto b_k_n = load_host_tensor<false>(
+            B_host, static_cast<int>(K), static_cast<int>(N), static_cast<int>(K));
+        permute_i4_inplace(b_k_n);
+        BRIDGE_HIP_CHECK(
+            kFn,
+            hipMemcpy(
+                B_dev, b_k_n.data(), elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
+    }
+    else
+    {
+        BRIDGE_HIP_CHECK(
+            kFn, hipMemcpy(B_dev, B, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
+    }
     // Apply BQ preshuffle when required -- mirrors gemm_bquant_profiler.hpp:118-121.
     // BPreshuffleQuant reorders BQ in host memory before the device copy so the kernel
     // finds the scale values in the interleaved layout it expects.

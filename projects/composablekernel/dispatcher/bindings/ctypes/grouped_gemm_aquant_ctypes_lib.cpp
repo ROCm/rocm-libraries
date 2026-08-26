@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <type_traits>
 
 #include "quant_bridge_common.hpp"
 #include "quant_bridge_shuffle.hpp"
@@ -142,7 +143,7 @@ int dispatcher_run_grouped_aquant_gemm(const void* A,
 
     // RAII device buffers: any early return (including from BRIDGE_HIP_CHECK) frees
     // every allocation automatically -- no hand-written cleanup lambda needed.
-    // B may be a packed type (pk_int4_t): elements_to_bytes<T>(n) handles PackedSize correctly.
+    // A may be a packed type (pk_int4_t): elements_to_bytes<T>(n) handles PackedSize correctly.
     DeviceBuffer<ADataType> A_dev;
     DeviceBuffer<BDataType> B_dev;
     DeviceBuffer<QDataType> AQ_dev;
@@ -158,13 +159,31 @@ int dispatcher_run_grouped_aquant_gemm(const void* A,
                      C_dev.allocate(elements_to_bytes<CDataType>(static_cast<std::size_t>(M) *
                                                                  static_cast<std::size_t>(N))));
 
-    // Copy inputs to device
-    BRIDGE_HIP_CHECK(kFn,
-                     hipMemcpy(A_dev,
-                               A,
-                               elements_to_bytes<ADataType>(static_cast<std::size_t>(M) *
-                                                            static_cast<std::size_t>(K)),
-                               hipMemcpyHostToDevice));
+    // Copy A. For pk_int4 A the raw i4x4 values must be permuted for the device
+    // implementation (run_gemm_quant_example.inc:758-763).
+    if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t>)
+    {
+        auto a_h = load_host_tensor<true>(static_cast<const ADataType*>(A),
+                                          static_cast<int>(M),
+                                          static_cast<int>(K),
+                                          static_cast<int>(stride_A));
+        permute_i4_inplace(a_h);
+        BRIDGE_HIP_CHECK(kFn,
+                         hipMemcpy(A_dev,
+                                   a_h.data(),
+                                   elements_to_bytes<ADataType>(static_cast<std::size_t>(M) *
+                                                                static_cast<std::size_t>(K)),
+                                   hipMemcpyHostToDevice));
+    }
+    else
+    {
+        BRIDGE_HIP_CHECK(kFn,
+                         hipMemcpy(A_dev,
+                                   A,
+                                   elements_to_bytes<ADataType>(static_cast<std::size_t>(M) *
+                                                                static_cast<std::size_t>(K)),
+                                   hipMemcpyHostToDevice));
+    }
     BRIDGE_HIP_CHECK(kFn,
                      hipMemcpy(B_dev,
                                B,
