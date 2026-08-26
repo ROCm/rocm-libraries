@@ -6062,14 +6062,13 @@ class KernelWriterAssembly(KernelWriter):
     if (tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]:
       module = Module("lraDeclareAddresses (Empty)")
     elif (kernel["LdsOffset%s"%tc] != 0) or \
-         (kernel.get("LDSSegmentInterleave") == 1 and tc in ("B", "MXSA", "MXSB")):
+         (kernel.get("LDSSegmentInterleave") == 1 and
+          (tc in ("MXSA", "MXSB") or
+           kernel["LDSSegInterleaveOffsets"].get("ldsBase" + tc) is not None)):
       _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
-      if tc == "B" and kernel.get("LDSSegmentInterleave") == 1:
-        _ldsBase = _segOff["ldsBaseB"]
-      elif tc in ("MXSA", "MXSB") and _segOff.get("ldsBase" + tc) is not None:
-        _ldsBase = _segOff["ldsBase" + tc]   # relocated MX scale base
-      else:
-        _ldsBase = kernel["LdsOffset%s"%tc]
+      # ldsBase<tc> covers A/B (interleaved or baseline) and relocated MX scales; falls back
+      # to the plain LdsOffset when this tensor has no segment-interleave base.
+      _ldsBase = _segOff.get("ldsBase" + tc, kernel["LdsOffset%s"%tc])
       module.add(VAddCOU32(dst=vgpr("LocalReadAddr%s+0"%tc), dst1=VCC(),
                            src0=hex(_ldsBase), src1=vgpr("LocalReadAddr%s+0"%tc),
                            comment=" += LdsOffset%s (lower)"%tc))
@@ -19219,13 +19218,25 @@ class KernelWriterAssembly(KernelWriter):
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
     if kernel.get("LDSSegmentInterleave") == 1 and tc in ("A", "B"):
       _segOff = kernel["LDSSegInterleaveOffsets"]
-      if tc == "A" and _segOff.get("portSplitA", False):
-        numVec = kernel["MIWaveTile"][ti] // kernel["VectorWidthA"]
-        vIdxFootprint = round(mt * du * bpe // dim1Divisor // numVec)   # per-vIdx, not the component jump
-        vIdxPad = vIdxFootprint // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
-        return vIdxFootprint + vIdxPad
-      # Coarse A / non-bcontig B: component jump.
-      if tc == "A" or not _segOff.get("bBaseline", False):
+      _portSplit = (tc == "A" and _segOff.get("portSplitA", False)) or \
+                   (tc == "B" and _segOff.get("portSplitB", False))
+      # componentSplit: ldsSplit is the per-vIdx step within the segment; the component jump
+      # rides the wave base (initTDMDescriptorWaveSeparatedImpl), not ldsSplit.
+      _componentSplit = _segOff.get("componentSplit", False) and _segOff.get("activeTC") == tc
+      if _portSplit or _componentSplit:
+        vw = kernel["VectorWidthA"] if tc == "A" else kernel["VectorWidthB"]
+        numVec = kernel["MIWaveTile"][ti] // vw
+        numComp = kernel["NumWaves"] // 2
+        # Both halves stay in one segment, so the boundary is the per-vIdx footprint, not a segment
+        # jump. splitDiv = numVec (VW==WaveTile/2) or numComp (VW==WaveTile).
+        splitDiv = numVec if numVec > 1 else numComp
+        halfFootprint = round(mt * du * bpe // dim1Divisor // splitDiv)
+        halfPad = halfFootprint // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
+        return halfFootprint + halfPad
+      # Otherwise the boundary is a segment jump (writeStrideBytes): the second half lands in the next
+      # segment. A baseline tensor (aBaseline/bBaseline) is skipped and uses the default footprint below.
+      if (tc == "A" and not _segOff.get("aBaseline", False)) or \
+         (tc == "B" and not _segOff.get("bBaseline", False)):
         return _segOff["writeStrideBytes"]
     half = round(mt * du * bpe // dim1Divisor)
     extraPadSize = half // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
@@ -19516,10 +19527,17 @@ class KernelWriterAssembly(KernelWriter):
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+      _segOffAB = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+      # Active tensor only gets the component wave jump; the baseline tensor (aBaseline/bBaseline) is untouched.
       _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and (
-          tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))
-      _segPortSplitA = _segAB and tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False)
-      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplitA
+          (tc == "A" and not _segOffAB.get("aBaseline", False)) or
+          (tc == "B" and not _segOffAB.get("bBaseline", False)))
+      _segPortSplit = _segAB and ((tc == "A" and _segOffAB.get("portSplitA", False)) or
+                                  (tc == "B" and _segOffAB.get("portSplitB", False)))
+      # componentSplit: the wave base carries the component segment jump (wId * writeStrideBytes);
+      # the per-vIdx split stays within the segment.
+      _segComponentSplit = _segAB and _segOffAB.get("componentSplit", False) and _segOffAB.get("activeTC") == tc
+      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplit or _segComponentSplit
       _segFootprint = _segWaveJump and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
       if _segWaveJump:
           dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
@@ -19533,12 +19551,10 @@ class KernelWriterAssembly(KernelWriter):
                 f"padBytes = numPadBlocks * ({ldsPadSize=})"))
         mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
                 "woffset += padBytes"))
-      if kernel.get("LDSSegmentInterleave") == 1 and tc == "B":
-          ldsConstOffset = kernel["LDSSegInterleaveOffsets"]["ldsBaseB"]
-      elif kernel.get("LDSSegmentInterleave") == 1 and tc in ("MXSA", "MXSB"):
-          _mxBase = kernel["LDSSegInterleaveOffsets"].get("ldsBase" + tc)
-          if _mxBase is not None:
-              ldsConstOffset = _mxBase   # relocated MX scale base
+      if kernel.get("LDSSegmentInterleave") == 1 and _segOffAB.get("ldsBase" + tc) is not None:
+          # A/B interleaved-or-shared base (e.g. ldsBaseB for [2,2]/[4,1], ldsBaseA for [1,4]),
+          # or relocated MX scale base.
+          ldsConstOffset = _segOffAB["ldsBase" + tc]
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
