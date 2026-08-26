@@ -49,11 +49,12 @@ TEST(HostValidationTypeBridge, ConvergesOnScalarType)
 
 TEST(HostValidationTypeBridge, ValidatesComputeInputTypeBWhenAIsUnset)
 {
-    Arguments arguments;
+    Arguments arguments{};
+    arguments.init();
     arguments.compute_input_typeA = HIPBLASLT_DATATYPE_INVALID;
     arguments.compute_input_typeB = HIP_R_64F;
 
-    EXPECT_THROW(derive_unset_compute_input_type(arguments), std::invalid_argument);
+    EXPECT_THROW(hipblaslt::client::resolveMatmulDataTypes(arguments), std::invalid_argument);
 }
 
 TEST(MatmulOrchestration, MapsScaleModes)
