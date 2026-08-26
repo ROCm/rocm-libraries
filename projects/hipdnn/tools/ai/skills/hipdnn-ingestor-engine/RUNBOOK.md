@@ -161,6 +161,28 @@ reasons unrelated to your integration. Knowing on day one lets you stage artifac
 less contended site while everything else proceeds. If the arch is unreachable, get a
 decision now — and report the run as the stage it reached, never as stage 8.
 
+**If you go off-site, create the log directory on THAT site's filesystem first.** `/home`
+is a different filesystem per site, so a job whose `--output` points at your usual
+`$HOME/...` path fails the instant it is scheduled on a node elsewhere: SLURM cannot open
+the file, and the job dies before your payload runs. The tell is subtle, because
+`squeue` keeps showing `PENDING` (it is requeued) while `sacct --duplicates` carries a
+`FAILED` row with `Start=None` and `End == Submit`:
+
+```bash
+sacct -j <jobid> --duplicates -o JobID,State,ExitCode,Start,End
+```
+
+`State=FAILED, ExitCode=1:0, Start=None` means it never ran — a launch failure, not a
+payload failure, and no log exists to explain it. Fix by creating the directory on the
+target site's root, which the submit host mounts:
+
+```bash
+ssh $LOGIN "mkdir -p /home_aus/<user>/.alola-gpu-tests/<job-dir>"   # or /home_sc
+```
+
+Check `sacct --duplicates` — not `squeue` — whenever an off-site job seems to queue
+forever. Plain `sacct` shows only the live requeued row and hides the failure entirely.
+
 ---
 
 ## Step 2 — Mine the kernel
