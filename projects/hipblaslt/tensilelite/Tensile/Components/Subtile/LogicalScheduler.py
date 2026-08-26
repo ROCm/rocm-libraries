@@ -4193,10 +4193,12 @@ class LogicalScheduler:
                              if getattr(em.source, 'label', None) == 'initC_overlap'), None)
             assert init_idx is not None, "preloop must contain the canonical initC op"
             next_id = max(em.moduleId for em in em_list) + 1
-            # After initC, jump to the tail loop when K < DepthU. Under PLSIN the
-            # fused-store + epilogue footprint sits between here and SkipToEnd and
-            # pushes it past the +-simm16 short-branch range, so this arm needs the
-            # 32-bit form.
+            # Jump to the tail when K<DepthU after all data-independent preloop
+            # setup, but before the global-read wait. PLSIN defers LRA setup and
+            # its fused-store predicate into this prefetch shadow; placing the
+            # jump immediately after initC would bypass both and leave the tail
+            # with invalid LDS read addresses. Non-PLSIN has no intervening setup,
+            # so this remains immediately after initC there.
             if plsin:
                 tailJump = writer.longBranchScc1(
                     endLabel, posNeg=1,
@@ -4204,7 +4206,10 @@ class LogicalScheduler:
             else:
                 tailJump = SCBranchSCC1(labelName=endLabel.getLabelName(),
                                         comment="K < DepthU: jump to tail loop")
-            em_list.insert(init_idx + 1, EmittedModule(
+            tail_insert_idx = next(
+                (i for i, em in enumerate(em_list) if em.opType == 'wait_gr'),
+                init_idx + 1)
+            em_list.insert(tail_insert_idx, EmittedModule(
                 moduleId=next_id,
                 instructions=[
                     SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,

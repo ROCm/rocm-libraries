@@ -36,6 +36,8 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 KWA_PATH = os.path.join(TENSILE_ROOT, "Tensile", "KernelWriterAssembly.py")
+LOGICAL_SCHEDULER_PATH = os.path.join(
+    TENSILE_ROOT, "Tensile", "Components", "Subtile", "LogicalScheduler.py")
 
 
 # ── Harness ───────────────────────────────────────────────────────────────
@@ -158,6 +160,19 @@ def _function_node(source, func_name):
     raise AssertionError("function %s not found" % func_name)
 
 
+def test_short_k_tail_jump_follows_deferred_preloop_setup():
+    # K<DepthU must execute PLSIN's deferred LRA/predicate setup before jumping
+    # to the tail. The insertion point is therefore the first preloop wait_gr,
+    # not the slot immediately after initC.
+    source = open(LOGICAL_SCHEDULER_PATH).read()
+    func = _function_node(source, "emitMainAndExitLoops")
+    body = ast.get_source_segment(source, func)
+    deferred_setup_idx = body.index("_lraDeferred")
+    tail_insert_idx = body.index("tail_insert_idx = next")
+    wait_target_idx = body.index("if em.opType == 'wait_gr'", tail_insert_idx)
+    assert deferred_setup_idx < tail_insert_idx < wait_target_idx
+
+
 def _find_call(func_node, callee_attr):
     for node in ast.walk(func_node):
         if (isinstance(node, ast.Call)
@@ -211,6 +226,11 @@ def test_build_subtile_fused_store_replays_srd_init_for_short_k():
         and value.right.value == "Short"
         for value in suffixes
     ), "short-K SrdD replay must use distinct assembly labels"
+    body = ast.get_source_segment(source, func)
+    assert 'src0=sgpr("SizesSum+%u"' in body
+    assert 'src1=pgr * kernel["DepthU"]' in body
+    assert "plsinSrdDInit_numIter" not in body, (
+        "short-K guard scratch must not clobber values live into the SrdD remainder")
 
 
 def test_fused_store_predicate_excludes_alpha():

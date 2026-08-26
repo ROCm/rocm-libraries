@@ -14705,15 +14705,15 @@ class KernelWriterAssembly(KernelWriter):
         shortInit = Label(label=self.labels.getNameInc("PLSIN_SrdDShortInit"), comment="")
         srdInitDone = Label(label=self.labels.getNameInc("PLSIN_SrdDInitDone"), comment="")
         module.addComment1("PLSIN numIter<PGR: replay skipped hoisted SrdD init serially")
-        with self.allocTmpSgpr(1, tag="plsinSrdDInit_numIter") as nTmp:
-          module.add(SLShiftRightB32(dst=sgpr(nTmp.idx),
-                                     src=sgpr("SizesSum+%u" % self.states.unrollIdx),
-                                     shiftHex=hex(log2(kernel["DepthU"])),
-                                     comment="numIter = SizesSum / DepthU"))
-          module.add(SCmpGeU32(src0=sgpr(nTmp.idx), src1=pgr,
-                               comment="numIter >= PGR? (woven SrdD init executed)"))
-          module.add(SCBranchSCC0(labelName=shortInit.getLabelName(),
-                                  comment="short K skipped FUSED loop -> run full SrdD init"))
+        # Compare K directly so this guard cannot reuse/clobber a scratch SGPR
+        # whose value is live from the woven prefix into the serial remainder
+        # (notably the masked ArgType used by batched-D routing).
+        module.add(SCmpGeU32(
+          src0=sgpr("SizesSum+%u" % self.states.unrollIdx),
+          src1=pgr * kernel["DepthU"],
+          comment="K >= PGR*DepthU? (woven SrdD init executed)"))
+        module.add(SCBranchSCC0(labelName=shortInit.getLabelName(),
+                                comment="short K skipped FUSED loop -> run full SrdD init"))
         for _it in _remainder:
           module.add(_it)
         module.add(SBranch(labelName=srdInitDone.getLabelName(),
