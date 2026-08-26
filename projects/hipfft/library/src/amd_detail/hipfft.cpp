@@ -2102,7 +2102,7 @@ hipfftResult hipfftXtSetCallback(hipfftHandle         plan,
                                  void**               callbackData)
 try
 {
-    if(!plan)
+    if(!plan || !plan->initialized())
         return HIPFFT_INVALID_PLAN;
 
     hipfftHandle_t::callback_info_t::validate_type(cbtype, plan->io_type);
