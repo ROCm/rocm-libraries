@@ -1078,7 +1078,12 @@ def localReadDTLInitCommonSwapVgpr(writer, kernel):
   atile = writer.states.a.tileInfo
   btile = writer.states.b.tileInfo
 
-  stmp = writer.sgprPool.checkOut(1, tag="_localReadDTLInitCommonSwapVgpr_stmp")
+  # One scratch SGPR, released at the end of this function.  The GR soffset
+  # allocation ahead of it takes one register per subtile strip and can leave
+  # the pool with nothing free while the architectural budget still has room,
+  # so let the pool grow instead of failing to emit the kernel.
+  stmp = writer.sgprPool.checkOut(1, tag="_localReadDTLInitCommonSwapVgpr_stmp",
+                                  preventOverflow=False)
   module.add(SMovB32(dst=sgpr(stmp), src=writer.ldsTotalSize, comment="Store Total Lds Size for one buffer"))
   for i in range(len(atile.sharedVgprLROffset)):
     vgprId = atile.sharedVgprLROffset[i]
