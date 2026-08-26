@@ -30,8 +30,8 @@
 
 #pragma once
 #include "../../../../shared/arithmetic.h"
+#include "../../include/rtc_kernel.h"
 #include "generator.h"
-#include "rtc_kernel.h"
 
 #include <cmath>
 #include <map>

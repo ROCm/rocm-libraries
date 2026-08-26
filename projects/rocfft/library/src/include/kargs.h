@@ -68,16 +68,6 @@ public:
         return buf.data_offset(lengths_bytes() + strides_bytes());
     }
 
-    IndexType index_type() const
-    {
-        return itype;
-    }
-
-    operator bool() const
-    {
-        return static_cast<bool>(buf);
-    }
-
 private:
     static size_t lengths_bytes()
     {

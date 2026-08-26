@@ -56,8 +56,7 @@ static inline size_t rtc_index_type_size(IndexType itype)
 // compilation and caching can live in the cached_compile method.
 //
 // function to generate the name of a kernel, given no arguments
-using kernel_name_gen_t  = std::function<std::string()>;
-using kernel_itype_gen_t = std::function<IndexType()>;
+using kernel_name_gen_t = std::function<std::string()>;
 // functor to generate the source code of a kernel, given the
 // kernel name.  but remember the source in case we're asked to
 // generate it again.
