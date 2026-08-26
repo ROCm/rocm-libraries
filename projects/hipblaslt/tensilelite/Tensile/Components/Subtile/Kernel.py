@@ -341,6 +341,10 @@ AB_B4_TLU1_8x1 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(8, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 128-bit GR: 128 fp4 along M = 8 MFMA-M tiles
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(8, 1), loadShape=LoadShape(m=32, k=1)),
 )
+AB_B4_TLU1_16x1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(16, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 128-bit GR: 256 fp4 along M = 16 MFMA-M tiles
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=32, k=1)),
+)
 
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
@@ -381,6 +385,7 @@ AB_GEOMETRY_MAP = {
   "AB_B4_TLU1":  AB_B4_TLU1,
   "AB_B4_TLU1_4x1": AB_B4_TLU1_4x1,
   "AB_B4_TLU1_8x1": AB_B4_TLU1_8x1,
+  "AB_B4_TLU1_16x1": AB_B4_TLU1_16x1,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:

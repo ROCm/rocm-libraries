@@ -158,7 +158,7 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
 
 
 # Stacks that use the column-scatter layout instead of a single-bit XOR.
-_COL_SCATTER_STACKS = frozenset({8})
+_COL_SCATTER_STACKS = frozenset({8, 16})
 
 
 def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
