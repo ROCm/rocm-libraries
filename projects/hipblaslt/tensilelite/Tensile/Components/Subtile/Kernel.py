@@ -359,11 +359,14 @@ def _wideGR(g, l):
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(l, 1), loadShape=LoadShape(m=32, k=1)),
   )
 
-AB_B4_TLU1_GR4_LR2   = _wideGR(4, 2)    # MT64x64   wg2x2: GR 64 elem (32B),  LR 32 elem
-AB_B4_TLU1_GR8_LR4   = _wideGR(8, 4)    # MT128x128 wg2x2: GR 128 elem (64B), LR 64 elem
-AB_B4_TLU1_GR16_LR8  = _wideGR(16, 8)   # MT256x256 wg2x2: GR 256 elem (128B = full line), LR 128 elem
-AB_B4_TLU1_GR8_LR2   = _wideGR(8, 2)    # wg4x4 variants
-AB_B4_TLU1_GR16_LR4  = _wideGR(16, 4)
+# GR spans the full macro-tile free dim (G = MacroTile/instM); LR is the
+# per-wave stack (L = MIWaveTile[0]), so G = L * waveGroup.  Register every
+# (G, L) pair the wave groups 1/2/4/8 can produce.
+_WIDE_GR_PAIRS = [(g, l) for g in (2, 4, 8, 16, 32)
+                         for l in (1, 2, 4, 8, 16)
+                         if l <= g and (g // l) in (1, 2, 4, 8)]
+_WIDE_GR_GEOMETRIES = {f"AB_B4_TLU1_GR{g}_LR{l}": _wideGR(g, l) for g, l in _WIDE_GR_PAIRS}
+globals().update(_WIDE_GR_GEOMETRIES)
 
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
@@ -405,12 +408,8 @@ AB_GEOMETRY_MAP = {
   "AB_B4_TLU1_4x1": AB_B4_TLU1_4x1,
   "AB_B4_TLU1_8x1": AB_B4_TLU1_8x1,
   "AB_B4_TLU1_16x1": AB_B4_TLU1_16x1,
-  "AB_B4_TLU1_GR4_LR2": AB_B4_TLU1_GR4_LR2,
-  "AB_B4_TLU1_GR8_LR4": AB_B4_TLU1_GR8_LR4,
-  "AB_B4_TLU1_GR16_LR8": AB_B4_TLU1_GR16_LR8,
-  "AB_B4_TLU1_GR8_LR2": AB_B4_TLU1_GR8_LR2,
-  "AB_B4_TLU1_GR16_LR4": AB_B4_TLU1_GR16_LR4,
 }
+AB_GEOMETRY_MAP.update(_WIDE_GR_GEOMETRIES)
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
   """Return the ABTilePair selected by Solution.py for tc ('A' or 'B')."""
