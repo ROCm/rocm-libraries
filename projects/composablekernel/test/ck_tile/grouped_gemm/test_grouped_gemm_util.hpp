@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #pragma once
+#include <algorithm>
 #include <sstream>
 #include <type_traits>
 #include <gtest/gtest.h>
@@ -48,6 +49,9 @@ class TestCkTileGroupedGemm : public ::testing::Test
 
         static const ck_tile::index_t M_Warp_Tile = 32;
         static const ck_tile::index_t N_Warp_Tile = 32;
+        // Deliberately not routed through get_k_warp_tile: with M_Warp_Tile=32 the helper
+        // returns 64 for 8-bit float on gfx950, which would change gfx9 codegen. Left as-is
+        // to keep the MFMA path byte-identical.
         static const ck_tile::index_t K_Warp_Tile = 16;
     };
 
@@ -59,15 +63,18 @@ class TestCkTileGroupedGemm : public ::testing::Test
 
         static const ck_tile::index_t M_Warp_Tile = 16;
         static const ck_tile::index_t N_Warp_Tile = 16;
-#if defined(CK_USE_GFX1250)
         static constexpr ck_tile::index_t K_Warp_Tile =
-            (std::is_same_v<ADataType, ck_tile::fp8_t> && std::is_same_v<BDataType, ck_tile::fp8_t>)
-                ? 64
-                : 32;
-#else
-        static const ck_tile::index_t K_Warp_Tile = 16;
-#endif
+            ck_tile::get_k_warp_tile<ADataType, M_Warp_Tile>();
     };
+
+    // Selects the same config the two invocation sites below instantiate the kernel with.
+    // Tests that need to respect a kernel constraint must read it from here so they cannot
+    // drift from the launched config.
+#if CK_TILE_USE_WMMA
+    using ActiveKernelParam = GroupedGemKernelParam_Wmma;
+#else
+    using ActiveKernelParam = GroupedGemKernelParam_Mfma;
+#endif
 
     using grouped_gemm_kargs = ck_tile::GroupedGemmHostArgs<>;
     std::size_t get_workspace_size(const std::vector<grouped_gemm_kargs>& gemm_descs)
