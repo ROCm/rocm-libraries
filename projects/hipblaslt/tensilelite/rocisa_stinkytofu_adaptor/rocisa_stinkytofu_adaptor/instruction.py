@@ -4285,9 +4285,23 @@ def _init_wmma_matrix_fmt() -> None:
     })
 
 
+_WMMA_TYPE_CONVERT_KNOWN = None
+
+
 def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> str:
     """Port of rocisa ``MFMAInstruction::typeConvert`` for the low-precision
-    (f8f6f4-family) inputs. Standard types defer to :func:`_inst_type_to_str`."""
+    (f8f6f4-family) inputs. Standard types defer to :func:`_inst_type_to_str`.
+
+    Raises RuntimeError for types with no matrix-instruction spelling (e.g.
+    complex), matching the C++ ``throw std::runtime_error("Type not found")``.
+    """
+    global _WMMA_TYPE_CONVERT_KNOWN  # noqa: PLW0603
+    if _WMMA_TYPE_CONVERT_KNOWN is None:
+        _WMMA_TYPE_CONVERT_KNOWN = frozenset({
+            InstType.INST_F16, InstType.INST_F32, InstType.INST_F64,
+            InstType.INST_BF16, InstType.INST_XF32, InstType.INST_I32,
+        })
+
     f8f6f4_k = 128 if has_wmma_v3 else 64
     f4_t = 32 if has_wmma_v3 else 0
     if it in _WMMA_F8F6F4_ALWAYS:
@@ -4309,7 +4323,9 @@ def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> st
         return "iu8"
     if it == InstType.INST_I8:
         return "i8"
-    return _inst_type_to_str(it)
+    if it in _WMMA_TYPE_CONVERT_KNOWN:
+        return _inst_type_to_str(it)
+    raise RuntimeError(f"Type not found: {it}")
 
 
 def _wmma_matrix_fmts(it: Any, m: int, n: int, k: int, has_wmma_v3: bool):
