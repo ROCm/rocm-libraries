@@ -39,6 +39,7 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
@@ -62,6 +63,7 @@
 #include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyUnreachableBlockElimPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsStaticPass.hpp"
@@ -69,6 +71,8 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -106,6 +110,40 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
         pm.addPass(createStinkyDAGSchedulerPass());
         pm.addPass(createStinkyMergeBarrierPass());
     }
+}
+
+/// Register allocation from ModuleOptions::RegisterAllocation:
+///   - 0 off
+///   - 1 shadow (colour and report, no rewrite)
+///   - 2 apply (higher values clamp to apply)
+void addRegisterAllocationPasses(PassManager& pm, const StinkyAsmModule& module) {
+    enum class Mode : int {
+        Off = 0,     ///< Keep the producer's numbering; add no passes.
+        Shadow = 1,  ///< Colour and report, rewrite nothing. Code is unchanged.
+        Apply = 2,   ///< Write the colouring through to the emitted operands.
+    };
+    const int configured = module.getModuleOptions().RegisterAllocation;
+    Mode mode = Mode::Apply;
+    if (configured <= static_cast<int>(Mode::Off))
+        mode = Mode::Off;
+    else if (configured == static_cast<int>(Mode::Shadow))
+        mode = Mode::Shadow;
+    if (mode == Mode::Off) return;
+
+    pm.addPass(createStinkyUnreachableBlockElimPass());
+    pm.addPass(createRemoveDefUseAnalysisPass());
+
+    LiftAsmRegistersToSSAOptions liftOptions;
+    liftOptions.classes = RegClassSet::only(RegType::S);
+    pm.addPass(createLiftAsmRegistersToSSAPass(liftOptions));
+
+    pm.addPass(createRegisterAllocationPass(RegisterAllocationOptions{
+        .allocator = "greedy-compact",
+        .allocate = RegClassSet::only(RegType::S),
+        .applyToOperands = (mode == Mode::Apply),
+        .report = true,
+        .emitSymbolBreadcrumbs = true,
+    }));
 }
 
 /// A fresh entry-scoped PassManager with analyses + standard instrumentation.
@@ -247,6 +285,10 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         }
 
         pm.addPass(createRegionClonePass(moduleOptions.CloneList));
+
+        // Register allocation (lift to SSA, colour, report, rewrite if Apply mode).
+        addRegisterAllocationPasses(pm, module);
+
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
 

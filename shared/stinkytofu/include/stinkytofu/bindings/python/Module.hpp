@@ -92,6 +92,7 @@
     X(TDMLoadWaveSync, bool)                      \
     X(PrefetchGlobalRead, int)                    \
     X(PrefetchLocalRead, int)                     \
+    X(RegisterAllocation, int)                    \
     X(RemoveInstructions, std::string)            \
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
