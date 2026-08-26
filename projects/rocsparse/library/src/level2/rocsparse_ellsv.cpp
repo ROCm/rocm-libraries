@@ -80,13 +80,19 @@ namespace rocsparse
                                                                             indextype,
                                                                             position));
 
+        // position lives where the handle's pointer mode says it does, and is read
+        // back into a host variable below.
+        const hipMemcpyKind kind = (handle->pointer_mode == rocsparse_pointer_mode_host)
+                                       ? hipMemcpyHostToHost
+                                       : hipMemcpyDeviceToHost;
+
         switch(indextype)
         {
         case rocsparse_indextype_i32:
         {
             int32_t p;
-            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-                &p, position, sizeof(int32_t), hipMemcpyDefault, handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemcpyAsync(&p, position, sizeof(int32_t), kind, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
             if(p != -1)
             {
@@ -97,8 +103,8 @@ namespace rocsparse
         case rocsparse_indextype_i64:
         {
             int64_t p;
-            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-                &p, position, sizeof(int64_t), hipMemcpyDefault, handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemcpyAsync(&p, position, sizeof(int64_t), kind, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
             if(p != -1)
             {
