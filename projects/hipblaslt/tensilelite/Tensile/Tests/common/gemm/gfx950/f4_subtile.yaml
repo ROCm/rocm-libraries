@@ -1,9 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# NT F4 subtile GEMM correctness.  NT -> both operands free-dim contiguous, both
-# transpose-read.  Stack = MIWaveTile[0]; MT = 16 * stack * waveGroup.  The 16x1
-# blocks are rectangular because acc VGPRs scale as MIWT[0]*MIWT[1]*4.
+# F4 subtile GEMM correctness.  Geometry is picked per operand from TLU{A,B}:
+# free-dim contiguous (TLU=1) gets the stacked transpose-read layout, K-contiguous
+# (TLU=0) gets the row-major one.  NT uses TLU=1 for both, TN TLU=0 for both, and
+# NN / TT pair one of each.  Stack = MIWaveTile[0]; MT = 16 * stack * waveGroup.
+# The 16x1 blocks are rectangular because acc VGPRs scale as MIWT[0]*MIWT[1]*4.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
@@ -346,3 +348,67 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [192, 256, 1, 256]
           - Exact: [384, 512, 1, 512]
+  -
+    - # NN: A free-contig (TLU=1, stacked), B K-contig (TLU=0, row-major)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [512, 512, 1, 512]
+  -
+    - # TT: A K-contig (TLU=0, row-major), B free-contig (TLU=1, stacked)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [512, 512, 1, 512]

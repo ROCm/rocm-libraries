@@ -791,18 +791,82 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
   return module
 
 
+def _isLRTLU1(tileInfo):
+  return bool(tileInfo.lr and isinstance(tileInfo.lr.config.tag, LRTag_TLU1))
+
+
+def _lraTileAssignment_rowMajorSingle(writer, kernel, module, tileInfo):
+  """Row-major (TLU=0) LR offsets for a single tensor.
+
+  Same lane map as the interleaved A+B path, but every parameter comes from
+  this tensor's own geometry so it can be paired with a TLU=1 operand.
+  """
+  tc = tileInfo.tc
+  if tileInfo.bpe == 1:
+    raise NotImplementedError("fp8 LR offsets are not wired for mixed TLU layouts")
+  subIterKBytes = tileInfo.subIterKBytes
+  wavesize = kernel["WavefrontSize"]
+  mi_m = tileInfo.mmaTileShape[0]
+  loadWidth = tileInfo.loadWidthLR
+  ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
+  ldsKBytes = subIterKBytes if writer.states.subtileLdsSwizzle else tileInfo.depthUBytes
+  padBytes = int(getattr(tileInfo, "ldsRowPadBytes", 0))
+  ldsRowStride = ldsKBytes + padBytes
+  numRowsPerLDSBanks = ldsRowBankSize // ldsKBytes
+  blockSize = ldsKBytes // loadWidth
+  tmpVgpr = writer.vgprPool.checkOut(5, tag="_lraTileAssignment_rowMajorSingle_tmpVgpr")
+  lane16, lane16Group, rotation, rowOffset, colOffset = range(tmpVgpr, tmpVgpr + 5)
+  module.add(VAndB32(dst=vgpr(lane16Group), src0=vgpr("Serial"), src1=wavesize-1, comment="%s: laneId"%tc))
+  module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="%s: lane16Group"%tc))
+  module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="%s: laneId %%%% %u"%(tc, mi_m)))
+  module.add(VMovB32(dst=vgpr(colOffset), src=vgpr(lane16Group), comment="%s: colOffset = lane16Group"%tc))
+  if writer.states.subtileLdsSwizzle:
+    module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
+    module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
+    module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
+    module.add(VAddU32(dst=vgpr(colOffset), src0=vgpr(rotation), src1=vgpr(lane16Group), comment="colOffset = rotation + lane16Group"))
+    setExecMask(module, writer, 0x33333333, 0x33333333)
+    module.add(VPermlane16SwapB32(dst=vgpr(colOffset), src=vgpr(colOffset), comment="apply swizzling"))
+    setExecMask(module, writer, -1, -1)
+  module.add(VAndB32(dst=vgpr(colOffset), src0=vgpr(colOffset), src1=hex(blockSize-1), comment="colOffset = colOffset %% blockSize"))
+  if padBytes == 0:
+    module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(ldsRowStride.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsRowStride))
+  else:
+    module.add(VMulLOU32(dst=vgpr(rowOffset), src0=hex(ldsRowStride), src1=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsRowStride))
+  _computeLROffset(module, tileInfo, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
+  writer.vgprPool.checkIn(tmpVgpr)
+  _applyWavePartitionLROffset(module, writer, kernel, tileInfo)
+  ldsStartOffset = getattr(writer, "ldsStartOffset%s" % tc, 0)
+  if ldsStartOffset:
+    for vgprId in range(len(tileInfo.sharedVgprLROffset)):
+      module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=ldsStartOffset,
+                 src1=vgpr(tileInfo.sharedVgprLROffset[vgprId]), comment="%s matrix offset in LDS"%tc))
+
+
 def _lraTileAssignment_legacy(writer, kernel):
   module = Module()
   module.addComment0("LR Offset Calculation for Subtile Based Tiling")
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
+  aTLU1 = _isLRTLU1(tileInfoA)
+  bTLU1 = _isLRTLU1(tileInfoB)
   # TLU=1 (NT): LDS holds each operand free-dim contiguous (K-major, one K row
   # every mmaTileShape[1]*bpe bytes). The MFMA K-layout is recovered on the read
   # with ds_read_b64_tr_b4, whose per-lane address is a pure (K-group, M-row)
   # ramp -- see _lraTileAssignment_tlu.
-  if tileInfoA.lr and isinstance(tileInfoA.lr.config.tag, LRTag_TLU1):
+  if aTLU1 and bTLU1:
     _lraTileAssignment_tlu(writer, kernel, module, tileInfoA)
     _lraTileAssignment_tlu(writer, kernel, module, tileInfoB)
+    return module
+  # NN / TT: one operand per layout. The row-major path below shares colOffset
+  # and rowOffset between A and B, so the TLU=0 operand takes the single-tensor
+  # variant instead.
+  if aTLU1 or bTLU1:
+    for ti, isTLU1 in ((tileInfoA, aTLU1), (tileInfoB, bTLU1)):
+      if isTLU1:
+        _lraTileAssignment_tlu(writer, kernel, module, ti)
+      else:
+        _lraTileAssignment_rowMajorSingle(writer, kernel, module, ti)
     return module
   if tileInfoA.bpe == 1:  # FP8: block-swap swizzle, no VPermlane16Swap
     return _lraTileAssignment_fp8_legacy(writer, kernel, module)
