@@ -1361,8 +1361,8 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
     const double ab_l1_ft = a_l1_ft + b_l1_ft;
 
     if (single_stream && skinny_m && a_temporal) {
-      if (ab_l1_ft <= static_cast<double>(hardware.l1_capacity)) {
-        const double headroom = 1.0 - ab_l1_ft / static_cast<double>(hardware.l1_capacity);
+      if (a_l1_ft <= static_cast<double>(hardware.l1_capacity)) {
+        const double headroom = 1.0 - a_l1_ft / static_cast<double>(hardware.l1_capacity);
         H_mem_l1_A            = heuristic.l1_hit_rate_ceiling_skinny * clamp01(headroom);
       } else if (concurrent_load < l2_cap) {
         const double headroom = 1.0 - concurrent_load / l2_cap;
@@ -1372,8 +1372,8 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
     }
 
     if (single_stream && skinny_n && b_temporal) {
-      if (ab_l1_ft <= static_cast<double>(hardware.l1_capacity)) {
-        const double headroom = 1.0 - ab_l1_ft / static_cast<double>(hardware.l1_capacity);
+      if (b_l1_ft <= static_cast<double>(hardware.l1_capacity)) {
+        const double headroom = 1.0 - b_l1_ft / static_cast<double>(hardware.l1_capacity);
         H_mem_l1_B            = heuristic.l1_hit_rate_ceiling_skinny * clamp01(headroom);
       } else if (concurrent_load < l2_cap) {
         const double headroom = 1.0 - concurrent_load / l2_cap;
@@ -2424,14 +2424,45 @@ double compute_tile_latency(const problem_t& problem,
   // unbatched threshold; batched GEMMs are more sensitive to fill/drain, so the
   // K==64 boundary is included for them.
   const bool exact_one_iter_large_k = K > heuristic_defaults_t::EXACT_ONE_ITER_K_MIN;
-  const bool exact_one_iter_batched_k64 =
-      (problem.batch > 1 && K >= heuristic_defaults_t::EXACT_ONE_ITER_K_MIN && MT_K >= heuristic_defaults_t::EXACT_ONE_ITER_K_MIN);
-  const double exact_one_iter_ratio =
-      (k_iters == 1 && tail_k == 0 && (exact_one_iter_large_k || exact_one_iter_batched_k64))
-          ? 2.0
+
+  // Batched few-iteration fill/drain penalty (batch > 1).  A batched GEMM
+  // launches batch*grid tiles, each paying the PGR fill/drain once.  A K-loop
+  // with few iterations (deep MT_K relative to K) amortizes that fill over
+  // little work, so HW prefers shallower MT_K / more iterations for batched
+  // micro-GEMMs -- deep MT_K over-selection (e.g. MT_K=64 at K=48-150) is the
+  // dominant batched regression.  Penalize by how far the K-loop length (main
+  // iters plus a partial tail iter) falls short of a target.  This also fires
+  // with a tail present, unlike the num_main_iters==0/tail==0 term below, so
+  // deep tiles with a residual tail no longer dodge the charge.  Gated on
+  // problem.batch > 1 so streaming batch==1 large-N shapes -- which genuinely prefer
+  // deep MT_K -- are untouched.
+  const double k_loop_len = static_cast<double>(k_iters) + (tail_k > 0 ? 1.0 : 0.0);
+  const double batched_fill_ratio =
+      (problem.batch > 1 && k_loop_len >= 1.0)
+          ? std::max(0.0, heuristic_defaults_t::BATCHED_FILL_ITER_TARGET - k_loop_len)
+                * heuristic_defaults_t::BATCHED_FILL_PENALTY
           : 0.0;
+
+  // Unbatched single fill+drain regime (problem.batch == 1, num_main_iters == 0): the
+  // whole K-loop lives inside the PGR fill/drain window, so the kernel never
+  // reaches steady state and the MT_K-deep prologue fill is exposed with no
+  // amortization.  Base tax only for a genuine single iter (k_iters == 1); a
+  // k_iters in [2, pgr] tile still does real per-iter work so it is charged only
+  // for DepthU fill *excess* (0 for a cache-line-deep MT_K).  The depth scaling
+  // covers k_iters == 1 too, else the model escapes a penalized k_iters == 2
+  // tile by hopping to an even deeper single-iter tile.
+  const bool no_steady_state =
+      (problem.batch == 1 && num_main_iters == 0 && k_iters >= 1 && tail_k == 0
+       && exact_one_iter_large_k);
+  const double fill_depth_excess =
+      std::max(0.0, mt_k_dd * a_bytes_du / phys_cl - 1.0);
+  const double no_steady_base = (k_iters == 1) ? 2.0 : 0.0;
+  const double no_steady_state_ratio = no_steady_state
+      ? no_steady_base + fill_depth_excess * heuristic_defaults_t::UNAMORTIZED_FILL_PENALTY
+      : 0.0;
+
   const double L_du_waste =
-      (mt_k_oversize_ratio + exact_one_iter_ratio)
+      (mt_k_oversize_ratio + no_steady_state_ratio + batched_fill_ratio)
       * (L_main_per_iter + heuristic_defaults_t::K_ITER_LOOP_OVERHEAD);
 
   // MainLoop subtotal.
@@ -2538,7 +2569,9 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("L_pgr_stall: " << L_pgr_stall);
     OLOG_DEBUG("L_loop_overhead: " << L_loop_overhead);
     OLOG_DEBUG("mt_k_oversize_ratio: " << mt_k_oversize_ratio);
-    OLOG_DEBUG("exact_one_iter_ratio: " << exact_one_iter_ratio);
+    OLOG_DEBUG("no_steady_state_ratio: " << no_steady_state_ratio);
+    OLOG_DEBUG("batched_fill_ratio: " << batched_fill_ratio);
+    OLOG_DEBUG("fill_depth_excess: " << fill_depth_excess);
     OLOG_DEBUG("L_du_waste: " << L_du_waste);
     OLOG_DEBUG("L_mainloop: " << L_mainloop);
     OLOG_DEBUG("L_epilogue_hbm: " << L_epilogue_hbm);
