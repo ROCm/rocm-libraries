@@ -245,10 +245,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             calculateMathClocksInUnrolledLoop(bb, passCtx);
         }
         // std::cout << "[EstimateAsmCycles] Total Asm Cycles: " << totalCycles_ << "\n";
-        // The preheader tail is outside the loop body the total is meant to describe, so a
-        // run that models it must not overwrite the published figure.
-        if (!includePreLoopTail_)
-            func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
+        func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
 
         return PreservedAnalyses::all();
     }
@@ -269,13 +266,12 @@ class EstimateAsmCyclesPassImpl : public Pass {
         annotateComments_ = annotate;
     }
 
-    /// Start modelling at the last `tensor_load_to_lds` ahead of `label_LoopBeginL`
-    /// instead of at the label itself, so the preheader tail that feeds the loop's
-    /// first iteration also gets cycle positions. This inflates the cumulative
-    /// figures relative to the loop-only model, so the total is not published as
-    /// function metadata while it is on.
-    void setIncludePreLoopTail(bool include) {
-        includePreLoopTail_ = include;
+    /// When true, also model non-loop blocks that contain an embedded
+    /// `label_LoopBeginL` (hierarchical / sub-loop IR). Used only by
+    /// computeEstimatedCyclesPerInstruction(); the published pass total stays
+    /// loop-block-only.
+    void setPerInstructionCycleQuery(bool query) {
+        perInstructionCycleQuery_ = query;
     }
 
    private:
@@ -803,30 +799,18 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         uint32_t totalCycles = 0;
         // Loop-body modelling runs in the LoopBeginL basic block (tensilelite names the block
-        // ^label_LoopBeginL). Non-loop blocks are skipped unless
-        // computeEstimatedCyclesPerInstruction is modelling the preheader tail ahead of an in-block
-        // label_LoopBeginL (hierarchical IR).
+        // ^label_LoopBeginL and the leading label instruction matches bb.getLabel()).
+        // computeEstimatedCyclesPerInstruction() also covers blocks that embed that label.
         std::size_t startIdx = 0;
         if (bb.getLabel() != "label_LoopBeginL" && bb.getLabel() != "LoopBeginL") {
             startIdx = instructions.size();
-            if (includePreLoopTail_) {
+            if (perInstructionCycleQuery_) {
                 for (std::size_t i = 0; i < instructions.size(); ++i) {
                     const LabelData* labelData = instructions[i]->getModifier<LabelData>();
                     if (isLabel(*instructions[i]) && labelData != nullptr &&
                         labelData->label == "label_LoopBeginL") {
                         startIdx = i;
                         break;
-                    }
-                }
-                // Back up over the preheader tail so the run-up to the first iteration is
-                // modelled too. The last global load into LDS is where that run-up begins:
-                // everything after it is the setup the loop head is waiting on.
-                if (startIdx < instructions.size()) {
-                    for (std::size_t i = startIdx; i-- > 0;) {
-                        if (isTensorLoad(*instructions[i])) {
-                            startIdx = i;
-                            break;
-                        }
                     }
                 }
             }
@@ -1024,7 +1008,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
     GfxArchID arch_ = static_cast<GfxArchID>(0);
 
     bool annotateComments_ = true;
-    bool includePreLoopTail_ = false;
+    bool perInstructionCycleQuery_ = false;
     std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;
 
     unsigned int totalCycles_ = 0;
@@ -1064,7 +1048,7 @@ std::unordered_map<const StinkyInstruction*, uint32_t> computeEstimatedCyclesPer
     Function& func, PassContext& passCtx) {
     EstimateAsmCyclesPassImpl pass;
     pass.setAnnotateComments(false);
-    pass.setIncludePreLoopTail(true);
+    pass.setPerInstructionCycleQuery(true);
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);
     return pass.getPerInstructionCycles();
