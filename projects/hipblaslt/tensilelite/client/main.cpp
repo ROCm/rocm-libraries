@@ -1182,9 +1182,9 @@ int main(int argc, const char* argv[])
             bool hasIcacheFlush
                 = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
             flushTimeMs = hasIcacheFlush ? estimate_flush_kernel_time(stream, gpuTimer) : 0.f;
-            // Added before ReferenceValidator so that postSolution, which runs
-            // listeners in reverse, reports the dirty-buffer verdict after the
-            // reference verdict rather than having it overwritten.
+            // Before ReferenceValidator: postSolution runs listeners in
+            // reverse, so the dirty-buffer verdict lands after the reference
+            // one rather than being overwritten by it.
             listeners.addListener(std::make_shared<SynchronizerValidator>(args));
             listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);

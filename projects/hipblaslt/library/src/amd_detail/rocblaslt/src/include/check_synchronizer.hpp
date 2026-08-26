@@ -7,14 +7,14 @@
  *        both use it and both must leave it at zero on exit.
  *        Enabled by HIPBLASLT_CHECK_SYNCHRONIZER env var (read once in handle ctor).
  *
- *        Covers rocblaslt_matmul_impl only; the ext and user-argument launch
- *        paths share the same buffer but are not scanned, so residue they leave
- *        is reported against the next scanned matmul.
+ *        Covers rocblaslt_matmul_impl only. The ext and user-argument paths
+ *        share the buffer but are not scanned, so residue they leave is
+ *        reported against the next scanned matmul.
  *
  *        Single-threaded debugging only: the scan synchronizes the stream and
- *        zeroes a handle-wide buffer, which would disrupt a concurrent kernel
- *        on another stream. Skipped entirely during HIP graph capture, since
- *        both operations are illegal there.
+ *        zeroes a handle-wide buffer, disrupting any concurrent kernel on
+ *        another stream. Skipped during HIP graph capture, where both
+ *        operations are illegal.
  */
 
 #pragma once
@@ -30,8 +30,7 @@
 #include <mutex>
 #include <vector>
 
-// Blocks on `stream` to read the buffer back, and reports it if any int is
-// nonzero. Gated on the env var, so the default path costs nothing.
+// Blocks on `stream` to read the buffer back and reports any nonzero int.
 inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
                                               hipStream_t      stream,
                                               const char*      label)
@@ -55,8 +54,8 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
     hipError_t err = hipStreamSynchronize(stream);
     if(err == hipSuccess)
         err = hipMemcpy(host.data(), handle->Synchronizer, bytes, hipMemcpyDeviceToHost);
-    // `host` may hold a previous scan's contents on failure, so an unreported
-    // failure here could read as a stale (possibly clean) buffer.
+    // Reported, not swallowed: `host` still holds the previous scan, which
+    // would otherwise read as a clean buffer.
     if(err != hipSuccess)
     {
         std::lock_guard<std::mutex> lk(log_mutex);
@@ -68,10 +67,9 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
         return;
     }
 
-    // Ints are both the scan step and the reported unit: every consumer writes
-    // 32-bit counters, so the offset names the counter left set. StreamK works
-    // from the head; MBSK does too, except on the user-argument path, where it
-    // is handed the buffer offset by 1638400 bytes (int 409600).
+    // Every consumer writes 32-bit counters, so an int offset names the counter
+    // left set. StreamK and MBSK both work from the head, except MBSK on the
+    // user-argument path, which is offset by 1638400 bytes (int 409600).
     size_t nonzero = 0, first = count;
     for(size_t i = 0; i < count; ++i)
         if(host[i] != 0)
@@ -95,9 +93,8 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
               << std::endl;
     }
 
-    // hipblasLtCreate zeroes the buffer once and every matmul is scanned, so
-    // restoring zero here keeps the next call's baseline clean and stops this
-    // residue being re-reported by every call after it.
+    // Restore the zero baseline, so this residue is reported once rather than
+    // by every call after it.
     static_cast<void>(hipMemset(handle->Synchronizer, 0, bytes));
 }
 

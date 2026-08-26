@@ -212,11 +212,10 @@ globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # host for non-SK5 solutions. Default keeps behavior unchanged for
 # existing tests.
 globalParameters["StreamKHybridMode"] = [0]
-# Read the shared Synchronizer buffer back after the first warmup of each
-# solution, and fail the run if a kernel left it nonzero. Residue is silent
-# otherwise: it corrupts a later launch, not the one that left it.
-# Only StreamK and GSU MultipleBufferSingleKernel solutions touch the buffer;
-# the client skips every other solution, so this costs nothing on them.
+# Read the shared Synchronizer buffer back after each solution's first warmup
+# and fail the run if a kernel left it nonzero; residue is otherwise silent,
+# corrupting a later launch rather than the one that left it. Only StreamK and
+# GSU MultipleBufferSingleKernel solutions are scanned.
 globalParameters["CheckSynchronizer"] = True
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.

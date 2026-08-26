@@ -227,9 +227,8 @@ _rocblaslt_handle::_rocblaslt_handle()
         }
     }
 
-    // HIPBLASLT_CHECK_SYNCHRONIZER: opt-in debug check that a kernel using the
-    // shared Synchronizer buffer -- StreamK or GSU MBSK -- leaves it all-zero
-    // on exit.
+    // HIPBLASLT_CHECK_SYNCHRONIZER: opt-in debug check that a StreamK or GSU
+    // MBSK kernel leaves the shared Synchronizer buffer all-zero on exit.
     if(const char* cs = std::getenv(kEnvCheckSynchronizer))
     {
         const std::string s = normalize_env(cs);

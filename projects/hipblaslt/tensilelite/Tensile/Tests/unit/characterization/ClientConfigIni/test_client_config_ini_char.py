@@ -516,11 +516,9 @@ class TestWriteClientConfigIniPlain:
     def test_check_synchronizer_reaches_the_client(self, tmp_path, monkeypatch, enabled):
         """CheckSynchronizer must always be emitted, in both states.
 
-        The check is on by default at both ends now, so a dropped or renamed
-        parameter would not disable it -- but it would make CheckSynchronizer
-        False unhonourable, silently re-enabling the check on the configs that
-        opt out, and those runs would keep passing until one of them was the
-        config that leaves residue.
+        The check is on by default at both ends, so a dropped or renamed
+        parameter would not disable it -- it would leave CheckSynchronizer
+        False unhonoured, silently scanning the configs that opt out.
         """
         pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
         content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT,

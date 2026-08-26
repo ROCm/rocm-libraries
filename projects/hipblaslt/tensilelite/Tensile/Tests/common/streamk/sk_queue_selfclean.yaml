@@ -1,9 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Per-XCD work-queue self-reset. Caught by the Synchronizer dirty-buffer check,
-# which CheckSynchronizer enables by default -- without it this config passes,
-# because the residue corrupts a later launch rather than this one.
+# Per-XCD work-queue self-reset, caught by the Synchronizer dirty-buffer check.
+# Without that check this config passes: the residue corrupts a later launch,
+# not this one.
 #
 # A queue counter's atomic_inc auto-reset bound assumes queue q receives exactly
 # W_q = distribute(skGrid, q) home fetches, which holds only while the value
