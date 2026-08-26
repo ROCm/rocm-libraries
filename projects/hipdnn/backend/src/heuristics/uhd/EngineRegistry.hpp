@@ -6,6 +6,8 @@
 #include "FeatureExtractor.hpp"
 #include "adapters/IUhdAdapter.hpp"
 
+#include <hipdnn_plugin_sdk/ingestor/uhd/UhdConfig.hpp>
+
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -18,6 +20,8 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
+using hipdnn_plugin_sdk::ingestor::uhd::UhdConfig;
+
 /// @brief Kernel candidate metadata (mock for UKD).
 ///
 /// Represents a single kernel variant with its KMD field values.
@@ -27,37 +31,6 @@ struct KernelCandidate
     int64_t kernelId;
     int64_t priority = 0;
     std::unordered_map<std::string, double> metadata; // KMD field values
-};
-
-/// @brief UHD configuration for an engine (mock for UED-owned UHD).
-///
-/// Contains the heuristic configuration: features signature, adapter,
-/// objective, and score metadata. In full RFC 0017 integration, this
-/// is owned by the UED.
-struct UhdConfig
-{
-    std::string uhdId;
-    std::string name;
-
-    // RFC 0019 §6.4: Derived values (ordered map of name → JsonLogic expression)
-    std::vector<std::pair<std::string, std::string>> derived; // name, expression (JSON string)
-
-    std::vector<std::string> featuresSignature;
-    std::string featuresHash;
-    std::string objective = "max"; // "max" or "min"
-
-    // Score metadata for cross-engine comparison (RFC §5, §12.3)
-    std::string scoreUnits; // e.g., "tflops", "ms"
-    bool scoreCalibrated = false; // cross-engine comparable?
-    std::string scoreTransform; // e.g., "log1p", "identity"
-
-    // Adapter configuration
-    std::string adapterType = "static_order"; // "static_order", "tree_data", etc.
-    std::string modelArtifactPath; // for tree_data/onnx/custom_library
-    std::string modelHash; // checksum of model artifact for integrity validation
-    std::vector<std::string> staticOrderFields = {"priority", "id"}; // for static_order
-    std::string customLibrarySymbol; // for custom_library: symbol name in .so
-    std::string nativeSymbol; // for native: symbol registered with NativeScorerRegistry
 };
 
 /// @brief Engine registration entry (mock for UED).
