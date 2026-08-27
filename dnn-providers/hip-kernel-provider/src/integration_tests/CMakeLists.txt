@@ -70,6 +70,43 @@ if(ENABLE_HIP_MLOPS_ENGINE)
         hip_mlops_engine/IntegrationGpuPassByValue.cpp
     )
 endif()
+
+if(ENABLE_HIP_FLASH2_ENGINE)
+    if(NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "ENABLE_HIP_FLASH2_ENGINE is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable Flash2 integration tests.")
+    else()
+        add_subdirectory(hip_flash2_engine)
+    endif()
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
+        kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
+    )
+    # This target links only the SDKs, not hip_kernel_provider_private, so it does not
+    # inherit the provider's gate and needs the definition set directly.
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR=1
+    )
+    # The relative layout only, never an absolute build path: the kpack suite locates the
+    # staged tree by walking from the loaded plugin exactly as the loader does, and needs
+    # the same spelling of the subdirectory the provider compiled in. An absolute path
+    # here would be baked into the installed test binary as well, naming a build tree it
+    # cannot see.
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPDNN_PACKAGED_FIXTURE_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
+    )
+    # Guarded rather than assumed: a root skips with a warning when hipcc is absent, and
+    # the suite is written to GTEST_SKIP in exactly that case. A hard dependency would
+    # turn a missing compiler into a configure error. hkp_descriptor_staging is the one
+    # target that owns the staged tree, whichever roots contributed to it.
+    if(TARGET hkp_descriptor_staging)
+        add_dependencies(hip_kernel_provider_integration_tests hkp_descriptor_staging)
+    endif()
+endif()
+
 clang_tidy_check(hip_kernel_provider_integration_tests)
 
 # ENVIRONMENT is forwarded to add_integration_test_target() rather than set
@@ -82,6 +119,11 @@ clang_tidy_check(hip_kernel_provider_integration_tests)
 # publishes the merged environment as
 # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT so that later call
 # can forward it to whichever suites actually exist.
+#
+# No descriptor entry: this suite loads the real plugin, and the engine resolves its
+# descriptor tree relative to the loaded module -- the staged copy in a build tree, the
+# installed copy in an install tree. Naming one explicitly would pin the build path into
+# the install-time CTest file and stop the installed descriptors from ever being read.
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
     LABELS slow
     ENVIRONMENT ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV})

@@ -27,9 +27,10 @@ namespace hipdnn_data_sdk::utilities
 ///
 /// Use this for the GPU-side bundle of an FP4 input; keep `Tensor<fp4_e2m1>` for
 /// the CPU-reference bundle. Filled with the same (seed, min, max) the two agree
-/// value-for-value, because randomization here mirrors
-/// `Tensor<fp4_e2m1>::fillWithRandomValues` exactly: the same RNG sequence is
-/// generated in linear index order and packed into nibbles.
+/// value-for-value AT EVERY COORDINATE, because randomization here mirrors
+/// `Tensor<fp4_e2m1>::fillWithRandomValues` exactly: the same RNG sequence drawn in
+/// index order, each draw packed into the nibble its coordinates reach through the
+/// strides. The agreement therefore survives a non-row-major layout.
 ///
 /// Only dense (packed-stride) layouts are supported: a padded sub-byte layout
 /// has no well-defined nibble packing. Element-wise host access (`operator()`,
@@ -119,9 +120,10 @@ public:
         _memory.markHostModified();
     }
 
-    // Mirrors Tensor<fp4_e2m1>::fillWithRandomValues: identical RNG, distribution,
-    // and linear traversal order, so a paired unpacked tensor (same seed) holds
-    // the same logical values.
+    // Mirrors Tensor<fp4_e2m1>::fillWithRandomValues: identical RNG and distribution,
+    // drawn in index order. Draw i belongs to the i-th logical element, so it goes in
+    // the nibble that element's coordinates reach through the strides. That is slot i
+    // for a row-major tensor and some other slot for a column-major one.
     void fillTensorWithRandomValues(float min,
                                     float max,
                                     unsigned int seed = std::random_device{}()) override
@@ -137,14 +139,9 @@ public:
         for(size_t i = 0; i < _elementCount; ++i)
         {
             const uint8_t nibble = nibbleFromFloat(distribution(generator));
-            if((i % 2) == 0)
-            {
-                host[i / 2] = nibble;
-            }
-            else
-            {
-                host[i / 2] = static_cast<uint8_t>(host[i / 2] | (nibble << 4));
-            }
+            const size_t slot = nibbleSlot(i);
+            const uint8_t shifted = (slot % 2) == 0 ? nibble : static_cast<uint8_t>(nibble << 4);
+            host[slot / 2] = static_cast<uint8_t>(host[slot / 2] | shifted);
         }
         _memory.markHostModified();
     }
@@ -203,6 +200,21 @@ private:
     static uint8_t nibbleFromFloat(float value)
     {
         return static_cast<uint8_t>(types::fp4_e2m1(value).data & 0x0F);
+    }
+
+    // Nibble slot holding logical element `index`: the offset its coordinates reach
+    // through the strides. Equals `index` exactly when the strides are row-major.
+    size_t nibbleSlot(size_t index) const
+    {
+        size_t remaining = index;
+        int64_t offset = 0;
+        for(size_t axis = _dims.size(); axis-- > 0;)
+        {
+            const auto extent = static_cast<size_t>(_dims[axis]);
+            offset += static_cast<int64_t>(remaining % extent) * _strides[axis];
+            remaining /= extent;
+        }
+        return static_cast<size_t>(offset);
     }
 
     static void validateAllPositive(const std::vector<int64_t>& values, const char* valueName)

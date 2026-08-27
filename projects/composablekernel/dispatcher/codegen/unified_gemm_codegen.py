@@ -202,6 +202,7 @@ class GemmVariant(Enum):
     STANDARD = "standard"
     PRESHUFFLE = "preshuffle"
     MULTI_D = "multi_d"
+    BATCHED = "batched"
     MULTI_ABD = "multi_abd"
     GROUPED = "grouped"
     # Stream-K. COVERAGE LIMITATION: the dispatcher does NOT yet emit the full
@@ -241,6 +242,7 @@ class KernelConfig:
 
     # Variant-specific
     preshuffle: bool = False
+    permute_n: bool = False  # B-preshuffle permutation variant (preshuffle only)
     elementwise_op: str = "PassThrough"
     num_d_tensors: int = 0
     d_layout: str = "r"  # Layout for D tensors (r=row, c=col) - same for all D tensors
@@ -311,6 +313,12 @@ class KernelConfig:
         # Preshuffle variant
         if self.preshuffle:
             parts.append("preshuffle")
+            if self.permute_n:
+                parts.append("permuteN")
+
+        # Batched variant
+        if self.variant == GemmVariant.BATCHED:
+            parts.append("batched")
 
         # Multi-D variant: include elementwise op, num tensors, and D layout
         if self.variant == GemmVariant.MULTI_D:
@@ -389,8 +397,12 @@ class KernelNaming:
         # Add variant suffix
         if config.variant == GemmVariant.PRESHUFFLE:
             name += "_preshuffle"
+            if config.permute_n:
+                name += "_permuteN"
         elif config.variant == GemmVariant.MULTI_D:
             name += f"_multid_{config.elementwise_op}_d{config.num_d_tensors}"
+        elif config.variant == GemmVariant.BATCHED:
+            name += "_batched"
         elif config.variant == GemmVariant.MULTI_ABD:
             # Encode every behavior-affecting multi-abd parameter so distinct
             # tensor counts / elementwise ops get distinct kernel names.
@@ -478,6 +490,11 @@ class CKTileKernelGenerator:
             includes += """
 #include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_v2.hpp"
 #include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_base_policy.hpp"
+"""
+
+        if config.variant == GemmVariant.BATCHED:
+            includes += """
+#include "ck_tile/ops/gemm/kernel/batched_gemm_kernel.hpp"
 """
 
         if config.variant == GemmVariant.STREAM_K:
@@ -703,6 +720,10 @@ struct {struct_name} {{
     static constexpr bool DoubleSmemBuffer = {str(tr.pipeline == "compv4" or tr.pipeline == "preshufflev2").lower()};
     static constexpr bool UseStructuredSparsity = false;
     static constexpr bool Preshuffle = {str(config.preshuffle).lower()};
+    // PermuteN selects the B-preshuffle permutation used by the host-side
+    // shuffle_b_permuteN (true) vs shuffle_b (false). The preshuffle ctypes lib
+    // reads this value to apply the same permutation the device kernel expects.
+    static constexpr bool PermuteN = {str(config.permute_n).lower()};
     static constexpr index_t NumWaveGroups = {config.num_wave_groups};
     
     {self._tile_types(config, ns_name)}
@@ -724,6 +745,9 @@ using ADataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[output_dtype]};
 using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
+// Layout aliases in the global namespace so single-kernel consumers (the
+// ctypes lib's fallback key derivation and the preshuffle B-shuffle) can query
+// this kernel's operand layouts by type.
 {self._multi_abd_global_exports(config, ns_name)}
 using ALayout = {ns_name}::ALayout;
 using BLayout = {ns_name}::BLayout;
@@ -764,6 +788,7 @@ using CLayout = {ns_name}::CLayout;
 #define GEMM_KEY_PRESHUFFLE {int(config.preshuffle)}
 #define GEMM_KEY_TRANSPOSE_C 0
 #define GEMM_KEY_GROUPED 0
+#define GEMM_KEY_BATCHED {int(config.variant == GemmVariant.BATCHED)}
 #define GEMM_KEY_SPLIT_K 1
 {self._multi_d_single_include(config)}#endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """
@@ -792,6 +817,8 @@ using CLayout = {ns_name}::CLayout;
             return self._launch_function_multi_abd(config)
         if config.variant == GemmVariant.MULTI_D:
             return self._launch_function_multi_d(config)
+        if config.variant == GemmVariant.BATCHED:
+            return self._launch_function_batched(config)
         if config.variant == GemmVariant.GROUPED:
             return self._launch_function_grouped(config)
         if config.variant == GemmVariant.STREAM_K:
@@ -845,6 +872,90 @@ using CLayout = {ns_name}::CLayout;
         }};
 
         BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+        return ave_time;
+    }}"""
+
+    def _launch_function_batched(self, config: KernelConfig) -> str:
+        """Generate launch function for batched GEMM.
+
+        Mirrors the Tile Engine batched_gemm instance
+        (gemm_instance_builder.py, kernel_name_prefix == "batched_gemm"):
+          * takes ``ck_tile::BatchedGemmHostArgs`` (adds batch_count + per-batch
+            strides on top of the single-problem args);
+          * uses the batched-specific ``TileGemmUniversalTraits`` (no persistent/
+            preshuffle/wave-group template tail);
+          * builds ``ck_tile::BatchedGemmKernel`` and sizes the grid with the
+            4-arg ``GridSize(M, N, k_batch, batch_count)``.
+        Unlike the standard path there is no hot-loop TailHandler branch -- the
+        batched kernel launches directly, matching Old-TE.
+        """
+        return f"""
+    static float launch(const ck_tile::BatchedGemmHostArgs& args, const stream_config& stream) {{
+        float ave_time{{0}};
+
+        constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
+
+        using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<
+            kPadM, kPadN, kPadK, DoubleSmemBuffer,
+            ALayout, BLayout, CLayout, TransposeC>;
+
+        using UniversalGemmProblem = UniversalGemmPipelineProblem<
+            ADataType, BDataType, AccDataType, TileShape,
+            GemmUniversalTraits,
+            scheduler>;
+
+        using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
+        {self._epilogue_code(config)}
+
+        using GemmKernel = ck_tile::BatchedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+
+        auto kargs = GemmKernel::MakeKernelArgs(args);
+
+        if (!GemmKernel::IsSupportedArgument(kargs)) {{
+            throw std::runtime_error("Arguments not supported for batched gemm kernel!");
+        }}
+
+        const dim3 grids = GemmKernel::GridSize(args.M, args.N, args.k_batch, args.batch_count);
+        const dim3 blocks = GemmKernel::BlockSize();
+
+        constexpr int kBlockPerCu = {config.k_block_per_cu};
+        if(args.k_batch > 1) {{
+            // Split-K path: the universal GEMM epilogue stores C with
+            // memory_operation_enum::atomic_add when k_batch > 1, so C must be
+            // zero at the start of EVERY kernel invocation. The benchmarking
+            // timing loop re-runs the kernel cold_niters + nrepeat times, so a
+            // single pre-launch memset is not enough -- C accumulates across
+            // iterations. Pass a hipMemsetAsync callable as the first callable
+            // to launch_kernel (the documented ck_tile pattern, see
+            // kernel_launch.hpp) so C is re-zeroed before each timed launch.
+            // Use hipMemsetAsync on the launch stream (sc.stream_id_): the
+            // synchronous hipMemset ignores stream_config and would serialise
+            // onto the default stream, skewing timing/correctness whenever a
+            // non-default stream is used. Only the batch slices actually
+            // written (M*N per batch) need clearing; use the batch stride to
+            // cover padded layouts.
+            const std::size_t c_bytes =
+                static_cast<std::size_t>(args.batch_stride_E) *
+                static_cast<std::size_t>(args.batch_count) * sizeof(CDataType);
+            ave_time = launch_kernel(stream,
+                [=](const stream_config& sc) {{
+                    // Check the return: a failed reset would let the split-K
+                    // atomic-add epilogue accumulate into a non-zero C and
+                    // silently produce wrong results (mirrors the stream-K path).
+                    if(hipMemsetAsync(args.e_ptr, 0, c_bytes, sc.stream_id_) != hipSuccess) {{
+                        throw std::runtime_error(
+                            "batched split-K: hipMemsetAsync failed to reset C between iterations");
+                    }}
+                }},
+                make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
+        }} else {{
+            // k_batch == 1 (the Old-TE parity default): byte-identical to the
+            // Tile Engine batched_gemm launch -- single kernel callable, no
+            // memset (the epilogue uses memory_operation_enum::set).
+            ave_time = launch_kernel(stream,
+                make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
+        }}
+
         return ave_time;
     }}"""
 
@@ -1242,6 +1353,30 @@ using CLayout = {ns_name}::CLayout;
 
     def _epilogue_code(self, config: KernelConfig) -> str:
         """Generate epilogue code"""
+        if config.variant == GemmVariant.BATCHED:
+            # Respect the requested epilogue: the batched sweep space includes
+            # BOTH "cshuffle" and "default" (see the shipped default_config.json
+            # trait_config.epilogue). Emitting CShuffle unconditionally would
+            # silently build a cshuffle kernel under a "_epi_default" name and
+            # skip the cshuffle-store correctness gate (_cshuffle_repeat_ok) for
+            # configs that requested "default" -- a name/impl mismatch that also
+            # breaks the config->codegen->runtime byte-parity invariant.
+            if config.trait.epilogue == "cshuffle":
+                return """
+        using EpilogueProblem = CShuffleEpilogueProblem<
+            ADataType, BDataType, tuple<>, AccDataType, CDataType,
+            tuple<>, CLayout, element_wise::PassThrough,
+            TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
+            WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
+            UniversalGemmProblem::TransposeC>;
+        using GemmEpilogue = CShuffleEpilogue<EpilogueProblem>;"""
+            return """
+        using EpilogueProblem = DefaultGemm2DEpilogueProblem<
+            ADataType, BDataType, tuple<>, AccDataType, CDataType,
+            tuple<>, CLayout, element_wise::PassThrough,
+            TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
+            kPadM, kPadN, WarpTileM, WarpTileN, WarpTileK, TransposeC>;
+        using GemmEpilogue = DefaultGemm2DEpilogue<EpilogueProblem>;"""
         if config.variant == GemmVariant.MULTI_ABD:
             # Multi-ABD epilogue: tuple A/B/D dtypes and D layouts, EDataType as
             # output, and the CDE element-wise function. Matches the TE builder's
@@ -1393,7 +1528,7 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
     key.algorithm.scheduler = {self.tm.SCHEDULER_TO_DISPATCHER[config.trait.scheduler]};
     key.algorithm.epilogue = {self.tm.EPILOGUE_TO_DISPATCHER[config.trait.epilogue]};
     key.algorithm.block_size = {config.block_size};
-    key.algorithm.double_buffer = {str(config.trait.pipeline == "compv4").lower()};
+    key.algorithm.double_buffer = {str(config.trait.pipeline in ("compv4", "preshufflev2")).lower()};
     key.algorithm.persistent = {str(config.trait.persistent).lower()};
     key.algorithm.preshuffle = {str(config.preshuffle).lower()};
     key.algorithm.transpose_c = false;
@@ -1595,28 +1730,36 @@ class UnifiedGemmCodegen:
 
     @staticmethod
     def _cshuffle_repeat_ok(tile: TileConfig) -> bool:
-        """CShuffle-store correctness gate.
+        """CShuffle-store correctness gate (narrowed; see issue #9684).
 
-        The CShuffle epilogue stores the accumulator back through LDS in
-        power-of-two MRepeat/NRepeat chunks, so a tile whose per-wave repeat
-        count -- tile / (warp * warp_tile) -- is not a power of two is
-        mis-stored and yields numerically WRONG results at runtime. The kernel
-        still compiles (the epilogue's static_asserts only check divisibility,
-        which such tiles satisfy), so it must be filtered in codegen. Observed
-        on MI350 for tile_m=192 (MRepeat = 192 / (2*32) = 3): verified incorrect
-        on BOTH the bridge and Tile Engine at every shape, including shapes
-        divisible by 192. Power-of-two tiles (64/128/256) are unaffected.
+        The CShuffle epilogue mis-stores the accumulator only for ONE specific
+        combination: an ODD per-wave repeat (>1) -- tile / (warp * warp_tile) --
+        paired with a 32-wide warp tile in that dimension. GPU-verified on
+        gfx942: the tile_m=192 / warp_m=2 / warp_tile_m=32 configs
+        (MRepeat = 192/(2*32) = 3) return garbage (built-in verify=fail,
+        max_rel ~1.3), while EVERY other non-power-of-two repeat is numerically
+        correct -- including MRepeat=3 with warp_tile_m=16 (192/(4*16)) and even
+        non-pow2 repeats such as 6 and 12. Confirmed by building all 116
+        non-pow2-repeat cshuffle/192 configs and running the op's CPU validation:
+        exactly the 26 matching the signature above fail; the other 90 pass. The
+        earlier "per-wave repeat must be a power of two" rule was therefore too
+        broad and needlessly dropped those 90 valid configs.
 
         This is CShuffle-specific: the "default" (DefaultGemm2DEpilogue) path
         stores directly (not through the LDS repack) and is numerically correct
-        for non-pow2 repeats -- verified on gfx942 at tile_m=192/MRepeat=3
-        (max_rel ~5e-4 across shapes divisible by 192, while the same tile under
-        CShuffle returns garbage, max_rel ~1.3). Only call this for kernels
-        whose resolved epilogue is "cshuffle".
+        for non-pow2 repeats. Only call this for kernels whose resolved epilogue
+        is "cshuffle".
         """
+
+        def _dim_bad(repeat: int, warp_tile: int) -> bool:
+            return repeat > 1 and repeat % 2 == 1 and warp_tile == 32
+
         m_repeat = tile.tile_m // (tile.warp_m * tile.warp_tile_m)
         n_repeat = tile.tile_n // (tile.warp_n * tile.warp_tile_n)
-        return _is_power_of_two(m_repeat) and _is_power_of_two(n_repeat)
+        return not (
+            _dim_bad(m_repeat, tile.warp_tile_m)
+            or _dim_bad(n_repeat, tile.warp_tile_n)
+        )
 
     def _get_configs_for_variant(self, variant: GemmVariant) -> List[KernelConfig]:
         """Get all configurations for a variant
@@ -1645,11 +1788,12 @@ class UnifiedGemmCodegen:
                 ):
                     continue
 
-            if variant == GemmVariant.STANDARD:
+            if variant in (GemmVariant.STANDARD, GemmVariant.BATCHED):
                 # CShuffle-store correctness gate: skip non-pow2 repeat tiles
                 # only for the cshuffle epilogue (see _cshuffle_repeat_ok). The
                 # "default" epilogue is correct with non-pow2 repeats, so it is
-                # NOT gated here.
+                # NOT gated here. Batched GEMM shares the standard tile/trait
+                # sweep -- it only differs in the launch/kernel type.
                 if trait.epilogue == "cshuffle" and not self._cshuffle_repeat_ok(tile):
                     continue
                 configs.append(KernelConfig(tile=tile, trait=trait, variant=variant))
@@ -1673,34 +1817,54 @@ class UnifiedGemmCodegen:
                         )
 
             elif variant == GemmVariant.PRESHUFFLE:
-                # Preshuffle needs specific pipeline (preshufflev2) and scheduler (default)
-                # Skip configs that don't use preshuffle-compatible traits
+                # Preshuffle uses a fixed pipeline (preshufflev2) and scheduler
+                # (default); the epilogue is swept ([default, cshuffle] in the TE
+                # gemm_preshuffle default_config). permute_n selects the B-shuffle
+                # permutation and is a global config knob (matches Old-TE).
+                # NOTE: for the bridge this value arrives already pinned to False
+                # via gemm_utils.py::BRIDGE_PERMUTE_N (its to_codegen_json forces
+                # it), even though the TE default_config.json / default_ci_config.json
+                # ship permute_n=true -- that TE default is a host-marker for a
+                # distinct permuteN pipeline the bridge does not emit, so it does
+                # not map to a separate bridged device kernel. The get(...) default
+                # here is only the fallback for a raw config with no key.
+                permute_n = bool(self.config.get("permute_n", False))
                 preshuffle_trait = TraitConfig(
                     pipeline="preshufflev2",
-                    epilogue="cshuffle",
+                    epilogue=trait.epilogue,
                     scheduler="default",
                     pad_m=trait.pad_m,
                     pad_n=trait.pad_n,
                     pad_k=trait.pad_k,
                     persistent=trait.persistent,
                 )
-                # Only generate one preshuffle config per tile (not per trait)
-                # since preshuffle has fixed pipeline/scheduler
-                # Preshuffle always uses the cshuffle epilogue, so the
-                # CShuffle-store pow2 repeat gate always applies here.
-                if (
-                    trait.pipeline == "compv3"
-                    and trait.scheduler == "intrawave"
-                    and self._cshuffle_repeat_ok(tile)
-                ):
-                    configs.append(
-                        KernelConfig(
-                            tile=tile,
-                            trait=preshuffle_trait,
-                            variant=variant,
-                            preshuffle=True,
-                        )
+                # Emit one preshuffle config per (tile, epilogue, persistent),
+                # de-duplicating over the swept pipeline/scheduler so a full sweep
+                # does not create N identical preshuffle kernels. When the caller
+                # already pins the pipeline to preshufflev2 (the bridge
+                # single-config path), accept it directly; otherwise collapse the
+                # sweep onto its first pipeline (compv3) + scheduler (intrawave).
+                is_pinned = (
+                    trait.pipeline == "preshufflev2" and trait.scheduler == "default"
+                )
+                is_sweep_anchor = (
+                    trait.pipeline == "compv3" and trait.scheduler == "intrawave"
+                )
+                if not (is_pinned or is_sweep_anchor):
+                    continue
+                # The CShuffle-store pow2 repeat gate applies only to the cshuffle
+                # epilogue (the default epilogue stores directly and is correct).
+                if trait.epilogue == "cshuffle" and not self._cshuffle_repeat_ok(tile):
+                    continue
+                configs.append(
+                    KernelConfig(
+                        tile=tile,
+                        trait=preshuffle_trait,
+                        variant=variant,
+                        preshuffle=True,
+                        permute_n=permute_n,
                     )
+                )
 
             elif variant == GemmVariant.MULTI_D:
                 # CShuffle-store correctness gate: applies only when the
@@ -2122,6 +2286,7 @@ def main():
             "preshuffle",
             "multi_d",
             "stream_k",
+            "batched",
             "multi_abd",
             "grouped",
         ],
