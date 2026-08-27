@@ -355,6 +355,16 @@ static_assert(validate_policy_coupling<ck_tile::bf16_t, 64>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 128>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64>());
 
+using DispatchProblem = TestFmhaProblem<ck_tile::half_t, 128>;
+static_assert(ck_tile::detail::uses_qr_tdm_lds_arena_v<
+              ck_tile::BlockFmhaPipelineQRKSVSTdm<DispatchProblem>>);
+static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
+              ck_tile::BlockFmhaPipelineQRKSVS<DispatchProblem>>);
+static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
+              ck_tile::BlockFmhaPipelineQRKSVSAsync<DispatchProblem>>);
+static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
+              ck_tile::BlockFmhaPipelineQRKSVSAsyncTrload<DispatchProblem>>);
+
 TEST(QrTdmLdsPadding, CompileTimeConfiguration) { SUCCEED(); }
 
 } // namespace
