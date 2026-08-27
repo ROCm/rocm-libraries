@@ -14,10 +14,11 @@
 
 - Work locally for reading and editing; build, test, benchmark, and profile only on the configured remote GPU host.
 - Before every remote build or run after a source change, source `.remote.env` locally and synchronize with `rsync -az --delete $RSYNC_EXCLUDES ./ "$REMOTE_HOST:$REMOTE_PATH/"`.
-- `rsync`, remote configure/build, and build-only `ssh`/`docker exec` actions do not require
-  authorization, including build retries. GPU correctness execution, benchmarks, profiling/traces,
-  metadata extraction, and other non-build remote diagnostics still require fresh explicit
-  authorization from the user; a run authorization does not cover retries.
+- Tasks 1--6 and 8--9 are fully pre-authorized for all remote/GPU actions and retries, including
+  `rsync`, `ssh`, `docker exec`, configure/build, correctness execution, and metadata extraction.
+  Treat those actions like local development and do not stop for permission. Task 7 is the only
+  authorization boundary: request authorization when entering its qualification runs, and stop again
+  after reporting the ablation table so the user can select the production configuration.
 - Never print or hard-code `.remote.env` values, never commit remotely, and copy remote-only results back before another destructive sync.
 - Preserve the user's existing `.gitignore` modification and any unrelated untracked files.
 - Use `apply_patch` for source and document edits. Do not use destructive checkout or reset commands to restore temporary experiment edits.
@@ -679,16 +680,15 @@ Use exactly representable coordinate-coded inputs with distinct Q/K/V tags. Inst
 FP16, prefill and decode, and all five enabled combinations. Include K0/K1 and V0/V1 pointer swaps.
 Check logical output exactly and verify guards after every physical region and after the arena.
 
-- [ ] **Step 2: Sync/build, then obtain authorization to execute the failing round-trip test**
+- [ ] **Step 2: Sync/build and execute the failing round-trip test**
 
 Expected compile failure: `run_qr_tdm_round_trip` is undefined.
 
 - [ ] **Step 3: Implement the round-trip harness and make all explicit-config tests pass**
 
 Implement the harness with explicit Q/K/V config template parameters so it does not depend on the
-production selector. Sync/build without an authorization prompt; obtain explicit authorization
-before each GPU test execution. Correct descriptor, pointer, or proof defects until BF16/FP16 on both
-paths and all five combinations pass. Use
+production selector. Sync/build and execute GPU tests without stopping for authorization. Correct
+descriptor, pointer, or proof defects until BF16/FP16 on both paths and all five combinations pass. Use
 `superpowers:systematic-debugging` for every failure. Do not weaken guards or expected mappings.
 
 - [ ] **Step 4: Add focused end-to-end GTest cases**
@@ -710,7 +710,7 @@ reference validation and compare padded versus none O/LSE exactly when compiler 
 - [ ] **Step 5: Run the correctness matrix for all five combinations**
 
 For each of none, Q+K+V, K+V, K-only, and V-only, edit only the three selection aliases. Sync/build
-each arm without asking; obtain explicit authorization for each GPU run. Record hostname, exact commit/diff hash, generated kernel
+and execute each arm without asking. Record hostname, exact commit/diff hash, generated kernel
 name, dtype, path, traits, and result. Every arm must pass before it can enter performance testing.
 
 - [ ] **Step 6: Restore the committed disabled selector and commit tests**
@@ -740,6 +740,13 @@ git commit -m "test(fmha): cover qr_tdm padded LDS paths"
 - Consumes: the five tested selector configurations and `QrTdmLegacyPhaseLayout`.
 - Produces: a decision table for BF16/FP16 x prefill/decode and an aligned-versus-legacy-phase report.
 
+Before the first Task 7 remote/GPU action, request one explicit authorization for the bounded Task 7
+suite defined below: five padding combinations, four dtype/path scopes, canonical no-mask/causal
+anchors, the aligned-versus-legacy-phase diagnostic, and associated metadata extraction. That one
+authorization covers the listed Task 7 actions and retries without further prompts. Any expansion
+beyond this matrix requires a new authorization. After the table is complete, stop for the user's
+production-config decision.
+
 - [ ] **Step 1: Generate exact blob names locally**
 
 Run the generator locally and select exactly one canonical no-mask/no-bias/no-LSE/no-sink instance
@@ -766,8 +773,8 @@ Never stage or commit this hunk.
 
 - [ ] **Step 3: Measure the five padding combinations**
 
-For each dtype/path/config, sync and build without an authorization prompt. Obtain explicit
-authorization for the benchmark execution. Configure in the preset `build/` directory with Ninja,
+After the Task 7 suite authorization, sync, build, and benchmark each dtype/path/config without
+additional prompts. Configure in the preset `build/` directory with Ninja,
 `-DFMHA_FWD_ENABLE_APIS=fwd`, and the exact filter. Run five warmups plus twenty timed iterations in seven independent invocations, with an
 unpadded A/B/A bracket. Record the container hostname with every artifact.
 
@@ -797,7 +804,7 @@ layout.
 
 - [ ] **Step 5: Extract and audit metadata and ISA**
 
-With separately authorized remote commands, extract the device object and record:
+Under the same bounded Task 7 authorization, extract the device object and record:
 
 ```text
 .group_segment_fixed_size
@@ -862,11 +869,11 @@ If dtype/path selection is fully compile-time from `Problem`, leave codegen unch
 instances are required, emit only the selected production configurations; do not emit the five
 ablation variants or the legacy-phase layout.
 
-- [ ] **Step 4: Sync/build, then obtain run authorizations for focused correctness/performance anchors**
+- [ ] **Step 4: Sync/build and run focused correctness/performance anchors**
 
-Rebuild from a fresh sync without asking. Obtain authorization before executing the selected
-BF16/FP16 prefill/decode anchors. Expected results must match the Task 7 acceptance decision within
-measurement variability. A GPU-run retry requires new authorization.
+Rebuild from a fresh sync and execute the selected BF16/FP16 prefill/decode anchors without asking.
+Expected results must match the Task 7 acceptance decision within measurement variability. Retries
+are pre-authorized.
 
 - [ ] **Step 5: Commit the production selection**
 
@@ -908,7 +915,7 @@ rg -n 'FMHA_FWD_QUICK_FILTER|QrTdmLegacyPhaseLayout' \
 Expected result: no temporary quick filter; the diagnostic layout is unreachable from production
 selection; `.gitignore` remains the only unrelated worktree change.
 
-- [ ] **Step 2: Perform the final sync/build, then obtain authorization for GPU test actions**
+- [ ] **Step 2: Perform the final sync/build and GPU test actions**
 
 Build the focused padding test, BF16/FP16 `tile_example_fmha_fwd` instances for both paths, and the
 representative non-`qr_tdm` controls. Run the descriptor round trips, focused FMHA GTests, canonical

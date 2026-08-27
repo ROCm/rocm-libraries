@@ -12,9 +12,10 @@ Target commit at design time: `d3fad825a5a8532021179bb5450f82991cf43add`
 
 This document defines the production design only. It does not by itself authorize source changes or
 an implementation plan. Implementation planning starts only after the design lead approves this
-written specification. During approved implementation, `rsync` and remote configure/build actions do
-not require per-action authorization. GPU correctness execution, benchmarks, profiling/traces, and
-other non-build remote diagnostics retain their explicit authorization requirements.
+written specification. During approved implementation, all remote and GPU actions in implementation
+Tasks 1--6 and 8--9 are pre-authorized and proceed like local development, including retries. Task 7
+qualification remains the sole authorization and production-selection checkpoint. The deferred ATT
+milestone remains outside this authorization policy.
 
 ## Context
 
@@ -602,8 +603,9 @@ and still must pass the CPU reference.
 
 ## Performance acceptance
 
-Every run follows the repository remote policy and requires individual lead authorization. Within an
-authorized experiment:
+Every run follows the repository remote policy. Task 7 qualification runs require the authorization
+defined by the implementation plan; runs outside Task 7 are pre-authorized. Within a Task 7
+experiment:
 
 - all arms run on the same recorded container hostname;
 - source changes are synchronized before execution;
