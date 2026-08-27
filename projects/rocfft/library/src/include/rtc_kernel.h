@@ -48,26 +48,26 @@ class RTCKernelArgs
 {
 public:
     RTCKernelArgs() = default;
-    explicit RTCKernelArgs(IndexType itype)
+    explicit RTCKernelArgs(KIntType itype)
         : itype(itype)
     {
     }
-    // append a value for an argument declared as "index_type"
-    void append_index(size_t value, const std::optional<IndexType>& forced_itype = std::nullopt)
+    // append a value for an argument declared as "kint_type"
+    void append_kint(size_t value, const std::optional<KIntType>& forced_itype = std::nullopt)
     {
         const auto arg_type = forced_itype.has_value() ? forced_itype.value() : itype;
 
         switch(arg_type)
         {
-        case IndexType::U32:
+        case KIntType::U32:
         {
             if(value > std::numeric_limits<unsigned int>::max())
-                throw std::runtime_error("index value overflows 32-bit kernel index_type");
+                throw std::runtime_error("index value overflows 32-bit kernel kint_type");
             unsigned int v = static_cast<unsigned int>(value);
             append(&v, sizeof(v));
             break;
         }
-        case IndexType::U64:
+        case KIntType::U64:
         {
             unsigned long long v = value;
             append(&v, sizeof(v));
@@ -133,7 +133,7 @@ private:
     }
 
     std::vector<char> buf;
-    IndexType         itype = IndexType::U32;
+    KIntType          itype = KIntType::U32;
 };
 
 // Base class for a runtime compiled kernel.  Subclassed for
@@ -153,9 +153,9 @@ struct RTCKernel
 
     // take already-compiled code object and prepare to launch the
     // named kernel.  itype is the width the kernel was generated with,
-    // so that get_launch_args can pack "index_type" arguments to match.
+    // so that get_launch_args can pack "kint_type" arguments to match.
     RTCKernel(const std::string&                       kernel_name,
-              IndexType                                itype,
+              KIntType                                 itype,
               std::shared_future<hipModule_wrapper_t>& module,
               dim3                                     gridDim  = {},
               dim3                                     blockDim = {});
@@ -215,11 +215,11 @@ struct RTCKernel
     dim3 blockDim;
 
     const std::string kernel_name;
-    const IndexType   itype;
+    const KIntType    itype;
     const int         deviceId = hipInvalidDeviceId;
 
 protected:
-    // Argument buffer that packs arguments declared as "index_type" at
+    // Argument buffer that packs arguments declared as "kint_type" at
     // the width this kernel was generated with.  get_launch_args
     // implementations must build their arguments through this - a
     // default-constructed RTCKernelArgs always packs 32-bit, which
@@ -328,40 +328,40 @@ static const char* rtc_array_type_name(rocfft_array_type type)
     }
 }
 
-static const char* rtc_index_name(IndexType itype)
+static const char* rtc_index_name(KIntType itype)
 {
     switch(itype)
     {
-    case IndexType::U32:
+    case KIntType::U32:
         return "_i32";
-    case IndexType::U64:
+    case KIntType::U64:
         return "_i64";
     }
 
     throw std::runtime_error("Invalid index type");
 }
 
-static const char* rtc_index_type(IndexType itype)
+static const char* rtc_kint_type(KIntType itype)
 {
     switch(itype)
     {
-    case IndexType::U32:
+    case KIntType::U32:
         return "unsigned int";
-    case IndexType::U64:
+    case KIntType::U64:
         return "unsigned long long";
     }
 
     throw std::runtime_error("Invalid index type");
 }
 
-static const char* rtc_index_type_decl(IndexType itype)
+static const char* rtc_kint_type_decl(KIntType itype)
 {
     switch(itype)
     {
-    case IndexType::U32:
-        return "typedef unsigned int index_type;\n";
-    case IndexType::U64:
-        return "typedef unsigned long long index_type;\n";
+    case KIntType::U32:
+        return "typedef unsigned int kint_type;\n";
+    case KIntType::U64:
+        return "typedef unsigned long long kint_type;\n";
     }
 
     throw std::runtime_error("Invalid index type");

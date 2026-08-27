@@ -64,10 +64,10 @@ enum struct TwiddleTableType
 // generate name for twiddle-compute kernel
 std::string twiddle_rtc_kernel_name(TwiddleTableType type,
                                     rocfft_precision precision,
-                                    const IndexType& itype);
+                                    const KIntType&  itype);
 // generate source for twiddle-compute kernel
 std::string twiddle_rtc(const std::string& kernel_name,
-                        const IndexType&   itype,
+                        const KIntType&    itype,
                         TwiddleTableType   type,
                         rocfft_precision   precision);
 

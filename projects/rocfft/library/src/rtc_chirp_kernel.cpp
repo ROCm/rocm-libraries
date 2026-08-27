@@ -31,7 +31,7 @@ std::shared_future<std::unique_ptr<RTCKernel>> RTCKernelChirp::generate(const st
                                ? static_cast<size_t>(INT32_MAX)
                                : static_cast<size_t>(UINT32_MAX);
 
-    const IndexType itype = N > u32_idx_limit ? IndexType::U64 : IndexType::U32;
+    const KIntType itype = N > u32_idx_limit ? KIntType::U64 : KIntType::U32;
 
     RTCGenerator generator;
     generator.generate_name = [=]() { return chirp_rtc_kernel_name(precision, itype); };

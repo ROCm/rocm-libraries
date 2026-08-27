@@ -22,7 +22,7 @@
 #include "device/kernel-generator-embed.h"
 #include "rtc_kernel.h"
 
-std::string chirp_rtc_kernel_name(rocfft_precision precision, const IndexType& itype)
+std::string chirp_rtc_kernel_name(rocfft_precision precision, const KIntType& itype)
 {
     std::string kernel_name = "chirp_gen";
     kernel_name += rtc_index_name(itype);
@@ -43,7 +43,7 @@ static std::string chirp_rtc_launch_bounds()
 static std::string chirp_rtc_args()
 {
     std::string args = "(";
-    args += "index_type N";
+    args += "kint_type N";
     args += ", scalar_type* output";
     args += ")";
     return args;
@@ -53,16 +53,16 @@ static std::string chirp_rtc_body()
 {
     std::string body = "{";
     body += R"_SRC(
-        index_type i = threadIdx.x + blockIdx.x * blockDim.x;
+        kint_type i = threadIdx.x + blockIdx.x * blockDim.x;
 
         if(i < N)
         {
-            index_type twoN = 2 * N;
-            index_type iSq  = i * i;
+            kint_type twoN = 2 * N;
+            kint_type iSq  = i * i;
 
             auto f = (double)iSq / (double)twoN;
 
-            index_type fRnd = floor(f);
+            kint_type fRnd = floor(f);
 
             auto aLow = iSq;
             auto bLow = twoN * fRnd;
@@ -83,14 +83,14 @@ static std::string chirp_rtc_body()
 }
 
 std::string
-    chirp_rtc(const std::string& kernel_name, rocfft_precision precision, const IndexType& itype)
+    chirp_rtc(const std::string& kernel_name, rocfft_precision precision, const KIntType& itype)
 {
     std::string src;
 
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
-    src += rtc_index_type_decl(itype);
+    src += rtc_kint_type_decl(itype);
     src += rtc_precision_type_decl(precision);
     src += "static constexpr double TWO_PI = 6.283185307179586476925286766559;\n";
 

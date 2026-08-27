@@ -29,26 +29,26 @@
 #include <vector>
 
 // Width of the integer type used for index/offset arithmetic inside
-// generated kernels. Kernels declare such arguments as "index_type".
-enum class IndexType
+// generated kernels. Kernels declare such arguments as "kint_type".
+enum class KIntType
 {
     U32,
     U64,
 };
 
-// Size of one "index_type" element, for packing arrays that kernels
-// read through an index_type pointer.
-static inline size_t rtc_index_type_size(IndexType itype)
+// Size of one "kint_type" element, for packing arrays that kernels
+// read through an kint_type pointer.
+static inline size_t rtc_kint_type_size(KIntType itype)
 {
     switch(itype)
     {
-    case IndexType::U32:
+    case KIntType::U32:
         return sizeof(unsigned int);
-    case IndexType::U64:
+    case KIntType::U64:
         return sizeof(unsigned long long);
     }
 
-    throw std::runtime_error("Invalid index type");
+    throw std::runtime_error("Invalid kernel integer type");
 }
 
 // runtime_compile dispatches to subclasses, those subclasses

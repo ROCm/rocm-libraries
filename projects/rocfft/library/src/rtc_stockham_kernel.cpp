@@ -40,7 +40,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     std::optional<StockhamGeneratorSpecs> specs2d;
     StockhamPartialPassParams             pp_params;
 
-    IndexType itype = node.GetKernelIndexType();
+    KIntType itype = node.GetKIntType();
 
     // SBRC variants look in the function pool for plain BLOCK_RC to
     // learn the block width, then decide on the transpose type once
@@ -260,7 +260,7 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
        || data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         kargs.append_ptr(data.node->twiddles_large);
     if(!hardcoded_dim)
-        kargs.append_index(data.node->length.size(), IndexType::U32);
+        kargs.append_kint(data.node->length.size(), KIntType::U32);
     // lengths
     kargs.append_ptr(data.node->devKernArg.lengths());
     // stride in/out
@@ -268,11 +268,11 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
     if(data.node->placement == rocfft_placement_notinplace)
         kargs.append_ptr(data.node->devKernArg.stride_out());
     // nbatch
-    kargs.append_index(data.node->batch);
+    kargs.append_kint(data.node->batch);
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+    kargs.append_kint(data.callbacks.load_cb_lds_bytes, KIntType::U32);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
 
@@ -299,16 +299,16 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
         if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
             kargs.append_ptr(data.node->chirp);
 
-        kargs.append_index(data.node->lengthBlueN);
-        kargs.append_index(data.node->lengthBlue);
+        kargs.append_kint(data.node->lengthBlueN);
+        kargs.append_kint(data.node->lengthBlue);
 
         break;
     case BFT_INV_CHIRP_MUL:
         if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
             kargs.append_ptr(data.node->chirp);
 
-        kargs.append_index(data.node->lengthBlueN);
-        kargs.append_index(data.node->lengthBlue);
+        kargs.append_kint(data.node->lengthBlueN);
+        kargs.append_kint(data.node->lengthBlue);
 
         break;
     }
@@ -319,13 +319,13 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
 
         if(data.node->fuseBlue == BFT_FWD_CHIRP)
         {
-            kargs.append_index(empty_val);
-            kargs.append_index(empty_val);
-            kargs.append_index(empty_val);
+            kargs.append_kint(empty_val);
+            kargs.append_kint(empty_val);
+            kargs.append_kint(empty_val);
 
-            kargs.append_index(empty_val);
-            kargs.append_index(empty_val);
-            kargs.append_index(empty_val);
+            kargs.append_kint(empty_val);
+            kargs.append_kint(empty_val);
+            kargs.append_kint(empty_val);
         }
         else
         {
@@ -333,31 +333,31 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
             switch(data.node->inStrideBlue.size())
             {
             case 2: // 1D FFT
-                kargs.append_index(empty_val);
-                kargs.append_index(empty_val);
-                kargs.append_index(data.node->iDistBlue);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(data.node->iDistBlue);
 
-                kargs.append_index(empty_val);
-                kargs.append_index(empty_val);
-                kargs.append_index(data.node->oDistBlue);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(data.node->oDistBlue);
                 break;
             case 3: // 2D FFT
-                kargs.append_index(data.node->inStrideBlue[2]);
-                kargs.append_index(empty_val);
-                kargs.append_index(data.node->iDistBlue);
+                kargs.append_kint(data.node->inStrideBlue[2]);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(data.node->iDistBlue);
 
-                kargs.append_index(data.node->outStrideBlue[2]);
-                kargs.append_index(empty_val);
-                kargs.append_index(data.node->oDistBlue);
+                kargs.append_kint(data.node->outStrideBlue[2]);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(data.node->oDistBlue);
                 break;
             case 4: // 3D FFT
-                kargs.append_index(data.node->inStrideBlue[2]);
-                kargs.append_index(data.node->inStrideBlue[3]);
-                kargs.append_index(data.node->iDistBlue);
+                kargs.append_kint(data.node->inStrideBlue[2]);
+                kargs.append_kint(data.node->inStrideBlue[3]);
+                kargs.append_kint(data.node->iDistBlue);
 
-                kargs.append_index(data.node->outStrideBlue[2]);
-                kargs.append_index(data.node->outStrideBlue[3]);
-                kargs.append_index(data.node->oDistBlue);
+                kargs.append_kint(data.node->outStrideBlue[2]);
+                kargs.append_kint(data.node->outStrideBlue[3]);
+                kargs.append_kint(data.node->oDistBlue);
                 break;
             default:
                 throw std::runtime_error("Invalid strides for Bluestein kernel");

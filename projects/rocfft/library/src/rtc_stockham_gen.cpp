@@ -455,7 +455,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(precision);
-    src += rtc_index_type_decl(specs.itype);
+    src += rtc_kint_type_decl(specs.itype);
     src += load_store_decls(loadOps, storeOps, cbtype);
     src += memory_gfx_h;
     src += callback_h;

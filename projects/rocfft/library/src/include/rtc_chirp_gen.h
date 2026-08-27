@@ -29,9 +29,9 @@
 static const unsigned int CHIRP_THREADS = 32;
 
 // generate name for chirp-compute kernel
-std::string chirp_rtc_kernel_name(rocfft_precision precision, const IndexType& itype);
+std::string chirp_rtc_kernel_name(rocfft_precision precision, const KIntType& itype);
 // generate source for chirp-compute kernel
 std::string
-    chirp_rtc(const std::string& kernel_name, rocfft_precision precision, const IndexType& itype);
+    chirp_rtc(const std::string& kernel_name, rocfft_precision precision, const KIntType& itype);
 
 #endif // RTC_CHIRP_GEN

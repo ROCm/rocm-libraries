@@ -26,7 +26,7 @@
 struct RTCKernelRealComplex : public RTCKernel
 {
     RTCKernelRealComplex(const std::string&                       kernel_name,
-                         IndexType                                itype,
+                         KIntType                                 itype,
                          std::shared_future<hipModule_wrapper_t>& module,
                          dim3                                     gridDim,
                          dim3                                     blockDim)
@@ -43,7 +43,7 @@ struct RTCKernelRealComplex : public RTCKernel
 struct RTCKernelRealComplexEven : public RTCKernel
 {
     RTCKernelRealComplexEven(const std::string&                       kernel_name,
-                             IndexType                                itype,
+                             KIntType                                 itype,
                              size_t                                   half_N,
                              std::shared_future<hipModule_wrapper_t>& module,
                              dim3                                     gridDim,
@@ -63,7 +63,7 @@ struct RTCKernelRealComplexEven : public RTCKernel
 struct RTCKernelRealComplexEvenTranspose : public RTCKernel
 {
     RTCKernelRealComplexEvenTranspose(const std::string&                       kernel_name,
-                                      IndexType                                itype,
+                                      KIntType                                 itype,
                                       std::shared_future<hipModule_wrapper_t>& module,
                                       dim3                                     gridDim,
                                       dim3                                     blockDim)

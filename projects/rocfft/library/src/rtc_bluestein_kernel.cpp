@@ -25,6 +25,7 @@
 #include "function_pool.h"
 #include "kernel_launch.h"
 #include "rtc_bluestein_gen.h"
+#include "rtc_kernel.h"
 #include "tree_node.h"
 
 RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafNode&    node,
@@ -53,7 +54,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
     generator.gridDim        = {DivRoundingUp(batch_accum, bwd)};
     generator.blockDim       = config.workgroup_size;
 
-    const IndexType itype = node.GetKernelIndexType();
+    const KIntType itype = node.GetKIntType();
 
     BluesteinSingleSpecs specs{itype,
                                static_cast<unsigned int>(node.length[0]),
@@ -98,7 +99,7 @@ RTCKernelArgs RTCKernelBluesteinSingle::get_launch_args(DeviceCallIn& data)
     {
         kargs.append_ptr(data.node->devKernArg.stride_out());
     }
-    kargs.append_index(data.node->batch);
+    kargs.append_kint(data.node->batch);
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
@@ -113,7 +114,7 @@ RTCKernelArgs RTCKernelBluesteinSingle::get_launch_args(DeviceCallIn& data)
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+    kargs.append_kint(data.callbacks.load_cb_lds_bytes, KIntType::U32);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
 
@@ -169,7 +170,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
         generator.blockDim = {LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL};
     }
 
-    const IndexType itype = node.GetKernelIndexType();
+    const KIntType itype = node.GetKIntType();
 
     BluesteinMultiSpecs specs{itype,
                               scheme,
@@ -259,7 +260,7 @@ RTCKernelArgs RTCKernelBluesteinMulti::get_launch_args(DeviceCallIn& data)
         // callback params
         kargs.append_ptr(data.callbacks.load_cb_fn);
         kargs.append_ptr(data.callbacks.load_cb_data);
-        kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+        kargs.append_kint(data.callbacks.load_cb_lds_bytes, KIntType::U32);
         kargs.append_ptr(data.callbacks.store_cb_fn);
         kargs.append_ptr(data.callbacks.store_cb_data);
 

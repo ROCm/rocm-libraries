@@ -90,7 +90,7 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     // NOTE:
     // Index variables declared as 32BIT are all bounded by grid limits,
     // and widening them to 64BIT would cost registers for nothing
-    src += rtc_index_type_decl(specs.itype);
+    src += rtc_kint_type_decl(specs.itype);
     src += rtc_precision_type_decl(specs.precision, array_type_is_complex(specs.inArrayType));
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
@@ -102,25 +102,25 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     Variable input_var{"input", "scalar_type", true, true};
     Variable output_var{"output", "scalar_type", true, true};
     Variable twiddles_large_var{"twiddles_large", "const scalar_type", true, true};
-    Variable dim_var{"dim", rtc_index_type(IndexType::U32)};
-    Variable length0_var{"length0", rtc_index_type(IndexType::U32)};
-    Variable length1_var{"length1", rtc_index_type(IndexType::U32)};
-    Variable length2_var{"length2", rtc_index_type(IndexType::U32)};
-    Variable gridX{"gridX", "const " + std::string(rtc_index_type(IndexType::U32))};
-    Variable gridY{"gridY", "const " + std::string(rtc_index_type(IndexType::U32))};
-    Variable gridZ{"gridZ", "const " + std::string(rtc_index_type(IndexType::U32))};
+    Variable dim_var{"dim", rtc_kint_type(KIntType::U32)};
+    Variable length0_var{"length0", rtc_kint_type(KIntType::U32)};
+    Variable length1_var{"length1", rtc_kint_type(KIntType::U32)};
+    Variable length2_var{"length2", rtc_kint_type(KIntType::U32)};
+    Variable gridX{"gridX", "const " + std::string(rtc_kint_type(KIntType::U32))};
+    Variable gridY{"gridY", "const " + std::string(rtc_kint_type(KIntType::U32))};
+    Variable gridZ{"gridZ", "const " + std::string(rtc_kint_type(KIntType::U32))};
     Variable lengths_var{
-        "lengths", "const " + std::string(rtc_index_type(IndexType::U32)), true, true};
-    Variable stride_in0_var{"stride_in0", "index_type"};
-    Variable stride_in1_var{"stride_in1", "index_type"};
-    Variable stride_in2_var{"stride_in2", "index_type"};
-    Variable stride_in_var{"stride_in", "const index_type", true, true};
-    Variable idist_var{"idist", "index_type"};
-    Variable stride_out0_var{"stride_out0", "index_type"};
-    Variable stride_out1_var{"stride_out1", "index_type"};
-    Variable stride_out2_var{"stride_out2", "index_type"};
-    Variable stride_out_var{"stride_out", "const index_type", true, true};
-    Variable odist_var{"odist", "index_type"};
+        "lengths", "const " + std::string(rtc_kint_type(KIntType::U32)), true, true};
+    Variable stride_in0_var{"stride_in0", "kint_type"};
+    Variable stride_in1_var{"stride_in1", "kint_type"};
+    Variable stride_in2_var{"stride_in2", "kint_type"};
+    Variable stride_in_var{"stride_in", "const kint_type", true, true};
+    Variable idist_var{"idist", "kint_type"};
+    Variable stride_out0_var{"stride_out0", "kint_type"};
+    Variable stride_out1_var{"stride_out1", "kint_type"};
+    Variable stride_out2_var{"stride_out2", "kint_type"};
+    Variable stride_out_var{"stride_out", "const kint_type", true, true};
+    Variable odist_var{"odist", "kint_type"};
 
     Function func(kernel_name);
     func.launch_bounds = specs.tileX * specs.tileY;
@@ -168,12 +168,12 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     func.body += CommentLines{"since gridDim is passed as {gridX, 1, 1}, use the",
                               "following variables to recover block indices in a 3-D fashion:"};
 
-    Variable old_blockIdx_x{"old_blockIdx_x", rtc_index_type(IndexType::U32)};
-    Variable old_blockIdx_y{"old_blockIdx_y", rtc_index_type(IndexType::U32)};
-    Variable old_blockIdx_z{"old_blockIdx_z", rtc_index_type(IndexType::U32)};
-    Variable tileBlockIdx_y{"tileBlockIdx_y", rtc_index_type(IndexType::U32)};
-    Variable tileBlockIdx_x{"tileBlockIdx_x", rtc_index_type(IndexType::U32)};
-    Variable remaining{"remaining", rtc_index_type(IndexType::U32)};
+    Variable old_blockIdx_x{"old_blockIdx_x", rtc_kint_type(KIntType::U32)};
+    Variable old_blockIdx_y{"old_blockIdx_y", rtc_kint_type(KIntType::U32)};
+    Variable old_blockIdx_z{"old_blockIdx_z", rtc_kint_type(KIntType::U32)};
+    Variable tileBlockIdx_y{"tileBlockIdx_y", rtc_kint_type(KIntType::U32)};
+    Variable tileBlockIdx_x{"tileBlockIdx_x", rtc_kint_type(KIntType::U32)};
+    Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
 
     // if a 1-D grid was provided because creating a natural 3-D grid exceeded allowed limits, then remap it to a 3-D grid.
     if(!specs.grid3D)
@@ -223,14 +223,14 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
         func.body += Assign{length2_var, 1};
     }
 
-    Variable tile_x_index{"tile_x_index", rtc_index_type(IndexType::U32)};
-    Variable tile_y_index{"tile_y_index", rtc_index_type(IndexType::U32)};
+    Variable tile_x_index{"tile_x_index", rtc_kint_type(KIntType::U32)};
+    Variable tile_y_index{"tile_y_index", rtc_kint_type(KIntType::U32)};
     func.body += Declaration{tile_x_index, "threadIdx.x"};
     func.body += Declaration{tile_y_index, "threadIdx.y"};
 
     func.body += CommentLines{"work out offset for dimensions after the first 3"};
-    Variable offset_in{"offset_in", "index_type"};
-    Variable offset_out{"offset_out", "index_type"};
+    Variable offset_in{"offset_in", "kint_type"};
+    Variable offset_out{"offset_out", "kint_type"};
     if(specs.grid3D)
     {
         func.body += Declaration{remaining, "blockIdx.z"};
@@ -245,7 +245,7 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     // use specified dim to avoid loops if possible
     if(specs.dim > 3)
     {
-        Variable d{"d", rtc_index_type(IndexType::U32)};
+        Variable d{"d", rtc_kint_type(KIntType::U32)};
         For      offset_loop{
             d,
             3,
@@ -268,7 +268,7 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     func.body += CallbackStoreDeclaration{};
 
     // loop variables for reading/writing
-    Variable i{"i", rtc_index_type(IndexType::U32)};
+    Variable i{"i", rtc_kint_type(KIntType::U32)};
     Variable logical_row{"logical_row", "auto"};
     Variable logical_col{"logical_col", "auto"};
     Variable idx0{"idx0", "auto"};

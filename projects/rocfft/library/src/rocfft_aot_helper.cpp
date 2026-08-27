@@ -243,7 +243,7 @@ void build_stockham_function_pool(CompileQueue& queue)
         std::vector<unsigned int> factors;
         std::copy(i.second.factors.begin(), i.second.factors.end(), std::back_inserter(factors));
 
-        StockhamGeneratorSpecs specs{IndexType::U32,
+        StockhamGeneratorSpecs specs{KIntType::U32,
                                      factors,
                                      {},
                                      static_cast<unsigned int>(precision),
@@ -365,7 +365,7 @@ void build_realcomplex(CompileQueue& queue)
                                                         ? rocfft_array_type_complex_planar
                                                         : rocfft_array_type_complex_interleaved;
 
-                                RealComplexEvenSpecs specs{{IndexType::U32,
+                                RealComplexEvenSpecs specs{{KIntType::U32,
                                                             scheme,
                                                             dim,
                                                             lensz,
@@ -399,7 +399,7 @@ void build_realcomplex(CompileQueue& queue)
 
                 for(size_t lensz = 1; lensz <= 3; lensz++)
                 {
-                    RealComplexEvenTransposeSpecs specs{{IndexType::U32,
+                    RealComplexEvenTransposeSpecs specs{{KIntType::U32,
                                                          scheme,
                                                          static_cast<size_t>(1),
                                                          lensz,
@@ -433,10 +433,10 @@ void build_twiddle(CompileQueue& queue)
     {
         for(auto type : twiddle_kernel_types)
         {
-            auto kernel_name = twiddle_rtc_kernel_name(type, precision, IndexType::U32);
+            auto kernel_name = twiddle_rtc_kernel_name(type, precision, KIntType::U32);
             std::function<std::string(const std::string&)> generate_src
                 = [=](const std::string& kernel_name) -> std::string {
-                return twiddle_rtc(kernel_name, IndexType::U32, type, precision);
+                return twiddle_rtc(kernel_name, KIntType::U32, type, precision);
             };
             queue.push({kernel_name, generate_src, ""});
         }
@@ -679,7 +679,7 @@ void build_solution_kernels(CompileQueue& queue)
                         return;
                 }
 
-                StockhamGeneratorSpecs specs{IndexType::U32,
+                StockhamGeneratorSpecs specs{KIntType::U32,
                                              factors,
                                              {},
                                              static_cast<unsigned int>(precision),

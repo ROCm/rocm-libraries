@@ -40,35 +40,35 @@ struct StockhamKernelRC : public StockhamKernel
     //
     // locals
     //
-    Variable offset_in{"offset_in", "index_type"};
-    Variable offset_out{"offset_out", "index_type"};
-    Variable stride_in{"stride_in", "const index_type", true};
-    Variable stride_out{"stride_out", "const index_type", true};
+    Variable offset_in{"offset_in", "kint_type"};
+    Variable offset_out{"offset_out", "kint_type"};
+    Variable stride_in{"stride_in", "const kint_type", true};
+    Variable stride_out{"stride_out", "const kint_type", true};
 
-    Variable stride0_out{"stride0_out", "const index_type"};
+    Variable stride0_out{"stride0_out", "const kint_type"};
 
     //
     //
     //
     Variable len_along_block{"len_along_block",
-                             "const " + std::string(rtc_index_type(IndexType::U32))};
+                             "const " + std::string(rtc_kint_type(KIntType::U32))};
     Variable len_along_plane{"len_along_plane",
-                             "const " + std::string(rtc_index_type(IndexType::U32))};
-    Variable stride_load_in{"stride_load_in", "const index_type"};
-    Variable stride_store_out{"stride_store_out", "const index_type"};
-    Variable stride_plane_in{"stride_plane_in", "const index_type"};
-    Variable stride_plane_out{"stride_plane_out", "const index_type"};
+                             "const " + std::string(rtc_kint_type(KIntType::U32))};
+    Variable stride_load_in{"stride_load_in", "const kint_type"};
+    Variable stride_store_out{"stride_store_out", "const kint_type"};
+    Variable stride_plane_in{"stride_plane_in", "const kint_type"};
+    Variable stride_plane_out{"stride_plane_out", "const kint_type"};
 
     //
     // locals
     //
-    Variable num_of_tiles_in_plane{"num_of_tiles_in_plane", rtc_index_type(IndexType::U32)};
-    Variable num_of_tiles_in_batch{"num_of_tiles_in_batch", rtc_index_type(IndexType::U32)};
-    Variable tile_index_in_plane{"tile_index_in_plane", rtc_index_type(IndexType::U32)};
+    Variable num_of_tiles_in_plane{"num_of_tiles_in_plane", rtc_kint_type(KIntType::U32)};
+    Variable num_of_tiles_in_batch{"num_of_tiles_in_batch", rtc_kint_type(KIntType::U32)};
+    Variable tile_index_in_plane{"tile_index_in_plane", rtc_kint_type(KIntType::U32)};
 
     Variable edge{"edge", "bool"};
-    Variable thread{"thread", rtc_index_type(IndexType::U32)}; // replacing tid_ver
-    Variable tid_hor{"tid_hor", rtc_index_type(IndexType::U32)};
+    Variable thread{"thread", rtc_kint_type(KIntType::U32)}; // replacing tid_ver
+    Variable tid_hor{"tid_hor", rtc_kint_type(KIntType::U32)};
 
     std::string tiling_name() override
     {
@@ -141,10 +141,10 @@ struct StockhamKernelRC : public StockhamKernel
     {
         StatementList stmts;
 
-        Variable plane_id{"plane_id", rtc_index_type(IndexType::U32)};
-        Variable tile_serial_in_batch{"tile_serial_in_batch", rtc_index_type(IndexType::U32)};
-        Variable global_stride_in{"global_stride_in", "const index_type"};
-        Variable global_stride_out{"global_stride_out", "const index_type"};
+        Variable plane_id{"plane_id", rtc_kint_type(KIntType::U32)};
+        Variable tile_serial_in_batch{"tile_serial_in_batch", rtc_kint_type(KIntType::U32)};
+        Variable global_stride_in{"global_stride_in", "const kint_type"};
+        Variable global_stride_out{"global_stride_out", "const kint_type"};
 
         stmts += Declaration{
             len_along_block,
@@ -182,9 +182,9 @@ struct StockhamKernelRC : public StockhamKernel
         // --------------------------------------------------
         StatementList offset_2d;
 
-        Variable d{"d", rtc_index_type(IndexType::U32)};
-        Variable index_along_d{"index_along_d", rtc_index_type(IndexType::U32)};
-        Variable remaining{"remaining", rtc_index_type(IndexType::U32)};
+        Variable d{"d", rtc_kint_type(KIntType::U32)};
+        Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
+        Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
 
         // offset_2d += CommentLines{"calculate offset for each tile:",
         //                       "  num_of_tiles_in_plane now means number of tiles along dim1",
@@ -202,10 +202,10 @@ struct StockhamKernelRC : public StockhamKernel
 
         if(emitGlobalId)
         {
-            stmts += Declaration{Variable{"global_stride_in[3]", "const index_type"},
+            stmts += Declaration{Variable{"global_stride_in[3]", "const kint_type"},
                                  Literal{"{global_stride_in_0, global_stride_in_1, global_idist}"}};
             stmts
-                += Declaration{Variable{"global_stride_out[3]", "const index_type"},
+                += Declaration{Variable{"global_stride_out[3]", "const kint_type"},
                                Literal{"{global_stride_out_0, global_stride_out_1, global_odist}"}};
 
             offset_2d += For{
@@ -464,7 +464,7 @@ struct StockhamKernelRC : public StockhamKernel
 
             StatementList edge_load;
 
-            Variable t{"t", rtc_index_type(IndexType::U32)};
+            Variable t{"t", rtc_kint_type(KIntType::U32)};
             if(divisible)
             {
                 Expression tmp_idx = tid_hor + (thread + t) * length;

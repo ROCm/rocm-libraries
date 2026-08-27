@@ -75,7 +75,7 @@ std::string bluestein_single_rtc(const std::string& kernel_name, const Bluestein
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(specs.precision);
-    src += rtc_index_type_decl(specs.itype);
+    src += rtc_kint_type_decl(specs.itype);
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
 
@@ -239,7 +239,7 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(specs.precision);
-    src += rtc_index_type_decl(specs.itype);
+    src += rtc_kint_type_decl(specs.itype);
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
 
@@ -258,9 +258,9 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     Variable input{"input", "scalar_type", true, true};
     Variable output{"output", "scalar_type", true, true};
     Variable dim{"dim", "const size_t"};
-    Variable lengths{"lengths", "const " + std::string(rtc_index_type(IndexType::U32)), true, true};
-    Variable stride_in{"stride_in", "const index_type", true, true};
-    Variable stride_out{"stride_out", "const index_type", true, true};
+    Variable lengths{"lengths", "const " + std::string(rtc_kint_type(KIntType::U32)), true, true};
+    Variable stride_in{"stride_in", "const kint_type", true, true};
+    Variable stride_out{"stride_out", "const kint_type", true, true};
     Variable scale_factor{"scale_factor", "const real_type_t<scalar_type>"};
 
     Function func{kernel_name};

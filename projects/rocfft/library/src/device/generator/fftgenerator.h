@@ -245,10 +245,10 @@ struct FFTComputeOffsets
 
     std::shared_ptr<Context> context;
 
-    Variable transform{"transform", rtc_index_type(IndexType::U32)};
-    Variable remaining{"remaining", rtc_index_type(IndexType::U32)};
-    Variable index_along_d{"index_along_d", rtc_index_type(IndexType::U32)};
-    Variable d{"d", rtc_index_type(IndexType::U32)};
+    Variable transform{"transform", rtc_kint_type(KIntType::U32)};
+    Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
+    Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
+    Variable d{"d", rtc_kint_type(KIntType::U32)};
 
     FFTComputeOffsets() = delete;
     FFTComputeOffsets(unsigned int             length0,
@@ -1061,19 +1061,19 @@ struct StockhamTransform
 
     FFTBuffer R{"R", Literal{0}, Literal{1}, 0};
     FFTBuffer lds{"lds",
-                  Variable{"offset_lds", rtc_index_type(IndexType::U32)},
-                  Variable{"stride_lds", rtc_index_type(IndexType::U32)}};
-    FFTBuffer X{"X", Variable{"offset_lds", rtc_index_type(IndexType::U32)}, Literal{1}};
+                  Variable{"offset_lds", rtc_kint_type(KIntType::U32)},
+                  Variable{"stride_lds", rtc_kint_type(KIntType::U32)}};
+    FFTBuffer X{"X", Variable{"offset_lds", rtc_kint_type(KIntType::U32)}, Literal{1}};
 
-    Variable dim{"dim", rtc_index_type(IndexType::U32)};
-    Variable nbatch{"nbatch", "index_type"};
-    Variable lengths{"lengths", rtc_index_type(IndexType::U32), true, true};
-    Variable stride{"stride", "index_type", true, true};
-    Variable offset{"offset", "index_type"};
+    Variable dim{"dim", rtc_kint_type(KIntType::U32)};
+    Variable nbatch{"nbatch", "kint_type"};
+    Variable lengths{"lengths", rtc_kint_type(KIntType::U32), true, true};
+    Variable stride{"stride", "kint_type", true, true};
+    Variable offset{"offset", "kint_type"};
 
     Variable write{"write", "bool"};
-    Variable thread{"thread", rtc_index_type(IndexType::U32)};
-    Variable batch{"batch", rtc_index_type(IndexType::U32)};
+    Variable thread{"thread", rtc_kint_type(KIntType::U32)};
+    Variable batch{"batch", rtc_kint_type(KIntType::U32)};
 
     Variable twiddles{"twiddles", "const scalar_type", true, true};
     Variable load_cb_fn{"load_cb_fn", "void*"};
@@ -1156,24 +1156,24 @@ struct BluesteinTransform
     FFTBuffer R{"R", Literal{0}, Literal{1}, 0};
     // LDS buffer
     FFTBuffer A{"A",
-                Variable{"offset_lds", rtc_index_type(IndexType::U32)},
-                Variable{"stride_lds", rtc_index_type(IndexType::U32)}};
+                Variable{"offset_lds", rtc_kint_type(KIntType::U32)},
+                Variable{"stride_lds", rtc_kint_type(KIntType::U32)}};
     // FFTed chirp signal (second half of chirp buffer)
     FFTBuffer B{"B", Literal{0}, Literal{1}};
     // chirp signal (first half of chirp buffer)
     FFTBuffer a{"a", Literal{0}, Literal{1}};
     // user data
-    FFTBuffer X{"X", Variable{"offset", "index_type"}, Variable{"stride0", "index_type"}};
+    FFTBuffer X{"X", Variable{"offset", "kint_type"}, Variable{"stride0", "kint_type"}};
 
-    Variable dim{"dim", rtc_index_type(IndexType::U32)};
-    Variable nbatch{"nbatch", rtc_index_type(IndexType::U32)};
-    Variable lengths{"lengths", rtc_index_type(IndexType::U32), true, true};
-    Variable stride{"stride", "index_type", true, true};
-    Variable offset{"offset", "index_type"};
+    Variable dim{"dim", rtc_kint_type(KIntType::U32)};
+    Variable nbatch{"nbatch", rtc_kint_type(KIntType::U32)};
+    Variable lengths{"lengths", rtc_kint_type(KIntType::U32), true, true};
+    Variable stride{"stride", "kint_type", true, true};
+    Variable offset{"offset", "kint_type"};
 
     Variable write{"write", "bool"};
-    Variable thread{"thread", rtc_index_type(IndexType::U32)};
-    Variable batch{"batch", rtc_index_type(IndexType::U32)};
+    Variable thread{"thread", rtc_kint_type(KIntType::U32)};
+    Variable batch{"batch", rtc_kint_type(KIntType::U32)};
     Variable val{"val", "scalar_type"};
 
     Variable buf_temp{"buf_temp", "scalar_type", true, true};

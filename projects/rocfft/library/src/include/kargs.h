@@ -38,10 +38,10 @@
 // batch stride.
 //
 // Lengths are always 32-bit, since kernels only ever index and divide
-// by them.  Strides and dists are as wide as the index_type of the
+// by them.  Strides and dists are as wide as the kint_type of the
 // kernel that reads the buffer, so the layout - and therefore the
-// offset of each array - depends on the IndexType this was created
-// with.  The kernel's index_type must be decided the same way, or it
+// offset of each array - depends on the KIntType this was created
+// with.  The kernel's kint_type must be decided the same way, or it
 // will read the arrays at the wrong width.
 class KernelArgsBuffer
 {
@@ -51,7 +51,7 @@ public:
                 const std::vector<size_t>& outStride,
                 size_t                     iDist,
                 size_t                     oDist,
-                IndexType                  itype);
+                KIntType                   itype);
 
     void* lengths() const
     {
@@ -76,11 +76,11 @@ private:
 
     size_t strides_bytes() const
     {
-        return KERN_ARGS_ARRAY_WIDTH * rtc_index_type_size(itype);
+        return KERN_ARGS_ARRAY_WIDTH * rtc_kint_type_size(itype);
     }
 
-    gpubuf    buf;
-    IndexType itype = IndexType::U32;
+    gpubuf   buf;
+    KIntType itype = KIntType::U32;
 };
 
 #endif // defined( KARGS_H )

@@ -32,7 +32,7 @@
 
 struct StockhamGeneratorSpecs
 {
-    StockhamGeneratorSpecs(const IndexType&                   itype,
+    StockhamGeneratorSpecs(const KIntType&                    itype,
                            const std::vector<unsigned int>&   factors,
                            const std::vector<unsigned int>&   factors2d,
                            unsigned int                       precision,
@@ -53,7 +53,7 @@ struct StockhamGeneratorSpecs
     {
     }
 
-    IndexType                 itype;
+    KIntType                  itype;
     std::vector<unsigned int> factors;
     std::vector<unsigned int> factors2d;
     std::vector<unsigned int> factors_pp;

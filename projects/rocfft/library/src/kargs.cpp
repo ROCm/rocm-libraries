@@ -32,7 +32,7 @@ bool KernelArgsBuffer::create(const std::vector<size_t>& length,
                               const std::vector<size_t>& outStride,
                               size_t                     iDist,
                               size_t                     oDist,
-                              IndexType                  itype)
+                              KIntType                   itype)
 {
     assert(length.size() == inStride.size());
     assert(length.size() == outStride.size());
@@ -65,10 +65,10 @@ bool KernelArgsBuffer::create(const std::vector<size_t>& length,
         char* array = host.data() + lengths_bytes() + array_idx * strides_bytes();
 
         auto store = [&](size_t i, size_t value) {
-            if(itype == IndexType::U32)
+            if(itype == KIntType::U32)
             {
                 if(value > std::numeric_limits<unsigned int>::max())
-                    throw std::runtime_error("stride overflows 32-bit kernel index_type");
+                    throw std::runtime_error("stride overflows 32-bit kernel kint_type");
                 reinterpret_cast<unsigned int*>(array)[i] = static_cast<unsigned int>(value);
             }
             else

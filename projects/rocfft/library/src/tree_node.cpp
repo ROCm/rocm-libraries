@@ -263,7 +263,7 @@ void LeafNode::Print(rocfft_ostream& os, int indent) const
 
 bool LeafNode::CreateDevKernelArgs()
 {
-    return devKernArg.create(length, inStride, outStride, iDist, oDist, GetKernelIndexType());
+    return devKernArg.create(length, inStride, outStride, iDist, oDist, GetKIntType());
 }
 
 bool LeafNode::CreateDeviceResources()

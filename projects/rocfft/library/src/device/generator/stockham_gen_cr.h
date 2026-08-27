@@ -36,11 +36,11 @@ struct StockhamKernelCR : public StockhamKernel
     //
     // locals
     //
-    Variable tile_index{"tile_index", rtc_index_type(IndexType::U32)};
-    Variable tile_length{"tile_length", rtc_index_type(IndexType::U32)};
+    Variable tile_index{"tile_index", rtc_kint_type(KIntType::U32)};
+    Variable tile_length{"tile_length", rtc_kint_type(KIntType::U32)};
     Variable in_bound{"in_bound", "bool"};
-    Variable thread{"thread", rtc_index_type(IndexType::U32)}; // replacing tid_ver
-    Variable tid_hor{"tid_hor", rtc_index_type(IndexType::U32)};
+    Variable thread{"thread", rtc_kint_type(KIntType::U32)}; // replacing tid_ver
+    Variable tid_hor{"tid_hor", rtc_kint_type(KIntType::U32)};
 
     std::string tiling_name() override
     {
@@ -110,10 +110,10 @@ struct StockhamKernelCR : public StockhamKernel
 
     StatementList calculate_offsets() override
     {
-        Variable d{"d", rtc_index_type(IndexType::U32)};
-        Variable index_along_d{"index_along_d", rtc_index_type(IndexType::U32)};
-        Variable remaining{"remaining", rtc_index_type(IndexType::U32)};
-        Variable plength{"plength", rtc_index_type(IndexType::U32)};
+        Variable d{"d", rtc_kint_type(KIntType::U32)};
+        Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
+        Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
+        Variable plength{"plength", rtc_kint_type(KIntType::U32)};
 
         StatementList stmts;
         stmts += Declaration{tile_index};
@@ -349,7 +349,7 @@ struct StockhamKernelCR : public StockhamKernel
             }
 
             StatementList edge_store;
-            Variable      t{"t", rtc_index_type(IndexType::U32)};
+            Variable      t{"t", rtc_kint_type(KIntType::U32)};
             if(divisible)
             {
                 Expression buf_idx = tid_hor * stride0 + (thread + t) * stride[1];

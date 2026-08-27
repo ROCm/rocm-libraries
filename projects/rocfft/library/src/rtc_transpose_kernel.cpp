@@ -90,9 +90,9 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
 
     bool tileAligned = node.length[0] % tileX == 0 && node.length[1] % tileX == 0;
 
-    // GetKernelIndexType runs after buffer assignment, fusion
+    // GetKIntType runs after buffer assignment, fusion
     // and padding, so the node's lengths and strides are final.
-    IndexType itype = node.GetKernelIndexType();
+    KIntType itype = node.GetKIntType();
 
     TransposeSpecs specs{itype,
                          tileX,
@@ -141,23 +141,23 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
     // and widening them to 64BIT would cost registers for nothing
 
     auto num_lengths = data.node->length.size();
-    kargs.append_index(num_lengths, IndexType::U32);
-    kargs.append_index(data.node->length[0], IndexType::U32);
-    kargs.append_index(data.node->length[1], IndexType::U32);
-    kargs.append_index(num_lengths > 2 ? data.node->length[2] : 1, IndexType::U32);
+    kargs.append_kint(num_lengths, KIntType::U32);
+    kargs.append_kint(data.node->length[0], KIntType::U32);
+    kargs.append_kint(data.node->length[1], KIntType::U32);
+    kargs.append_kint(num_lengths > 2 ? data.node->length[2] : 1, KIntType::U32);
     kargs.append_ptr(data.node->devKernArg.lengths());
 
-    kargs.append_index(data.node->inStride[0]);
-    kargs.append_index(data.node->inStride[1]);
-    kargs.append_index(num_lengths > 2 ? data.node->inStride[2] : 0);
+    kargs.append_kint(data.node->inStride[0]);
+    kargs.append_kint(data.node->inStride[1]);
+    kargs.append_kint(num_lengths > 2 ? data.node->inStride[2] : 0);
     kargs.append_ptr(data.node->devKernArg.stride_in());
-    kargs.append_index(data.node->iDist);
+    kargs.append_kint(data.node->iDist);
 
-    kargs.append_index(data.node->outStride[0]);
-    kargs.append_index(data.node->outStride[1]);
-    kargs.append_index(num_lengths > 2 ? data.node->outStride[2] : 0);
+    kargs.append_kint(data.node->outStride[0]);
+    kargs.append_kint(data.node->outStride[1]);
+    kargs.append_kint(num_lengths > 2 ? data.node->outStride[2] : 0);
     kargs.append_ptr(data.node->devKernArg.stride_out());
-    kargs.append_index(data.node->oDist);
+    kargs.append_kint(data.node->oDist);
 
     // pass gridX, gridY and gridZ to restore a 3-D GPU grid, if needed for large grids
     unsigned int tileX = data.node->precision == rocfft_precision_single ? 64 : 32;
@@ -172,14 +172,14 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
                                          data.node->batch,
                                          std::multiplies<unsigned int>());
 
-    kargs.append_index(gridX, IndexType::U32);
-    kargs.append_index(gridY, IndexType::U32);
-    kargs.append_index(gridZ, IndexType::U32);
+    kargs.append_kint(gridX, KIntType::U32);
+    kargs.append_kint(gridY, KIntType::U32);
+    kargs.append_kint(gridZ, KIntType::U32);
 
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+    kargs.append_kint(data.callbacks.load_cb_lds_bytes, KIntType::U32);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
 

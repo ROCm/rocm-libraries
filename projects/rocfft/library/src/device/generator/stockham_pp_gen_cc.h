@@ -81,17 +81,17 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     unsigned int transforms_per_block_unscaled;
 
-    Variable trans_local{"trans_local", rtc_index_type(IndexType::U32)};
+    Variable trans_local{"trans_local", rtc_kint_type(KIntType::U32)};
 
-    Variable thread_lds{"thread_lds", rtc_index_type(IndexType::U32)};
+    Variable thread_lds{"thread_lds", rtc_kint_type(KIntType::U32)};
 
-    Variable tid_hor_lds{"tid_hor_lds", rtc_index_type(IndexType::U32)};
-    Variable tid_hor_pp{"tid_hor_pp", rtc_index_type(IndexType::U32)};
-    Variable offset_tid_hor{"offset_tid_hor", "index_type"};
+    Variable tid_hor_lds{"tid_hor_lds", rtc_kint_type(KIntType::U32)};
+    Variable tid_hor_pp{"tid_hor_pp", rtc_kint_type(KIntType::U32)};
+    Variable offset_tid_hor{"offset_tid_hor", "kint_type"};
 
-    Variable block_idx_pp{"block_idx_pp", "index_type"};
+    Variable block_idx_pp{"block_idx_pp", "kint_type"};
 
-    Variable thread_in_device_twd{"thread_in_device_twd", rtc_index_type(IndexType::U32)};
+    Variable thread_in_device_twd{"thread_in_device_twd", rtc_kint_type(KIntType::U32)};
 
     std::vector<unsigned int> launcher_lengths() override
     {
@@ -190,10 +190,10 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     StatementList calculate_offsets() override
     {
-        Variable d{"d", std::string(rtc_index_type(IndexType::U32))};
-        Variable index_along_d{"index_along_d", rtc_index_type(IndexType::U32)};
-        Variable remaining{"remaining", rtc_index_type(IndexType::U32)};
-        Variable plength{"plength", std::string(rtc_index_type(IndexType::U32))};
+        Variable d{"d", std::string(rtc_kint_type(KIntType::U32))};
+        Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
+        Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
+        Variable plength{"plength", std::string(rtc_kint_type(KIntType::U32))};
 
         StatementList stmts;
         stmts += Declaration{tile_index};

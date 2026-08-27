@@ -28,7 +28,7 @@
 struct RTCKernelBluesteinSingle : public RTCKernel
 {
     RTCKernelBluesteinSingle(const std::string&                       kernel_name,
-                             IndexType                                itype,
+                             KIntType                                 itype,
                              std::shared_future<hipModule_wrapper_t>& module,
                              dim3                                     gridDim,
                              dim3                                     blockDim)
@@ -46,7 +46,7 @@ struct RTCKernelBluesteinSingle : public RTCKernel
 struct RTCKernelBluesteinMulti : public RTCKernel
 {
     RTCKernelBluesteinMulti(const std::string&                       kernel_name,
-                            IndexType                                itype,
+                            KIntType                                 itype,
                             ComputeScheme                            scheme,
                             size_t                                   N,
                             size_t                                   M,

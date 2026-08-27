@@ -27,7 +27,7 @@
 struct RTCKernelTwiddle : public RTCKernel
 {
     // Twiddle length N is limited by LDS size, so we use U32 index type for all twiddle kernels
-    static inline IndexType itype = IndexType::U32;
+    static inline KIntType itype = KIntType::U32;
 
     // generate twiddle kernel from type and precision
     static std::shared_future<std::unique_ptr<RTCKernel>>
@@ -44,7 +44,7 @@ protected:
     TwiddleTableType type;
 
     RTCKernelTwiddle(const std::string&                       kernel_name,
-                     IndexType                                itype,
+                     KIntType                                 itype,
                      std::shared_future<hipModule_wrapper_t>& module,
                      dim3                                     gridDim,
                      dim3                                     blockDim)
