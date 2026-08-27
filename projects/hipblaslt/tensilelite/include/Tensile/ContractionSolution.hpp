@@ -340,6 +340,37 @@ namespace TensileLite
     };
 
     /**
+     * Selection-time diagnostics for uniform summation order.
+     *
+     * Under uniform summation order the library filters out every solution it
+     * cannot prove row-uniform, so a lookup can legitimately return nothing.
+     * That is visible to the caller only as "no solution found", which does not
+     * say whether uniform summation order was responsible or which of its
+     * clauses did the work. These two functions close that gap: the filter tags
+     * each rejection with a short stable token, and the caller that observes an
+     * empty result asks for the tally back.
+     *
+     * The tally is thread-local and covers the candidates examined since the
+     * last reset, which a caller performs immediately before a lookup.
+     *
+     * Everything here is inert unless TENSILE_DB bit 0x200000 is set: recording
+     * is a branch on a cached flag, so no counting, formatting or allocation
+     * happens on a normal run. It is a dedicated bit rather than a log level so
+     * that enabling it does not also switch on per-call tracing.
+     */
+    TENSILELITEHOST_EXPORT void uniformSummationOrderSelectionTallyReset();
+
+    /**
+     * Renders the tally as `<token>:<count>` pairs, most frequent first, joined
+     * by commas; "none" when no candidate reached the filter. The count of
+     * candidates that reached the filter is returned through examined, so a
+     * caller can tell "uniform summation order emptied the set" from "the set
+     * was already empty when the filter ran".
+     */
+    TENSILELITEHOST_EXPORT std::string
+        uniformSummationOrderSelectionTallyReport(size_t& examined, size_t& refused);
+
+    /**
      * Represents a single kernel or set of kernels that can perform a single
      * tensor contraction.
      *
@@ -867,6 +898,13 @@ namespace TensileLite
         // Empty means the launch is row-uniform. requireSynchronizer is the
         // one clause that exists only at solve() (the pointer is not allocated
         // at heuristic time); selection passes false.
+        //
+        // obstacleToken, when non-null, receives a short stable identifier for
+        // whichever clause objected, written by that clause itself rather than
+        // recovered from the prose. It points at a string literal with static
+        // storage duration and is left untouched when the return value is
+        // empty. It exists so a diagnostic can name the reason without parsing
+        // the human-readable text, which is free to change.
         std::string uniformSummationOrderLaunchObstacle(
             Problem const&         problem,
             Hardware const&        hardware,
@@ -874,7 +912,8 @@ namespace TensileLite
             size_t                 resolvedGlobalAccumulation,
             uint32_t               gsu,
             void const*            synchronizer,
-            bool                   requireSynchronizer) const;
+            bool                   requireSynchronizer,
+            char const**           obstacleToken = nullptr) const;
 
         // Launch gate. Call once sk and resolvedGlobalAccumulation are final.
         void checkUniformSummationOrder(Problem const&         problem,

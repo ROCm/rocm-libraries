@@ -43,6 +43,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <random>
 
@@ -4252,11 +4253,13 @@ namespace TensileLite
     {
         // Forward declaration: defined with the other uniform-summation-order Stream-K
         // helpers later in this file. getSKReduction consults it when deciding
-        // whether parallel remains eligible under uniform summation order.
+        // whether parallel remains eligible under uniform summation order, and
+        // wants only the yes/no, so obstacleToken defaults to unrequested.
         std::string streamKUniformSummationOrderObstacle(
             SizeMapping const&                      sizeMapping,
             ContractionSolution::ProblemType const& problemType,
-            ContractionSolution::Problem const&     problem);
+            ContractionSolution::Problem const&     problem,
+            char const**                            obstacleToken = nullptr);
     } // namespace
 
     origami::reduction_t ContractionSolution::getSKReduction(Problem const&  problem,
@@ -4576,6 +4579,66 @@ namespace TensileLite
 
     namespace
     {
+        // Thread-local tally of the uniform-summation-order selection filter.
+        //
+        // Capacity is fixed and the token strings are borrowed rather than
+        // copied, so recording a rejection never allocates. The token set is
+        // closed and small (one literal per clause of the launch-obstacle
+        // helper), so a linear scan is cheaper than any keyed container and
+        // keeps the report in a deterministic insertion order.
+        constexpr size_t uniformSummationOrderTallyCapacity = 32;
+
+        struct UniformSummationOrderTally
+        {
+            char const* tokens[uniformSummationOrderTallyCapacity] = {};
+            size_t      counts[uniformSummationOrderTallyCapacity] = {};
+            size_t      distinct                                   = 0;
+            // Candidates that reached the uniform-summation-order filter, i.e.
+            // that had already satisfied every other selection predicate.
+            size_t examined = 0;
+            size_t refused  = 0;
+        };
+
+        UniformSummationOrderTally& uniformSummationOrderTally()
+        {
+            static thread_local UniformSummationOrderTally tally;
+            return tally;
+        }
+
+        void uniformSummationOrderTallyRecord(char const* token)
+        {
+            UniformSummationOrderTally& tally = uniformSummationOrderTally();
+            ++tally.refused;
+
+            // Every clause tags itself, so a null token means a clause was
+            // added without one. Naming that case is better than dropping the
+            // rejection out of the total.
+            if(token == nullptr)
+                token = "Untagged";
+
+            for(size_t i = 0; i < tally.distinct; ++i)
+            {
+                if(std::strcmp(tally.tokens[i], token) == 0)
+                {
+                    ++tally.counts[i];
+                    return;
+                }
+            }
+
+            if(tally.distinct == uniformSummationOrderTallyCapacity)
+            {
+                // Unreachable while the token set is smaller than the capacity;
+                // folding rather than dropping keeps the counts summing to
+                // refused if a future clause pushes it over.
+                ++tally.counts[uniformSummationOrderTallyCapacity - 1];
+                return;
+            }
+
+            tally.tokens[tally.distinct] = token;
+            tally.counts[tally.distinct] = 1;
+            ++tally.distinct;
+        }
+
         // Statically-knowable reasons a StreamK launch cannot be shown
         // row-uniform: no resolved grid, reduction strategy or Synchronizer
         // pointer is consulted, so the launch-obstacle helper (used by both
@@ -4583,17 +4646,28 @@ namespace TensileLite
         // can share one implementation and cannot disagree. Returns an empty
         // string when nothing here objects.
         //
+        // Each rejection also names itself through obstacleToken (see the
+        // declaration of uniformSummationOrderLaunchObstacle) so a diagnostic
+        // never has to recover the reason by matching on the prose.
+        //
         // None of these fires for any solution in the shipped tuned logic. They
         // fence configurations that are expressible but were never audited for
         // this guarantee.
         std::string streamKUniformSummationOrderObstacle(
             SizeMapping const&                        sizeMapping,
             ContractionSolution::ProblemType const&   problemType,
-            ContractionSolution::Problem const&       problem)
+            ContractionSolution::Problem const&       problem,
+            char const**                              obstacleToken)
         {
+            auto refuse = [&](char const* token, std::string detail) -> std::string {
+                if(obstacleToken != nullptr)
+                    *obstacleToken = token;
+                return detail;
+            };
+
             // Atomic fixup accumulates partial tiles in arrival order.
             if(sizeMapping.streamKAtomic != 0)
-                return "StreamKAtomic=1";
+                return refuse("StreamKAtomic", "StreamKAtomic=1");
 
             // The partials write and the fixup read both build their store
             // state coordinate-agnostically (lane-linear addressing, no
@@ -4605,8 +4679,9 @@ namespace TensileLite
             // in the solution serialization: a record omitting it reads false,
             // so this rejection is only as good as the logic files.
             if(problemType.useInitialStridesCD)
-                return "UseInitialStridesCD=1 disables the coordinate-agnostic store "
-                       "addressing the StreamK partials path relies on";
+                return refuse("UseInitialStridesCD",
+                              "UseInitialStridesCD=1 disables the coordinate-agnostic store "
+                              "addressing the StreamK partials path relies on");
 
             // Same premise, different switch: more than one packed index in
             // dimension 0 selects per-column address VGPRs and more than one in
@@ -4614,11 +4689,13 @@ namespace TensileLite
             // the expression the file already uses for the same question in
             // projectedPerformance()/calculateDimensionM().
             if(problem.freeIndicesA().size() > 1 || (sizeMapping.packBatchDims & 0x1))
-                return "a packed C0 index set disables the coordinate-agnostic store "
-                       "addressing the StreamK partials path relies on";
+                return refuse("PackedC0Index",
+                              "a packed C0 index set disables the coordinate-agnostic store "
+                              "addressing the StreamK partials path relies on");
             if(problem.freeIndicesB().size() > 1 || (sizeMapping.packBatchDims & 0x2))
-                return "a packed C1 index set disables the coordinate-agnostic store "
-                       "addressing the StreamK partials path relies on";
+                return refuse("PackedC1Index",
+                              "a packed C1 index set disables the coordinate-agnostic store "
+                              "addressing the StreamK partials path relies on");
 
             // WaveSplitK and LocalSplitU are mutually exclusive projections of
             // WorkGroup[2] (Solution.py), so WorkGroup[2] > 1 with LocalSplitU
@@ -4629,9 +4706,12 @@ namespace TensileLite
             // StreamK scope is deliberate, since every shipped WaveSplitK
             // solution has StreamK=0 and refusing those would buy nothing.
             if(sizeMapping.workGroupSize.z > 1 && sizeMapping.LocalSplitU <= 1)
-                return "WaveSplitK (WorkGroup[2]=" + std::to_string(sizeMapping.workGroupSize.z)
-                       + " with LocalSplitU=" + std::to_string(sizeMapping.LocalSplitU)
-                       + ") does not mask redundant lanes on the StreamK partials store";
+                return refuse("WaveSplitK",
+                              "WaveSplitK (WorkGroup[2]="
+                                  + std::to_string(sizeMapping.workGroupSize.z)
+                                  + " with LocalSplitU=" + std::to_string(sizeMapping.LocalSplitU)
+                                  + ") does not mask redundant lanes on the StreamK partials "
+                                    "store");
 
             // MX block scaling. Detected from the problem type, never from a
             // kernel-name substring: thousands of shipped f32 records carry an
@@ -4646,15 +4726,21 @@ namespace TensileLite
                 // one, so pin the envelope the derivation covers. All shipped
                 // MX solutions satisfy all three.
                 if(problemType.mxScaleFormat != 1)
-                    return "MX scale format " + std::to_string(problemType.mxScaleFormat)
-                           + " under StreamK is not audited for uniform summation order";
+                    return refuse("MXScaleFormat",
+                                  "MX scale format " + std::to_string(problemType.mxScaleFormat)
+                                      + " under StreamK is not audited for uniform summation "
+                                        "order");
                 if((problemType.mxBlockA != 0 && problemType.mxBlockA != 32)
                    || (problemType.mxBlockB != 0 && problemType.mxBlockB != 32))
-                    return "an MX block size other than 32 under StreamK is not audited for "
-                           "uniform summation order";
+                    return refuse("MXBlockSize",
+                                  "an MX block size other than 32 under StreamK is not audited "
+                                  "for uniform summation order");
                 if(sizeMapping.matrixInstruction[2] != 128)
-                    return "MX with MatrixInstK=" + std::to_string(sizeMapping.matrixInstruction[2])
-                           + " under StreamK is not audited for uniform summation order";
+                    return refuse("MXMatrixInstK",
+                                  "MX with MatrixInstK="
+                                      + std::to_string(sizeMapping.matrixInstruction[2])
+                                      + " under StreamK is not audited for uniform summation "
+                                        "order");
 
                 // The gfx950 HostPreSwizzle scale layout packs 32 M/N rows x 8
                 // MX blocks into one 256-byte granule addressed lane-linearly,
@@ -4668,9 +4754,11 @@ namespace TensileLite
                 // DepthU=128 for MX fp8, so assert it here.
                 constexpr size_t mxScaleSwizzleGranuleK = 256; // lrSubtileShape[1](2) * instK(128)
                 if(sizeMapping.depthU % mxScaleSwizzleGranuleK != 0)
-                    return "DepthU=" + std::to_string(sizeMapping.depthU)
-                           + " is not a multiple of the MX scale swizzle granule (256 K "
-                             "elements), so a StreamK K-cut can land inside a granule";
+                    return refuse("MXScaleSwizzleGranule",
+                                  "DepthU=" + std::to_string(sizeMapping.depthU)
+                                      + " is not a multiple of the MX scale swizzle granule (256 "
+                                        "K elements), so a StreamK K-cut can land inside a "
+                                        "granule");
             }
 
             return {};
@@ -4709,9 +4797,59 @@ namespace TensileLite
         // that one launch-only clause. Everything else the gate would refuse
         // is dropped here so findTopSolutions / isAlgoSupported return only
         // kernels this problem can launch under USO.
-        return uniformSummationOrderLaunchObstacle(
-                   problem, hardware, sk, resolvedGA, gsu, nullptr, false)
-            .empty();
+        //
+        // The token is collected only to be tallied: a lookup that ends with no
+        // admissible solution reports which clauses emptied it, which is the
+        // only way to tell "uniform summation order refused everything" from
+        // "nothing matched this problem in the first place". Tallying is off
+        // unless TENSILE_DB bit 0x200000 is set and never changes the verdict.
+        char const*       obstacleToken = nullptr;
+        const std::string obstacle      = uniformSummationOrderLaunchObstacle(
+            problem, hardware, sk, resolvedGA, gsu, nullptr, false, &obstacleToken);
+
+        if(Debug::Instance().printNoSolutionUniformSummationOrder())
+        {
+            ++uniformSummationOrderTally().examined;
+            if(!obstacle.empty())
+                uniformSummationOrderTallyRecord(obstacleToken);
+        }
+
+        return obstacle.empty();
+    }
+
+    void uniformSummationOrderSelectionTallyReset()
+    {
+        uniformSummationOrderTally() = UniformSummationOrderTally{};
+    }
+
+    std::string uniformSummationOrderSelectionTallyReport(size_t& examined, size_t& refused)
+    {
+        UniformSummationOrderTally const& tally = uniformSummationOrderTally();
+        examined                                = tally.examined;
+        refused                                 = tally.refused;
+
+        if(tally.distinct == 0)
+            return "none";
+
+        // Most frequent first, insertion order breaking ties, so the same run
+        // always renders the same string.
+        std::vector<size_t> order(tally.distinct);
+        for(size_t i = 0; i < tally.distinct; ++i)
+            order[i] = i;
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            return tally.counts[a] > tally.counts[b];
+        });
+
+        std::string report;
+        for(size_t i = 0; i < order.size(); ++i)
+        {
+            if(i != 0)
+                report += ',';
+            report += tally.tokens[order[i]];
+            report += ':';
+            report += std::to_string(tally.counts[order[i]]);
+        }
+        return report;
     }
 
     std::string ContractionSolution::uniformSummationOrderLaunchObstacle(
@@ -4721,18 +4859,28 @@ namespace TensileLite
         size_t                 resolvedGlobalAccumulation,
         uint32_t               gsu,
         void const*            synchronizer,
-        bool                   requireSynchronizer) const
+        bool                   requireSynchronizer,
+        char const**           obstacleToken) const
     {
+        auto refuse = [&](char const* token, std::string detail) -> std::string {
+            if(obstacleToken != nullptr)
+                *obstacleToken = token;
+            return detail;
+        };
+
         if(handwrittenCustomKernel())
-            return "custom kernel " + customKernel.name
-                   + " is not supported under uniform summation order";
+            return refuse("CustomKernel",
+                          "custom kernel " + customKernel.name
+                              + " is not supported under uniform summation order");
 
         if(sizeMapping.streamK != 0)
         {
             // The statically-knowable obstacles (atomic fixup,
             // UseInitialStridesCD, packed C0/C1, WaveSplitK, MX scale granule).
-            const std::string obstacle
-                = streamKUniformSummationOrderObstacle(sizeMapping, problemType, problem);
+            // That helper tags itself, so the token is already set when it
+            // objects.
+            const std::string obstacle = streamKUniformSummationOrderObstacle(
+                sizeMapping, problemType, problem, obstacleToken);
             if(!obstacle.empty())
                 return obstacle;
 
@@ -4740,7 +4888,7 @@ namespace TensileLite
             // a default-constructed StreamKSettings, so this is what stands
             // between them and a division by zero below.
             if(sk.grid == 0)
-                return "the resolved StreamK grid is 0";
+                return refuse("StreamKGridZero", "the resolved StreamK grid is 0");
 
             // StreamK=5 hybrid runs the static (SK3) packing unless its
             // sub-mode resolves to dynamic. generateSingleCall() decides this
@@ -4763,11 +4911,12 @@ namespace TensileLite
                 // the launch is row-uniform; otherwise fail closed.
                 if(!streamKParallelReductionRowUniform(
                        sk, sizeMapping.streamKAtomic, staticTwoTilePacking, tiles))
-                    return "the resolved StreamK parallel reduction is not row-uniform: tiles="
-                           + std::to_string(tiles) + " grid=" + std::to_string(sk.grid)
-                           + " streamKAtomic=" + std::to_string(sizeMapping.streamKAtomic)
-                           + " staticTwoTilePacking="
-                           + (staticTwoTilePacking ? "1" : "0");
+                    return refuse(
+                        "ParallelReductionNotRowUniform",
+                        "the resolved StreamK parallel reduction is not row-uniform: tiles="
+                            + std::to_string(tiles) + " grid=" + std::to_string(sk.grid)
+                            + " streamKAtomic=" + std::to_string(sizeMapping.streamKAtomic)
+                            + " staticTwoTilePacking=" + (staticTwoTilePacking ? "1" : "0"));
             }
             else if(sk.reduction == origami::reduction_t::tree)
             {
@@ -4780,7 +4929,8 @@ namespace TensileLite
 
                     AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
                     if(pAMDGPU == nullptr)
-                        return "the StreamK split cannot be recomputed for this hardware";
+                        return refuse("HardwareNotAMDGPU",
+                                      "the StreamK split cannot be recomputed for this hardware");
 
                     // The same helper generateSingleCall() packs from, so the gate
                     // reasons about the split the kernel actually performs.
@@ -4796,15 +4946,16 @@ namespace TensileLite
                                                      itersPerTile,
                                                      sk.grid,
                                                      internalArgsSupport.perTileExtraIters))
-                        return "the StreamK split is not row-uniform: tiles="
-                               + std::to_string(tiles)
-                               + " itersPerTile=" + std::to_string(itersPerTile)
-                               + " grid=" + std::to_string(sk.grid)
-                               + " skTiles=" + std::to_string(split.skTiles)
-                               + " skItersPerWG=" + std::to_string(split.skItersPerWG)
-                               + " extraIters=" + std::to_string(split.extraIters)
-                               + " perTileExtraIters="
-                               + (internalArgsSupport.perTileExtraIters ? "1" : "0");
+                        return refuse(
+                            "StaticSplitNotRowUniform",
+                            "the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
+                                + " itersPerTile=" + std::to_string(itersPerTile)
+                                + " grid=" + std::to_string(sk.grid)
+                                + " skTiles=" + std::to_string(split.skTiles)
+                                + " skItersPerWG=" + std::to_string(split.skItersPerWG)
+                                + " extraIters=" + std::to_string(split.extraIters)
+                                + " perTileExtraIters="
+                                + (internalArgsSupport.perTileExtraIters ? "1" : "0"));
                 }
                 else if(tiles % sk.grid != 0)
                 {
@@ -4813,8 +4964,10 @@ namespace TensileLite
                     // held to SKTiles == 0 below, so the divisibility test is
                     // redundant for them, but redundant and fail-closed is the
                     // right side to err on.
-                    return "StreamK grid " + std::to_string(sk.grid)
-                           + " does not divide the tile count " + std::to_string(tiles);
+                    return refuse("GridDoesNotDivideTiles",
+                                  "StreamK grid " + std::to_string(sk.grid)
+                                      + " does not divide the tile count "
+                                      + std::to_string(tiles));
                 }
 
                 // Mirrors the arg-packing condition: the ws/Flags pair is only
@@ -4822,7 +4975,8 @@ namespace TensileLite
                 // as a request for the parallel reduction path.
                 if(requireSynchronizer && sizeMapping.streamKAtomic == 0
                    && sizeMapping.streamKForceDPOnly == 0 && synchronizer == nullptr)
-                    return "the StreamK Synchronizer/Flags pointer is null";
+                    return refuse("SynchronizerNull",
+                                  "the StreamK Synchronizer/Flags pointer is null");
 
                 // The dynamic-queue variants are row-uniform only while every output
                 // tile stays data-parallel, i.e. the packed SKTiles is 0.
@@ -4833,13 +4987,15 @@ namespace TensileLite
                     const uint32_t skTiles
                         = overrideTiles > -1 ? static_cast<uint32_t>(overrideTiles) : 0u;
                     if(skTiles != 0)
-                        return "the dynamic-queue StreamK path is packing SKTiles="
-                               + std::to_string(skTiles) + " rather than 0";
+                        return refuse("DynamicQueueSKTiles",
+                                      "the dynamic-queue StreamK path is packing SKTiles="
+                                          + std::to_string(skTiles) + " rather than 0");
                 }
             }
             else
             {
-                return "the resolved StreamK reduction is neither tree nor parallel";
+                return refuse("UnknownReduction",
+                              "the resolved StreamK reduction is neither tree nor parallel");
             }
         }
 
@@ -4854,8 +5010,10 @@ namespace TensileLite
               || resolvedGlobalAccumulation == 4
               || ((resolvedGlobalAccumulation == 0 || resolvedGlobalAccumulation == 1) && gsu <= 1);
         if(!accumulationRowUniform)
-            return "resolved GlobalAccumulation=" + std::to_string(resolvedGlobalAccumulation)
-                   + " with GSU=" + std::to_string(gsu) + " is not row-uniform";
+            return refuse("GlobalAccumulation",
+                          "resolved GlobalAccumulation="
+                              + std::to_string(resolvedGlobalAccumulation)
+                              + " with GSU=" + std::to_string(gsu) + " is not row-uniform");
 
         // Recomputes exactly what generateSingleCall() packs. The clamp in
         // calculateAutoStaggerU() should already have forced this to 0; checking
@@ -4864,12 +5022,14 @@ namespace TensileLite
         const size_t  resolvedStaggerU
             = std::get<1>(calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM));
         if(resolvedStaggerU != 0)
-            return "the resolved StaggerU is " + std::to_string(resolvedStaggerU)
-                   + " rather than 0";
+            return refuse("ResolvedStaggerU",
+                          "the resolved StaggerU is " + std::to_string(resolvedStaggerU)
+                              + " rather than 0");
 
         if(!internalArgsSupport.staggerU && sizeMapping.staggerU != 0)
-            return "this kernel has no runtime StaggerU and a compiled-in StaggerU="
-                   + std::to_string(sizeMapping.staggerU);
+            return refuse("CompiledInStaggerU",
+                          "this kernel has no runtime StaggerU and a compiled-in StaggerU="
+                              + std::to_string(sizeMapping.staggerU));
 
         return {};
     }

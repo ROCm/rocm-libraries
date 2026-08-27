@@ -44,7 +44,10 @@
 #include "rocroller_host.hpp"
 #endif
 
+#include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Contractions.hpp>
+#include <Tensile/DataTypes.hpp>
+#include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
@@ -60,6 +63,7 @@
 #include <exception>
 #include <filesystem>
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -4408,6 +4412,69 @@ void _convertToHeuristicResultArray(
     }
 }
 
+// One stderr record per problem whose solution lookup came back with nothing,
+// naming the uniform-summation-order clauses that eliminated the candidates.
+//
+// "No solution found" is all a caller can see today, and it does not say
+// whether uniform summation order was responsible or, if so, which of its
+// clauses did the work. Both are ordinary questions to ask when the feature is
+// switched on and a previously working problem stops resolving.
+//
+// The record is written on the selection path, so it only ever describes a
+// problem that produced no kernel and therefore no work.
+//
+// Format, one line, stable so it can be consumed by a script:
+//
+//   hipBLASLt-USO-NOSOLUTION uso=<0|1> op=<identifier> m=<M> n=<N> k=<K>
+//     batch=<B> transA=<0|1> transB=<0|1> a=<type> b=<type> c=<type> d=<type>
+//     compute=<type> candidates=<count> refused=<count>
+//     reasons=<Token:count,...|none>
+//
+// candidates counts the solutions that reached the uniform-summation-order
+// filter, that is, the ones that had already satisfied every other selection
+// predicate. candidates=0 therefore means the set was empty before the filter
+// ran and uniform summation order is not the reason.
+//
+// m/n/k/batch are the products over the free, bound and batch indices, which is
+// how the Stream-K resolution reduces the problem, so they agree with the
+// numbers the rest of the library reasons about even for a multi-index
+// contraction.
+inline void reportNoSolutionFound(TensileLite::ContractionProblemGemm const& tensile_prob)
+{
+    using TensileLite::DataTypeInfo;
+
+    size_t m = 1, n = 1, k = 1, batch = 1;
+    for(size_t i = 0; i < tensile_prob.freeIndicesA().size(); ++i)
+        m *= tensile_prob.freeSizeA(i);
+    for(size_t i = 0; i < tensile_prob.freeIndicesB().size(); ++i)
+        n *= tensile_prob.freeSizeB(i);
+    for(size_t i = 0; i < tensile_prob.boundIndices().size(); ++i)
+        k *= tensile_prob.boundSize(i);
+    for(size_t i = 0; i < tensile_prob.batchIndices().size(); ++i)
+        batch *= tensile_prob.batchSize(i);
+
+    size_t            examined = 0;
+    size_t            refused  = 0;
+    const std::string reasons
+        = TensileLite::uniformSummationOrderSelectionTallyReport(examined, refused);
+
+    std::ostringstream msg;
+    msg << "hipBLASLt-USO-NOSOLUTION"
+        << " uso=" << (tensile_prob.getParams().uniformSummationOrder() ? 1 : 0)
+        << " op=" << tensile_prob.operationIdentifier() << " m=" << m << " n=" << n << " k=" << k
+        << " batch=" << batch << " transA=" << (tensile_prob.transA() ? 1 : 0)
+        << " transB=" << (tensile_prob.transB() ? 1 : 0)
+        << " a=" << DataTypeInfo::Get(tensile_prob.a().dataType()).abbrev
+        << " b=" << DataTypeInfo::Get(tensile_prob.b().dataType()).abbrev
+        << " c=" << DataTypeInfo::Get(tensile_prob.c().dataType()).abbrev
+        << " d=" << DataTypeInfo::Get(tensile_prob.d().dataType()).abbrev
+        << " compute=" << DataTypeInfo::Get(tensile_prob.computeType()).abbrev
+        << " candidates=" << examined << " refused=" << refused << " reasons=" << reasons << "\n";
+
+    // stderr, so a caller parsing the bench CSV on stdout is unaffected.
+    std::cerr << msg.str();
+}
+
 template <typename T>
 inline auto getSolutions(
     const T& inputs,
@@ -4418,7 +4485,18 @@ inline auto getSolutions(
     bool                                          enableEpilogue,
     const int&                                    requestedAlgoCount)
 {
+    // Cached from TENSILE_DB at first use; off by default, so the whole
+    // diagnostic costs one predictable branch per lookup.
+    const bool reportEmpty
+        = TensileLite::Debug::Instance().printNoSolutionUniformSummationOrder();
+    if(reportEmpty)
+        TensileLite::uniformSummationOrderSelectionTallyReset();
+
     auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+
+    if(reportEmpty && solutions.empty())
+        reportNoSolutionFound(tensile_prob);
+
     return solutions;
 }
 
