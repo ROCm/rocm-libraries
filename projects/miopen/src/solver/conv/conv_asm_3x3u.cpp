@@ -194,7 +194,9 @@ bool ConvAsm3x3U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.isXnackEnabled() || IsXnackNeutralGfx9(target))
+    if(target.isXnackEnabled())
+        return false;
+    if(IsGfx9ConsumerApu(target))
         return false;
 
     if(problem.IsTensorsCasted())

@@ -95,7 +95,9 @@ inline bool WinoCommonIsApplicable(const FusionContext& context, const FusionDes
         return false;
 
     const auto& target = conv_ctx.GetStream().GetTargetProperties();
-    if(target.isXnackEnabled() || IsXnackNeutralGfx9(target))
+    if(target.isXnackEnabled())
+        return false;
+    if(IsGfx9ConsumerApu(target))
         return false;
 
     return true;

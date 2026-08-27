@@ -689,7 +689,9 @@ static bool IsApplicableBase(const ExecutionContext& ctx, const ProblemDescripti
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.isXnackEnabled() || IsXnackNeutralGfx9(target))
+    if(target.isXnackEnabled())
+        return false;
+    if(IsGfx9ConsumerApu(target))
         return false;
 
     const auto name = ctx.GetStream().GetDeviceName();
