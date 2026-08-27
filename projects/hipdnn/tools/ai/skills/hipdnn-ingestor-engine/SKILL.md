@@ -13,24 +13,28 @@ skill, two flows — not one skill per descriptor type — because descriptors c
 each other by UUID and the UMD-vs-`graph_match` decision is a property of the whole
 engine, not of any single file.
 
-This skill is five files. **If you are here to do an integration, read this page's
-completion contract and then drive from `RUNBOOK.md`** — the rest are reference material
-it sends you to at named steps.
+This skill is six files, each with exactly one job. **If you are here to do an
+integration, read this page's completion contract and then drive from `RUNBOOK.md`** —
+everything else is reference material it sends you to at a named step, and each of those
+files tells you what you owe before you return.
 
 | File | When | Shape |
 |---|---|---|
 | `SKILL.md` (this) | First, and only this far. The completion contract and the dialect decision. | Why |
 | `RUNBOOK.md` | **The thing you execute.** Every step, its commands, and the gate that ends it. | How |
-| `rocke-mining.md` | Sent from runbook step 2. Extracting applicability rules that exist only in the Python. | How |
+| `graph-contract.md` | Sent from runbook step 2a. Which hipDNN operation — or composition — you are implementing, and everything the graph can ask for. | How |
+| `rocke-mining.md` | Sent from runbook step 2b. Extracting applicability rules that exist only in the kernel's Python. | How |
 | `native-pack.md` | Sent from runbook step 6. The five hooks and their silent-failure traps. | How |
-| `prompt.md` | Reference. Fuller reasoning behind each step, plus the **extend** flow, which the runbook does not cover. | Why |
+| `extend.md` | The **extend** flow: adding a pack or kernel to an engine that already exists. | How |
 
-Worked examples throughout are drawn from `kernels/gfx950/attention_dense.py`, a dense
-SDPA prefill kernel. **They are illustrations of a shape, not a description of your
-kernel.** Where a step gives a discovery command, run it against your own module rather
-than reusing the example's answer — a different kernel's spec fields, layout, ABI and
-baked constants will all differ, and the failure mode for assuming otherwise is silently
-wrong numbers.
+**This skill is op-agnostic.** hipDNN spans convolution, matmul, normalization, attention,
+quantization and more, and every step here is written to work for any of them: the
+operation catalog is enumerated, never assumed, and every discovery step is a command you
+run against *your* kernel. Where a worked example names a specific operation it is there to
+make a shape concrete — read it as an illustration, never as a description of your kernel.
+Run the command; do not reuse the example's answer. A different kernel's spec fields,
+layout, ABI and baked constants will all differ, and the failure mode for assuming
+otherwise is silently wrong numbers.
 
 ## Completion contract — read this before starting
 
@@ -45,9 +49,9 @@ The nine stages, in order. A run is **incomplete** until stage 8:
 | # | Stage | Done when |
 |---|---|---|
 | 1 | Dialect settled | `direct_load` vs `packaged` decided from the kernel's nature |
-| 2 | Sources mined | For rocKE: spec introspected AND the Python applicability rules extracted |
+| 2 | Sources mined | **The graph contract first** (which hipDNN operation or composition you serve, and every field it can carry), **then** the kernel: spec introspected and its applicability rules extracted. Runbook steps 2a and 2b. |
 | 3 | Batch confirmed with the human | Name, arch, **which knobs are exposed and which knob values ship AOT**, the variant set, workspace, UMD-vs-graph_match answered |
-| 4 | Descriptors generated | `generate.py` exit 0, emitting the **full variant set** — not one kernel (see `prompt.md` § Sizing the variant set) |
+| 4 | Descriptors generated | `generate.py` exit 0, emitting the **full variant set** — not one kernel (see `RUNBOOK.md` § Sizing the variant set) |
 | 5 | **Hook bodies implemented** | `graph_match`, `kernel_match`, `score`, dispatch all written — no `// TODO` left in a code path the engine reaches |
 | 6 | Spliced | Every applicable CMake/registration point applied, edits made not just described |
 | 7 | Built | Provider compiles with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`; engine appears in `hipdnn_list_engines` |
@@ -55,11 +59,12 @@ The nine stages, in order. A run is **incomplete** until stage 8:
 | 9 | Handed back | Residual judgment calls surfaced to the human with a recommendation |
 
 **Each stage leaves an artifact on disk, and you commit it before starting the next.**
-`prompt.md` § *What each step must produce* has the per-step table. Two stages are where
-runs die and both have a mechanical check: stage 2 is done when `mining.md` exists, and
-stage 5 is done when `grep -c "FILL THIS OUT"` on the pack returns 0. Research that
-produced no file is not a completed stage — it is a stall, and the cure is to write down
-what you have, mark the uncertain rows, and move.
+`RUNBOOK.md`'s sequence table carries the per-step `Produces` / `Gate` / `Typical time`
+contract. Three stages have a mechanical done-check and they are the ones runs die on:
+stage 2 is done when **both** `graph_contract.md` and `mining.md` exist, and stage 5 when
+`grep -c "FILL THIS OUT"` on the pack returns 0. Research that produced no file is not a
+completed stage — it is a stall, and the cure is to write down what you have, mark the
+uncertain rows, and move.
 
 **Check at stage 1 that stage 8 is reachable.** The shared reference executors are dense
 and stride-based and decline paged KV, varlen, ragged tensors and block-sparse/sinks —
@@ -141,18 +146,18 @@ rejected, and correctly so.
 
 ## The two flows, at a glance
 
-**Create** (new engine): settle the dialect, ask for the kernel sources *first*, infer
-aggressively from them (for rocKE: introspect the builder's spec dataclass rather than
-reading text), then confirm the remainder in **one batch** — engine name/namespace, arch
-list, which fields are knobs, dispatch/workspace policy, and whether a distinction
-becomes a UMD or lives in the UED's `graph_match`. Then invoke the generator, then the
-validator(s) for that dialect, then report. Full steps in `prompt.md` § Create flow.
+**Create** (new engine): settle the dialect, ask for the kernel sources *first*, establish
+the graph contract (which hipDNN operation you are implementing and everything it can
+carry), mine the kernel, then confirm the remainder in **one batch** — engine
+name/namespace, arch list, which fields are knobs, dispatch/workspace policy, and whether
+a distinction becomes a UMD or lives in the UED's `graph_match`. Then generate, validate,
+implement the pack, splice, build and test on device. **Drive it from `RUNBOOK.md`.**
 
 **Extend** (existing engine): point at the existing descriptor directory, add one pack
 or one kernel, mint only the *new* UUIDs, append to the existing CMake lists rather than
 rewriting them, then re-run the validator over the **whole** directory — whole-directory
 revalidation is what demonstrates the pieces that were already there stayed valid. Full
-steps in `prompt.md` § Extend flow.
+steps in `extend.md`.
 
 ## Validator availability — check this before promising validation
 
@@ -163,7 +168,7 @@ directory configured the ordinary way will not contain the binary at all. Absenc
 the **common** case, not an edge case — both flows must detect it explicitly (search the
 active build directory's `bin/`, and any install prefix, for `hipdnn_validate_descriptors`)
 and say so plainly in the completion report, rather than silently skipping the
-validation step. See `prompt.md` § Detecting an absent validator.
+validation step.
 
 `hkp_pack`'s authored-form validation needs no build at all — it is Python, importable
 straight from `descriptor-packaging/python`. Packing additionally needs `msgpack` and
@@ -195,10 +200,11 @@ Every completion report this skill produces states, explicitly:
    build flags it is gated on. Bundles run against whichever engine *wins* a graph, so
    without that target a new engine competing with an incumbent can sit unexercised while
    the suite reports green. Tests with no engine-pinned target are tests that do not
-   defend your engine. If `hipdnn_list_engines` renders your engine as a bare hex id
-   rather than its scoped name, `--test-engine` cannot select it and rejects it as "not
-   loaded" — say so as a **blocking dependency on AICK-1901** (a name-registration
-   visibility bug, not anything the provider can fix), and ship the pinned target anyway.
+   defend your engine. **Write that target even though it cannot pass yet**: engine-name
+   exposure is in progress, so today `--test-engine` sees a bare hex id and the target
+   fails with `Error: Engine '<name>' is not loaded`. Report that as *pending engine-name
+   exposure (AICK-1901)* — an expected state, not a test failure and not your provider's
+   bug. Nothing ships before the name lands, so registering ahead of it is correct.
 6. **The judgment calls you are handing back**: rocKE restrictions you could not check
    from a graph, knobs you fixed that could be searched, and coverage the tests do not
    have. Each with a recommendation.

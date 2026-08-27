@@ -1,12 +1,34 @@
-# Runbook — a rocKE kernel into hipDNN, end to end
+# Runbook — a kernel into hipDNN as an ingestor engine, end to end
 
-**Read this file first and drive from it.** The other three files are reference material
-you are sent to at specific steps. This one is the sequence, and it is written to be
-executed rather than interpreted.
+**Read this file first and drive from it.** The other files are reference material you are
+sent to at specific steps, and each tells you what you owe before you return. This one is
+the sequence, and it is written to be executed rather than interpreted.
 
-Every command is copy-paste with the variables below substituted. Every step ends in a
-**GATE** — a command whose output you check before continuing. A step whose gate you have
-not run is a step you have not finished.
+Every command is copy-paste with the variables below substituted. Every step opens with a
+`Produces` / `Gate` / `Typical time` contract and ends in a **GATE** — a command whose
+output you check before continuing. A step whose gate you have not run is a step you have
+not finished.
+
+**Scope: this runbook is written for the `packaged` dialect** — a rocKE builder, lowered
+at build time by `hkp_pack`. That is the common case and the one with the most traps. For
+a **`direct_load`** bundle (a `.cpp`/`.hip` the provider embeds, `kind: embedded_source`,
+compiled at plan-build time on device) the sequence is the same but four steps differ:
+
+- **Step 2b** does not apply — there is no Python to mine. The graph contract (2a) still
+  does, in full: it is about hipDNN's side, not the kernel's.
+- **Step 4**: `kernel_source` is `{kind: embedded_source, source_file, entry_point}`, one
+  pair per kernel entry point. Candidate KMD fields come from what the kernel is templated
+  or `#define`d on — one field per axis.
+- **Step 5** has one rung, not three: there is nothing to pack, so run
+  `hipdnn_validate_descriptors` directly against the authored tree, adding
+  `--native-source <pack.cpp>` to cross-check the stub's symbol constants against the
+  descriptors.
+- **Step 7a**: all five splice points apply, including points 1
+  (`HIPDNN_DESCRIPTOR_FILES`) and 2 (`HIPDNN_INGESTOR_PACK_KERNELS`), which a packaged
+  bundle must never touch. A kernel missing from point 2 fails at plan-build time with a
+  missing embedded source.
+
+Everywhere else, read `packaged` instructions as applying to you.
 
 ## Set these once, at the top of your run
 
@@ -64,27 +86,67 @@ these boxes and a stray dep directory is not the project's convention.
 
 ## The sequence at a glance
 
+Every step below opens with the same three-line contract, so you can always tell whether
+you are finished:
+
+```
+Produces:      the artifact that must exist on disk
+Gate:          the command whose output you check
+Typical time:  how long this usually takes
+```
+
+`Typical time` is not a target — it is a stall detector. **At 4× the estimate, stop and
+write down what you have**, mark the uncertain parts, and move to the next step. A step
+that produced no file is not a step in progress; it is a stall, and the cure is always the
+same: write the artifact, however incomplete, and continue.
+
 | Step | Produces | Gate |
 |---|---|---|
-| 0 | Dialect, one line | rocKE ⇒ `packaged`, no alternative |
+| 0 | Environment ready, dialect stated | `.venv` present; rocKE ⇒ `packaged` |
 | 1 | Feasibility verdict | Reference **and** hardware both reachable |
-| 2 | `mining.md` | File exists, every row has a verdict |
-| 3 | Batch message | Sent, after exhausting sources |
-| 4 | `config.yaml`, descriptors | `generate.py` exit 0 |
-| 5 | Packed + validated tree | `success: true`, 0 ERROR |
+| 2a | `graph_contract.md` | File exists; op matched; disagreement table has rows |
+| 2b | `mining.md` | File exists, every constraint row has a verdict |
+| 3 | Batch message | Sent, after the source budget is spent |
+| 4 | `config.yaml`, descriptors | `generate.py` exit 0, kernel count = agreed set |
+| 5 | Packed + validated tree | `success: true`, 0 ERROR, desk check clean |
 | 6 | Native pack | `grep -c "FILL THIS OUT"` = 0 |
 | 7 | Built, packed, staged | Engine id in `hipdnn_list_engines` |
-| 8 | Tests + an engine-pinned CI target | A real graph dispatched and matched a reference, **and** `ENGINE_NAME` selects your engine |
-| 9 | Report | All nine stages named |
+| 8 | Tests + an engine-pinned CI target | A real graph dispatched and matched a reference on `$ARCH` |
+| 9 | Report | All nine stages named, by number |
+
+The nine **stages** of the completion contract in `SKILL.md` are unchanged; 2a and 2b are
+two halves of stage 2. Stage 2a is new because the matcher you write at step 6 is a
+translation between hipDNN's description of the operation and the kernel's, and reading
+only the kernel half is how silent-wrong-answer defects get written.
 
 **Commit after every step.** What you committed is the deliverable if you stop.
 
 ---
 
-## Step 0 — Dialect
+## Step 0 — Environment and dialect
 
-Is the kernel a rocKE builder? Then it is **`packaged`**, `kind: rocke`, and there is no
-alternative — the runtime has no rocKE adapter. Say so in one line and move.
+```
+Produces:      a working generator venv, and the dialect in one line
+Gate:          test -x $GEN/.venv/bin/python
+Typical time:  5 minutes
+```
+
+Set the variables at the top of this file, then make the generator's venv real before
+anything needs it:
+
+```bash
+cd $GEN && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+test -x $GEN/.venv/bin/python && echo "GENERATOR VENV OK" || echo "SETUP INCOMPLETE"
+```
+
+**GATE:** prints `GENERATOR VENV OK`. Step 4 invokes `$GEN/.venv/bin/python` directly and
+fails with "no such file" without this. Do not improvise a dependency directory or
+`pip install --target` into the worktree — see § *Two Python environments* above for why
+the split exists and which tool uses which.
+
+Then the dialect. Is the kernel a rocKE builder? Then it is **`packaged`**, `kind: rocke`,
+and there is no alternative — the runtime has no rocKE adapter. Say so in one line and
+move.
 
 The one fatal mistake here: splicing a packaged bundle into `HIPDNN_DESCRIPTOR_FILES`.
 That installs an unlowered `kind: rocke` copy the loader rejects, silently dropping your
@@ -93,6 +155,12 @@ engine. Points 1 and 2 of the CMake splice **never** apply to you.
 ---
 
 ## Step 1 — Feasibility, before you mine anything
+
+```
+Produces:      a feasibility verdict on three axes, stated in the run log
+Gate:          1a signature_error empty; 1b a dense path exists; 1c --test-only accepted
+Typical time:  15 minutes
+```
 
 Three independent things must be true. Check all three now; each one costs a minute and
 each one, discovered at step 8 instead, wastes the whole run.
@@ -185,10 +253,52 @@ forever. Plain `sacct` shows only the live requeued row and hides the failure en
 
 ---
 
-## Step 2 — Mine the kernel
+## Step 2a — The graph contract: what hipDNN can ask for
 
-**Read `rocke-mining.md` now.** It tells you what to extract and how to classify it. This
-step's output is `mining.md`.
+```
+Produces:      graph_contract.md
+Gate:          ls graph_contract.md  (op matched; disagreement table has rows)
+Typical time:  45-90 minutes, mostly reading
+```
+
+**Read `graph-contract.md` now** and produce its five sections. Do this *before* touching
+the kernel's Python.
+
+Why this order: the matcher you write at step 6 translates between hipDNN's description of
+the operation and the kernel's. Agents who start on the kernel side arrive at step 6 having
+never read the graph side, then reverse-engineer it while writing C++. Every
+silent-wrong-answer defect this skill knows about came from that order.
+
+What 2a settles, in one line each:
+
+- **Which operation you are implementing** — a node, or a *composition* of nodes.
+  hipDNN is a graph API; fused kernels are subgraphs and have no table of their own.
+- **Every field the graph can carry**, consumed or explicitly rejected.
+- **How the frontend spells it** — intent, defaults and deprecations the schema omits.
+- **What a real graph of this op looks like**, read from an actual bundle.
+- **The disagreement table** — every kernel field against its hipDNN spelling. This is
+  what step 6 consumes, and it is the highest-value artifact in the run.
+
+If no operation matches, `graph-contract.md` carries a six-check disconfirmation list.
+Work all six and record the results before escalating; most first-pass "hipDNN cannot
+express this" calls are actually "I have not understood this API yet."
+
+**GATE:** `ls graph_contract.md` succeeds, section 1 names the node(s) and any UID edges,
+and section 5 has a row per pinned kernel field.
+
+---
+
+## Step 2b — Mine the kernel: what it can actually answer
+
+```
+Produces:      mining.md
+Gate:          ls mining.md  (every constraint row has a verdict)
+Typical time:  60-90 minutes
+```
+
+**Read `rocke-mining.md` now.** It tells you what to extract and how to classify it. You
+are classifying rules as graph-derivable or not — which is only answerable because 2a told
+you what the graph carries.
 
 The budget, because this is where runs die: **draft `mining.md` after the kernel module
 and its spec, before ANY third source.** Then **five sources *beyond the kernel module*,
@@ -196,19 +306,21 @@ maximum** — count them and name them in the file. Rows you are unsure of go in
 `UNSURE` and become step-3 questions; that is what step 3 is for. Hitting the cap is not
 failure, it is the step working.
 
-Discovery commands for the five deliverables:
+Discovery commands for the five deliverables. **None of these names is guaranteed** — a
+command that prints nothing means you looked for the wrong name, not that the kernel has
+no rules. `rocke-mining.md` carries the fallbacks:
 
 ```bash
 M=$PROVIDER/rocke/library/$MODULE
 
-# Constraint table: __post_init__ is the densest source
+# Constraint table: the spec's validation, wherever it lives
 grep -n "raise ValueError" $M
 
-# Layout: the address arithmetic. Look for stride_*_tok and the *_base terms.
+# Layout: the address arithmetic. Look for the stride and base terms.
 grep -nE "stride_[a-z]+_tok|_base = |b\.global_(load|store)|buffer_rsrc" $M | head -30
 
-# Grid / block / ABI
-grep -nA12 "^def .*_grid\|^def .*_block\|^def .*_signature" $M
+# Grid / block / ABI — named-function convention first
+grep -nA12 -E "^def [a-zA-Z_0-9]+_(grid|block|signature)\(" $M
 
 # ABI slots, and whether each is conditional: read the b.param declarations IN ORDER
 grep -nB2 "b\.param(" $M
@@ -219,44 +331,108 @@ grep -nA3 "raise ValueError" $M | sed -n '/def run_/,$p' | head -40
 
 **GATE:** `ls mining.md` succeeds and every row of the constraint table has a verdict.
 
-Two things the Python cannot tell you, and both are required:
-
-**The graph-side audit.** Open your op's table and account for *every* optional field —
-implemented, or explicitly rejected. An unchecked mode is accepted and then silently not
-performed.
-
-```bash
-sed -n "/^table $OPTABLE/,/^}/p" $REPO/projects/hipdnn/flatbuffers_sdk/schemas/*.fbs
-```
-
-**The spelling check.** For each field your spec pins, confirm hipDNN spells it the same
-way. Where it does not, the rule is a *derivation*, not a comparison:
-
-```bash
-grep -rn "<spec_field_name>" $REPO/projects/hipdnn/flatbuffers_sdk/schemas/ || \
-  echo "NOT A GRAPH FIELD -- this is a derivation, see rocke-mining.md"
-```
-
 ---
 
 ## Step 3 — One batch message to the human
 
+```
+Produces:      one message, containing proposals rather than questions
+Gate:          sent, after the source budget is spent
+Typical time:  30 minutes to prepare, then you wait
+```
+
 **Exhaust the sources first.** This batch is for decisions only a human can make: scope,
-naming, what they intend to run. Anything the tree answers, answer yourself — see
-`prompt.md` § Step 3 for the two categories that look like judgment calls and are not.
+naming, what they intend to run. Anything the tree answers, answer yourself. Two things
+look like judgment calls and are not:
+
+- **A numeric mapping between the kernel and the graph** (an off-by-one, a units
+  difference). The stage-8 reference executor *defines* it — read its predicate under
+  `integration-tests/gpu-ref/kernels/<op>/`.
+- **What an unfamiliar graph attribute means.** The frontend header and the cuDNN
+  compatibility shim both spell out intent and defaults in comments.
+
+If you must ask something source-derivable anyway, ask with your answer and its evidence
+attached, as a confirmation. If the human replies "go and check" — the correct reply to a
+question you should not have asked — go and check; do not re-ask, and do not stall.
 
 Bring a proposal, not a question. Present: engine name, arch, the variant set with counts,
 which knobs are exposed and which values ship AOT, workspace policy, the layout you
 derived with its arithmetic, and the rejection checklist. If they do not answer, ship the
 proposal and mark it an assumption.
 
-Sizing the variant set is in `prompt.md` § *Sizing the variant set*. The two questions it
-answers: does every capability you advertise have a variant behind it, and does any knob
-have more than one value (a one-value knob makes `score` a no-op — legitimate, but say so).
+**Two separate knob decisions, and both are the human's.** *Exposed knobs* — which KMD
+fields become `knobs` on the UED, i.e. what a caller or the autotuner may steer. *AOT
+variant values* — which concrete values of each are compiled into the shipped set. An
+exposed knob with one compiled value is a knob in name only.
+
+**Only `int`-typed fields can be a real knob.** The loader's `getCustomKnobs` silently
+drops a non-int knob at plan-build time — no error, no warning, discovered only against a
+real device. Screen for this *before* you ask: if a knob is wanted on a non-int field, say
+so now and offer to retype the field or drop it.
+
+Ask both as one question, e.g. "expose `<knob_a>` and `<knob_b>`; ship
+`<knob_a> ∈ {…} × <knob_b> ∈ {…}` = N tuning variants per capability — confirm or adjust?"
+
+### Sizing the variant set
+
+**A one-kernel engine is not an integration, it is a demo.** With a single variant `score`
+never ranks anything, the UED's knobs select nothing, autotuning has no candidate set, and
+the first graph whose dtype or shape differs finds nothing to serve it. The heuristic path
+becomes dead code that still reports green.
+
+The set must deliver two different things:
+
+1. **Feature coverage** — one variant per combination of *supported capability* a graph
+   can ask for. A capability with no variant behind it is one the engine advertises and
+   cannot serve. That is the applicability defect, arriving as wrong numbers.
+2. **Performance headroom** — several variants along the *tuning* knobs for the same
+   capability, so the heuristic and the autotuner have something to choose between.
+
+**Where to find the candidate axes**, in order of authority:
+
+- **The rocKE dispatcher for this kernel family**, under `rocke/library/dispatch/`. It
+  already encodes which configurations are worth generating. **Read the module your
+  builder actually reaches, not a shared one** — a family directory can hold several
+  unrelated kernel families side by side whose shared constants do not apply to yours.
+  Grep for the builder you are integrating and read only what that call path touches.
+  Not every op-family has a dispatcher directory; where there is none, the per-op module
+  is both dispatcher and sizing source.
+- **The spec dataclass's own knob comments**, which frequently record measured results.
+  Prefer a knob the kernel author says matters; skip one they say is neutral.
+- **The `supports_*` predicate's allowed sets**, for the hard capability bounds.
+
+The dispatcher is also where *policy* lives. If it does not auto-select your kernel — some
+candidates are opt-in only, matching solely when a request names them — say so in the
+step-9 report: you are exposing something rocKE itself does not route to by default.
+
+**Budget: keep the total under ~100 kernels for a first integration.** Every variant is a
+separately compiled code object, costing build time, archive size and install footprint.
+Cover each capability once, then spend what remains on tuning variants for the
+configurations that matter. Say what you pruned and why.
+
+**When the axes are not orthogonal.** The guidance above assumes axes that cross freely.
+Many kernels are not like that: features can be mutually exclusive in non-obvious ways, so
+a full cross-product is not merely large but mostly *illegal* — most cells fail the spec's
+own validation. For a kernel like that the honest first integration is **narrow and
+explicit**: ship the core, and have `graph_match` explicitly decline the rest. That is a
+*stated scope limit*, not a gap — the engine serves what it ships and loudly declines
+everything else, which is the correct, debuggable failure.
+
+What makes that legitimate rather than lazy is saying it: name the declined features here
+in step 3, give each a negative test at step 8b, and list them at step 9 as follow-on work.
+
+**GATE:** the message is sent, and it contains a concrete variant list with counts — not a
+question about what the variant set should be.
 
 ---
 
 ## Step 4 — Generate
+
+```
+Produces:      configs/$SLUG.yaml and a generated descriptor tree
+Gate:          generate.py exit 0, and kernel count == the set agreed at step 3
+Typical time:  45 minutes
+```
 
 Write `$GEN/configs/$SLUG.yaml`. Start from an existing packaged config as a shape
 reference:
@@ -296,6 +472,12 @@ and your descriptors are never packed at all.
 ---
 
 ## Step 5 — Validate, three rungs
+
+```
+Produces:      a packed tree that loads, plus a clean desk check
+Gate:          5a count printed; 5b skipped=False; 5c success:true, 0 ERROR; 5d clean
+Typical time:  30 minutes, plus pack time (comgr can take minutes per arch)
+```
 
 Each proves something different. Run all three.
 
@@ -397,10 +579,10 @@ toc = [k["kernel_source"].get("toc_key") for k in ks]
 print(f"kernels={len(ks)} distinct toc_key={len(set(toc))}",
       "OK" if len(set(toc))==len(ks) else "COLLISION -- two variants share one blob")
 
-# 4. symbol names are NOT guaranteed unique. rocKE's kernel_name() may omit fields it
-#    still bakes in (attention_dense omits batch and waves_per_eu, and says so at
-#    attention_dense.py:2073-2079). Uniqueness comes from (toc_key, symbol), never the
-#    symbol alone -- do not build anything that keys on the symbol string.
+# 4. symbol names are NOT guaranteed unique. A rocKE kernel_name() may omit fields the
+#    kernel still bakes in -- read your builder's kernel_name() and compare what it
+#    interpolates against what the spec pins. Uniqueness comes from (toc_key, symbol),
+#    never the symbol alone -- do not build anything that keys on the symbol string.
 sym = [k["kernel_source"].get("symbol") for k in ks]
 print("distinct symbols:", len(set(sym)), "of", len(ks),
       "(fewer is legal -- toc_key disambiguates)")
@@ -416,6 +598,12 @@ run of declined graphs proves nothing while looking like a green suite.
 ---
 
 ## Step 6 — Implement the native pack. THIS IS THE WORK.
+
+```
+Produces:      packs/<Name>Native.cpp with all five hooks implemented
+Gate:          grep -c "FILL THIS OUT" == 0
+Typical time:  half a day. The largest step, and the point of the whole run.
+```
 
 The generator wrote `/tmp/$SLUG/packs/*Native.cpp` with every body
 `// TODO - FILL THIS OUT`. An engine in that state parses, validates, enumerates — and
@@ -445,6 +633,12 @@ replace it*. Silence is not.
 ---
 
 ## Step 7 — Splice, build, pack, confirm
+
+```
+Produces:      an engine that builds, packs, stages and enumerates
+Gate:          your FNV-1a id appears in hipdnn_list_engines output
+Typical time:  1-2 hours, dominated by the build
+```
 
 ### 7a. Splice
 
@@ -476,6 +670,24 @@ sed -n '/struct IngestorPack/,/};/p' \
 ```
 
 ### 7b. Build and pack
+
+**The build flags, which are easy to get wrong.** Two of these read like each other and
+do entirely different jobs:
+
+| Flag | Default | Job |
+|---|---|---|
+| `HIPDNN_ENABLE_KERNEL_INGESTOR` | **OFF** | The ingestor itself: descriptor loading, the kpack adapter, and `hipdnn_validate_descriptors`. **ON for any descriptor-backed integration** — nothing here works without it, and it is why the validator is usually missing. |
+| `HIPDNN_ENABLE_<OP>` | **OFF** | The **frontend** for an op that has one. With it off the graph API for that op is `#ifdef`-compiled out, so the graph cannot be expressed at all and every plan silently DECLINEs. Must be ON in **both** the hipDNN SDK at `HIPDNN_ROOT` and the provider. Check whether your op has such a flag: `grep -rhoE "HIPDNN_ENABLE_[A-Z_0-9]+" --include=CMakeLists.txt --include=*.cmake $REPO/projects/hipdnn` — most ops have none and are always compiled in. |
+| `ENABLE_<X>_ENGINE` | often **ON** | A **competing** hand-written engine for the same op. Nothing to do with the frontend, despite the similar name. Yours must beat it, or be pinned past it (8c). |
+
+A missing frontend flag wastes a whole build: the provider compiles, your engine
+enumerates, and every graph declines with nothing pointing at the flag.
+
+**Use `skill://hipdnn-superbuild` rather than hand-rolling a configure.** It carries the
+repo-root rule, the preset table, the toolchain and the stale-cache retry; hand-rolling
+those loses ~30 minutes to a system-compiler fallback that presents as dozens of
+`-Werror` failures in files you never touched. If a build already exists, rebuild
+incrementally rather than reconfiguring:
 
 ```bash
 cmake --build $BUILD -j48 --target hip_kernel_provider hipdnn_list_engines \
@@ -516,8 +728,65 @@ Missing engine, in the order worth checking: (1) the pack step never ran, (2) sp
 
 ## Step 8 — Test, on the target arch
 
-Two deliverables, both required. `prompt.md` § Step 8 has the matrix reasoning; this is
-the mechanics.
+```
+Produces:      bundles in both tiers, C++ negatives, a pinned CI target, a device run
+Gate:          a real graph dispatched and matched a reference on $ARCH
+Typical time:  half a day, plus whatever the GPU queue costs you
+```
+
+Enumeration proves construction, not matching. Only a real graph on the target arch proves
+the engine serves anything — and adding to the shared suite is a **required deliverable**,
+not an optional extra. An integration whose only evidence is a one-off script leaves
+nothing behind: the next change to the matcher, the kernel or the packager has no way to
+notice it broke.
+
+### The two tiers, and you owe both
+
+The split is **functional breadth vs numeric depth**, not "one case vs many".
+
+| Tier | Question it answers | Content |
+|---|---|---|
+| **quick** | Is every supported feature wired up and matching? | Many tiny graphs, one per meaningful support combination, smallest legal shape. Fast enough to run on every change. |
+| **standard** (and `full`) | Is it numerically right at sizes people use? | Realistic shapes, deeper verification, combinations too expensive per-commit. |
+
+Quick's job is functional signal, not numeric confidence. If a supported option is never
+exercised there, the commit that silently unwires it ships green.
+
+**Deciding your op's matrix is a real design decision — make it deliberately.** There is
+no universal axis list: a normalization's interesting axes are nothing like an attention
+op's, and a matmul's are different again. Derive yours from the step-2b constraint table —
+the axes a *graph* can vary and your matcher claims to support. Typical families: dtype, a
+shape parameter the kernel specializes on, an optional mode flag, memory layout, a fused
+epilogue, a degenerate or boundary shape. Which exist, and which are independent, is yours
+to work out.
+
+Then prune against a time budget, deliberately:
+
+- Cover each supported feature **at least once**. Zero coverage means nobody notices it
+  breaking.
+- Prefer *independent* combinations over a full cross-product. If two axes do not interact
+  in the kernel's code paths, you do not need every pairing.
+- Weight toward what step 2b flagged as fragile — layout handling, boundary shapes,
+  anything whose failure mode is silent.
+- **When the budget binds, drop coverage rather than slow the tier down.** A quick tier
+  that takes minutes gets disabled, and then it protects nothing. Move what you dropped to
+  standard and say so.
+
+For scale, count the neighbours rather than guessing — and note the two families count
+differently, so do not compare them directly:
+
+```bash
+cd $REPO/dnn-providers/integration-tests/integration-test-bundles/quick
+# per-graph ops: one directory per case
+find <Op> -name '*.json' ! -name '*.meta.json' | sed 's|/[^/]*$||' | sort -u | wc -l
+# sweep ops: cases live inside sweep.json
+python3 -c "import json,glob; print(sum(len(json.load(open(f))['cases']) for f in glob.glob('<Op>/*/sweep.json')))"
+```
+
+**The rejection checklist is a coverage list too.** Each "must decline" row deserves a
+negative case — cheap, and exactly the assertion that catches an over-broad matcher before
+it returns wrong numbers. Those belong in C++ (8b), not in bundles: a bundle for a graph
+you decline is simply served by another engine.
 
 ### 8a. Bundles — graph coverage
 
@@ -600,35 +869,38 @@ Four things that decide whether this works:
    (see step 1b) — it declines dropout, paging, varlen, stats and fp8 descale.
 3. **Gate on the build flags that produce your engine.** An ungated block turns "engine
    not built" from a skip into a wall of failures.
-4. **Your engine must publish a NAME, not just an id.** `--test-engine` matches against
-   the loaded engines' `engineName`
-   (`integration-tests/src/main.cpp:312-321`); if it does not match, the binary exits
-   with `Error: Engine '<name>' is not loaded` before running anything.
+4. **The engine must resolve to a NAME, not a bare id, for `--test-engine` to select it.**
+   The harness matches against the loaded engines' `engineName`
+   (`integration-tests/src/main.cpp`); no match means it exits with
+   `Error: Engine '<name>' is not loaded` before running a single case.
 
-**Point 4 is the prerequisite, and it is easy to hit.** The name the harness compares
-against is resolved by id, not published by the provider: `getEngineInfos`
-(`projects/hipdnn/backend/src/plugin/EnginePluginResourceManager.cpp:126-174`) fills
-`engineName` from `getEngineNameFromId(id)` and falls back to `formatEngineIdHex(id)`
-when the id is not in the process-wide interning map. `DescriptorLoader.hpp:2085-2100`
-*does* register descriptor-declared names through `EngineRegistrar` — but its own comment
-records that the registry is "process-local, hidden visibility, so `hipdnn_list_engines`
-still renders these as hex", tracked as **AICK-1901**. So a descriptor-backed engine can
-register and dispatch perfectly while still presenting to the harness as a bare hex id,
-and `--test-engine hipkernel:YourEngine` then exits with `Error: Engine '<name>' is not
-loaded` before running anything.
+**Point 4 will fail today, and that is expected. Write the block anyway.**
 
-The cheap tell, from step 7c: if `hipdnn_list_engines` shows your engine as a bare hex id
-rather than its scoped name, the name did not survive to the harness. That is the whole
-check — there is no provider-side API to grep for. (Earlier revisions of this runbook told
-you to grep for a `Container::getEngineName` / "plugin API 1.4.0"; **no such symbol or
-version exists anywhere in this repository** — the grep could only ever print its own
-failure branch, for every provider, forever.)
+Engine-name exposure is **in progress**. Until it lands, a descriptor-backed engine
+registers and dispatches perfectly while still presenting to the harness as a bare hex id,
+so a pinned target built today fails at runtime with exactly that error. **This is not a
+defect in your integration and not a reason to omit the target.**
 
-If your engine renders as hex, say so in the step-9 report as a **blocking dependency on
-AICK-1901**, not as a testing gap: the tests are written and correct, and they become
-CI-visible the moment that visibility bug is fixed. Write the
-`add_external_integration_test_target` block anyway, gated as above — it is inert until
-the name resolves, and it is the artifact that makes the fix immediately useful.
+Why it happens, so you recognise it rather than debug it: `getEngineInfos`
+(`projects/hipdnn/backend/src/plugin/EnginePluginResourceManager.cpp`) fills `engineName`
+from `getEngineNameFromId(id)`, falling back to a hex rendering when the id is not in the
+process-wide interning map. The descriptor loader *does* register the name, but that
+registry is process-local with hidden visibility — tracked as **AICK-1901**, and being
+fixed. The tell from step 7c: your engine shows as a bare hex id rather than its scoped
+name.
+
+So:
+
+- **Write the `add_external_integration_test_target` block now**, gated as above. Nothing
+  ships before the name API lands, so registering ahead of it is correct, not premature —
+  and the target goes live the moment it does, with no further work.
+- **Expect `Error: Engine '<engine>' is not loaded`** when you run that target today.
+  Record it in the step-9 report as *pending engine-name exposure (AICK-1901)*, not as a
+  test failure and not as a blocking dependency on your provider.
+- **Do not** substitute a workaround — do not drop `ENGINE_NAME`, do not pin a different
+  engine, do not delete the target. An inert correct target beats a green misleading one.
+- Your other stage-8 evidence stands on its own meanwhile: the bundles, the C++
+  applicability negatives, and the on-device run in 8d do not depend on `--test-engine`.
 
 ### 8d. Run it, on `$ARCH`
 
@@ -647,6 +919,12 @@ correctly — the defect is upstream.
 ---
 
 ## Step 9 — Report
+
+```
+Produces:      a completion report against all nine stages
+Gate:          grep -c '^### [0-9]' <report> == 9
+Typical time:  30 minutes
+```
 
 Against all nine stages, by number. Name the stage you reached; if it is not 8, say which
 stage stopped you and what would unblock it. Then, per `SKILL.md` § Output contract: what
