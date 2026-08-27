@@ -29,6 +29,59 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
+namespace
+{
+
+// Teardown for the shared handle and stream lives in main's scope, not at each
+// return site. Deliberately *not* folded into getSharedHandle()'s static: that
+// would defer hipdnnDestroy to static-destruction time, whose order against the
+// HIP runtime's own statics is unspecified.
+class HandleGuard
+{
+public:
+    explicit HandleGuard(hipdnnHandle_t handle)
+        : _handle(handle)
+    {
+    }
+
+    HandleGuard(const HandleGuard&) = delete;
+    HandleGuard& operator=(const HandleGuard&) = delete;
+    HandleGuard(HandleGuard&&) = delete;
+    HandleGuard& operator=(HandleGuard&&) = delete;
+
+    ~HandleGuard()
+    {
+        static_cast<void>(hipdnnDestroy(_handle));
+    }
+
+private:
+    hipdnnHandle_t _handle;
+};
+
+class StreamGuard
+{
+public:
+    explicit StreamGuard(hipStream_t stream)
+        : _stream(stream)
+    {
+    }
+
+    StreamGuard(const StreamGuard&) = delete;
+    StreamGuard& operator=(const StreamGuard&) = delete;
+    StreamGuard(StreamGuard&&) = delete;
+    StreamGuard& operator=(StreamGuard&&) = delete;
+
+    ~StreamGuard()
+    {
+        static_cast<void>(hipStreamDestroy(_stream));
+    }
+
+private:
+    hipStream_t _stream;
+};
+
+} // namespace
+
 int main(int argc, char** argv) noexcept
 {
     // Shared hipdnn handle + HIP stream are created below before any fixture
@@ -277,8 +330,12 @@ int main(int argc, char** argv) noexcept
         testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
         listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
 
-        // Create shared handle (triggers engine loading)
+        // Create shared handle (triggers engine loading). The guards below own
+        // teardown for every exit path from here on, including the outer catch,
+        // so no return site cleans up by hand. Declaration order matters: the
+        // stream is destroyed first, then the handle it was set on.
         auto handle = hipdnn_integration_tests::getSharedHandle();
+        const HandleGuard handleGuard(handle);
 
         // Set stream on shared handle
         hipStream_t stream;
@@ -287,10 +344,11 @@ int main(int argc, char** argv) noexcept
             std::cerr << "Failed to create HIP stream\n";
             return 1;
         }
+        const StreamGuard streamGuard(stream);
+
         if(hipdnnSetStream(handle, stream) != HIPDNN_STATUS_SUCCESS)
         {
             std::cerr << "Failed to set stream on shared handle\n";
-            static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
 
@@ -301,7 +359,6 @@ int main(int argc, char** argv) noexcept
         catch(const std::exception& e)
         {
             std::cerr << e.what() << "\n";
-            static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
 
@@ -312,7 +369,6 @@ int main(int argc, char** argv) noexcept
             std::cerr << "Error: Engine '"
                       << hipdnn_integration_tests::TestConfig::get().getEngineName()
                       << "' is not loaded. Check the plugin path.\n";
-            static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
 
@@ -413,7 +469,6 @@ int main(int argc, char** argv) noexcept
                               << " more suite(s)\n";
                 }
 
-                static_cast<void>(hipStreamDestroy(stream));
                 return 1;
             }
         }
@@ -450,9 +505,7 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().writeMarkdown(allEngineNames);
         }
 
-        // Clean up shared handle and stream
-        static_cast<void>(hipStreamDestroy(stream));
-        hipdnnDestroy(handle);
+        // handleGuard / streamGuard clean up on the way out.
         return exitCode;
     }
     catch(const std::exception& e)
