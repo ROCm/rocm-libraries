@@ -180,7 +180,13 @@ static std::string twiddle_rtc_body(TwiddleTableType type)
 
             if(iX < X)
             {
-                auto j = (static_cast<integer_type>(1) << (iY * base)) * iX;
+                // j is a step within the transform, not an index into
+                // this table, so it scales with the transform length
+                // rather than with the table's size.  Keep it 64-bit
+                // independently of integer_type: iY * base reaches
+                // ceil(log2(length)) - 1, which overflows a 32-bit
+                // shift once the transform exceeds 2^32 elements.
+                auto j = (static_cast<size_t>(1) << (iY * base)) * iX;
 
                 double c = cos(phi * j);
                 double s = sin(phi * j);

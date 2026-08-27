@@ -26,12 +26,7 @@ std::shared_future<std::unique_ptr<RTCKernel>> RTCKernelChirp::generate(const st
                                                                         const size_t&      N,
                                                                         rocfft_precision precision)
 {
-    // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
-    size_t u32_idx_limit = gpu_arch.find("gfx1250") != std::string::npos
-                               ? static_cast<size_t>(INT32_MAX)
-                               : static_cast<size_t>(UINT32_MAX);
-
-    const KIntType itype = N > u32_idx_limit ? KIntType::U64 : KIntType::U32;
+    auto itype = RTCKernelChirp::itype(gpu_arch, N);
 
     RTCGenerator generator;
     generator.generate_name = [=]() { return chirp_rtc_kernel_name(precision, itype); };

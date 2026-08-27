@@ -378,8 +378,8 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
         gridY = std::max<unsigned int>((((m - 1) / 2) + (tileY - 1)) / tileY, 1);
     }
 
-    kargs.append_kint(gridY);
-    kargs.append_kint(gridZ);
+    kargs.append_kint(gridY, KIntType::U32);
+    kargs.append_kint(gridZ, KIntType::U32);
 
     append_load_store_args(kargs, *data.node);
 

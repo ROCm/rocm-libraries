@@ -58,8 +58,8 @@ void launch_chirp_kernel(const size_t           N,
     auto numBlocks = DivRoundingUp<size_t>(N, blockSize);
 
     auto          kernel = RTCKernelChirp::generate(deviceProp.gcnArchName, N, precision);
-    RTCKernelArgs kargs;
-    kargs.append_size_t(N);
+    RTCKernelArgs kargs(RTCKernelChirp::itype(deviceProp.gcnArchName, N));
+    kargs.append_kint(N);
     kargs.append_ptr(output);
     kernel.get()->launch(kargs, dim3(numBlocks), dim3(blockSize), 0, deviceProp, stream);
 }

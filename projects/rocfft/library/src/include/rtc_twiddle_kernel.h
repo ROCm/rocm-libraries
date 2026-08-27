@@ -26,7 +26,11 @@
 
 struct RTCKernelTwiddle : public RTCKernel
 {
-    // Twiddle length N is limited by LDS size, so we use U32 index type for all twiddle kernels
+    // Twiddle tables are all small enough to index with 32 bits - the
+    // per-length tables are bounded by LDS size, and the large 3-step
+    // table is only X * Y entries.  This bounds the table indices only:
+    // the LARGE kernel also computes step values that scale with the
+    // transform length, so those stay 64-bit in the kernel body.
     static inline KIntType itype = KIntType::U32;
 
     // generate twiddle kernel from type and precision
