@@ -11,7 +11,7 @@
 // gcnArchName alone cannot tell them apart. hipDeviceProp_t::asicRevision is the
 // only in-process signal that distinguishes them (empirically v0 -> 0, v1 -> 1).
 // This mirrors the exact read in rocblaslt's handle.cpp (asic_rev =
-// properties.asicRevision, guarded by HIP_VERSION >= 307).
+// properties.asicRevision).
 //
 // Build (done on demand by tasks.py):  hipcc -O0 gpu_revision_probe.cpp -o <out>
 // Usage:                               <out> [deviceId]   (deviceId defaults to 0)
@@ -57,11 +57,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-#if HIP_VERSION >= 307
     int asicRevision = properties.asicRevision;
-#else
-    int asicRevision = -1;
-#endif
 
     // gcnArchName first, asicRevision second; one value per line so the caller
     // can parse without splitting on characters that may appear in arch names.

@@ -2668,14 +2668,7 @@ std::string rocblaslt_internal_get_library_arch_name()
     // Zero-init: a failed query leaves the arch name empty, so no subtree matches.
     hipDeviceProp_t deviceProperties{};
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-#if HIP_VERSION >= 307
     const int asicRevision = deviceProperties.asicRevision;
-#else
-    // asicRevision doesn't exist before HIP 3.7. Use -1, not 0: 0 is the v0 marker
-    // and would wrongly pick gfx1250v0. gfx1250 needs ROCm 7+, so this only guards
-    // compilation on older HIP.
-    const int asicRevision = -1;
-#endif
     return rocblaslt_revisioned_arch_name(ArchName{}(deviceProperties), asicRevision);
 }
 
