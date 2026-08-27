@@ -13,6 +13,8 @@ Documentation for rocFFT is available at
 ### Resolved issues
 
 * Addressed a cache-reuse issue with RCCL communicators by giving each communicator its own set of streams.
+* Fixed `rocfft_plan_create` hanging when given a zero FFT length, zero batch, or zero dimensions; these
+  now return `rocfft_status_invalid_dimensions` or `rocfft_status_invalid_arg_value`.
 
 ### Known issues
 
