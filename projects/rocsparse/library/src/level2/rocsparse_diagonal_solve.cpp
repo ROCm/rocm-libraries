@@ -221,6 +221,14 @@ rocsparse_status rocsparse::diagonal_solve(rocsparse_handle              handle,
 
     const bool conj = (trans == rocsparse_operation_conjugate_transpose);
 
+    // The kernel reads the diagonal from the value array with a per-batch stride.
+    // The CSC strided-batch setter stores that stride in columns_values_batch_stride
+    // and leaves batch_stride unset (unlike CSR, which fills batch_stride). Pick the
+    // right field per format, otherwise batched CSC solves reuse batch 0's diagonal.
+    const int64_t val_batch_stride = (A->format == rocsparse_format_csc)
+                                         ? A->columns_values_batch_stride
+                                         : A->batch_stride;
+
 #define DIAGONAL_SOLVE_DISPATCH(T_)                              \
     rocsparse::diagonal_solve_dispatch<T_>(handle,               \
                                            diag.offset_type,     \
@@ -232,7 +240,7 @@ rocsparse_status rocsparse::diagonal_solve(rocsparse_handle              handle,
                                            diag.diag_ind,        \
                                            diag.transposed_perm, \
                                            A->const_val_data,    \
-                                           A->batch_stride,      \
+                                           val_batch_stride,     \
                                            x,                    \
                                            x_row_stride,         \
                                            x_col_stride,         \
