@@ -100,6 +100,11 @@ endif()
 add_library(rocalution ${SOURCE} ${PUBLIC_HEADERS})
 add_library(roc::rocalution ALIAS rocalution)
 
+# Add Windows version resource to library
+if(WIN32 AND BUILD_SHARED_LIBS)
+    target_sources(rocalution PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
+
 set(package_depends)
 set(static_depends)
 
