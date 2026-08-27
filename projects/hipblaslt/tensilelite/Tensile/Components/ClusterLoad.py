@@ -92,6 +92,10 @@ class ClusterLoadTDM(ClusterLoad):
         SGPR to stay within the 106-SGPR budget (at 107 SGPRs the kernel is
         replaced by an ``s_endpgm`` stub and the output tensor is left unwritten).
         With ``Ck > 1`` A is a real multicast and must stay live.
+
+        Restricted to ``StreamKForceDPOnly=1``. Under ForceDPOnly=0
+        ``persistSkKeepsMasks`` holds both masks live for the skipPGR2 self-only
+        comparison, so neither can be freed whatever ``ClusterDim`` is.
         """
         return (self.papRefreshesMask(kernel)
                 and kernel.get("ClusterDim", [1, 1])[1] <= 1
@@ -101,7 +105,8 @@ class ClusterLoadTDM(ClusterLoad):
         """True when the PAP-live B mask can be freed because it is self-only.
 
         With ``Cs == 1`` B has no M-axis peers. Symmetric to
-        ``papDropsSelfOnlyMaskA`` for ``Ck == 1``.
+        ``papDropsSelfOnlyMaskA`` for ``Ck == 1``, including its
+        ``StreamKForceDPOnly=1`` restriction.
         """
         return (self.papRefreshesMask(kernel)
                 and kernel.get("ClusterDim", [1, 1])[0] <= 1
