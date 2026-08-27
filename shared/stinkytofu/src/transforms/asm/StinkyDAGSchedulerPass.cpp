@@ -48,31 +48,6 @@ namespace {
 using namespace stinkytofu;
 using namespace stinkytofu::dag;
 
-static bool hasSchedulingPath(const std::vector<std::unordered_set<unsigned>>& dagGraph,
-                              const std::vector<std::unordered_set<unsigned>>& constraintGraph,
-                              unsigned from, unsigned to) {
-    if (from == to) return true;
-
-    std::vector<unsigned> pending{from};
-    std::vector<bool> visited(dagGraph.size(), false);
-    visited[from] = true;
-    while (!pending.empty()) {
-        const unsigned current = pending.back();
-        pending.pop_back();
-
-        for (const auto* graph : {&dagGraph, &constraintGraph}) {
-            for (unsigned successor : (*graph)[current]) {
-                if (successor == to) return true;
-                if (!visited[successor]) {
-                    visited[successor] = true;
-                    pending.push_back(successor);
-                }
-            }
-        }
-    }
-    return false;
-}
-
 // collapseExecMaskedRegions()/expandExecMaskedGroups(): see ExecMaskGrouping.hpp and
 // docs/developer/exec-mask-grouping.md.
 
@@ -351,8 +326,7 @@ static void scheduleRegionWithMovableSideEffects(
     // cycle validation, but never mutates the register-dependency DAG.
     std::vector<HardSchedulingConstraint> requestedConstraints;
     readyQueue.onInitRegion(regionStart, regionEnd, blockBegin, requestedConstraints);
-    std::vector<std::unordered_set<unsigned>> constraintGraph(regionSize);
-    std::vector<unsigned> constraintInDegree(regionSize, 0);
+    HardSchedulingConstraintOverlay constraintOverlay(dagGraph);
     for (const auto& [predecessor, successor] : requestedConstraints) {
         auto predecessorIt = instToId.find(predecessor);
         auto successorIt = instToId.find(successor);
@@ -360,14 +334,11 @@ static void scheduleRegionWithMovableSideEffects(
 
         const unsigned predecessorId = predecessorIt->second;
         const unsigned successorId = successorIt->second;
-        if (constraintGraph[predecessorId].contains(successorId)) continue;
-        if (hasSchedulingPath(dagGraph, constraintGraph, successorId, predecessorId)) {
+        if (!constraintOverlay.tryAdd(predecessorId, successorId)) {
             PASS_DEBUG(std::cerr << "[DAG hard constraint] skip cycle-forming link "
                                  << predecessorId << " -> " << successorId << "\n");
             continue;
         }
-        constraintGraph[predecessorId].insert(successorId);
-        ++constraintInDegree[successorId];
         PASS_DEBUG(std::cerr << "[DAG hard constraint] add overlay link " << predecessorId << " -> "
                              << successorId << "\n");
     }
@@ -381,7 +352,7 @@ static void scheduleRegionWithMovableSideEffects(
     // A node is ready only when both its original DAG dependencies and the
     // independent hard scheduling constraints have been satisfied.
     for (unsigned i = 0; i < regionSize; ++i) {
-        if (dagNodes[i].inDegree == 0 && constraintInDegree[i] == 0) readyQueue.push(&dagNodes[i]);
+        if (constraintOverlay.isReady(i, dagNodes[i].inDegree)) readyQueue.push(&dagNodes[i]);
     }
 
     // Process the ready queue until it's empty.
@@ -414,17 +385,15 @@ static void scheduleRegionWithMovableSideEffects(
         for (unsigned succId : dagGraph[currentNode->id]) {
             DAGNode& succNode = dagNodes[succId];
             succNode.inDegree--;
-            if (succNode.inDegree == 0 && constraintInDegree[succId] == 0)
-                readyQueue.push(&succNode);
+            if (constraintOverlay.isReady(succId, succNode.inDegree)) readyQueue.push(&succNode);
         }
 
         // Independently release successors blocked only by scheduler-policy links.
-        for (unsigned succId : constraintGraph[currentNode->id]) {
-            assert(constraintInDegree[succId] > 0);
-            --constraintInDegree[succId];
+        const auto& constraintSuccessors = constraintOverlay.successors(currentNode->id);
+        constraintOverlay.satisfyFrom(currentNode->id);
+        for (unsigned succId : constraintSuccessors) {
             DAGNode& succNode = dagNodes[succId];
-            if (succNode.inDegree == 0 && constraintInDegree[succId] == 0)
-                readyQueue.push(&succNode);
+            if (constraintOverlay.isReady(succId, succNode.inDegree)) readyQueue.push(&succNode);
         }
     }
     assert(orderInRegion == regionSize &&
