@@ -121,11 +121,6 @@ TEST_P(GridmaskTest, Correctness) {
 //   "wide"  -- a different tileWidth/gridRatio, still axis-aligned.
 //   "rot"   -- rotation only (translateVector {0,0}), so the rotate/translate order -- which the
 //              API doc does not specify -- cannot affect the result.
-//
-// The 12 red cases are HOST x I8 x PartialRoi x 2x36x48 only, where the processed width (24) is not
-// a multiple of the vector width: the scalar tail writes 0 instead of -128 for masked pixels, i.e.
-// it does not apply the I8 intensity shift that the vector body does. Tolerance stays 0. The same
-// grid at 2x36x64 (width 32) is green, which is why both sizes are instantiated.
 INSTANTIATE_TEST_SUITE_P(Image_Effects, GridmaskTest,
                          ::testing::ValuesIn(with_params<GridmaskParams>(
                              make_configs({DType::U8, DType::F16, DType::F32},

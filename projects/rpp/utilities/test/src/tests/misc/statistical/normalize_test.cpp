@@ -164,20 +164,5 @@ TEST_P(NormalizeTest, Correctness) {
         FAIL() << "unsupported dtype conversion for normalize";
 }
 
-// The dtype conversions are the set the header documents ("Supports u8->f32, i8->f32,
-// f16->f16 and f32->f32"). Note the legacy harness instead exercises same-dtype
-// (u8->u8, i8->i8); the two disagree, and the header is taken as the spec here.
-//
-// 223 of these 288 cases are red against four documented kernel defects, all deterministic
-// (identical failure set across repeated runs). The goldens and tolerances are deliberately
-// left correct:
-//   - 144: U8toF32 / I8toF32 rejected with RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE, though the
-//     header documents them.
-//   -  36: cms0 (both statistics supplied) applies sample 0's mean/stddev to every sample,
-//     both backends.
-//   -  18: cms1 on HOST multiplies by the supplied stddev instead of by scale/stddev; HIP is
-//     correct.
-//   -  25: cms2/cms3 on HOST at rank >= 3 (all zeros at 3D), plus F16 partial masks at 2D; HIP
-//     matches the golden at every rank.
 INSTANTIATE_TEST_SUITE_P(Misc_Statistical, NormalizeTest, ::testing::ValuesIn(normalize_grid()),
                          nd_op_config_name<NormalizeParams>);

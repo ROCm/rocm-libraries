@@ -122,12 +122,6 @@ void run_resize_crop_mirror(const TestConfig& cfg, const ResizeCropMirrorParams&
 
 // Full name:
 // Image_Geometric/ResizeCropMirrorTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Tag>_<DstWxDstH>_<Interp>_<Mirror>
-//
-// Every case is currently red against this (correct) golden, documenting two kernel defects:
-//  - NEAREST_NEIGHBOR returns RPP_ERROR_NOT_IMPLEMENTED (both backends) -- the ASSERT on the return
-//    value fails.
-//  - BILINEAR runs but samples the trailing edge one texel short (interior matches the golden
-//    exactly); the same bilinear defect as resize et al.
 class ResizeCropMirrorTest : public SkipListTest<WithParams<ResizeCropMirrorParams>> {};
 
 TEST_P(ResizeCropMirrorTest, Correctness) {

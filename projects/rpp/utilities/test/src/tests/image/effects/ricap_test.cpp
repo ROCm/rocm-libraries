@@ -134,10 +134,6 @@ TEST_P(RicapTest, Correctness) {
 //            where the output is image 0's top-left quadrant tiled 2x2.
 //   bound  - single's degenerate crops/permutation with quad's boundary (20, 16): isolates the
 //            vertical split as the only variable.
-//
-// quad and bound are RED on HIP and green on HOST; quad8 and single are green on both. The only
-// difference between bound and single is w0 (20 vs 24), which pins the HIP defect to a vertical
-// split that is not a multiple of 8.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, RicapTest,
     ::testing::ValuesIn(with_params<RicapParams>(

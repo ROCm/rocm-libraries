@@ -113,14 +113,6 @@ class GlitchTest : public SkipListTest<WithParams<GlitchParams>> {};
 
 TEST_P(GlitchTest, Correctness) {
     const auto& p = GetParam();
-    // The HOST U8 planar path sizes its vector loop as (roiWidth & ~31) - 32 in an unsigned, which
-    // underflows to ~4e9 whenever the ROI is narrower than 64 columns, and the loop then walks the
-    // whole address space. The segfault takes the entire process with it, so these two cases are
-    // enumerated but skipped rather than left red. Remove this guard once the kernel is fixed.
-    if (p.cfg.backend == RPP_HOST_BACKEND && p.cfg.dtype == DType::U8 &&
-        p.cfg.layout == Layout::PLN3 && p.cfg.roi == Roi::Partial)
-        GTEST_SKIP() << "HOST U8 planar glitch segfaults on a ROI narrower than its vector stride";
-
     dispatch_dtype<DType::U8, DType::F16, DType::F32>(p.cfg.dtype, [&](auto tag) {
         run_glitch<Element<decltype(tag)>>(p.cfg, p.op);
     });

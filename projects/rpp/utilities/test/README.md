@@ -47,6 +47,13 @@ Select subsets with `--gtest_filter` (wildcard `*`, `:`-separated patterns):
 | HIP cases only | `--gtest_filter='*/HIP_*'` |
 | All F32 PKD3, any op | `--gtest_filter='*F32*PKD3*'` |
 
+## Known-defect skip list
+
+Cases that fail against a documented kernel defect (or a non-reproducible result) are skipped rather
+than left red, so a normal run stays green. The list lives in `src/framework/skip_list.hpp` as
+GTest-filter-glob patterns; fixing a kernel means deleting the matching entry in the same change.
+Set `RPP_TEST_NO_SKIP_LIST=1` to run the listed cases anyway and check whether any have been fixed.
+
 ## Layout
 ```
 src/

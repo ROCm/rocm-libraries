@@ -147,11 +147,9 @@ TEST_P(ResizeMirrorNormalizeTest, Correctness) {
 }
 
 // Four sets, each isolating one more stage: the plain resize, the mirror, the mean subtraction, and
-// finally the stdDev divide on top of the mirror. IdentityNN is expected red on the ASSERT: the op
-// returns RPP_ERROR_NOT_IMPLEMENTED (-6) for nearest-neighbour on both backends, exactly as
-// resize_crop_mirror does. MirrorOnly is the exact control instead -- under the partial ROI the
-// destination size equals the ROI, so the resize is scale 1, every source coordinate is an integer
-// and bilinear is exact.
+// finally the stdDev divide on top of the mirror. MirrorOnly is the exact control -- under the
+// partial ROI the destination size equals the ROI, so the resize is scale 1, every source
+// coordinate is an integer and bilinear is exact.
 INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, ResizeMirrorNormalizeTest,
     ::testing::ValuesIn(with_params<RmnParams>(
