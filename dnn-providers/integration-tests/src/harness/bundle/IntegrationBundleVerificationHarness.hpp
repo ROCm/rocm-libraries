@@ -118,6 +118,14 @@ protected:
     virtual bool isEnforcingSupportClaims() const;
     virtual void applyMetadataGuards() const;
 
+    // Virtual so deviceless tests can observe the non-FULL routing decision without
+    // reaching getSharedHandle(). The real implementation needs a device.
+    virtual void enforceAtLevel(EnforcementLevel level);
+
+    // Protected so a stubbed enforceAtLevel() can exit the same way the real one does
+    // when it cannot verify: marks the bundle accounted for, then skips.
+    void skipUnverifiable(const std::string& reason);
+
     InputFillRecipes& inputFillRecipes()
     {
         return _inputFillRecipes;
@@ -144,7 +152,6 @@ private:
     };
 
     void runComparison();
-    void enforceAtLevel(EnforcementLevel level);
     void runGoldenMode();
     void runExplicitRefMode(ReferenceExecutorType type);
     void runAutoMode();
@@ -178,7 +185,6 @@ private:
                              float atol,
                              float rtol) const;
 
-    void skipUnverifiable(const std::string& reason);
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);
 
