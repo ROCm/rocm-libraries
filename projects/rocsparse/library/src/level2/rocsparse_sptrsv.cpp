@@ -764,8 +764,8 @@ namespace rocsparse
                                                                     A,
                                                                     analysis_policy,
                                                                     &ellsv_info,
-                                                                    buffer,
-                                                                    buffer_size_in_bytes));
+                                                                    buffer_size_in_bytes,
+                                                                    buffer));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_analysis);
                 switch(analysis_policy)
                 {
@@ -884,8 +884,8 @@ namespace rocsparse
                                                                  dnvec_descr_x,
                                                                  dnvec_descr_y,
                                                                  sptrsv_descr->get_ellsv_info(),
-                                                                 buffer,
-                                                                 buffer_size_in_bytes));
+                                                                 buffer_size_in_bytes,
+                                                                 buffer));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
                 return rocsparse_status_success;
             }
