@@ -219,7 +219,6 @@ bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
     const int64_t heads = dims->Get(HEAD_AXIS);
     const int64_t sequence = dims->Get(SEQ_AXIS);
     const int64_t headSize = dims->Get(HEAD_SIZE_AXIS);
-    const int64_t batch = dims->Get(BATCH_AXIS);
 
     const auto axisOk = [&](uint32_t axis, int64_t expected) {
         return dims->Get(axis) == 1 || strides->Get(axis) == expected;
@@ -456,8 +455,11 @@ std::optional<BoundTokens> gfx942AttentionDenseGraphMatches(const MatchContext& 
         causal = 1;
         break;
     case MaskType::SLIDING_WINDOW:
+    default:
         // supports_attention_dense rejects sliding_window unconditionally
-        // (attention_dense.py:922).
+        // (attention_dense.py:922). `default` is required by -Wswitch-default and
+        // doubles as the safe verdict for any mask kind added to the enum later:
+        // an unrecognised mask is declined, never served as if it were dense.
         return std::nullopt;
     }
 
@@ -669,13 +671,8 @@ bool kernelMatches(const MatchContext& context,
     // a future variant set with a shape range would need exactly these.
     const int64_t blockM = intField(BLOCK_M_FIELD);
     const int64_t blockN = intField(BLOCK_N_FIELD);
-    if(blockM <= 0 || blockN <= 0 || problem.seqLenQ % blockM != 0
-       || problem.seqLenKv % blockN != 0)
-    {
-        return false;
-    }
-
-    return true;
+    return blockM > 0 && blockN > 0 && problem.seqLenQ % blockM == 0
+           && problem.seqLenKv % blockN == 0;
 }
 
 /**
@@ -791,7 +788,8 @@ public:
         // buildIngestorKernelCode documents that it deliberately does not consult
         // `options` on the KPACK branch -- a kpack blob's build defines were baked at
         // pack time. An EMBEDDED_SOURCE kernel in this pack would need a real answer.
-        compilation::KernelCompileOptions options(nullptr, context.deviceProperties.gcnArchName);
+        const compilation::KernelCompileOptions options(nullptr,
+                                                        context.deviceProperties.gcnArchName);
 
         auto code
             = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
