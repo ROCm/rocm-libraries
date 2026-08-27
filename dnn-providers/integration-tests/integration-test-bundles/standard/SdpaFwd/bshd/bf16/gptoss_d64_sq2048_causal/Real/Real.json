@@ -43,11 +43,11 @@
                 "causal_mask": false,
                 "causal_mask_bottom_right": false,
                 "dropout_probability": null,
-                "attn_scale_value": 0.08838834764831845,
+                "attn_scale_value": 0.125,
                 "left_bound": -1,
                 "right_bound": 0,
                 "max_seq_len_kv": null,
-                "diagonal_alignment": "BOTTOM_RIGHT",
+                "diagonal_alignment": "TOP_LEFT",
                 "mma_core_mode": "float",
                 "implementation": "AUTO"
             }
@@ -59,17 +59,17 @@
             "name": "Q",
             "dims": [
                 2,
-                4,
-                256,
-                128
+                128,
+                2048,
+                64
             ],
             "strides": [
-                131072,
-                128,
-                512,
+                16777216,
+                64,
+                8192,
                 1
             ],
-            "data_type": "half",
+            "data_type": "bfloat16",
             "virtual": false
         },
         {
@@ -77,17 +77,17 @@
             "name": "K",
             "dims": [
                 2,
-                4,
-                256,
-                128
+                128,
+                2048,
+                64
             ],
             "strides": [
-                131072,
-                128,
-                512,
+                16777216,
+                64,
+                8192,
                 1
             ],
-            "data_type": "half",
+            "data_type": "bfloat16",
             "virtual": false
         },
         {
@@ -95,17 +95,17 @@
             "name": "V",
             "dims": [
                 2,
-                4,
-                256,
-                128
+                128,
+                2048,
+                64
             ],
             "strides": [
-                131072,
-                128,
-                512,
+                16777216,
+                64,
+                8192,
                 1
             ],
-            "data_type": "half",
+            "data_type": "bfloat16",
             "virtual": false
         },
         {
@@ -113,21 +113,21 @@
             "name": "O",
             "dims": [
                 2,
-                4,
-                256,
-                128
+                128,
+                2048,
+                64
             ],
             "strides": [
-                131072,
-                128,
-                512,
+                16777216,
+                64,
+                8192,
                 1
             ],
-            "data_type": "half",
+            "data_type": "bfloat16",
             "virtual": false
         }
     ],
-    "io_data_type": "half",
+    "io_data_type": "bfloat16",
     "compute_data_type": "float",
     "intermediate_data_type": "float",
     "name": ""

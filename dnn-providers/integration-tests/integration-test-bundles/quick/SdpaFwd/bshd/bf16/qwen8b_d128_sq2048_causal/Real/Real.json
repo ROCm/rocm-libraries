@@ -44,8 +44,8 @@
                 "causal_mask_bottom_right": false,
                 "dropout_probability": null,
                 "attn_scale_value": 0.08838834764831845,
-                "left_bound": null,
-                "right_bound": null,
+                "left_bound": -1,
+                "right_bound": 0,
                 "max_seq_len_kv": null,
                 "diagonal_alignment": "TOP_LEFT",
                 "mma_core_mode": "float",
@@ -58,15 +58,15 @@
             "uid": 0,
             "name": "Q",
             "dims": [
-                2,
-                4,
-                256,
+                1,
+                32,
+                2048,
                 128
             ],
             "strides": [
-                131072,
+                8388608,
                 128,
-                512,
+                4096,
                 1
             ],
             "data_type": "bfloat16",
@@ -76,15 +76,15 @@
             "uid": 1,
             "name": "K",
             "dims": [
-                2,
-                4,
-                256,
+                1,
+                8,
+                2048,
                 128
             ],
             "strides": [
-                131072,
+                2097152,
                 128,
-                512,
+                1024,
                 1
             ],
             "data_type": "bfloat16",
@@ -94,15 +94,15 @@
             "uid": 2,
             "name": "V",
             "dims": [
-                2,
-                4,
-                256,
+                1,
+                8,
+                2048,
                 128
             ],
             "strides": [
-                131072,
+                2097152,
                 128,
-                512,
+                1024,
                 1
             ],
             "data_type": "bfloat16",
@@ -112,15 +112,15 @@
             "uid": 3,
             "name": "O",
             "dims": [
-                2,
-                4,
-                256,
+                1,
+                32,
+                2048,
                 128
             ],
             "strides": [
-                131072,
+                8388608,
                 128,
-                512,
+                4096,
                 1
             ],
             "data_type": "bfloat16",

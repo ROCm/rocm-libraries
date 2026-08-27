@@ -43,11 +43,11 @@
                 "causal_mask": false,
                 "causal_mask_bottom_right": false,
                 "dropout_probability": null,
-                "attn_scale_value": 0.08838834764831845,
+                "attn_scale_value": 0.125,
                 "left_bound": -1,
                 "right_bound": 0,
                 "max_seq_len_kv": null,
-                "diagonal_alignment": "BOTTOM_RIGHT",
+                "diagonal_alignment": "TOP_LEFT",
                 "mma_core_mode": "float",
                 "implementation": "AUTO"
             }
@@ -58,76 +58,76 @@
             "uid": 0,
             "name": "Q",
             "dims": [
-                2,
-                4,
-                256,
-                128
+                1,
+                32,
+                4096,
+                64
             ],
             "strides": [
-                131072,
-                128,
-                512,
+                8388608,
+                64,
+                2048,
                 1
             ],
-            "data_type": "bfloat16",
+            "data_type": "half",
             "virtual": false
         },
         {
             "uid": 1,
             "name": "K",
             "dims": [
-                2,
-                4,
-                256,
-                128
+                1,
+                8,
+                4096,
+                64
             ],
             "strides": [
-                131072,
-                128,
+                2097152,
+                64,
                 512,
                 1
             ],
-            "data_type": "bfloat16",
+            "data_type": "half",
             "virtual": false
         },
         {
             "uid": 2,
             "name": "V",
             "dims": [
-                2,
-                4,
-                256,
-                128
+                1,
+                8,
+                4096,
+                64
             ],
             "strides": [
-                131072,
-                128,
+                2097152,
+                64,
                 512,
                 1
             ],
-            "data_type": "bfloat16",
+            "data_type": "half",
             "virtual": false
         },
         {
             "uid": 3,
             "name": "O",
             "dims": [
-                2,
-                4,
-                256,
-                128
+                1,
+                32,
+                4096,
+                64
             ],
             "strides": [
-                131072,
-                128,
-                512,
+                8388608,
+                64,
+                2048,
                 1
             ],
-            "data_type": "bfloat16",
+            "data_type": "half",
             "virtual": false
         }
     ],
-    "io_data_type": "bfloat16",
+    "io_data_type": "half",
     "compute_data_type": "float",
     "intermediate_data_type": "float",
     "name": ""
