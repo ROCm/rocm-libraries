@@ -256,7 +256,7 @@ inline std::optional<hipblaslt_initialization>
         value == "nan"        ? hipblaslt_initialization::nan        :
         value == "norm_dist_one_special" ? hipblaslt_initialization::norm_dist_one_special :
         value == "uniform_low_precision" ? hipblaslt_initialization::uniform_low_precision :
-        std::nullopt;
+        std::optional<hipblaslt_initialization>{};
 }
 // clang-format on
 inline const hipblaslt_activation_type string_to_hipblaslt_activation_type(const std::string& value)
