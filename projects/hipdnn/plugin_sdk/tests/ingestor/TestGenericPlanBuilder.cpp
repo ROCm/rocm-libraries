@@ -1276,6 +1276,95 @@ TEST(TestIngestorGenericPlanBuilder, NamesEveryCandidateReasonWhenNothingCanBeBu
     }
 }
 
+/// The benchmarking half of RethrowsAMalformedDescriptorInsteadOfServingTheNextKernel.
+///
+/// Same handler, same kernels, only the benchmarking knob differs -- which is the point:
+/// whether a malformed descriptor is reported or absorbed must not be a consequence of a
+/// tuning setting. Nothing is sampled, so the builder needs no timer: the throw happens
+/// while candidates are still being constructed.
+TEST(TestIngestorGenericPlanBuilder, RethrowsAMalformedDescriptorWhileBenchmarking)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const MalformedAtBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+    const TestHandle handle;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xB9));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(handle, graph, engineConfig, context);
+        FAIL() << "expected a malformed descriptor to be reported, not dropped from the "
+                  "benchmarking set";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("outside the descriptor's directory"),
+                  std::string::npos)
+            << error.what();
+    }
+}
+
+/// The benchmarking half of NamesEveryCandidateReasonWhenNothingCanBeBuilt.
+///
+/// Pins that the thrown message carries every dropped candidate's reason -- the per-kernel
+/// WARN lines that also carry them are hidden at the default log level.
+TEST(TestIngestorGenericPlanBuilder, NamesEveryCandidateReasonWhenBenchmarkingBuildsNothing)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const FailsToPrepareEveryBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+    const TestHandle handle;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xBA));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(handle, graph, engineConfig, context);
+        FAIL() << "expected the exhausted candidate set to be reported";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        const std::string what = error.what();
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(what.find("3 applicable kernel(s)"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 64"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 128"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 256"), std::string::npos) << what;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The winner-cache coverage gate and ranked walk at the buildPlan() lookup site
 // ---------------------------------------------------------------------------
