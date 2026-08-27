@@ -255,6 +255,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         find_package(rocm-kpack CONFIG REQUIRED)
     endif()
     add_subdirectory(descriptor-packaging)
+    # Produces the pointwise_model pack's .uhd.fb and its model artifact, which the
+    # descriptor staging in src/ then copies alongside that pack's JSON. Ahead of src/ so
+    # the target exists to depend on.
+    add_subdirectory(tools/uhd_model_gen)
 endif()
 
 add_subdirectory(src)
@@ -363,6 +367,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         pointwise/pointwise_add.kdp.json
         pointwise/pointwise_mul.kdp.json
         pointwise/pointwise_sub.kdp.json
+        pointwise_model/pointwise_model.kmd.json
+        pointwise_model/pointwise_model.ued.json
+        pointwise_model/pointwise_model.uhd.json
+        pointwise_model/pointwise_model_add.kdp.json
     )
 
     # Wiped once per configure, not once per build. copy_if_different below makes an
@@ -386,6 +394,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         )
         list(APPEND _staged_descriptors "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}")
     endforeach()
+
+    # The pointwise_model pack's heuristic is a trained artifact rather than a symbol, so
+    # two of its files are binary and cannot be staged by copying from the source tree.
+    # They are generated instead -- see tools/uhd_model_gen for why they are not committed.
+    # Listed as outputs of one command because a single run writes both, and both are
+    # inputs to the staging target below, so a test target that pulls the descriptors in
+    # gets them too.
+    set(_generated_model_artifacts
+        "${HIPDNN_DESCRIPTOR_BUILD_DIR}/pointwise_model/pointwise_model.uhd.fb"
+        "${HIPDNN_DESCRIPTOR_BUILD_DIR}/pointwise_model/pointwise_model.bin"
+    )
+    add_custom_command(
+        OUTPUT ${_generated_model_artifacts}
+        COMMAND uhd_model_gen "${HIPDNN_DESCRIPTOR_BUILD_DIR}/pointwise_model"
+        DEPENDS uhd_model_gen
+        COMMENT "Generating pointwise_model UHD and model artifact"
+        VERBATIM
+    )
+    list(APPEND _staged_descriptors ${_generated_model_artifacts})
 
     add_custom_target(
         hip_kernel_provider_descriptors ALL
@@ -415,4 +442,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}/${_descriptor_subdir}"
         )
     endforeach()
+
+    # The generated pair keeps that same invariant, but has to come from the build tree:
+    # it has no source-tree copy to install. Omitting it would install a pointwise_model
+    # UHD whose artifact is missing, which degrades to declared order at run time and says
+    # so only in a log -- exactly the silent difference the loop above exists to prevent.
+    install(
+        FILES ${_generated_model_artifacts}
+        DESTINATION
+            "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}/pointwise_model"
+    )
 endif()
