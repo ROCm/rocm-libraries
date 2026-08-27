@@ -285,6 +285,28 @@ TEST(CPU_UnitTestConvSolverGemmBwdRestBwd_NONE, RejectsPackedLayout)
     EXPECT_FALSE(miopen::solver::conv::GemmBwdRest{}.IsApplicable(context, problem));
 }
 
+TEST(CPU_UnitTestConvSolverGemmBwdRestBwd_NONE, RejectsMixedPointOutputLayouts)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    const auto test_case = TestCase{{4, 3, 4, 4, 4},
+                                    {16, 3, 4, 4, 4},
+                                    {0, 0, 0},
+                                    {4, 4, 4},
+                                    {1, 1, 1},
+                                    miopenHalf,
+                                    miopenHalf,
+                                    miopenHalf,
+                                    miopenTensorNDHWC,
+                                    miopenTensorNCDHW};
+    const auto problem   = test_case.GetProblemDescription(miopen::conv::Direction::BackwardData);
+    auto context         = miopen::ExecutionContext{&get_handle()};
+    problem.SetupFloats(context);
+    problem.SetupComputeType(context);
+
+    EXPECT_FALSE(miopen::solver::conv::GemmBwdRest{}.IsApplicable(context, problem));
+}
+
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverGemmBwdRestBwd_FP16,

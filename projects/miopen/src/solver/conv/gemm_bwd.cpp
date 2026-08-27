@@ -723,9 +723,7 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
             return false;
         if(!problem.IsDirectionBackwardData())
             return false;
-        const auto dx_layout = problem.GetOut().GetLayoutEnum();
-        if(dx_layout != miopenTensorNCHW && dx_layout != miopenTensorNCDHW &&
-           dx_layout != miopenTensorNHWC && dx_layout != miopenTensorNDHWC)
+        if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
             return false;
         // Without a direct write the result goes through Col2Im3d, which addresses dx as
         // channel-first and so cannot serve a channel-last layout.

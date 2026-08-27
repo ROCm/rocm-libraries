@@ -79,7 +79,7 @@ extern "C" __global__ void Col2Im2dU(FLOAT* col,
 
     unsigned int input_size = channels * height * width;
 
-    const uint32_t size_of_group = col_h * col_w * (channels / num_groups) * wei_h * wei_w;
+    const index_t size_of_group = index_t{col_h} * col_w * (channels / num_groups) * wei_h * wei_w;
 
     uint32_t w = (gid / channels) % width;
     uint32_t h = gid / (channels * width);
