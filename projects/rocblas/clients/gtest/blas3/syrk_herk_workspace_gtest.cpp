@@ -500,6 +500,7 @@ namespace
         static std::string name_suffix(const Arguments& arg)
         {
             std::string name = RocBLAS_TestName<syrk_herk_workspace_gtest>(arg.name);
+            name += "_";
             name += arg.function;
             return name;
         }
