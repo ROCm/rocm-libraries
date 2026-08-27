@@ -1049,15 +1049,24 @@ public:
     {
         auto idx_limit = GetU32IntegerLimit();
 
+        // The strides and dists also have to fit, not just the indices the
+        // kernel reaches.  A dist is packed into the argument buffer even
+        // when batch is 1, where it contributes nothing to the max index.
         if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
-           || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit)
+           || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit
+           || MaxKernelStride(io_data_label::INPUT) > idx_limit
+           || MaxKernelStride(io_data_label::OUTPUT) > idx_limit)
         {
             return KIntType::U64;
         }
         return KIntType::U32;
     }
     // Max element index the kernel would compute for a given I/O side.
-    size_t       MaxKernelIndex(io_data_label io) const;
+    size_t MaxKernelIndex(io_data_label io) const;
+    // Max stride or dist packed into the kernel argument buffer for a given
+    // I/O side.  Not bounded by MaxKernelIndex: an unused dist can be
+    // arbitrarily large.
+    size_t       MaxKernelStride(io_data_label io) const;
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
 };

@@ -1166,14 +1166,14 @@ struct BluesteinTransform
     FFTBuffer X{"X", Variable{"offset", "integer_type"}, Variable{"stride0", "integer_type"}};
 
     Variable dim{"dim", rtc_kint_type(KIntType::U32)};
-    Variable nbatch{"nbatch", rtc_kint_type(KIntType::U32)};
+    Variable nbatch{"nbatch", "integer_type"};
     Variable lengths{"lengths", rtc_kint_type(KIntType::U32), true, true};
     Variable stride{"stride", "integer_type", true, true};
     Variable offset{"offset", "integer_type"};
 
     Variable write{"write", "bool"};
     Variable thread{"thread", rtc_kint_type(KIntType::U32)};
-    Variable batch{"batch", rtc_kint_type(KIntType::U32)};
+    Variable batch{"batch", "integer_type"};
     Variable val{"val", "scalar_type"};
 
     Variable buf_temp{"buf_temp", "scalar_type", true, true};

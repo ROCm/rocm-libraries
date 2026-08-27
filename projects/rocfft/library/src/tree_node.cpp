@@ -29,6 +29,7 @@
 #include "rocfft_mpi.h"
 #include "twiddles.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -372,6 +373,20 @@ size_t LeafNode::MaxKernelIndex(io_data_label io) const
     const auto  io_length = io == io_data_label::INPUT ? length : GetOutputLength();
     // compute_ptrdiff returns the buffer size (one-past-the-end).
     return compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
+}
+
+size_t LeafNode::MaxKernelStride(io_data_label io) const
+{
+    // These are the values KernelArgsBuffer::create packs into the stride
+    // array, so they must fit in the kernel's integer type regardless of
+    // how far the kernel actually indexes.
+    const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
+    const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
+
+    auto max_stride = io_stride.empty() ? static_cast<size_t>(0)
+                                        : *std::max_element(io_stride.begin(), io_stride.end());
+
+    return std::max(max_stride, io_dist);
 }
 
 void TreeNode::SetTransposeOutputLength()

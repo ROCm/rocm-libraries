@@ -158,7 +158,7 @@ protected:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::LENGTH_N, precision);
-        RTCKernelArgs kargs(RTCKernelTwiddle::itype);
+        RTCKernelArgs kargs(RTCKernelTwiddle::itype_);
         kargs.append_kint(length_limit);
         kargs.append_kint(N);
         kargs.append_ptr(device_data_ptr);
@@ -194,7 +194,7 @@ protected:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::RADICES, precision);
-        RTCKernelArgs kargs(RTCKernelTwiddle::itype);
+        RTCKernelArgs kargs(RTCKernelTwiddle::itype_);
         kargs.append_kint(length_limit);
         kargs.append_kint(num_radices);
         kargs.append_struct(radices_device);
@@ -211,7 +211,7 @@ protected:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::PARTIAL_PASS_N, precision);
-        RTCKernelArgs kargs(RTCKernelTwiddle::itype);
+        RTCKernelArgs kargs(RTCKernelTwiddle::itype_);
         kargs.append_kint(N);
         kargs.append_ptr(output);
 
@@ -231,7 +231,7 @@ protected:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::HALF_N, precision);
-        RTCKernelArgs kargs(RTCKernelTwiddle::itype);
+        RTCKernelArgs kargs(RTCKernelTwiddle::itype_);
         kargs.append_kint(half_N);
         kargs.append_kint(N);
         kargs.append_ptr(output);
@@ -403,7 +403,7 @@ public:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::LARGE, precision);
-        RTCKernelArgs kargs(RTCKernelTwiddle::itype);
+        RTCKernelArgs kargs(RTCKernelTwiddle::itype_);
         kargs.append_double(phi);
         kargs.append_kint(largeTwdBase);
         kargs.append_kint(X);
@@ -431,7 +431,7 @@ protected:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::PARTIAL_PASS_N, precision);
-        RTCKernelArgs kargs(RTCKernelTwiddle::itype);
+        RTCKernelArgs kargs(RTCKernelTwiddle::itype_);
         kargs.append_kint(N);
         kargs.append_ptr(output);
 
