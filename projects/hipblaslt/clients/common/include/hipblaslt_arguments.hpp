@@ -190,8 +190,6 @@ struct Arguments
     bool                     scaleD;
     bool                     scaleE;
     bool                     scaleAlpha_vector;
-    bool                     amaxScaleA;
-    bool                     amaxScaleB;
     bool                     amaxD;
     bool                     c_equal_d;
     bool                     HMM;
@@ -315,8 +313,6 @@ struct Arguments
     OPER(scaleD) SEP                 \
     OPER(scaleE) SEP                 \
     OPER(scaleAlpha_vector) SEP      \
-    OPER(amaxScaleA) SEP             \
-    OPER(amaxScaleB) SEP             \
     OPER(amaxD) SEP                  \
     OPER(c_equal_d) SEP              \
     OPER(HMM) SEP                    \

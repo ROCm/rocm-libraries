@@ -111,8 +111,6 @@ For more information, run the command with the ``--help`` option. The output of 
    --scaleC <value>                   Apply scale for C buffer. 0 = None, 1 = scalar                                      (Default value is: 0)
    --scaleD <value>                   Apply scale for D buffer. 0 = None, 1 = scalar                                      (Default value is: 0)
    --scaleAlpha_vector                Apply scaleAlpha vector
-   --amaxScaleA                       Apply scale for A buffer by abs max of A buffer
-   --amaxScaleB                       Apply scale for B buffer by abs max of B buffer
    --amaxD                            Output Amax of intermediate D matrix
    --use_e                            Apply AUX output/ gradient input
    --gradient                         Enable gradient

@@ -18,39 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from copy import deepcopy
 from generator import Problem, ProblemSet, SuiteProblemGenerator
-
-amax_def_args = {'--type'  : 'H',
-                 '--dtype' : 'S',
-                 '--init'  : 'hpl',
-                 }
-
-lengths = {
-
-    'amax_example': [
-        (64, 64),
-        (128, 128),
-    ],
-
-    'amax_set_1': [
-        (16,    1024  ),
-        (16,    8192  ),
-        (16,    65536 ),
-        (2048,  1024  ),
-        (2048,  8192  ),
-        (2048,  65536 ),
-        (8192,  1024  ),
-        (8192,  8192  ),
-        (8192,  65536 ),
-        (16,    16384 ),
-        (32,    16384 ),
-        (16,    2048  ),
-        (32,    2048  ),
-        (16,    4096  ),
-        (32,    4096  ),
-    ],
-}
 
 # Suite definitions
 def api_overhead():
@@ -59,32 +27,6 @@ def api_overhead():
     # set different value for hot iteration of getHeuristic and getAll
     problemlist = [Problem(args={"--cold_iters" : "10" , "--iters" : "1000" , "--get_all_iters" : "100"})]
     yield ProblemSet(benchType="api_overhead", name="benchset_1", problems=problemlist)
-
-def amax_example():
-    """AMAX example."""
-
-    problemlist = []
-
-    for length in lengths['amax_example']:
-        args = deepcopy(amax_def_args)
-        args.update({'--m': str(length[0]),
-                     '--n': str(length[1])})
-        problemlist.append(Problem(args=args))
-
-    yield ProblemSet(benchType="amax", name="example", problems=problemlist)
-
-def amax_set_1():
-    """AMAX benchset 1."""
-
-    problemlist = []
-
-    for length in lengths['amax_set_1']:
-        args = deepcopy(amax_def_args)
-        args.update({'--m': str(length[0]),
-                     '--n': str(length[1])})
-        problemlist.append(Problem(args=args))
-
-    yield ProblemSet(benchType="amax", name="benchset_1", problems=problemlist)
 
 def matmul_examples():
     """gemm examples"""
@@ -178,7 +120,6 @@ def all(problems_dir=None):
     else:
         # general suites for all arches
         yield from api_overhead()
-        yield from amax_set_1()
 
         if "gfx942" in target_arch:
             # Put focused tests set for gfx942

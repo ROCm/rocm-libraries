@@ -1834,7 +1834,7 @@ void testing_matmul(const Arguments& arg)
         if(arg.bias_vector || arg.activation_type != hipblaslt_activation_type::none || arg.use_e
            || arg.gradient || arg.scaleA != hipblaslt_scaling_format::none
            || arg.scaleB != hipblaslt_scaling_format::none || arg.scaleC || arg.scaleD || arg.scaleE
-           || arg.scaleAlpha_vector || arg.amaxScaleA || arg.amaxScaleB || arg.amaxD)
+           || arg.scaleAlpha_vector || arg.amaxD)
         {
             hipblaslt_cout
                 << "Skipping fp16_accumulator_probe: requires default epilogue (no bias, "
@@ -3251,38 +3251,13 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
                || arg.scaleA == hipblaslt_scaling_format::Vector)
             {
-                if(arg.amaxScaleA && (arg.a_type == HIP_R_32F || arg.a_type == HIP_R_16F))
-                {
-                    CHECK_HIPBLASLT_ERROR(hipblasltExtAMax(arg.a_type,
-                                                           HIP_R_32F,
-                                                           dScaleA[i].buf(),
-                                                           dA[i].buf(),
-                                                           A_row[i],
-                                                           A_col[i],
-                                                           stream));
-
-                    CHECK_HIP_ERROR(synchronize(hScaleA[i], dScaleA[i]));
-                }
-                else
-                    CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
+                CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
             }
 
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
                || arg.scaleB == hipblaslt_scaling_format::Vector)
             {
-                if(arg.amaxScaleB && (arg.b_type == HIP_R_32F || arg.b_type == HIP_R_16F))
-                {
-                    CHECK_HIPBLASLT_ERROR(hipblasltExtAMax(arg.b_type,
-                                                           HIP_R_32F,
-                                                           dScaleB[i].buf(),
-                                                           dB[i].buf(),
-                                                           B_row[i],
-                                                           B_col[i],
-                                                           stream));
-                    CHECK_HIP_ERROR(synchronize(hScaleB[i], dScaleB[i]));
-                }
-                else
-                    CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
+                CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
             }
 
             if(arg.scaleC)
@@ -3665,37 +3640,12 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
             {
-                if(arg.amaxScaleA && (arg.a_type == HIP_R_32F || arg.a_type == HIP_R_16F))
-                {
-                    CHECK_HIPBLASLT_ERROR(hipblasltExtAMax(arg.a_type,
-                                                           HIP_R_32F,
-                                                           dScaleA[i].buf(),
-                                                           dA[i].buf(),
-                                                           A_row[i],
-                                                           A_col[i],
-                                                           stream));
-
-                    CHECK_HIP_ERROR(synchronize(hScaleA[i], dScaleA[i]));
-                }
-                else
-                    CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
+                CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
             }
 
             if(arg.scaleB == hipblaslt_scaling_format::Scalar)
             {
-                if(arg.amaxScaleB && (arg.b_type == HIP_R_32F || arg.b_type == HIP_R_16F))
-                {
-                    CHECK_HIPBLASLT_ERROR(hipblasltExtAMax(arg.b_type,
-                                                           HIP_R_32F,
-                                                           dScaleB[i].buf(),
-                                                           dB[i].buf(),
-                                                           B_row[i],
-                                                           B_col[i],
-                                                           stream));
-                    CHECK_HIP_ERROR(synchronize(hScaleB[i], dScaleB[i]));
-                }
-                else
-                    CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
+                CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
             }
 
             if(arg.scaleC)

@@ -606,14 +606,6 @@ try
          bool_switch(&arg.scaleAlpha_vector)->default_value(false),
          "Apply scaleAlpha vector")
 
-        ("amaxScaleA",
-         bool_switch(&arg.amaxScaleA)->default_value(false),
-         "Apply scale for A buffer by abs max of A buffer")
-
-        ("amaxScaleB",
-         bool_switch(&arg.amaxScaleB)->default_value(false),
-         "Apply scale for B buffer by abs max of B buffer")
-
         ("amaxD",
          bool_switch(&arg.amaxD)->default_value(false),
          "Output Amax of intermediate D matrix")
