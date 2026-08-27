@@ -72,6 +72,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/HwInstDescTest.cpp
     unit/asm/ReadWriteOperandTest.cpp
     unit/asm/BarrierTest.cpp
+    unit/asm/MergeBarrierPassTest.cpp
     unit/asm/LoopRegionRemarkPassTest.cpp
     unit/asm/BranchHelpersTest.cpp
     unit/asm/SetpcSwappcCfgTest.cpp
@@ -90,7 +91,6 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/BasicBlockTest.cpp
     unit/asm/DumpStinkyModulePassTest.cpp
     unit/asm/StinkySignatureTest.cpp
-    unit/asm/RederiveExpertScopePassTest.cpp
     unit/asm/HWModelTest.cpp
 )
 

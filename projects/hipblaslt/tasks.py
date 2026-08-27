@@ -370,6 +370,106 @@ def _asic_revision_option(architecture: str, asic_revision):
     return f"-DHIPBLASLT_ASIC_REVISION={asic_revision}"
 
 
+# Clients need a Fortran compiler only for enable_language(Fortran) + LAPACK;
+# hipBLASLt itself has no Fortran TUs. Prefer an absolute path so CMake does
+# not search PATH and pick a different flang/gfortran than the one we selected.
+_ROCM_FLANG_RELPATHS = (
+    ("llvm", "bin", "flang"),
+    ("bin", "amdflang"),
+    ("bin", "flang"),
+    ("lib", "llvm", "bin", "flang"),  # Windows ROCm SDK; unused if the files above exist
+)
+
+
+def _is_real_compiler_binary(path: Path) -> bool:
+    """True if path is an existing executable file (including a symlink to one)."""
+    try:
+        if not path.is_file():
+            return False
+    except OSError:
+        return False
+    if sys.platform == "win32":
+        return True
+    return os.access(path, os.X_OK)
+
+
+def _fortran_file_if_present(path: Path):
+    candidates = [path]
+    if sys.platform == "win32" and path.suffix.lower() != ".exe":
+        candidates.append(path.with_name(path.name + ".exe"))
+    for cand in candidates:
+        if _is_real_compiler_binary(cand):
+            return cand
+    return None
+
+
+def _absolute_fortran(path: Path) -> str:
+    # Keep symlink identity (e.g. /opt/rocm/llvm/bin/flang); do not resolve to
+    # lib/llvm/bin/flang-N, which is a less stable name to put in the cache.
+    return path.absolute().as_posix()
+
+
+def _expand_fortran_spec(spec: str) -> str:
+    """Turn a path or command name into a CMake compiler value."""
+    spec = spec.strip()
+    if not spec:
+        return spec
+    found = _fortran_file_if_present(Path(spec))
+    if found:
+        return _absolute_fortran(found)
+    which = shutil.which(spec)
+    if which:
+        found = _fortran_file_if_present(Path(which))
+        if found:
+            return _absolute_fortran(found)
+    return spec
+
+
+def _autodetect_rocm_flang(rocm: Path):
+    for rel in _ROCM_FLANG_RELPATHS:
+        found = _fortran_file_if_present(rocm.joinpath(*rel))
+        if found:
+            return found
+    return None
+
+
+def _fortran_on_path(name: str):
+    which = shutil.which(name)
+    if not which:
+        return None
+    return _fortran_file_if_present(Path(which))
+
+
+def _resolve_fortran_compiler(explicit, rocm: Path):
+    """Pick CMAKE_Fortran_COMPILER when --clients is set.
+
+    Order: --fortran-compiler, FC, CMAKE_Fortran_COMPILER, ROCm flang, PATH
+    flang, then a detected gfortran. Exit if none of those exist.
+    """
+    if explicit and str(explicit).strip():
+        return _expand_fortran_spec(str(explicit)), "--fortran-compiler"
+    fc = os.environ.get("FC", "").strip()
+    if fc:
+        return _expand_fortran_spec(fc), "FC"
+    cmake_fc = os.environ.get("CMAKE_Fortran_COMPILER", "").strip()
+    if cmake_fc:
+        return _expand_fortran_spec(cmake_fc), "CMAKE_Fortran_COMPILER"
+    found = _autodetect_rocm_flang(rocm)
+    if found:
+        return _absolute_fortran(found), "auto-detected ROCm flang"
+    found = _fortran_on_path("flang")
+    if found:
+        return _absolute_fortran(found), "auto-detected flang on PATH"
+    found = _fortran_on_path("gfortran")
+    if found:
+        return _absolute_fortran(found), "fallback gfortran"
+    print(
+        "No Fortran compiler found for --clients. "
+        "Install ROCm flang or gfortran, or pass --fortran-compiler with a path."
+    )
+    sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # invoke tasks
 # ---------------------------------------------------------------------------
@@ -410,6 +510,13 @@ def _asic_revision_option(architecture: str, asic_revision):
         "build_dir": "Override the build directory.",
         "rocm_path": "Override the ROCm installation path.",
         "clean": "Remove the build directory before configuring (default: incremental).",
+        "fortran_compiler": (
+            "Fortran compiler for --clients (path or name: flang, gfortran, "
+            "/opt/rocm/llvm/bin/flang). Default: FC, else CMAKE_Fortran_COMPILER, "
+            "else auto-detect ROCm flang ({rocm}/llvm/bin/flang, {rocm}/bin/amdflang, "
+            "{rocm}/bin/flang, then PATH flang, then PATH gfortran). "
+            "Exits if none of those are found. Ignored without --clients."
+        ),
     }
 )
 def build(
@@ -451,6 +558,7 @@ def build(
     # flags in signature order, so inserting a parameter mid-signature takes
     # -g from --gprof and cascades onto --logic-filter's -f.
     asic_revision=None,
+    fortran_compiler=None,
 ):
     _supported_distros()
 
@@ -522,6 +630,13 @@ def build(
     # RocRoller
     use_rocroller = not skip_rocroller and not (distro == "rhel" and version_id == "9.1")
 
+    # Clients-only: same value is forwarded to the deps cmake (netlib LAPACK)
+    # and the hipBLASLt configure. Not resolved when clients are off.
+    fortran_cmake = None
+    if clients:
+        fortran_cmake, fortran_why = _resolve_fortran_compiler(fortran_compiler, rocm)
+        print(f"Fortran compiler: {fortran_cmake} ({fortran_why})")
+
     # ---------------------------------------------------------------------------
     # Dependencies
     # ---------------------------------------------------------------------------
@@ -529,6 +644,7 @@ def build(
         _install_system_deps(
             c, distro, version_major, clients, use_system_packages,
             no_msgpack, use_rocroller, legacy_hipblas_direct, bld,
+            fortran_compiler=fortran_cmake,
         )
 
     # ---------------------------------------------------------------------------
@@ -685,7 +801,7 @@ def build(
         f"-DCMAKE_C_COMPILER={ccompiler}",
     ]
     if clients:
-        compiler_opts.append("-DCMAKE_Fortran_COMPILER=gfortran")
+        compiler_opts.append(f"-DCMAKE_Fortran_COMPILER={fortran_cmake}")
     if sys.platform == "win32":
         _setup_msvc_env()
         # Set ROCm env vars AFTER vcvarsall so it doesn't overwrite them.
@@ -753,6 +869,7 @@ def build(
 def _install_system_deps(
     c, distro, version_major, build_clients, use_system_packages,
     no_msgpack, use_rocroller, legacy_hipblas_direct, bld: Path,
+    fortran_compiler=None,
 ):
     tensile_msgpack_backend = not no_msgpack
 
@@ -862,10 +979,14 @@ def _install_system_deps(
     deps_prefix.mkdir(parents=True, exist_ok=True)
     print(f"\033[32mBuilding \033[33mgoogletest\033[32m from source into {deps_prefix}\033[0m")
     with c.cd(str(deps_dir)):
+        fortran_opt = ""
+        if fortran_compiler:
+            fortran_opt = f" -DCMAKE_Fortran_COMPILER={fortran_compiler}"
         c.run(
             f"cmake -DCMAKE_INSTALL_PREFIX={deps_prefix.as_posix()}"
             f" -DCMAKE_INSTALL_LIBDIR=lib"
             f" -DBUILD_LAPACK={build_lapack}"
+            f"{fortran_opt}"
             f" {ROOT_PATH}/deps"
         )
         c.run(f"make -j{os.cpu_count()}")

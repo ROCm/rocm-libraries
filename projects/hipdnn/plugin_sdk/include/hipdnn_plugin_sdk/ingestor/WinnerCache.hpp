@@ -12,9 +12,9 @@
 #include <optional>
 #include <vector>
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceKey.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
@@ -42,7 +42,7 @@ using WinnerRecord = std::vector<RankedEntry>;
 /// a record, which is why the coverage gate exists.
 struct WinnerKey
 {
-    GraphContentKey graph;
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph;
     DeviceKey device;
 
     bool operator==(const WinnerKey& other) const
@@ -60,12 +60,35 @@ struct WinnerKeyHash
 {
     size_t operator()(const WinnerKey& key) const noexcept
     {
-        const size_t graphHash = std::hash<GraphContentKey>{}(key.graph);
+        const size_t graphHash
+            = std::hash<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey>{}(key.graph);
         const size_t deviceHash = std::hash<DeviceKey>{}(key.device);
         return graphHash
                ^ (deviceHash + 0x9e3779b97f4a7c15ULL + (graphHash << 6) + (graphHash >> 2));
     }
 };
+
+/// Do @p left and @p right rank the same candidates in the same order? Compares the
+/// `(kernelId, packId, dispatchId)` sequence positionally and ignores `timeMs`.
+///
+/// This is the write-back supersession test (see `writeBackToShard()`). The two obvious
+/// alternatives are both wrong. Comparing only the kernel-id *set* would treat a genuine
+/// reordering -- a driver or firmware change, a different thermal or clock regime, two
+/// kernels that actually swapped -- as no change and discard it forever, and here the
+/// order IS the payload. Comparing whole records including `timeMs` would never match,
+/// because a measured float essentially never repeats bit-for-bit, so every benchmarking
+/// run of an unchanged catalog would append a line.
+inline bool rankedIdsEqual(const WinnerRecord& left, const WinnerRecord& right)
+{
+    return std::equal(left.begin(),
+                      left.end(),
+                      right.begin(),
+                      right.end(),
+                      [](const RankedEntry& a, const RankedEntry& b) {
+                          return a.kernelId == b.kernelId && a.packId == b.packId
+                                 && a.dispatchId == b.dispatchId;
+                      });
+}
 
 /// Does @p record carry a measurement for every kernel in @p kernels? One-directional:
 /// entries in @p record absent from @p kernels do not fail coverage. Production
