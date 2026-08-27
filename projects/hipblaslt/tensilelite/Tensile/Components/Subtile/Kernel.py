@@ -512,17 +512,45 @@ class TileInfo:
       # split has already divided the work.
       _otherWaves = max(1, self.numWaves // self.waveGroupSize)
       _coopWaves = self.grWavesPerStrip if _isTLU1 else self.numWaves
+      _winSplit = 1
       if _isTLU1 and _otherWaves > 1:
         _cand = self.grWavesPerStrip * _otherWaves
         _stripBytes = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
-        if _cand > _coopWaves and _stripBytes % gr_cfg.bytesPerLoad(_cand) == 0:
-          _coopWaves = _cand
+        if self.grWavesPerStrip > 1:
+          if _cand > _coopWaves and _stripBytes % gr_cfg.bytesPerLoad(_cand) == 0:
+            _coopWaves = _cand
+        else:
+          # One K window of a strip only holds _stripBytes/bytesPerLoad(1) load
+          # blocks, so a fetch group larger than that cannot be absorbed by K
+          # slices alone -- bytesPerLoad(_cand) would exceed the strip and push
+          # loadRatioGR above 1, which the emitter cannot express.  Spread the
+          # leftover factor over the K windows instead: a window is just a
+          # coarser K slice, one whole strip column of the macro tile further on.
+          # Maximise the total spread (K slices x K windows), preferring slices
+          # so a config that already fits keeps the layout it has today.
+          _numWin = int(self.localSubtileGrid[1])
+          _best, _bestKey = (_coopWaves, 1), (_coopWaves, _coopWaves)
+          _c = 1
+          while _c <= _cand:
+            if _stripBytes % gr_cfg.bytesPerLoad(_c) == 0:
+              _w = 1
+              while _w <= _numWin and _c * _w <= _cand:
+                if _numWin % _w == 0 and (_c * _w, _c) > _bestKey:
+                  _bestKey, _best = (_c * _w, _c), (_c, _w)
+                _w *= 2
+            _c *= 2
+          _coopWaves, _winSplit = _best
       self.grOtherAxisWaves = _otherWaves
       self.grCoopWaves = _coopWaves
       # K slices a strip is cut into so the other-axis waves stop refetching it.
       # >1 means a per-wave sub-strip offset is applied, which the XOR swizzle
       # cannot absorb -- SubtileTLUSwizzle keys off this to pick col_scatter.
       self.grKSplit = max(1, _coopWaves // max(1, self.grWavesPerStrip)) if _isTLU1 else 1
+      # K windows the fetch group is additionally spread over.  A wave issues
+      # only grWindowsPerWave of them and reaches its own set through a runtime
+      # window offset applied to both the global and the LDS write address.
+      self.grKWindowSplit = _winSplit
+      self.grWindowsPerWave = max(1, int(self.localSubtileGrid[1]) // _winSplit)
       _grLoadWaves = _coopWaves
       # Effective wave count for GR cooperative-load math (numGRPerSubtile,
       # localGRGranularity).  TLU=1 waves partition free-dim strips instead of
@@ -532,7 +560,7 @@ class TileInfo:
       _globalGRTileSize    = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
       self.loadRatioGR     = _grBytesPerLoad / _globalGRTileSize if _globalGRTileSize else 0
       self.numGRPerSubtile = int(math.ceil(1.0 / self.loadRatioGR)) if self.loadRatioGR else 0
-      self.numGRTotal      = int(self.localSubtileGrid[0] * self.localSubtileGrid[1] / self.loadRatioGR) if self.loadRatioGR else 0
+      self.numGRTotal      = int(self.localSubtileGrid[0] * self.grWindowsPerWave / self.loadRatioGR) if self.loadRatioGR else 0
 
       # LR subtile grid — used by LR emit dispatch (may differ from GR)
       self.lrGlobalSubtileGrid = list(lr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
@@ -1416,8 +1444,11 @@ def mainLoop(writer, kernel):
 
   lrAGran = ReadGranularity(mn=1, k=1)
   lrBGran = ReadGranularity(mn=1, k=1)
-  grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1]
-  grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1]
+  # A K-window split spreads grKWindowSplit consecutive K windows over the
+  # fetch group, so one GR round covers that many windows' worth of subIterK
+  # even though a wave issues only its own.
+  grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1] * int(getattr(tiA, "grKWindowSplit", 1))
+  grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1] * int(getattr(tiB, "grKWindowSplit", 1))
   # TDM: one tensor_load_to_lds covers the full localMMATileGrid.
   if kernel.get("enableTDMA", False):
     grAGran = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])
