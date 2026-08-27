@@ -1331,15 +1331,6 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     }
 
     // GFX942 Tests
-    def dbsyncGfx942 = 'Dbsync gfx942'
-    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX942 && !passedStages.contains(dbsyncGfx942), dbsyncGfx942) {
-        node(rocmnodeFn("gfx942")) {
-            try {
-                withStageStatus { runDbSyncJobFn(gfx942_flags, "ci") }
-            } finally { cleanWs() }
-        }
-    }
-
     def bf16Gfx942 = 'Bf16 Hip Install All gfx942'
     addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx942), bf16Gfx942) {
         node(rocmnodeFn("gfx942")) {
