@@ -6,11 +6,14 @@
 # rewrites the shipped descriptor to `kind: kpack` before the runtime loader
 # ever sees it. Nothing dispatches `rocke` at runtime, and nothing needs to.
 #
-# Why gfx950 and not gfx942: the gfx950 builder already takes `(spec, *, arch)`,
-# which is what hkp_pack's _require_spec_arch_signature demands. gfx942's takes
-# an extra keyword-only `tuning` object that no descriptor can supply, so the
-# packer refuses it by design -- the refusal PR #11237 is fixing. Point the
-# rocke adapter at the gfx942 module and it reports that same refusal.
+# Why gfx950 and not gfx942: history only. gfx942's builder used to take an
+# extra keyword-only `tuning` object that no descriptor could supply, so the
+# packer refused it by design. PR #11237 folded that parameter into the spec
+# dataclass, and both builders now satisfy hkp_pack's
+# `_require_spec_arch_signature` `(spec, *, arch)` contract -- introspect
+# reports an empty `signature_error` for gfx942 as well as gfx950. This file
+# stays the worked example because it is the one that shipped, not because
+# gfx942 is blocked. Do not conclude from this comment that it is.
 #
 # Every `spec` value below is a field of AttentionDenseSpec. The six without
 # defaults (batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads,

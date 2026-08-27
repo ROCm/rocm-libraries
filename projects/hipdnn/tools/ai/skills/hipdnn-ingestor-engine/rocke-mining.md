@@ -42,10 +42,17 @@ function (the geometry is implicit in `b.block_id_*()` calls and stated only in 
 module docstring). A discovery command that silently returns nothing is the failure mode
 to watch for here: empty output means "wrong name", not "no rules".
 
+**Every grep below uses `-E`.** Not decoration: `\|` alternation is a GNU-BRE extension
+that several `grep` builds in this environment do not implement, and on those builds the
+BRE form matches *zero* lines and exits 1 — indistinguishable from "this kernel has no
+validation". Both forms were run against the real gfx942 and gfx950 dense modules: the
+BRE spellings returned 0 hits on both, the `-E` spellings returned 4 and 7. If you write
+one of these by hand, write it with `-E`.
+
 ```bash
 # validation: whichever shape this kernel uses
-grep -n "__post_init__\|^def is_valid_spec\|^def supports_\|^def build_" $M
-grep -n "raise ValueError\|ok, why =\|is_valid_spec(\|validate_.*spec(" $M | head
+grep -nE "__post_init__|^def is_valid_spec|^def supports_|^def build_" $M
+grep -nE "raise ValueError|ok, why =|is_valid_spec\(|validate_.*spec\(" $M | head
 
 # geometry, step 1: the named-function convention (about half the kernels)
 grep -nA12 -E "^def [a-zA-Z_0-9]+_(grid|block|signature)\(" $M
@@ -107,20 +114,55 @@ reader the feature is supported. Find them mechanically:
 ```bash
 python3 - "$M" <<'PY'
 import ast, sys
+
 src = open(sys.argv[1]).read()
-for node in ast.walk(ast.parse(src)):
-    if isinstance(node, ast.FunctionDef) and node.name == "__post_init__":
-        for stmt in node.body:
-            if isinstance(stmt, ast.If):
-                guard = ast.unparse(stmt.test)
-                raises = [n for n in ast.walk(stmt) if isinstance(n, ast.Raise)]
-                if raises:
-                    print(f"line {stmt.lineno}: {len(raises)} rule(s) guarded by  if {guard}:")
+tree = ast.parse(src)
+
+# Do NOT hardcode __post_init__. ~40% of modules validate elsewhere -- gfx942
+# attention_dense keeps 23 of its rules in `supports_attention_dense` and has no
+# __post_init__ at all, so a walk pinned to that one name prints nothing and reads
+# exactly like "this kernel has no guarded rules". Walk every function that
+# rejects, by SHAPE: a raise, or a `return False, "..."` verdict pair.
+def rejects(fn):
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Raise):
+            return True
+        if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple):
+            head = n.value.elts[0] if n.value.elts else None
+            if isinstance(head, ast.Constant) and head.value is False:
+                return True
+    return False
+
+found = False
+for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+    if not rejects(fn):
+        continue
+    for stmt in ast.walk(fn):
+        if isinstance(stmt, ast.If) and rejects(stmt):
+            found = True
+            nr = sum(1 for x in ast.walk(stmt) if isinstance(x, ast.Raise))
+            nv = sum(
+                1
+                for x in ast.walk(stmt)
+                if isinstance(x, ast.Return)
+                and isinstance(x.value, ast.Tuple)
+                and x.value.elts
+                and isinstance(x.value.elts[0], ast.Constant)
+                and x.value.elts[0].value is False
+            )
+            print(f"{fn.name}:{stmt.lineno}: guarded by  if {ast.unparse(stmt.test)}:"
+                  f"  ({nr} raise, {nv} return-False)")
+if not found:
+    print("NO GUARDED RULES FOUND -- suspect the walk, not the kernel. "
+          "Check the module really does reject somewhere: grep -nE "
+          "'raise |return False,' \"$M\"")
 PY
 ```
 
 Anything under a guard naming a feature you decline is SCOPE. Anything ungated is
-unconditional and needs a real verdict.
+unconditional and needs a real verdict. The script prints the owning function name, so
+an unexpected name (`supports_<op>` rather than `__post_init__`) is information, not a
+miss.
 
 **Rules can also be baked WITHOUT appearing in `__post_init__`, and those are the
 dangerous ones** — they are invisible to a reader auditing the validation. Two sources:
@@ -356,9 +398,35 @@ Two independent mistakes produced it, and both are avoidable here:
 
 **The check to run — and it is exhaustive, not a hunt for one sneaky field.** `batch` is
 the example because it shipped, not because it is special. The rule is: **every field a
-variant pins needs a matcher check.** For the gfx950 dense kernel that is eight of them
-— `batch`, `seqlen_q`, `seqlen_kv`, `num_query_heads`, `num_kv_heads`, `head_size`,
-`causal`, `block_n` — not one.
+variant pins needs a matcher check** — either the KMD carries it and `kernel_match`
+compares it, or `graph_match` requires it outright.
+
+**Do not copy a field list out of this document.** Any list written here is one kernel's
+answer and will be wrong for yours: the gfx950 dense bundle pins **18** spec fields, and
+the gfx942 dense kernel additionally bakes `waves_per_eu` and seven gfx942-only fields
+(`block_m`, `iglp`, `lds_row_pad`, `use_cfvst`, `use_exp2_fast`, `use_v_swizzle`,
+`v_row_pad`) into its `kernel_name()`. Enumerate yours from your own descriptors:
+
+```bash
+python3 - "$KDP" <<'PY'
+import collections, json, sys
+doc = json.load(open(sys.argv[1]))
+pins, meta = collections.defaultdict(set), set()
+for k in doc["kernelDescriptors"]:
+    spec = k.get("kernel_source", {}).get("spec") or k.get("provenance", {}).get("spec", {})
+    for f, v in spec.items():
+        pins[f].add(json.dumps(v))
+    meta |= set(k.get("metadata", {}))
+print(f"{len(pins)} spec fields pinned by this variant set:")
+for f in sorted(pins):
+    where = "in KMD" if f in meta else "NOT IN KMD -- needs a graph_match check"
+    print(f"  {f:22} {len(pins[f])} distinct value(s)   {where}")
+PY
+```
+
+Every row needs a verdict. A field with one distinct value is the dangerous case, not the
+safe one: it is a constant your kernels were compiled with, invisible in the KMD, and
+exactly the shape of the `batch == 1` defect above.
 
 So enumerate mechanically rather than by eye. Walk your descriptor's `spec` block field
 by field, and for each one write down the matcher check that enforces it and where it

@@ -200,8 +200,13 @@ tensors and block-sparse/sinks. `dnn-providers/integration-tests/README.md`
 Then check whether **your** kernel has a path the reference can express:
 
 ```bash
-grep -n "if spec\.\(paged\|varlen\|ragged\)" $PROVIDER/rocke/library/$MODULE | head
+grep -nE "if spec\.(paged|varlen|ragged|sliding_window|use_sinks)" \
+     $PROVIDER/rocke/library/$MODULE | head
 ```
+
+`-E`, always: the `\|` BRE spelling matches **zero** lines on several `grep` builds here
+and exits 1, which reads exactly like "this kernel has no such branch" — the wrong
+conclusion, reached silently.
 
 An `if` around the feature means a dense alternative exists and you can ship a dense-only
 variant set. No branch — the feature is unconditional — means there is no dense subset,
@@ -313,8 +318,9 @@ no rules. `rocke-mining.md` carries the fallbacks:
 ```bash
 M=$PROVIDER/rocke/library/$MODULE
 
-# Constraint table: the spec's validation, wherever it lives
-grep -n "raise ValueError" $M
+# Constraint table: the spec's validation, wherever it lives. Both shapes -- a raise,
+# and the `return False, "why"` verdict pair rocke's supports_<op> uses instead.
+grep -nE "raise ValueError|return False," $M
 
 # Layout: the address arithmetic. Look for the stride and base terms.
 grep -nE "stride_[a-z]+_tok|_base = |b\.global_(load|store)|buffer_rsrc" $M | head -30
@@ -322,11 +328,16 @@ grep -nE "stride_[a-z]+_tok|_base = |b\.global_(load|store)|buffer_rsrc" $M | he
 # Grid / block / ABI — named-function convention first
 grep -nA12 -E "^def [a-zA-Z_0-9]+_(grid|block|signature)\(" $M
 
-# ABI slots, and whether each is conditional: read the b.param declarations IN ORDER
-grep -nB2 "b\.param(" $M
+# ABI slots, and whether each is conditional, IN ORDER. rocKE declares the signature
+# through a SignatureBuilder chain, not `b.param(...)` -- `b.param(` matches zero lines
+# in both the gfx950 and gfx942 dense modules.
+grep -nE "\.ptr\(|\.scalar\(" $M
 
-# Launch-time guards that are NOT in the spec
-grep -nA3 "raise ValueError" $M | sed -n '/def run_/,$p' | head -40
+# Launch-time guards that are NOT in the spec: everything the run_<op> wrapper rejects.
+# awk, not `grep -A3 | sed`: grep's context blocks are disjoint, so a sed range anchored
+# on `def run_` only ever fires if a raise happens to sit within 3 lines of it. That
+# pipeline printed NOTHING on both dense modules -- it has never returned data.
+awk '/^def run_/{f=1} f && /raise |return False,/{print FILENAME":"NR": "$0}' $M
 ```
 
 **GATE:** `ls mining.md` succeeds and every row of the constraint table has a verdict.
