@@ -220,7 +220,13 @@ BenchmarkProblems:
           - Exact: [384, 768, 1, 1024]
 
   -
-    - # ProblemType (MT192: MIWaveTile 12, strip 4, 3 strips per wave)
+    - # ProblemType (non-power-of-two macro tiles at four waves in N.  The stack is
+      # the largest power-of-two divisor of the tile in MI tiles, so MT192 is 12
+      # tiles -> strip 4, 3 strips per wave, and MT224 is 14 -> strip 2, 7 strips.
+      # Both need the M wave group at 1: splitting the tile over M waves leaves a
+      # per-wave count that neither divides nor is divided by the strip (12 -> 6
+      # against strip 4, 14 -> 7 against strip 2), so the wave straddles a strip
+      # and the geometry check rejects it.)
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -237,6 +243,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 12, 4,  1, 4]   # MT192x256 wg1x4
+          - [16, 16, 128, 1,  1, 14, 4,  1, 4]   # MT224x256 wg1x4
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [256]
@@ -249,7 +256,9 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [192, 256, 1, 256]
+          - Exact: [224, 256, 1, 256]
           - Exact: [384, 512, 1, 512]
+          - Exact: [448, 512, 1, 512]
   -
     - # Prefetch cross product.  PGR double-buffers LDS, PLR double-buffers the
       # MFMA operand registers, so both change the GR/LR schedule and the LDS
