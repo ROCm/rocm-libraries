@@ -403,6 +403,18 @@ RUN for tool in /usr/bin/llvm*-20; do \
 
 RUN python3 -m pip install --break-system-packages pre-commit
 
+# uhd_gen's training dependencies (RFC 0019 §13).
+#
+# projects/hipdnn/tools/CMakeLists.txt registers uhd_gen's suite with CTest only when
+# pytest is importable, and warns and skips registration otherwise. Without these the
+# warning fires and the tests silently do not exist -- including in CI, so the
+# cross-language features_hash contract they pin against the C++ FeatureExtractor goes
+# unchecked. lightgbm, numpy and flatbuffers are what the tool itself imports; the suite
+# additionally guards each case with importorskip, so a partial set degrades to skips
+# rather than errors.
+RUN python3 -m pip install --break-system-packages --no-cache-dir \
+        pytest lightgbm numpy flatbuffers
+
 # Create mount point for /opt/rocm (will be empty unless mounted or built upon)
 RUN mkdir -p /opt/rocm
 
