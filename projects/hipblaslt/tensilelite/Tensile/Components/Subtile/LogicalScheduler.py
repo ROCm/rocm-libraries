@@ -4383,24 +4383,21 @@ class LogicalScheduler:
                                              before=None,
                                              source=None))
 
-        # ── Preloop split: duplicate initC + LRA offset across fast and slow paths ──
+        # ── Preloop split: initC on both paths, LRA on fast path and NoTailLoop only ──
         #
-        # Fast path (K >= DepthU):
+        # Fast path (K >= DepthU, skipGRForTail=True):
         #   [GRs] -> [initC] -> [lraDeferred] -> SBranch PreloopEnd
         #                                      -> [WaitGR, Sync, LR, SkipOps]
         #
         # Slow path (K < DepthU):
-        #   Label SkipPreloop -> [initC] -> [lraDeferred] -> SCmpEQ/tailJump
-        #                                                  -> Label PreloopEnd
-        #                                                  -> [WaitGR, Sync, LR, SkipOps]
+        #   Label SkipPreloop -> [initC] -> SCmpEQ/tailJump -> Label PreloopEnd
+        #                                                    -> [WaitGR, Sync, LR, SkipOps]
+        #   lraDeferred is omitted: the tail loop uses an independent flat-tile layout
+        #   and does not consume the LR address registers.
         #
-        # lraDeferred (LDS read-address VALU) is placed inside the duplicated zone so it
-        # acts as overlapping filler during the buffer_load window on the fast path, and
-        # correctly sets up addresses on the slow path too.
-        #
-        # The skip-GR guard above ensures K<DepthU never reaches fast-path GRs.
-        # No tail-jump is needed after the fast-path initC for the same reason.
-        # The slow-path initC always exits via tailJump (K<DepthU is always true there).
+        # NoTailLoop path (skipGRForTail=False, no split):
+        #   [GRs] -> [initC] -> [lraDeferred] -> [WaitGR, Sync, LR, SkipOps]
+        #   lraDeferred injected before wait_gr (no slow path exists).
         #
         # EmittedModules with source=None (opType=="") are not dispatched by
         # populate() — their instructions list is used directly as pre-built assembly.
@@ -4426,11 +4423,6 @@ class LogicalScheduler:
                                         comment="K < DepthU: jump to tail loop")
 
             if skipGRForTail:
-                # Build the LRA offset instructions to inline on both paths.
-                # _lraDeferred is placed inside the duplicated zone (alongside initC)
-                # so the offset VALU acts as overlapping filler during the buffer_load
-                # window. It appears on both the fast path (K >= DepthU) and the slow
-                # path (K < DepthU) so neither path misses the address setup.
                 lra_instrs = list(_lraDeferred) if _lraDeferred else []
 
                 # Fast-path: initC already at init_idx; append LRA offset, then branch.
@@ -4450,9 +4442,9 @@ class LogicalScheduler:
                                           comment="K >= DepthU: skip slow-path initC")]))
                 next_id += 1
 
-                # Slow-path: SkipPreloop label + fresh initC (built lazily by populate)
-                # + LRA offset (duplicate) + tail-jump + PreloopEnd label rejoining
-                # WaitGR/Sync/LR.
+                # Slow-path: SkipPreloop label + initC copy + tail-jump + PreloopEnd.
+                # lraDeferred is NOT duplicated here: the tail loop has its own
+                # flat-tile addressing and does not consume the LR address registers.
                 sp_base = init_idx + fp_branch_offset + 1
                 em_list.insert(sp_base, EmittedModule(
                     moduleId=next_id,
@@ -4467,16 +4459,7 @@ class LogicalScheduler:
                     instructions=list(em_list[init_idx].instructions)))
                 next_id += 1
 
-                if lra_instrs:
-                    em_list.insert(sp_base + 2, EmittedModule(
-                        moduleId=next_id,
-                        instructions=list(lra_instrs),
-                        before=None,
-                        source=None))
-                    next_id += 1
-
-                tail_offset = sp_base + 2 + (1 if lra_instrs else 0)
-                em_list.insert(tail_offset, EmittedModule(
+                em_list.insert(sp_base + 2, EmittedModule(
                     moduleId=next_id,
                     instructions=[
                         SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
@@ -4485,7 +4468,7 @@ class LogicalScheduler:
                         preloopEndLabel,
                     ]))
             else:
-                # skipGRForTail=False (PGR=0 or NoTailLoop variant): no split needed.
+                # skipGRForTail=False (PGR=0): no split needed.
                 em_list.insert(init_idx + 1, EmittedModule(
                     moduleId=next_id,
                     instructions=[
@@ -4493,6 +4476,21 @@ class LogicalScheduler:
                                   comment="K < DepthU? initC done, run tail only"),
                         tailJump,
                     ]))
+
+        # NoTailLoop fallback: no split exists, so inject lraDeferred before wait_gr
+        # in the flat preloop (the only path). skipGRForTail=False implies NoTailLoop=True
+        # for any kernel where _lraDeferred is set (PGR=0 kernels never defer LRA).
+        if _lraDeferred and not skipGRForTail:
+            fl = preloop_emitted[0][0]
+            drain_idx = next((i for i, em in enumerate(fl)
+                              if em.opType == 'wait_gr'), len(fl))
+            new_id = max((em.moduleId for em in fl), default=-1) + 1
+            fl.insert(drain_idx, EmittedModule(
+                moduleId=new_id,
+                instructions=list(_lraDeferred),
+                before=None,
+                source=None))
+
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
                                   preloop_emitted, schedule=False))
 

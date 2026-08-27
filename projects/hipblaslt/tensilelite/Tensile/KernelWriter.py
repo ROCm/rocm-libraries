@@ -5538,22 +5538,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # (lraTileAssignment -> v9/v14, the DTL swap-vgpr init that READS v9/v14, and
     # lraTileAssignmentScaleSwizzled -> v19/v22 + scale swaps) is pure loop-invariant
     # VALU whose only consumers are the post-barrier ds_reads and the main-loop LR
-    # swaps. For a subtile fused-store kernel that prefetches (PGR>=1) we DEFER these
-    # three modules into the pre-loop global-read shadow (LogicalScheduler splices them
-    # in just before the wait_gr drain) so ~750 cycles of address math overlaps the
+    # swaps. For any subtile kernel that prefetches (PGR>=1, no TDM) we DEFER these
+    # three modules into the preloop so ~750 cycles of address math overlaps the
     # in-flight prefetch buffer_loads instead of sitting on the pre-main-loop critical
     # path. The functions are still CALLED here, in the same order, so vgpr/sgpr-pool
     # checkout/checkin bookkeeping is byte-identical -- only the emission position of the
     # returned modules moves. localReadDTLInitCommonSwapVgpr consumes v9/v14 so it must
     # travel WITH lraTileAssignment; graTileAssignmentScaleSwizzled computes GR offsets
-    # (feeds the prefetch) and stays inline. Any branch that skips the whole pre-loop
-    # (K<DepthU -> SkipToEnd) also skips every one of these consumers and routes to the
-    # tail loop's independent flat-tile layout, so producer and consumers stay on the
-    # same side of that branch. TDM / PGR==0 / non-eligible kernels emit inline as before.
+    # (feeds the prefetch) and stays inline. On the fast path (K>=DepthU) lraDeferred
+    # lands between initC and wait_gr as overlapping filler. On the NoTailLoop path
+    # (no split) it lands before wait_gr. The slow path (K<DepthU) omits lraDeferred
+    # entirely — the tail loop uses an independent flat-tile layout. TDM / PGR==0
+    # kernels emit inline as before.
     _deferLra = (kernel.get("UseSubtileImpl")
                  and kernel["PrefetchGlobalRead"] >= 1
                  and not hasTDM
-                 and self._plsinFusedFlagEligible(kernel))
+                 and (self._plsinFusedFlagEligible(kernel)
+                      or kernel.get("PreloopGRClusterSize", -1) > 0))
     self._deferredPreloopLraModules = None
     _lraModule     = lraTileAssignment(self, kernel)
     _lraSwapModule = localReadDTLInitCommonSwapVgpr(self, kernel)
