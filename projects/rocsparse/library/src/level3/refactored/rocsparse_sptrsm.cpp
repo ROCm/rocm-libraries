@@ -470,7 +470,6 @@ namespace rocsparse
         //
         switch(A->format)
         {
-
         case rocsparse_format_csc:
         {
 
@@ -487,7 +486,6 @@ namespace rocsparse
                                                                p_error));
             break;
         }
-
         case rocsparse_format_csr:
         {
 
