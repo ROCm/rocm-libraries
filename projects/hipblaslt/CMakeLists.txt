@@ -755,6 +755,13 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
+    # Python dependencies for running tests from the installed artifact.
+    install(
+        FILES "${_tensilelite_src}/requirements-test.txt"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
+    )
+
     if(TENSILELITE_ENABLE_CLIENT)
         install(
             TARGETS tensilelite-client
