@@ -12,7 +12,7 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/host_validation/HipblasltReferenceGemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/host_validation/Reduction.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MatmulPreparation.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/MatmulTestCase.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MatmulProblem.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/argument_model.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_parse_data.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_arguments.cpp"

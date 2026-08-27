@@ -217,109 +217,109 @@ namespace hipblaslt::client
         return parameters;
     }
 
-    MatmulPreparation prepareMatmulCases(const Arguments&                arguments,
-                                         std::span<const MatmulTestCase> matmulCases,
-                                         hipDataType                     inputTypeA,
-                                         hipDataType                     inputTypeB,
-                                         hipDataType                     inputTypeC,
-                                         hipDataType                     outputType,
-                                         hipDataType                     computeScalarType,
-                                         hipDataType                     coefficientType,
-                                         hipDataType                     biasType,
-                                         bool                            swizzleA,
-                                         bool                            swizzleB,
-                                         bool                            useRocrollerMxLayout)
+    MatmulPreparation prepareMatmulProblems(const Arguments&               arguments,
+                                            std::span<const MatmulProblem> matmulProblems,
+                                            hipDataType                    inputTypeA,
+                                            hipDataType                    inputTypeB,
+                                            hipDataType                    inputTypeC,
+                                            hipDataType                    outputType,
+                                            hipDataType                    computeScalarType,
+                                            hipDataType                    coefficientType,
+                                            hipDataType                    biasType,
+                                            bool                           swizzleA,
+                                            bool                           swizzleB,
+                                            bool                           useRocrollerMxLayout)
     {
         MatmulPreparation preparation;
-        preparation.cases.resize(matmulCases.size());
+        preparation.problems.resize(matmulProblems.size());
 
-        for(size_t index = 0; index < matmulCases.size(); ++index)
+        for(size_t index = 0; index < matmulProblems.size(); ++index)
         {
-            const auto& testCase     = matmulCases[index];
-            auto&       preparedCase = preparation.cases[index];
+            const auto& problem         = matmulProblems[index];
+            auto&       preparedProblem = preparation.problems[index];
 
-            set_alpha_type(preparedCase.alpha, arguments, computeScalarType, inputTypeA);
-            set_beta_type(preparedCase.beta, arguments, computeScalarType, inputTypeA);
+            set_alpha_type(preparedProblem.alpha, arguments, computeScalarType, inputTypeA);
+            set_beta_type(preparedProblem.beta, arguments, computeScalarType, inputTypeA);
             if(arguments.scaleAlpha_vector)
-                set_computeInterface(preparedCase.alpha, 1.0, computeScalarType, inputTypeA);
+                set_computeInterface(preparedProblem.alpha, 1.0, computeScalarType, inputTypeA);
 
-            preparedCase.a.elements    = testCase.a.allocationElements;
-            preparedCase.a.batchStride = testCase.a.batchStride();
+            preparedProblem.a.elements    = problem.a.allocationElements;
+            preparedProblem.a.batchStride = problem.a.batchStride();
             if(swizzleA)
             {
                 const auto parameters = matmulSwizzleParameters(inputTypeA, arguments.compute_type);
                 constexpr int64_t microRows      = 16;
                 const int64_t     reductionBlock = parameters.innerBlock * parameters.packingFactor;
-                const int64_t     swizzledStride
-                    = ((testCase.m + microRows - 1) / microRows) * microRows
-                      * ((testCase.k + reductionBlock - 1) / reductionBlock) * reductionBlock;
-                if(testCase.batchCount > 1 && testCase.a.batchStride() != 0)
+                const int64_t swizzledStride = ((problem.m + microRows - 1) / microRows) * microRows
+                                               * ((problem.k + reductionBlock - 1) / reductionBlock)
+                                               * reductionBlock;
+                if(problem.batchCount > 1 && problem.a.batchStride() != 0)
                 {
-                    preparedCase.a.batchStride = swizzledStride;
-                    preparedCase.a.replacedUnsupportedBatchStride
-                        = testCase.a.batchStride()
-                              != testCase.a.leadingDimension() * testCase.a.columns()
-                          && testCase.a.batchStride() != swizzledStride;
+                    preparedProblem.a.batchStride = swizzledStride;
+                    preparedProblem.a.replacedUnsupportedBatchStride
+                        = problem.a.batchStride()
+                              != problem.a.leadingDimension() * problem.a.columns()
+                          && problem.a.batchStride() != swizzledStride;
                 }
-                preparedCase.a.elements = testCase.batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY
-                                              ? swizzledStride
-                                              : testCase.batchCount * swizzledStride;
+                preparedProblem.a.elements = problem.batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+                                                 ? swizzledStride
+                                                 : problem.batchCount * swizzledStride;
             }
 
-            preparedCase.b.elements    = testCase.b.allocationElements;
-            preparedCase.b.batchStride = testCase.b.batchStride();
+            preparedProblem.b.elements    = problem.b.allocationElements;
+            preparedProblem.b.batchStride = problem.b.batchStride();
             if(swizzleB)
             {
                 const auto parameters = matmulSwizzleParameters(inputTypeB, arguments.compute_type);
                 constexpr int64_t microColumns   = 16;
                 const int64_t     reductionBlock = parameters.innerBlock * parameters.packingFactor;
                 const int64_t     swizzledStride
-                    = ((testCase.n + microColumns - 1) / microColumns) * microColumns
-                      * ((testCase.k + reductionBlock - 1) / reductionBlock) * reductionBlock;
-                if(testCase.batchCount > 1 && testCase.b.batchStride() != 0)
+                    = ((problem.n + microColumns - 1) / microColumns) * microColumns
+                      * ((problem.k + reductionBlock - 1) / reductionBlock) * reductionBlock;
+                if(problem.batchCount > 1 && problem.b.batchStride() != 0)
                 {
-                    preparedCase.b.batchStride = swizzledStride;
-                    preparedCase.b.replacedUnsupportedBatchStride
-                        = testCase.b.batchStride()
-                              != testCase.b.leadingDimension() * testCase.b.columns()
-                          && testCase.b.batchStride() != swizzledStride;
+                    preparedProblem.b.batchStride = swizzledStride;
+                    preparedProblem.b.replacedUnsupportedBatchStride
+                        = problem.b.batchStride()
+                              != problem.b.leadingDimension() * problem.b.columns()
+                          && problem.b.batchStride() != swizzledStride;
                 }
-                preparedCase.b.elements = testCase.batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY
-                                              ? swizzledStride
-                                              : testCase.batchCount * swizzledStride;
+                preparedProblem.b.elements = problem.batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+                                                 ? swizzledStride
+                                                 : problem.batchCount * swizzledStride;
             }
 
-            preparedCase.outputCopyElements
+            preparedProblem.outputCopyElements
                 = arguments.unit_check || arguments.norm_check || arguments.allclose_check
-                      ? testCase.d.allocationElements
+                      ? problem.d.allocationElements
                       : 0;
-            preparedCase.scaleAlphaElements = arguments.scaleAlpha_vector ? testCase.m : 0;
+            preparedProblem.scaleAlphaElements = arguments.scaleAlpha_vector ? problem.m : 0;
 
-            if(testCase.batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
+            if(problem.batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
             {
                 if(arguments.scaleA == hipblaslt_scaling_format::Scalar)
-                    preparedCase.a.scaleElements = 1;
+                    preparedProblem.a.scaleElements = 1;
                 else if(arguments.scaleA == hipblaslt_scaling_format::Vector)
-                    preparedCase.a.scaleElements = testCase.m;
+                    preparedProblem.a.scaleElements = problem.m;
                 else if(isBlockScaling(arguments.scaleA))
                 {
                     if(useRocrollerMxLayout)
                     {
-                        preparedCase.a.scaleElements = scaleBufferSize(
-                            testCase.a.rows(), testCase.a.columns(), arguments.scaleA);
+                        preparedProblem.a.scaleElements = scaleBufferSize(
+                            problem.a.rows(), problem.a.columns(), arguments.scaleA);
                     }
                     else
                     {
                         const size_t scaleBlock = blockSize(arguments.scaleA);
                         const size_t tileCount  = 128 / scaleBlock;
-                        const size_t scaleRows  = testCase.operationA == HIPBLAS_OP_T
-                                                      ? divideRoundUp(testCase.a.rows(), scaleBlock)
-                                                      : testCase.a.rows();
+                        const size_t scaleRows  = problem.operationA == HIPBLAS_OP_T
+                                                      ? divideRoundUp(problem.a.rows(), scaleBlock)
+                                                      : problem.a.rows();
                         const size_t scaleColumns
-                            = testCase.operationA == HIPBLAS_OP_T
-                                  ? testCase.a.columns()
-                                  : divideRoundUp(testCase.a.columns(), scaleBlock);
-                        const bool   reductionAlongRows = testCase.operationA == HIPBLAS_OP_T;
+                            = problem.operationA == HIPBLAS_OP_T
+                                  ? problem.a.columns()
+                                  : divideRoundUp(problem.a.columns(), scaleBlock);
+                        const bool   reductionAlongRows = problem.operationA == HIPBLAS_OP_T;
                         const size_t reductionExtent
                             = reductionAlongRows ? scaleRows : scaleColumns;
                         const size_t outputExtent = reductionAlongRows ? scaleColumns : scaleRows;
@@ -327,35 +327,35 @@ namespace hipblaslt::client
                             = divideRoundUp(reductionAlongRows ? reductionExtent : outputExtent,
                                             tileCount)
                               * tileCount;
-                        preparedCase.a.scaleElements = reductionAlongRows
-                                                           ? outputExtent * paddedExtent
-                                                           : reductionExtent * paddedExtent;
+                        preparedProblem.a.scaleElements = reductionAlongRows
+                                                              ? outputExtent * paddedExtent
+                                                              : reductionExtent * paddedExtent;
                     }
                 }
 
                 if(arguments.scaleB == hipblaslt_scaling_format::Scalar)
-                    preparedCase.b.scaleElements = 1;
+                    preparedProblem.b.scaleElements = 1;
                 else if(arguments.scaleB == hipblaslt_scaling_format::Vector)
-                    preparedCase.b.scaleElements = testCase.n;
+                    preparedProblem.b.scaleElements = problem.n;
                 else if(isBlockScaling(arguments.scaleB))
                 {
                     if(useRocrollerMxLayout)
                     {
-                        preparedCase.b.scaleElements = scaleBufferSize(
-                            testCase.b.rows(), testCase.b.columns(), arguments.scaleB);
+                        preparedProblem.b.scaleElements = scaleBufferSize(
+                            problem.b.rows(), problem.b.columns(), arguments.scaleB);
                     }
                     else
                     {
                         const size_t scaleBlock = blockSize(arguments.scaleB);
                         const size_t tileCount  = 128 / scaleBlock;
-                        const size_t scaleRows = testCase.operationB == HIPBLAS_OP_T
-                                                     ? testCase.b.rows()
-                                                     : divideRoundUp(testCase.b.rows(), scaleBlock);
+                        const size_t scaleRows  = problem.operationB == HIPBLAS_OP_T
+                                                      ? problem.b.rows()
+                                                      : divideRoundUp(problem.b.rows(), scaleBlock);
                         const size_t scaleColumns
-                            = testCase.operationB == HIPBLAS_OP_T
-                                  ? divideRoundUp(testCase.b.columns(), scaleBlock)
-                                  : testCase.b.columns();
-                        const bool   reductionAlongRows = testCase.operationB == HIPBLAS_OP_N;
+                            = problem.operationB == HIPBLAS_OP_T
+                                  ? divideRoundUp(problem.b.columns(), scaleBlock)
+                                  : problem.b.columns();
+                        const bool   reductionAlongRows = problem.operationB == HIPBLAS_OP_N;
                         const size_t reductionExtent
                             = reductionAlongRows ? scaleRows : scaleColumns;
                         const size_t outputExtent = reductionAlongRows ? scaleColumns : scaleRows;
@@ -363,9 +363,9 @@ namespace hipblaslt::client
                             = divideRoundUp(reductionAlongRows ? reductionExtent : outputExtent,
                                             tileCount)
                               * tileCount;
-                        preparedCase.b.scaleElements = reductionAlongRows
-                                                           ? outputExtent * paddedExtent
-                                                           : reductionExtent * paddedExtent;
+                        preparedProblem.b.scaleElements = reductionAlongRows
+                                                              ? outputExtent * paddedExtent
+                                                              : reductionExtent * paddedExtent;
                     }
                 }
 
@@ -373,61 +373,63 @@ namespace hipblaslt::client
                 {
                     if(arguments.bias_source == hipblaslt_bias_source::a
                        || arguments.bias_source == hipblaslt_bias_source::d)
-                        preparedCase.biasElements = testCase.m;
+                        preparedProblem.biasElements = problem.m;
                     else if(arguments.bias_source == hipblaslt_bias_source::b)
-                        preparedCase.biasElements = testCase.n;
+                        preparedProblem.biasElements = problem.n;
 
                     if(arguments.bias_stride > 0)
-                        preparedCase.biasElements = arguments.bias_stride * testCase.batchCount;
+                        preparedProblem.biasElements = arguments.bias_stride * problem.batchCount;
                 }
 
-                preparedCase.epilogue        = matmulEpilogue(arguments);
-                preparedCase.epilogueEnabled = preparedCase.epilogue != HIPBLASLT_EPILOGUE_DEFAULT
-                                               || arguments.scaleAlpha_vector || arguments.amaxD;
-                if(preparedCase.epilogueEnabled)
+                preparedProblem.epilogue = matmulEpilogue(arguments);
+                preparedProblem.epilogueEnabled
+                    = preparedProblem.epilogue != HIPBLASLT_EPILOGUE_DEFAULT
+                      || arguments.scaleAlpha_vector || arguments.amaxD;
+                if(preparedProblem.epilogueEnabled)
                 {
-                    preparedCase.activation0 = arguments.activation_arg1;
-                    preparedCase.activation1 = arguments.activation_arg2;
+                    preparedProblem.activation0 = arguments.activation_arg1;
+                    preparedProblem.activation1 = arguments.activation_arg2;
                 }
             }
             else
             {
                 if(arguments.scaleA == hipblaslt_scaling_format::Scalar)
-                    preparedCase.a.scaleElements = 1;
+                    preparedProblem.a.scaleElements = 1;
                 if(arguments.scaleB == hipblaslt_scaling_format::Scalar)
-                    preparedCase.b.scaleElements = 1;
+                    preparedProblem.b.scaleElements = 1;
             }
 
-            const size_t biasBytes = preparedCase.biasElements * realDataTypeSize(biasType);
+            const size_t biasBytes = preparedProblem.biasElements * realDataTypeSize(biasType);
             const size_t inputCBytes
-                = get_computeInterface(preparedCase.beta, computeScalarType) == 0
+                = get_computeInterface(preparedProblem.beta, computeScalarType) == 0
                       ? 0
-                      : testCase.c.allocationElements * realDataTypeSize(inputTypeC);
-            if(testCase.batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
+                      : problem.c.allocationElements * realDataTypeSize(inputTypeC);
+            if(problem.batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
             {
                 preparation.rotatingBytes
-                    += preparedCase.a.elements * realDataTypeSize(inputTypeA)
-                       + preparedCase.b.elements * realDataTypeSize(inputTypeB) + inputCBytes
-                       + testCase.d.allocationElements * realDataTypeSize(outputType)
-                       + testCase.auxiliaryAllocationElements() * realDataTypeSize(outputType)
+                    += preparedProblem.a.elements * realDataTypeSize(inputTypeA)
+                       + preparedProblem.b.elements * realDataTypeSize(inputTypeB) + inputCBytes
+                       + problem.d.allocationElements * realDataTypeSize(outputType)
+                       + problem.auxiliaryAllocationElements() * realDataTypeSize(outputType)
                        + biasBytes
-                       + preparedCase.scaleAlphaElements * realDataTypeSize(coefficientType)
-                       + preparedCase.a.scaleElements * realDataTypeSize(coefficientType)
-                       + preparedCase.b.scaleElements * realDataTypeSize(coefficientType);
+                       + preparedProblem.scaleAlphaElements * realDataTypeSize(coefficientType)
+                       + preparedProblem.a.scaleElements * realDataTypeSize(coefficientType)
+                       + preparedProblem.b.scaleElements * realDataTypeSize(coefficientType);
             }
             else
             {
                 preparation.rotatingBytes
-                    += preparedCase.a.elements * realDataTypeSize(inputTypeA) * testCase.batchCount
-                       + preparedCase.b.elements * realDataTypeSize(inputTypeB)
-                             * testCase.batchCount
-                       + inputCBytes * testCase.batchCount
-                       + testCase.d.allocationElements * realDataTypeSize(outputType)
-                             * testCase.batchCount
+                    += preparedProblem.a.elements * realDataTypeSize(inputTypeA)
+                           * problem.batchCount
+                       + preparedProblem.b.elements * realDataTypeSize(inputTypeB)
+                             * problem.batchCount
+                       + inputCBytes * problem.batchCount
+                       + problem.d.allocationElements * realDataTypeSize(outputType)
+                             * problem.batchCount
                        + biasBytes
-                       + preparedCase.scaleAlphaElements * realDataTypeSize(coefficientType)
-                       + preparedCase.a.scaleElements * realDataTypeSize(coefficientType)
-                       + preparedCase.b.scaleElements * realDataTypeSize(coefficientType);
+                       + preparedProblem.scaleAlphaElements * realDataTypeSize(coefficientType)
+                       + preparedProblem.a.scaleElements * realDataTypeSize(coefficientType)
+                       + preparedProblem.b.scaleElements * realDataTypeSize(coefficientType);
             }
         }
 

@@ -5,7 +5,7 @@
 
 #include "datatype_interface.hpp"
 #include "hipblaslt_arguments.hpp"
-#include <hipblaslt/client/MatmulTestCase.hpp>
+#include <hipblaslt/client/MatmulProblem.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -29,7 +29,7 @@ namespace hipblaslt::client
         bool    replacedUnsupportedBatchStride = false;
     };
 
-    struct PreparedMatmulCase
+    struct PreparedMatmulProblem
     {
         PreparedMatmulOperand a;
         PreparedMatmulOperand b;
@@ -46,8 +46,8 @@ namespace hipblaslt::client
 
     struct MatmulPreparation
     {
-        std::vector<PreparedMatmulCase> cases;
-        int64_t                         rotatingBytes = 0;
+        std::vector<PreparedMatmulProblem> problems;
+        int64_t                            rotatingBytes = 0;
     };
 
     bool supportsMatmulSwizzle(hipDataType dataType);
@@ -63,16 +63,16 @@ namespace hipblaslt::client
     MatmulSwizzleParameters matmulSwizzleParameters(hipDataType          dataType,
                                                     hipblasComputeType_t computeType);
 
-    MatmulPreparation prepareMatmulCases(const Arguments&                arguments,
-                                         std::span<const MatmulTestCase> matmulCases,
-                                         hipDataType                     inputTypeA,
-                                         hipDataType                     inputTypeB,
-                                         hipDataType                     inputTypeC,
-                                         hipDataType                     outputType,
-                                         hipDataType                     computeScalarType,
-                                         hipDataType                     coefficientType,
-                                         hipDataType                     biasType,
-                                         bool                            swizzleA,
-                                         bool                            swizzleB,
-                                         bool                            useRocrollerMxLayout);
+    MatmulPreparation prepareMatmulProblems(const Arguments&               arguments,
+                                            std::span<const MatmulProblem> matmulProblems,
+                                            hipDataType                    inputTypeA,
+                                            hipDataType                    inputTypeB,
+                                            hipDataType                    inputTypeC,
+                                            hipDataType                    outputType,
+                                            hipDataType                    computeScalarType,
+                                            hipDataType                    coefficientType,
+                                            hipDataType                    biasType,
+                                            bool                           swizzleA,
+                                            bool                           swizzleB,
+                                            bool                           useRocrollerMxLayout);
 } // namespace hipblaslt::client
