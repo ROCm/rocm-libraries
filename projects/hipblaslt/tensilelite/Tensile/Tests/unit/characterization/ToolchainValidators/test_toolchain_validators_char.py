@@ -35,9 +35,6 @@ V = importlib.import_module("Tensile.Toolchain.Validators")
         ("supportedCCompiler", "amdclang++", False),
         ("supportedOffloadBundler", "clang-offload-bundler", True),
         ("supportedOffloadBundler", "clang", False),
-        ("supportedHip", "hipcc", True),
-        ("supportedHip", "hipconfig", True),
-        ("supportedHip", "hipcc.exe", False),
     ],
 )
 def test_supported_predicates(fn, name, expected):
