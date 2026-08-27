@@ -43,6 +43,7 @@ from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter, stripStrid
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
+from rocisa.functions import vectorMultiplyBpe
 from ...Common import INDEX_CHARS
 from ...SolutionStructs.Utilities import isSubtileIterateMode as _isSubtileIterateMode
 from ...Common.DataType import DataType
@@ -1331,9 +1332,10 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
           comment="%s: wave K-row base = axisId*%d" % (tc, kRowsPerWave)))
     module.add(VMulLOU32(dst=vgpr(dst), src0=strideK, src1=vgpr(dst),
           comment="%s: K row * strideK (elements)" % tc))
-    # elements -> bytes (bpe is 0.5 for fp4, so shift right by 1)
-    module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(1), src=vgpr(dst),
-          comment="%s: elements -> bytes (fp4)" % tc))
+    # bpe is per-operand: 0.5 for fp4 shifts right, but the bf16 TLU=1 geometry
+    # has a bpe of 2 and has to shift left, so let the helper pick.
+    module.add(vectorMultiplyBpe(dst, dst, float(tileInfo.bpe),
+          comment="%s: elements -> bytes" % tc))
     writer.sgprPool.checkIn(tmpS)
     return dst
   localSub0 = int(tileInfo.localSubtileGrid[0])
@@ -1450,8 +1452,8 @@ def _tluKSliceGlobalOffset(writer, kernel, module, tileInfo):
   strideK = writer.strideRef(tc, unrollIdx)
   module.add(VMulLOU32(dst=vgpr(dst), src0=strideK, src1=vgpr(dst),
         comment="%s: K row * strideK (elements)" % tc))
-  module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(1), src=vgpr(dst),
-        comment="%s: elements -> bytes (fp4)" % tc))
+  module.add(vectorMultiplyBpe(dst, dst, float(tileInfo.bpe),
+        comment="%s: elements -> bytes" % tc))
   return dst
 
 
