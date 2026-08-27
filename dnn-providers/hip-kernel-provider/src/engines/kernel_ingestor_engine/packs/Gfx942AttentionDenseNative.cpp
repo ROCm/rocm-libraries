@@ -780,15 +780,36 @@ public:
                 "bakes that layout and takes no stride arguments");
         }
 
-        // KernelCompileOptions classifies the tensor it is handed as NCHW or NHWC and
-        // THROWS for anything else -- BSHD attention memory is neither, so passing the
-        // real query tensor here would fail at prepare() time. A layout-neutral
-        // stand-in is safe on this path and only this path: every kernel in this pack
-        // is KPACK (kernel_source.kind: rocke, lowered by hkp_pack at build time), and
-        // buildIngestorKernelCode documents that it deliberately does not consult
-        // `options` on the KPACK branch -- a kpack blob's build defines were baked at
-        // pack time. An EMBEDDED_SOURCE kernel in this pack would need a real answer.
-        const compilation::KernelCompileOptions options(nullptr,
+        // KernelCompileOptions dereferences the tensor it is handed UNCONDITIONALLY:
+        // addDataTypeAndLayoutOptions() calls `tensorAttrs->data_type()` with no null
+        // check, and isChannelLastLayout() THROWS for any 4D stride order that is
+        // neither NCHW nor NHWC. BSHD attention memory is neither, so passing the real
+        // query tensor throws at prepare() time -- and passing `nullptr` segfaults.
+        // "Layout-neutral stand-in" means a minimal REAL tensor, not the absence of
+        // one; reading it the other way cost a device run.
+        //
+        // Hence a 1x1x1x1 tensor with NCHW-ordered strides, which classifies cleanly.
+        // Safe on this path and only this path: every kernel in this pack is KPACK
+        // (kernel_source.kind: rocke, lowered by hkp_pack at build time), and
+        // buildIngestorKernelCode deliberately does not consult `options` on the KPACK
+        // branch -- a kpack blob's build defines were baked at pack time. An
+        // EMBEDDED_SOURCE kernel in this pack would need a real answer here.
+        flatbuffers::FlatBufferBuilder standInBuilder;
+        {
+            const std::vector<int64_t> unitDims{1, 1, 1, 1};
+            const std::vector<int64_t> unitStrides{1, 1, 1, 1};
+            standInBuilder.Finish(
+                data_objects::CreateTensorAttributesDirect(standInBuilder,
+                                                           0,
+                                                           nullptr,
+                                                           data_objects::DataType::FLOAT,
+                                                           &unitStrides,
+                                                           &unitDims,
+                                                           false));
+        }
+        const auto* standIn = flatbuffers::GetRoot<data_objects::TensorAttributes>(
+            standInBuilder.GetBufferPointer());
+        const compilation::KernelCompileOptions options(standIn,
                                                         context.deviceProperties.gcnArchName);
 
         auto code
