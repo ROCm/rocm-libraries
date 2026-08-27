@@ -711,10 +711,22 @@ Then prune against a **time budget**, and prune deliberately:
   that takes minutes gets disabled, and then it protects nothing. Move what you dropped
   to standard and say so in your report.
 
-For scale calibration, the shipped ops sit at roughly 2–15 quick bundles each
-(`quick/SdpaFwd` 15, `quick/RMSNorm` 8, `quick/ConvolutionFwd` 2) — sized to each op's
-support surface, not to a template. Read the neighbours of the op you are adding before
-choosing.
+For scale calibration, count the shipped neighbours yourself rather than trusting a
+number here — **the two op families count differently and mixing them misleads**:
+
+```bash
+cd $REPO/dnn-providers/integration-tests/integration-test-bundles/quick
+# per-graph ops (SdpaFwd): one directory per case
+find <Op> -name '*.json' ! -name '*.meta.json' | sed 's|/[^/]*$||' | sort -u | wc -l
+# sweep ops (RMSNorm, ConvolutionFwd): cases live inside sweep.json
+python3 -c "import json,glob; print(sum(len(json.load(open(f))['cases']) for f in glob.glob('<Op>/*/sweep.json')))"
+```
+
+On this branch that gives `quick/SdpaFwd` **15** case directories, `quick/RMSNorm` 4
+directories expanding to **172** swept cases, `quick/ConvolutionFwd` 1 directory
+expanding to **108**. A sweep op's breadth is data, so it is cheap; a per-graph op's is
+one directory each, so 15 is already a wide surface. Size against the op you are actually
+adding, not against a template.
 
 **The rejection checklist is a coverage list too.** Each "must decline" row deserves a
 negative case — cheap, and exactly the assertion that catches an over-broad matcher

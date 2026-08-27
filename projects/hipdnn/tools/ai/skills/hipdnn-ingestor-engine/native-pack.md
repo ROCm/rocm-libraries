@@ -4,29 +4,50 @@ The generator emits `packs/<Name>Native.cpp` with every body `// TODO - FILL THI
 Filling them is **the** integration work; descriptors are scaffolding around it. This file
 is how.
 
-Reference implementation to read before writing anything:
-`src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp` (~700 lines, a rocKE
-SDPA pack). `PointwiseNative.cpp` in the working tree shows the same shapes with a
-non-trivial `workspaceBytes` and multiple `GraphCriterionFn`s.
+Reference implementations to read before writing anything — **find them, do not assume a
+filename.** What exists varies by branch:
 
-**Copy its SHAPES, not its RULES.** It is the right model for structure — the
-match/prepare/launch split, the ownership rules, the layout-neutral stand-in — and it has
-at least two *applicability* defects that a copier inherits silently:
+```bash
+ls $PROVIDER/src/engines/kernel_ingestor_engine/packs/*Native.cpp
+```
 
-- Its `causal` derivation reads only the deprecated `causal_mask` /
+`PointwiseNative.cpp` and `ConvNative.cpp` ship on every branch and are the ones to read
+for *structure*: the match/prepare/launch split, the ownership rules, a non-trivial
+`workspaceBytes`, multiple `GraphCriterionFn`s. A rocKE SDPA pack (`AttentionDenseNative.cpp`)
+exists on some branches and not others — `git log --all --diff-filter=A -- '**/packs/*Native.cpp'`
+finds every one ever added if your tree has none.
+
+**Copy their SHAPES, not their RULES.** Every rocKE reference pack in this codebase's
+history has shipped at least one *applicability* defect, and a copier inherits it
+silently. Two that were found by checking a pack's rejection list against real bundle
+data — both present in the gfx950 dense SDPA pack as first authored:
+
+- Its `causal` derivation read only the deprecated `causal_mask` /
   `causal_mask_bottom_right` booleans. Every shipped `quick/SdpaFwd` bundle leaves those
-  `false` and expresses causality through `left_bound`/`right_bound`, so it computes
-  `causal = 0` for a causal graph and matches a **non-causal kernel**. Wrong numbers, no
+  `false` and expresses causality through `left_bound`/`right_bound`, so it computed
+  `causal = 0` for a causal graph and matched a **non-causal kernel**. Wrong numbers, no
   fault, matcher green.
-- Its `mma_core_mode != UNSET` rejection declines every shipped SdpaFwd bundle, because
+- Its `mma_core_mode != UNSET` rejection declined every shipped SdpaFwd bundle, because
   they all set `"float"` (`FLOAT = 1`, `data_types.fbs`). The engine then serves nothing
   and the suite stays green because another engine wins.
 
-Both are the failure classes this file and `rocke-mining.md` warn about, present in the
-file they point at. **Derive your rules from the kernel source and the op's `.fbs`, then
-use this pack to check your structure** — not the other way round. And validate any
-rejection you write against real bundle data (`integration-tests/integration-test-bundles/`):
-a check that declines every shipped case is as broken as one that admits a bad graph.
+**The general rules behind those two, which outlive any particular file:**
+
+- **A graph concept with no matching spec field is a *derivation*, and derivations are
+  where reference packs go wrong.** hipDNN's SDPA schema has no `causal` boolean at all;
+  causality comes off `left_bound`/`right_bound`/`diagonal_alignment`, with the deprecated
+  booleans taking precedence *only when set*. Find the canonical derivation in the tree and
+  call it rather than reimplementing it — for masks that is
+  `asm_sdpa_engine/plans/SdpaPlanUtils.hpp` (`getMaskType`).
+- **Never write an optional-enum rejection as `field() != DEFAULT` without checking what
+  shipped bundles actually set.** A frontend default that is a non-zero enum value makes
+  the naive form an over-rejection that fails *silently*: the engine registers, builds and
+  passes CI by never being selected. There is no error to notice.
+
+So: derive your rules from the kernel source and the op's `.fbs`, then use an existing pack
+to check your structure — not the other way round. And validate every rejection you write
+against real bundle data (`integration-tests/integration-test-bundles/`): a check that
+declines every shipped case is as broken as one that admits a bad graph.
 
 ---
 
@@ -87,6 +108,30 @@ Structure, in order:
    - `scale_tensor_uid` — a *device-resident* scale. A kernel taking `scale` as a launch
      scalar cannot accept it, and nothing about the Python spec says so.
    - `mma_core_mode` and the quantization scale UIDs — likewise absent from the spec.
+   - `implementation` (`AttentionImplementation`: AUTO/COMPOSITE/UNIFIED) — an execution
+     strategy hint with no rocKE counterpart. A pack that never reads it silently ignores
+     a COMPOSITE/UNIFIED request.
+
+   **Do not rely on a curated list, including this one — it has already gone stale once**
+   (`implementation` was missing from it, and the one shipped pack audited against this
+   section had exactly that hole). After writing your rejection block, run the
+   completeness check and treat anything it prints as a hole:
+
+   ```bash
+   grep -oP '^\s+\K[a-z_]+(?=:)' <op>_attributes.fbs | while read f; do
+       grep -q "$f(" packs/<Name>Native.cpp || echo "UNCHECKED: $f"
+   done
+   ```
+
+   Every name it prints must be either consumed or explicitly rejected — not merely
+   absent because no shipped bundle varies it yet. A field is safe to skip only once you
+   have written down, in a comment, why its only legal value is inert for this kernel.
+
+   **Do not invent a default for a scalar the graph did not supply**, even a
+   mathematically obvious one like `attn_scale_value = 1/sqrt(head_size)`. If the schema
+   marks a scalar optional and your kernel's ABI takes it as a required launch argument,
+   require presence in `graph_match` and decline its absence. Guessing a value the graph
+   never asked for silently overrides whatever the frontend's omission meant.
 
    The mining checklist tells you what the *kernel* cannot do. This audit tells you what
    the *graph* can ask for. Both are required; neither substitutes for the other.

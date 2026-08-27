@@ -195,9 +195,10 @@ Every completion report this skill produces states, explicitly:
    build flags it is gated on. Bundles run against whichever engine *wins* a graph, so
    without that target a new engine competing with an incumbent can sit unexercised while
    the suite reports green. Tests with no engine-pinned target are tests that do not
-   defend your engine. If the provider cannot yet publish an engine name
-   (`Container::getEngineName`, plugin API 1.4.0), say so as a **blocking dependency** —
-   `--test-engine` rejects a nameless engine as "not loaded".
+   defend your engine. If `hipdnn_list_engines` renders your engine as a bare hex id
+   rather than its scoped name, `--test-engine` cannot select it and rejects it as "not
+   loaded" — say so as a **blocking dependency on AICK-1901** (a name-registration
+   visibility bug, not anything the provider can fix), and ship the pinned target anyway.
 6. **The judgment calls you are handing back**: rocKE restrictions you could not check
    from a graph, knobs you fixed that could be searched, and coverage the tests do not
    have. Each with a recommendation.

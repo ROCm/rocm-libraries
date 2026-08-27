@@ -1,4 +1,4 @@
 interface:
   display_name: "hipDNN Ingestor Engine"
-  short_description: "Generate and validate a kernel-ingestor descriptor bundle"
-  default_prompt: "Use hipdnn-ingestor-engine to turn a new kernel into a validated hipDNN generic-kernel-ingestor descriptor bundle (create flow), or to add a pack/kernel to an existing engine's descriptors (extend flow). Ask for the kernel sources first, infer as much as possible, confirm the rest in one batch, run the generator then the validator, and report what was and was not proven."
+  short_description: "Drive a complete kernel-ingestor engine integration, descriptors through on-device test"
+  default_prompt: "Use hipdnn-ingestor-engine to drive a COMPLETE hipDNN generic-kernel-ingestor integration for a kernel (create flow), or to add a pack/kernel to an existing engine (extend flow). Read SKILL.md's nine-stage completion contract, then drive from RUNBOOK.md. A validated descriptor bundle is roughly a third of an integration, not the deliverable: the native pack's matcher/score/dispatch bodies, the CMake splice, a build, and an on-device test that proves the engine actually dispatches are all required. A run is incomplete before stage 8; report the stage reached by number, and what was proven versus merely enumerated."

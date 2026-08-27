@@ -351,12 +351,40 @@ F = [f for f in F if f in ks[0]["metadata"]]
 
 # 1. metadata must agree with the spec it claims to describe -- the matcher reads
 #    metadata, the compiler read spec; a drift between them is invisible and fatal.
-bad = [(k["name"], f) for k in ks for f in F
-       if f in k["kernel_source"].get("spec", {})
-       and str(k["kernel_source"]["spec"][f]).lower() != str(k["metadata"][f]).lower()
-       and not (isinstance(k["kernel_source"]["spec"][f], bool)
-                and int(k["kernel_source"]["spec"][f]) == k["metadata"][f])]
-print("metadata/spec drift:", bad or "none")
+#
+#    The spec lives in different places depending on which tree you point this at:
+#    kernel_source.spec on an AUTHORED (pre-pack) tree, provenance.spec on a SHIPPED
+#    (post-pack) one -- packing moves it. Check both, and say so explicitly rather
+#    than silently reporting "none" when NEITHER is present: that silence is
+#    indistinguishable from "checked, found no drift", and reading only
+#    kernel_source.spec made this check dead on every packed tree.
+#
+#    dtype is commonly a SPELLING, not a raw value (one integration paired spec
+#    "bf16"/"fp16" with metadata "BFLOAT16"/"HALF"). If your engine translates the
+#    dtype vocabulary, drop "dtype" from F here or add your own explicit map, or
+#    every row false-positives.
+no_spec = []
+bad = []
+for k in ks:
+    spec = k["kernel_source"].get("spec")
+    if spec is None:
+        spec = k.get("provenance", {}).get("spec")
+    if spec is None:
+        no_spec.append(k["name"])
+        continue
+    for f in F:
+        if f not in spec:
+            continue
+        sv, mv = spec[f], k["metadata"][f]
+        if isinstance(sv, bool):
+            if int(sv) != mv:
+                bad.append((k["name"], f))
+        elif str(sv).lower() != str(mv).lower():
+            bad.append((k["name"], f))
+if no_spec:
+    print("metadata/spec drift: COULD NOT CHECK -- no spec found (wrong tree?) for:", no_spec)
+else:
+    print("metadata/spec drift:", bad or "none")
 
 # 2. no two kernels may share a matcher tuple on the same arch -- one is unreachable
 tups = collections.Counter(tuple(k["metadata"][f] for f in F) for k in ks)
@@ -575,22 +603,30 @@ Four things that decide whether this works:
    (`integration-tests/src/main.cpp:312-321`); if it does not match, the binary exits
    with `Error: Engine '<name>' is not loaded` before running anything.
 
-**Point 4 is the prerequisite, and it is easy to hit.** A descriptor-backed engine only
-publishes a name once the provider implements `Container::getEngineName` (engine plugin
-API 1.4.0). Without it the engine registers and dispatches perfectly but is nameless to
-the harness, so `--test-engine` rejects it as "not loaded" and this block cannot exist.
+**Point 4 is the prerequisite, and it is easy to hit.** The name the harness compares
+against is resolved by id, not published by the provider: `getEngineInfos`
+(`projects/hipdnn/backend/src/plugin/EnginePluginResourceManager.cpp:126-174`) fills
+`engineName` from `getEngineNameFromId(id)` and falls back to `formatEngineIdHex(id)`
+when the id is not in the process-wide interning map. `DescriptorLoader.hpp:2085-2100`
+*does* register descriptor-declared names through `EngineRegistrar` — but its own comment
+records that the registry is "process-local, hidden visibility, so `hipdnn_list_engines`
+still renders these as hex", tracked as **AICK-1901**. So a descriptor-backed engine can
+register and dispatch perfectly while still presenting to the harness as a bare hex id,
+and `--test-engine hipkernel:YourEngine` then exits with `Error: Engine '<name>' is not
+loaded` before running anything.
 
 The cheap tell, from step 7c: if `hipdnn_list_engines` shows your engine as a bare hex id
-rather than its scoped name, the name is not published. Check before writing the CMake:
+rather than its scoped name, the name did not survive to the harness. That is the whole
+check — there is no provider-side API to grep for. (Earlier revisions of this runbook told
+you to grep for a `Container::getEngineName` / "plugin API 1.4.0"; **no such symbol or
+version exists anywhere in this repository** — the grep could only ever print its own
+failure branch, for every provider, forever.)
 
-```bash
-grep -rn "getEngineName" <provider>/src/core/ || \
-  echo "provider does not publish engine names -- --test-engine cannot select this engine"
-```
-
-If it is missing, say so in the step-9 report as a **blocking dependency on the provider**,
-not as a testing gap: the tests are written and correct, and they become CI-visible the
-moment the provider adopts that API.
+If your engine renders as hex, say so in the step-9 report as a **blocking dependency on
+AICK-1901**, not as a testing gap: the tests are written and correct, and they become
+CI-visible the moment that visibility bug is fixed. Write the
+`add_external_integration_test_target` block anyway, gated as above — it is inert until
+the name resolves, and it is the artifact that makes the fix immediately useful.
 
 ### 8d. Run it, on `$ARCH`
 
