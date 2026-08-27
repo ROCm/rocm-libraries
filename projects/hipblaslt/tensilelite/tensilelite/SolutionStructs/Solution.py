@@ -3348,6 +3348,10 @@ class Solution(collections.abc.Mapping):
     state["enableLDSTrMetadata"] = state["ProblemType"]["Sparse"] and state["ProblemType"]["MetadataLayout"] \
       and isLDSTrEnabled(isaInfoMap[isa].asmCaps, hasLDSTrans=True, unrollMajorLDS=False, dtv=False, numBytes=1)
 
+    # Give each wave a contiguous block of MIWaveTile output tiles (like subtile) via the shared
+    # gate contigOut = UseSubtileImpl or WaveContiguousOutput; does not enable subtile itself.
+    state["WaveContiguousOutput"] = state["enableLDSTrB"] and not state["UseSubtileImpl"]
+
     # This reject kernels in 950 logic yaml, temporarily comment it out.
     # finalLDSTrInst = state["enableLDSTrA"] or state["enableLDSTrB"]
     # if state["LDSTrInst"] != finalLDSTrInst:
