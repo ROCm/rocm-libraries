@@ -116,7 +116,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::ActivationEnumWhiteList>(),
                      Base::template Pair<Predicates::Contraction::UseBiasCheck>(),
                      Base::template Pair<Predicates::Contraction::UseEEqual>(),
-                     Base::template Pair<Predicates::Contraction::UseGateResidualEqual>(),
+                     Base::template Pair<Predicates::Contraction::UseGateResidualCheck>(),
                      Base::template Pair<Predicates::Contraction::DataTypeEEqual>(),
                      Base::template Pair<Predicates::Contraction::UseScaleABCheck>(),
                      Base::template Pair<Predicates::Contraction::UseScaleCDCheck>(),
@@ -489,8 +489,8 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::Contraction::UseGateResidualEqual, IO>
-            : public AutoMappingTraits<Predicates::Contraction::UseGateResidualEqual, IO>
+        struct MappingTraits<Predicates::Contraction::UseGateResidualCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UseGateResidualCheck, IO>
         {
         };
 
