@@ -168,7 +168,12 @@ each one, discovered at step 8 instead, wastes the whole run.
 ### 1a. The builder is packable
 
 ```bash
-cd $GEN && python3 -c "
+# PYTHONPATH inline, not inherited. The export in the preamble is a separate fenced
+# block; a fresh shell -- or a fresh agent turn -- does not have it, and the failure is
+# `ModuleNotFoundError: No module named 'kernels'` raised from inside the introspector,
+# which names the missing dependency but not the reason you are missing it.
+cd $GEN && PYTHONPATH=$GEN:$PROVIDER/descriptor-packaging/python:$PROVIDER/rocke/library:$PROVIDER/rocke/platform/python \
+python3 -c "
 from codegen.sources import introspect
 i = introspect('$MODULE', '$BUILDER')
 print('signature_error:', repr(i.signature_error))

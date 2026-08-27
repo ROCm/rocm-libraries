@@ -117,18 +117,28 @@ exactly as if this were a new engine's step 2a. See `graph-contract.md` for the 
 sections to produce in that case.
 
 Then the step that makes an extend trustworthy: point every root and `--native-source` at
-the **whole** tree — never just the new pack or kernel:
+the **whole** tree — never just the new pack or kernel.
+
+**Which tree: the SHIPPED one.** The validator runs the real runtime loader, which reads
+`kernel_source.kind: kpack`. For a `packaged` (rocKE) engine the authored tree still
+carries `kind: rocke` with its `builder`/`build` keys, and pointing the validator at it
+produces a real, misleading ERROR —
+`unknown key 'build' in kernel '...' kernel_source; extension keys must start with 'x-'
+or '_'` — which reads like a corrupt descriptor and is actually the wrong directory. Pack
+first (`RUNBOOK.md` step 5b), then validate the packed output. A `direct_load` engine has
+no packed form and validates its authored tree directly.
 
 ```bash
-<build-dir>/bin/hipdnn_validate_descriptors <existing-dir>/descriptors \
+# packaged: the PACKED tree, after step 5b. direct_load: the authored descriptors dir.
+<build-dir>/bin/hipdnn_validate_descriptors <packed-tree>/<arch> \
     --native-source <existing-pack-native.cpp> \
     --expect-engine <engine-name> --json
 ```
 
 (`--native-source`, `--expect-engine`, `--json` — the validator's real flags, from
 `ValidateDescriptors.cpp`'s own usage string; no per-file or incremental mode exists.) No
-`hipdnn_validate_descriptors` binary means `HIPDNN_ENABLE_KERNEL_INGESTOR` is unset or
-OFF — say so by flag name and don't report structural validation as having run.
+`hipdnn_validate_descriptors` binary has three possible causes, not one — `RUNBOOK.md`
+step 5c has the check that tells them apart.
 
 A partial validation (new files only) can't catch a cross-reference the addition broke in
 an existing file — exactly step 2's failure mode. Whole-directory revalidation is what
@@ -147,7 +157,7 @@ which existing files were included, not only the new ones.
 ## GATE
 
 ```bash
-<build-dir>/bin/hipdnn_validate_descriptors <existing-dir>/descriptors \
+<build-dir>/bin/hipdnn_validate_descriptors <packed-tree>/<arch> \
     --native-source <existing-pack-native.cpp> --expect-engine <engine-name> --json \
   | python3 -c "import json,sys; d=json.load(sys.stdin); print('success:', d['success'], '| errors:', [g for g in d['diagnostics'] if g['severity'] in ('ERROR','FATAL')])"
 ```
