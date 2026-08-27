@@ -368,7 +368,7 @@ class AttentionDenseSpec:
                 # runtime, in cu_seqlens. Every sequence in the batch would get the same
                 # baked diagonal, and the n_upper clamp keeps it in bounds, so this is
                 # wrong numerics rather than a fault. A per-sequence runtime offset is
-                # tracked in AICK-2032.
+                # tracked in AICK-2049.
                 raise ValueError(
                     "causal_bottom_right is not supported with varlen=True (the "
                     "diagonal offset would be baked from the padded maxima, not each "
@@ -541,6 +541,21 @@ def supports_attention_dense(
         AttentionDenseSpec(**{f.name: getattr(spec, f.name) for f in spec.__dataclass_fields__.values()})  # type: ignore[attr-defined]
     except ValueError as e:
         return False, str(e)
+    # --- Tile geometry. The causal KV-tile bound keeps the query-block term outside its
+    # ceil, which is exact only when qb*BLOCK_M is a whole number of KV tiles. A block_n
+    # that does not divide the query tile breaks that and the bound falls short: at
+    # block_n=96, seqlen_q=512 the last query block stops one tile before the tile
+    # holding its own diagonal, dropping keys. Nothing fails loudly, so reject it. This
+    # mirrors the identical gate gfx942 already applies -- kept here rather than in the
+    # shared spec because the spec stays a permissive shape container and each arch's
+    # supports_* decides what it can actually run.
+    if _BLOCK_M % spec.block_n != 0:
+        return False, (
+            f"block_n must divide the {_BLOCK_M}-row query tile (got "
+            f"block_n={spec.block_n}; the spec also requires block_n % 32 == 0, so use "
+            f"32, 64, 128 or 256). Load-bearing for causal=True, where the KV-tile "
+            f"bound would otherwise drop the keys past the last whole sub-tile"
+        )
     return True, ""
 
 
@@ -1226,7 +1241,13 @@ def build_attention_dense(
         # optimisation: leaving this unshifted would mask tiles that do not need it,
         # which is slower but still correct, because the diagonal only ever moves
         # right (seqlen_q <= seqlen_kv is validated).
-        diag_start = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(DIAG_TILES))
+        diag_start = b.mul(qb, b.const_i32(n_per))
+        if DIAG_TILES:
+            # Guarded, like the mask above. An unguarded add would emit `add x, 0` on
+            # every causal kernel: harmless after codegen, since LLVM folds it, but it
+            # stays in the IR and moves every golden hash on the non-persistent causal
+            # path. Emit nothing when the offset is zero.
+            diag_start = b.add(diag_start, b.const_i32(DIAG_TILES))
         body_upper = b.select(b.cmp_lt(diag_start, n_upper), diag_start, n_upper)
         body = b.scf_for_iter(
             b.const_i32(1), body_upper, b.const_i32(1), iter_args, iv_name="nb"
