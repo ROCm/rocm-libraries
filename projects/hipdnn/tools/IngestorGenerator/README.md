@@ -307,3 +307,31 @@ of the provider's `IngestorPacks.hpp` and asserts the emitted row's arity matche
 Skips if the provider source is not found beside this checkout. Also checks that the
 `.hpp`/`.cpp` fragment pair name the same register-function symbol, and that
 `cmake_test_sources.txt` names files this generator's own run actually wrote.
+
+### Every path the skill cites must exist (`tests/test_skill_paths.py`)
+
+```bash
+.venv/bin/python -m pytest tests/test_skill_paths.py -v
+```
+
+`native-pack.md` once told an agent to read `packs/AttentionDenseNative.cpp`, which did
+not exist on the branch the skill shipped on -- the file's first instruction was
+unresolvable, and one grep would have caught it. Nothing ever ran that grep. This test
+does, permanently: it walks every backtick span in the six
+`tools/ai/skills/hipdnn-ingestor-engine/*.md` files, extracts the ones that are
+unambiguously repo paths (`tests/skill_paths.py` holds the conservative rules -- a known
+extension or a known top-level directory prefix, no `$VAR`/`<placeholder>`/glob/shell
+metacharacter), and asserts each resolves against `git ls-files`.
+
+Lives here rather than under the skill directory because this is the tool with a venv
+and a pytest story already wired; the skill directory has neither. Extraction is
+deliberately conservative -- bare words, `$REPO`-rooted paths, `<op>`-style
+placeholders, globs and shell one-liners are routed to a separate "skipped, and
+counted" bucket rather than either being flagged or silently dropped, and one test
+asserts that skip count stays in a sane range so an extractor regression (suddenly
+flagging everything, or nothing) is visible. A dedicated negative-test class proves the
+check actually fires: it feeds the extractor the literal defect string above and
+confirms it flags `packs/AttentionDenseNative.cpp` as dangling on this tree, paired with
+a positive case (`packs/ConvNative.cpp`, `packs/PointwiseNative.cpp`, both of which do
+exist) proving the negative result comes from the path being genuinely absent, not from
+the resolver rejecting everything.
