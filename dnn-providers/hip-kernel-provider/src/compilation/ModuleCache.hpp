@@ -68,6 +68,24 @@ public:
         return _entries.size();
     }
 
+    /// Drop every cached entry, so the next getOrLoad() for any key loads afresh.
+    ///
+    /// Intended for tests, and deliberately not called anywhere in the product: module
+    /// residency is a lifetime guarantee the dispatch path relies on, not an
+    /// optimisation to be invalidated. A test that damages a backing artifact on disk
+    /// needs the next lookup to actually re-read it, which residency otherwise
+    /// prevents.
+    ///
+    /// Erasing drops this cache's reference, not necessarily the last one: a live plan
+    /// holds its own shared_ptr, so a module still in use stays loaded and unloads when
+    /// that last reference goes. Clearing therefore cannot pull a module out from under
+    /// a running dispatch.
+    void clear()
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _entries.clear();
+    }
+
     // NOLINTBEGIN(bugprone-crtp-constructor-accessibility)
     ModuleCache(const ModuleCache&) = delete;
     ModuleCache& operator=(const ModuleCache&) = delete;

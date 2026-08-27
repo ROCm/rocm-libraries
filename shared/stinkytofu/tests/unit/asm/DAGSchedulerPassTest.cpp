@@ -30,6 +30,7 @@
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "transforms/asm/dag/RegionDAG.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -40,6 +41,78 @@ static int countStinkyInstructions(const BasicBlock& bb) {
         if (ir.getType() == IRBase::IRType::StinkyTofu) count++;
     }
     return count;
+}
+
+TEST(HardSchedulingConstraintOverlayTest, EnforcesBarrierTensorAndDsOrdering) {
+    // Base DAG descendants: barrierAfter -> tensorLoad and barrierBefore -> dsLoad.
+    std::vector<std::unordered_set<unsigned>> baseGraph(4);
+    baseGraph[0].insert(1);
+    baseGraph[2].insert(3);
+    std::vector<unsigned> baseInDegree{0, 1, 0, 1};
+
+    dag::HardSchedulingConstraintOverlay overlay(baseGraph);
+    ASSERT_TRUE(overlay.tryAdd(0, 2));  // barrierAfter -> barrierBefore
+    ASSERT_TRUE(overlay.tryAdd(1, 2));  // tensorLoad -> barrierBefore
+    ASSERT_TRUE(overlay.tryAdd(1, 3));  // tensorLoad -> dsLoad
+
+    EXPECT_TRUE(overlay.isReady(0, baseInDegree[0]));
+    EXPECT_FALSE(overlay.isReady(1, baseInDegree[1]));
+    EXPECT_FALSE(overlay.isReady(2, baseInDegree[2]));
+    EXPECT_FALSE(overlay.isReady(3, baseInDegree[3]));
+
+    --baseInDegree[1];
+    overlay.satisfyFrom(0);
+    EXPECT_TRUE(overlay.isReady(1, baseInDegree[1]));
+    EXPECT_FALSE(overlay.isReady(2, baseInDegree[2]));
+
+    overlay.satisfyFrom(1);
+    EXPECT_TRUE(overlay.isReady(2, baseInDegree[2]));
+    EXPECT_FALSE(overlay.isReady(3, baseInDegree[3]));
+
+    --baseInDegree[3];
+    overlay.satisfyFrom(2);
+    EXPECT_TRUE(overlay.isReady(3, baseInDegree[3]));
+}
+
+TEST(HardSchedulingConstraintOverlayTest, SkipsCycleAndPreservesScheduleCompleteness) {
+    std::vector<std::unordered_set<unsigned>> baseGraph(3);
+    baseGraph[0].insert(1);
+    baseGraph[1].insert(2);
+    std::vector<unsigned> baseInDegree{0, 1, 1};
+
+    dag::HardSchedulingConstraintOverlay overlay(baseGraph);
+    EXPECT_FALSE(overlay.tryAdd(2, 0));  // Would close 0 -> 1 -> 2 -> 0.
+
+    unsigned scheduled = 0;
+    for (unsigned node = 0; node < 3; ++node) {
+        ASSERT_TRUE(overlay.isReady(node, baseInDegree[node]));
+        ++scheduled;
+        for (unsigned successor : baseGraph[node]) --baseInDegree[successor];
+        overlay.satisfyFrom(node);
+    }
+    EXPECT_EQ(scheduled, 3u);
+}
+
+TEST(HardSchedulingConstraintOverlayTest, WaitsForBaseDagAndHardConstraintReadiness) {
+    // C requires both the base edge A -> C and the independent hard link B -> C.
+    std::vector<std::unordered_set<unsigned>> baseGraph(3);
+    baseGraph[0].insert(2);
+
+    dag::HardSchedulingConstraintOverlay baseFirst(baseGraph);
+    ASSERT_TRUE(baseFirst.tryAdd(1, 2));
+    unsigned cBaseInDegree = 1;
+    --cBaseInDegree;  // A completes first.
+    EXPECT_FALSE(baseFirst.isReady(2, cBaseInDegree));
+    baseFirst.satisfyFrom(1);
+    EXPECT_TRUE(baseFirst.isReady(2, cBaseInDegree));
+
+    dag::HardSchedulingConstraintOverlay constraintFirst(baseGraph);
+    ASSERT_TRUE(constraintFirst.tryAdd(1, 2));
+    cBaseInDegree = 1;
+    constraintFirst.satisfyFrom(1);  // B completes first.
+    EXPECT_FALSE(constraintFirst.isReady(2, cBaseInDegree));
+    --cBaseInDegree;
+    EXPECT_TRUE(constraintFirst.isReady(2, cBaseInDegree));
 }
 
 class DAGSchedulerPassTest : public ::testing::Test {

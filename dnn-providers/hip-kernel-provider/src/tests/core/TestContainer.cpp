@@ -94,6 +94,11 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
     // Named rather than just counted: neither a count nor an emptiness check can tell
     // a missing engine (e.g. a pack table dropped from a static-archive link) from a
     // renamed one.
+    //
+    // Containment, not equality: the catalog is descriptor-driven, so a build that stages
+    // additional descriptor sets into the descriptor tree — an integration fixture, say —
+    // legitimately discovers more than the two shipped sets. Requiring an exact set would
+    // make every such build fail here, which tests the staging rather than the engines.
     const auto& sets = discoverDescriptorSets();
 
     std::vector<std::string> names;
@@ -103,7 +108,11 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
         names.push_back(set.engine.name);
     }
     std::sort(names.begin(), names.end());
-    EXPECT_EQ(names, (std::vector<std::string>{"hipkernel:ConvFwd", "hipkernel:Pointwise"}));
+    for(const auto* expected : {"hipkernel:ConvFwd", "hipkernel:Pointwise"})
+    {
+        EXPECT_NE(std::find(names.begin(), names.end(), expected), names.end())
+            << "shipped descriptor set '" << expected << "' was not discovered";
+    }
 
     Container container;
     const auto allEngineIds = container.getEngineManager().getAllEngineIds();
