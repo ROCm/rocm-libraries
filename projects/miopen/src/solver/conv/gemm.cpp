@@ -1080,6 +1080,7 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
 #endif
 
                 // C[N, K] = A[N, CZYX] * B^T[CZYX, K], where B stores W[K, CZYX].
+                gemm_desc.isColMajor  = false;
                 gemm_desc.batch_count = 1;
                 gemm_desc.strideA     = 0;
                 gemm_desc.strideB     = 0;

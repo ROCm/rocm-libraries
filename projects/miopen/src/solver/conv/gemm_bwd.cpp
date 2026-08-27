@@ -72,6 +72,7 @@ bool GemmBwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         return false;
 
     return problem.IsDirectionBackwardData() &&
+           (problem.IsLayoutDefault() || problem.IsLayoutNHWC()) &&
            !(gemm::IsAnyBufferBf16(dxDesc, dyDesc, wDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported);
 #else
@@ -722,7 +723,9 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
             return false;
         if(!problem.IsDirectionBackwardData())
             return false;
-        if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
+        const auto dx_layout = problem.GetOut().GetLayoutEnum();
+        if(dx_layout != miopenTensorNCHW && dx_layout != miopenTensorNCDHW &&
+           dx_layout != miopenTensorNHWC && dx_layout != miopenTensorNDHWC)
             return false;
         // Without a direct write the result goes through Col2Im3d, which addresses dx as
         // channel-first and so cannot serve a channel-last layout.
@@ -862,6 +865,7 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
                     miopen::conv::IsBwdDataPointOutputDirectWritable(problem);
 
                 auto single_gemm_desc        = gemm_desc;
+                single_gemm_desc.isColMajor  = false;
                 single_gemm_desc.batch_count = 1;
                 single_gemm_desc.strideA     = 0;
                 single_gemm_desc.strideB     = 0;
