@@ -48,32 +48,4 @@ EpilogueResult referenceEpilogue(const EpilogueProblem& problem) {
     };
 }
 
-EpilogueResult referenceEpilogue(const EpilogueProblem& problem,
-                                 const TensorStorageAllocator& allocator) {
-    (void)detail::validateEpilogueProblem(problem);
-    Tensor output(problem.outputType, problem.input.shape(), allocator);
-    std::optional<Tensor> rawOutput;
-    std::optional<Tensor> auxiliaryOutput;
-    std::optional<Tensor> amax;
-    if (problem.rawOutputType)
-        rawOutput.emplace(*problem.rawOutputType, problem.input.shape(), allocator);
-    if (problem.auxiliaryOutputType)
-        auxiliaryOutput.emplace(*problem.auxiliaryOutputType, problem.input.shape(), allocator);
-    if (problem.amaxType) amax.emplace(*problem.amaxType, Shape{1}, allocator);
-    EpilogueRequest request(problem, output, rawOutput, auxiliaryOutput, amax);
-    (void)detail::validateEpilogueRequest(request);
-    detail::validateOwnedEpilogueStorage(request);
-    detail::initializeOwnedEpilogueTensor(output);
-    if (rawOutput) detail::initializeOwnedEpilogueTensor(*rawOutput);
-    if (auxiliaryOutput) detail::initializeOwnedEpilogueTensor(*auxiliaryOutput);
-    if (amax) detail::initializeOwnedEpilogueTensor(*amax);
-    const EpilogueRunInfo runInfo = referenceEpilogue(request);
-    return {
-        .output = std::move(output),
-        .rawOutput = std::move(rawOutput),
-        .auxiliaryOutput = std::move(auxiliaryOutput),
-        .amax = std::move(amax),
-        .runInfo = runInfo,
-    };
-}
 }  // namespace roc::host_validation

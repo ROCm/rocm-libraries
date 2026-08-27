@@ -355,11 +355,7 @@ void generate(Tensor destination, Generator&& generator) {
 
 GenerationRunInfo generate(Tensor destination, const GenerationRecipe& recipe);
 Tensor generate(ScalarType type, Layout layout, const GenerationRecipe& recipe);
-Tensor generate(ScalarType type, Layout layout, const GenerationRecipe& recipe,
-                const TensorStorageAllocator& allocator);
 Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe);
-Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe,
-                const TensorStorageAllocator& allocator);
 GenerationRunInfo generateAt(Tensor destination, size_t logicalIndex,
                              const GenerationRecipe& recipe);
 }  // namespace roc::host_validation

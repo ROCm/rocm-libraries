@@ -187,7 +187,7 @@ namespace hipblaslt::host_validation
         constexpr ScalarType type = scalarType<T>();
         static_assert(scalarTypeInfo(type).storageBits == sizeof(T) * 8,
                       "External C++ type does not store one scalar per object.");
-        return ::roc::host_validation::Tensor(
+        return ::roc::host_validation::Tensor::copyEncodedBackingStorage(
             type, std::move(layout), std::as_bytes(std::span<const T>(data, elements)));
     }
 
@@ -197,16 +197,15 @@ namespace hipblaslt::host_validation
         constexpr ScalarType type = scalarType<T>();
         static_assert(scalarTypeInfo(type).storageBits == sizeof(T) * 8,
                       "External C++ type does not store one scalar per object.");
-        return ::roc::host_validation::Tensor(
+        return ::roc::host_validation::Tensor::copyEncodedBackingStorage(
             type, std::move(layout), std::as_writable_bytes(std::span<T>(data, elements)));
     }
 
     inline ::roc::host_validation::Tensor
         tensorFromMutableStorage(void* data, size_t storageBytes, hipDataType type, Layout layout)
     {
-        return ::roc::host_validation::Tensor(
-            scalarType(type),
-            std::move(layout),
+        return ::roc::host_validation::Tensor::copyEncodedBackingStorage(
+            scalarType(type), std::move(layout),
             std::span<std::byte>(static_cast<std::byte*>(data), storageBytes));
     }
 
@@ -214,9 +213,8 @@ namespace hipblaslt::host_validation
         tensorFromMutableStorage(void* data, ScalarType type, Layout layout)
     {
         const size_t storageBytes = storageBytesForLayout(type, layout);
-        return ::roc::host_validation::Tensor(
-            type,
-            std::move(layout),
+        return ::roc::host_validation::Tensor::copyEncodedBackingStorage(
+            type, std::move(layout),
             std::span<std::byte>(static_cast<std::byte*>(data), storageBytes));
     }
 
@@ -224,11 +222,11 @@ namespace hipblaslt::host_validation
     void copyTensorStorageTo(T* data, size_t elements, const ::roc::host_validation::Tensor& tensor)
     {
         const size_t bytes = elements * sizeof(T);
-        if(tensor.storage().size() > bytes)
+        if(tensor.rawEncodedBackingStorage().size() > bytes)
             throw std::invalid_argument("Tensor storage exceeds destination capacity.");
-        if(!tensor.storage().empty())
+        if(!tensor.rawEncodedBackingStorage().empty())
             std::memcpy(static_cast<void*>(data),
-                        tensor.storage().data(),
-                        tensor.storage().size());
+                        tensor.rawEncodedBackingStorage().data(),
+                        tensor.rawEncodedBackingStorage().size());
     }
 } // namespace hipblaslt::host_validation

@@ -125,14 +125,18 @@ inline double encodedUlpDistance(double exact, double approximation, ScalarType 
         case ScalarType::Float6E3M2:
         case ScalarType::Float4E2M1:
         case ScalarType::E5M3:
-        case ScalarType::E4M3:
+        case ScalarType::E4M3: {
+            const BinaryFloatFormat format = binaryFloatFormat(type);
+            const uint64_t exactRaw = encodeBinaryFloat(type, static_cast<float>(exact));
+            const uint64_t approximationRaw =
+                encodeBinaryFloat(type, static_cast<float>(approximation));
             exactEncoding =
-                orderedFloatingEncoding(encodeBinaryFloat(type, static_cast<float>(exact)),
-                                        scalarTypeInfo(type).storageBits);
+                format.hasSign ? orderedFloatingEncoding(exactRaw, format.totalBits) : exactRaw;
             approximationEncoding =
-                orderedFloatingEncoding(encodeBinaryFloat(type, static_cast<float>(approximation)),
-                                        scalarTypeInfo(type).storageBits);
+                format.hasSign ? orderedFloatingEncoding(approximationRaw, format.totalBits)
+                               : approximationRaw;
             break;
+        }
         case ScalarType::Boolean:
         case ScalarType::UInt8:
         case ScalarType::Int8:
@@ -406,7 +410,7 @@ void forEachSelectedIndex(const Shape& shape, const ComparisonSelection& selecti
 }
 
 inline ComparisonValue loadComparisonValue(const Tensor& view, ptrdiff_t logicalOffset) {
-    const auto storage = view.storage();
+    const auto storage = view.rawEncodedBackingStorage();
     if (scalarTypeInfo(view.type()).category == ScalarCategory::Complex)
         return typedComparisonValue(
             decodeScalar<std::complex<double>>(view.type(), storage, logicalOffset));
@@ -563,17 +567,18 @@ bool knownPointwiseDecision(const Tensor& observed, ptrdiff_t observedOffset,
                             const ComparisonOptions& options) {
     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
         const ComparisonValue observedValue =
-            loadComparisonValueKnown<Tag>(observed.storage(), observedOffset);
+            loadComparisonValueKnown<Tag>(observed.rawEncodedBackingStorage(), observedOffset);
         const ComparisonValue expectedValue =
-            loadComparisonValueKnown<Tag>(expected.storage(), expectedOffset);
+            loadComparisonValueKnown<Tag>(expected.rawEncodedBackingStorage(), expectedOffset);
         if (options.complexPointwiseMode == ComplexPointwiseMode::Magnitude)
             return compareComplexMagnitude(observedValue, expectedValue, options).close;
         return pointwiseValuesClose(observedValue.real, expectedValue.real, options) &&
                pointwiseValuesClose(observedValue.imaginary, expectedValue.imaginary, options);
     } else {
-        return pointwiseValuesClose(loadFastComparisonReal<Tag>(observed.storage(), observedOffset),
-                                    loadFastComparisonReal<Tag>(expected.storage(), expectedOffset),
-                                    options);
+        return pointwiseValuesClose(
+            loadFastComparisonReal<Tag>(observed.rawEncodedBackingStorage(), observedOffset),
+            loadFastComparisonReal<Tag>(expected.rawEncodedBackingStorage(), expectedOffset),
+            options);
     }
 }
 
@@ -661,10 +666,10 @@ ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
                         static_cast<ptrdiff_t>(innerIndex) * expected.layout().strides()[0];
                     bool close = false;
                     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
-                        const ComparisonValue observedValue =
-                            loadComparisonValueKnown<Tag>(observed.storage(), observedOffset);
-                        const ComparisonValue expectedValue =
-                            loadComparisonValueKnown<Tag>(expected.storage(), expectedOffset);
+                        const ComparisonValue observedValue = loadComparisonValueKnown<Tag>(
+                            observed.rawEncodedBackingStorage(), observedOffset);
+                        const ComparisonValue expectedValue = loadComparisonValueKnown<Tag>(
+                            expected.rawEncodedBackingStorage(), expectedOffset);
                         if (options.complexPointwiseMode == ComplexPointwiseMode::Magnitude) {
                             close = compareComplexMagnitude(observedValue, expectedValue, options)
                                         .close;
@@ -674,9 +679,10 @@ ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
                                     predicate(observedValue.imaginary, expectedValue.imaginary);
                         }
                     } else {
-                        close = predicate(
-                            loadFastComparisonReal<Tag>(observed.storage(), observedOffset),
-                            loadFastComparisonReal<Tag>(expected.storage(), expectedOffset));
+                        close = predicate(loadFastComparisonReal<Tag>(
+                                              observed.rawEncodedBackingStorage(), observedOffset),
+                                          loadFastComparisonReal<Tag>(
+                                              expected.rawEncodedBackingStorage(), expectedOffset));
                     }
                     result.mismatches += static_cast<size_t>(!close);
                 }
@@ -692,10 +698,10 @@ ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
                 ++result.compared;
                 bool close = false;
                 if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
-                    const ComparisonValue observedValue =
-                        loadComparisonValueKnown<Tag>(observed.storage(), observedOffset);
-                    const ComparisonValue expectedValue =
-                        loadComparisonValueKnown<Tag>(expected.storage(), expectedOffset);
+                    const ComparisonValue observedValue = loadComparisonValueKnown<Tag>(
+                        observed.rawEncodedBackingStorage(), observedOffset);
+                    const ComparisonValue expectedValue = loadComparisonValueKnown<Tag>(
+                        expected.rawEncodedBackingStorage(), expectedOffset);
                     if (options.complexPointwiseMode == ComplexPointwiseMode::Magnitude) {
                         close =
                             compareComplexMagnitude(observedValue, expectedValue, options).close;
@@ -705,9 +711,10 @@ ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
                             close && predicate(observedValue.imaginary, expectedValue.imaginary);
                     }
                 } else {
-                    close =
-                        predicate(loadFastComparisonReal<Tag>(observed.storage(), observedOffset),
-                                  loadFastComparisonReal<Tag>(expected.storage(), expectedOffset));
+                    close = predicate(loadFastComparisonReal<Tag>(
+                                          observed.rawEncodedBackingStorage(), observedOffset),
+                                      loadFastComparisonReal<Tag>(
+                                          expected.rawEncodedBackingStorage(), expectedOffset));
                 }
                 result.mismatches += static_cast<size_t>(!close);
             });
@@ -783,21 +790,23 @@ ComparisonResult compare(const Tensor& observed, const Tensor& expected,
                         decision.emplace(detail::knownPointwiseDecision<Tag>(
                             observed, observedOffset, expected, expectedOffset, options));
                     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
-                        accumulator.observe(logicalIndex, observedOffset, expectedOffset,
-                                            detail::loadComparisonValueKnown<Tag>(
-                                                observed.storage(), observedOffset),
-                                            detail::loadComparisonValueKnown<Tag>(
-                                                expected.storage(), expectedOffset),
-                                            decision);
+                        accumulator.observe(
+                            logicalIndex, observedOffset, expectedOffset,
+                            detail::loadComparisonValueKnown<Tag>(
+                                observed.rawEncodedBackingStorage(), observedOffset),
+                            detail::loadComparisonValueKnown<Tag>(
+                                expected.rawEncodedBackingStorage(), expectedOffset),
+                            decision);
                     } else {
-                        accumulator.observeReal(logicalIndex, observedOffset, expectedOffset,
-                                                detail::loadComparisonValueKnown<Tag>(
-                                                    observed.storage(), observedOffset)
-                                                    .real,
-                                                detail::loadComparisonValueKnown<Tag>(
-                                                    expected.storage(), expectedOffset)
-                                                    .real,
-                                                decision);
+                        accumulator.observeReal(
+                            logicalIndex, observedOffset, expectedOffset,
+                            detail::loadComparisonValueKnown<Tag>(
+                                observed.rawEncodedBackingStorage(), observedOffset)
+                                .real,
+                            detail::loadComparisonValueKnown<Tag>(
+                                expected.rawEncodedBackingStorage(), expectedOffset)
+                                .real,
+                            decision);
                     }
                 });
         });
@@ -859,7 +868,7 @@ SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte
 SentinelResult checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allocatedElements,
                                         SentinelRegion region, size_t maxReportedMismatches) {
     const auto& layout = logicalTensor.layout();
-    detail::validateSentinelRange(logicalTensor.type(), logicalTensor.storage(), 0,
+    detail::validateSentinelRange(logicalTensor.type(), logicalTensor.rawEncodedBackingStorage(), 0,
                                   allocatedElements);
     std::vector<bool> used(allocatedElements, false);
     detail::forEachSelectedIndex(
@@ -874,9 +883,9 @@ SentinelResult checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allo
     result.reportedMismatches.reserve(maxReportedMismatches);
     for (size_t index = 0; index < allocatedElements; ++index) {
         if (used[index]) continue;
-        const SentinelResult element =
-            checkUnwrittenSentinel(logicalTensor.type(), logicalTensor.storage(), index, 1, region,
-                                   maxReportedMismatches - result.reportedMismatches.size());
+        const SentinelResult element = checkUnwrittenSentinel(
+            logicalTensor.type(), logicalTensor.rawEncodedBackingStorage(), index, 1, region,
+            maxReportedMismatches - result.reportedMismatches.size());
         result.append(element, maxReportedMismatches);
     }
     return result;

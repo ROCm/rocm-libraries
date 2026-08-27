@@ -23,27 +23,29 @@ int main() {
     Tensor d(ScalarType::Float32, Shape{1, 1});
 
     GemmRequest problem(
-        GemmOperand(
-            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(a))),
-        GemmOperand(
-            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(b))),
-        Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(c)), d,
-        ScalarType::Float32);
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(a))),
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b))),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                         std::span<const float>(c)),
+        d, ScalarType::Float32);
     if (!queryGemmSupport(problem)) return 1;
     referenceGemm(problem);
     if (d.loadAs<float>({0, 0}) != 6) return 1;
 
     const GemmResult ownedGemm = referenceGemm(GemmProblem(
-        GemmOperand(
-            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(a))),
-        GemmOperand(
-            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(b))),
-        Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(c)),
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(a))),
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b))),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                         std::span<const float>(c)),
         ScalarType::Float32, ScalarType::Float32));
     if (ownedGemm.output.loadAs<float>({0, 0}) != 6) return 1;
 
     EpilogueProblem epilogue(
-        Tensor::fromNativeValues<float>(Shape{1, 1}, std::array<float, 1>{-2.0f}),
+        Tensor::copyNativeValues<float>(Shape{1, 1}, std::array<float, 1>{-2.0f}),
         ScalarType::Float32, ScalarType::Float32);
     epilogue.activation = Activation::Relu;
     epilogue.amaxType = ScalarType::Float32;
@@ -54,17 +56,17 @@ int main() {
         return 1;
 
     const std::array<float, 3> reductionInput{-1, 4, -3};
-    const ReductionResult maximumAbsolute =
-        referenceMaximumAbsolute(Tensor::fromNative<float>(Layout::contiguous(Shape{3}),
-                                                           std::span<const float>(reductionInput)),
-                                 ScalarType::Float32, ScalarType::Float32);
+    const ReductionResult maximumAbsolute = referenceMaximumAbsolute(
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{3}),
+                                         std::span<const float>(reductionInput)),
+        ScalarType::Float32, ScalarType::Float32);
     if (maximumAbsolute.output.loadAs<float>({}) != 4) return 1;
 
     Tensor generated =
         generate(ScalarType::Float32, Shape{4},
                  GenerationRecipe::realOnly(GenerationRecipe::candidateSet({.values = {-2.0, 3.0}}),
                                             {.seed = 17}));
-    for (size_t index = 0; index < generated.size(); ++index) {
+    for (size_t index = 0; index < generated.elementCount(); ++index) {
         const float value = generated.loadAs<float>({index});
         if (value != -2.0f && value != 3.0f) return 1;
     }
@@ -73,8 +75,10 @@ int main() {
     if (generated.loadAs<float>({2}) != 11.0f) return 1;
 
     AxpbyProblem axpby(
-        Tensor::fromNative<float>(Layout::contiguous(Shape{1}), std::span<const float>(a)),
-        Tensor::fromNative<float>(Layout::contiguous(Shape{1}), std::span<const float>(b)),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
+                                         std::span<const float>(a)),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
+                                         std::span<const float>(b)),
         ScalarType::Float32, ScalarType::Float32);
     axpby.alpha = 2.0;
     axpby.beta = -1.0;
@@ -85,7 +89,7 @@ int main() {
 
     const std::array<float, 2> softmaxValues{1.0f, 2.0f};
     const Tensor softmaxInput =
-        Tensor::fromNativeValues<float>(Shape{1, 2}, std::span<const float>(softmaxValues));
+        Tensor::copyNativeValues<float>(Shape{1, 2}, std::span<const float>(softmaxValues));
     const SoftmaxResult softmax =
         referenceSoftmax(SoftmaxProblem(softmaxInput, ScalarType::Float32, 1, ScalarType::Float32));
     if (softmax.runInfo.slicesProcessed != 1 || softmax.runInfo.outputElementsWritten != 2 ||
@@ -109,7 +113,7 @@ int main() {
     sparsityPattern.fixedPositions = {0, 2};
     const std::array<float, 4> sparseValues{1, 2, 3, 4};
     const StructuredSparsityResult sparse = applyStructuredSparsity(StructuredSparsityProblem(
-        Tensor::fromNativeValues<float>(Shape{4}, std::span<const float>(sparseValues)),
+        Tensor::copyNativeValues<float>(Shape{4}, std::span<const float>(sparseValues)),
         sparsityPattern, {.retainedIndices = true, .twoOfFourMetadata = true}));
     if (sparse.pruned.loadAs<float>({1}) != 0 || sparse.compressed.loadAs<float>({1}) != 3 ||
         !sparse.retainedIndices || !sparse.twoOfFourMetadata ||

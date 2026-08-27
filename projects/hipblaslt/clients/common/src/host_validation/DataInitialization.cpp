@@ -311,7 +311,7 @@ namespace hipblaslt::host_validation
         Layout layout(
             Shape{initialization.rows, initialization.columns, generatedBatchCount},
             {1, layoutStride(initialization.leadingDimension), layoutStride(batchStride)});
-        Tensor matrix = Tensor(type, Layout::contiguous(Shape{elements})).alias(std::move(layout));
+        Tensor matrix = Tensor(type, Layout::contiguousLastDimensionFastest(Shape{elements})).shareStorageWithLayout(std::move(layout));
         if(initialization.rows == 0 || initialization.columns == 0
            || initialization.batchCount == 0)
             return matrix;

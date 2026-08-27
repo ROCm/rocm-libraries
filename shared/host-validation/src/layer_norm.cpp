@@ -31,22 +31,4 @@ LayerNormResult referenceLayerNorm(const LayerNormProblem& problem) {
     };
 }
 
-LayerNormResult referenceLayerNorm(const LayerNormProblem& problem,
-                                   const TensorStorageAllocator& allocator) {
-    const detail::LayerNormPlan plan = detail::validateLayerNormProblem(problem);
-    Tensor output(problem.outputType, problem.input.shape(), allocator);
-    std::optional<Tensor> mean;
-    std::optional<Tensor> inverseVariance;
-    if (problem.meanType) mean.emplace(*problem.meanType, plan.statisticsShape, allocator);
-    if (problem.inverseVarianceType)
-        inverseVariance.emplace(*problem.inverseVarianceType, plan.statisticsShape, allocator);
-    LayerNormRequest request(problem, output, mean, inverseVariance);
-    const LayerNormRunInfo runInfo = referenceLayerNorm(request);
-    return {
-        .output = std::move(output),
-        .mean = std::move(mean),
-        .inverseVariance = std::move(inverseVariance),
-        .runInfo = runInfo,
-    };
-}
 }  // namespace roc::host_validation

@@ -194,8 +194,8 @@ int main(int argc, char** argv)
 
     using namespace roc::host_validation;
     using namespace hipblaslt::host_validation;
-    const Layout tensorLayout     = Layout::contiguous(Shape{m, n});
-    const Layout statisticsLayout = Layout::contiguous(Shape{m});
+    const Layout tensorLayout     = Layout::contiguousLastDimensionFastest(Shape{m, n});
+    const Layout statisticsLayout = Layout::contiguousLastDimensionFastest(Shape{m});
 
     LayerNormProblem problem(tensorFromStorage(cpuInput.data(), cpuInput.size(), tensorLayout),
                              ScalarType::Float32,
@@ -206,7 +206,7 @@ int main(int argc, char** argv)
     problem.epsilon             = 1e-5;
     if(affine)
     {
-        const Layout affineLayout = Layout::contiguous(Shape{n});
+        const Layout affineLayout = Layout::contiguousLastDimensionFastest(Shape{n});
         problem.gamma = tensorFromStorage(cpuGamma.data(), cpuGamma.size(), affineLayout);
         problem.beta  = tensorFromStorage(cpuBeta.data(), cpuBeta.size(), affineLayout);
     }

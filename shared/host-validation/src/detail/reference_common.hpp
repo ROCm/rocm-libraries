@@ -79,6 +79,8 @@ Accumulator applyActivation(Activation activation, Accumulator value, Accumulato
                 "Complex reference arithmetic does not support activation.");
         return value;
     } else {
+        using Transcendental =
+            std::conditional_t<std::is_same_v<Accumulator, double>, double, float>;
         switch (activation) {
             case Activation::None:
                 return value;
@@ -90,25 +92,29 @@ Accumulator applyActivation(Activation activation, Accumulator value, Accumulato
             case Activation::Relu:
                 return std::max(Accumulator(0), value);
             case Activation::Gelu: {
-                constexpr float coefficient0 = 0.7978845608028654f;
-                constexpr float coefficient1 = 0.044715f;
-                const float x = static_cast<float>(value);
+                constexpr Transcendental coefficient0 =
+                    static_cast<Transcendental>(0.7978845608028654);
+                constexpr Transcendental coefficient1 = static_cast<Transcendental>(0.044715);
+                const Transcendental x = static_cast<Transcendental>(value);
                 return static_cast<Accumulator>(
-                    0.5f * x *
-                    (1.0f + std::tanh(coefficient0 * x * (1.0f + coefficient1 * x * x))));
+                    Transcendental(0.5) * x *
+                    (Transcendental(1) +
+                     std::tanh(coefficient0 * x * (Transcendental(1) + coefficient1 * x * x))));
             }
             case Activation::GeluDerivative: {
-                constexpr float coefficient0 = 0.0535161f;
-                constexpr float coefficient1 = 0.398942f;
-                constexpr float coefficient2 = 0.0356774f;
-                constexpr float coefficient3 = 0.797885f;
-                const float x = static_cast<float>(value);
-                const float cube = x * x * x;
-                const float first = coefficient0 * cube + coefficient1 * x;
-                const float second = coefficient2 * cube + coefficient3 * x;
-                const float derivative =
-                    0.5f * std::tanh(second) +
-                    first * (4.0f / std::pow(std::exp(-second) + std::exp(second), 2)) + 0.5f;
+                constexpr Transcendental coefficient0 = static_cast<Transcendental>(0.0535161);
+                constexpr Transcendental coefficient1 = static_cast<Transcendental>(0.398942);
+                constexpr Transcendental coefficient2 = static_cast<Transcendental>(0.0356774);
+                constexpr Transcendental coefficient3 = static_cast<Transcendental>(0.797885);
+                const Transcendental x = static_cast<Transcendental>(value);
+                const Transcendental cube = x * x * x;
+                const Transcendental first = coefficient0 * cube + coefficient1 * x;
+                const Transcendental second = coefficient2 * cube + coefficient3 * x;
+                const Transcendental derivative =
+                    Transcendental(0.5) * std::tanh(second) +
+                    first *
+                        (Transcendental(4) / std::pow(std::exp(-second) + std::exp(second), 2)) +
+                    Transcendental(0.5);
                 return static_cast<Accumulator>(derivative);
             }
             case Activation::GeluScaling:
@@ -119,20 +125,22 @@ Accumulator applyActivation(Activation activation, Accumulator value, Accumulato
             case Activation::ReluDerivative:
                 return value > Accumulator(0) ? Accumulator(1) : Accumulator(0);
             case Activation::Sigmoid: {
-                const float x = static_cast<float>(value);
-                return static_cast<Accumulator>(1.0f / (1.0f + std::exp(-x)));
+                const Transcendental x = static_cast<Transcendental>(value);
+                return static_cast<Accumulator>(Transcendental(1) /
+                                                (Transcendental(1) + std::exp(-x)));
             }
             case Activation::Tanh:
-                return static_cast<Accumulator>(std::tanh(static_cast<float>(value * parameter0)) *
-                                                static_cast<float>(parameter1));
+                return static_cast<Accumulator>(
+                    std::tanh(static_cast<Transcendental>(value * parameter0)) *
+                    static_cast<Transcendental>(parameter1));
             case Activation::Silu: {
-                const float x = static_cast<float>(value);
-                return static_cast<Accumulator>(x / (1.0f + std::exp(-x)));
+                const Transcendental x = static_cast<Transcendental>(value);
+                return static_cast<Accumulator>(x / (Transcendental(1) + std::exp(-x)));
             }
             case Activation::Swish: {
-                const float x = static_cast<float>(value);
-                const float beta = static_cast<float>(parameter0);
-                return static_cast<Accumulator>(x / (1.0f + std::exp(-beta * x)));
+                const Transcendental x = static_cast<Transcendental>(value);
+                const Transcendental beta = static_cast<Transcendental>(parameter0);
+                return static_cast<Accumulator>(x / (Transcendental(1) + std::exp(-beta * x)));
             }
             case Activation::Clamp:
                 return std::max(parameter0, std::min(value, parameter1));
@@ -182,7 +190,7 @@ template <typename Accumulator>
 class RuntimeMatrixReader {
    public:
     explicit RuntimeMatrixReader(const Tensor& view)
-        : m_storage(view.storage()),
+        : m_storage(view.rawEncodedBackingStorage()),
           m_offset(view.layout().offset()),
           m_rowStride(view.layout().strides()[0]),
           m_columnStride(view.layout().strides()[1]),
@@ -205,7 +213,7 @@ template <typename Accumulator>
 class RuntimeMatrixWriter {
    public:
     explicit RuntimeMatrixWriter(const Tensor& view)
-        : m_storage(view.storage()),
+        : m_storage(view.rawEncodedBackingStorage()),
           m_offset(view.layout().offset()),
           m_rowStride(view.layout().strides()[0]),
           m_columnStride(view.layout().strides()[1]),
@@ -293,7 +301,7 @@ template <typename Accumulator>
 class RuntimeVectorReader {
    public:
     explicit RuntimeVectorReader(const Tensor& view)
-        : m_storage(view.storage()),
+        : m_storage(view.rawEncodedBackingStorage()),
           m_offset(view.layout().offset()),
           m_stride(view.layout().strides()[0]),
           m_load(runtimeLoadFunction<Accumulator>(view.type())) {}
@@ -313,7 +321,7 @@ template <typename Accumulator>
 class RuntimeTensorReader {
    public:
     explicit RuntimeTensorReader(const Tensor& view)
-        : m_storage(view.storage()),
+        : m_storage(view.rawEncodedBackingStorage()),
           m_layout(view.layout()),
           m_load(runtimeLoadFunction<Accumulator>(view.type())) {}
 
@@ -331,7 +339,7 @@ template <typename Accumulator>
 class RuntimeTensorWriter {
    public:
     explicit RuntimeTensorWriter(const Tensor& view)
-        : m_storage(view.storage()),
+        : m_storage(view.rawEncodedBackingStorage()),
           m_layout(view.layout()),
           m_store(runtimeStoreFunction<Accumulator>(view.type())) {}
 

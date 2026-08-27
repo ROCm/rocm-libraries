@@ -271,7 +271,7 @@ namespace rocRoller::HostNumerics
             roc::host_validation::generate(
                 source, generationRecipe(descriptor, initialization, type, minimum, maximum, seed));
 
-            auto const sourceStorage = source.storage();
+            auto const sourceStorage = source.rawEncodedBackingStorage();
             if(sourceStorage.size() % sizeof(float) != 0)
                 throw std::logic_error("Float32 generation storage is not float-aligned.");
 
@@ -289,7 +289,7 @@ namespace rocRoller::HostNumerics
                 storage[index] = static_cast<std::byte>(encoded);
             }
 
-            return Tensor::fromStorage(type, layout, std::move(storage));
+            return Tensor::takeOwnershipOfEncodedBackingStorage(type, layout, std::move(storage));
         }
 
         GeneratedTensor generateUnscaled(TensorDescriptor const&   descriptor,
@@ -306,7 +306,7 @@ namespace rocRoller::HostNumerics
                     = generateUnscaledF8(descriptor, initialization, type, minimum, maximum, seed);
                 std::optional<Tensor> reference;
                 if(includeReference)
-                    reference = data.to(ScalarType::Float32);
+                    reference = data.copyConvertedTo(ScalarType::Float32);
                 return {std::move(data), std::nullopt, std::move(reference)};
             }
 
@@ -315,7 +315,7 @@ namespace rocRoller::HostNumerics
                 data, generationRecipe(descriptor, initialization, type, minimum, maximum, seed));
             std::optional<Tensor> reference;
             if(includeReference)
-                reference = data.to(ScalarType::Float32);
+                reference = data.copyConvertedTo(ScalarType::Float32);
             return {std::move(data), std::nullopt, std::move(reference)};
         }
 
@@ -365,22 +365,22 @@ namespace rocRoller::HostNumerics
             problem.seed      = seed;
 
             auto   result      = roc::host_validation::generateMx(problem);
-            auto   dataStorage = std::vector<std::byte>(result.data.storage().begin(),
-                                                      result.data.storage().end());
-            Tensor data        = Tensor::fromStorage(
+            auto   dataStorage = std::vector<std::byte>(result.data.rawEncodedBackingStorage().begin(),
+                                                      result.data.rawEncodedBackingStorage().end());
+            Tensor data        = Tensor::takeOwnershipOfEncodedBackingStorage(
                 result.data.type(), hostTensorLayout(descriptor), std::move(dataStorage));
 
             auto const scaleLayout  = hostScaleLayout(descriptor, blockedDimension, scaleBlockSize);
-            auto       scaleStorage = std::vector<std::byte>(result.scales.storage().begin(),
-                                                       result.scales.storage().end());
+            auto       scaleStorage = std::vector<std::byte>(result.scales.rawEncodedBackingStorage().begin(),
+                                                       result.scales.rawEncodedBackingStorage().end());
             Tensor     scales
-                = Tensor::fromStorage(result.scales.type(), scaleLayout, std::move(scaleStorage));
+                = Tensor::takeOwnershipOfEncodedBackingStorage(result.scales.type(), scaleLayout, std::move(scaleStorage));
             std::optional<Tensor> reference;
             if(includeReference)
             {
-                auto referenceStorage = std::vector<std::byte>(result.reference.storage().begin(),
-                                                               result.reference.storage().end());
-                reference             = Tensor::fromStorage(result.reference.type(),
+                auto referenceStorage = std::vector<std::byte>(result.reference.rawEncodedBackingStorage().begin(),
+                                                               result.reference.rawEncodedBackingStorage().end());
+                reference             = Tensor::takeOwnershipOfEncodedBackingStorage(result.reference.type(),
                                                 hostTensorLayout(descriptor),
                                                 std::move(referenceStorage));
             }

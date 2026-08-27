@@ -164,6 +164,4 @@ struct MxGenerationResult {
 };
 
 MxGenerationResult generateMx(const MxGenerationProblem& problem);
-MxGenerationResult generateMx(const MxGenerationProblem& problem,
-                              const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation

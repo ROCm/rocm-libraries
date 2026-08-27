@@ -310,19 +310,19 @@ TEST(ReferenceGemmSelection, UsesPointwiseForSparseFloatValidation)
     for(const size_t index : selected)
         observedSelected.push_back(d[index]);
     const auto selectedLayout
-        = roc::host_validation::Layout::contiguous(roc::host_validation::Shape{selected.size()});
+        = roc::host_validation::Layout::contiguousLastDimensionFastest(roc::host_validation::Shape{selected.size()});
     const auto matching = roc::host_validation::compare(
-        roc::host_validation::Tensor::fromNative<float>(selectedLayout,
+        roc::host_validation::Tensor::copyNativeStorage<float>(selectedLayout,
                                                         std::span<const float>(observedSelected)),
-        roc::host_validation::Tensor::fromNative<float>(selectedLayout,
+        roc::host_validation::Tensor::copyNativeStorage<float>(selectedLayout,
                                                         std::span<const float>(expectedSelected)));
     ASSERT_TRUE(matching.passed());
 
     observedSelected[selected.size() / 2] += 1.0f;
     const auto injectedFailure = roc::host_validation::compare(
-        roc::host_validation::Tensor::fromNative<float>(selectedLayout,
+        roc::host_validation::Tensor::copyNativeStorage<float>(selectedLayout,
                                                         std::span<const float>(observedSelected)),
-        roc::host_validation::Tensor::fromNative<float>(selectedLayout,
+        roc::host_validation::Tensor::copyNativeStorage<float>(selectedLayout,
                                                         std::span<const float>(expectedSelected)));
     EXPECT_FALSE(injectedFailure.passed());
     EXPECT_EQ(injectedFailure.mismatches, 1);
@@ -1363,9 +1363,10 @@ TEST(ReferencePackedStorage, Float6MatchesComponentCodec)
     packed.data.v3 = 0x1f;
     packed.data.v4 = 0x3f;
 
-    const roc::host_validation::Tensor component(
+    const roc::host_validation::Tensor component =
+        roc::host_validation::Tensor::copyEncodedBackingStorage(
         roc::host_validation::ScalarType::Float6E2M3,
-        roc::host_validation::Layout::contiguous(roc::host_validation::Shape{32}),
+        roc::host_validation::Layout::contiguousLastDimensionFastest(roc::host_validation::Shape{32}),
         std::as_bytes(std::span<const Float6x32>(&packed, 1)));
     for(size_t index = 0; index < 32; ++index)
         EXPECT_EQ(component.loadAs<float>({index}), packed.getElement(index)) << "index=" << index;
@@ -1396,9 +1397,10 @@ TEST(ReferencePackedStorage, BFloat6MatchesComponentCodec)
     packed.data.v3 = 0x1f;
     packed.data.v4 = 0x3f;
 
-    const roc::host_validation::Tensor component(
+    const roc::host_validation::Tensor component =
+        roc::host_validation::Tensor::copyEncodedBackingStorage(
         roc::host_validation::ScalarType::Float6E3M2,
-        roc::host_validation::Layout::contiguous(roc::host_validation::Shape{32}),
+        roc::host_validation::Layout::contiguousLastDimensionFastest(roc::host_validation::Shape{32}),
         std::as_bytes(std::span<const BFloat6x32>(&packed, 1)));
     for(size_t index = 0; index < 32; ++index)
         EXPECT_EQ(component.loadAs<float>({index}), packed.getElement(index)) << "index=" << index;

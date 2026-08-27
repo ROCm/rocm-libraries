@@ -129,9 +129,8 @@ namespace hipblaslt::host_validation
             const size_t     storageBytes = storageBytesForLayout(scalar, layout);
             if(data == nullptr && storageBytes != 0)
                 throw std::invalid_argument("hipBLASLt comparison buffer is null.");
-            return ::roc::host_validation::Tensor(
-                scalar,
-                layout,
+            return ::roc::host_validation::Tensor::copyEncodedBackingStorage(
+                scalar, layout,
                 std::span<const std::byte>(static_cast<const std::byte*>(data), storageBytes));
         }
 
@@ -267,7 +266,7 @@ namespace hipblaslt::host_validation
                     {1, static_cast<ptrdiff_t>(request.leadingDimension)},
                     batchOffset);
                 const ComparisonResult batchReport = compare(
-                    observed.alias(batchLayout), expected.alias(batchLayout), frobeniusOptions);
+                    observed.shareStorageWithLayout(batchLayout), expected.shareStorageWithLayout(batchLayout), frobeniusOptions);
                 report.relativeFrobeniusError += batchReport.relativeFrobeniusError;
             }
         }

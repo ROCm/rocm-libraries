@@ -1002,6 +1002,10 @@ class TensorAndGemmTests(unittest.TestCase):
             ),
             1.0,
         )
+        self.assertEqual(
+            hv.encoded_ulp_distance(1.0, 2.0, hv.ScalarType.E5M3),
+            8.0,
+        )
 
         candidates = [1e-6, 1e-5, 1e-4, 1e-3]
         tolerance = hv.find_allclose_tolerance(
@@ -2785,6 +2789,19 @@ class TensorAndGemmTests(unittest.TestCase):
                     atol=2e-5,
                 )
 
+    def test_float64_activation_retains_float64_precision(self):
+        values = np.asarray([[1.0000000001]], dtype=np.float64)
+        result = hv.reference_epilogue(
+            hv.from_numpy(values),
+            hv.ScalarType.Float64,
+            hv.ScalarType.Float64,
+            activation=hv.Activation.Sigmoid,
+        )
+        expected = 1.0 / (1.0 + np.exp(-values))
+        np.testing.assert_allclose(
+            hv.to_numpy(result.output), expected, rtol=0.0, atol=1e-15
+        )
+
     def test_reference_sum_matches_numpy(self):
         values = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
         observed = hv.reference_sum(
@@ -2819,6 +2836,18 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(
             hv.to_numpy(integer_observed),
             np.sum(integer_values, axis=1, dtype=np.int32),
+        )
+
+        wrapping_values = np.asarray([np.iinfo(np.int32).max, 1], dtype=np.int32)
+        wrapping_observed = hv.reference_sum(
+            hv.from_numpy(wrapping_values),
+            hv.ScalarType.Int32,
+            hv.ScalarType.Int32,
+            [0],
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(wrapping_observed),
+            np.sum(wrapping_values, dtype=np.int32),
         )
 
     def test_reference_maximum_absolute_matches_numpy(self):

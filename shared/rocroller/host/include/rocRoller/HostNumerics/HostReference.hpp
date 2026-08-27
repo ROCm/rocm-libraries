@@ -128,7 +128,7 @@ namespace rocRoller::HostNumerics
         if(values.size() != rows * columns)
             throw std::invalid_argument(
                 "rocRoller output storage does not match the matrix dimensions.");
-        return roc::host_validation::Tensor(
+        return roc::host_validation::Tensor::copyEncodedBackingStorage(
             HostReferenceDetail::outputScalarType<T>(),
             roc::host_validation::Layout(roc::host_validation::Shape{rows, columns},
                                          {1, static_cast<ptrdiff_t>(rows)}),

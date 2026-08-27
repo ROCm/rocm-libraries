@@ -58,7 +58,7 @@ void appendTensorValues(nb::list& result, Tensor tensor) {
     using LoadFunction = Value (*)(std::span<const std::byte>, ptrdiff_t);
     const LoadFunction load = visitScalarType(
         tensor.type(), []<typename Tag>() -> LoadFunction { return &loadTensorValue<Value, Tag>; });
-    const auto storage = tensor.storage();
+    const auto storage = tensor.rawEncodedBackingStorage();
     const auto& layout = tensor.layout();
     forEachIndex(tensor.shape(), [&](std::span<const size_t> indices) {
         result.append(load(storage, layout.elementOffset(indices)));
@@ -230,8 +230,9 @@ Tensor tensorFromNumpy(nb::object array, std::optional<ScalarType> requestedType
 
     Shape shape(std::move(tensorDimensions));
     if (empty) {
-        return Tensor(type, Layout(std::move(shape), std::move(tensorStrides)),
-                      std::span<const std::byte>(reinterpret_cast<const std::byte*>(view.buf), 0));
+        return Tensor::copyEncodedBackingStorage(
+            type, Layout(std::move(shape), std::move(tensorStrides)),
+            std::span<const std::byte>(reinterpret_cast<const std::byte*>(view.buf), 0));
     }
     if (!view.buf) throw std::invalid_argument("Nonempty NumPy Tensor has a null data pointer.");
 
@@ -266,9 +267,10 @@ Tensor tensorFromNumpy(nb::object array, std::optional<ScalarType> requestedType
     if (storageBytes > std::numeric_limits<uintptr_t>::max() - storageAddress)
         throw std::overflow_error("NumPy Tensor storage address overflow.");
 
-    return Tensor(type, Layout(std::move(shape), std::move(tensorStrides), normalizedOffset),
-                  std::span<const std::byte>(reinterpret_cast<const std::byte*>(storageAddress),
-                                             storageBytes));
+    return Tensor::copyEncodedBackingStorage(
+        type, Layout(std::move(shape), std::move(tensorStrides), normalizedOffset),
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(storageAddress),
+                                   storageBytes));
 }
 
 Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::bytes rawStorage,
@@ -276,13 +278,14 @@ Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::by
     std::vector<std::byte> storage(rawStorage.size());
     std::memcpy(storage.data(), rawStorage.c_str(), rawStorage.size());
     Shape shape(std::move(dimensions));
-    Layout layout = Layout::contiguous(shape);
+    Layout layout = Layout::contiguousLastDimensionFastest(shape);
     if (tensorStrides || offset != 0) {
         std::vector<ptrdiff_t> selectedStrides =
             tensorStrides ? std::move(*tensorStrides) : strides(layout);
         layout = Layout(std::move(shape), std::move(selectedStrides), offset);
     }
-    return Tensor::fromStorage(type, std::move(layout), std::move(storage));
+    return Tensor::takeOwnershipOfEncodedBackingStorage(type, std::move(layout),
+                                                        std::move(storage));
 }
 
 }  // namespace
@@ -413,7 +416,7 @@ NB_MODULE(_roc_host_validation, module) {
     nb::class_<Layout>(module, "Layout")
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
              "offset"_a = 0)
-        .def_static("contiguous", &Layout::contiguous)
+        .def_static("contiguous_last_dimension_fastest", &Layout::contiguousLastDimensionFastest)
         .def_prop_ro("shape", &Layout::shape, nb::rv_policy::reference_internal)
         .def_prop_ro("strides", &strides)
         .def_prop_ro("offset", &Layout::offset);
@@ -426,26 +429,27 @@ NB_MODULE(_roc_host_validation, module) {
         .def_static(
             "from_values",
             [](ScalarType type, std::vector<size_t> shape, const std::vector<double>& values) {
-                return Tensor::fromValues(type, Shape(std::move(shape)),
-                                          std::span<const double>(values));
+                return Tensor::copyValuesWithConversion(type, Shape(std::move(shape)),
+                                                        std::span<const double>(values));
             })
         .def_static(
             "from_signed_values",
             [](ScalarType type, std::vector<size_t> shape, const std::vector<int64_t>& values) {
-                return Tensor::fromValues(type, Shape(std::move(shape)),
-                                          std::span<const int64_t>(values));
+                return Tensor::copyValuesWithConversion(type, Shape(std::move(shape)),
+                                                        std::span<const int64_t>(values));
             })
         .def_static(
             "from_unsigned_values",
             [](ScalarType type, std::vector<size_t> shape, const std::vector<uint64_t>& values) {
-                return Tensor::fromValues(type, Shape(std::move(shape)),
-                                          std::span<const uint64_t>(values));
+                return Tensor::copyValuesWithConversion(type, Shape(std::move(shape)),
+                                                        std::span<const uint64_t>(values));
             })
         .def_static("from_complex_values",
                     [](ScalarType type, std::vector<size_t> shape,
                        const std::vector<std::complex<double>>& values) {
-                        return Tensor::fromValues(type, Shape(std::move(shape)),
-                                                  std::span<const std::complex<double>>(values));
+                        return Tensor::copyValuesWithConversion(
+                            type, Shape(std::move(shape)),
+                            std::span<const std::complex<double>>(values));
                     })
         .def_static("from_storage", &tensorFromStorage, "type"_a, "shape"_a, "storage"_a,
                     "strides"_a = std::optional<std::vector<ptrdiff_t>>{}, "offset"_a = 0)
@@ -453,16 +457,17 @@ NB_MODULE(_roc_host_validation, module) {
         .def_prop_ro("shape", [](const Tensor& tensor) { return dimensions(tensor.shape()); })
         .def_prop_ro("strides", [](const Tensor& tensor) { return strides(tensor.layout()); })
         .def_prop_ro("offset", [](const Tensor& tensor) { return tensor.layout().offset(); })
-        .def_prop_ro("size", &Tensor::size)
+        .def_prop_ro("size", &Tensor::elementCount)
         .def_prop_ro("storage",
                      [](const Tensor& tensor) {
-                         const auto storage = tensor.storage();
+                         const auto storage = tensor.rawEncodedBackingStorage();
                          return nb::bytes(reinterpret_cast<const char*>(storage.data()),
                                           storage.size());
                      })
         .def_prop_ro("values", [](const Tensor& tensor) { return tensorValues(tensor); })
-        .def("clone", [](const Tensor& tensor) { return tensor.clone(); })
-        .def("to", static_cast<Tensor (Tensor::*)(ScalarType) const>(&Tensor::to), "type"_a);
+        .def("clone", [](const Tensor& tensor) { return tensor.deepCopy(); })
+        .def("to", static_cast<Tensor (Tensor::*)(ScalarType) const>(&Tensor::copyConvertedTo),
+             "type"_a);
 
     python_bindings::registerGemmBindings(module);
 

@@ -48,8 +48,10 @@ int main(int argc, char** argv) {
     }
 
     const Layout layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(leadingDimension)});
-    const Tensor expectedView = Tensor::fromNative<float>(layout, std::span<const float>(expected));
-    const Tensor observedView = Tensor::fromNative<float>(layout, std::span<const float>(observed));
+    const Tensor expectedView =
+        Tensor::copyNativeStorage<float>(layout, std::span<const float>(expected));
+    const Tensor observedView =
+        Tensor::copyNativeStorage<float>(layout, std::span<const float>(observed));
     ComparisonOptions options = defaultComparisonOptions(ScalarType::Float32);
     options.computePointwiseStatistics = false;
     options.computeFrobenius = false;

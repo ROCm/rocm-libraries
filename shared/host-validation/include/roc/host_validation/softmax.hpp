@@ -53,6 +53,4 @@ struct SoftmaxResult {
 
 SoftmaxRunInfo referenceSoftmax(const SoftmaxRequest& request);
 SoftmaxResult referenceSoftmax(const SoftmaxProblem& problem);
-SoftmaxResult referenceSoftmax(const SoftmaxProblem& problem,
-                               const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation

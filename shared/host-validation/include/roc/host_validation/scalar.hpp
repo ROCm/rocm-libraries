@@ -426,7 +426,7 @@ class Scalar {
         return m_type;
     }
 
-    std::span<const std::byte> storage() const {
+    std::span<const std::byte> rawEncodedBackingStorage() const {
         return std::span<const std::byte>(m_storage).first(storageSize());
     }
 
@@ -441,9 +441,10 @@ class Scalar {
     }
 
     friend bool operator==(const Scalar& left, const Scalar& right) {
-        return left.m_type == right.m_type &&
-               std::equal(left.storage().begin(), left.storage().end(), right.storage().begin(),
-                          right.storage().end());
+        return left.m_type == right.m_type && std::equal(left.rawEncodedBackingStorage().begin(),
+                                                         left.rawEncodedBackingStorage().end(),
+                                                         right.rawEncodedBackingStorage().begin(),
+                                                         right.rawEncodedBackingStorage().end());
     }
 
    private:
