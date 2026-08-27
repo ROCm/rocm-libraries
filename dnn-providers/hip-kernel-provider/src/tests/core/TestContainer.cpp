@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <array>
 
 #include <gtest/gtest.h>
@@ -14,21 +15,40 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+#endif
+
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::core;
 
-constexpr uint32_t EXPECTED_ENGINES = 0
-
+/// Engines the provider exposes: one per compiled-in native engine, plus one per
+/// discovered descriptor set, read from the inventory rather than hardcoded so a
+/// newly shipped pack is never silently uncounted.
+static uint32_t expectedEngines()
+{
+    uint32_t expected = 0;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-                                      + 1
+    ++expected;
 #endif
-
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
-                                      + 1
+    ++expected;
 #endif
+#ifdef HIPDNN_ENGINE_HIP_FLASH2
+    ++expected;
+#endif
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    expected += static_cast<uint32_t>(
+        hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets().size());
+#endif
+    return expected;
+}
 
-    // Add more blocks like this as more engines are implemented
-    ;
+/// Upper bound for the fixed-size buffers below; only needs to be at least
+/// expectedEngines().
+constexpr uint32_t MAX_EXPECTED_ENGINES = 8;
 
 TEST(TestContainer, ConstructsSuccessfully)
 {
@@ -40,8 +60,8 @@ TEST(TestContainer, CopyEngineIdsReturnsExpectedEngineCount)
     uint32_t numEngines = 0;
     auto totalEngines = Container::copyEngineIds(nullptr, 0, numEngines);
 
-    EXPECT_EQ(totalEngines, EXPECTED_ENGINES);
-    EXPECT_EQ(numEngines, EXPECTED_ENGINES);
+    EXPECT_EQ(totalEngines, expectedEngines());
+    EXPECT_EQ(numEngines, expectedEngines());
 }
 
 TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
@@ -49,12 +69,13 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
 #ifndef HIPDNN_ENGINE_HIP_MLOPS
     GTEST_SKIP();
 #else
-    std::array<int64_t, EXPECTED_ENGINES> engineIds = {};
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
-    auto totalEngines = Container::copyEngineIds(engineIds.data(), EXPECTED_ENGINES, numEngines);
+    auto totalEngines
+        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
-    EXPECT_EQ(totalEngines, EXPECTED_ENGINES);
-    EXPECT_EQ(numEngines, EXPECTED_ENGINES);
+    EXPECT_EQ(totalEngines, expectedEngines());
+    EXPECT_EQ(numEngines, expectedEngines());
 
     bool containsHipMlopsEngine = false;
     for(const int64_t engine : engineIds)
@@ -64,6 +85,46 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
     EXPECT_EQ(containsHipMlopsEngine, true);
 #endif
 }
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    // Named rather than just counted: neither a count nor an emptiness check can tell
+    // a missing engine (e.g. a pack table dropped from a static-archive link) from a
+    // renamed one.
+    //
+    // Containment, not equality: the catalog is descriptor-driven, so a build that stages
+    // additional descriptor sets into the descriptor tree — an integration fixture, say —
+    // legitimately discovers more than the two shipped sets. Requiring an exact set would
+    // make every such build fail here, which tests the staging rather than the engines.
+    const auto& sets = discoverDescriptorSets();
+
+    std::vector<std::string> names;
+    names.reserve(sets.size());
+    for(const auto& set : sets)
+    {
+        names.push_back(set.engine.name);
+    }
+    std::sort(names.begin(), names.end());
+    for(const auto* expected : {"hipkernel:ConvFwd", "hipkernel:Pointwise"})
+    {
+        EXPECT_NE(std::find(names.begin(), names.end(), expected), names.end())
+            << "shipped descriptor set '" << expected << "' was not discovered";
+    }
+
+    Container container;
+    const auto allEngineIds = container.getEngineManager().getAllEngineIds();
+
+    for(const auto& set : sets)
+    {
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+        EXPECT_NE(std::find(allEngineIds.begin(), allEngineIds.end(), engineId), allEngineIds.end())
+            << "no engine for descriptor set '" << set.engine.name << "'";
+    }
+}
+#endif
 
 TEST(TestContainer, GetEngineManagerReturnsValidReference)
 {
@@ -114,6 +175,32 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
 #endif
 }
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+TEST(TestContainer, GetApplicableEngineIdsPointwiseAddGraph)
+{
+    // Applicability is device-resolved: with no device, matchers decline.
+    SKIP_IF_NO_DEVICES();
+
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+    using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
+
+    Handle handle;
+    Container container;
+    auto& engineManager = container.getEngineManager();
+
+    const auto graph = buildPointwiseGraph();
+    const auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graph.GetBufferPointer(), graph.GetSize());
+
+    auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
+
+    EXPECT_NE(std::find(applicableEngines.begin(),
+                        applicableEngines.end(),
+                        hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)),
+              applicableEngines.end());
+}
+#endif
+
 TEST(TestContainer, GetAllEngineIds)
 {
     Container container;
@@ -121,5 +208,5 @@ TEST(TestContainer, GetAllEngineIds)
 
     auto allEngines = engineManager.getAllEngineIds();
 
-    ASSERT_EQ(allEngines.size(), EXPECTED_ENGINES);
+    ASSERT_EQ(allEngines.size(), expectedEngines());
 }

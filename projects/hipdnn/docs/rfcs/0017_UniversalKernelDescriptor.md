@@ -1112,10 +1112,17 @@ source; a multi-launch UKD supplies one per Launch. The initial variants:
   //           a prebuilt code-object file (runtime drop-in)
   // hip:    {"source": "sdpa_fwd.hip", "entry": "sdpa_fwd_kernel"}
   //           a HIP source file, compiled ahead of time and packaged (build-time; covers hipRTC too)
-  // rocke:  {"source": "kernels/gfx950/attention_dense.py", "entry": "build_attention_dense",
-  //          "build": {"head_size": 128, ...}}
-  //           a rocKE builder plus the build values for this one instance; the adapter runs the
-  //           rocKE AOT build and packs the resulting code object (build-time, Section 9.1)
+  // rocke:  {"source": "kernels/gfx942/attention_tiled_2d.py",
+  //          "builder": "build_unified_attention_2d_tiled",
+  //          "spec": {"head_size": 64, "block_size": 16, ...}}
+  //           a rocKE builder plus the spec values for this one instance; the adapter runs the
+  //           rocKE AOT build and packs the resulting code object (build-time, Section 9.1).
+  //           The field names differ from the hip kind deliberately: `builder` is a FUNCTION
+  //           name, not a symbol (the launch symbol is captured from the compiled artifact and
+  //           must not be authored), and `source` is a dotted MODULE path resolved through the
+  //           importable `kernels` package -- NOT a file under the source root. `spec` rather
+  //           than `build` because the values are constructed into the builder's own spec
+  //           dataclass, whose fields and validation belong to the builder.
 }
 ```
 

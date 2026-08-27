@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "7a19c6e0-2d84-4b3f-91c7-05e6b8fa2d31",
+  "name": "packed: graph operation is add",
+  "scope": "graph",
+  "match_symbol": "hipkernel.pointwise.add_match"
+}
