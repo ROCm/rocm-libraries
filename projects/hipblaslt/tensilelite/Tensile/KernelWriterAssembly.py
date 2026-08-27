@@ -15296,7 +15296,8 @@ class KernelWriterAssembly(KernelWriter):
         with self.allocTmpSgpr(1, tag="globalWriteElements_tmpSgprGSU") as tmpSgprGSU:
           module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
-        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
+        # SRVW epilogue can also exceed simm16, so use longBranch like MBSK.
+        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1 or kernel["StoreRemapVectorWidth"]):
           module.add(self.longBranchScc1(label=gsuLabel, posNeg=1, comment="long branch if GSU == 1"))
         else:
           module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
@@ -16136,6 +16137,7 @@ class KernelWriterAssembly(KernelWriter):
     # print("NumVgprAvailable", numVgprAvailable)
     if ss.numVgprsPerElement:
       numElementsPerBatch = numVgprAvailable // ss.numVgprsPerElement
+      ss.cfg.VgprAllowedNEPB = numElementsPerBatch
     else:
       # numVgprsPerElement==0: accvgprs are pre-staged (e.g. UseSubtileImpl) so no pool
       # vgprs are needed per element.  Default to the full element list; use
@@ -16221,6 +16223,44 @@ class KernelWriterAssembly(KernelWriter):
     #  numVectorsPerBatch = numElementsPerBatch / kernel["GlobalWriteVectorWidth"]
     #  #print "  NumVectorsPerBatch", numVectorsPerBatch
     #  numElementsPerBatch = numVectorsPerBatch * kernel["GlobalWriteVectorWidth"]
+
+    # Shrink NEPB to an N-group divisor so CLS can compact. Skip if NEPBS is set.
+    # Not used for atomic / StoreRemap / subtile.
+    if kernel["CompactLoopStore"] and not kernel["NumElementsPerBatchStore"] and kernel["EnableMatrixInstruction"] \
+        and not atomic and not kernel["StoreRemapVectorWidth"] and not kernel.get("UseSubtileImpl") \
+        and ss.numVgprsPerElement > 0:
+      maxNIter = GlobalWriteBatchWriter.clsMaxNIter(kernel)
+      nElem = len(element)
+      if maxNIter > 1 and nElem % maxNIter == 0:
+        # TODO: `if _naturalIter` is always true; use `<= 1` to skip already-looping kernels.
+        naturalNumBatches = max(1, ceilDivide(nElem, numElementsPerBatch))
+        _, _naturalIter, _ = GlobalWriteBatchWriter.computeCLSLayout(kernel, naturalNumBatches, numElementsPerBatch, gwvw)
+        # if _naturalIter <= 1:
+        if _naturalIter:
+          elemsPerNGroup = nElem // maxNIter
+          # Shrink only; VGPR/SGPR/even already in numElementsPerBatch.
+          budget = min(elemsPerNGroup, max(1, numElementsPerBatch))
+          # Largest N-group divisor that fits the budget.
+          # half/bf16 pack two elements per 32b register (setupStoreElementsForBatch
+          # pairs data vgpr as (ei, ei+1)), so an odd batch mis-pairs the last element.
+          # Skip odd cand unless gwvw already makes the ValuC count even.
+          # Mirrors GlobalWriteBatchWriter.alignNEPBForCLS.
+          # needsEven is commented out (experiment); alignNEPBForCLS still checks it.
+          # cdt = kernel["ProblemType"]["ComputeDataType"]
+          # needsEven = (cdt.isHalf() or cdt.isBFloat16()) and ((gwvw % 2) == 1)
+          # largest divisor of one N-group that fits the budget (== elemsPerNGroup
+          # itself when it fits -> fattest batch, most compaction); min 1.
+          for cand in range(budget, 0, -1):
+            if elemsPerNGroup % cand == 0:
+              numElementsPerBatch = cand
+              break
+            # if elemsPerNGroup % cand != 0:
+            #   continue
+            # if needsEven and cand > 1 and (cand % 2) != 0:
+            #   continue
+            # numElementsPerBatch = cand
+            # break
+
     numBatches = max(1, ceilDivide(len(element),numElementsPerBatch))
 
     # Grow pool if needed
@@ -16271,14 +16311,8 @@ class KernelWriterAssembly(KernelWriter):
     factorDim = factorDims[fdIdx]
     edgeModule.add(writeLabel)
 
-    # CompactLoopStore: allocate two dedicated, named sgprs for the CLS loop so
-    # it no longer hijacks WorkGroup2 / ArgType (which are still live in some
-    # store paths -- e.g. batched-GEMM batch offsets read WorkGroup2, and
-    # ArgType is read during store-arg load). Checked out once here so the same
-    # registers persist across all batches (and activation branches) of this
-    # store, and freed at the end of the function.
-    #   CLSm0Base      : M0 base accumulator (src VGPR index offset)
-    #   CLSLoopCounter : CLS loop iteration countdown
+    # Dedicated CLS SGPRs (do not reuse WorkGroup2 / ArgType; they are still live).
+    # CLSm0Base = M0 src offset; CLSLoopCounter = countdown.
     if kernel["CompactLoopStore"]:
       edgeModule.add(self.defineSgpr("CLSm0Base", 1))
       edgeModule.add(self.defineSgpr("CLSLoopCounter", 1))
@@ -16388,11 +16422,7 @@ class KernelWriterAssembly(KernelWriter):
 
         self.alphaBeforeLoadC = False
         if kernel["MIArchVgpr"] and applyAlpha and not kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
-          # CompactLoopStore: emit alpha via Pattern 1 -- keep codeAccVgprRead so the
-          # "copy MI out reg" stays a standalone per-element move, and force
-          # codeMulAlpha=None to suppress the fused Pattern 3 (v_mul_f32 copy+alpha).
-          # The CLS loop later steps that standalone copy across MI slices via M0,
-          # which the fused form cannot do. Non-CLS keeps Pattern 3 verbatim.
+          # CLS: keep standalone accVgprRead (M0 can step it). Drop fused mul-alpha.
           if kernel["CompactLoopStore"]:
             codeMulAlpha = None
           else:
@@ -16412,36 +16442,29 @@ class KernelWriterAssembly(KernelWriter):
         # We need a variable to read from correct VGPR index when numBatches > 1.
         ss.lsuStartVgprOffset = 0
 
-        # CompactLoopStore: only emit ONE CLS body's worth of batches
-        # (= batchesPerCLSBody, computed from SourceSwap / outerTT1 layout in
-        # GlobalWriteBatchWriter.computeBatchesPerCLSBody). The CLS loop tail
-        # emitted by GlobalWriteBatch.emit() at batchIdx == batchesPerCLSBody-1
-        # branches the loop back at runtime to re-execute the body CLS-iter-count
-        # times via M0 indirection. Emitting additional batches beyond the CLS body
-        # is unnecessary and would only duplicate store code that is intended to be
-        # re-executed via the runtime loop.
-        # For non-CLS, numBatchesCLS == numBatches so behaviour is unchanged.
+        # Emit one CLS body; the runtime loop re-runs it. Non-CLS: all batches.
         if kernel["CompactLoopStore"]:
-          numBatchesCLS = GlobalWriteBatchWriter.computeBatchesPerCLSBody(kernel, numBatches)
+          # Same divisibility as iterCount, or trailing batches are never stored.
+          numBatchesCLS = GlobalWriteBatchWriter.computeBatchesPerCLSBody(kernel, numBatches, numElementsPerBatch, gwvw)
         else:
           numBatchesCLS = numBatches
 
-        # CompactLoopStore: pre-compute per-batch "next_rowInc" (rowInc from
-        # this batch's last elt to the NEXT batch's first elt). Passed as
-        # `inter_iter_rowInc` to globalWriteBatch so the per-elt look-ahead
-        # scan in GlobalWriteBatchWriter falls through to this value when no
-        # further intra-batch emit is found (= last emitting elt of the batch
-        # needs the cross-batch advance). 0 for non-CLS / last batch / atomic.
+        # Per-batch look-ahead: boundary delta vs first real row jump (primer).
         next_rowInc_per_batch = [0] * numBatches
+        next_firing_per_batch = [0] * numBatches
         if kernel["CompactLoopStore"] and not atomic:
-          # Use the single authoritative coordOffset1 formula in
-          # getStoreElementsInfoForBatch (returns coord1 per element for the
-          # whole list) instead of a duplicated helper.
+          # Coord1 from getStoreElementsInfoForBatch (one formula for all elts).
           _, _coord1All = ss.getStoreElementsInfoForBatch(kernel, element)
           for _bIdx in range(numBatches):
             _elStopIdx = min((_bIdx + 1) * numElementsPerBatch, len(element))
             if _elStopIdx < len(element):
               next_rowInc_per_batch[_bIdx] = _coord1All[_elStopIdx] - _coord1All[_elStopIdx - 1]
+              # First non-zero delta after the boundary = primer row jump.
+              for _j in range(_elStopIdx, len(element)):
+                _d = _coord1All[_j] - _coord1All[_j - 1]
+                if _d != 0:
+                  next_firing_per_batch[_bIdx] = _d
+                  break
 
         for batchIdx in range(0, numBatchesCLS):
           elementStartIdx = batchIdx * numElementsPerBatch
@@ -16455,17 +16478,8 @@ class KernelWriterAssembly(KernelWriter):
             #Indication if this batch is last batch for this column block shape
             self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
 
-          # Look ahead through next_rowInc_per_batch for the first non-zero
-          # transition: SRVW path skips batches whose `addrCalc.rowInc == 0`,
-          # so the chain primer at the current batch primes for the NEXT
-          # firing consumer (= first batch with a real row transition).
-          # Cumulative skip is implicit since skipped transitions are 0 and
-          # contribute nothing to the sum.
-          _next_firing_rowInc = 0
-          for _k in range(batchIdx, numBatches):
-            if next_rowInc_per_batch[_k] != 0:
-              _next_firing_rowInc = next_rowInc_per_batch[_k]
-              break
+          # Primer uses the next real row jump; boundary delta may be 0 (mid-row).
+          _next_firing_rowInc = next_firing_per_batch[batchIdx]
           _direct_next_rowInc = next_rowInc_per_batch[batchIdx] if batchIdx < numBatches else 0
           actLoopModule.add(self.globalWriteBatch(kernel, tPA, tPB, activation, ss, batchIdx, \
               applyAlpha, beta, edge, atomic, gwvw, atomicW, \
@@ -16475,6 +16489,11 @@ class KernelWriterAssembly(KernelWriter):
               activationTypeStr, elementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, numBatches, \
               _next_firing_rowInc, _direct_next_rowInc))
           biasLocalBarrierInit = True
+
+        # SRVW+CLS: check in the offset vgpr after the last store batch.
+        if kernel["StoreRemapVectorWidth"] and kernel["CompactLoopStore"] and getattr(self, "compactLoopStoreVgpr", -1) != -1:
+          self.vgprPool.checkIn(self.compactLoopStoreVgpr)
+          self.compactLoopStoreVgpr = -1
 
         ss.resetState()
         actLoopModuleList.append(actLoopModule)
@@ -16526,8 +16545,7 @@ class KernelWriterAssembly(KernelWriter):
     if len(actLoopLabelModules) > 1:
       edgeModule.add(actLoopEndLabel)
 
-    # CompactLoopStore: release the dedicated CLS sgprs now that all batches /
-    # activation branches of this store have been emitted.
+    # Free dedicated CLS SGPRs after all batches / activation branches.
     if kernel["CompactLoopStore"]:
       edgeModule.add(self.undefineSgpr("CLSLoopCounter"))
       edgeModule.add(self.undefineSgpr("CLSm0Base"))
@@ -16925,15 +16943,8 @@ class KernelWriterAssembly(KernelWriter):
     Add stores for the element with addrCalc and sumIdx.
     tmpS01 is a single :temp sGPR
 
-    CompactLoopStore: `elementIdx` is used so that elt-0 (rowInc=0) also emits
-    incrementToNextRow as a chain seed -- a no-op s_add + s_lshl primer that
-    seeds s[stmp] for elt-1's real advance. Default 1 keeps the legacy
-    rowInc != 0 gate for non-CLS callers.
-
-    `overrideAfterPrimerRows` is forwarded to incrementToNextRow's CLS
-    delayed AFTER-primer so the primer encodes the NEXT EMITTING elt's
-    rowInc (look-ahead). 0 means no override.
-
+    CompactLoopStore: elementIdx lets elt0 (rowInc==0) seed incrementToNextRow.
+    overrideAfterPrimerRows is the next emitting elt's rowInc (0 = no override).
     """
     module = Module("addStore sumIdx %s"%(str(sumIdx)))
     if self.do["GlobalWrite"]:
@@ -16960,13 +16971,7 @@ class KernelWriterAssembly(KernelWriter):
         else:
           addr0 = vgpr(addrCalc.addrDVgpr,2)
           addr1 = ""
-        # CompactLoopStore: drop rowInc gate so elt-0 (rowInc=0) also emits a
-        # chain seed -- no-op s_add (s[stmp]=0 from preamble) + s_lshl that
-        # primes s[stmp]=StrideD<<log2(bpe) for elt-1's real advance.
-        # `forceinitrow0=1` opens the same gate inside incrementToNextRow.
-        # Legacy path (CompactLoopStore=False) keeps the original `addrCalc.rowInc`
-        # gate -- bit-for-bit unchanged because `False and ...` short-circuits and
-        # forceinitrow0 only matters when we actually enter the function.
+        # CLS: also seed the SRD chain on elt0/batch0 (rowInc==0).
         if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
           module.add(addrCalc.incrementToNextRow(kernel, "D", ss, tmpS01, forceinitrow0=1,
                                                  overrideAfterPrimerRows=overrideAfterPrimerRows))
@@ -16987,8 +16992,10 @@ class KernelWriterAssembly(KernelWriter):
         else:
           addr0 = vgpr(addrCalc.addrGSUSyncVgprs,2)
           addr1 = ""
-        if ss.optSrdIncForRow and addrCalc.rowInc:
-          module.add(addrCalc.incrementToNextRow(kernel, "TD", ss, tmpS01))
+        # First CLS store (elt0/batch0) must prime SrdTD even when rowInc==0.
+        if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
+          module.add(addrCalc.incrementToNextRow(kernel, "TD", ss, tmpS01, forceinitrow0=1,
+                                                 overrideAfterPrimerRows=overrideAfterPrimerRows))
         dataType     = kernel["ProblemType"]["DestDataType"]
         globalOffset = addrCalc.globalOffset
         globalOffset = int((globalOffset/self.states.bpeCexternal) * self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
@@ -17083,10 +17090,7 @@ class KernelWriterAssembly(KernelWriter):
   # Global Read Input
   ##############################################################################
   # readInput: global read into VGPRs for tc in {'C','E','WS', ...}.
-  # CompactLoopStore: `elementIdx` is used so elt-0 (rowInc=0) also emits
-  # incrementToNextRow as a chain seed (matches addStore). For tc == 'C' we
-  # additionally route the chain through s[tmpS01+1] so the C-load primer
-  # does not trash the D-store chain (which uses tmpS01).
+  # CLS: elt0/batch0 still emit incrementToNextRow. C uses tmpS01+1 so D's primer is kept.
   def readInput(self, kernel, ss, tc: str, dataType, addrCalc, vc0, data, gwvw, addr, tmpS01,
                 elementIdx=None, batchIdx=None, overrideAfterPrimerRows=0):
     module = Module("read%sInput"%tc)
@@ -17126,11 +17130,7 @@ class KernelWriterAssembly(KernelWriter):
             globalOffset = int((globalOffset/self.states.bpeCexternal) * self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
 
     isWorkspace = tc == 'WS'
-    # CompactLoopStore: drop rowInc gate so elt-0 also emits chain seed
-    # (preserves the s[stmp] chain for the delayed-primer pattern). tc=='C' +
-    # CLS uses tmpS01+1 so the C-load chain primer does not trash D-store's
-    # chain (which uses tmpS01). Non-CLS uses tmpS01 for all tcs (= baseline).
-    # `forceinitrow0=1` opens the same gate inside incrementToNextRow.
+    # CLS: seed the SRD chain on elt0/batch0. C uses tmpS01+1 so D's primer is kept.
     if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))) and not isWorkspace:
       _stmp = (tmpS01 + 1) if (tc == 'C' and kernel["CompactLoopStore"]) else tmpS01
       module.add(addrCalc.incrementToNextRow(kernel, tc, ss, _stmp, forceinitrow0=1, bpeType=bpeType,

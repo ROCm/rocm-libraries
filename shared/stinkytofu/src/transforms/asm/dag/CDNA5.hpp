@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <map>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 #include "InFlightQueue.hpp"
@@ -592,7 +593,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) override;
 
     void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                      IRList::iterator blockBegin) override;
+                      IRList::iterator blockBegin,
+                      std::vector<HardSchedulingConstraint>& hardConstraints) override;
 
     void onFinishBB() override;
 };
@@ -1864,7 +1866,8 @@ void CDNA5ReadyQueue::onFinishBB() {
 // Rule (2): seedWmmaDsLatencyFromPrefix. Rule (5): head balance.
 // Barrier thresholds: computeBarrierAfterThresholds / computeBarrierBeforeThresholds.
 void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                                   IRList::iterator blockBegin) {
+                                   IRList::iterator blockBegin,
+                                   std::vector<HardSchedulingConstraint>& hardConstraints) {
     wmmaIssuedCountThisRegion_ = 0;
     dsInsertedSinceLastWmma_ = 0;
     lastPickedNode_ = nullptr;
@@ -2010,13 +2013,56 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 if (overlap) {
                     int deltaAfter = (adjustedAfterEnd - adjustedBeforeBegin + 1) / 2 + 1;
                     int deltaBefore = (adjustedAfterEnd - adjustedBeforeBegin) / 2 + 1;
-                    if ((adjustedBeforeBegin + deltaBefore + beforeGroup.window > totalWmma) &&
-                        (adjustedAfterEnd - deltaAfter > afterGroup.window)) {
-                        const int targetBefore =
-                            totalWmma - adjustedBeforeBegin - beforeGroup.window;
-                        deltaAfter += deltaBefore - targetBefore;
-                        deltaBefore = targetBefore;
+
+                    // Every overlapping pair needs structural ordering, independent of
+                    // which threshold-adjustment branch above was taken.
+                    for (StinkyInstruction* barrierAfter : afterGroup.barriers) {
+                        for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
+                            hardConstraints.emplace_back(barrierAfter, barrierBefore);
+                        }
                     }
+
+                    // Also keep tensor_load descendants of barrierAfter ahead of the
+                    // barrierBefore group. Traverse the transitive def-use users; edges
+                    // whose endpoints are outside this scheduling region are ignored by
+                    // the region scheduler.
+                    std::vector<StinkyInstruction*> pending(afterGroup.barriers.begin(),
+                                                            afterGroup.barriers.end());
+                    std::unordered_set<StinkyInstruction*> visited;
+                    std::vector<StinkyInstruction*> descendantTensorLoads;
+                    while (!pending.empty()) {
+                        StinkyInstruction* descendant = pending.back();
+                        pending.pop_back();
+                        if (!visited.insert(descendant).second) continue;
+                        if (isTensorLoad(*descendant)) descendantTensorLoads.push_back(descendant);
+                        for (StinkyInstruction* user : descendant->getUsers())
+                            pending.push_back(user);
+                    }
+                    for (StinkyInstruction* tensorLoad : descendantTensorLoads) {
+                        for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
+                            hardConstraints.emplace_back(tensorLoad, barrierBefore);
+                        }
+                    }
+
+                    // Prevent these tensor_loads from interleaving with ds_load descendants
+                    // of barrierBefore: all matching tensor_loads must issue first.
+                    pending.assign(beforeGroup.barriers.begin(), beforeGroup.barriers.end());
+                    visited.clear();
+                    std::vector<StinkyInstruction*> descendantDsLoads;
+                    while (!pending.empty()) {
+                        StinkyInstruction* descendant = pending.back();
+                        pending.pop_back();
+                        if (!visited.insert(descendant).second) continue;
+                        if (isDSRead(*descendant)) descendantDsLoads.push_back(descendant);
+                        for (StinkyInstruction* user : descendant->getUsers())
+                            pending.push_back(user);
+                    }
+                    for (StinkyInstruction* tensorLoad : descendantTensorLoads) {
+                        for (StinkyInstruction* dsLoad : descendantDsLoads) {
+                            hardConstraints.emplace_back(tensorLoad, dsLoad);
+                        }
+                    }
+
                     adjustedAfterEnd = std::clamp(adjustedAfterEnd - deltaAfter, 0, totalWmma);
                     adjustedBeforeBegin =
                         std::clamp(adjustedBeforeBegin + deltaBefore, 0, totalWmma);
