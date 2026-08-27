@@ -300,10 +300,14 @@ namespace TensileLite
     // Each field's provenance is annotated inline as one of:
     //   available  = read from the value the launch uses, or from the same real
     //                helper/param solve() uses, so it reflects the launch exactly.
-    //   recomputed = re-derived here by mirroring the makeArgs/solve() sizing and
-    //                packing logic (a faithful re-derivation, not a stored launched
-    //                value).
-    // Computing or printing this report does not change launch behaviour. See
+    //   recomputed = re-derived here rather than read back from a launched value:
+    //                either by mirroring the kernel-arg packing in makeArgs()
+    //                (skTiles/skSplit/totalItems) or by deriving from other fields.
+    //                Mirrors can drift silently if makeArgs() changes; each such
+    //                field names what it mirrors.
+    // This snapshot is not purely observational: reduction, skGrid and isDynamic are
+    // launch INPUTS -- solve() copies them into StreamKSettings and uses isDynamic as
+    // its dynamic-queue predicate. Only the PRINTING is optional; see
     // Debug::printStreamKLaunchSummary() (TENSILE_DB bit 0x200000).
     struct StreamKDecisions
     {
@@ -311,9 +315,13 @@ namespace TensileLite
         // available: sizeMapping.streamK, the mode solve() uses (0 = not StreamK, else 3/4/5).
         int  streamKMode      = 0;
         // available: streamK5EffectiveDynamic(), the same helper solve()'s grid path uses
-        // (SK5 resolved to the dynamic SK4 sub-path).
+        // (SK5 resolved to the dynamic SK4 sub-path). Only meaningful for SK5: it stays
+        // false for SK4 even though SK4 is unconditionally dynamic, so ask isDynamic
+        // (below) -- not this -- whether a launch takes the dynamic path.
         bool effectiveDynamic = false;
         // recomputed: derived from streamKMode + effectiveDynamic (SK4, or SK5 resolved dynamic).
+        // Launch-relevant rather than merely reported: solve() consumes this as the
+        // dynamicQueuePath predicate guarding the work-stealing rejection.
         bool isDynamic        = false;
 
         // --- Reduction ---
@@ -335,13 +343,34 @@ namespace TensileLite
         // available: wired from sk.grid, the FINAL grid solve() launches with (after all
         // fallbacks: fixed-grid override, tree-fixup-bounds, workspace-insufficient DP).
         size_t finalGrid          = 0;
-        // available: alias of finalGrid (the grid solve() launches with).
+        // available: the grid solve() initialises sk.grid from. finalGrid and skGrid
+        // always hold the same value -- computeStreamKDecisions() sets both to its final
+        // grid, and solve() writes the launched sk.grid back into both. Both exist
+        // because they are read for different reasons: skGrid is the launch INPUT
+        // solve() consumes, finalGrid is the reported outcome printed against
+        // selectedGrid.
         size_t skGrid             = 0;
-        // recomputed: mirrors the makeArgs tile packing (stream-k / partial tile count).
+        // The next three mirror the kernel-arg packing in makeArgs() (search for
+        // "SKTiles"/"skTiles"), evaluated on the FINAL post-fallback grid and
+        // reduction. They are hand-written mirrors: any change to the packing in
+        // makeArgs() must be reflected in computeStreamKDecisions() or the report
+        // silently drifts from the launch.
+        //
+        // recomputed: dynamic path  -> the SKTiles arg (debug override, else 0);
+        //             parallel path -> the split factor, which is what makeArgs packs
+        //                              into the skTiles slot on that path;
+        //             static SK3    -> streamKStaticSplit().skTiles, the stream-k
+        //                              (partial) tile count.
         size_t skTiles          = 0;
-        // recomputed: mirrors the makeArgs k-split packing (>=1).
+        // recomputed: dynamic path -> the SKSplit arg after the CeilDivide round-trip;
+        //             parallel path -> grid / tiles;
+        //             static SK3   -> 1 (no k-split; SK3 packs SKItersPerWG instead).
         size_t skSplit          = 0;
-        // recomputed: mirrors the makeArgs packing, (tiles - skTiles) + skTiles*skSplit.
+        // recomputed: work-item count. Dynamic path mirrors the packed TotalItems arg,
+        //             (tiles - skTiles) + skTiles*skSplit. The SK3 ABI has no TotalItems
+        //             arg, so on the parallel and static paths this is reported as
+        //             'tiles' (one work item per output tile) rather than mirroring a
+        //             packed value.
         size_t totalItems       = 0;
 
         // --- DP-only ---
@@ -359,11 +388,22 @@ namespace TensileLite
         // --- Workspace / partials ---
         // recomputed: skTiles > 0.
         bool   partialsPresent        = false;
-        // recomputed: mirrors the sizing guard (requiredWorkspaceBytes > 0).
+        // recomputed: requiredWorkspaceBytes > 0.
         bool   workspaceAllocated     = false;
-        // recomputed: mirrors the sizing guard -- partials(+queue) bytes reserved (0 if none/fallback).
+        // recomputed: partials(+work-queue) bytes this launch reserves; 0 when no
+        // partials are needed or the workspace-DP fallback fired.
+        //
+        // WARNING: this is NOT ContractionSolution::requiredWorkspaceSize()'s return
+        // value, even though the names are close. requiredWorkspaceSize() is the
+        // separate, caller-facing implementation of the same reserve-or-not rule (it
+        // is what the allocator sizes from) and it differs today: it always uses
+        // getSKReduction(), and for parallel reduction it sizes with
+        // requiredWorkspaceSizeGsu() rather than partialTileSize(). The two must stay
+        // consistent about WHETHER a workspace is needed -- change one, check the other.
         size_t requiredWorkspaceBytes = 0;
-        // recomputed: mirrors the sizing guard -- partials(+queue) bytes wanted (pre fit check).
+        // recomputed: partials(+work-queue) bytes wanted, before the fit check against
+        // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
+        // makes the "wanted vs given" comparison legible in the report.
         size_t idealWorkspaceBytes    = 0;
         // available: problem.workspaceSize().
         size_t givenWorkspaceBytes    = 0;
@@ -375,7 +415,11 @@ namespace TensileLite
         size_t numQueues              = 0;
 
         // --- Fallbacks that fired (each can change selectedGrid -> finalGrid) ---
-        // recomputed: mirrors solve()'s workspace fallback (idealWorkspace > given -> tree + grid=tiles).
+        // recomputed: the workspace-insufficient fallback (idealWorkspaceBytes >
+        // givenWorkspaceBytes -> reduction=tree, grid=tiles). computeStreamKDecisions()
+        // is the sole implementation of this fallback; solve() consumes the result.
+        // Keep the reserve-or-not condition in sync with
+        // ContractionSolution::requiredWorkspaceSize().
         bool workspaceDPFallbackFired = false;
         // available: getSKGridImpl out-param (24-bit tree-fixup bounds -> grid=tiles).
         bool treeBoundsFallbackFired  = false;
@@ -575,15 +619,16 @@ namespace TensileLite
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the
         // given problem/hardware. solve() consumes the reduction strategy, grid,
-        // and workspace/DP fallbacks from here to populate StreamKSettings; it is
-        // also directly callable from unit tests. Some fields are read from the
-        // values the launch uses (or the same helpers solve() uses:
-        // streamK5EffectiveDynamic, getSKReduction, getSKGrid, partialTileSize);
-        // others are re-derived here by mirroring the makeArgs/solve() sizing and
-        // packing logic. Each StreamKDecisions field documents its own provenance
-        // (available vs recomputed). Calling it changes no launch behaviour.
-        // Returns an all-default snapshot (streamKMode==0) for non-StreamK
-        // solutions.
+        // isDynamic predicate, and workspace/DP fallback from here to populate
+        // StreamKSettings -- this is the only place that logic lives -- and it is
+        // also directly callable from unit tests. Existing helpers are reused where
+        // possible (streamK5EffectiveDynamic, getSKReduction, getSKGridImpl,
+        // partialTileSize); the makeArgs packing quantities are re-derived. Each
+        // StreamKDecisions field documents its own provenance (available vs
+        // recomputed). Has no effect on the launch beyond producing these values, and
+        // never mutates solution or problem state. For a non-StreamK solution
+        // (sizeMapping.streamK <= 0) it returns immediately with a default-initialised
+        // snapshot whose streamKMode is sizeMapping.streamK.
         StreamKDecisions computeStreamKDecisions(Problem const&  problem,
                                                  Hardware const& hardware) const;
 

@@ -61,7 +61,7 @@ namespace TensileLite
         bool printWinningKernelName() const;
 
         // Re-reads TENSILE_DB, TENSILE_DB2, and TENSILE_STREAMK5_FORCE_MODE from
-        // the environment and updates cached state.  Only these fields are
+        // the environment and updates cached state.  Only these three fields are
         // refreshed; all other env-driven settings remain at their initial values.
         // Intended for tests that call setenv() in-process after the singleton has
         // already been constructed.

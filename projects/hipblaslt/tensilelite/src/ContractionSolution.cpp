@@ -3484,12 +3484,25 @@ namespace TensileLite
             auto tiles = problem.getNumTiles(sizeMapping, 1);
             // Single source of truth: compute the StreamK launch decisions once
             // (also consumed by the diagnostic launch summary and unit tests) and
-            // consume them here. computeStreamKDecisions() applies exactly the
-            // reduction / grid / workspace-DP-fallback logic used at launch,
-            // reusing the same helpers, so the decisions match what is launched.
-            // It has no side effects, so computing it before the dynamic-queue
-            // guard below cannot change observable behaviour (the guard still
-            // throws before any kernel-arg packing / kernel launch).
+            // consume them here. computeStreamKDecisions() owns the reduction /
+            // grid / workspace-DP-fallback logic and reuses the same helpers, so
+            // the decisions ARE what is launched.
+            //
+            // The dynamic-queue guard below consumes skDecisions.isDynamic, so
+            // this call has to precede it -- which moves getSKReduction(),
+            // getSKGridImpl() and the workspace sizing ahead of that rejection.
+            // That is safe rather than free: the call mutates no solution or
+            // problem state and launches nothing, so the guard still throws before
+            // any kernel-arg packing or kernel launch. It is not, however,
+            // output-free -- the helpers it calls can write TENSILE_DB diagnostics
+            // to stderr (streamK5EffectiveDynamic's SK5 mode-selection note under
+            // 0x100000, getSKGridImpl's CU-occupancy note under
+            // printPropertyEvaluation). Neither is reachable on a guard-rejected
+            // launch as the code stands (the guard only fires on the dynamic-queue
+            // path, where the reduction is forced to tree without calling
+            // getSKReduction and getSKGridImpl takes its diagnostic-free
+            // branches), but a future edit that prints from those helpers would
+            // start emitting for solutions this guard goes on to reject.
             skDecisions = computeStreamKDecisions(problem, hardware);
             // Defensive: dynamic-queue / work-stealing StreamK solutions are
             // excluded from selection on devices whose runtime XCD count is not
@@ -3524,8 +3537,8 @@ namespace TensileLite
                     "Select a non-work-stealing solution instead.");
             }
             // Consume the reduction / grid decided above. computeStreamKDecisions
-            // applies the same logic (including the workspace-insufficient DP
-            // fallback) using the same helpers, so these match what is launched.
+            // has already applied the workspace-insufficient DP fallback, and no
+            // further StreamK sizing happens below, so these are the launch values.
             sk.reduction                 = skDecisions.reduction;
             sk.grid                      = skDecisions.skGrid;
             sk.streamKTileSchedulingMode = problem.getParams().streamKTileSchedulingMode();
@@ -4846,18 +4859,24 @@ namespace TensileLite
         return size;
     }
 
-    // Single source of truth for the StreamK launch decisions. This mirrors --
-    // and is consumed by -- the sizing block in solve(): the reduction, grid, and
-    // workspace/DP fallbacks below are exactly what solve() applies to the
-    // StreamKSettings it launches with, and the skTiles/skSplit/totalItems fields
-    // mirror the kernel-arg packing in makeArgs(). It reuses the existing helpers
-    // rather than re-deriving, so the summary cannot drift from the real launch.
+    // Single source of truth for the StreamK launch decisions. The reduction, grid,
+    // and workspace/DP fallback computed here are the values solve() launches with:
+    // solve() reads them straight out of the returned snapshot into StreamKSettings
+    // and applies no further StreamK sizing of its own. Existing helpers
+    // (streamK5EffectiveDynamic, getSKReduction, getSKGridImpl, partialTileSize) are
+    // reused rather than re-derived.
     //
-    // The partials-workspace guard and sizing below reserve iff
-    // (reduction==parallel || tiles%grid!=0), sized as partialTileSize(grid) (+ the
-    // per-XCD work-queue region for the dynamic path); the reservation does not
-    // depend on dynamicPartialsSlots. The dynamicPartialsSlots field is still
-    // populated (skTiles*skSplit, computed locally) purely for reporting.
+    // Two mirrors here must be kept in sync with code elsewhere:
+    //   * the reserve-or-not workspace rule below duplicates the one in
+    //     ContractionSolution::requiredWorkspaceSize(), which is what the caller
+    //     allocates from;
+    //   * skTiles/skSplit/totalItems duplicate the kernel-arg packing in makeArgs().
+    //
+    // The partials-workspace guard reserves iff (reduction==parallel || tiles%grid!=0),
+    // sized as partialTileSize(grid) (+ the per-XCD work-queue region on the dynamic
+    // path); the reservation does not depend on dynamicPartialsSlots. The
+    // dynamicPartialsSlots field is still populated (skTiles*skSplit, computed
+    // locally) purely for reporting.
     StreamKDecisions
         ContractionSolution::computeStreamKDecisions(Problem const&  problem,
                                                      Hardware const& hardware) const
@@ -4874,7 +4893,9 @@ namespace TensileLite
             = (sizeMapping.streamK == 5) ? streamK5EffectiveDynamic(problem, hardware) : false;
         d.effectiveDynamic = effectiveDynamic;
 
-        // Reduction strategy -- mirrors solve().
+        // Reduction strategy. SK4 and SK5-resolved-dynamic are unconditionally tree;
+        // everything else asks getSKReduction(). Note requiredWorkspaceSize() always
+        // asks getSKReduction() and has no such special case -- see the note above.
         origami::reduction_t reduction;
         if(sizeMapping.streamK == 4)
             reduction = origami::reduction_t::tree;
@@ -4921,9 +4942,10 @@ namespace TensileLite
         d.numQueues           = streamKBakedQueueCount(hardware);
         d.givenWorkspaceBytes = problem.workspaceSize();
 
-        // Workspace / DP fallback -- mirrors the guard in solve(): reserve iff
-        // (reduction==parallel || tiles%grid!=0), sized by grid (not by
-        // dynamicSlots).
+        // Workspace / DP fallback. Reserve iff (reduction==parallel ||
+        // tiles%grid!=0), sized by grid (not by dynamicSlots). This is the same
+        // reserve-or-not rule requiredWorkspaceSize() implements independently, so
+        // the two must be changed together.
         size_t idealWorkspace = 0;
         bool   needPartials   = false;
         if(grid > 0
@@ -5005,7 +5027,13 @@ namespace TensileLite
                                                         Problem const&          problem,
                                                         StreamKDecisions const& d) const
     {
-        (void)problem; // reserved for future per-problem detail; keeps the API stable
+        // Everything printed below already lives in the snapshot, so the problem is
+        // currently unused. It stays in the signature because a launch summary is
+        // naturally reported per (solution, problem) pair and the obvious next
+        // additions -- the GEMM sizes, transposes, and problem-level StreamK params
+        // -- are only reachable from here; keeping it avoids churning every call
+        // site and every test when one of those is added.
+        (void)problem;
         auto reductionStr = [](origami::reduction_t r) {
             return r == origami::reduction_t::parallel ? "parallel(DP)" : "tree";
         };
@@ -5023,10 +5051,12 @@ namespace TensileLite
 
         // Which fallback (if any) turned the initially-selected grid into the
         // final launch grid. Reported alongside selectedGrid vs finalGrid.
-        // Ordered latest-clamp-wins: the workspace-DP fallback runs in solve(),
-        // after getSKGridImpl; within getSKGridImpl the ForceDPOnly cluster
+        // Ordered latest-clamp-wins, i.e. the reverse of the order they are applied:
+        // the workspace-DP fallback runs last (in computeStreamKDecisions, after
+        // getSKGridImpl returns); inside getSKGridImpl the ForceDPOnly cluster
         // multicast clamp runs after the tree-bounds fallback, which in turn runs
-        // after the skFixedGrid override.
+        // after the skFixedGrid override. So the first matching branch below names
+        // the clamp that actually produced finalGrid.
         const char* gridChangedBy = "none";
         if(d.workspaceDPFallbackFired)
             gridChangedBy = "workspaceDP";
@@ -5037,7 +5067,12 @@ namespace TensileLite
         else if(d.fixedGridUsed)
             gridChangedBy = "fixedGrid";
 
-        // Which mechanism (if any) makes this launch data-parallel-only.
+        // Which mechanism (if any) makes this launch data-parallel-only. More than
+        // one can be set at once (e.g. the debug override on a force-DP-only
+        // kernel), so the ladder reports the most specific explanation first:
+        // the compile-time kernel param, then the process-wide debug override,
+        // then the runtime workspace fallback -- from "this kernel is always DP"
+        // to "this particular launch had to give up on StreamK".
         const char* dpOnlySource = "none";
         if(d.forceDPOnly)
             dpOnlySource = "forceDPOnly(param)";
@@ -5047,7 +5082,10 @@ namespace TensileLite
             dpOnlySource = "workspaceDP(runtime)";
 
         // Human-readable byte annotation, e.g. "1245184 (1.19 MiB)". SIZE_MAX is
-        // reported as "unbounded" (the sentinel bench passes for "no cap").
+        // reported as "unbounded": that is ContractionProblem's default workspace
+        // size (see ContractionProblem.hpp m_workspaceSize), meaning
+        // setWorkspaceSize() was never called and the workspace is uncapped, so
+        // printing it as a byte count would be nonsense.
         auto humanUnit = [](size_t bytes) -> std::string {
             static const char* units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
             double              v      = static_cast<double>(bytes);
@@ -5079,14 +5117,13 @@ namespace TensileLite
             return fmtBytes(bytes);
         };
 
-        // Deeply-indented, multi-line labeled block. The leading token
-        // "TensileLite::StreamK LAUNCH SUMMARY" is preserved verbatim (with the
-        // kernel name on the same first line) so existing log scrapers / test
-        // substring matches keep working. Each section header sits on its own
-        // line and its fields are indented beneath it as aligned "key = value"
-        // pairs, one field per line. This is a pure LAYOUT change: no field,
-        // value, label, or the NA-when-!isDynamic behaviour is altered, and no
-        // launch behaviour is affected.
+        // Output shape: one header line carrying the fixed token
+        // "TensileLite::StreamK LAUNCH SUMMARY" and the kernel name, followed by
+        // labeled sections. Each section header sits on its own line and its
+        // fields are indented beneath it as "key = value" pairs, one per line,
+        // with the '=' column-aligned within the section. Keep the header token
+        // and the field key spellings stable: log scrapers and the substring
+        // assertions in tests/StreamKLaunchSummary_test.cpp match on them.
         //
         // 'field' prints one indented, '='-aligned pair. 'width' is the per-section
         // key column width chosen so every '=' in that section lines up.
