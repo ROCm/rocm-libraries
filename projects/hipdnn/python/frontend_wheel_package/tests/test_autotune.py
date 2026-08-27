@@ -90,6 +90,114 @@ def test_autotune_enums():
     assert hipdnn.PrimingFailurePolicy.BENCHMARK_UNPRIMED.name == "BENCHMARK_UNPRIMED"
 
 
+def test_autotune_cache_write_outcome_enum():
+    """AutotuneCacheWriteOutcome exposes every C++ enumerator."""
+    names = {
+        hipdnn.AutotuneCacheWriteOutcome.WRITTEN.name,
+        hipdnn.AutotuneCacheWriteOutcome.DECLINED_DISABLED.name,
+        hipdnn.AutotuneCacheWriteOutcome.DECLINED_UNKEYABLE.name,
+        hipdnn.AutotuneCacheWriteOutcome.NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE.name,
+        hipdnn.AutotuneCacheWriteOutcome.UNCHANGED.name,
+        hipdnn.AutotuneCacheWriteOutcome.NOT_ATTEMPTED_PARTIAL_SWEEP.name,
+    }
+    assert names == {
+        "WRITTEN",
+        "DECLINED_DISABLED",
+        "DECLINED_UNKEYABLE",
+        "NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE",
+        "UNCHANGED",
+        "NOT_ATTEMPTED_PARTIAL_SWEEP",
+    }
+    assert (
+        hipdnn.AutotuneCacheWriteOutcome.WRITTEN
+        != hipdnn.AutotuneCacheWriteOutcome.DECLINED_DISABLED
+    )
+
+
+def test_partial_sweep_outcome_is_distinct_from_other_declines():
+    """A filtered sweep's decline is reportable and not confusable with the others."""
+    partial = hipdnn.AutotuneCacheWriteOutcome.NOT_ATTEMPTED_PARTIAL_SWEEP
+    assert partial != hipdnn.AutotuneCacheWriteOutcome.WRITTEN
+    assert (
+        partial != hipdnn.AutotuneCacheWriteOutcome.NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE
+    )
+    assert partial != hipdnn.AutotuneCacheWriteOutcome.UNCHANGED
+
+
+def test_autotune_result_exposes_the_sweep_coverage_axes():
+    """A PARTIAL_SWEEP decline must say which engine caused it.
+
+    `excluded_by_caller` names the engines a filter or the workspace budget held out,
+    which are the ones that make a sweep unpersistable. Without it the outcome reports
+    that something was excluded but not what.
+    """
+    result = hipdnn.AutotuneResult()
+    assert result.benchmarked is False
+    assert result.excluded_by_caller is False
+
+
+def test_autotune_exhaustive_sweep_is_bound():
+    """Graph exposes autotune_exhaustive_sweep, returning results and a write outcome."""
+    assert hasattr(hipdnn.Graph, "autotune_exhaustive_sweep")
+    doc = hipdnn.Graph.autotune_exhaustive_sweep.__doc__
+    assert "tuple[list[" in doc
+    assert "AutotuneCacheWriteOutcome" in doc
+
+
+def test_timed_iterations_is_inert_under_the_default_strategy():
+    """timed_iterations applies only under FIXED_AVERAGE.
+
+    The default strategy is RUN_UNTIL_STABLE, whose loop is bounded by max_iterations and
+    stability_threshold and never reads timed_iterations. Advice to raise
+    timed_iterations is therefore correct only once the caller also sets the strategy.
+    Asserting the defaults rather than the prose keeps this honest if a default moves.
+    """
+    config = hipdnn.AutotuneConfig()
+    assert config.strategy == hipdnn.AutotuneStrategy.RUN_UNTIL_STABLE
+    assert config.timed_iterations == 10
+    assert config.max_iterations == 100
+
+    # Settable from Python, so the docstring's qualification is actionable.
+    config.strategy = hipdnn.AutotuneStrategy.FIXED_AVERAGE
+    assert config.strategy == hipdnn.AutotuneStrategy.FIXED_AVERAGE
+
+
+def test_exhaustive_sweep_docstring_qualifies_the_iteration_dial():
+    """The docstring must not tell a caller to raise a field their strategy ignores."""
+    doc = hipdnn.Graph.autotune_exhaustive_sweep.__doc__
+    assert "config.timed_iterations" in doc
+    # The dial is only meaningful alongside the strategy that reads it.
+    assert "FIXED_AVERAGE" in doc
+    assert "RUN_UNTIL_STABLE" in doc
+
+
+def test_exhaustive_sweep_docstring_states_the_locked_fields_correctly():
+    """Two fields are locked; strategy is honoured as the caller set it."""
+    doc = hipdnn.Graph.autotune_exhaustive_sweep.__doc__
+    assert "Two config fields are set by this call" in doc
+    assert "Three config fields" not in doc
+
+
+def test_exhaustive_sweep_docstring_states_the_full_sweep_contract():
+    """The record is keyed on graph+device only, so a partial sweep must not persist."""
+    doc = hipdnn.Graph.autotune_exhaustive_sweep.__doc__
+    # No knob variants.
+    assert "no knob variants" in doc
+    # No filtering, and an adequate workspace.
+    assert "engine_id_filter" in doc
+    assert "get_autotune_workspace_size()" in doc
+    # And what happens when the caller does it anyway.
+    assert "NOT_ATTEMPTED_PARTIAL_SWEEP" in doc
+
+
+def test_autotune_result_exposes_robust_time():
+    """The statistic the exhaustive sweep ranks on is readable from a result."""
+    result = hipdnn.AutotuneResult()
+    assert hasattr(result, "robust_time_ms")
+    assert hasattr(result, "min_time_ms")
+    assert result.robust_time_ms == 0.0
+
+
 def test_engine_config_info_defaults_and_assignment():
     """EngineConfigInfo mirrors the C++ defaults and its fields are writable."""
     cfg = hipdnn.EngineConfigInfo()
@@ -302,6 +410,24 @@ def test_workspace_and_plan_name_without_compiled_plans():
     with pytest.raises(RuntimeError) as excinfo:
         graph.get_plan_name()
     assert "out of bounds" in str(excinfo.value)
+
+
+def test_engine_name_accessors_take_an_optional_handle():
+    """The three name-reporting accessors accept a trailing handle keyword.
+
+    Python cannot overload, so the handle-taking C++ forms -- the ones that name
+    plugin-supplied engines -- are reached through a keyword defaulting to None.
+    An unbuilt graph is enough to pin the signature: each accessor refuses it the
+    same way with the keyword as without.
+    """
+    graph = hipdnn.Graph()
+
+    with pytest.raises(RuntimeError):
+        graph.get_plan_name(handle=None)
+    with pytest.raises(RuntimeError):
+        graph.get_plan_name_at_index(0, handle=None)
+    with pytest.raises(RuntimeError):
+        graph.get_engine_configs(handle=None)
 
 
 @pytest.mark.gpu

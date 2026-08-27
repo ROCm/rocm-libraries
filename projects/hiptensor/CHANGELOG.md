@@ -16,6 +16,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 * Enabled `-frtti` on Windows to fix RTTI-related build failures.
+* Removed the internal compiler flags `-amdgpu-early-inline-all=true` and `-amdgpu-function-calls=false` from the build, which caused excessive compile-time memory usage (OOM) with newer ROCm/LLVM toolchains (JIRA: LCOMPILER-2589).
 
 ## hipTensor 2.3.0 for ROCm 7.14
 

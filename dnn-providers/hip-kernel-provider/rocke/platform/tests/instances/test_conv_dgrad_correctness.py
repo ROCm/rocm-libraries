@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -331,6 +332,242 @@ class TestConvDgradCorrectness(unittest.TestCase):
             "-1",
             label="fp16 resnet N8H56W56C64K64",
         )
+
+    # ---- grouped (grid-per-group on blockIdx.y) ------------------------------
+
+    def test_fp16_grouped_stride1(self):
+        """fp16 grouped dgrad, groups=4 (cpg=kpg=16), stride=1 direct store."""
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "64",
+            "--K",
+            "64",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--groups",
+            "4",
+            "--split-k",
+            "1",
+            label="fp16 grouped g4 stride=1",
+        )
+
+    def test_bf16_grouped_stride1(self):
+        """bf16 grouped dgrad, groups=4, stride=1."""
+        self._verify(
+            "--dtype",
+            "bf16",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "64",
+            "--K",
+            "64",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--groups",
+            "4",
+            "--split-k",
+            "1",
+            label="bf16 grouped g4 stride=1",
+        )
+
+    def test_fp16_grouped_stride2(self):
+        """fp16 grouped dgrad, groups=4, stride=2 — tilde decomposition path."""
+        if ARCH not in _CDNA_ARCHES:
+            self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "64",
+            "--K",
+            "64",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--sH",
+            "2",
+            "--sW",
+            "2",
+            "--groups",
+            "4",
+            "--split-k",
+            "1",
+            label="fp16 grouped g4 stride=2",
+        )
+
+    def test_fp16_grouped_odd_kpg(self):
+        """Non-power-of-two kpg (C=K=48, groups=8 -> cpg=kpg=6): guards against
+        the k_sub decode-divisor trap (must divide by kpg, not total K)."""
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "2",
+            "--Hi",
+            "16",
+            "--Wi",
+            "16",
+            "--C",
+            "48",
+            "--K",
+            "48",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--groups",
+            "8",
+            "--split-k",
+            "1",
+            label="fp16 grouped g8 cpg=kpg=6",
+        )
+
+    def test_fp16_grouped_split_k(self):
+        """fp16 grouped dgrad with split_k>1 — group on y, split_k on z compose;
+        even cpg (=16) keeps the packed <2 x f16> atomic pairs in-group."""
+        if ARCH not in _CDNA_ARCHES:
+            self.skipTest(f"split_k dgrad requires CDNA atomic-add; running on {ARCH}")
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "4",
+            "--Hi",
+            "28",
+            "--Wi",
+            "28",
+            "--C",
+            "64",
+            "--K",
+            "128",
+            "--Y",
+            "3",
+            "--X",
+            "3",
+            "--pH",
+            "1",
+            "--pW",
+            "1",
+            "--groups",
+            "4",
+            "--split-k",
+            "-1",
+            label="fp16 grouped g4 split_k=auto",
+        )
+
+
+def _count_vector_buffer_loads(ll: str) -> int:
+    """Number of vector-typed raw buffer loads in the lowered IR (dY free axis)."""
+    return len(re.findall(r"amdgcn\.raw\.(?:ptr\.)?buffer\.load\.v\d+\w+", ll))
+
+
+class TestConvDgradGfx1250Emit(unittest.TestCase):
+    """gfx1250 (wave32 WMMA 16x16x32) grouped dgrad -- CPU-only emit check.
+
+    Builds the kernel and lowers it with the *Python* engine (no GPU / comgr),
+    so it runs in every CI lane including GPU-less ones.  A ROCKE_BACKEND=both
+    dual-engine assertion is NOT available for dgrad: its weight (B) load is
+    always scalar and emits the generic ``tile.buffer_load`` op, which the C++
+    ``lower_serialized_ir`` does not implement (a pre-existing gap, independent
+    of grouping -- it affects groups=1 dgrad too).  Numeric correctness of
+    grouped dgrad is validated on gfx942/gfx950 above; this guards that the
+    gfx1250 16x16x32 WMMA path builds and vectorises the dY loads.
+    """
+
+    def _lower_gfx1250(self, groups: int) -> str:
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            build_implicit_gemm_conv_dgrad,
+            is_valid_dgrad_spec,
+        )
+
+        p = ConvProblem(
+            N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=groups
+        )
+        spec = DgradConvSpec(
+            problem=p,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp16"),
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            wave_size=32,
+            pipeline="mem",
+            epilogue="default",
+        )
+        ok, why = is_valid_dgrad_spec(spec, "gfx1250")
+        self.assertTrue(ok, f"gfx1250 dgrad spec unexpectedly invalid: {why}")
+        kernel = build_implicit_gemm_conv_dgrad(spec, arch="gfx1250")
+        return _lower_kernel_to_llvm_python(kernel, arch="gfx1250")
+
+    def test_gfx1250_grouped_dgrad_emits_wmma_16x16x32(self):
+        # Grouped dgrad (grid-per-group, group on block_id_y) on gfx1250:
+        # C=K=64, groups=4 -> cpg=kpg=16.
+        ll = self._lower_gfx1250(groups=4)
+        self.assertIn(
+            "wmma.f32.16x16x32",
+            ll,
+            "expected the gfx1250 16x16x32 WMMA intrinsic in the grouped lowered IR",
+        )
+        self.assertGreater(
+            _count_vector_buffer_loads(ll),
+            0,
+            "expected vectorised dY loads for gfx1250 grouped dgrad, got scalar only",
+        )
+
+    def test_gfx1250_ungrouped_dgrad_emits_wmma_16x16x32(self):
+        # groups=1 must also build on the relaxed 16x16x32 WMMA atom gate.
+        ll = self._lower_gfx1250(groups=1)
+        self.assertIn("wmma.f32.16x16x32", ll)
 
 
 if __name__ == "__main__":
