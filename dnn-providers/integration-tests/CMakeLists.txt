@@ -58,6 +58,15 @@ endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 
+set(RANDOMIZATION_LIBRARY "rocrand"  CACHE STRING "Name of the randomization library")
+
+# Derive USE_ROCRAND as a boolean based on the RANDOMIZATION_LIBRARY value
+if(RANDOMIZATION_LIBRARY STREQUAL "rocrand")
+    set(USE_ROCRAND TRUE)
+else()
+    set(USE_ROCRAND FALSE)
+endif()
+
 include(GNUInstallDirs)
 include(ClangTidy)
 include(ClangCheck)
@@ -105,6 +114,12 @@ if(NOT TARGET hipdnn_plugin_sdk)
 endif()
 
 find_package(Threads REQUIRED)
+
+find_package(rocrand QUIET)
+if(USE_ROCRAND AND NOT TARGET roc::rocrand)
+    message(WARNING "rocRAND not found, falling back to CPU random number generation")
+    set(USE_ROCRAND OFF)
+endif()
 
 include(Dependencies)
 fetch_gtest_dependency()
