@@ -274,6 +274,8 @@ inline void setRocisaToArchMap(GpuArch& registry) {
         {"VNop", "v_nop"},
         {"VAddPKF32", "v_pk_add_f32"},
         {"_VAddPKF32", "v_pk_add_f32"},
+        {"VFmaPKF32", "v_pk_fma_f32"},
+        {"_VFmaPKF32", "v_pk_fma_f32"},
         {"VMulPKF32", "v_pk_mul_f32"},
         {"_VMulPKF32", "v_pk_mul_f32"},
         {"VMulF16", "v_mul_f16"},
