@@ -459,7 +459,9 @@ class DgradConvSpec:
     Pipeline, epilogue, and async-DMA options are the same as
     :class:`~.conv_implicit_gemm.ImplicitGemmConvSpec`.
 
-    Only ``groups=1`` and 2-D convolution are supported currently.
+    Grouped convolution (``groups > 1``, channels-per-group > 1) and 2-D are
+    supported; group-merging and 3-D are not.  Grouped runs grid-per-group with
+    the conv group on ``blockIdx.y`` (see :func:`_build_tilde_dgrad`).
     """
 
     problem: ConvProblem
@@ -643,18 +645,14 @@ class DgradConvSpec:
                     f"split_k > 1 requires dtype_d in fp32/bf16/fp16 "
                     f"(got {self.data.dtype_d!r})"
                 )
-            if self.data.dtype_d in ("bf16", "fp16") and self.problem.C % 2 != 0:
+            if self.data.dtype_d in ("bf16", "fp16") and self.problem.cpg % 2 != 0:
                 raise ValueError(
-                    f"split_k > 1 with dtype_d={self.data.dtype_d!r} requires even C "
-                    f"(packed <2 x dtype> atomic pairs on the innermost NHWC dimension); "
-                    f"got C={self.problem.C}"
+                    f"split_k > 1 with dtype_d={self.data.dtype_d!r} requires even "
+                    f"channels-per-group (packed <2 x dtype> atomic pairs on the "
+                    f"innermost NHWC dimension must stay within one group's slab); "
+                    f"got cpg={self.problem.cpg}"
                 )
         p = self.problem
-        if p.groups != 1:
-            raise ValueError(
-                "DgradConvSpec: grouped convolution (groups > 1) is not yet supported "
-                "for the dgrad direction"
-            )
         if p.is_3d:
             raise ValueError(
                 "DgradConvSpec: 3-D convolution is not yet supported for the dgrad "
@@ -708,6 +706,11 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     p = spec.problem
     if p.is_3d:
         return False, "dgrad only supports 2-D convolution currently"
+    if p.groups > 1 and p.cpg == 1:
+        return False, (
+            "depthwise dgrad (channels-per-group == 1) is not supported by the "
+            "implicit-GEMM grouped path"
+        )
 
     if spec.tile_m % (spec.warp_m * spec.warp_tile_m):
         return False, "tile_m not divisible by warp_m * warp_tile_m"
@@ -747,11 +750,11 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"split_k > 1 requires dtype_d in fp32/bf16/fp16 for atomic accumulation "
             f"(got {spec.data.dtype_d!r})"
         )
-    if sk > 1 and spec.data.dtype_d in ("bf16", "fp16") and p.C % 2 != 0:
+    if sk > 1 and spec.data.dtype_d in ("bf16", "fp16") and p.cpg % 2 != 0:
         return False, (
-            f"split_k > 1 with dtype_d={spec.data.dtype_d!r} requires even C "
-            f"(packed <2 x dtype> atomic pairs on the innermost NHWC dimension); "
-            f"got C={p.C}"
+            f"split_k > 1 with dtype_d={spec.data.dtype_d!r} requires even "
+            f"channels-per-group (packed <2 x dtype> atomic pairs on the innermost "
+            f"NHWC dimension must stay within one group's slab); got cpg={p.cpg}"
         )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
@@ -788,8 +791,13 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         )
 
     if family == "wmma":
-        if atom != (16, 16, 16):
-            return False, f"WMMA dgrad supports only 16x16x16 (got {atom}) on {arch}"
+        # 16x16x16 is the RDNA WMMA hero (gfx1151/gfx1201); 16x16x32 is the
+        # gfx1250 hero (its only fp16/bf16 WMMA atom -- there is no 16x16x16 on
+        # gfx1250). Both feed the same WMMA fragment machinery in emit_mfma_phase.
+        if atom not in ((16, 16, 16), (16, 16, 32)):
+            return False, (
+                f"WMMA dgrad supports 16x16x16 or 16x16x32 (got {atom}) on {arch}"
+            )
         if spec.pipeline != "mem":
             return False, (
                 f"WMMA dgrad supports only the 'mem' pipeline "
@@ -1082,6 +1090,26 @@ def _build_tilde_dgrad(
     c_X = b.const_i32(p.X)
     c_dg_N = b.const_i32(p.cpg)
 
+    # Grouped conv (groups > 1): the conv group rides blockIdx.y.  blockIdx.z is
+    # split_k and blockIdx.x is the flat tilde-tile index, so y is free (it is
+    # launched as 1 for ungrouped and its WarpGrid block_m offset is overridden
+    # below).  Each CTA handles exactly one group: its reduction is confined to
+    # that group's kpg output channels and it writes that group's cpg
+    # input-channel slab of dX.  The group offsets the absolute output-channel
+    # base (k_out = g*kpg + local) on dY/W and the absolute input-channel base
+    # (c = g*cpg + local) on W/dX, and the k_sub decode divides by kpg (not the
+    # total K).  For groups == 1 nothing is emitted, keeping the IR byte-identical.
+    grouped = p.groups > 1
+    if grouped:
+        group_idx = b.block_id_y()
+        c_kpg = b.const_i32(p.kpg)
+        k_out_group_base = b.mul(group_idx, c_kpg)
+        c_group_base = b.mul(group_idx, b.const_i32(p.cpg))
+    else:
+        c_kpg = None
+        k_out_group_base = None
+        c_group_base = None
+
     # Precompute tiling divisors (runtime, from record).
     # k_sub decomposition order: [ydot, xdot, k_out] (k_out innermost, CK-compatible).
     # k_sub = ydot * XDotSlice * K + xdot * K + k_out
@@ -1107,11 +1135,15 @@ def _build_tilde_dgrad(
     ]
 
     threads = spec.block_size
+    # Per-group vector sizes: dY (NHWK) vectorises along the per-group output-channel
+    # run kpg (== K when ungrouped); B (W, KYXC) vectorises along the per-group input
+    # channel run cpg (== C when ungrouped).  Using (cpg, kpg) keeps groups==1
+    # byte-identical while making grouped loads respect the per-group extents.
     _def_vec_a, _def_vec_b, _ = DgradConvSpec.default_vector_sizes(
-        p.C, p.K, spec.data.dtype_a
+        p.cpg, p.kpg, spec.data.dtype_a
     )
     # load_vec_a: k_out is innermost in k_dg → consecutive k_sub → consecutive k_out
-    # → contiguous in dY (NHWK, last dim K).  Condition: K % load_vec_a == 0.
+    # → contiguous in dY (NHWK, last dim K).  Condition: kpg % load_vec_a == 0.
     # For split_k > 1 the slice boundary may not align to K_conv so use 1 there.
     if spec.split_k <= 1:
         _safe_vec_a = _choose_load_vec_for(
@@ -1126,7 +1158,8 @@ def _build_tilde_dgrad(
     # load_vec_b: B (W, KYXC) — the GEMM row axis is N_dg = c (input channels), which
     # is the stride-1 axis of KYXC.  Vectorise along the free (row) axis and transpose
     # into the row-major (N, K) LDS tile on store (CoalescedTileLoader vector_axis="row"),
-    # exactly as wgrad does for its B (X, NHWC) operand.  Condition: C % load_vec_b == 0.
+    # exactly as wgrad does for its B (X, NHWC) operand.  Condition: cpg % load_vec_b
+    # == 0 (cpg == C when ungrouped); the group base g*cpg is a multiple of cpg.
     _vb = CoalescedTileLoader.choose_vec(
         tile_rows=block_n,
         tile_cols=block_k,
@@ -1164,13 +1197,17 @@ def _build_tilde_dgrad(
         k_sub = b_.add(k_off_capture[0], col)
 
         # Decompose k_sub → (ydot, xdot, k_out)  [k_out innermost, CK-compatible]
-        # k_sub = ydot * xdot_slice * K + xdot * K + k_out
-        # Consecutive k_sub → consecutive k_out → contiguous in dY (NHWK, last dim K)
-        # Condition for vector loads: K % load_vec_a == 0
-        k_out = b_.mod(k_sub, c_K)
-        yx_rem = b_.div(k_sub, c_K)
+        # k_sub = ydot * xdot_slice * kpg + xdot * kpg + k_out.  The reduction is
+        # per-group, so the decode divisor is kpg (== K when ungrouped) and k_out
+        # is group-local in [0, kpg); the absolute NHWK channel is g*kpg + k_out.
+        # Consecutive k_sub → consecutive k_out → contiguous in dY (NHWK, last dim
+        # K) within one group. Condition for vector loads: kpg % load_vec_a == 0.
+        _kdiv = c_kpg if grouped else c_K
+        k_out = b_.mod(k_sub, _kdiv)
+        yx_rem = b_.div(k_sub, _kdiv)
         ydot = b_.div(yx_rem, rec_x_dot_slice)
         xdot = b_.mod(yx_rem, rec_x_dot_slice)
+        k_out_abs = b_.add(k_out, k_out_group_base) if grouped else k_out
 
         # Decompose m_sub → (n, htilde_local, wtilde_local)
         n = b_.div(m_sub, hw_tilde)
@@ -1189,13 +1226,14 @@ def _build_tilde_dgrad(
         # Bounds check: 0 <= ho < Ho, 0 <= wo < Wo, k_out < K
         ho_ok = b_.land(b_.cmp_ge(ho, c0), b_.cmp_lt(ho, c_Ho))
         wo_ok = b_.land(b_.cmp_ge(wo, c0), b_.cmp_lt(wo, c_Wo))
-        k_ok = b_.cmp_lt(k_out, c_K)
+        k_ok = b_.cmp_lt(k_out, _kdiv)
         valid = b_.land(b_.land(ho_ok, wo_ok), k_ok)
 
-        # NHWK linear offset: (n * Ho + ho) * Wo * K + wo * K + k_out
+        # NHWK linear offset: (n * Ho + ho) * Wo * K + wo * K + k_out_abs
+        # (the K stride stays total-K; only the channel index carries g*kpg).
         offset = b_.add(
             b_.mul(b_.add(b_.mul(n, c_Ho), ho), b_.mul(c_Wo, c_K)),
-            b_.add(b_.mul(wo, c_K), k_out),
+            b_.add(b_.mul(wo, c_K), k_out_abs),
         )
         safe_offset = b_.select(valid, offset, b_.const_i32(0))
         return safe_offset, valid
@@ -1206,24 +1244,35 @@ def _build_tilde_dgrad(
         k_sub = b_.add(k_off_capture[0], col)
 
         # Same k_out-innermost decomposition as dy_descriptor (must match).
-        # c (row axis) is stride-1 in KYXC; vectorised loads along c use vector_axis="row".
-        k_out = b_.mod(k_sub, c_K)
-        yx_rem = b_.div(k_sub, c_K)
+        # c (row axis) is stride-1 in KYXC; vectorised loads along c use
+        # vector_axis="row".  The reduction is per-group, so the decode divisor is
+        # kpg (== K when ungrouped) and k_out is group-local in [0, kpg).
+        _kdiv = c_kpg if grouped else c_K
+        k_out = b_.mod(k_sub, _kdiv)
+        yx_rem = b_.div(k_sub, _kdiv)
         ydot = b_.div(yx_rem, rec_x_dot_slice)
         xdot = b_.mod(yx_rem, rec_x_dot_slice)
+        k_out_abs = b_.add(k_out, k_out_group_base) if grouped else k_out
 
         # y = ydot * b_y_stride + b_y_offset
         y = b_.add(b_.mul(ydot, rec_b_y_stride), rec_b_y_offset)
         x = b_.add(b_.mul(xdot, rec_b_x_stride), rec_b_x_offset)
 
-        # Bounds check: y < Y, x < X, k_out < K
+        # Bounds check: y < Y, x < X, k_out < kpg (group-local)
         valid = b_.land(
-            b_.land(b_.cmp_lt(y, c_Y), b_.cmp_lt(x, c_X)), b_.cmp_lt(k_out, c_K)
+            b_.land(b_.cmp_lt(y, c_Y), b_.cmp_lt(x, c_X)), b_.cmp_lt(k_out, _kdiv)
         )
 
-        # KYXC linear offset: ((k_out * Y + y) * X + x) * C + c
+        # Weight is stored PER-GROUP packed: KYXC == [K, Y, X, cpg] (mirrors the
+        # forward make_b_descriptor and the wgrad packed dW output).  The group is
+        # carried entirely by the absolute output channel k_out_abs = g*kpg+k_out
+        # (different k rows hold different groups' slabs); the input channel is
+        # group-local c_val in [0, cpg) and the last-dim stride is cpg.  Ungrouped:
+        # cpg == C and k_out_abs == k_out, so this is byte-identical.
+        #   offset = ((k_out_abs * Y + y) * X + x) * cpg + c_local
+        _cstride = c_dg_N if grouped else c_C
         offset = b_.add(
-            b_.mul(b_.add(b_.mul(b_.add(b_.mul(k_out, c_Y), y), c_X), x), c_C),
+            b_.mul(b_.add(b_.mul(b_.add(b_.mul(k_out_abs, c_Y), y), c_X), x), _cstride),
             c_val,
         )
         safe_offset = b_.select(valid, offset, b_.const_i32(0))
@@ -1389,6 +1438,7 @@ def _build_tilde_dgrad(
         c_Hi=c_Hi,
         c_Wi=c_Wi,
         c_C=c_C,
+        c_group_base=c_group_base,
     )
     use_cshuffle = spec.epilogue == "cshuffle"
     is_wmma = op.family == "wmma"
@@ -1418,6 +1468,7 @@ def _build_tilde_dgrad(
             c_Hi,
             c_Wi,
             c_C,
+            c_group_base=c_group_base,
         )
     elif not spec.is_strided:
         # stride=1, single sub-GEMM: compile-time stride-1 descriptor.
@@ -1430,6 +1481,7 @@ def _build_tilde_dgrad(
                     final_accs,
                     grid,
                     dx_rsrc,
+                    c_group_base=c_group_base,
                 )
             else:
                 _emit_dgrad_direct_epilogue_wmma(
@@ -1444,11 +1496,16 @@ def _build_tilde_dgrad(
                     block_n_off_v,
                     dx_rsrc,
                     c0,
+                    c_group_base=c_group_base,
                 )
         elif use_cshuffle:
-            _emit_dgrad_cshuffle_epilogue(b, spec, final_accs, grid, dx_rsrc)
+            _emit_dgrad_cshuffle_epilogue(
+                b, spec, final_accs, grid, dx_rsrc, c_group_base=c_group_base
+            )
         else:
-            _emit_dgrad_direct_epilogue(b, spec, final_accs, grid, dx_rsrc)
+            _emit_dgrad_direct_epilogue(
+                b, spec, final_accs, grid, dx_rsrc, c_group_base=c_group_base
+            )
     elif is_wmma:
         # stride>1, WMMA: runtime tilde addr_fn.
         if use_cshuffle:
@@ -1515,6 +1572,7 @@ def _emit_dgrad_tilde_atomic_epilogue(
     c_Hi: Value,
     c_Wi: Value,
     c_C: Value,
+    c_group_base: Optional[Value] = None,
 ) -> None:
     """Atomic-add epilogue for the tilde kernel.
 
@@ -1564,6 +1622,10 @@ def _emit_dgrad_tilde_atomic_epilogue(
             for i in range(c_per_lane):
                 c_m = b.add(atom_m_base, rows[i])
                 c_n = b.add(atom_n_base, cols[i])
+                # Absolute dX channel = g*cpg + c_n (group base is even, so the
+                # packed <2 x dtype> pair parity below is unchanged); bounds use
+                # the group-local c_n (< gemm_n = cpg).
+                c_n_off = b.add(c_n, c_group_base) if c_group_base is not None else c_n
 
                 # Decompose c_m (the M index) into (n, htl, wtl) at runtime
                 n_val = b.div(c_m, hw_tilde)
@@ -1585,7 +1647,7 @@ def _emit_dgrad_tilde_atomic_epilogue(
                 # NHWC offset: ((n * Hi + hi) * Wi + wi) * C + c
                 dx_offset = b.add(
                     b.mul(b.add(b.mul(b.add(b.mul(n_val, c_Hi), hi), c_Wi), wi), c_C),
-                    c_n,
+                    c_n_off,
                 )
 
                 val_f32 = b.vec_extract(acc, i)
@@ -1595,9 +1657,9 @@ def _emit_dgrad_tilde_atomic_epilogue(
                     elif dtype_d == "bf16":
                         val_cvt = b.trunc_f32_to_bf16(val_f32)
                         zero = b.trunc_f32_to_bf16(b.const_f32(0.0))
-                        c_n_is_odd = b.mod(c_n, b.const_i32(2))
+                        c_n_is_odd = b.mod(c_n_off, b.const_i32(2))
                         is_odd = b.cmp_ne(c_n_is_odd, b.const_i32(0))
-                        c_n_even = b.sub(c_n, c_n_is_odd)
+                        c_n_even = b.sub(c_n_off, c_n_is_odd)
                         off_even = b.add(
                             b.mul(
                                 b.add(b.mul(b.add(b.mul(n_val, c_Hi), hi), c_Wi), wi),
@@ -1612,9 +1674,9 @@ def _emit_dgrad_tilde_atomic_epilogue(
                     else:
                         val_cvt = b.trunc_f32_to_f16(val_f32)
                         zero = b.trunc_f32_to_f16(b.const_f32(0.0))
-                        c_n_is_odd = b.mod(c_n, b.const_i32(2))
+                        c_n_is_odd = b.mod(c_n_off, b.const_i32(2))
                         is_odd = b.cmp_ne(c_n_is_odd, b.const_i32(0))
-                        c_n_even = b.sub(c_n, c_n_is_odd)
+                        c_n_even = b.sub(c_n_off, c_n_is_odd)
                         off_even = b.add(
                             b.mul(
                                 b.add(b.mul(b.add(b.mul(n_val, c_Hi), hi), c_Wi), wi),
@@ -1634,13 +1696,17 @@ def _emit_dgrad_direct_epilogue(
     accs: Sequence[Value],
     grid: WarpGrid,
     dx_rsrc: Value,
+    c_group_base: Optional[Value] = None,
 ) -> None:
     """Per-lane scalar store to dX via the input-gradient descriptor."""
     p = spec.problem
     dX_desc = make_dgrad_dx_descriptor(p, dtype=spec.data.dtype_d)
 
     def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        return dX_desc.offset(b_, m=m_val, c=n_val)
+        # n_val is the group-local input channel (< cpg); the absolute NHWC
+        # channel is g*cpg + n_val.  Ungrouped: c_group_base is None → c = n_val.
+        c = b_.add(n_val, c_group_base) if c_group_base is not None else n_val
+        return dX_desc.offset(b_, m=m_val, c=c)
 
     DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
         b,
@@ -1663,6 +1729,7 @@ def _emit_dgrad_direct_epilogue_wmma(
     block_n_off: Value,
     dx_rsrc: Value,
     c0: Value,
+    c_group_base: Optional[Value] = None,
 ) -> None:
     """Per-lane store for the WMMA (gfx1151) accumulator layout into dX."""
     p = spec.problem
@@ -1702,7 +1769,8 @@ def _emit_dgrad_direct_epilogue_wmma(
                 ok = b.land(m_ok, n_ok)
 
                 v_f32 = b.vec_extract(acc, i)
-                dx_off_elems, _ = dX_desc.offset(b, m=m_val, c=n_val)
+                _c = b.add(n_val, c_group_base) if c_group_base is not None else n_val
+                dx_off_elems, _ = dX_desc.offset(b, m=m_val, c=_c)
                 dx_off_bytes = b.mul(dx_off_elems, b.const_i32(_elem_bytes))
                 safe_off = b.select(ok, dx_off_bytes, b.const_i32((1 << 31) - 1))
                 if _fp32_out:
@@ -1739,6 +1807,7 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
     c_Hi: Value,
     c_Wi: Value,
     c_C: Value,
+    c_group_base: Optional[Value] = None,
 ) -> None:
     """Per-lane tilde store for WMMA (gfx1151) accumulator layout into dX.
 
@@ -1787,10 +1856,11 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
                 wi_ok = b.land(b.cmp_ge(wi, c0), b.cmp_lt(wi, c_Wi))
                 ok = b.land(b.land(m_ok, n_ok), b.land(hi_ok, wi_ok))
 
-                # NHWC offset: ((n_batch*Hi + hi)*Wi + wi)*C + c
+                # NHWC offset: ((n_batch*Hi + hi)*Wi + wi)*C + c_abs
+                _c = b.add(n_val, c_group_base) if c_group_base is not None else n_val
                 _o = b.add(
                     b.mul(b.add(b.mul(b.add(b.mul(n_batch, c_Hi), hi), c_Wi), wi), c_C),
-                    n_val,
+                    _c,
                 )
                 dx_off_bytes = b.mul(_o, b.const_i32(_elem_bytes))
                 safe_off = b.select(ok, dx_off_bytes, b.const_i32((1 << 31) - 1))
@@ -1810,8 +1880,9 @@ def _dgrad_store_vec(spec: DgradConvSpec) -> int:
     """Deduce max_store_vec for dX (last dim = C) mirroring default_vector_sizes."""
     if spec.vector_size_c is not None:
         return spec.vector_size_c
+    # dX (NHWC) channel run within one conv group is cpg (== C when ungrouped).
     _, __, vec_c = DgradConvSpec.default_vector_sizes(
-        spec.problem.C, spec.problem.K, spec.data.dtype_d
+        spec.problem.cpg, spec.problem.kpg, spec.data.dtype_d
     )
     return vec_c
 
@@ -1819,13 +1890,15 @@ def _dgrad_store_vec(spec: DgradConvSpec) -> int:
 def _dgrad_stride1_dx_addr(
     b: IRBuilder,
     spec: DgradConvSpec,
+    c_group_base: Optional[Value] = None,
 ) -> tuple:
     """Return (addr_fn, bounds) for the stride-1 dX descriptor."""
     p = spec.problem
     dX_desc = make_dgrad_dx_descriptor(p, dtype=spec.data.dtype_d)
 
     def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        return dX_desc.offset(b_, m=m_val, c=n_val)
+        c = b_.add(n_val, c_group_base) if c_group_base is not None else n_val
+        return dX_desc.offset(b_, m=m_val, c=c)
 
     bounds = (b.const_i32(_dg_M(p)), b.const_i32(_dg_N(p)))
     return dx_addr, bounds
@@ -1838,9 +1911,10 @@ def _emit_dgrad_cshuffle_epilogue_wmma(
     accs: Sequence[Value],
     grid: WarpGrid,
     dx_rsrc: Value,
+    c_group_base: Optional[Value] = None,
 ) -> None:
     """WMMA cshuffle epilogue for stride=1 dX (uses from_grid_op)."""
-    dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec)
+    dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, c_group_base)
     CShuffleEpilogue.from_grid_op(
         op=op,
         grid=grid,
@@ -1855,9 +1929,10 @@ def _emit_dgrad_cshuffle_epilogue(
     accs: Sequence[Value],
     grid: WarpGrid,
     dx_rsrc: Value,
+    c_group_base: Optional[Value] = None,
 ) -> None:
     """MFMA cshuffle epilogue for stride=1 dX."""
-    dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec)
+    dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, c_group_base)
     CShuffleEpilogue.from_grid(
         atom=spec.atom,
         grid=grid,
@@ -1885,6 +1960,7 @@ def _tilde_dx_addr_fn(
     c_Hi: Value,
     c_Wi: Value,
     c_C: Value,
+    c_group_base: Optional[Value] = None,
 ):
     """Compute NHWC element offset + hi/wi validity for the tilde epilogues.
 
@@ -1919,7 +1995,9 @@ def _tilde_dx_addr_fn(
     _o2 = b.mul(_o1, c_Wi)
     _o3 = b.add(_o2, wi)
     _o4 = b.mul(_o3, c_C)
-    offset = b.add(_o4, n_global)
+    # Absolute NHWC channel = g*cpg + n_global (ungrouped: c_group_base is None).
+    _n = b.add(n_global, c_group_base) if c_group_base is not None else n_global
+    offset = b.add(_o4, _n)
 
     # Return raw element offset (no sentinel select here).
     # DirectEpilogue/CShuffleEpilogue apply the sentinel via hw_ok (the valid flag),
@@ -1946,6 +2024,7 @@ def _emit_dgrad_tilde_direct_epilogue(
     c_Hi: Value,
     c_Wi: Value,
     c_C: Value,
+    c_group_base: Optional[Value] = None,
 ) -> None:
     """Scalar (per-element) direct store for the tilde non-atomic path.
 
@@ -1966,6 +2045,7 @@ def _emit_dgrad_tilde_direct_epilogue(
             c_Hi,
             c_Wi,
             c_C,
+            c_group_base,
         )
         return offset, hw_ok
 
@@ -1998,6 +2078,7 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
     c_Hi: Value,
     c_Wi: Value,
     c_C: Value,
+    c_group_base: Optional[Value] = None,
 ) -> None:
     """LDS-staged wide store for the tilde non-atomic path.
 
@@ -2021,6 +2102,7 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
             c_Hi,
             c_Wi,
             c_C,
+            c_group_base,
         )
         return offset, hw_ok
 
