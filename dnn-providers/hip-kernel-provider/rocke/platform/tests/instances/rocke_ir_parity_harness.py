@@ -255,13 +255,16 @@ def build_dgrad(
     return _build
 
 
-def build_conv_wgrad_reduce(name, arch, wg_M, wg_N, dtype_d="fp16", tile_m=4, tile_n=64):
+def build_conv_wgrad_reduce(
+    name, arch, wg_M, wg_N, dtype_d="fp16", tile_m=4, tile_n=64
+):
     """Build a workspace-reduce (Stage 2) kernel for the two-stage deterministic wgrad.
 
     ``wg_M`` = K (output channels), ``wg_N`` = Y*X*C (filter spatial × input channel).
     A minimal ConvProblem with Y=1, X=1, C=wg_N, K=wg_M is used solely to satisfy
     WgradReduceSpec's requirement for a ConvProblem (it only reads wg_M/wg_N from it).
     """
+
     def _build():
         from rocke.instances.common.conv_wgrad_workspace_reduce import (
             WgradReduceSpec,
