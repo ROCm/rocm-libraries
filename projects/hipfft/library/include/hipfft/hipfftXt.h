@@ -101,7 +101,8 @@ typedef void (*hipfftCallbackStoreD)(
    * @param[in] cbtype Type of callback being set.
    * @param[in] callbackData Array of callback function data pointers
    */
-HIPFFT_DEPRECATED_MSG("Use hipfftXtSetJITCallback instead.")
+HIPFFT_DEPRECATED_MSG(
+    "Function pointer callbacks are deprecated; use hipfftXtSetJITCallback for JIT callbacks.")
 HIPFFT_EXPORT hipfftResult hipfftXtSetCallback(hipfftHandle         plan,
                                                void**               callbacks,
                                                hipfftXtCallbackType cbtype,
@@ -114,7 +115,8 @@ HIPFFT_EXPORT hipfftResult hipfftXtSetCallback(hipfftHandle         plan,
    * @param[in] plan The FFT plan.
    * @param[in] cbtype Type of callback being removed.
    */
-HIPFFT_DEPRECATED_MSG("Use hipfftXtSetJITCallback instead.")
+HIPFFT_DEPRECATED_MSG(
+    "Function pointer callbacks are deprecated; use hipfftXtSetJITCallback for JIT callbacks.")
 HIPFFT_EXPORT hipfftResult hipfftXtClearCallback(hipfftHandle plan, hipfftXtCallbackType cbtype);
 
 /*! @brief Set shared memory size for callback.
@@ -169,6 +171,10 @@ typedef void (*hipfftJITCallbackStoreD)(
    *
    *  Note: JIT callbacks cannot currently be used on multi-GPU transforms.
    *  This support will be added in a future release of hipFFT.
+   *
+   * JIT callbacks can be cleared from the plan by passing nullptr
+   * for `symbol_name` and `bitcode_data`, and 0 for
+   * `bitcode_len_bytes`.
    *
    * `cbdata` is an optional array of pointers of data that is passed
    * to the callback function.  As JIT callbacks are currently only

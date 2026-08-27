@@ -34,7 +34,8 @@ Documentation for hipFFT is available at
 
 * The `hipfftXtSetCallback` and `hipfftXtClearCallback` APIs are now deprecated and will be removed in a future
   release.  They allow for specifying callbacks as device function pointers at plan execution time, but rocFFT cannot
-  optimize the combined code.  Instead, users should specify JIT callbacks on plan descriptions.
+  optimize the combined code.  Instead, users should specify JIT callbacks with `hipfftXtSetJITCallback` before
+  initializing the plan.
 
 ## hipFFT 1.0.25 for ROCm 10.0
 

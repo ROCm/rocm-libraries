@@ -1399,12 +1399,12 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     }
 
     // if JIT callbacks are used, pass the cbdata to the execution info
-    if(plan->load_callback.jit_enabled())
+    if(plan->load_callback.jit_enabled() && plan->load_callback.data)
     {
         ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_load_callback_data(
             plan->info, plan->load_callback.data, plan->device_contexts.size()));
     }
-    if(plan->store_callback.jit_enabled())
+    if(plan->store_callback.jit_enabled() && plan->store_callback.data)
     {
         ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_store_callback_data(
             plan->info, plan->store_callback.data, plan->device_contexts.size()));
@@ -2257,6 +2257,12 @@ try
     if(!plan)
         return HIPFFT_INVALID_PLAN;
 
+    // Return an error if we're neither clearing callbacks nor setting
+    // symbol + bitcode together.
+    if(!(!symbol_name && !bitcode_data && !bitcode_len_bytes)
+       && !(symbol_name && bitcode_data && bitcode_len_bytes))
+        return HIPFFT_INVALID_VALUE;
+
     switch(cbtype)
     {
     case HIPFFT_CB_LD_COMPLEX:
@@ -2264,8 +2270,11 @@ try
     case HIPFFT_CB_LD_REAL:
     case HIPFFT_CB_LD_REAL_DOUBLE:
     {
-        plan->load_callback.type   = cbtype;
-        plan->load_callback.symbol = symbol_name;
+        plan->load_callback.type = cbtype;
+        if(symbol_name)
+            plan->load_callback.symbol = symbol_name;
+        else
+            plan->load_callback.symbol.clear();
         plan->load_callback.bitcode.assign(static_cast<const char*>(bitcode_data),
                                            static_cast<const char*>(bitcode_data)
                                                + bitcode_len_bytes);
@@ -2277,8 +2286,11 @@ try
     case HIPFFT_CB_ST_REAL:
     case HIPFFT_CB_ST_REAL_DOUBLE:
     {
-        plan->store_callback.type   = cbtype;
-        plan->store_callback.symbol = symbol_name;
+        plan->store_callback.type = cbtype;
+        if(symbol_name)
+            plan->store_callback.symbol = symbol_name;
+        else
+            plan->store_callback.symbol.clear();
         plan->store_callback.bitcode.assign(static_cast<const char*>(bitcode_data),
                                             static_cast<const char*>(bitcode_data)
                                                 + bitcode_len_bytes);
