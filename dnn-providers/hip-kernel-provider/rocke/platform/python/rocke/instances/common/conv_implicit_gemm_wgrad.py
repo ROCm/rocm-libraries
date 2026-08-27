@@ -431,12 +431,12 @@ class WgradConvSpec:
         if self.split_k == 0 or self.split_k > 1:
             if self.data.dtype_d not in ("fp32", "bf16", "fp16"):
                 raise ValueError(
-                    f"split_k > 1 requires dtype_d in fp32/bf16/fp16 "
+                    f"split_k atomic requires dtype_d in fp32/bf16/fp16 "
                     f"(got {self.data.dtype_d!r})"
                 )
             if self.data.dtype_d in ("bf16", "fp16") and self.problem.cpg % 2 != 0:
                 raise ValueError(
-                    f"split_k > 1 with dtype_d={self.data.dtype_d!r} requires even cpg "
+                    f"split_k atomic with dtype_d={self.data.dtype_d!r} requires even cpg "
                     f"(packed <2 x dtype> atomic pairs must stay within one filter "
                     f"position; the packed dW inner dim is cpg=C/groups); "
                     f"got cpg={self.problem.cpg} (C={self.problem.C}, groups={self.problem.groups})"
@@ -482,8 +482,9 @@ class WgradConvSpec:
           B (X):   NHWC → last dim C → vec_b
           D (dW):  KYXC → last dim C → vec_c
 
-        When ``split_k > 1`` the epilogue is ``default`` (direct scalar store),
-        which does not support vec_c > 1, so vec_c is forced to 1.
+        When ``split_k != 1`` (including ``split_k == 0`` for runtime selection)
+        the epilogue is ``default`` (direct scalar store), which does not support
+        vec_c > 1, so vec_c is forced to 1.
         """
         sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
 
@@ -727,6 +728,7 @@ def build_implicit_gemm_conv_wgrad(
 
     _is_split_k = spec.split_k > 1 or spec.split_k == 0
     _split_k_runtime = spec.split_k == 0  # ks passed as kernel arg at launch
+    _grouped = p_load.groups > 1
 
     b = IRBuilder(spec.kernel_name())
     if spec.waves_per_eu is not None:
@@ -757,7 +759,12 @@ def build_implicit_gemm_conv_wgrad(
     dW_bytes = b.param("dW_bytes", I32)
     # Runtime split-K: ks = slice width per CTA, computed and passed by the launcher.
     # Only present when split_k == 0; fixed-degree kernels bake ks as a constant.
+    # ks_count = number of slices; only needed when grouped+runtime so the kernel
+    # can decode (group, slice) from block_id_z = group*ks_count + slice.
     _ks_param = b.param("ks", I32) if _split_k_runtime else None
+    _ks_count_param = (
+        b.param("ks_count", I32) if (_split_k_runtime and _grouped) else None
+    )
 
     op = _resolve_wgrad_op(spec, arch)
     atom = spec.atom if op.family == "mma" else None
@@ -798,11 +805,12 @@ def build_implicit_gemm_conv_wgrad(
     # matching forward).  When split_k>1 the group and the K-slice SHARE the z
     # axis: the grid launches z = groups*split_k and every CTA decodes
     # ``group = block_id_z // split_k`` and ``slice = block_id_z % split_k``.
+    # split_k==0 (runtime): same scheme but split_k degree is runtime; the kernel
+    # receives ``ks_count`` (the degree) as an extra arg alongside ``ks`` (slice
+    # width) so both div and mod can be emitted.  Grid: z = groups * ks_count.
     # ``group_v`` stays None on the ungrouped path so all groups==1 IR is
     # byte-identical to the pre-grouped kernel.
-    # split_k == 0 (runtime): grouped+split_k is not yet supported; the validator
-    # enforces groups==1 when split_k_runtime=True.
-    grouped = p_load.groups > 1
+    grouped = _grouped
     group_v = None
     if grouped:
         c_kpg = b.const_i32(p_load.kpg)  # kpg: dY output-channel slab stride
@@ -812,12 +820,19 @@ def build_implicit_gemm_conv_wgrad(
     # Split-K K-slice bounds.  K_wg is padded so every slice is exactly ks
     # elements wide and ks % tile_k == 0.  OOB loads return 0 via buffer clamp.
     # split_k == 1: k_lo = 0, k_hi = None (loop runs to c_wg_K, unpadded).
-    # split_k == 0: ks is a runtime kernel arg; k_lo/k_hi computed at runtime.
+    # split_k == 0: ks/ks_count are runtime kernel args; k_lo/k_hi computed at runtime.
     # split_k > 1: ks is a compile-time constant.
     if _is_split_k:
         if _split_k_runtime:
             c_ks = _ks_param  # runtime i32 from kernel arg
-            k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
+            if grouped:
+                # z = group * ks_count + slice; decode both at runtime.
+                z_id = b.block_id_z()
+                group_v = b.to_sgpr_u32(b.div(z_id, _ks_count_param))
+                slice_id = b.mod(z_id, _ks_count_param)
+                k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
+            else:
+                k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
         else:
             wg_K_padded = spec.wg_K_padded()
             c_ks = b.const_i32(wg_K_padded // spec.split_k)
