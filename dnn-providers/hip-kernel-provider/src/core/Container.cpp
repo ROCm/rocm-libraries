@@ -212,7 +212,7 @@ Container::Container()
         // engine that declines everything.
         if(auto engine = engineDefinition.createEngine(*_devicePropertyProvider))
         {
-            _engineManager->addEngine(std::move(engine));
+            _engineManager->addEngine(std::move(engine), engineDefinition.name);
         }
     }
 }
