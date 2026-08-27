@@ -84,8 +84,7 @@ EXECUTION_SPECIFIER inline uchar float_to_bfp8(float x)
 #undef MIOPEN_FP8_TYPE
 #undef MIOPEN_FP8_SATURATION
 #else
-// TODO: Remove the following
-// functions which are rewrites of the f8 header impl functions
+// Software fallback when the configured FP8 interpretation is unavailable in HIP.
 typedef union
 {
     float fp32;
@@ -120,7 +119,9 @@ EXECUTION_SPECIFIER float fp8_to_float_impl(uchar x, const int wm, const int we)
     {
         if(x == 0x80)
             return fNeg0.fp32;
-        if(exponent == ((1 << we) - 1))
+        if(we == 4 && (x & 0x7F) == 0x7F)
+            return fNaN.fp32;
+        if(we == 5 && exponent == ((1 << we) - 1))
             return (mantissa == 0) ? (sign ? fNegInf.fp32 : fInf.fp32) : fNaN.fp32;
     }
     cvt_fp8_fp32_t retval;
@@ -189,23 +190,44 @@ float_to_fp8_impl(float _x, const int wm, const int we) // bool stoch, uint rng)
     exponent = (head >> 23) & 0xFF;
     sign     = head >> 31;
 
-    uint signed_inf = (sign << 7) + (((1 << we) - 1) << wm);
+    uint signed_inf;
+    uint nan;
+    if(negative_zero_nan)
+    {
+        signed_inf = clip ? (sign << 7) + 0x7F : 0x80;
+        nan        = 0x80;
+    }
+    else if(we == 4)
+    {
+        signed_inf = (sign << 7) + (clip ? 0x7E : 0x7F);
+        nan        = (sign << 7) + 0x7F;
+    }
+    else
+    {
+        signed_inf = (sign << 7) + (clip ? 0x7B : 0x7C);
+        nan        = (sign << 7) + 0x7F;
+    }
 
     if(negative_zero_nan)
     {
         if((x & 0x7F800000) == 0x7F800000)
-            return 0x80;
+            return nan;
     }
     else
     {
         if((x & 0x7F800000) == 0x7F800000)
-            return signed_inf + (mantissa != 0 ? 1 : 0);
+        {
+            if(we == 4 || mantissa != 0)
+                return nan;
+            return sign == 0 ? 0x7C : 0xFC;
+        }
     }
     if(x == 0)
         return 0;
 
     uint drop_mask           = (1 << (mfmt - wm)) - 1;
-    const int max_exp        = (1 << we) - (negative_zero_nan ? 1 : 2);
+    const int max_exp =
+        (1 << we) - ((!negative_zero_nan && we == 5) ? 2 : 1);
     const int exp_low_cutoff = (128) - (1 << (we - 1)) + 1 - (negative_zero_nan ? 1 : 0);
 
     exponent -= exp_low_cutoff - 1;
@@ -237,7 +259,7 @@ float_to_fp8_impl(float _x, const int wm, const int we) // bool stoch, uint rng)
     {
         if(clip)
         {
-            mantissa = (1 << wm) - 1;
+            mantissa = (!negative_zero_nan && we == 4) ? (1 << wm) - 2 : (1 << wm) - 1;
             exponent = max_exp;
         }
         else
@@ -247,6 +269,9 @@ float_to_fp8_impl(float _x, const int wm, const int we) // bool stoch, uint rng)
     }
     if(exponent == 0 && mantissa == 0)
         return negative_zero_nan ? 0 : (sign << 7);
+    if(clip && !negative_zero_nan && we == 4 && exponent == max_exp &&
+       mantissa == (1 << wm) - 1)
+        mantissa--;
     mantissa &= (1 << wm) - 1;
     return (sign << 7) | (exponent << wm) | mantissa;
 }

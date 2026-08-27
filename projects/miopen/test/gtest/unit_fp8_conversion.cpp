@@ -10,6 +10,8 @@
 #include <miopen/handle.hpp>
 
 #include <array>
+#include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -17,14 +19,21 @@
 
 namespace {
 
-constexpr std::size_t value_count = 5;
+constexpr std::size_t value_count = 7;
+
+struct ConversionData
+{
+    std::array<float, value_count> input;
+    std::array<unsigned char, value_count> encoded;
+    std::array<float, value_count> decoded;
+};
 
 struct Fp8Format
 {
     std::string name;
     int ieee_exponent_bias;
-    std::array<unsigned char, value_count> fp8;
-    std::array<unsigned char, value_count> bfp8;
+    ConversionData fp8;
+    ConversionData bfp8;
 };
 
 std::string GetKernelSource()
@@ -41,7 +50,7 @@ extern "C" __global__ void fp8_conversion_test(const float* input,
                                                  float* fp8_output,
                                                  float* bfp8_output)
 {
-    for(unsigned int i = 0; i < 5; ++i)
+    for(unsigned int i = 0; i < 7; ++i)
     {
         fp8[i]        = float_to_fp8(input[i]);
         bfp8[i]       = float_to_bfp8(input[i]);
@@ -60,7 +69,8 @@ enum class Fp8Type
 
 void TestConversions(const Fp8Format& format, bool force_software_fallback, Fp8Type fp8_type)
 {
-    const std::vector<float> input = {0.0f, 0.5f, 1.0f, 2.0f, -1.0f};
+    const auto& data = fp8_type == Fp8Type::Fp8 ? format.fp8 : format.bfp8;
+    const std::vector<float> input(data.input.begin(), data.input.end());
     const std::vector<unsigned char> empty_bytes(value_count);
     const std::vector<float> empty_floats(value_count);
 
@@ -92,22 +102,52 @@ void TestConversions(const Fp8Format& format, bool force_software_fallback, Fp8T
     if(fp8_type == Fp8Type::Fp8)
     {
         EXPECT_EQ(handle.Read<unsigned char>(fp8_dev, value_count),
-                  std::vector<unsigned char>(format.fp8.begin(), format.fp8.end()));
-        EXPECT_EQ(handle.Read<float>(fp8_out_dev, value_count), input);
+                  std::vector<unsigned char>(data.encoded.begin(), data.encoded.end()));
     }
     else
     {
         EXPECT_EQ(handle.Read<unsigned char>(bfp8_dev, value_count),
-                  std::vector<unsigned char>(format.bfp8.begin(), format.bfp8.end()));
-        EXPECT_EQ(handle.Read<float>(bfp8_out_dev, value_count), input);
+                  std::vector<unsigned char>(data.encoded.begin(), data.encoded.end()));
+    }
+
+    const auto output = fp8_type == Fp8Type::Fp8
+                            ? handle.Read<float>(fp8_out_dev, value_count)
+                            : handle.Read<float>(bfp8_out_dev, value_count);
+    for(std::size_t i = 0; i < value_count; ++i)
+    {
+        SCOPED_TRACE("value index " + std::to_string(i));
+        if(std::isnan(data.decoded[i]))
+            EXPECT_TRUE(std::isnan(output[i]));
+        else
+            EXPECT_EQ(output[i], data.decoded[i]);
+
+        if(data.decoded[i] == 0.0f)
+            EXPECT_EQ(std::signbit(output[i]), std::signbit(data.decoded[i]));
     }
 }
 
 void TestFormats(Fp8Type fp8_type)
 {
+    constexpr auto inf = std::numeric_limits<float>::infinity();
+    constexpr auto nan = std::numeric_limits<float>::quiet_NaN();
+    constexpr auto max = std::numeric_limits<float>::max();
     const std::array<Fp8Format, 2> formats = {
-        Fp8Format{"fnuz", 0, {0x00, 0x38, 0x40, 0x48, 0xC0}, {0x00, 0x3C, 0x40, 0x44, 0xC0}},
-        Fp8Format{"ieee", 1, {0x00, 0x30, 0x38, 0x40, 0xB8}, {0x00, 0x38, 0x3C, 0x40, 0xBC}}};
+        Fp8Format{"fnuz",
+                  0,
+                  {{1.1f, -1.1f, 0x1p-10f, max, inf, nan, -0.0f},
+                   {0x41, 0xC1, 0x01, 0x7F, 0x80, 0x80, 0x00},
+                   {1.125f, -1.125f, 0x1p-10f, 240.0f, nan, nan, 0.0f}},
+                  {{1.1f, -1.1f, 0x1p-17f, max, inf, nan, -0.0f},
+                   {0x40, 0xC0, 0x01, 0x7F, 0x80, 0x80, 0x00},
+                   {1.0f, -1.0f, 0x1p-17f, 57344.0f, nan, nan, 0.0f}}},
+        Fp8Format{"ieee",
+                  1,
+                  {{1.1f, -1.1f, 0x1p-9f, max, inf, nan, -0.0f},
+                   {0x39, 0xB9, 0x01, 0x7E, 0x7F, 0x7F, 0x80},
+                   {1.125f, -1.125f, 0x1p-9f, 448.0f, nan, nan, -0.0f}},
+                  {{1.1f, -1.1f, 0x1p-16f, max, inf, nan, -0.0f},
+                   {0x3C, 0xBC, 0x01, 0x7B, 0x7C, 0x7D, 0x80},
+                   {1.0f, -1.0f, 0x1p-16f, 57344.0f, inf, nan, -0.0f}}}};
 
     for(const auto& format : formats)
     {
