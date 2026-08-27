@@ -163,12 +163,45 @@ CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_row_major_lds_descriptor()
 template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
 struct QrTdmLdsArenaLayout;
 
+inline constexpr bool is_qr_tdm_padding_supported_arch_v =
+#if(defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)) || \
+    (!defined(__HIP_DEVICE_COMPILE__) && defined(CK_USE_GFX1250))
+    true;
+#else
+    false;
+#endif
+
 template <typename Problem>
+inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
+    is_qr_tdm_padding_supported_arch_v &&
+    ((std::is_same_v<typename Problem::QDataType, bf16_t> &&
+      std::is_same_v<typename Problem::KDataType, bf16_t> &&
+      std::is_same_v<typename Problem::VDataType, bf16_t>) ||
+     (std::is_same_v<typename Problem::QDataType, half_t> &&
+      std::is_same_v<typename Problem::KDataType, half_t> &&
+      std::is_same_v<typename Problem::VDataType, half_t>)) &&
+     Problem::BlockFmhaShape::kQKHeaddim == 128 &&
+     Problem::BlockFmhaShape::kN1 == 128 &&
+     numeric_traits<typename Problem::QDataType>::PackedSize == 1 &&
+     numeric_traits<typename Problem::KDataType>::PackedSize == 1 &&
+     numeric_traits<typename Problem::VDataType>::PackedSize == 1;
+
+template <typename Problem,
+          bool Enabled = is_qr_tdm_padding_enabled_problem_v<Problem>,
+          bool Prefill = (Problem::BlockFmhaShape::kM0 > 64)>
 struct QrTdmPaddingSelection
 {
     using Q = LdsPaddingConfig<false, 0, 0>;
     using K = LdsPaddingConfig<false, 0, 0>;
     using V = LdsPaddingConfig<false, 0, 0>;
+};
+
+template <typename Problem, bool Prefill>
+struct QrTdmPaddingSelection<Problem, true, Prefill>
+{
+    using Q = LdsPaddingConfig<false, 0, 0>;
+    using K = LdsPaddingConfig<true, 256, 16>;
+    using V = LdsPaddingConfig<true, 256, 32>;
 };
 
 } // namespace detail

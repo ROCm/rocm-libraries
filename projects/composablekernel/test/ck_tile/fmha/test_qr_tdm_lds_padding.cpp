@@ -14,6 +14,18 @@ using QKPad = ck_tile::detail::LdsPaddingConfig<true, 256, 16>;
 using VPad  = ck_tile::detail::LdsPaddingConfig<true, 256, 32>;
 using NoPad = ck_tile::detail::LdsPaddingConfig<false, 0, 0>;
 
+#if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__gfx125__)
+static_assert(ck_tile::detail::is_qr_tdm_padding_supported_arch_v);
+#else
+static_assert(!ck_tile::detail::is_qr_tdm_padding_supported_arch_v);
+#endif
+#elif defined(CK_USE_GFX1250)
+static_assert(ck_tile::detail::is_qr_tdm_padding_supported_arch_v);
+#else
+static_assert(!ck_tile::detail::is_qr_tdm_padding_supported_arch_v);
+#endif
+
 template <typename DataType, typename Descriptor>
 constexpr ck_tile::index_t
 byte_offset(const Descriptor& descriptor, ck_tile::index_t row, ck_tile::index_t col)
@@ -85,6 +97,62 @@ using TestFmhaProblem =
                                       ck_tile::SimplifiedGenericAttentionMask<false>,
                                       false,
                                       TestFmhaTraits>;
+
+template <typename BaseProblem, typename QDataType_, typename KDataType_, typename VDataType_>
+struct TestProblemWithDataTypes : BaseProblem
+{
+    using QDataType = QDataType_;
+    using KDataType = KDataType_;
+    using VDataType = VDataType_;
+};
+
+template <typename BaseShape, ck_tile::index_t QKHeadDim, ck_tile::index_t VHeadDim>
+struct TestShapeWithHeadDims : BaseShape
+{
+    static constexpr ck_tile::index_t kQKHeaddim = QKHeadDim;
+    static constexpr ck_tile::index_t kN1        = VHeadDim;
+};
+
+template <typename BaseProblem, typename Shape>
+struct TestProblemWithShape : BaseProblem
+{
+    using BlockFmhaShape = Shape;
+};
+
+template <typename Selection>
+constexpr bool is_disabled_selection()
+{
+    return std::is_same_v<typename Selection::Q, NoPad> &&
+           std::is_same_v<typename Selection::K, NoPad> &&
+           std::is_same_v<typename Selection::V, NoPad>;
+}
+
+using SelectionBaseProblem = TestFmhaProblem<ck_tile::half_t, 128>;
+using MixedTypeProblem = TestProblemWithDataTypes<SelectionBaseProblem,
+                                                  ck_tile::half_t,
+                                                  ck_tile::bf16_t,
+                                                  ck_tile::half_t>;
+using FloatProblem =
+    TestProblemWithDataTypes<SelectionBaseProblem, float, float, float>;
+using PackedProblem = TestProblemWithDataTypes<SelectionBaseProblem,
+                                               ck_tile::pk_fp4_t,
+                                               ck_tile::pk_fp4_t,
+                                               ck_tile::pk_fp4_t>;
+using QK64Shape = TestShapeWithHeadDims<TestFmhaShape<128>, 64, 128>;
+using V64Shape  = TestShapeWithHeadDims<TestFmhaShape<128>, 128, 64>;
+using QK64Problem = TestProblemWithShape<SelectionBaseProblem, QK64Shape>;
+using V64Problem  = TestProblemWithShape<SelectionBaseProblem, V64Shape>;
+
+static_assert(
+    is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<MixedTypeProblem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<FloatProblem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<PackedProblem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<QK64Problem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<V64Problem>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<SelectionBaseProblem, false, false>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<SelectionBaseProblem, false, true>>());
 
 static_assert(ck_tile::detail::is_valid_lds_padding_config_v<true, 256, 16>);
 static_assert(ck_tile::detail::is_valid_lds_padding_config_v<true, 256, 32>);
@@ -327,15 +395,16 @@ constexpr bool validate_policy_coupling()
     constexpr auto v_desc = Policy::template MakeVLdsBlockDescriptor<Problem>();
 
     static_assert(std::is_same_v<QConfig, NoPad>);
-    static_assert(std::is_same_v<KConfig, NoPad>);
-    static_assert(std::is_same_v<VConfig, NoPad>);
+    static_assert(std::is_same_v<KConfig, QKPad>);
+    static_assert(std::is_same_v<VConfig, VPad>);
     static_assert(!QRaw::kEnabled && QRaw::kPadInterval == 0 && QRaw::kPadAmount == 0);
-    static_assert(!KRaw::kEnabled && KRaw::kPadInterval == 0 && KRaw::kPadAmount == 0);
-    static_assert(!VRaw::kEnabled && VRaw::kPadInterval == 0 && VRaw::kPadAmount == 0);
+    static_assert(KRaw::kEnabled && KRaw::kPadInterval == 5 && KRaw::kPadAmount == 3);
+    static_assert(VRaw::kEnabled && VRaw::kPadInterval == 5 && VRaw::kPadAmount == 7);
     static_assert(q_desc.calculate_offset(ck_tile::make_tuple(1, 0)) == 128);
-    static_assert(k_desc.get_element_space_size() == (M > 64 ? 64 * 128 : 64 * 32));
-    static_assert(v_desc.get_element_space_size() == 64 * 128);
-    static_assert(Layout::kArenaBytes == (M > 64 ? 65536 : 20480));
+    static_assert(k_desc.get_element_space_size() * sizeof(DataType) ==
+                  (M > 64 ? 17392 : 4336));
+    static_assert(v_desc.get_element_space_size() * sizeof(DataType) == 18400);
+    static_assert(Layout::kArenaBytes == (M > 64 ? 71680 : 22784));
 
     using EnabledQ = ck_tile::detail::LdsPaddingConfig<true, 256, 16>;
     using EnabledRaw = ck_tile::detail::EncodedTdmPadding<EnabledQ>;
@@ -353,10 +422,21 @@ constexpr bool validate_policy_coupling()
     return true;
 }
 
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 128>());
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 64>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 128>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64>());
+#else
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<
+              TestFmhaProblem<ck_tile::bf16_t, 128>>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<
+              TestFmhaProblem<ck_tile::bf16_t, 64>>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<
+              TestFmhaProblem<ck_tile::half_t, 128>>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<
+              TestFmhaProblem<ck_tile::half_t, 64>>>());
+#endif
 
 using DispatchProblem = TestFmhaProblem<ck_tile::half_t, 128>;
 static_assert(ck_tile::detail::uses_qr_tdm_lds_arena_v<
