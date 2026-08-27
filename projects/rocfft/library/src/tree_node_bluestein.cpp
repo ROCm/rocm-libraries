@@ -154,7 +154,7 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     }
     case BT_MULTI_KERNEL_FUSED:
     {
-        // Guard against inner-batched layouts so a removed DecideBlueType check fails here, not at runtime.
+        // Guard against inner-batched layouts so a removed DecideBlueType check fails here.
         if(is_inner_batched(batch, inStride, iDist, outStride, oDist))
             throw std::runtime_error("fused Bluestein cannot represent inner-batched layouts");
 
