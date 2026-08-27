@@ -17,6 +17,14 @@ const std::vector<IngestorPack>& ingestorPacks()
         // No kpack archive: its kernels are embedded_source, so there is no module to
         // drop and nothing for a reset to do.
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, nullptr},
+        // Packaged/kpack: its kernels are lowered rocKE builders resolved out of the
+        // per-arch .kpack archive, so it owns a module cache the reset sweep must
+        // reach. The generator's fragment emitted `nullptr` in this slot; that would
+        // have left this pack out of resetIngestorModuleCachesForTesting() while its
+        // own fragment header states the rule that says otherwise.
+        {"hipkernel:Gfx942AttentionDense",
+         &registerGfx942AttentionDenseSymbols,
+         &resetGfx942AttentionDenseModuleCache},
     };
     return s_packs;
 }
