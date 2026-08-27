@@ -95,8 +95,9 @@ struct DAGNode {
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };
 
-// A hard scheduling edge: first must be issued before second.
-using SchedulingDependency = std::pair<StinkyInstruction*, StinkyInstruction*>;
+// A scheduler-only hard ordering constraint: first must issue before second.
+// It is kept separate from the register-dependency DAG.
+using HardSchedulingConstraint = std::pair<StinkyInstruction*, StinkyInstruction*>;
 
 // comparator: return true if a should come *after* b.
 struct CompareByDAGid {
@@ -165,11 +166,11 @@ class ReadyQueue {
     // (prefix [blockBegin, regionStart) is visible for cross-region / preloop state).
     virtual void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
                               IRList::iterator blockBegin,
-                              std::vector<SchedulingDependency>& additionalDependencies) {
+                              std::vector<HardSchedulingConstraint>& hardConstraints) {
         (void)regionStart;
         (void)regionEnd;
         (void)blockBegin;
-        (void)additionalDependencies;
+        (void)hardConstraints;
     }
 
     // Hook called after a basic block has been fully scheduled. When the queue is

@@ -594,7 +594,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
                       IRList::iterator blockBegin,
-                      std::vector<SchedulingDependency>& additionalDependencies) override;
+                      std::vector<HardSchedulingConstraint>& hardConstraints) override;
 
     void onFinishBB() override;
 };
@@ -1867,7 +1867,7 @@ void CDNA5ReadyQueue::onFinishBB() {
 // Barrier thresholds: computeBarrierAfterThresholds / computeBarrierBeforeThresholds.
 void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
                                    IRList::iterator blockBegin,
-                                   std::vector<SchedulingDependency>& additionalDependencies) {
+                                   std::vector<HardSchedulingConstraint>& hardConstraints) {
     wmmaIssuedCountThisRegion_ = 0;
     dsInsertedSinceLastWmma_ = 0;
     lastPickedNode_ = nullptr;
@@ -2018,7 +2018,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     // which threshold-adjustment branch above was taken.
                     for (StinkyInstruction* barrierAfter : afterGroup.barriers) {
                         for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
-                            additionalDependencies.emplace_back(barrierAfter, barrierBefore);
+                            hardConstraints.emplace_back(barrierAfter, barrierBefore);
                         }
                     }
 
@@ -2040,7 +2040,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     }
                     for (StinkyInstruction* tensorLoad : descendantTensorLoads) {
                         for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
-                            additionalDependencies.emplace_back(tensorLoad, barrierBefore);
+                            hardConstraints.emplace_back(tensorLoad, barrierBefore);
                         }
                     }
 
@@ -2059,7 +2059,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     }
                     for (StinkyInstruction* tensorLoad : descendantTensorLoads) {
                         for (StinkyInstruction* dsLoad : descendantDsLoads) {
-                            additionalDependencies.emplace_back(tensorLoad, dsLoad);
+                            hardConstraints.emplace_back(tensorLoad, dsLoad);
                         }
                     }
 
