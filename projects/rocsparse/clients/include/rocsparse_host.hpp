@@ -327,8 +327,7 @@ void host_csrsv(rocsparse_operation  trans,
                 J*                   numeric_pivot);
 
 template <typename I, typename T>
-void host_ellsv(rocsparse_operation  trans,
-                I                    M,
+void host_ellsv(I                    M,
                 I                    N,
                 T                    alpha,
                 const I*             ell_col_ind,

@@ -227,8 +227,7 @@ void testing_spsv_ell(const Arguments& arg)
         // CPU ellsv performed directly on the ELL storage
         I analysis_pivot = -1;
         I solve_pivot    = -1;
-        host_ellsv<I, T>(trans_A,
-                         M,
+        host_ellsv<I, T>(M,
                          N,
                          halpha,
                          hA.ind,

@@ -2294,8 +2294,7 @@ void host_csrsv(rocsparse_operation  trans,
 }
 
 template <typename I, typename T>
-void host_ellsv(rocsparse_operation  trans,
-                I                    M,
+void host_ellsv(I                    M,
                 I                    N,
                 T                    alpha,
                 const I*             ell_col_ind,
@@ -2316,15 +2315,6 @@ void host_ellsv(rocsparse_operation  trans,
     *struct_pivot  = M + 1;
     *numeric_pivot = M + 1;
 
-    const bool conj      = (trans == rocsparse_operation_conjugate_transpose);
-    const bool transpose = (trans != rocsparse_operation_none);
-
-    // Applying the transpose flips the triangular structure.
-    const rocsparse_fill_mode eff_fill
-        = (!transpose) ? fill_mode
-                       : ((fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                   : rocsparse_fill_mode_lower);
-
     // The right-hand side is accumulated in-place in y.
     for(I row = 0; row < M; ++row)
     {
@@ -2333,144 +2323,69 @@ void host_ellsv(rocsparse_operation  trans,
 
     // Accessors over the ELL storage (column-major with leading dimension M).
     auto get_col = [&](I row, I p) -> I { return ell_col_ind[(int64_t)p * M + row] - base; };
-    auto get_val = [&](I row, I p) -> T {
-        const T v = ell_val[(int64_t)p * M + row];
-        return conj ? rocsparse_conj(v) : v;
-    };
+    auto get_val = [&](I row, I p) -> T { return ell_val[(int64_t)p * M + row]; };
 
-    if(!transpose)
+    // Direct forward/backward substitution over the ELL rows.
+    const bool forward = (fill_mode == rocsparse_fill_mode_lower);
+
+    for(I r = 0; r < M; ++r)
     {
-        // Direct forward/backward substitution over the ELL rows.
-        const bool forward = (fill_mode == rocsparse_fill_mode_lower);
+        const I row = forward ? r : (M - 1 - r);
 
-        for(I r = 0; r < M; ++r)
+        T    sum      = y[row];
+        bool has_diag = false;
+        T    diag_val = static_cast<T>(0);
+
+        for(I p = 0; p < ell_width; ++p)
         {
-            const I row = forward ? r : (M - 1 - r);
+            const I col = get_col(row, p);
 
-            T    sum      = y[row];
-            bool has_diag = false;
-            T    diag_val = static_cast<T>(0);
-
-            for(I p = 0; p < ell_width; ++p)
+            // Skip padded (out-of-range) entries.
+            if(col < 0 || col >= N)
             {
-                const I col = get_col(row, p);
+                continue;
+            }
 
-                // Skip padded (out-of-range) entries.
-                if(col < 0 || col >= N)
+            T val = get_val(row, p);
+
+            if(col == row)
+            {
+                if(diag_type == rocsparse_diag_type_non_unit)
                 {
-                    continue;
-                }
-
-                T val = get_val(row, p);
-
-                if(col == row)
-                {
-                    if(diag_type == rocsparse_diag_type_non_unit)
+                    // Numerical zero pivot, avoid division by zero.
+                    if(val == static_cast<T>(0))
                     {
-                        // Numerical zero pivot, avoid division by zero.
-                        if(val == static_cast<T>(0))
-                        {
-                            *numeric_pivot = std::min(*numeric_pivot, row + base);
-                            val            = static_cast<T>(1);
-                        }
-
-                        has_diag = true;
-                        diag_val = static_cast<T>(1) / val;
-                    }
-
-                    continue;
-                }
-
-                // Only entries on the active triangular side are already solved.
-                const bool below = (col < row);
-                if((forward && below) || (!forward && !below))
-                {
-                    sum = std::fma(-val, y[col], sum);
-                }
-            }
-
-            if(diag_type == rocsparse_diag_type_non_unit)
-            {
-                if(!has_diag)
-                {
-                    *struct_pivot = std::min(*struct_pivot, row + base);
-                }
-
-                y[row] = sum * diag_val;
-            }
-            else
-            {
-                y[row] = sum;
-            }
-        }
-    }
-    else
-    {
-        // Transpose solve performed directly on the ELL rows: sweep the rows of A
-        // in the order the transposed unknowns become available, finalizing y[j]
-        // and propagating it into the remaining right-hand sides.
-        const bool forward = (eff_fill == rocsparse_fill_mode_lower);
-
-        for(I r = 0; r < M; ++r)
-        {
-            const I j = forward ? r : (M - 1 - r);
-
-            // Finalize unknown j using the diagonal of row j of A.
-            bool has_diag = false;
-            T    diag_val = static_cast<T>(0);
-
-            for(I p = 0; p < ell_width; ++p)
-            {
-                const I col = get_col(j, p);
-                if(col == j)
-                {
-                    if(diag_type == rocsparse_diag_type_non_unit)
-                    {
-                        T val = get_val(j, p);
-                        if(val == static_cast<T>(0))
-                        {
-                            *numeric_pivot = std::min(*numeric_pivot, j + base);
-                            val            = static_cast<T>(1);
-                        }
-
-                        diag_val = static_cast<T>(1) / val;
+                        *numeric_pivot = std::min(*numeric_pivot, row + base);
+                        val            = static_cast<T>(1);
                     }
 
                     has_diag = true;
-                    break;
+                    diag_val = static_cast<T>(1) / val;
                 }
+
+                continue;
             }
 
-            if(diag_type == rocsparse_diag_type_non_unit)
+            // Only entries on the active triangular side are already solved.
+            const bool below = (col < row);
+            if((forward && below) || (!forward && !below))
             {
-                if(!has_diag)
-                {
-                    *struct_pivot = std::min(*struct_pivot, j + base);
-                }
-
-                y[j] = y[j] * diag_val;
+                sum = std::fma(-val, y[col], sum);
             }
+        }
 
-            // Propagate the finalized unknown y[j] into the coupled equations
-            // using the off-diagonal entries of row j of A (columns of A^T).
-            for(I p = 0; p < ell_width; ++p)
+        if(diag_type == rocsparse_diag_type_non_unit)
+        {
+            if(!has_diag)
             {
-                const I col = get_col(j, p);
-
-                if(col < 0 || col >= N || col == j)
-                {
-                    continue;
-                }
-
-                // Only the not-yet-solved side of the transposed system couples.
-                const bool below = (col < j);
-                if((forward && below) || (!forward && !below))
-                {
-                    continue;
-                }
-
-                y[col] = std::fma(-get_val(j, p), y[j], y[col]);
+                *struct_pivot = std::min(*struct_pivot, row + base);
             }
+
+            y[row] = sum * diag_val;
+        }
+        else
+        {
+            y[row] = sum;
         }
     }
 
@@ -10218,8 +10133,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                           const TTYPE*         c,             \
                                           const TTYPE*         s,             \
                                           rocsparse_index_base base);         \
-    template void host_ellsv<ITYPE, TTYPE>(rocsparse_operation  trans,        \
-                                           ITYPE                M,            \
+    template void host_ellsv<ITYPE, TTYPE>(ITYPE                M,            \
                                            ITYPE                N,            \
                                            TTYPE                alpha,        \
                                            const ITYPE*         ell_col_ind,  \
