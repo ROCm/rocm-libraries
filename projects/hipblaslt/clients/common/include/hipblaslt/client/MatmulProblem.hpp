@@ -33,12 +33,12 @@ namespace hipblaslt::client
 
         int64_t rows() const
         {
-            return static_cast<int64_t>(layout.extent(0));
+            return static_cast<int64_t>(layout.shape().extent(0));
         }
 
         int64_t columns() const
         {
-            return static_cast<int64_t>(layout.extent(1));
+            return static_cast<int64_t>(layout.shape().extent(1));
         }
 
         int64_t leadingDimension() const

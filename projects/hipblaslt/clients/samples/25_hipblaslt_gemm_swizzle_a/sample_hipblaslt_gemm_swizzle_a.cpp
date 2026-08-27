@@ -89,15 +89,15 @@ void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
     std::copy(sourceBytes.begin(), sourceBytes.end(), nativeBytes.begin());
 
     const Shape sourceShape = colMaj ? Shape{k, m} : Shape{m, k};
-    Tensor      tmpTensor   = Tensor::fromNative(Layout::contiguous(sourceShape),
+    Tensor      tmpTensor   = Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(sourceShape),
                                                  std::span<const Storage>(nativeStorage));
     if(colMaj)
-        tmpTensor = tmpTensor.permute({1, 0});
+        tmpTensor = tmpTensor.copyWithPermutedDimensions({1, 0});
 
     const Tensor permuted
-        = tmpTensor.reshape(Shape{m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK})
-              .permute({0, 2, 3, 1, 4});
-    const std::span<const std::byte> swizzledBytes = permuted.storage();
+        = tmpTensor.reshapeSharingStorage(Shape{m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK})
+              .copyWithPermutedDimensions({0, 2, 3, 1, 4});
+    const std::span<const std::byte> swizzledBytes = permuted.rawEncodedBackingStorage();
     auto destinationBytes                          = std::as_writable_bytes(std::span(dst, m * k));
     std::copy(swizzledBytes.begin(), swizzledBytes.end(), destinationBytes.begin());
 }
@@ -231,12 +231,12 @@ int main()
                 = hipblaslt::host_validation::tensorFromStorage(
                       source.data(),
                       source.size(),
-                      roc::host_validation::Layout::contiguous(
+                      roc::host_validation::Layout::contiguousLastDimensionFastest(
                           roc::host_validation::Shape{source.size()}))
-                      .to(roc::host_validation::ScalarType::Float8E4M3Fnuz);
-            if(converted.storage().size() != destination.size())
+                      .copyConvertedTo(roc::host_validation::ScalarType::Float8E4M3Fnuz);
+            if(converted.rawEncodedBackingStorage().size() != destination.size())
                 throw std::runtime_error("Converted FP8 storage size mismatch.");
-            std::memcpy(destination.data(), converted.storage().data(), converted.storage().size());
+            std::memcpy(destination.data(), converted.rawEncodedBackingStorage().data(), converted.rawEncodedBackingStorage().size());
         };
         convertToFp8(cpuAF16, cpuAF8);
         convertToFp8(cpuBF16, cpuBF8);

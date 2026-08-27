@@ -104,9 +104,8 @@ namespace hipblaslt::host_validation
                                         ScalarType  type,
                                         Layout      layout)
     {
-        return Tensor(
-            type,
-            std::move(layout),
+        return Tensor::copyEncodedBackingStorage(
+            type, std::move(layout),
             std::span<const std::byte>(static_cast<const std::byte*>(pointer), storageBytes));
     }
 
@@ -158,7 +157,7 @@ namespace hipblaslt::host_validation
         Tensor observed
             = matrixTransformTensor(
                   arguments.observed, arguments.observedStorageBytes, type, outputLayout)
-                  .to(ScalarType::Float32);
+                  .copyConvertedTo(ScalarType::Float32);
         const ComparisonResult comparison = compare(observed, expected, arguments.comparison);
         return {
             .runInfo    = runInfo,

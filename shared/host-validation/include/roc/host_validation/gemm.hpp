@@ -178,8 +178,4 @@ GemmRunInfo referenceGemm(const GemmRequest& request, const GemmExecution& execu
 GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output = {},
                          const GemmExecution& execution = {},
                          const GemmBackendImplementation* backendImplementation = nullptr);
-GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output,
-                         const TensorStorageAllocator& allocator,
-                         const GemmExecution& execution = {},
-                         const GemmBackendImplementation* backendImplementation = nullptr);
 }  // namespace roc::host_validation

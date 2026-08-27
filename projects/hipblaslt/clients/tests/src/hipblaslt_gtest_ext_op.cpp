@@ -78,12 +78,12 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     using namespace hipblaslt::host_validation;
     Tensor expected(ScalarType::Float32, Shape{m, n});
     referenceSoftmax(SoftmaxRequest(
-        tensorFromStorage(input.data(), input.size(), Layout::contiguous(Shape{m, n})),
+        tensorFromStorage(input.data(), input.size(), Layout::contiguousLastDimensionFastest(Shape{m, n})),
         expected,
         1,
         ScalarType::Float32));
     const ComparisonResult comparison
-        = compare(tensorFromStorage(output.data(), output.size(), Layout::contiguous(Shape{m, n})),
+        = compare(tensorFromStorage(output.data(), output.size(), Layout::contiguousLastDimensionFastest(Shape{m, n})),
                   expected,
                   nearComparisonOptions(1e-5));
     EXPECT_TRUE(comparison.passed());
@@ -149,9 +149,9 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
 
     using namespace roc::host_validation;
     using namespace hipblaslt::host_validation;
-    const Layout tensorLayout     = Layout::contiguous(Shape{m, n});
-    const Layout statisticsLayout = Layout::contiguous(Shape{m});
-    const Layout affineLayout     = Layout::contiguous(Shape{n});
+    const Layout tensorLayout     = Layout::contiguousLastDimensionFastest(Shape{m, n});
+    const Layout statisticsLayout = Layout::contiguousLastDimensionFastest(Shape{m});
+    const Layout affineLayout     = Layout::contiguousLastDimensionFastest(Shape{n});
 
     LayerNormProblem problem(tensorFromStorage(input.data(), input.size(), tensorLayout),
                              ScalarType::Float32,
@@ -230,10 +230,10 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
 
     using namespace roc::host_validation;
     Tensor referenceOutput = hipblaslt::host_validation::tensorFromMutableStorage(
-        refOutput.data(), refOutput.size(), Layout::contiguous(Shape{}));
+        refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
     referenceMaximumAbsolute(
         hipblaslt::host_validation::tensorFromStorage(
-            cpuInput.data(), cpuInput.size(), Layout::contiguous(Shape{numElements})),
+            cpuInput.data(), cpuInput.size(), Layout::contiguousLastDimensionFastest(Shape{numElements})),
         referenceOutput,
         ScalarType::Float32);
     hipblaslt::host_validation::copyTensorStorageTo(

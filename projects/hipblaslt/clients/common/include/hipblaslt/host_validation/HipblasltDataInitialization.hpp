@@ -72,7 +72,7 @@ namespace hipblaslt::host_validation
                 generated.shape(), [&](std::span<const size_t> indices, size_t) {
                     const ptrdiff_t offset = generated.layout().elementOffset(indices);
                     ::roc::host_validation::detail::copyBitRange(
-                        generated.storage(),
+                        generated.rawEncodedBackingStorage(),
                         ::roc::host_validation::detail::bitOffset(type, offset),
                         destinationStorage,
                         ::roc::host_validation::detail::bitOffset(type, offset),
@@ -206,7 +206,7 @@ namespace hipblaslt::host_validation
     {
         initializeTensor(
             values.data(),
-            Layout::contiguous(Shape{values.size()}),
+            Layout::contiguousLastDimensionFastest(Shape{values.size()}),
             vectorInitializationRecipe(scalarType<T>(), initialization, trigonometric));
     }
 

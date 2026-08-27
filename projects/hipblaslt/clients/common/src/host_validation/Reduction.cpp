@@ -49,15 +49,16 @@ namespace hipblaslt::host_validation
         const Layout outputLayout(Shape{static_cast<size_t>(arguments.rows)},
                                   {static_cast<ptrdiff_t>(arguments.outputStride)});
 
-        Tensor output(
+        Tensor output = Tensor::copyEncodedBackingStorage(
             outputType, outputLayout, mutableStorage(arguments.output, outputType, outputLayout));
         const ReductionRunInfo run = roc::host_validation::referenceSum(ReductionRequest(
-            Tensor(inputType, inputLayout, constStorage(arguments.input, inputType, inputLayout)),
+            Tensor::copyEncodedBackingStorage(
+                inputType, inputLayout, constStorage(arguments.input, inputType, inputLayout)),
             output,
             accumulatorType,
             {1}));
-        if(!output.storage().empty())
-            std::memcpy(arguments.output, output.storage().data(), output.storage().size());
+        if(!output.rawEncodedBackingStorage().empty())
+            std::memcpy(arguments.output, output.rawEncodedBackingStorage().data(), output.rawEncodedBackingStorage().size());
         return run;
     }
 } // namespace hipblaslt::host_validation

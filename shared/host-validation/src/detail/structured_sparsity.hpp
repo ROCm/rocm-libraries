@@ -128,12 +128,7 @@ inline StructuredSparsityPlan validateStructuredSparsityProblem(
 }
 
 inline bool tensorStorageOverlaps(const Tensor& left, const Tensor& right) {
-    if (left.storage().empty() || right.storage().empty()) return false;
-    const uintptr_t leftBegin = reinterpret_cast<uintptr_t>(left.storage().data());
-    const uintptr_t rightBegin = reinterpret_cast<uintptr_t>(right.storage().data());
-    const uintptr_t leftEnd = leftBegin + left.storage().size();
-    const uintptr_t rightEnd = rightBegin + right.storage().size();
-    return leftBegin < rightEnd && rightBegin < leftEnd;
+    return byteRangesOverlap(left.rawEncodedBackingStorage(), right.rawEncodedBackingStorage());
 }
 
 inline void rejectTensorStorageOverlap(const Tensor& left, const Tensor& right,
@@ -172,7 +167,8 @@ inline StructuredSparsityPlan validateStructuredSparsityRequest(
             throw std::invalid_argument("Structured sparsity two-of-four metadata shape mismatch.");
     }
     const bool inputPrunedOverlap = tensorStorageOverlaps(request.input, request.pruned);
-    const bool exactInPlace = request.input.storage().data() == request.pruned.storage().data() &&
+    const bool exactInPlace = request.input.rawEncodedBackingStorage().data() ==
+                                  request.pruned.rawEncodedBackingStorage().data() &&
                               request.input.layout() == request.pruned.layout();
     if (inputPrunedOverlap && !exactInPlace)
         throw std::invalid_argument(
@@ -359,11 +355,11 @@ inline StructuredSparsityRunInfo applyTwoOfFourByteAligned(const StructuredSpars
                 ? problem.twoOfFourMetadata->layout().elementOffset(coordinates)
                 : 0;
 
-        const std::byte* inputPointer =
-            problem.input.storage().data() + static_cast<size_t>(inputBase) * BytesPerElement;
-        std::byte* prunedPointer =
-            problem.pruned.storage().data() + static_cast<size_t>(prunedBase) * BytesPerElement;
-        std::byte* compressedPointer = problem.compressed.storage().data() +
+        const std::byte* inputPointer = problem.input.rawEncodedBackingStorage().data() +
+                                        static_cast<size_t>(inputBase) * BytesPerElement;
+        std::byte* prunedPointer = problem.pruned.rawEncodedBackingStorage().data() +
+                                   static_cast<size_t>(prunedBase) * BytesPerElement;
+        std::byte* compressedPointer = problem.compressed.rawEncodedBackingStorage().data() +
                                        static_cast<size_t>(compressedBase) * BytesPerElement;
 
         if (inputPointer != prunedPointer)
@@ -371,7 +367,8 @@ inline StructuredSparsityRunInfo applyTwoOfFourByteAligned(const StructuredSpars
 
         uint8_t* metadataPointer =
             problem.twoOfFourMetadata
-                ? reinterpret_cast<uint8_t*>(problem.twoOfFourMetadata->storage().data()) +
+                ? reinterpret_cast<uint8_t*>(
+                      problem.twoOfFourMetadata->rawEncodedBackingStorage().data()) +
                       static_cast<size_t>(metadataBase)
                 : nullptr;
         if constexpr (!RandomSelection) {
@@ -384,7 +381,8 @@ inline StructuredSparsityRunInfo applyTwoOfFourByteAligned(const StructuredSpars
 
         uint8_t* retainedIndexPointer =
             problem.retainedIndices
-                ? reinterpret_cast<uint8_t*>(problem.retainedIndices->storage().data()) +
+                ? reinterpret_cast<uint8_t*>(
+                      problem.retainedIndices->rawEncodedBackingStorage().data()) +
                       static_cast<size_t>(retainedIndexBase)
                 : nullptr;
         for (size_t group = 0; group < plan.groupsPerLine; ++group) {
@@ -451,18 +449,19 @@ inline StructuredSparsityRunInfo applyTwoOfFourByteAlignedStrided(
         problem.retainedIndices ? problem.retainedIndices->layout().strides()[axis] : 0;
     const ptrdiff_t metadataAxisStride =
         problem.twoOfFourMetadata ? problem.twoOfFourMetadata->layout().strides()[axis] : 0;
-    const bool inPlace = problem.input.storage().data() == problem.pruned.storage().data();
+    const bool inPlace = problem.input.rawEncodedBackingStorage().data() ==
+                         problem.pruned.rawEncodedBackingStorage().data();
 
     auto inputPointer = [&](ptrdiff_t elementOffset) {
-        return problem.input.storage().data() +
+        return problem.input.rawEncodedBackingStorage().data() +
                static_cast<size_t>(elementOffset) * BytesPerElement;
     };
     auto prunedPointer = [&](ptrdiff_t elementOffset) {
-        return problem.pruned.storage().data() +
+        return problem.pruned.rawEncodedBackingStorage().data() +
                static_cast<size_t>(elementOffset) * BytesPerElement;
     };
     auto compressedPointer = [&](ptrdiff_t elementOffset) {
-        return problem.compressed.storage().data() +
+        return problem.compressed.rawEncodedBackingStorage().data() +
                static_cast<size_t>(elementOffset) * BytesPerElement;
     };
 
@@ -524,8 +523,8 @@ inline StructuredSparsityRunInfo applyTwoOfFourByteAlignedStrided(
                         0, BytesPerElement);
 
             if (problem.retainedIndices) {
-                uint8_t* retainedIndexPointer =
-                    reinterpret_cast<uint8_t*>(problem.retainedIndices->storage().data());
+                uint8_t* retainedIndexPointer = reinterpret_cast<uint8_t*>(
+                    problem.retainedIndices->rawEncodedBackingStorage().data());
                 const ptrdiff_t retainedGroup =
                     retainedIndexBase + static_cast<ptrdiff_t>(group * 2) * retainedIndexAxisStride;
                 retainedIndexPointer[static_cast<size_t>(retainedGroup)] =
@@ -534,8 +533,8 @@ inline StructuredSparsityRunInfo applyTwoOfFourByteAlignedStrided(
                     static_cast<uint8_t>(positionSet.retained[1]);
             }
             if (problem.twoOfFourMetadata) {
-                uint8_t* metadataPointer =
-                    reinterpret_cast<uint8_t*>(problem.twoOfFourMetadata->storage().data());
+                uint8_t* metadataPointer = reinterpret_cast<uint8_t*>(
+                    problem.twoOfFourMetadata->rawEncodedBackingStorage().data());
                 const ptrdiff_t metadataOffset =
                     metadataBase + static_cast<ptrdiff_t>(group / 2) * metadataAxisStride;
                 uint8_t& metadataByte = metadataPointer[static_cast<size_t>(metadataOffset)];
@@ -642,9 +641,10 @@ inline Shape validateTwoOfFourMetadataProblem(const TwoOfFourMetadataProblem& pr
             const ptrdiff_t firstOffset =
                 retainedBase + static_cast<ptrdiff_t>(group * 2) * retainedAxisStride;
             const uint8_t first = decodeScalarKnown<ScalarType::UInt8, uint8_t>(
-                problem.retainedIndices.storage(), firstOffset);
+                problem.retainedIndices.rawEncodedBackingStorage(), firstOffset);
             const uint8_t second = decodeScalarKnown<ScalarType::UInt8, uint8_t>(
-                problem.retainedIndices.storage(), firstOffset + retainedAxisStride);
+                problem.retainedIndices.rawEncodedBackingStorage(),
+                firstOffset + retainedAxisStride);
             (void)twoOfFourMetadataNibble(first, second);
         }
     }
@@ -723,17 +723,17 @@ StructuredSparsityRunInfo applyStructuredSparsity(const StructuredSparsityReques
                     compressedBase +
                     static_cast<ptrdiff_t>(group * retainedElements + retainedIndex) *
                         compressedAxisStride;
-                detail::copyEncodedElement(problem.input.type(), problem.input.storage(),
-                                           sourceOffset, problem.compressed.storage(),
-                                           compressedOffset);
+                detail::copyEncodedElement(
+                    problem.input.type(), problem.input.rawEncodedBackingStorage(), sourceOffset,
+                    problem.compressed.rawEncodedBackingStorage(), compressedOffset);
                 if (problem.retainedIndices) {
                     const ptrdiff_t retainedIndexOffset =
                         retainedIndexBase +
                         static_cast<ptrdiff_t>(group * retainedElements + retainedIndex) *
                             retainedIndexAxisStride;
-                    detail::encodeScalarKnown<ScalarType::UInt8>(problem.retainedIndices->storage(),
-                                                                 retainedIndexOffset,
-                                                                 static_cast<uint8_t>(position));
+                    detail::encodeScalarKnown<ScalarType::UInt8>(
+                        problem.retainedIndices->rawEncodedBackingStorage(), retainedIndexOffset,
+                        static_cast<uint8_t>(position));
                 }
             }
 
@@ -745,12 +745,13 @@ StructuredSparsityRunInfo applyStructuredSparsity(const StructuredSparsityReques
                     metadataBase + static_cast<ptrdiff_t>(group / 2) * metadataAxisStride;
                 if (group % 2 == 0) {
                     detail::encodeScalarKnown<ScalarType::UInt8>(
-                        problem.twoOfFourMetadata->storage(), metadataOffset, nibble);
+                        problem.twoOfFourMetadata->rawEncodedBackingStorage(), metadataOffset,
+                        nibble);
                 } else {
                     const uint8_t previous = detail::decodeScalarKnown<ScalarType::UInt8, uint8_t>(
-                        problem.twoOfFourMetadata->storage(), metadataOffset);
+                        problem.twoOfFourMetadata->rawEncodedBackingStorage(), metadataOffset);
                     detail::encodeScalarKnown<ScalarType::UInt8>(
-                        problem.twoOfFourMetadata->storage(), metadataOffset,
+                        problem.twoOfFourMetadata->rawEncodedBackingStorage(), metadataOffset,
                         static_cast<uint8_t>(previous | static_cast<uint8_t>(nibble << 4)));
                 }
             }
@@ -763,11 +764,12 @@ StructuredSparsityRunInfo applyStructuredSparsity(const StructuredSparsityReques
                     prunedBase +
                     static_cast<ptrdiff_t>(group * groupSize + position) * prunedAxisStride;
                 if (retained[position]) {
-                    detail::copyEncodedElement(problem.input.type(), problem.input.storage(),
-                                               sourceOffset, problem.pruned.storage(),
-                                               prunedOffset);
+                    detail::copyEncodedElement(
+                        problem.input.type(), problem.input.rawEncodedBackingStorage(),
+                        sourceOffset, problem.pruned.rawEncodedBackingStorage(), prunedOffset);
                 } else {
-                    detail::zeroEncodedElement(problem.pruned.type(), problem.pruned.storage(),
+                    detail::zeroEncodedElement(problem.pruned.type(),
+                                               problem.pruned.rawEncodedBackingStorage(),
                                                prunedOffset);
                 }
             }
@@ -809,29 +811,6 @@ StructuredSparsityResult applyStructuredSparsity(const StructuredSparsityProblem
     };
 }
 
-StructuredSparsityResult applyStructuredSparsity(const StructuredSparsityProblem& problem,
-                                                 const TensorStorageAllocator& allocator) {
-    const detail::StructuredSparsityPlan plan = detail::validateStructuredSparsityProblem(problem);
-    Tensor pruned(problem.input.type(), problem.input.shape(), allocator);
-    Tensor compressed(problem.input.type(), plan.compressedShape, allocator);
-    std::optional<Tensor> retainedIndices;
-    std::optional<Tensor> twoOfFourMetadata;
-    if (problem.outputs.retainedIndices)
-        retainedIndices.emplace(ScalarType::UInt8, plan.compressedShape, allocator);
-    if (problem.outputs.twoOfFourMetadata)
-        twoOfFourMetadata.emplace(ScalarType::UInt8, *plan.metadataShape, allocator);
-    StructuredSparsityRequest request(problem, pruned, compressed, retainedIndices,
-                                      twoOfFourMetadata);
-    const StructuredSparsityRunInfo runInfo = applyStructuredSparsity(request);
-    return {
-        .pruned = std::move(pruned),
-        .compressed = std::move(compressed),
-        .retainedIndices = std::move(retainedIndices),
-        .twoOfFourMetadata = std::move(twoOfFourMetadata),
-        .runInfo = runInfo,
-    };
-}
-
 TwoOfFourMetadataRunInfo encodeTwoOfFourMetadata(const TwoOfFourMetadataRequest& problem) {
     const Shape metadataShape = detail::validateTwoOfFourMetadataRequest(problem);
     const size_t sparsityGroups = problem.retainedIndices.shape()[problem.axis] / 2;
@@ -853,24 +832,26 @@ TwoOfFourMetadataRunInfo encodeTwoOfFourMetadata(const TwoOfFourMetadataRequest&
             const ptrdiff_t firstOffset =
                 retainedBase + static_cast<ptrdiff_t>(firstGroup * 2) * retainedAxisStride;
             const uint8_t first0 = detail::decodeScalarKnown<ScalarType::UInt8, uint8_t>(
-                problem.retainedIndices.storage(), firstOffset);
+                problem.retainedIndices.rawEncodedBackingStorage(), firstOffset);
             const uint8_t first1 = detail::decodeScalarKnown<ScalarType::UInt8, uint8_t>(
-                problem.retainedIndices.storage(), firstOffset + retainedAxisStride);
+                problem.retainedIndices.rawEncodedBackingStorage(),
+                firstOffset + retainedAxisStride);
             uint8_t encoded = detail::twoOfFourMetadataNibble(first0, first1);
 
             if (firstGroup + 1 < sparsityGroups) {
                 const ptrdiff_t secondOffset = firstOffset + 2 * retainedAxisStride;
                 const uint8_t second0 = detail::decodeScalarKnown<ScalarType::UInt8, uint8_t>(
-                    problem.retainedIndices.storage(), secondOffset);
+                    problem.retainedIndices.rawEncodedBackingStorage(), secondOffset);
                 const uint8_t second1 = detail::decodeScalarKnown<ScalarType::UInt8, uint8_t>(
-                    problem.retainedIndices.storage(), secondOffset + retainedAxisStride);
+                    problem.retainedIndices.rawEncodedBackingStorage(),
+                    secondOffset + retainedAxisStride);
                 encoded = static_cast<uint8_t>(
                     encoded |
                     static_cast<uint8_t>(detail::twoOfFourMetadataNibble(second0, second1) << 4));
             }
 
             detail::encodeScalarKnown<ScalarType::UInt8>(
-                problem.metadata.storage(),
+                problem.metadata.rawEncodedBackingStorage(),
                 metadataBase + static_cast<ptrdiff_t>(metadataGroup) * metadataAxisStride, encoded);
         }
     }
@@ -889,12 +870,4 @@ TwoOfFourMetadataResult encodeTwoOfFourMetadata(const TwoOfFourMetadataProblem& 
     return {.metadata = std::move(metadata), .runInfo = runInfo};
 }
 
-TwoOfFourMetadataResult encodeTwoOfFourMetadata(const TwoOfFourMetadataProblem& problem,
-                                                const TensorStorageAllocator& allocator) {
-    const Shape metadataShape = detail::validateTwoOfFourMetadataProblem(problem);
-    Tensor metadata(ScalarType::UInt8, metadataShape, allocator);
-    TwoOfFourMetadataRequest request(problem, metadata);
-    const TwoOfFourMetadataRunInfo runInfo = encodeTwoOfFourMetadata(request);
-    return {.metadata = std::move(metadata), .runInfo = runInfo};
-}
 }  // namespace roc::host_validation

@@ -74,13 +74,13 @@ namespace
         const auto recipe = GenerationRecipe::realOnly(
             std::move(component),
             tensilelite_adapter::dataInitializationSettings(seed, stream));
-        Tensor generated(type, Layout::contiguous(Shape{values.size()}));
+        Tensor generated(type, Layout::contiguousLastDimensionFastest(Shape{values.size()}));
         generate(generated, recipe);
 
         const std::span<std::byte> destination = std::as_writable_bytes(std::span<T>(values));
-        if(generated.storage().size() != destination.size())
+        if(generated.rawEncodedBackingStorage().size() != destination.size())
             throw std::runtime_error("Generated Tensor storage does not match test value storage.");
-        std::ranges::copy(generated.storage(), destination.begin());
+        std::ranges::copy(generated.rawEncodedBackingStorage(), destination.begin());
     }
 
 #ifdef TENSILE_USE_FP8_BF8
@@ -191,8 +191,8 @@ TEST(ReferenceMXFastPath, MatchesPointwiseForScaledFP8Gemm)
     ASSERT_TRUE(tryReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, ReferenceGemmExecution::BlockedRequired));
 
     const auto comparison = roc::host_validation::compare(
-        roc::host_validation::Tensor::fromNative(std::span<const float>(dBlocked)),
-        roc::host_validation::Tensor::fromNative(std::span<const float>(dPointwise)),
+        roc::host_validation::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
+        roc::host_validation::Tensor::copyNativeStorage(std::span<const float>(dPointwise)),
         roc::host_validation::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
@@ -254,8 +254,8 @@ TEST(ReferenceMXFastPath, MatchesPointwiseWithBetaAndBias)
     ASSERT_TRUE(tryReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, ReferenceGemmExecution::BlockedRequired));
 
     const auto comparison = roc::host_validation::compare(
-        roc::host_validation::Tensor::fromNative(std::span<const float>(dBlocked)),
-        roc::host_validation::Tensor::fromNative(std::span<const float>(dPointwise)),
+        roc::host_validation::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
+        roc::host_validation::Tensor::copyNativeStorage(std::span<const float>(dPointwise)),
         roc::host_validation::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches

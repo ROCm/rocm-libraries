@@ -24,30 +24,13 @@
 #include <utility>
 #include <vector>
 
-TEST(HostValidationTensorStorage, PooledPinnedAllocatorBacksTensorAliases)
-{
-    using namespace roc::host_validation;
-
-    Tensor tensor(ScalarType::Float32, Shape{2}, HipHostBuffer::tensorAllocator());
-    tensor.storeFrom({1}, 7.0f);
-    Tensor alias = tensor;
-    EXPECT_EQ(alias.storage().data(), tensor.storage().data());
-    EXPECT_EQ(alias.loadAs<float>({1}), 7.0f);
-
-    Tensor clone = tensor.clone(HipHostBuffer::tensorAllocator());
-    EXPECT_NE(clone.storage().data(), tensor.storage().data());
-    clone.storeFrom({1}, 11.0f);
-    EXPECT_EQ(tensor.loadAs<float>({1}), 7.0f);
-    EXPECT_EQ(clone.loadAs<float>({1}), 11.0f);
-}
-
 TEST(HostValidationTensorStorage, HipHostBufferTensorRetainsAndMutatesThePinnedAllocation)
 {
     using namespace roc::host_validation;
 
     Tensor tensor = [] {
         HipHostBuffer buffer(HIP_R_32F, 2);
-        Tensor        wrapped = buffer.tensor(ScalarType::Float32, Layout::contiguous(Shape{2}));
+        Tensor        wrapped = buffer.tensor(ScalarType::Float32, Layout::contiguousLastDimensionFastest(Shape{2}));
         wrapped.storeFrom({1}, 7.0f);
         EXPECT_EQ(buffer.as<float>()[1], 7.0f);
         return wrapped;
@@ -635,7 +618,7 @@ TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
     exact.batchCount       = 2;
     Tensor exactMatrix     = generateMatrix(exact);
     EXPECT_EQ(exactMatrix.layout(), (Layout(Shape{2, 3, 2}, {1, 4, 12})));
-    EXPECT_EQ(exactMatrix.storage().size(), 24 * sizeof(float));
+    EXPECT_EQ(exactMatrix.rawEncodedBackingStorage().size(), 24 * sizeof(float));
     for(size_t batch = 0; batch < 2; ++batch)
         for(size_t column = 0; column < 3; ++column)
             for(size_t row = 0; row < 2; ++row)
@@ -657,7 +640,7 @@ TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
                 if(value != 0)
                     EXPECT_EQ(value > 0, ((row ^ column) & 1U) != 0);
             }
-    Tensor exactAllocation = exactMatrix.alias(Layout(Shape{4, 3, 2}, {1, 4, 12}));
+    Tensor exactAllocation = exactMatrix.shareStorageWithLayout(Layout(Shape{4, 3, 2}, {1, 4, 12}));
     for(size_t batch = 0; batch < 2; ++batch)
         for(size_t column = 0; column < 3; ++column)
             for(size_t row = 2; row < 4; ++row)
@@ -709,7 +692,7 @@ TEST(HostValidationDataInitializationBridge, StochasticMatrixModesUseRoleSpecifi
     };
 
     const auto values = [](const Tensor& tensor) {
-        return std::vector<std::byte>(tensor.storage().begin(), tensor.storage().end());
+        return std::vector<std::byte>(tensor.rawEncodedBackingStorage().begin(), tensor.rawEncodedBackingStorage().end());
     };
 
     for(const hipblaslt_initialization mode : modes)
@@ -808,7 +791,7 @@ TEST(HostValidationDataInitializationBridge, DeviceInitializationUploadsGenerate
     const Tensor expected           = generateMatrix(initialization);
 
     void* device = nullptr;
-    ASSERT_EQ(hipMalloc(&device, expected.storage().size()), hipSuccess);
+    ASSERT_EQ(hipMalloc(&device, expected.rawEncodedBackingStorage().size()), hipSuccess);
 
     hipblaslt_init_device(ABC_dims::B,
                           initialization.initialization,
@@ -820,10 +803,10 @@ TEST(HostValidationDataInitializationBridge, DeviceInitializationUploadsGenerate
                           initialization.type,
                           initialization.batchStride,
                           initialization.batchCount);
-    std::vector<std::byte> observed(expected.storage().size());
+    std::vector<std::byte> observed(expected.rawEncodedBackingStorage().size());
     EXPECT_EQ(hipMemcpy(observed.data(), device, observed.size(), hipMemcpyDeviceToHost),
               hipSuccess);
-    EXPECT_TRUE(std::equal(observed.begin(), observed.end(), expected.storage().begin()));
+    EXPECT_TRUE(std::equal(observed.begin(), observed.end(), expected.rawEncodedBackingStorage().begin()));
     EXPECT_EQ(hipFree(device), hipSuccess);
 }
 

@@ -929,8 +929,8 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     problem.epilogue.activation = toHostValidationActivation(actType[i]);
                     if(bias_ptr)
                         problem.epilogue.bias
-                            = VectorBinding{Tensor::fromNative<float>(
-                                                Layout::contiguous(Shape{size_t(m[i])}),
+                            = VectorBinding{Tensor::copyNativeStorage<float>(
+                                                Layout::contiguousLastDimensionFastest(Shape{size_t(m[i])}),
                                                 std::span<const float>(bias_ptr, size_t(m[i]))),
                                             MatrixAxis::Row};
                     if(actType[i] == ActivationType::SWISH)

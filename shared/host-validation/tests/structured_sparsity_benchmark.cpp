@@ -105,20 +105,23 @@ int main(int argc, char** argv) {
     StructuredSparsityPattern pattern;
     pattern.axis = 1;
     pattern.fixedPositions = {0, 1};
-    Tensor prunedTensor = Tensor::fromNative<float>(inputLayout, std::span<const float>(pruned));
+    Tensor prunedTensor =
+        Tensor::copyNativeStorage<float>(inputLayout, std::span<const float>(pruned));
     Tensor compressedTensor =
-        Tensor::fromNative<float>(compressedLayout, std::span<const float>(compressed));
+        Tensor::copyNativeStorage<float>(compressedLayout, std::span<const float>(compressed));
     Tensor metadataTensor =
-        Tensor::fromNative<uint8_t>(metadataLayout, std::span<const uint8_t>(metadata));
+        Tensor::copyNativeStorage<uint8_t>(metadataLayout, std::span<const uint8_t>(metadata));
     StructuredSparsityRequest request(prunedTensor, prunedTensor, compressedTensor, std::nullopt,
                                       metadataTensor, pattern);
 
     const double componentMilliseconds =
         milliseconds([&] { applyParallel(request, rows); }, iterations);
-    std::memcpy(pruned.data(), prunedTensor.storage().data(), prunedTensor.storage().size());
-    std::memcpy(compressed.data(), compressedTensor.storage().data(),
-                compressedTensor.storage().size());
-    std::memcpy(metadata.data(), metadataTensor.storage().data(), metadataTensor.storage().size());
+    std::memcpy(pruned.data(), prunedTensor.rawEncodedBackingStorage().data(),
+                prunedTensor.rawEncodedBackingStorage().size());
+    std::memcpy(compressed.data(), compressedTensor.rawEncodedBackingStorage().data(),
+                compressedTensor.rawEncodedBackingStorage().size());
+    std::memcpy(metadata.data(), metadataTensor.rawEncodedBackingStorage().data(),
+                metadataTensor.rawEncodedBackingStorage().size());
 
     std::vector<float> legacyPruned = input;
     std::vector<float> legacyCompressed(rows * columns / 2);

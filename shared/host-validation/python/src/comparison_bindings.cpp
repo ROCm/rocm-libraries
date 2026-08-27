@@ -147,7 +147,7 @@ void registerComparisonBindings(nb::module_& module) {
     module.def(
         "check_unwritten_sentinel",
         [](const Tensor& tensor, SentinelRegion region, size_t maxReportedMismatches) {
-            return checkUnwrittenSentinel(tensor.type(), tensor.storage(), 0,
+            return checkUnwrittenSentinel(tensor.type(), tensor.rawEncodedBackingStorage(), 0,
                                           tensor.shape().elementCount(), region,
                                           maxReportedMismatches);
         },

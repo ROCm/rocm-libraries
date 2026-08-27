@@ -38,15 +38,6 @@ ReductionResult referenceReduce(const ReductionProblem& problem) {
     return {.output = std::move(output), .runInfo = runInfo};
 }
 
-ReductionResult referenceReduce(const ReductionProblem& problem,
-                                const TensorStorageAllocator& allocator) {
-    const detail::ReductionPlan plan = detail::validateReductionProblem(problem);
-    Tensor output(problem.outputType, plan.outputShape, allocator);
-    ReductionRequest request(problem, output);
-    const ReductionRunInfo runInfo = referenceReduce(request);
-    return {.output = std::move(output), .runInfo = runInfo};
-}
-
 ReductionRunInfo referenceSum(const ReductionRequest& request) {
     if (request.operation != ReductionOperation::Sum)
         throw std::invalid_argument("referenceSum requires a sum reduction problem.");
@@ -57,13 +48,6 @@ ReductionResult referenceSum(const ReductionProblem& problem) {
     if (problem.operation != ReductionOperation::Sum)
         throw std::invalid_argument("referenceSum requires a sum reduction problem.");
     return referenceReduce(problem);
-}
-
-ReductionResult referenceSum(const ReductionProblem& problem,
-                             const TensorStorageAllocator& allocator) {
-    if (problem.operation != ReductionOperation::Sum)
-        throw std::invalid_argument("referenceSum requires a sum reduction problem.");
-    return referenceReduce(problem, allocator);
 }
 
 ReductionRunInfo referenceMaximumAbsolute(const ReductionRequest& request) {
@@ -89,13 +73,4 @@ ReductionResult referenceMaximumAbsolute(Tensor input, ScalarType outputType,
                                             std::move(axes), ReductionOperation::MaximumAbsolute));
 }
 
-ReductionResult referenceMaximumAbsolute(Tensor input, ScalarType outputType,
-                                         ScalarType accumulatorType,
-                                         const TensorStorageAllocator& allocator) {
-    std::vector<size_t> axes(input.shape().rank());
-    std::iota(axes.begin(), axes.end(), 0);
-    return referenceReduce(ReductionProblem(std::move(input), outputType, accumulatorType,
-                                            std::move(axes), ReductionOperation::MaximumAbsolute),
-                           allocator);
-}
 }  // namespace roc::host_validation

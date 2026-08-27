@@ -170,9 +170,9 @@ namespace
         generate(generated, recipe);
         const std::span<std::byte> destinationBytes
             = std::as_writable_bytes(std::span<T>(destination));
-        if(generated.storage().size() != destinationBytes.size())
+        if(generated.rawEncodedBackingStorage().size() != destinationBytes.size())
             throw std::runtime_error("Generated tensor storage does not match CPU driver type.");
-        std::memcpy(destinationBytes.data(), generated.storage().data(), destinationBytes.size());
+        std::memcpy(destinationBytes.data(), generated.rawEncodedBackingStorage().data(), destinationBytes.size());
     }
 
     template <typename Destination, typename Source>
@@ -183,17 +183,17 @@ namespace
         static_assert(std::is_trivially_copyable_v<Destination>);
 
         const Tensor sourceTensor(toHostValidationScalarType(TypeTraits<Source>::value),
-                                  Layout::contiguous(Shape{source.size()}),
+                                  Layout::contiguousLastDimensionFastest(Shape{source.size()}),
                                   std::as_bytes(source));
         const Tensor converted
-            = sourceTensor.to(toHostValidationScalarType(TypeTraits<Destination>::value));
+            = sourceTensor.copyConvertedTo(toHostValidationScalarType(TypeTraits<Destination>::value));
 
         std::vector<Destination>   result(source.size());
         const std::span<std::byte> resultBytes
             = std::as_writable_bytes(std::span<Destination>(result));
-        if(converted.storage().size() != resultBytes.size())
+        if(converted.rawEncodedBackingStorage().size() != resultBytes.size())
             throw std::runtime_error("Converted tensor storage does not match CPU driver type.");
-        std::memcpy(resultBytes.data(), converted.storage().data(), resultBytes.size());
+        std::memcpy(resultBytes.data(), converted.rawEncodedBackingStorage().data(), resultBytes.size());
         return result;
     }
 
@@ -217,18 +217,18 @@ namespace
         {
             const Tensor sourceTensor(
                 ScalarType::Float4E2M1,
-                Layout::contiguous(Shape{logicalElementsPerBatch}),
+                Layout::contiguousLastDimensionFastest(Shape{logicalElementsPerBatch}),
                 sourceBytes.subspan(batch * storageBytesPerBatch, storageBytesPerBatch));
             const Tensor converted
-                = sourceTensor.to(toHostValidationScalarType(TypeTraits<Destination>::value));
+                = sourceTensor.copyConvertedTo(toHostValidationScalarType(TypeTraits<Destination>::value));
             const std::span<std::byte> destinationBytes
                 = std::as_writable_bytes(std::span<Destination>(result).subspan(
                     batch * logicalElementsPerBatch, logicalElementsPerBatch));
-            if(converted.storage().size() != destinationBytes.size())
+            if(converted.rawEncodedBackingStorage().size() != destinationBytes.size())
                 throw std::runtime_error(
                     "Converted FP4 tensor storage does not match CPU driver type.");
             std::memcpy(
-                destinationBytes.data(), converted.storage().data(), destinationBytes.size());
+                destinationBytes.data(), converted.rawEncodedBackingStorage().data(), destinationBytes.size());
         }
         return result;
     }
@@ -471,12 +471,12 @@ int runGemm(size_t             m,
             generateValues(logicalValues, fp4Values, initializationStream);
             for(size_t batch = 0; batch < batchCount; ++batch)
             {
-                auto packed = roc::host_validation::Tensor::fromValues(
+                auto packed = roc::host_validation::Tensor::copyValuesWithConversion(
                     roc::host_validation::ScalarType::Float4E2M1,
                     roc::host_validation::Shape{numLogical},
                     std::span<const float>(logicalValues).subspan(batch * numLogical, numLogical));
                 std::memcpy(reinterpret_cast<std::byte*>(vec.data()) + batch * storagePerBatch,
-                            packed.storage().data(),
+                            packed.rawEncodedBackingStorage().data(),
                             storagePerBatch);
             }
         };
@@ -632,7 +632,7 @@ int runGemm(size_t             m,
                     roc::host_validation::tensilelite_adapter::dataInitializationSettings(
                         42, stream));
                 roc::host_validation::generate(generated, recipe);
-                std::memcpy(values.data(), generated.storage().data(), generated.storage().size());
+                std::memcpy(values.data(), generated.rawEncodedBackingStorage().data(), generated.rawEncodedBackingStorage().size());
             };
             fillScale(mxsa, 0);
             fillScale(mxsb, 1);
@@ -763,23 +763,23 @@ int runGemm(size_t             m,
             const ptrdiff_t strideBColumn = transB ? 1 : static_cast<ptrdiff_t>(k);
 
             GemmOperand operandA(
-                Tensor::fromNative<AccumulateT>(Layout(Shape{m, k}, {strideARow, strideAColumn}),
+                Tensor::copyNativeStorage<AccumulateT>(Layout(Shape{m, k}, {strideARow, strideAColumn}),
                                                 std::span<const AccumulateT>(aPtr, numA)));
             GemmOperand operandB(
-                Tensor::fromNative<AccumulateT>(Layout(Shape{k, n}, {strideBRow, strideBColumn}),
+                Tensor::copyNativeStorage<AccumulateT>(Layout(Shape{k, n}, {strideBRow, strideBColumn}),
                                                 std::span<const AccumulateT>(bPtr, numB)));
             if(computeInputA != dtypeEnumA)
                 operandA.computeType = toHostValidationScalarType(computeInputA);
             if(computeInputB != dtypeEnumB)
                 operandB.computeType = toHostValidationScalarType(computeInputB);
 
-            Tensor outputTensor = Tensor::fromNative<AccumulateT>(
+            Tensor outputTensor = Tensor::copyNativeStorage<AccumulateT>(
                 Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
                 std::span<AccumulateT>(dPtr, numC));
             GemmRequest problem(
                 std::move(operandA),
                 std::move(operandB),
-                Tensor::fromNative<AccumulateT>(Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
+                Tensor::copyNativeStorage<AccumulateT>(Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
                                                 std::span<const AccumulateT>(cPtr, numC)),
                 outputTensor,
                 nativeScalarType<AccumulateT>);
@@ -796,26 +796,26 @@ int runGemm(size_t             m,
             if(useBias)
             {
                 problem.epilogue.bias = VectorBinding{
-                    Tensor::fromNative<AccumulateT>(
-                        Layout::contiguous(Shape{m}),
+                    Tensor::copyNativeStorage<AccumulateT>(
+                        Layout::contiguousLastDimensionFastest(Shape{m}),
                         std::span<const AccumulateT>(biasVec.data() + batch * m, m)),
                     MatrixAxis::Row};
             }
             if(useScaleAlphaVec)
             {
                 problem.epilogue.scaleAlpha
-                    = VectorBinding{Tensor::fromNative<AccumulateT>(
-                                        Layout::contiguous(Shape{scaleAlphaVecBuf.size()}),
+                    = VectorBinding{Tensor::copyNativeStorage<AccumulateT>(
+                                        Layout::contiguousLastDimensionFastest(Shape{scaleAlphaVecBuf.size()}),
                                         std::span<const AccumulateT>(scaleAlphaVecBuf)),
                                     factorDim == 0 ? MatrixAxis::Row : MatrixAxis::Column};
             }
             if(useScaleAB == "Vector")
             {
                 problem.epilogue.scaleA
-                    = Tensor::fromNative<AccumulateT>(Layout::contiguous(Shape{scaleABuf.size()}),
+                    = Tensor::copyNativeStorage<AccumulateT>(Layout::contiguousLastDimensionFastest(Shape{scaleABuf.size()}),
                                                       std::span<const AccumulateT>(scaleABuf));
                 problem.epilogue.scaleB
-                    = Tensor::fromNative<AccumulateT>(Layout::contiguous(Shape{scaleBBuf.size()}),
+                    = Tensor::copyNativeStorage<AccumulateT>(Layout::contiguousLastDimensionFastest(Shape{scaleBBuf.size()}),
                                                       std::span<const AccumulateT>(scaleBBuf));
             }
 
@@ -869,7 +869,7 @@ int runGemm(size_t             m,
 #endif
 
             referenceGemm(problem);
-            std::memcpy(dPtr, outputTensor.storage().data(), outputTensor.storage().size());
+            std::memcpy(dPtr, outputTensor.rawEncodedBackingStorage().data(), outputTensor.rawEncodedBackingStorage().size());
         }
 
         // Compare results — reduced-precision types need wider tolerance.
@@ -884,7 +884,7 @@ int runGemm(size_t             m,
 
         const auto comparisonType = toHostValidationScalarType(TypeTraits<AccumulateT>::value);
         const auto comparisonLayout
-            = roc::host_validation::Layout::contiguous(roc::host_validation::Shape{d.size()});
+            = roc::host_validation::Layout::contiguousLastDimensionFastest(roc::host_validation::Shape{d.size()});
         roc::host_validation::ComparisonOptions comparisonOptions{
             .absoluteTolerance     = tolerance,
             .relativeTolerance     = 0.0,
@@ -899,11 +899,11 @@ int runGemm(size_t             m,
             comparisonOptions.selection.maxElements = selectedValidationIndices.size();
         }
         const auto comparison = roc::host_validation::compare(
-            roc::host_validation::Tensor(
+            roc::host_validation::Tensor::copyEncodedBackingStorage(
                 comparisonType, comparisonLayout, std::as_bytes(std::span<const AccumulateT>(d))),
-            roc::host_validation::Tensor(comparisonType,
-                                         comparisonLayout,
-                                         std::as_bytes(std::span<const AccumulateT>(dRef))),
+            roc::host_validation::Tensor::copyEncodedBackingStorage(
+                comparisonType, comparisonLayout,
+                std::as_bytes(std::span<const AccumulateT>(dRef))),
             comparisonOptions);
 
         for(const auto& mismatch : comparison.reportedMismatches)
