@@ -811,7 +811,8 @@ namespace TensileLite
                                              dim3 const&            problemNumGroupTiles,
                                              dim3 const&            numWorkGroups,
                                              KA&                    args,
-                                             StreamKSettings const& sk) const
+                                             StreamKSettings const& sk,
+                                             size_t resolvedGlobalAccumulation) const
     {
         if(debugKernel)
         {
@@ -846,18 +847,18 @@ namespace TensileLite
             }
         }
         bool singleWSD = false;
-        if(sizeMapping.globalAccumulation == 1
+        if(resolvedGlobalAccumulation == 1
            && (problemType.computeType != problemType.dType
                || problemType.activationType != ActivationType::None))
             singleWSD = true;
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
         if(gsu > 1 && sizeMapping.streamK == 0
-           && ((singleWSD || sizeMapping.globalAccumulation == 2)
-               || (sizeMapping.globalAccumulation == 3)))
+           && ((singleWSD || resolvedGlobalAccumulation == 2)
+               || (resolvedGlobalAccumulation == 3)))
         {
             args.template append<void const*>("ws_d", (uint8_t*)inputs.ws + workspaceOffsetInByte);
-            if(sizeMapping.globalAccumulation == 3)
+            if(resolvedGlobalAccumulation == 3)
             {
                 args.template append<void const*>("c", inputs.c);
             }
@@ -941,7 +942,7 @@ namespace TensileLite
 
         // Pass wsStride if it's not in MBSK mode
         bool gsuWSStride
-            = gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0;
+            = gsu > 1 && resolvedGlobalAccumulation != 3 && sizeMapping.streamK == 0;
         bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
@@ -2199,8 +2200,15 @@ namespace TensileLite
                                             ntab);
             }
         }
-        singleCallArgs<T_Debug, true>(
-            problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
+        singleCallArgs<T_Debug, true>(problem,
+                                      inputs,
+                                      0,
+                                      &hardware,
+                                      problemNumGroupTiles,
+                                      rv.numWorkGroups,
+                                      rv.args,
+                                      sk,
+                                      gsuSettings.globalAccumulation);
 
         if(gsuSettings.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
         {
@@ -2363,6 +2371,8 @@ namespace TensileLite
                 // But this code path is run to calculate to determine if solution is supported
                 // Set SK grid to 1 for now to avoid 0 division
                 sk.grid = 1;
+                // Grouped GEMM does not resolve accumulation per launch (see the
+                // checkUniformSummationOrder call in the grouped path).
                 singleCallArgs<T_Debug, false>(problem,
                                                inputs.grouped[idx],
                                                workspaceOffsetInByte,
@@ -2370,7 +2380,8 @@ namespace TensileLite
                                                rv.numWorkGroups,
                                                rv.numWorkGroups,
                                                h_args,
-                                               sk);
+                                               sk,
+                                               sizeMapping.globalAccumulation);
 
                 if(sizeMapping.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
                 {
@@ -2681,6 +2692,7 @@ namespace TensileLite
                                                        KA&                    args,
                                                        StreamKSettings const& sk,
                                                        uint32_t               autoGsuVal,
+                                                       size_t                 resolvedGlobalAccumulation,
                                                        uint32_t               additionalPaddingPerBatchGeneralBatch) const
     {
         TensorDescriptor const& c = problem.c();
@@ -2755,12 +2767,15 @@ namespace TensileLite
         if(problemType.useGateResidual)
             args.template append<void const*>("gateResidual", inputs.gateResidual);
 
-        if(sizeMapping.globalAccumulation == 2 || sizeMapping.streamK > 0)
+        // In MultipleBuffer the GEMM kernel writes unscaled partials and this
+        // kernel applies alpha and beta*C, so it needs the real values. The mode
+        // is the resolved one: AdaptiveGemmGSUA can pick it per launch.
+        if(resolvedGlobalAccumulation == 2 || sizeMapping.streamK > 0)
             args.append("alpha", inputs.alpha, problem.alphaType());
         else
             args.append("alpha", 1.0f, problem.betaType());
 
-        if((sizeMapping.globalAccumulation == 2 || sizeMapping.streamK > 0) and problemType.useBeta)
+        if((resolvedGlobalAccumulation == 2 || sizeMapping.streamK > 0) and problemType.useBeta)
             args.append("beta", inputs.beta, problem.betaType());
         else
             args.append("beta", 0.0f, problem.betaType());
@@ -2892,7 +2907,8 @@ namespace TensileLite
         ContractionSolution::generateOutputConversionCall(Problem const&           problem,
                                                           ContractionInputs const& inputs,
                                                           StreamKSettings const&   sk,
-                                                          uint32_t                 autoGsuVal) const
+                                                          uint32_t                 autoGsuVal,
+                                                          size_t resolvedGlobalAccumulation) const
     {
         KernelInvocation rv;
 
@@ -2957,7 +2973,9 @@ namespace TensileLite
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
-        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal, additionalPaddingPerBatchGeneralBatch);
+        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal,
+                                          resolvedGlobalAccumulation,
+                                          additionalPaddingPerBatchGeneralBatch);
 
         //@TODO determine if this is needed, may not end up in the same code object file
         rv.codeObjectFile = codeObjectFilename.load();
@@ -3116,8 +3134,14 @@ namespace TensileLite
         {
             auto            problem = problems[idx];
             StreamKSettings sk;
-            outputConversionCallArgs<T_Debug>(
-                problem, inputs.grouped[idx], workspaceOffsetInByte, h_args, sk, autoGsuVal);
+            // Grouped GEMM does not resolve accumulation per launch.
+            outputConversionCallArgs<T_Debug>(problem,
+                                              inputs.grouped[idx],
+                                              workspaceOffsetInByte,
+                                              h_args,
+                                              sk,
+                                              autoGsuVal,
+                                              sizeMapping.globalAccumulation);
             if constexpr(std::is_same<KA, KernelArguments>::value)
                 workspaceOffsetInByte += requiredWorkspaceSize(problem, hardware);
         }
@@ -3738,9 +3762,11 @@ namespace TensileLite
            || sk.reduction == origami::reduction_t::parallel)
         {
             if(debug)
-                rv.push_back(generateOutputConversionCall<true>(problem, inputs, sk, autoGsuVal));
+                rv.push_back(generateOutputConversionCall<true>(
+                    problem, inputs, sk, autoGsuVal, gsuSettings.globalAccumulation));
             else
-                rv.push_back(generateOutputConversionCall<false>(problem, inputs, sk, autoGsuVal));
+                rv.push_back(generateOutputConversionCall<false>(
+                    problem, inputs, sk, autoGsuVal, gsuSettings.globalAccumulation));
         }
 
         // The reduction of A is done in ConversionKernel when GSU > 1 in MultipleBuffer mode
