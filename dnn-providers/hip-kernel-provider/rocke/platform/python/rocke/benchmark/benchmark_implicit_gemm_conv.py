@@ -2049,7 +2049,10 @@ def _run_wgrad_sweep(
         # for fixed kernels there is exactly one degree (resolved_split_k itself).
         _rt_degrees = _SPLIT_K_AUTO if _is_rt else (resolved_split_k,)
 
-        for _launch_sk in _rt_degrees:
+        for _i, _launch_sk in enumerate(_rt_degrees):
+            if _do_prune and _is_rt and _cfg_key in _pruned_configs:
+                n_skipped += len(_rt_degrees) - _i
+                break
             block = (spec.block_size, 1, 1)
             stream = 0
 
