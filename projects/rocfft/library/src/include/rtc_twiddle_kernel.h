@@ -31,7 +31,7 @@ struct RTCKernelTwiddle : public RTCKernel
     // table is only X * Y entries.  This bounds the table indices only:
     // the LARGE kernel also computes step values that scale with the
     // transform length, so those stay 64-bit in the kernel body.
-    static inline KIntType itype_ = KIntType::U32;
+    static inline KIntType default_itype = KIntType::U32;
 
     // generate twiddle kernel from type and precision
     static std::shared_future<std::unique_ptr<RTCKernel>>

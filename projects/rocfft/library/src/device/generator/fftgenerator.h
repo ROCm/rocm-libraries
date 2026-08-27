@@ -1073,7 +1073,7 @@ struct StockhamTransform
 
     Variable write{"write", "bool"};
     Variable thread{"thread", rtc_kint_type(KIntType::U32)};
-    Variable batch{"batch", rtc_kint_type(KIntType::U32)};
+    Variable batch{"batch", "integer_type"};
 
     Variable twiddles{"twiddles", "const scalar_type", true, true};
     Variable load_cb_fn{"load_cb_fn", "void*"};
