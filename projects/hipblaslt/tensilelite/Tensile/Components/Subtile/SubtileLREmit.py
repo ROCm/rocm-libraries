@@ -257,9 +257,22 @@ def _emitLROffset_TLU0(tag, tile, ti, writer, kernel):
 
 # --- LR alloc/dealloc (LRTag_1x2) -------------------------------------------
 
+@_allocLROffsetRegisters.register(LRTag_TLU1)
+def _allocLROffsetRegs_tlu(tag, tile, ti, writer, kernel):
+  """Allocate LR offset registers for the free-dim contiguous (TLU=1) shape.
+
+  One base, not one per read.  The transpose read reaches every subtile of the
+  strip from a single per-lane address through its immediate offset, so the
+  extra bases the row-major shape needs would never be used as an address --
+  and each one also costs a swap register and its double-buffer xor, in the
+  main loop as well as at setup.
+  """
+  tile.sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="_allocLROffsetRegs_tlu_sharedVgprLROffset")]
+  tile.sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="_allocLROffsetRegs_tlu_sharedVgprLROffsetSwap")]
+
+
 @_allocLROffsetRegisters.register(LRTag_1x1)
 @_allocLROffsetRegisters.register(LRTag_1x2)
-@_allocLROffsetRegisters.register(LRTag_TLU1)
 def _allocLROffsetRegs_1x2(tag, tile, ti, writer, kernel):
   """Allocate LR offset registers for row-major (TLU=0) 1x2 subtile shape.
 
