@@ -488,7 +488,8 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
         return rocsparse_status_success;
     }
 
-    const auto A_batch_count = (A->batch_stride > 0) ? A->batch_count : 1;
+    const auto A_batch_count  = (A->batch_stride > 0) ? A->batch_count : 1;
+    const auto A_batch_stride = A->batch_stride;
 
     // Stream
     int32_t blockdim = 512;
