@@ -11,20 +11,26 @@ per (k, n) group, AQuant scales A per (m, k) group:
 
     C = dequant(A, AQ) @ B,   A[m, k] *= AQ[m // gM, k // gK]
 
-Requires a gfx950 GPU (MI350X / MI355X) and hipcc in PATH. Skips cleanly
-(exit 77) when no GPU is visible or the detected arch is not gfx950, so it is
-safe to invoke unconditionally from a CI lane.
+Requires a gfx942 (MI300X) or gfx950 (MI350X / MI355X) GPU and hipcc in PATH.
+Skips cleanly (exit 77) when no GPU is visible or the detected arch is neither.
+
+The non-preshuffleaq tests (fp8, bf8, fp8/tiled) use standard fp8 MFMA
+(warp_tile_k=32) which gfx942 has. The preshuffleaq tests are gated behind
+PRESHUFFLEAQ_SUPPORTED_ARCHS = ("gfx950",): they use FlatMM (warp_tile_k=64
+on gfx942), and that path has not yet been CI-verified on gfx942.
+
+The host fp8 codec follows the target arch — OCP on gfx950, FNUZ on gfx942.
 
 Tests:
-  fp8, bf8 — GPU output is non-zero, finite, and within 5% max-relative-error
-             vs. a fp32 CPU reference; time_ms is positive.
+  fp8, bf8 — GPU output is non-zero, non-constant, finite, and within 5%
+             max-relative-error vs. a fp32 CPU reference; time_ms is positive.
   fp8/tiled — same checks on a shape spanning a 4x4 grid of output tiles
              (tile_m=16, tile_n=64), which the 1x1-tile cases cannot catch.
 
 Run:
   python3 test_aquant_gpu_correctness.py
   python3 test_aquant_gpu_correctness.py -v          # verbose hipcc output
-  python3 test_aquant_gpu_correctness.py --gfx gfx950
+  python3 test_aquant_gpu_correctness.py --gfx gfx942
 """
 
 import argparse
@@ -37,6 +43,8 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+
+from dispatcher_common import fp8_uses_ocp
 
 from grouped_gemm_aquant_utils import (
     AQuantGemmProblem,
@@ -52,39 +60,43 @@ TOLERANCE = 0.05  # 5% max relative error — fp8/bf8 precision floor
 
 PASS = "PASS"
 FAIL = "FAIL"
+SKIP = "SKIP"
 
 # ctest reports this as "skipped" rather than passed. Without it, a CPU-only or
-# non-gfx950 runner would report every AQuant test as a hard FAIL for a reason
+# non-supported runner would report every AQuant test as a hard FAIL for a reason
 # that has nothing to do with the code under test.
 SKIP_EXIT = 77
 
-# AQuant shares BQuant's gfx950 (MI350X/MI355X) quantised-MFMA requirement.
-SUPPORTED_ARCHS = ("gfx950",)
+# fp8, bf8, fp8/tiled use standard MFMA (warp_tile_k=32), present on gfx942.
+# The former gfx950-only restriction was the OCP-hardcoded host codec, now fixed.
+SUPPORTED_ARCHS = ("gfx942", "gfx950")
+
+# preshuffleaq uses FlatMM (warp_tile_k=64 on gfx942 per _preshuffleaq_warp_tile_k).
+# Held back one CI run: FlatMM has not been empirically exercised on gfx942.
+PRESHUFFLEAQ_SUPPORTED_ARCHS = ("gfx950",)
 
 
 # ---------------------------------------------------------------------------
 # Dtype helpers
 # ---------------------------------------------------------------------------
 
-def _encode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
-    """Encode float32 → fp8 bytes (uint8 view of the fp8 bit pattern).
-
-    fp8 = OCP e4m3fn, bf8 = OCP e5m2. Kernels on gfx950 are compiled with
-    -DCK_TILE_USE_OCP_FP8 (see grouped_gemm_aquant_utils._compile_aquant_kernel),
-    so the bit patterns match what the kernel decodes.
-    """
+def _fp8_ml_dtype(dtype: str, gfx_arch: str):
+    """The ml_dtypes fp8/bf8 type matching what the kernel for `gfx_arch` produces."""
     import ml_dtypes
 
-    ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
-    return arr.astype(ml_t).view(np.uint8)
+    if fp8_uses_ocp(gfx_arch):
+        return ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+    return ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else ml_dtypes.float8_e5m2fnuz
 
 
-def _decode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
-    """Decode fp8 bytes (uint8 view) back to float32."""
-    import ml_dtypes
+def _encode_fp8(arr: np.ndarray, dtype: str, gfx_arch: str) -> np.ndarray:
+    """Encode float32 → fp8/bf8 bytes (uint8 view). Format follows target arch."""
+    return arr.astype(_fp8_ml_dtype(dtype, gfx_arch)).view(np.uint8)
 
-    ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
-    return arr.view(ml_t).astype(np.float32)
+
+def _decode_fp8(arr: np.ndarray, dtype: str, gfx_arch: str) -> np.ndarray:
+    """Decode fp8/bf8 bytes (uint8 view) → float32."""
+    return arr.view(_fp8_ml_dtype(dtype, gfx_arch)).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +150,7 @@ def _detect_arch() -> "str | None":
         return None
 
 
-def _make_inputs(M, N, K, gM, gK, dtype, seed=42):
+def _make_inputs(M, N, K, gM, gK, dtype, gfx_arch: str, seed=42):
     """Generate fp8-encoded A/B plus float32 AQ scales, and the decoded references.
 
     A and B are encoded to fp8 and decoded back so the CPU reference consumes the
@@ -151,9 +163,10 @@ def _make_inputs(M, N, K, gM, gK, dtype, seed=42):
     A_f32 = rng.uniform(-2.0, 2.0, (M, K)).astype(np.float32)
     B_f32 = rng.uniform(-2.0, 2.0, (K, N)).astype(np.float32)
     AQ    = rng.uniform(0.5, 2.0, (QM_A, QK_A)).astype(np.float32)
-    A_raw = _encode_fp8(A_f32, dtype)
-    B_raw = _encode_fp8(B_f32, dtype)
-    return A_raw, _decode_fp8(A_raw, dtype), B_raw, _decode_fp8(B_raw, dtype), AQ
+    A_raw = _encode_fp8(A_f32, dtype, gfx_arch)
+    B_raw = _encode_fp8(B_f32, dtype, gfx_arch)
+    return (A_raw, _decode_fp8(A_raw, dtype, gfx_arch),
+            B_raw, _decode_fp8(B_raw, dtype, gfx_arch), AQ)
 
 
 def _run_one(label: str, config, M: int, N: int, K: int,
@@ -161,7 +174,7 @@ def _run_one(label: str, config, M: int, N: int, K: int,
              B_raw: np.ndarray, B_f32: np.ndarray,
              AQ: np.ndarray,
              out_dir: Path,
-             gfx_arch: str = "gfx950") -> "tuple[str, str]":
+             gfx_arch: str) -> "tuple[str, str]":
     """Build, run, and verify one kernel. Returns (PASS|FAIL, detail_message)."""
     problem = AQuantGemmProblem(
         M=M, N=N, K=K,
@@ -183,10 +196,14 @@ def _run_one(label: str, config, M: int, N: int, K: int,
     result = runner.run(A=A_raw, B=B_raw, AQ=AQ, problem=problem, c_dtype=np.float16)
     C_gpu = result.C.astype(np.float32)
 
-    # An all-zero C is the signature of a kernel that launched but never wrote —
-    # e.g. an MFMA instruction unavailable on the target arch.
+    # A degenerate C is the signature of a kernel that launched but never did the
+    # work — e.g. a wrong warp_tile_k (CK_GFX950_SUPPORT branch mismatch) returning
+    # all zeros on gfx942. Check before the tolerance gate; see abquant for rationale.
     if np.all(C_gpu == 0):
         return FAIL, f"{label}: GPU output is all-zero"
+    if float(C_gpu.std()) <= 0.0:
+        return FAIL, (f"{label}: GPU output is constant "
+                      f"(value={float(C_gpu.flat[0]):.6g}); kernel did not compute")
     nan_mask = ~np.isfinite(C_gpu)
     if np.any(nan_mask):
         nan_frac = nan_mask.mean()
@@ -219,7 +236,7 @@ def test_fp8(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
     # which exercises the AQ scale prefetch more thoroughly than an even tail.
     M, N, K, gM, gK = 16, 64, 768, 1, 128
     cfg = default_fp8_config(quant_group_k=gK, quant_group_m=gM, gfx_arch=gfx_arch)
-    A_raw, A_dec, B_raw, B_dec, AQ = _make_inputs(M, N, K, gM, gK, "fp8")
+    A_raw, A_dec, B_raw, B_dec, AQ = _make_inputs(M, N, K, gM, gK, "fp8", gfx_arch)
     return _run_one("fp8", cfg, M, N, K, A_raw, A_dec, B_raw, B_dec, AQ,
                     out_dir, gfx_arch=gfx_arch)
 
@@ -227,7 +244,8 @@ def test_fp8(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
 def test_bf8(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
     M, N, K, gM, gK = 16, 64, 768, 1, 128
     cfg = default_bf8_config(quant_group_k=gK, quant_group_m=gM, gfx_arch=gfx_arch)
-    A_raw, A_dec, B_raw, B_dec, AQ = _make_inputs(M, N, K, gM, gK, "bf8", seed=43)
+    A_raw, A_dec, B_raw, B_dec, AQ = _make_inputs(M, N, K, gM, gK, "bf8", gfx_arch,
+                                                    seed=43)
     return _run_one("bf8", cfg, M, N, K, A_raw, A_dec, B_raw, B_dec, AQ,
                     out_dir, gfx_arch=gfx_arch)
 
@@ -237,7 +255,8 @@ def test_fp8_tiled(out_dir: Path, gfx_arch: str) -> "tuple[str, str]":
     # cases above cannot distinguish a correct tile index from a constant one.
     M, N, K, gM, gK = 64, 256, 768, 1, 128
     cfg = default_fp8_config(quant_group_k=gK, quant_group_m=gM, gfx_arch=gfx_arch)
-    A_raw, A_dec, B_raw, B_dec, AQ = _make_inputs(M, N, K, gM, gK, "fp8", seed=44)
+    A_raw, A_dec, B_raw, B_dec, AQ = _make_inputs(M, N, K, gM, gK, "fp8", gfx_arch,
+                                                    seed=44)
     return _run_one("fp8/tiled", cfg, M, N, K, A_raw, A_dec, B_raw, B_dec, AQ,
                     out_dir, gfx_arch=gfx_arch)
 
@@ -258,7 +277,7 @@ def main():
     # No hardcoded default: it must stay possible to tell "user asked for
     # gfx950" from "we are on an unrelated box", so the skip below can fire.
     parser.add_argument("--gfx", default=None,
-                        help="GPU arch override (default: auto-detect; gfx950 only)")
+                        help="GPU arch override (default: auto-detect)")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
@@ -297,12 +316,15 @@ def main():
         log.info("[%s] %s", status, detail)
 
     print("\n=== Summary ===")
-    passed = sum(1 for _, s, _ in results if s == PASS)
     for name, status, detail in results:
         print(f"  [{status:4s}] {detail}")
-    print(f"\n{passed}/{len(results)} passed")
+    passed = sum(1 for _, s, _ in results if s == PASS)
+    skipped = sum(1 for _, s, _ in results if s == SKIP)
+    failed = len(results) - passed - skipped
+    print(f"\n{passed}/{len(results) - skipped} passed"
+          + (f", {skipped} skipped" if skipped else ""))
 
-    return 0 if passed == len(results) else 1
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":
