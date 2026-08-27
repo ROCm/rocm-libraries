@@ -209,6 +209,102 @@ static_assert(validate_production_geometries<ck_tile::bf16_t>());
 static_assert(validate_production_geometries<ck_tile::half_t>());
 #endif
 
+template <typename Layout>
+constexpr bool has_aligned_production_regions()
+{
+    if constexpr(Layout::kDoubleBuffer)
+    {
+        return Layout::kQOffset % 256 == 0 && Layout::kK0Offset % 256 == 0 &&
+               Layout::kK1Offset % 256 == 0 && Layout::kV0Offset % 256 == 0 &&
+               Layout::kV1Offset % 256 == 0;
+    }
+    else
+    {
+        return Layout::kQOffset % 256 == 0 && Layout::kK0Offset % 256 == 0 &&
+               Layout::kV0Offset % 256 == 0;
+    }
+}
+
+template <typename DataType>
+constexpr bool validate_arena_layouts()
+{
+    using PrefillProblem = TestFmhaProblem<DataType, 128>;
+    using DecodeProblem  = TestFmhaProblem<DataType, 64>;
+    using Policy         = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+
+    using PrefillAll = typename Policy::template LdsArenaLayout<PrefillProblem>;
+    using DecodeAll  = typename Policy::template LdsArenaLayout<DecodeProblem>;
+
+    static_assert(PrefillAll::kQOffset == 0);
+    static_assert(PrefillAll::kK0Offset == 0);
+    static_assert(PrefillAll::kK1Offset == 17408);
+    static_assert(PrefillAll::kV0Offset == 34816);
+    static_assert(PrefillAll::kV1Offset == 53248);
+    static_assert(PrefillAll::kArenaBytes == 71680);
+    static_assert(DecodeAll::kQOffset == 0);
+    static_assert(DecodeAll::kK0Offset == 0);
+    static_assert(DecodeAll::kV0Offset == 4352);
+    static_assert(DecodeAll::kArenaBytes == 22784);
+
+    using PrefillNone =
+        typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, NoPad, NoPad>;
+    using PrefillQKV =
+        typename Policy::template LdsArenaLayout<PrefillProblem, QKPad, QKPad, VPad>;
+    using PrefillKV =
+        typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, QKPad, VPad>;
+    using PrefillK =
+        typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, QKPad, NoPad>;
+    using PrefillV =
+        typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, NoPad, VPad>;
+    static_assert(PrefillNone::kArenaBytes == 65536);
+    static_assert(PrefillQKV::kArenaBytes == 71680);
+    static_assert(PrefillKV::kArenaBytes == 71680);
+    static_assert(PrefillK::kArenaBytes == 67584);
+    static_assert(PrefillV::kArenaBytes == 69632);
+
+    using DecodeNone =
+        typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, NoPad, NoPad>;
+    using DecodeQKV =
+        typename Policy::template LdsArenaLayout<DecodeProblem, QKPad, QKPad, VPad>;
+    using DecodeKV =
+        typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, QKPad, VPad>;
+    using DecodeK =
+        typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, QKPad, NoPad>;
+    using DecodeV =
+        typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, NoPad, VPad>;
+    static_assert(DecodeNone::kArenaBytes == 20480);
+    static_assert(DecodeQKV::kArenaBytes == 22784);
+    static_assert(DecodeKV::kArenaBytes == 22784);
+    static_assert(DecodeK::kArenaBytes == 20736);
+    static_assert(DecodeV::kArenaBytes == 22528);
+
+    static_assert(has_aligned_production_regions<PrefillAll>());
+    static_assert(has_aligned_production_regions<DecodeAll>());
+    static_assert(PrefillAll::kK0Offset + PrefillAll::kKBytes <= PrefillAll::kK1Offset);
+    static_assert(PrefillAll::kK1Offset + PrefillAll::kKBytes <= PrefillAll::kV0Offset);
+    static_assert(PrefillAll::kQOffset + PrefillAll::kQBytes <= PrefillAll::kV0Offset);
+    static_assert((PrefillAll::kK1Offset - PrefillAll::kK0Offset) % QKPad::kIntervalBytes == 0);
+    static_assert((PrefillAll::kV1Offset - PrefillAll::kV0Offset) % VPad::kIntervalBytes == 0);
+    static_assert(PrefillAll::kArenaBytes <= 128 * 1024);
+    static_assert(ck_tile::integer_least_multiple(PrefillAll::kArenaBytes, 64 * 1024) * 2 <=
+                  320 * 1024);
+
+    using Legacy =
+        ck_tile::detail::QrTdmLegacyPhaseLayout<PrefillProblem, QKPad, QKPad, VPad>;
+    static_assert(Legacy::kK0Offset == 0);
+    static_assert(Legacy::kK1Offset == 17392);
+    static_assert(Legacy::kV0Offset == 35040);
+    static_assert(Legacy::kV1Offset == 53440);
+    static_assert(Legacy::kArenaBytes == 71840);
+    static_assert(Legacy::kDiagnosticOnly);
+    static_assert(!Legacy::kHasProductionAlignment);
+
+    return true;
+}
+
+static_assert(validate_arena_layouts<ck_tile::bf16_t>());
+static_assert(validate_arena_layouts<ck_tile::half_t>());
+
 TEST(QrTdmLdsPadding, CompileTimeConfiguration) { SUCCEED(); }
 
 } // namespace

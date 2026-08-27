@@ -158,6 +158,9 @@ CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_row_major_lds_descriptor()
     }
 }
 
+template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
+struct QrTdmLdsArenaLayout;
+
 } // namespace detail
 
 // This pipeline is qkv all located in LDS, targeting gfx1250
@@ -171,6 +174,12 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                                            /* AsyncCopy = */ true,
                                                            /* NumPrefetchK = */ 1,
                                                            /* NumPrefetchV = */ 1>;
+
+    template <typename Problem,
+              typename QPadding = detail::LdsPaddingConfig<true, 256, 16>,
+              typename KPadding = detail::LdsPaddingConfig<true, 256, 16>,
+              typename VPadding = detail::LdsPaddingConfig<true, 256, 32>>
+    using LdsArenaLayout = detail::QrTdmLdsArenaLayout<Problem, QPadding, KPadding, VPadding>;
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentQ()
@@ -880,6 +889,124 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 };
 
 namespace detail {
+
+template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
+struct QrTdmLdsArenaLayout
+{
+    using Shape = typename Problem::BlockFmhaShape;
+
+    static constexpr bool kDoubleBuffer     = Shape::kM0 > 64;
+    static constexpr index_t kArenaAlignment = 256;
+    static constexpr index_t kRegionAlignment = 256;
+    static constexpr index_t kSRequiredAlignment =
+        BlockFmhaPipelineQRKSVSTdmDefaultPolicy::template GetSmemNPackS<Problem>() *
+        sizeof(typename Problem::SaccDataType);
+
+    static constexpr auto q_descriptor =
+        make_qr_tdm_row_major_lds_descriptor<typename Problem::QDataType,
+                                               Shape::kM0,
+                                               Shape::kSubQKHeaddim,
+                                               QPadding,
+                                               16>();
+    static constexpr auto k_descriptor =
+        make_qr_tdm_row_major_lds_descriptor<typename Problem::KDataType,
+                                               Shape::kN0,
+                                               kDoubleBuffer ? Shape::kSubQKHeaddim : Shape::kK0,
+                                               KPadding,
+                                               16>();
+    static constexpr auto v_descriptor =
+        make_qr_tdm_row_major_lds_descriptor<typename Problem::VDataType,
+                                               Shape::kN0,
+                                               Shape::kN1,
+                                               VPadding,
+                                               16>();
+
+    static constexpr index_t kQBytes =
+        q_descriptor.get_element_space_size() * sizeof(typename Problem::QDataType);
+    static constexpr index_t kKBytes =
+        k_descriptor.get_element_space_size() * sizeof(typename Problem::KDataType);
+    static constexpr index_t kVBytes =
+        v_descriptor.get_element_space_size() * sizeof(typename Problem::VDataType);
+    static constexpr index_t kSBytes =
+        BlockFmhaPipelineQRKSVSTdmDefaultPolicy::template GetSmemSizeS<Problem>();
+
+    static constexpr index_t kQOffset  = 0;
+    static constexpr index_t kK0Offset = 0;
+    static constexpr index_t kK1Offset =
+        kDoubleBuffer ? integer_least_multiple(kK0Offset + kKBytes, kRegionAlignment) : 0;
+    static constexpr index_t kSOffset =
+        kDoubleBuffer ? 0 : integer_least_multiple(kK0Offset + kKBytes, kSRequiredAlignment);
+    static constexpr index_t kV0Offset = [] {
+        if constexpr(kDoubleBuffer)
+        {
+            constexpr index_t kKRegionEnd = kK1Offset + kKBytes;
+            return integer_least_multiple(max(kKRegionEnd, kQBytes), kRegionAlignment);
+        }
+        else
+        {
+            return integer_least_multiple(kSOffset + kSBytes, kRegionAlignment);
+        }
+    }();
+    static constexpr index_t kV1Offset =
+        kDoubleBuffer ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment) : kV0Offset;
+    static constexpr index_t kArenaBytes = [] {
+        if constexpr(kDoubleBuffer)
+        {
+            return integer_least_multiple(kV1Offset + kVBytes, kArenaAlignment);
+        }
+        else
+        {
+            return integer_least_multiple(max(kQBytes, kV0Offset + kVBytes), kArenaAlignment);
+        }
+    }();
+
+    static constexpr bool kHasProductionAlignment =
+        kQOffset % kRegionAlignment == 0 && kK0Offset % kRegionAlignment == 0 &&
+        (!kDoubleBuffer || kK1Offset % kRegionAlignment == 0) &&
+        kV0Offset % kRegionAlignment == 0 &&
+        (!kDoubleBuffer || kV1Offset % kRegionAlignment == 0);
+
+    static_assert(kHasProductionAlignment);
+    static_assert(kQOffset + kQBytes <= kArenaBytes);
+    static_assert(kV0Offset + kVBytes <= kArenaBytes);
+    static_assert(!kDoubleBuffer || kK0Offset + kKBytes <= kK1Offset);
+    static_assert(!kDoubleBuffer || kK1Offset + kKBytes <= kV0Offset);
+    static_assert(!kDoubleBuffer || kQOffset + kQBytes <= kV0Offset);
+    static_assert(kDoubleBuffer || kK0Offset + kKBytes <= kSOffset);
+    static_assert(kDoubleBuffer || kSOffset + kSBytes <= kV0Offset);
+    static_assert(!kDoubleBuffer || !KPadding::kEnabled ||
+                  (kK1Offset - kK0Offset) % KPadding::kIntervalBytes == 0);
+    static_assert(!kDoubleBuffer || !VPadding::kEnabled ||
+                  (kV1Offset - kV0Offset) % VPadding::kIntervalBytes == 0);
+    static_assert(kArenaBytes <= 128 * 1024);
+    static_assert(integer_least_multiple(kArenaBytes, 64 * 1024) * 2 <= 320 * 1024);
+};
+
+template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
+struct QrTdmLegacyPhaseLayout
+{
+    using Production = QrTdmLdsArenaLayout<Problem, QPadding, KPadding, VPadding>;
+
+    static_assert(Production::kDoubleBuffer,
+                  "legacy-phase diagnostics are defined only for the prefill path");
+
+    static constexpr bool kDiagnosticOnly       = true;
+    static constexpr index_t kQOffset            = 0;
+    static constexpr index_t kK0Offset           = 0;
+    static constexpr index_t kK1Offset           = Production::kKBytes;
+    static constexpr index_t kV0Offset           = 2 * Production::kKBytes + 256;
+    static constexpr index_t kV1Offset           = kV0Offset + Production::kVBytes;
+    static constexpr index_t kArenaBytes         = kV1Offset + Production::kVBytes;
+    static constexpr bool kHasProductionAlignment =
+        kQOffset % 256 == 0 && kK0Offset % 256 == 0 && kK1Offset % 256 == 0 &&
+        kV0Offset % 256 == 0 && kV1Offset % 256 == 0;
+
+    static_assert(kQOffset + Production::kQBytes <= kV0Offset);
+    static_assert(kK0Offset + Production::kKBytes <= kK1Offset);
+    static_assert(kK1Offset + Production::kKBytes <= kV0Offset);
+    static_assert(kV0Offset + Production::kVBytes <= kV1Offset);
+    static_assert(kV1Offset + Production::kVBytes <= kArenaBytes);
+};
 
 template <typename TensorTag, typename Problem, bool LoadOnce>
 CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_writer_distribution()
