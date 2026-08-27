@@ -52,7 +52,7 @@ namespace hipblaslt::client
         }
     };
 
-    struct MatmulTestCase
+    struct MatmulProblem
     {
         int64_t m;
         int64_t n;
@@ -79,5 +79,5 @@ namespace hipblaslt::client
 
     MatmulDataTypes resolveMatmulDataTypes(const Arguments& arguments);
 
-    std::vector<MatmulTestCase> normalizeMatmulCases(const Arguments& arguments);
+    std::vector<MatmulProblem> normalizeMatmulProblems(const Arguments& arguments);
 } // namespace hipblaslt::client

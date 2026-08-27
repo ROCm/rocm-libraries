@@ -13,7 +13,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/host_validation_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_buffer_gtest.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/matmul_test_case_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/matmul_problem_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_validation_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp

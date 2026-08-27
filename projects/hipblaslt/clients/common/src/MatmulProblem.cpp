@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <hipblaslt/client/MatmulTestCase.hpp>
+#include <hipblaslt/client/MatmulProblem.hpp>
 
 #include "hipblaslt_datatype2string.hpp"
 
@@ -203,11 +203,11 @@ namespace hipblaslt::client
         return types;
     }
 
-    std::vector<MatmulTestCase> normalizeMatmulCases(const Arguments& arguments)
+    std::vector<MatmulProblem> normalizeMatmulProblems(const Arguments& arguments)
     {
-        const int32_t caseCount  = std::max(1, arguments.grouped_gemm);
-        const int32_t batchCount = std::max(1, arguments.batch_count);
-        if(caseCount > static_cast<int32_t>(MAX_SUPPORTED_NUM_PROBLEMS))
+        const int32_t problemCount = std::max(1, arguments.grouped_gemm);
+        const int32_t batchCount   = std::max(1, arguments.batch_count);
+        if(problemCount > static_cast<int32_t>(MAX_SUPPORTED_NUM_PROBLEMS))
             throw std::invalid_argument("Grouped GEMM count exceeds the Arguments capacity.");
 
         hipblasLtBatchMode_t batchMode;
@@ -229,9 +229,9 @@ namespace hipblaslt::client
         if(arguments.c_equal_d && arguments.c_type != arguments.d_type)
             throw std::invalid_argument("C and D must have the same type when they share storage.");
 
-        std::vector<MatmulTestCase> cases;
-        cases.reserve(caseCount);
-        for(int32_t index = 0; index < caseCount; ++index)
+        std::vector<MatmulProblem> problems;
+        problems.reserve(problemCount);
+        for(int32_t index = 0; index < problemCount; ++index)
         {
             const int64_t m = arguments.M[index];
             const int64_t n = arguments.N[index];
@@ -261,7 +261,7 @@ namespace hipblaslt::client
                   : useArgumentStrides
                       ? arguments.stride_d[index]
                       : checkedProduct(arguments.ldd[index], n, "canonical D batch stride");
-            MatmulTestCase testCase{
+            MatmulProblem problem{
                 .m          = m,
                 .n          = n,
                 .k          = k,
@@ -302,11 +302,11 @@ namespace hipblaslt::client
                     = useArgumentStrides
                           ? arguments.stride_e[index]
                           : checkedProduct(arguments.lde[index], n, "canonical E batch stride");
-                testCase.auxiliary = normalizeMatrix(
+                problem.auxiliary = normalizeMatrix(
                     arguments.aux_type, m, n, arguments.lde[index], strideE, batchCount, batchMode);
             }
-            cases.push_back(std::move(testCase));
+            problems.push_back(std::move(problem));
         }
-        return cases;
+        return problems;
     }
 } // namespace hipblaslt::client

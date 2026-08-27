@@ -63,14 +63,14 @@ namespace hipblaslt::host_validation
         MatmulValidationMetrics metrics;
     };
 
-    inline HostComparisonReport compareMatmulOutput(const HostComparisonRequest& source,
-                                                    const MatmulValidationCase&   testCase,
+    inline HostComparisonReport compareMatmulOutput(const HostComparisonRequest&   source,
+                                                    const MatmulValidationCase&    validationCase,
                                                     const MatmulValidationOptions& options,
                                                     bool specialValueConsistency,
                                                     bool searchAllClose,
                                                     bool computeUlp)
     {
-        HostComparisonRequest request = source;
+        HostComparisonRequest request          = source;
         request.requireSpecialValueConsistency = specialValueConsistency;
         request.computeRelativeFrobeniusError  = options.compareNorm;
         request.findAllCloseTolerance          = searchAllClose;
@@ -78,17 +78,18 @@ namespace hipblaslt::host_validation
 
         if(options.comparePointwise)
         {
-            if(testCase.pointwiseTolerance.symmetricRelative != 0)
+            if(validationCase.pointwiseTolerance.symmetricRelative != 0)
             {
-                request.pointwise                  = HostPointwiseComparison::SymmetricRelative;
-                request.symmetricRelativeTolerance = testCase.pointwiseTolerance.symmetricRelative;
+                request.pointwise = HostPointwiseComparison::SymmetricRelative;
+                request.symmetricRelativeTolerance
+                    = validationCase.pointwiseTolerance.symmetricRelative;
             }
             else
             {
-                request.pointwise = testCase.pointwiseTolerance.absolute != 0
-                                        ? HostPointwiseComparison::Near
-                                        : HostPointwiseComparison::Unit;
-                request.absoluteTolerance = testCase.pointwiseTolerance.absolute;
+                request.pointwise         = validationCase.pointwiseTolerance.absolute != 0
+                                                ? HostPointwiseComparison::Near
+                                                : HostPointwiseComparison::Unit;
+                request.absoluteTolerance = validationCase.pointwiseTolerance.absolute;
             }
         }
         return compareHost(request);
@@ -99,19 +100,19 @@ namespace hipblaslt::host_validation
         double ulpSum   = 0.0;
         size_t ulpCount = 0;
 
-        for(const auto& testCase : request.cases)
+        for(const auto& validationCase : request.cases)
         {
             std::vector<HostComparisonReport> outputReports;
-            outputReports.reserve(testCase.outputs.size());
-            for(const auto& output : testCase.outputs)
+            outputReports.reserve(validationCase.outputs.size());
+            for(const auto& output : validationCase.outputs)
             {
-                outputReports.push_back(compareMatmulOutput(
-                    output,
-                    testCase,
-                    request.options,
-                    request.options.comparePointwise || request.options.compareNorm,
-                    request.options.searchAllClose,
-                    request.options.computeUlp));
+                outputReports.push_back(compareMatmulOutput(output,
+                                                            validationCase,
+                                                            request.options,
+                                                            request.options.comparePointwise
+                                                                || request.options.compareNorm,
+                                                            request.options.searchAllClose,
+                                                            request.options.computeUlp));
             }
 
             if(request.options.comparePointwise || request.options.compareNorm)
@@ -134,7 +135,7 @@ namespace hipblaslt::host_validation
                     if(request.options.assertNorm)
                     {
                         CHECK_SUCCESS(norm_check(normError,
-                                                 testCase.outputs.front().type,
+                                                 validationCase.outputs.front().type,
                                                  request.options.computeType,
                                                  request.options.inputTypeA,
                                                  request.options.inputTypeB));
@@ -163,51 +164,53 @@ namespace hipblaslt::host_validation
             {
                 for(const auto& report : outputReports)
                 {
-                    request.metrics.maximumUlp
-                        = std::max(request.metrics.maximumUlp,
-                                   report.unitsInLastPlaceComparison.maximumUlp);
+                    request.metrics.maximumUlp = std::max(
+                        request.metrics.maximumUlp, report.unitsInLastPlaceComparison.maximumUlp);
                     ulpSum += report.unitsInLastPlaceComparison.sumUlp;
                     ulpCount += report.unitsInLastPlaceComparison.ulpCompared;
                 }
             }
 
-            auto validateSideOutput = [&](const std::optional<MatmulValidationCase::SideOutput>&
-                                              output) {
-                if(!output)
-                    return;
-                if(request.options.comparePointwise)
-                {
-                    auto pointwiseOptions        = request.options;
-                    pointwiseOptions.compareNorm = false;
-                    const auto report            = compareMatmulOutput(
-                        output->pointwise, testCase, pointwiseOptions, false, false, false);
-                    CHECK_SUCCESS(report.comparison.passed());
-                }
-                if(request.options.compareNorm)
-                {
-                    auto normOptions             = request.options;
-                    normOptions.comparePointwise = false;
-                    const auto report
-                        = compareMatmulOutput(output->norm, testCase, normOptions, false, false, false);
-                    const double normError = std::abs(report.relativeFrobeniusError);
-                    request.metrics.relativeFrobeniusError += normError;
-                    if(request.options.assertNorm)
-                    {
-                        CHECK_SUCCESS(
-                            output->useComputeNormPolicy
-                                ? norm_check(normError,
-                                             output->norm.type,
-                                             request.options.computeType,
-                                             request.options.inputTypeA,
-                                             request.options.inputTypeB)
-                                : norm_check(normError, output->norm.type));
-                    }
-                }
-            };
+            auto validateSideOutput
+                = [&](const std::optional<MatmulValidationCase::SideOutput>& output) {
+                      if(!output)
+                          return;
+                      if(request.options.comparePointwise)
+                      {
+                          auto pointwiseOptions        = request.options;
+                          pointwiseOptions.compareNorm = false;
+                          const auto report            = compareMatmulOutput(output->pointwise,
+                                                                             validationCase,
+                                                                             pointwiseOptions,
+                                                                             false,
+                                                                             false,
+                                                                             false);
+                          CHECK_SUCCESS(report.comparison.passed());
+                      }
+                      if(request.options.compareNorm)
+                      {
+                          auto normOptions             = request.options;
+                          normOptions.comparePointwise = false;
+                          const auto report            = compareMatmulOutput(
+                              output->norm, validationCase, normOptions, false, false, false);
+                          const double normError = std::abs(report.relativeFrobeniusError);
+                          request.metrics.relativeFrobeniusError += normError;
+                          if(request.options.assertNorm)
+                          {
+                              CHECK_SUCCESS(output->useComputeNormPolicy
+                                                ? norm_check(normError,
+                                                             output->norm.type,
+                                                             request.options.computeType,
+                                                             request.options.inputTypeA,
+                                                             request.options.inputTypeB)
+                                                : norm_check(normError, output->norm.type));
+                          }
+                      }
+                  };
 
-            validateSideOutput(testCase.maximum);
-            validateSideOutput(testCase.auxiliary);
-            validateSideOutput(testCase.bias);
+            validateSideOutput(validationCase.maximum);
+            validateSideOutput(validationCase.auxiliary);
+            validateSideOutput(validationCase.bias);
         }
 
         if(request.options.computeUlp && ulpCount != 0)
