@@ -433,10 +433,10 @@ void build_twiddle(CompileQueue& queue)
     {
         for(auto type : twiddle_kernel_types)
         {
-            auto kernel_name = twiddle_rtc_kernel_name(type, precision);
+            auto kernel_name = twiddle_rtc_kernel_name(type, precision, IndexType::U32);
             std::function<std::string(const std::string&)> generate_src
                 = [=](const std::string& kernel_name) -> std::string {
-                return twiddle_rtc(kernel_name, type, precision);
+                return twiddle_rtc(kernel_name, IndexType::U32, type, precision);
             };
             queue.push({kernel_name, generate_src, ""});
         }

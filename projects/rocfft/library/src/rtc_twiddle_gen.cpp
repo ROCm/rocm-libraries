@@ -23,7 +23,9 @@
 #include "rtc_kernel.h"
 #include "twiddles.h"
 
-std::string twiddle_rtc_kernel_name(TwiddleTableType type, rocfft_precision precision)
+std::string twiddle_rtc_kernel_name(TwiddleTableType type,
+                                    rocfft_precision precision,
+                                    const IndexType& itype)
 {
     std::string kernel_name = "twiddle_gen";
     switch(type)
@@ -44,6 +46,7 @@ std::string twiddle_rtc_kernel_name(TwiddleTableType type, rocfft_precision prec
         kernel_name += "_pp_N";
         break;
     }
+    kernel_name += rtc_index_name(itype);
     kernel_name += rtc_precision_name(precision);
     return kernel_name;
 }
@@ -75,32 +78,32 @@ static std::string twiddle_rtc_args(TwiddleTableType type, rocfft_precision prec
     switch(type)
     {
     case TwiddleTableType::RADICES:
-        args += "size_t length_limit";
-        args += ", size_t num_radices";
+        args += "index_type length_limit";
+        args += ", index_type num_radices";
         args += ", radices_t radices";
         args += ", radices_t radices_prod";
         args += ", radices_t radices_sum_prod";
         args += ", scalar_type* output";
         break;
     case TwiddleTableType::LENGTH_N:
-        args += "size_t length_limit";
-        args += ", size_t N";
+        args += "index_type length_limit";
+        args += ", index_type N";
         args += ", scalar_type* output";
         break;
     case TwiddleTableType::HALF_N:
-        args += "size_t half_N";
-        args += ", size_t N";
+        args += "index_type half_N";
+        args += ", index_type N";
         args += ", scalar_type* output";
         break;
     case TwiddleTableType::LARGE:
         args += "double phi";
-        args += ", size_t base";
-        args += ", size_t X";
-        args += ", size_t Y";
+        args += ", index_type base";
+        args += ", index_type X";
+        args += ", index_type Y";
         args += ", scalar_type* output";
         break;
     case TwiddleTableType::PARTIAL_PASS_N:
-        args += "size_t N";
+        args += "index_type N";
         args += ", scalar_type* output";
         break;
     }
@@ -115,20 +118,20 @@ static std::string twiddle_rtc_body(TwiddleTableType type)
     {
     case TwiddleTableType::RADICES:
         body += R"_SRC(
-        auto i = threadIdx.x + blockIdx.x * blockDim.x;
+        index_type i = threadIdx.x + blockIdx.x * blockDim.x;
 
         if(i < num_radices - 1)
         {
             auto L     = radices_prod.data[i];
             auto radix = radices.data[i + 1];
-            auto k     = threadIdx.y + blockIdx.y * blockDim.y;
+            index_type k     = threadIdx.y + blockIdx.y * blockDim.y;
 
             if(k < L / radix)
             {
                 double theta = TWO_PI * (k) / (L);
                 auto   index = radices_sum_prod.data[i] + k * (radices.data[i + 1] - 1);
 
-                for(size_t j = 1; j < radix && index < length_limit; ++j)
+                for(index_type j = 1; j < radix && index < length_limit; ++j)
                 {
                     output[index].x = cos((j)*theta);
                     output[index].y = sin((j)*theta);
@@ -141,7 +144,7 @@ static std::string twiddle_rtc_body(TwiddleTableType type)
         break;
     case TwiddleTableType::LENGTH_N:
         body += R"_SRC(
-        auto i = threadIdx.x + blockIdx.x * blockDim.x;
+        index_type i = threadIdx.x + blockIdx.x * blockDim.x;
 
         if(i < N && i < length_limit)
         {
@@ -155,7 +158,7 @@ static std::string twiddle_rtc_body(TwiddleTableType type)
         break;
     case TwiddleTableType::HALF_N:
         body += R"_SRC(
-        auto i = threadIdx.x + blockIdx.x * blockDim.x;
+        index_type i = threadIdx.x + blockIdx.x * blockDim.x;
 
         if(i < half_N)
         {
@@ -169,15 +172,15 @@ static std::string twiddle_rtc_body(TwiddleTableType type)
         break;
     case TwiddleTableType::LARGE:
         body += R"_SRC(
-        auto iY = threadIdx.y + blockIdx.y * blockDim.y;
+        index_type iY = threadIdx.y + blockIdx.y * blockDim.y;
 
         if(iY < Y)
         {
-            auto iX = threadIdx.x + blockIdx.x * blockDim.x;
+            index_type iX = threadIdx.x + blockIdx.x * blockDim.x;
 
             if(iX < X)
             {
-                auto j = (static_cast<size_t>(1) << (iY * base)) * iX;
+                auto j = (static_cast<index_type>(1) << (iY * base)) * iX;
 
                 double c = cos(phi * j);
                 double s = sin(phi * j);
@@ -192,8 +195,8 @@ static std::string twiddle_rtc_body(TwiddleTableType type)
         break;
     case TwiddleTableType::PARTIAL_PASS_N:
         body += R"_SRC(
-        auto i_row = threadIdx.x + blockIdx.x * blockDim.x;
-        auto i_col = threadIdx.y + blockIdx.y * blockDim.y;
+        index_type i_row = threadIdx.x + blockIdx.x * blockDim.x;
+        index_type i_col = threadIdx.y + blockIdx.y * blockDim.y;
 
         if(i_row < N && i_col < N)
         {   
@@ -210,18 +213,21 @@ static std::string twiddle_rtc_body(TwiddleTableType type)
     return body;
 }
 
-std::string
-    twiddle_rtc(const std::string& kernel_name, TwiddleTableType type, rocfft_precision precision)
+std::string twiddle_rtc(const std::string& kernel_name,
+                        const IndexType&   itype,
+                        TwiddleTableType   type,
+                        rocfft_precision   precision)
 {
     std::string src;
 
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
+    src += rtc_index_type_decl(itype);
     src += rtc_precision_type_decl(precision);
     src += "static constexpr double TWO_PI = -6.283185307179586476925286766559;\n";
-    src += "static const unsigned int TWIDDLES_MAX_RADICES = "
-           + std::to_string(TWIDDLES_MAX_RADICES) + ";\n";
+    src += "static const index_type TWIDDLES_MAX_RADICES = " + std::to_string(TWIDDLES_MAX_RADICES)
+           + ";\n";
 
     src += radices_t_str;
     src += twiddle_rtc_header;

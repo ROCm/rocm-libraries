@@ -26,15 +26,16 @@ std::shared_future<std::unique_ptr<RTCKernel>> RTCKernelTwiddle::generate(
     const std::string& gpu_arch, TwiddleTableType type, rocfft_precision precision)
 {
     RTCGenerator generator;
-    generator.generate_name = [=]() { return twiddle_rtc_kernel_name(type, precision); };
-    generator.generate_src
-        = [=](const std::string& kernel_name) { return twiddle_rtc(kernel_name, type, precision); };
-    generator.construct_rtckernel = [](const std::string&                       kernel_name,
-                                       std::shared_future<hipModule_wrapper_t>& module,
-                                       dim3                                     gridDim,
-                                       dim3                                     blockDim) {
+    generator.generate_name = [=]() { return twiddle_rtc_kernel_name(type, precision, itype); };
+    generator.generate_src  = [=](const std::string& kernel_name) {
+        return twiddle_rtc(kernel_name, itype, type, precision);
+    };
+    generator.construct_rtckernel = [=](const std::string&                       kernel_name,
+                                        std::shared_future<hipModule_wrapper_t>& module,
+                                        dim3                                     gridDim,
+                                        dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelTwiddle(kernel_name, module, gridDim, blockDim));
+            new RTCKernelTwiddle(kernel_name, itype, module, gridDim, blockDim));
     };
 
     std::string kernel_name;
