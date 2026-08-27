@@ -322,19 +322,37 @@ static void scheduleRegionWithMovableSideEffects(
         if (!dagNodes[i].hazardFlags.empty()) dagNodes[i].hazardDeadline = bestDeadline;
     }
 
-    PASS_DEBUG(dag::dumpDAGGraph(regionDag, std::cerr));
+    // Scheduler-policy ordering is an overlay: it participates in readiness and
+    // cycle validation, but never mutates the register-dependency DAG.
+    std::vector<HardSchedulingConstraint> requestedConstraints;
+    readyQueue.onInitRegion(regionStart, regionEnd, blockBegin, requestedConstraints);
+    HardSchedulingConstraintOverlay constraintOverlay(dagGraph);
+    for (const auto& [predecessor, successor] : requestedConstraints) {
+        auto predecessorIt = instToId.find(predecessor);
+        auto successorIt = instToId.find(successor);
+        if (predecessorIt == instToId.end() || successorIt == instToId.end()) continue;
 
-    readyQueue.onInitRegion(regionStart, regionEnd, blockBegin);
+        const unsigned predecessorId = predecessorIt->second;
+        const unsigned successorId = successorIt->second;
+        if (!constraintOverlay.tryAdd(predecessorId, successorId)) {
+            PASS_DEBUG(std::cerr << "[DAG hard constraint] skip cycle-forming link "
+                                 << predecessorId << " -> " << successorId << "\n");
+            continue;
+        }
+        PASS_DEBUG(std::cerr << "[DAG hard constraint] add overlay link " << predecessorId << " -> "
+                             << successorId << "\n");
+    }
+
+    PASS_DEBUG(dag::dumpDAGGraph(regionDag, std::cerr));
 
     // Kahn's algorithm with stable pick (by original order)
 
     assert(readyQueue.empty() && "Ready queue must be empty before scheduling a region");
 
-    // Initialize the ready queue with instructions that have in-degree 0.
+    // A node is ready only when both its original DAG dependencies and the
+    // independent hard scheduling constraints have been satisfied.
     for (unsigned i = 0; i < regionSize; ++i) {
-        if (dagNodes[i].inDegree == 0) {
-            readyQueue.push(&dagNodes[i]);
-        }
+        if (constraintOverlay.isReady(i, dagNodes[i].inDegree)) readyQueue.push(&dagNodes[i]);
     }
 
     // Process the ready queue until it's empty.
@@ -363,17 +381,23 @@ static void scheduleRegionWithMovableSideEffects(
         // Add the instruction to the scheduled list.
         scheduled.push_back(currentNode->inst);
 
-        // Process all successors of the current node.
+        // Process original DAG successors without modifying the overlay.
         for (unsigned succId : dagGraph[currentNode->id]) {
             DAGNode& succNode = dagNodes[succId];
             succNode.inDegree--;
+            if (constraintOverlay.isReady(succId, succNode.inDegree)) readyQueue.push(&succNode);
+        }
 
-            // If the successor now has in-degree 0, add it to the ready queue.
-            if (succNode.inDegree == 0) {
-                readyQueue.push(&succNode);
-            }
+        // Independently release successors blocked only by scheduler-policy links.
+        const auto& constraintSuccessors = constraintOverlay.successors(currentNode->id);
+        constraintOverlay.satisfyFrom(currentNode->id);
+        for (unsigned succId : constraintSuccessors) {
+            DAGNode& succNode = dagNodes[succId];
+            if (constraintOverlay.isReady(succId, succNode.inDegree)) readyQueue.push(&succNode);
         }
     }
+    assert(orderInRegion == regionSize &&
+           "Hard scheduling constraints must not leave unscheduled DAG nodes");
 }
 
 // Schedule the instructions in the given IRList.
