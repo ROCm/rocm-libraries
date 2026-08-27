@@ -1,12 +1,12 @@
 {
   "version": "1.0",
-  "id": "9bf47a68-2b54-4ba5-94b8-bbddd3abf3c0",
+  "id": "2b5ddf8b-0547-4526-8eff-d18da30cef75",
   "name": "hipkernel:Gfx942AttentionDense",
   "graph_match": {
     "native": "hipkernel.gfx942_attention_dense.graph_match"
   },
-  "metadata": "b76b7d80-8053-4b71-8fd7-078b2f2613e9",
-  "heuristic": "4486c76c-8957-4e1f-aab8-188b92f590ad",
+  "metadata": "26ddc6a3-d5c1-414b-912c-84dde5c1b15d",
+  "heuristic": "65733e40-1798-41e8-98a5-e32644e5b1e3",
   "knobs": [
     "block_n",
     "head_size",
