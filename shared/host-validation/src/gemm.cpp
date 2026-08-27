@@ -13,12 +13,8 @@
 namespace roc::host_validation {
 namespace {
 bool gemmTensorStorageOverlaps(const Tensor& left, const Tensor& right) {
-    if (left.storage().empty() || right.storage().empty()) return false;
-    const uintptr_t leftBegin = reinterpret_cast<uintptr_t>(left.storage().data());
-    const uintptr_t rightBegin = reinterpret_cast<uintptr_t>(right.storage().data());
-    const uintptr_t leftEnd = leftBegin + left.storage().size();
-    const uintptr_t rightEnd = rightBegin + right.storage().size();
-    return leftBegin < rightEnd && rightBegin < leftEnd;
+    return detail::byteRangesOverlap(left.rawEncodedBackingStorage(),
+                                     right.rawEncodedBackingStorage());
 }
 
 void validateOwnedGemmStorage(const GemmProblem& problem, const Tensor& output) {
@@ -45,8 +41,8 @@ void validateOwnedGemmStorage(const GemmProblem& problem, const Tensor& output) 
 }
 
 void initializeOwnedGemmOutput(const Tensor& output, size_t requiredStorageBytes) {
-    std::fill(output.storage().begin(), output.storage().begin() + requiredStorageBytes,
-              std::byte{0});
+    std::fill(output.rawEncodedBackingStorage().begin(),
+              output.rawEncodedBackingStorage().begin() + requiredStorageBytes, std::byte{0});
     detail::forEachIndex(output.shape(), [&](std::span<const size_t> indices, size_t) {
         output.storeFrom(indices, 0.0);
     });
@@ -124,22 +120,16 @@ GemmRunInfo referenceGemm(const GemmRequest& request, const GemmExecution& execu
 GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output,
                          const GemmExecution& execution,
                          const GemmBackendImplementation* backendImplementation) {
-    return referenceGemm(problem, output, TensorStorage::allocate, execution,
-                         backendImplementation);
-}
-
-GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output,
-                         const TensorStorageAllocator& allocator, const GemmExecution& execution,
-                         const GemmBackendImplementation* backendImplementation) {
     detail::validateRuntimeGemmProblem(problem);
     const Shape outputShape{problem.a.values.shape()[0], problem.b.values.shape()[1]};
-    const Layout outputLayout = output.layout.value_or(Layout::contiguous(outputShape));
+    const Layout outputLayout =
+        output.layout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
     if (outputLayout.shape() != outputShape)
         throw std::invalid_argument("Owning reference GEMM output layout shape mismatch.");
     (void)output.selection.selectedCount(outputShape.elementCount());
     const size_t requiredStorageBytes = storageBytesForLayout(problem.outputType, outputLayout);
 
-    Tensor destination(problem.outputType, outputLayout, allocator);
+    Tensor destination(problem.outputType, outputLayout);
     validateOwnedGemmStorage(problem, destination);
     initializeOwnedGemmOutput(destination, requiredStorageBytes);
     GemmRequest request(problem, destination, output.selection);

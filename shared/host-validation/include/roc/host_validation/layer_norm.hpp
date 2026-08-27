@@ -83,6 +83,4 @@ struct LayerNormResult {
 
 LayerNormRunInfo referenceLayerNorm(const LayerNormRequest& request);
 LayerNormResult referenceLayerNorm(const LayerNormProblem& problem);
-LayerNormResult referenceLayerNorm(const LayerNormProblem& problem,
-                                   const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation

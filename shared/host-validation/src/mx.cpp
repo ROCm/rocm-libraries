@@ -458,26 +458,6 @@ std::vector<std::byte> packRawValues(std::span<const uint8_t> rawValues, uint16_
     return storage;
 }
 
-Tensor tensorFromStorage(ScalarType type, Layout layout, std::span<const std::byte> storage,
-                         const TensorStorageAllocator& allocator) {
-    if (!allocator) throw std::invalid_argument("MX Tensor storage allocator is empty.");
-    TensorStorage allocated = allocator(storage.size());
-    if (allocated.size() < storage.size())
-        throw std::invalid_argument("MX Tensor storage allocator returned too few bytes.");
-    Tensor result = Tensor::wrapStorage(type, std::move(layout), std::move(allocated));
-    std::ranges::copy(storage, result.storage().begin());
-    return result;
-}
-
-template <typename Native>
-Tensor nativeTensor(ScalarType type, Layout layout, const std::vector<Native>& values,
-                    const TensorStorageAllocator& allocator) {
-    const size_t bytes =
-        checkedMultiply(values.size(), sizeof(Native), "MX native tensor storage overflow.");
-    return tensorFromStorage(type, std::move(layout),
-                             {reinterpret_cast<const std::byte*>(values.data()), bytes}, allocator);
-}
-
 void generateUnbounded(const MxGenerationProblem& problem, const ScaleBlocking& blocking,
                        std::vector<uint8_t>& dataRawValues, std::vector<uint8_t>& scaleRawValues,
                        std::vector<uint32_t>& scaleIndexValues, std::vector<float>& referenceValues,
@@ -660,8 +640,7 @@ void validateProblem(const MxGenerationProblem& problem) {
 }
 }  // namespace
 
-MxGenerationResult generateMx(const MxGenerationProblem& problem,
-                              const TensorStorageAllocator& allocator) {
+MxGenerationResult generateMx(const MxGenerationProblem& problem) {
     validateProblem(problem);
     const size_t rows = problem.shape[0];
     const size_t columns = problem.shape[1];
@@ -691,25 +670,22 @@ MxGenerationResult generateMx(const MxGenerationProblem& problem,
         generateQuantized(problem, blocking, dataRawValues, scaleRawValues, scaleIndexValues,
                           referenceValues, threadCount);
 
-    const std::vector<std::byte> dataStorage =
+    std::vector<std::byte> dataStorage =
         packRawValues(dataRawValues, scalarTypeInfo(problem.dataType).storageBits, threadCount);
-    Tensor data = tensorFromStorage(
+    Tensor data = Tensor::takeOwnershipOfEncodedBackingStorage(
         problem.dataType, Layout(problem.shape, {1, static_cast<ptrdiff_t>(leadingDimension)}),
-        dataStorage, allocator);
+        std::move(dataStorage));
     std::vector<std::byte> scaleStorage(scaleRawValues.size());
     std::memcpy(scaleStorage.data(), scaleRawValues.data(), scaleRawValues.size());
-    Tensor scales = tensorFromStorage(
-        problem.scaleType, Layout::contiguous(Shape{blocking.scaleCount}), scaleStorage, allocator);
+    Tensor scales = Tensor::takeOwnershipOfEncodedBackingStorage(
+        problem.scaleType, Layout::contiguousLastDimensionFastest(Shape{blocking.scaleCount}),
+        std::move(scaleStorage));
     Tensor scaleIndices =
-        nativeTensor(ScalarType::UInt32, Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}),
-                     scaleIndexValues, allocator);
+        Tensor::copyNativeStorage(Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}),
+                                  std::span<const uint32_t>(scaleIndexValues));
     Tensor reference =
-        nativeTensor(ScalarType::Float32, Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}),
-                     referenceValues, allocator);
+        Tensor::copyNativeStorage(Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}),
+                                  std::span<const float>(referenceValues));
     return {std::move(data), std::move(scales), std::move(scaleIndices), std::move(reference)};
-}
-
-MxGenerationResult generateMx(const MxGenerationProblem& problem) {
-    return generateMx(problem, TensorStorage::allocate);
 }
 }  // namespace roc::host_validation

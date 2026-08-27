@@ -72,7 +72,7 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument("rocRoller runtime scale block size must be nonzero.");
         const size_t blockCount
             = reductionExtent / blockSize + static_cast<size_t>(reductionExtent % blockSize != 0);
-        return Tensor(
+        return Tensor::copyEncodedBackingStorage(
             scalarType, Layout(Shape{freeExtent, blockCount}, {0, 0}), std::as_bytes(values));
     }
 
@@ -89,13 +89,14 @@ namespace rocRoller::HostNumerics
         if(scalarTypeInfo(scalarType).category != ScalarCategory::Scale)
             throw std::invalid_argument("rocRoller block scales require a scale data type.");
         if(values.size() == 1)
-            return Tensor(scalarType, Layout(layout.shape(), {0, 0}), std::as_bytes(values));
+            return Tensor::copyEncodedBackingStorage(
+                scalarType, Layout(layout.shape(), {0, 0}), std::as_bytes(values));
 
         auto const requiredBytes = storageBytesForLayout(scalarType, layout);
         if(values.size_bytes() != requiredBytes)
             throw std::invalid_argument(
                 "rocRoller block-scale storage does not match its data descriptor.");
-        return Tensor(scalarType, layout, std::as_bytes(values));
+        return Tensor::copyEncodedBackingStorage(scalarType, layout, std::as_bytes(values));
     }
 
     HostReferenceProblem
@@ -164,7 +165,7 @@ namespace rocRoller::HostNumerics
                     checkedElementCount(
                         rows, blockCount, "rocRoller A scale element count overflow."),
                     1.0f);
-                unitScaleA = Tensor::fromValues(
+                unitScaleA = Tensor::copyValuesWithConversion(
                     ScalarType::Float32, Shape{rows, blockCount}, std::span<const float>(values));
             }
             if(!problem.scaleB)
@@ -173,7 +174,7 @@ namespace rocRoller::HostNumerics
                     checkedElementCount(
                         columns, blockCount, "rocRoller B scale element count overflow."),
                     1.0f);
-                unitScaleB = Tensor::fromValues(ScalarType::Float32,
+                unitScaleB = Tensor::copyValuesWithConversion(ScalarType::Float32,
                                                 Shape{columns, blockCount},
                                                 std::span<const float>(values));
             }

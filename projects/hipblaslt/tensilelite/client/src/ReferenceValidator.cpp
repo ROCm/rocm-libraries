@@ -351,7 +351,8 @@ namespace TensileLite
                     m_cpuResultBuffer.get())
                     + elementsBeforeData * elementBytes,
                 allocatedBytes);
-            const Tensor resultTensor(scalarType, layout, resultStorage);
+            const Tensor resultTensor =
+                Tensor::copyEncodedBackingStorage(scalarType, layout, resultStorage);
 
             ComparisonOptions options
                 = validationComparisonOptions(tensor.dataType(), threshold);

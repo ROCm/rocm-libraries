@@ -65,19 +65,12 @@ struct ReductionResult {
 
 ReductionRunInfo referenceReduce(const ReductionRequest& request);
 ReductionResult referenceReduce(const ReductionProblem& problem);
-ReductionResult referenceReduce(const ReductionProblem& problem,
-                                const TensorStorageAllocator& allocator);
 
 ReductionRunInfo referenceSum(const ReductionRequest& request);
 ReductionResult referenceSum(const ReductionProblem& problem);
-ReductionResult referenceSum(const ReductionProblem& problem,
-                             const TensorStorageAllocator& allocator);
 
 ReductionRunInfo referenceMaximumAbsolute(const ReductionRequest& request);
 ReductionRunInfo referenceMaximumAbsolute(Tensor input, Tensor output, ScalarType accumulatorType);
 ReductionResult referenceMaximumAbsolute(Tensor input, ScalarType outputType,
                                          ScalarType accumulatorType);
-ReductionResult referenceMaximumAbsolute(Tensor input, ScalarType outputType,
-                                         ScalarType accumulatorType,
-                                         const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation

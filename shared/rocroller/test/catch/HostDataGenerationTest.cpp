@@ -32,9 +32,9 @@ namespace HostDataGenerationTest
 
         std::vector<uint8_t> bytes(roc::host_validation::Tensor const& tensor)
         {
-            std::vector<uint8_t> result(tensor.storage().size());
-            std::transform(tensor.storage().begin(),
-                           tensor.storage().end(),
+            std::vector<uint8_t> result(tensor.rawEncodedBackingStorage().size());
+            std::transform(tensor.rawEncodedBackingStorage().begin(),
+                           tensor.rawEncodedBackingStorage().end(),
                            result.begin(),
                            [](std::byte value) { return std::to_integer<uint8_t>(value); });
             return result;

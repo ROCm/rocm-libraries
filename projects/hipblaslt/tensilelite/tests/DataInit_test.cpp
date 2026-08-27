@@ -410,18 +410,18 @@ TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
     StructuredSparsityPattern pattern;
     pattern.axis           = sparseAxis;
     pattern.fixedPositions = {0, 1};
-    Tensor componentPrunedTensor(scalarType,
-                                 layout(denseDescriptor),
-                                 std::as_writable_bytes(std::span<int8_t>(componentPruned)));
-    Tensor componentCompressedTensor(
+    Tensor componentPrunedTensor = Tensor::copyEncodedBackingStorage(
+        scalarType, layout(denseDescriptor),
+        std::as_writable_bytes(std::span<int8_t>(componentPruned)));
+    Tensor componentCompressedTensor = Tensor::copyEncodedBackingStorage(
         scalarType,
         layout(compressedDescriptor),
         std::as_writable_bytes(std::span<int8_t>(componentCompressed)));
-    Tensor componentMetadataTensor(ScalarType::UInt8,
-                                   logicalMetadataLayout,
-                                   std::as_writable_bytes(std::span<uint8_t>(componentMetadata)));
+    Tensor componentMetadataTensor = Tensor::copyEncodedBackingStorage(
+        ScalarType::UInt8, logicalMetadataLayout,
+        std::as_writable_bytes(std::span<uint8_t>(componentMetadata)));
     StructuredSparsityRequest componentRequest(
-        Tensor(
+        Tensor::copyEncodedBackingStorage(
             scalarType, layout(denseDescriptor), std::as_bytes(std::span<const int8_t>(original))),
         componentPrunedTensor,
         componentCompressedTensor,
@@ -430,14 +430,14 @@ TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
         pattern);
     applyStructuredSparsity(componentRequest);
     std::memcpy(componentPruned.data(),
-                componentPrunedTensor.storage().data(),
-                componentPrunedTensor.storage().size());
+                componentPrunedTensor.rawEncodedBackingStorage().data(),
+                componentPrunedTensor.rawEncodedBackingStorage().size());
     std::memcpy(componentCompressed.data(),
-                componentCompressedTensor.storage().data(),
-                componentCompressedTensor.storage().size());
+                componentCompressedTensor.rawEncodedBackingStorage().data(),
+                componentCompressedTensor.rawEncodedBackingStorage().size());
     std::memcpy(componentMetadata.data(),
-                componentMetadataTensor.storage().data(),
-                componentMetadataTensor.storage().size());
+                componentMetadataTensor.rawEncodedBackingStorage().data(),
+                componentMetadataTensor.rawEncodedBackingStorage().size());
 
     EXPECT_EQ(componentPruned, adapterPruned);
     EXPECT_EQ(componentCompressed, adapterCompressed);

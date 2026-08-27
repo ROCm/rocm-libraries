@@ -80,7 +80,7 @@ int main(int argc, char** argv)
     using roc::host_validation::Shape;
     using roc::host_validation::Tensor;
     const Tensor weight
-        = Tensor::fromNative(Layout::contiguous(Shape{m, k}), std::span<const int>(weightStorage));
+        = Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(Shape{m, k}), std::span<const int>(weightStorage));
 
     std::cout << "Original weight:\n";
     printTensor<int>(std::cout, weight);
@@ -92,13 +92,13 @@ int main(int argc, char** argv)
     constexpr auto   MultipleK    = MiK * PackK;
     const auto       paddedM      = (m / MultipleM + !!(m % MultipleM)) * MultipleM;
     const auto       paddedK      = (k / MultipleK + !!(k % MultipleK)) * MultipleK;
-    const Tensor     paddedWeight = weight.pad(Shape{paddedM, paddedK});
+    const Tensor     paddedWeight = weight.copyWithZeroPadding(Shape{paddedM, paddedK});
     std::cout << "Padded weight:\n";
     printTensor<int>(std::cout, paddedWeight);
     const Tensor permuted
         = paddedWeight
-              .reshape(Shape{paddedM / MiM, MiM, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK})
-              .permute({0, 2, 3, 1, 4});
+              .reshapeSharingStorage(Shape{paddedM / MiM, MiM, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK})
+              .copyWithPermutedDimensions({0, 2, 3, 1, 4});
     std::cout << "Swizzle weight:\n";
     printTensor<int>(std::cout, permuted);
     return 0;

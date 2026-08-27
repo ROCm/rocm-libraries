@@ -77,13 +77,15 @@ Tensor tensorFromRaw(ScalarType type, uint32_t raw) {
     std::vector<std::byte> storage(bytes);
     for (size_t index = 0; index < bytes; ++index)
         storage[index] = static_cast<std::byte>((raw >> (index * 8)) & 0xffU);
-    return Tensor::fromStorage(type, Layout::contiguous(Shape{1}), std::move(storage));
+    return Tensor::takeOwnershipOfEncodedBackingStorage(
+        type, Layout::contiguousLastDimensionFastest(Shape{1}), std::move(storage));
 }
 
 uint32_t tensorRaw(const Tensor& tensor) {
     uint32_t raw = 0;
-    for (size_t index = 0; index < tensor.storage().size(); ++index)
-        raw |= static_cast<uint32_t>(std::to_integer<uint8_t>(tensor.storage()[index]))
+    for (size_t index = 0; index < tensor.rawEncodedBackingStorage().size(); ++index)
+        raw |= static_cast<uint32_t>(
+                   std::to_integer<uint8_t>(tensor.rawEncodedBackingStorage()[index]))
                << (index * 8);
     return raw & rawMask(tensor.type());
 }
@@ -489,9 +491,9 @@ void testIntegerCodecPolicies() {
 
     const std::array<double, 4> sourceValues{127.5, 128.5, -128.5, -129.5};
     const Tensor source =
-        Tensor::fromNativeValues<double>(Shape{sourceValues.size()}, sourceValues);
-    const Tensor saturated = source.to(ScalarType::Int8, saturateNearestEven);
-    const Tensor wrapped = source.to(ScalarType::Int8, wrapNearestEven);
+        Tensor::copyNativeValues<double>(Shape{sourceValues.size()}, sourceValues);
+    const Tensor saturated = source.copyConvertedTo(ScalarType::Int8, saturateNearestEven);
+    const Tensor wrapped = source.copyConvertedTo(ScalarType::Int8, wrapNearestEven);
     const std::array<int8_t, 4> saturatedExpected{127, 127, -128, -128};
     const std::array<int8_t, 4> wrappedExpected{-128, -128, -128, 126};
     for (size_t index = 0; index < sourceValues.size(); ++index) {
@@ -501,7 +503,7 @@ void testIntegerCodecPolicies() {
                 "Tensor modulo-wrap conversion mismatch.");
     }
     requireThrows<std::overflow_error>(
-        [&] { (void)source.to(ScalarType::Int8, rejectNearestEven); },
+        [&] { (void)source.copyConvertedTo(ScalarType::Int8, rejectNearestEven); },
         "Tensor rejecting conversion accepted a rounded overflow.");
     require(source.loadAs<int8_t>({0}, saturateNearestEven) == 127 &&
                 source.loadAs<int8_t>({0}, wrapNearestEven) == -128,
@@ -517,7 +519,7 @@ void testIntegerCodecPolicies() {
         "Native integer store did not reject overflow.");
 
     const std::array<int16_t, 1> overflowingValue{128};
-    const Tensor saturatedFactory = Tensor::fromValues<int16_t>(
+    const Tensor saturatedFactory = Tensor::copyValuesWithConversion<int16_t>(
         ScalarType::Int8, Shape{1}, overflowingValue, saturateNearestEven);
     require(saturatedFactory.loadAs<int8_t>({0}) == 127,
             "Tensor value factory did not apply conversion options.");
@@ -581,7 +583,7 @@ int main() {
     const Scalar int12Scalar = Scalar::fromStorage(ScalarType::Int12, int12Storage);
     require(int12Scalar.as<int32_t>() == -1234,
             "Runtime scalar did not decode a packed Int12 value.");
-    require(std::to_integer<uint8_t>(int12Scalar.storage()[1]) == 0x0b,
+    require(std::to_integer<uint8_t>(int12Scalar.rawEncodedBackingStorage()[1]) == 0x0b,
             "Runtime scalar did not clear packed padding bits.");
     require(Scalar::zero(ScalarType::Float6E2M3).as<float>() == 0.0f &&
                 Scalar::one(ScalarType::Float6E2M3).as<float>() == 1.0f,
@@ -608,8 +610,9 @@ int main() {
     std::vector<std::byte> fp4Raw(8);
     for (uint8_t index = 0; index < 16; index += 2)
         fp4Raw[index / 2] = static_cast<std::byte>(index | ((index + 1) << 4));
-    const Tensor fp4Decoded = Tensor::fromStorage(ScalarType::Float4E2M1,
-                                                  Layout::contiguous(Shape{16}), std::move(fp4Raw));
+    const Tensor fp4Decoded = Tensor::takeOwnershipOfEncodedBackingStorage(
+        ScalarType::Float4E2M1, Layout::contiguousLastDimensionFastest(Shape{16}),
+        std::move(fp4Raw));
     for (size_t index = 0; index < fp4Expected.size(); ++index)
         require(fp4Decoded.loadAs<float>({index}) == fp4Expected[index],
                 "FP4 exhaustive decode mismatch.");
@@ -618,7 +621,8 @@ int main() {
     for (size_t index = 0; index < fp4Expected.size(); ++index)
         fp4Encoded.storeFrom({index}, fp4Expected[index]);
     for (uint8_t index = 0; index < 16; ++index) {
-        const uint8_t byte = std::to_integer<uint8_t>(fp4Encoded.storage()[index / 2]);
+        const uint8_t byte =
+            std::to_integer<uint8_t>(fp4Encoded.rawEncodedBackingStorage()[index / 2]);
         const uint8_t raw = (index & 1) ? byte >> 4 : byte & 0xf;
         require(raw == index, "FP4 exhaustive encode mismatch.");
     }
@@ -626,8 +630,8 @@ int main() {
     std::vector<std::byte> int4Raw(8);
     for (uint8_t index = 0; index < 16; index += 2)
         int4Raw[index / 2] = static_cast<std::byte>(index | ((index + 1) << 4));
-    const Tensor int4 =
-        Tensor::fromStorage(ScalarType::Int4, Layout::contiguous(Shape{16}), std::move(int4Raw));
+    const Tensor int4 = Tensor::takeOwnershipOfEncodedBackingStorage(
+        ScalarType::Int4, Layout::contiguousLastDimensionFastest(Shape{16}), std::move(int4Raw));
     for (uint8_t index = 0; index < 16; ++index) {
         const int32_t expected = index < 8 ? index : static_cast<int32_t>(index) - 16;
         require(int4.loadAs<int32_t>({index}) == expected, "Int4 exhaustive decode mismatch.");
@@ -638,12 +642,13 @@ int main() {
             static_cast<std::byte>(raw & 0xff),
             static_cast<std::byte>(raw >> 8),
         };
-        const Tensor value = Tensor::fromStorage(ScalarType::Float16, Layout::contiguous(Shape{1}),
-                                                 std::move(storage));
+        const Tensor value = Tensor::takeOwnershipOfEncodedBackingStorage(
+            ScalarType::Float16, Layout::contiguousLastDimensionFastest(Shape{1}),
+            std::move(storage));
         const float decoded = value.loadAs<float>({0});
         Tensor roundTrip(ScalarType::Float16, Shape{1});
         roundTrip.storeFrom({0}, decoded);
-        const uint16_t encoded = bytesToUint16(roundTrip.storage());
+        const uint16_t encoded = bytesToUint16(roundTrip.rawEncodedBackingStorage());
         if (std::isnan(decoded)) {
             require((encoded & 0x7c00U) == 0x7c00U && (encoded & 0x03ffU) != 0,
                     "Float16 NaN did not remain NaN.");
@@ -657,7 +662,7 @@ int main() {
         const float decoded = value.loadAs<float>({0});
         Tensor roundTrip(ScalarType::BFloat16, Shape{1});
         roundTrip.storeFrom({0}, decoded);
-        const uint16_t encoded = bytesToUint16(roundTrip.storage());
+        const uint16_t encoded = bytesToUint16(roundTrip.rawEncodedBackingStorage());
         if (std::isnan(decoded)) {
             require((encoded & 0x7f80U) == 0x7f80U && (encoded & 0x007fU) != 0,
                     "BFloat16 NaN did not remain NaN.");
@@ -719,8 +724,8 @@ int main() {
 
     std::vector<std::byte> e8Raw{std::byte{0},   std::byte{1},   std::byte{127},
                                  std::byte{128}, std::byte{254}, std::byte{255}};
-    const Tensor e8 =
-        Tensor::fromStorage(ScalarType::E8M0, Layout::contiguous(Shape{6}), std::move(e8Raw));
+    const Tensor e8 = Tensor::takeOwnershipOfEncodedBackingStorage(
+        ScalarType::E8M0, Layout::contiguousLastDimensionFastest(Shape{6}), std::move(e8Raw));
     require(e8.loadAs<float>({0}) == std::ldexp(1.0f, -127), "E8M0 minimum mismatch.");
     require(e8.loadAs<float>({1}) == std::ldexp(1.0f, -126), "E8M0 exponent mismatch.");
     require(e8.loadAs<float>({2}) == 1.0f, "E8M0 unity mismatch.");

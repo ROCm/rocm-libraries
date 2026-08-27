@@ -67,7 +67,7 @@ const std::byte* adjustedStorage(const View& view) {
     const ptrdiff_t logicalOffset = view.layout().offset();
     if (logicalOffset < 0)
         throw std::invalid_argument("BLAS backend received a negative storage offset.");
-    return view.storage().data() + static_cast<size_t>(logicalOffset) * (bits / 8);
+    return view.rawEncodedBackingStorage().data() + static_cast<size_t>(logicalOffset) * (bits / 8);
 }
 
 template <typename T, typename View>

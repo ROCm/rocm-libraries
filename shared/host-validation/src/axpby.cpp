@@ -31,11 +31,4 @@ AxpbyResult referenceAxpby(const AxpbyProblem& problem) {
     return {.output = std::move(output), .runInfo = runInfo};
 }
 
-AxpbyResult referenceAxpby(const AxpbyProblem& problem, const TensorStorageAllocator& allocator) {
-    const Shape& outputShape = detail::validateAxpbyProblem(problem);
-    Tensor output(problem.outputType, outputShape, allocator);
-    AxpbyRequest request(problem, output);
-    const AxpbyRunInfo runInfo = referenceAxpby(request);
-    return {.output = std::move(output), .runInfo = runInfo};
-}
 }  // namespace roc::host_validation

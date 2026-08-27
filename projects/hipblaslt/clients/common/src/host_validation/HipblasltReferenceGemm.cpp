@@ -77,9 +77,9 @@ namespace
         const size_t bytes = storageBytesForLayout(type, layout);
         if(data == nullptr && bytes != 0)
             throw std::invalid_argument("Null hipBLASLt reference input buffer.");
-        return Tensor(type,
-                      std::move(layout),
-                      std::span<const std::byte>(static_cast<const std::byte*>(data), bytes));
+        return Tensor::copyEncodedBackingStorage(
+            type, std::move(layout),
+            std::span<const std::byte>(static_cast<const std::byte*>(data), bytes));
     }
 
     Tensor tensorFromMutableStorage(void* data, ScalarType type, Layout layout)
@@ -87,7 +87,7 @@ namespace
         const size_t bytes = storageBytesForLayout(type, layout);
         if(data == nullptr && bytes != 0)
             throw std::invalid_argument("Null hipBLASLt reference output buffer.");
-        return Tensor(
+        return Tensor::copyEncodedBackingStorage(
             type, std::move(layout), std::span<std::byte>(static_cast<std::byte*>(data), bytes));
     }
 
@@ -96,7 +96,7 @@ namespace
     {
         const ScalarType type =
             hipblaslt::host_validation::scalarType<Tc>();
-        return tensorFromStorage(data, type, Layout::contiguous(Shape{elements}));
+        return tensorFromStorage(data, type, Layout::contiguousLastDimensionFastest(Shape{elements}));
     }
 }
 
@@ -219,7 +219,7 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     }
     const size_t outputBytes = storageBytesForLayout(outputType, layoutD);
     if(outputBytes != 0)
-        std::memcpy(D, output.storage().data(), outputBytes);
+        std::memcpy(D, output.rawEncodedBackingStorage().data(), outputBytes);
 }
 
 void hipblaslt_reference_gemm(hipblasOperation_t   transA,

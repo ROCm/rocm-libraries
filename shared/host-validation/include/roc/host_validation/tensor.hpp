@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <initializer_list>
 #include <limits>
@@ -31,10 +32,6 @@ class Shape {
 
     size_t rank() const {
         return m_dimensions.size();
-    }
-
-    bool empty() const {
-        return elementCount() == 0;
     }
 
     size_t operator[](size_t dimension) const {
@@ -86,7 +83,10 @@ class Shape {
         const auto appendDimension = [&](size_t dimension) {
             if (indices[dimension] >= extent(dimension))
                 throw std::out_of_range("Tensor coordinate exceeds shape.");
-            result = result * extent(dimension) + indices[dimension];
+            result = checkedElementProduct(result, extent(dimension));
+            if (indices[dimension] > std::numeric_limits<size_t>::max() - result)
+                throw std::overflow_error("Tensor linear index overflow.");
+            result += indices[dimension];
         };
 
         if (order == IndexOrder::LastDimensionFastest) {
@@ -152,16 +152,11 @@ class Layout {
 
     Layout(Shape shape, std::vector<ptrdiff_t> strides, ptrdiff_t offset = 0)
         : m_shape(std::move(shape)), m_strides(std::move(strides)), m_offset(offset) {
-        if (rank() != m_strides.size())
+        if (m_shape.rank() != m_strides.size())
             throw std::invalid_argument("Tensor layout rank and stride count differ.");
     }
 
-    // Compatibility spelling for contiguousLastDimensionFastest(). For a matrix this is
-    // row-major/C-order: the last dimension has unit stride.
-    static Layout contiguous(const Shape& shape) {
-        return contiguousLastDimensionFastest(shape);
-    }
-
+    // For a matrix this is row-major/C-order: the last dimension has unit stride.
     static Layout contiguousLastDimensionFastest(const Shape& shape) {
         std::vector<ptrdiff_t> strides(shape.rank(), 1);
         ptrdiff_t stride = 1;
@@ -188,30 +183,6 @@ class Layout {
         return m_shape;
     }
 
-    size_t rank() const {
-        return m_shape.rank();
-    }
-
-    size_t extent(size_t dimension) const {
-        return m_shape.extent(dimension);
-    }
-
-    std::span<const size_t> dimensions() const {
-        return m_shape.dimensions();
-    }
-
-    size_t elementCount() const {
-        return m_shape.elementCount();
-    }
-
-    size_t elementCount(size_t firstDimension, size_t onePastLastDimension) const {
-        return m_shape.elementCount(firstDimension, onePastLastDimension);
-    }
-
-    size_t elementCountExcluding(size_t excludedDimension) const {
-        return m_shape.elementCountExcluding(excludedDimension);
-    }
-
     std::span<const ptrdiff_t> strides() const {
         return m_strides;
     }
@@ -225,12 +196,12 @@ class Layout {
     }
 
     ptrdiff_t elementOffset(std::span<const size_t> indices) const {
-        if (indices.size() != rank())
+        if (indices.size() != m_shape.rank())
             throw std::invalid_argument("Tensor index rank does not match layout rank.");
 
         ptrdiff_t result = m_offset;
         for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
-            if (indices[dimension] >= extent(dimension))
+            if (indices[dimension] >= m_shape.extent(dimension))
                 throw std::out_of_range("Tensor index exceeds shape.");
             const ptrdiff_t delta = checkedMultiply(indices[dimension], stride(dimension));
             result = checkedAdd(result, delta);
@@ -276,14 +247,15 @@ class Layout {
     }
 
     std::pair<ptrdiff_t, ptrdiff_t> checkedElementBounds() const {
-        for (size_t dimension = 0; dimension < rank(); ++dimension) {
-            if (extent(dimension) == 0) return {0, -1};
+        for (size_t dimension = 0; dimension < m_shape.rank(); ++dimension) {
+            if (m_shape.extent(dimension) == 0) return {0, -1};
         }
 
         ptrdiff_t lower = m_offset;
         ptrdiff_t upper = m_offset;
-        for (size_t dimension = 0; dimension < rank(); ++dimension) {
-            const ptrdiff_t delta = checkedMultiply(extent(dimension) - 1, stride(dimension));
+        for (size_t dimension = 0; dimension < m_shape.rank(); ++dimension) {
+            const ptrdiff_t delta =
+                checkedMultiply(m_shape.extent(dimension) - 1, stride(dimension));
             if (delta < 0)
                 lower = checkedAdd(lower, delta);
             else
@@ -339,125 +311,106 @@ inline size_t storageBytesForLayout(ScalarType type, const Layout& layout) {
     return detail::storageBytesForLayout(type, layout);
 }
 
-// Reference-counted lifetime owner plus a mutable byte range. Copies retain the
-// same owner and byte range. A nonempty range requires an owner, so this type
-// cannot represent unanchored borrowed memory.
-class TensorStorage {
-   public:
-    TensorStorage() = default;
-
-    static TensorStorage wrap(std::shared_ptr<void> owner, std::span<std::byte> bytes) {
-        return TensorStorage(std::move(owner), bytes);
-    }
-
-    static TensorStorage allocate(size_t bytes) {
-        auto owner = std::make_shared<std::vector<std::byte>>(bytes);
-        return TensorStorage(owner, std::span<std::byte>(*owner));
-    }
-
-    // Callers must write each byte before reading it.
-    static TensorStorage allocateUninitialized(size_t bytes) {
-        std::shared_ptr<void> owner(new std::byte[bytes], std::default_delete<std::byte[]>());
-        return TensorStorage(owner,
-                             std::span<std::byte>(static_cast<std::byte*>(owner.get()), bytes));
-    }
-
-    std::span<const std::byte> bytes() const {
-        return m_bytes;
-    }
-
-    std::span<std::byte> mutableBytes() const {
-        return m_bytes;
-    }
-
-    size_t size() const {
-        return m_bytes.size();
-    }
-
-   private:
-    TensorStorage(std::shared_ptr<void> owner, std::span<std::byte> bytes)
-        : m_owner(std::move(owner)), m_bytes(bytes) {
-        if (!m_owner && !m_bytes.empty())
-            throw std::invalid_argument("Nonempty TensorStorage requires an owner.");
-    }
-
-    std::shared_ptr<void> m_owner;
-    std::span<std::byte> m_bytes;
-};
-
-using TensorStorageAllocator = std::function<TensorStorage(size_t)>;
+namespace detail {
+inline bool byteRangesOverlap(std::span<const std::byte> left, std::span<const std::byte> right) {
+    if (left.empty() || right.empty()) return false;
+    const auto less = std::less<const std::byte*>{};
+    return less(left.data(), right.data() + right.size()) &&
+           less(right.data(), left.data() + left.size());
+}
+}  // namespace detail
 
 // Runtime tensor handle consisting of a ScalarType, Layout, and owner-anchored
-// storage. Copies share storage. clone() deep-copies the addressed storage and
-// alias() applies another layout to the same bytes. Const Tensor handles retain
-// shallow mutability, so writes are visible through every alias.
+// storage. Copies share storage. deepCopy() duplicates the complete backing storage,
+// while shareStorageWithLayout() applies another layout to the same bytes. Const
+// Tensor handles retain shallow mutability, so writes are visible through every
+// shared handle.
 //
-// Span and native-value constructors copy into owned storage. wrapStorage()
-// retains the supplied TensorStorage owner and performs no copy.
+// Copy factories allocate owned storage. shareExternalMutableBackingStorage()
+// retains a caller-supplied lifetime anchor and performs no copy.
 class Tensor {
    public:
-    Tensor(ScalarType type, Shape shape) : Tensor(type, Layout::contiguous(shape)) {}
+    Tensor(ScalarType type, Shape shape)
+        : Tensor(type, Layout::contiguousLastDimensionFastest(shape)) {}
 
     Tensor(ScalarType type, Layout layout)
-        : Tensor(type, std::move(layout), TensorStorage::allocate) {}
+        : m_type(type),
+          m_layout(std::move(layout)),
+          m_storage(allocateZeroInitializedStorage(
+              ::roc::host_validation::storageBytesForLayout(m_type, m_layout))) {}
 
-    Tensor(ScalarType type, Shape shape, const TensorStorageAllocator& allocator)
-        : Tensor(type, Layout::contiguous(shape), allocator) {}
-
-    Tensor(ScalarType type, Layout layout, const TensorStorageAllocator& allocator)
-        : m_type(type), m_layout(std::move(layout)) {
-        if (!allocator) throw std::invalid_argument("Tensor storage allocator is empty.");
-        m_storage = allocator(::roc::host_validation::storageBytesForLayout(m_type, m_layout));
-        validateStorage();
+    // Allocates storage without initializing its bytes. Every byte that can be
+    // observed must be written before it is read or copied.
+    static Tensor allocateUninitialized(ScalarType type, Layout layout) {
+        const size_t bytes = ::roc::host_validation::storageBytesForLayout(type, layout);
+        return Tensor(type, std::move(layout), allocateUninitializedStorage(bytes));
     }
 
-    Tensor(ScalarType type, Layout layout, std::vector<std::byte> storage)
-        : Tensor(type, std::move(layout), storageFromVector(std::move(storage))) {}
-
-    Tensor(ScalarType type, Layout layout, std::span<const std::byte> storage)
-        : Tensor(type, std::move(layout), std::vector<std::byte>(storage.begin(), storage.end())) {}
-
-    Tensor(ScalarType type, Layout layout, std::span<std::byte> storage)
-        : Tensor(type, std::move(layout), std::span<const std::byte>(storage)) {}
-
-    static Tensor wrapStorage(ScalarType type, Layout layout, TensorStorage storage) {
-        return Tensor(type, std::move(layout), std::move(storage));
+    static Tensor allocateUninitialized(ScalarType type, Shape shape) {
+        return allocateUninitialized(type, Layout::contiguousLastDimensionFastest(shape));
     }
 
-    static Tensor fromStorage(ScalarType type, Layout layout, std::vector<std::byte> storage) {
-        return Tensor(type, std::move(layout), std::move(storage));
+    // Copies the complete encoded backing storage. The span may include
+    // product-required padding beyond the elements addressed by layout.
+    static Tensor copyEncodedBackingStorage(ScalarType type, Layout layout,
+                                            std::span<const std::byte> storage) {
+        const size_t required = ::roc::host_validation::storageBytesForLayout(type, layout);
+        if (storage.size() < required)
+            throw std::invalid_argument("Encoded Tensor storage is too small for its layout.");
+        return Tensor(type, std::move(layout),
+                      storageFromVector(std::vector<std::byte>(storage.begin(), storage.end())));
+    }
+
+    // Takes ownership of complete encoded backing storage, including any
+    // product-required padding beyond the elements addressed by layout.
+    static Tensor takeOwnershipOfEncodedBackingStorage(ScalarType type, Layout layout,
+                                                       std::vector<std::byte> storage) {
+        const size_t required = ::roc::host_validation::storageBytesForLayout(type, layout);
+        if (storage.size() < required)
+            throw std::invalid_argument("Encoded Tensor storage is too small for its layout.");
+        return Tensor(type, std::move(layout), storageFromVector(std::move(storage)));
+    }
+
+    // Shares an external mutable byte range without copying it. lifetimeAnchor
+    // must keep that range valid until every Tensor sharing it is destroyed.
+    static Tensor shareExternalMutableBackingStorage(ScalarType type, Layout layout,
+                                                     std::shared_ptr<void> lifetimeAnchor,
+                                                     std::span<std::byte> storage) {
+        return Tensor(type, std::move(layout), SharedStorage(std::move(lifetimeAnchor), storage));
     }
 
     template <typename Source>
-    static Tensor fromValues(ScalarType type, Shape shape, std::span<const Source> values) {
+    static Tensor copyValuesWithConversion(ScalarType type, Shape shape,
+                                           std::span<const Source> values) {
         if (values.size() != shape.elementCount())
             throw std::invalid_argument("Tensor value count does not match shape.");
         Tensor result(type, shape);
         for (size_t index = 0; index < values.size(); ++index)
-            detail::encodeScalar(type, result.storage(), static_cast<ptrdiff_t>(index),
-                                 values[index]);
+            detail::encodeScalar(type, result.rawEncodedBackingStorage(),
+                                 static_cast<ptrdiff_t>(index), values[index]);
         return result;
     }
 
     template <typename Source>
-    static Tensor fromValues(ScalarType type, Shape shape, std::span<const Source> values,
-                             const ScalarConversionOptions& options) {
+    static Tensor copyValuesWithConversion(ScalarType type, Shape shape,
+                                           std::span<const Source> values,
+                                           const ScalarConversionOptions& options) {
         if (values.size() != shape.elementCount())
             throw std::invalid_argument("Tensor value count does not match shape.");
         Tensor result(type, shape);
         for (size_t index = 0; index < values.size(); ++index)
-            detail::encodeScalar(type, result.storage(), static_cast<ptrdiff_t>(index),
-                                 values[index], options);
+            detail::encodeScalar(type, result.rawEncodedBackingStorage(),
+                                 static_cast<ptrdiff_t>(index), values[index], options);
         return result;
     }
 
     template <typename Source>
-    static Tensor fromNativeValues(Shape shape, std::span<const Source> values) {
-        return fromValues(nativeScalarType<Source>, std::move(shape), values);
+    static Tensor copyNativeValues(Shape shape, std::span<const Source> values) {
+        return copyValuesWithConversion(nativeScalarType<Source>, std::move(shape), values);
     }
 
     template <typename Source>
-    static Tensor fromNative(Layout layout, std::span<const Source> values) {
+    static Tensor copyNativeStorage(Layout layout, std::span<const Source> values) {
         constexpr ScalarType type = nativeScalarType<Source>;
         static_assert(scalarTypeInfo(type).storageBits == sizeof(Source) * 8,
                       "Native Tensor storage requires one scalar per C++ object.");
@@ -465,22 +418,23 @@ class Tensor {
         const size_t required = ::roc::host_validation::storageBytesForLayout(type, layout);
         if (bytes.size() < required)
             throw std::invalid_argument("Native Tensor storage is too small for its layout.");
-        return Tensor(type, std::move(layout), bytes.first(required));
+        return copyEncodedBackingStorage(type, std::move(layout), bytes);
     }
 
     template <typename Source>
-    static Tensor fromNative(Layout layout, std::span<Source> values) {
-        return fromNative(std::move(layout), std::span<const Source>(values));
+    static Tensor copyNativeStorage(Layout layout, std::span<Source> values) {
+        return copyNativeStorage(std::move(layout), std::span<const Source>(values));
     }
 
     template <typename Source>
-    static Tensor fromNative(std::span<const Source> values) {
-        return fromNative(Layout::contiguous(Shape{values.size()}), values);
+    static Tensor copyNativeStorage(std::span<const Source> values) {
+        return copyNativeStorage(Layout::contiguousLastDimensionFastest(Shape{values.size()}),
+                                 values);
     }
 
     template <typename Source>
-    static Tensor fromNative(std::span<Source> values) {
-        return fromNative(std::span<const Source>(values));
+    static Tensor copyNativeStorage(std::span<Source> values) {
+        return copyNativeStorage(std::span<const Source>(values));
     }
 
     ScalarType type() const {
@@ -495,23 +449,24 @@ class Tensor {
         return m_layout;
     }
 
-    size_t size() const {
-        return m_layout.elementCount();
+    size_t elementCount() const {
+        return m_layout.shape().elementCount();
     }
 
-    std::span<std::byte> storage() const {
-        return m_storage.mutableBytes();
+    std::span<std::byte> rawEncodedBackingStorage() const {
+        return m_storage.bytes;
     }
 
     template <typename Target>
     Target loadAs(std::span<const size_t> indices) const {
-        return detail::decodeScalar<Target>(m_type, storage(), m_layout.elementOffset(indices));
+        return detail::decodeScalar<Target>(m_type, rawEncodedBackingStorage(),
+                                            m_layout.elementOffset(indices));
     }
 
     template <typename Target>
     Target loadAs(std::span<const size_t> indices, const ScalarConversionOptions& options) const {
-        return detail::decodeScalar<Target>(m_type, storage(), m_layout.elementOffset(indices),
-                                            options);
+        return detail::decodeScalar<Target>(m_type, rawEncodedBackingStorage(),
+                                            m_layout.elementOffset(indices), options);
     }
 
     template <typename Target>
@@ -527,14 +482,15 @@ class Tensor {
 
     template <typename Source>
     void storeFrom(std::span<const size_t> indices, Source value) const {
-        detail::encodeScalar(m_type, storage(), m_layout.elementOffset(indices), value);
+        detail::encodeScalar(m_type, rawEncodedBackingStorage(), m_layout.elementOffset(indices),
+                             value);
     }
 
     template <typename Source>
     void storeFrom(std::span<const size_t> indices, Source value,
                    const ScalarConversionOptions& options) const {
-        detail::encodeScalar(m_type, storage(), m_layout.elementOffset(indices), std::move(value),
-                             options);
+        detail::encodeScalar(m_type, rawEncodedBackingStorage(), m_layout.elementOffset(indices),
+                             std::move(value), options);
     }
 
     template <typename Source>
@@ -549,34 +505,48 @@ class Tensor {
                   options);
     }
 
-    Tensor alias(Layout layout) const {
+    Tensor shareStorageWithLayout(Layout layout) const {
         return Tensor(m_type, std::move(layout), m_storage);
     }
 
-    Tensor clone() const {
-        return clone(TensorStorage::allocate);
+    Tensor deepCopy() const {
+        return copyEncodedBackingStorage(m_type, m_layout, rawEncodedBackingStorage());
     }
 
-    Tensor clone(const TensorStorageAllocator& allocator) const {
-        Tensor result(m_type, m_layout, allocator);
-        const size_t required = ::roc::host_validation::storageBytesForLayout(m_type, m_layout);
-        std::ranges::copy(storage().first(required), result.storage().begin());
-        return result;
-    }
-
-    void copyTo(std::span<std::byte> destination) const {
+    void copyAddressedStorageTo(std::span<std::byte> destination) const {
         const size_t required = ::roc::host_validation::storageBytesForLayout(m_type, m_layout);
         if (destination.size() < required)
             throw std::invalid_argument("Tensor copy destination storage is too small.");
         const auto [lower, upper] = detail::elementBounds(m_layout);
         if (upper < lower) return;
 
-        const size_t firstByte = static_cast<size_t>(detail::bitOffset(m_type, lower) / 8);
-        std::ranges::copy(storage().subspan(firstByte, required - firstByte),
-                          destination.subspan(firstByte).begin());
+        const uint64_t bits = scalarTypeInfo(m_type).storageBits;
+        const uint64_t firstBit = detail::bitOffset(m_type, lower);
+        const uint64_t onePastLastBit = (static_cast<uint64_t>(upper) + 1) * bits;
+        uint64_t currentBit = firstBit;
+
+        if (currentBit % 8 != 0) {
+            const uint16_t leadingBits = static_cast<uint16_t>(
+                std::min<uint64_t>(8 - currentBit % 8, onePastLastBit - currentBit));
+            detail::copyBitRange(rawEncodedBackingStorage(), currentBit, destination, currentBit,
+                                 leadingBits);
+            currentBit += leadingBits;
+        }
+
+        const size_t firstFullByte = static_cast<size_t>(currentBit / 8);
+        const size_t fullBytes = static_cast<size_t>((onePastLastBit - currentBit) / 8);
+        if (fullBytes != 0)
+            std::memmove(destination.data() + firstFullByte,
+                         rawEncodedBackingStorage().data() + firstFullByte, fullBytes);
+        currentBit += static_cast<uint64_t>(fullBytes) * 8;
+
+        if (currentBit < onePastLastBit)
+            detail::copyBitRange(rawEncodedBackingStorage(), currentBit, destination, currentBit,
+                                 static_cast<uint16_t>(onePastLastBit - currentBit));
     }
 
-    void copyTo(std::span<std::byte> destination, std::span<const size_t> linearIndices) const {
+    void copySelectedElementsTo(std::span<std::byte> destination,
+                                std::span<const size_t> linearIndices) const {
         const size_t required = ::roc::host_validation::storageBytesForLayout(m_type, m_layout);
         if (destination.size() < required)
             throw std::invalid_argument("Tensor copy destination storage is too small.");
@@ -584,68 +554,113 @@ class Tensor {
         const uint16_t bits = scalarTypeInfo(m_type).storageBits;
         forEachLinearIndex(linearIndices, [&](std::span<const size_t> indices) {
             const uint64_t offset = detail::bitOffset(m_type, layout().elementOffset(indices));
-            detail::copyBitRange(storage(), offset, destination, offset, bits);
+            detail::copyBitRange(rawEncodedBackingStorage(), offset, destination, offset, bits);
         });
     }
 
-    void copyFrom(const Tensor& source) const {
+    void copyLogicalElementsFrom(const Tensor& source) const {
         if (m_type != source.m_type)
             throw std::invalid_argument("Tensor copy requires matching scalar types.");
         if (shape() != source.shape())
             throw std::invalid_argument("Tensor copy requires matching shapes.");
+        if (rawEncodedBackingStorage().data() == source.rawEncodedBackingStorage().data() &&
+            layout() == source.layout())
+            return;
+        if (detail::byteRangesOverlap(rawEncodedBackingStorage(),
+                                      source.rawEncodedBackingStorage())) {
+            copyLogicalElementsFrom(source.deepCopy());
+            return;
+        }
         const uint16_t bits = scalarTypeInfo(m_type).storageBits;
         detail::forEachIndex(shape(), [&](std::span<const size_t> indices, size_t) {
-            detail::copyBitRange(
-                source.storage(), detail::bitOffset(m_type, source.layout().elementOffset(indices)),
-                storage(), detail::bitOffset(m_type, layout().elementOffset(indices)), bits);
+            detail::copyBitRange(source.rawEncodedBackingStorage(),
+                                 detail::bitOffset(m_type, source.layout().elementOffset(indices)),
+                                 rawEncodedBackingStorage(),
+                                 detail::bitOffset(m_type, layout().elementOffset(indices)), bits);
         });
     }
 
-    void copyFrom(const Tensor& source, std::span<const size_t> linearIndices) const {
+    void copySelectedElementsFrom(const Tensor& source,
+                                  std::span<const size_t> linearIndices) const {
         if (m_type != source.m_type)
             throw std::invalid_argument("Tensor copy requires matching scalar types.");
         if (shape() != source.shape())
             throw std::invalid_argument("Tensor copy requires matching shapes.");
+        if (rawEncodedBackingStorage().data() == source.rawEncodedBackingStorage().data() &&
+            layout() == source.layout()) {
+            forEachLinearIndex(linearIndices, [](std::span<const size_t>) {});
+            return;
+        }
+        if (detail::byteRangesOverlap(rawEncodedBackingStorage(),
+                                      source.rawEncodedBackingStorage())) {
+            copySelectedElementsFrom(source.deepCopy(), linearIndices);
+            return;
+        }
 
         const uint16_t bits = scalarTypeInfo(m_type).storageBits;
         forEachLinearIndex(linearIndices, [&](std::span<const size_t> indices) {
-            detail::copyBitRange(
-                source.storage(), detail::bitOffset(m_type, source.layout().elementOffset(indices)),
-                storage(), detail::bitOffset(m_type, layout().elementOffset(indices)), bits);
+            detail::copyBitRange(source.rawEncodedBackingStorage(),
+                                 detail::bitOffset(m_type, source.layout().elementOffset(indices)),
+                                 rawEncodedBackingStorage(),
+                                 detail::bitOffset(m_type, layout().elementOffset(indices)), bits);
         });
     }
 
-    Tensor reshape(Shape shape) const;
+    Tensor reshapeSharingStorage(Shape shape) const;
 
     // New storage bits are zero; existing logical elements retain their encodings.
-    Tensor pad(Shape shape) const;
+    Tensor copyWithZeroPadding(Shape shape) const;
 
     // destinationToSource[d] names the source dimension copied to destination dimension d.
-    Tensor permute(std::span<const size_t> destinationToSource) const;
+    Tensor copyWithPermutedDimensions(std::span<const size_t> destinationToSource) const;
 
-    Tensor permute(std::initializer_list<size_t> destinationToSource) const {
-        return permute(
+    Tensor copyWithPermutedDimensions(std::initializer_list<size_t> destinationToSource) const {
+        return copyWithPermutedDimensions(
             std::span<const size_t>(destinationToSource.begin(), destinationToSource.size()));
     }
 
-    Tensor to(ScalarType type) const;
+    Tensor copyConvertedTo(ScalarType type) const;
 
-    Tensor to(ScalarType type, const ScalarConversionOptions& options) const;
+    Tensor copyConvertedTo(ScalarType type, const ScalarConversionOptions& options) const;
 
    private:
-    Tensor(ScalarType type, Layout layout, TensorStorage storage)
+    struct SharedStorage {
+        SharedStorage() = default;
+
+        SharedStorage(std::shared_ptr<void> lifetimeAnchor, std::span<std::byte> bytes)
+            : lifetimeAnchor(std::move(lifetimeAnchor)), bytes(bytes) {
+            if (!this->lifetimeAnchor && !this->bytes.empty())
+                throw std::invalid_argument("Nonempty Tensor storage requires a lifetime anchor.");
+        }
+
+        std::shared_ptr<void> lifetimeAnchor;
+        std::span<std::byte> bytes;
+    };
+
+    Tensor(ScalarType type, Layout layout, SharedStorage storage)
         : m_type(type), m_layout(std::move(layout)), m_storage(std::move(storage)) {
         validateStorage();
     }
 
-    static TensorStorage storageFromVector(std::vector<std::byte> storage) {
+    static SharedStorage allocateZeroInitializedStorage(size_t bytes) {
+        auto owner = std::make_shared<std::vector<std::byte>>(bytes);
+        return SharedStorage(owner, std::span<std::byte>(*owner));
+    }
+
+    static SharedStorage allocateUninitializedStorage(size_t bytes) {
+        std::shared_ptr<void> owner(new std::byte[bytes], std::default_delete<std::byte[]>());
+        return SharedStorage(owner,
+                             std::span<std::byte>(static_cast<std::byte*>(owner.get()), bytes));
+    }
+
+    static SharedStorage storageFromVector(std::vector<std::byte> storage) {
         auto owner = std::make_shared<std::vector<std::byte>>(std::move(storage));
-        return TensorStorage::wrap(owner, std::span<std::byte>(*owner));
+        return SharedStorage(owner, std::span<std::byte>(*owner));
     }
 
     template <typename Function>
     void forEachLinearIndex(std::span<const size_t> linearIndices, Function&& function) const {
-        const size_t count = size();
+        const size_t count = elementCount();
         std::vector<size_t> indices(shape().rank(), 0);
         for (const size_t linearIndex : linearIndices) {
             if (linearIndex >= count)
@@ -661,26 +676,27 @@ class Tensor {
         }
     }
 
-    void validateStorage() const {
-        if (m_storage.size() < ::roc::host_validation::storageBytesForLayout(m_type, m_layout))
+    void validateStorage() {
+        const size_t required = ::roc::host_validation::storageBytesForLayout(m_type, m_layout);
+        if (m_storage.bytes.size() < required)
             throw std::invalid_argument("Tensor storage is too small for its layout.");
     }
 
     ScalarType m_type;
     Layout m_layout;
-    TensorStorage m_storage;
+    SharedStorage m_storage;
 };
 
-inline Tensor Tensor::reshape(Shape shape) const {
-    if (shape.elementCount() != size())
+inline Tensor Tensor::reshapeSharingStorage(Shape shape) const {
+    if (shape.elementCount() != elementCount())
         throw std::invalid_argument("Tensor reshape requires the same logical element count.");
     if (layout() != Layout::contiguousLastDimensionFastest(this->shape()))
         throw std::invalid_argument(
             "Tensor reshape requires a contiguous last-dimension-fastest layout.");
-    return alias(Layout::contiguousLastDimensionFastest(shape));
+    return shareStorageWithLayout(Layout::contiguousLastDimensionFastest(shape));
 }
 
-inline Tensor Tensor::pad(Shape shape) const {
+inline Tensor Tensor::copyWithZeroPadding(Shape shape) const {
     if (shape.rank() != this->shape().rank())
         throw std::invalid_argument("Tensor padding requires the same rank.");
     for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
@@ -692,13 +708,15 @@ inline Tensor Tensor::pad(Shape shape) const {
     const uint16_t bits = scalarTypeInfo(type()).storageBits;
     detail::forEachIndex(this->shape(), [&](std::span<const size_t> indices, size_t) {
         detail::copyBitRange(
-            storage(), detail::bitOffset(type(), layout().elementOffset(indices)), result.storage(),
+            rawEncodedBackingStorage(), detail::bitOffset(type(), layout().elementOffset(indices)),
+            result.rawEncodedBackingStorage(),
             detail::bitOffset(type(), result.layout().elementOffset(indices)), bits);
     });
     return result;
 }
 
-inline Tensor Tensor::permute(std::span<const size_t> destinationToSource) const {
+inline Tensor Tensor::copyWithPermutedDimensions(
+    std::span<const size_t> destinationToSource) const {
     if (destinationToSource.size() != shape().rank())
         throw std::invalid_argument("Tensor permutation rank does not match the tensor.");
 
@@ -724,27 +742,25 @@ inline Tensor Tensor::permute(std::span<const size_t> destinationToSource) const
                 sourceIndices[destinationToSource[destinationDimension]];
 
         detail::copyBitRange(
-            storage(), detail::bitOffset(type(), layout().elementOffset(sourceIndices)),
-            result.storage(),
+            rawEncodedBackingStorage(),
+            detail::bitOffset(type(), layout().elementOffset(sourceIndices)),
+            result.rawEncodedBackingStorage(),
             detail::bitOffset(type(), result.layout().elementOffset(destinationIndices)), bits);
     });
     return result;
 }
 
-inline Tensor Tensor::to(ScalarType destinationType) const {
-    return to(destinationType, detail::implicitStorageConversionOptions(destinationType));
+inline Tensor Tensor::copyConvertedTo(ScalarType destinationType) const {
+    return copyConvertedTo(destinationType,
+                           detail::implicitStorageConversionOptions(destinationType));
 }
 
-inline Tensor Tensor::to(ScalarType destinationType, const ScalarConversionOptions& options) const {
+inline Tensor Tensor::copyConvertedTo(ScalarType destinationType,
+                                      const ScalarConversionOptions& options) const {
     const ScalarType sourceType = type();
     const Layout& sourceLayout = layout();
-    const std::span<const std::byte> sourceStorage = storage();
-    const size_t requiredStorage =
-        ::roc::host_validation::storageBytesForLayout(sourceType, sourceLayout);
-    if (destinationType == sourceType)
-        return Tensor::fromStorage(
-            destinationType, sourceLayout,
-            std::vector<std::byte>(sourceStorage.begin(), sourceStorage.begin() + requiredStorage));
+    const std::span<const std::byte> sourceStorage = rawEncodedBackingStorage();
+    if (destinationType == sourceType) return deepCopy();
 
     Tensor result(destinationType, sourceLayout);
     const Tensor destination = result;
@@ -760,23 +776,23 @@ inline Tensor Tensor::to(ScalarType destinationType, const ScalarConversionOptio
                     const uint64_t value = detail::decodeScalarKnown<SourceTag::type, uint64_t>(
                         sourceStorage, sourceOffset);
                     detail::encodeScalarKnown<DestinationTag::type>(
-                        destination.storage(), destinationOffset, value, options);
+                        destination.rawEncodedBackingStorage(), destinationOffset, value, options);
                 } else if constexpr (sourceCategory == ScalarCategory::SignedInteger) {
                     const int64_t value = detail::decodeScalarKnown<SourceTag::type, int64_t>(
                         sourceStorage, sourceOffset);
                     detail::encodeScalarKnown<DestinationTag::type>(
-                        destination.storage(), destinationOffset, value, options);
+                        destination.rawEncodedBackingStorage(), destinationOffset, value, options);
                 } else if constexpr (sourceCategory == ScalarCategory::Complex) {
                     const std::complex<double> value =
                         detail::decodeScalarKnown<SourceTag::type, std::complex<double>>(
                             sourceStorage, sourceOffset);
                     detail::encodeScalarKnown<DestinationTag::type>(
-                        destination.storage(), destinationOffset, value, options);
+                        destination.rawEncodedBackingStorage(), destinationOffset, value, options);
                 } else {
                     const double value = detail::decodeScalarKnown<SourceTag::type, double>(
                         sourceStorage, sourceOffset);
                     detail::encodeScalarKnown<DestinationTag::type>(
-                        destination.storage(), destinationOffset, value, options);
+                        destination.rawEncodedBackingStorage(), destinationOffset, value, options);
                 }
             });
         });

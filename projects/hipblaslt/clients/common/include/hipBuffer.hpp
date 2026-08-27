@@ -182,32 +182,15 @@ public:
         return reinterpret_cast<const T*>(buf());
     }
 
-    roc::host_validation::TensorStorage tensorStorage() const
-    {
-        return roc::host_validation::TensorStorage::wrap(
-            buffer,
-            std::span<std::byte>(reinterpret_cast<std::byte*>(buffer->memory.get()),
-                                 getNumBytes()));
-    }
-
     roc::host_validation::Tensor tensor(roc::host_validation::ScalarType type,
                                         roc::host_validation::Layout     layout) const
     {
-        return roc::host_validation::Tensor::wrapStorage(type, std::move(layout), tensorStorage());
-    }
-
-    static roc::host_validation::TensorStorage allocateTensorStorage(size_t bytes)
-    {
-        const size_t allocationBytes = std::max<size_t>(bytes, 1);
-        auto         owner
-            = std::make_shared<PooledHostMemory>(memory_pool<h_memory>::Get(allocationBytes));
-        return roc::host_validation::TensorStorage::wrap(
-            owner, std::span<std::byte>(reinterpret_cast<std::byte*>(owner->memory.get()), bytes));
-    }
-
-    static roc::host_validation::TensorStorageAllocator tensorAllocator()
-    {
-        return [](size_t bytes) { return allocateTensorStorage(bytes); };
+        return roc::host_validation::Tensor::shareExternalMutableBackingStorage(
+            type,
+            std::move(layout),
+            buffer,
+            std::span<std::byte>(reinterpret_cast<std::byte*>(buffer->memory.get()),
+                                 getNumBytes()));
     }
 
 private:

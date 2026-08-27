@@ -97,6 +97,4 @@ struct EpilogueResult {
 
 EpilogueRunInfo referenceEpilogue(const EpilogueRequest& request);
 EpilogueResult referenceEpilogue(const EpilogueProblem& problem);
-EpilogueResult referenceEpilogue(const EpilogueProblem& problem,
-                                 const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation

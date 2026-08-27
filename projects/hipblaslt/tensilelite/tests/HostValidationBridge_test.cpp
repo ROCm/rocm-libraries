@@ -27,7 +27,7 @@ namespace
             = TensileLite::Client::compareHostBuffers(type,
                                                       observedStorage.data(),
                                                       expectedStorage.data(),
-                                                      Layout::contiguous(Shape{1}),
+                                                      Layout::contiguousLastDimensionFastest(Shape{1}),
                                                       options);
         return report.passed();
     }

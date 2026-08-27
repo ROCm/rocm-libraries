@@ -360,9 +360,9 @@ namespace TensileLite::Client
             if(!type || !recipe)
                 return false;
 
-            Tensor generated(*type, std::move(layout), storage);
+            Tensor generated = Tensor::copyEncodedBackingStorage(*type, std::move(layout), storage);
             roc::host_validation::generate(generated, *recipe);
-            std::ranges::copy(generated.storage(), storage.begin());
+            std::ranges::copy(generated.rawEncodedBackingStorage(), storage.begin());
             return true;
         }
     } // namespace
@@ -382,7 +382,7 @@ namespace TensileLite::Client
             throw std::invalid_argument("Null TensileLite host initialization buffer.");
         return generate(dataType,
                         mode,
-                        Layout::contiguous(Shape{elements}),
+                        Layout::contiguousLastDimensionFastest(Shape{elements}),
                         {static_cast<std::byte*>(array), bytes},
                         false,
                         key);
@@ -404,7 +404,7 @@ namespace TensileLite::Client
             throw std::invalid_argument("Null TensileLite host initialization buffer.");
         return generate(dataType,
                         mode,
-                        Layout::contiguous(Shape{elements}),
+                        Layout::contiguousLastDimensionFastest(Shape{elements}),
                         {static_cast<std::byte*>(array), bytes},
                         false,
                         key,
@@ -495,9 +495,12 @@ namespace TensileLite::Client
         const Layout         compressedLayout     = hostValidationLayout(tensorC);
         const Layout         metadataTensorLayout = logicalSparseMetadataLayout(
             tensor, tensorMeta, dim, static_cast<size_t>(metadataLayout));
-        Tensor prunedTensor(scalarType, denseLayout, prunedStorage);
-        Tensor compressedTensor(scalarType, compressedLayout, compressedStorage);
-        Tensor metadataTensor(ScalarType::UInt8, metadataTensorLayout, metadataStorage);
+        Tensor prunedTensor =
+            Tensor::copyEncodedBackingStorage(scalarType, denseLayout, prunedStorage);
+        Tensor compressedTensor =
+            Tensor::copyEncodedBackingStorage(scalarType, compressedLayout, compressedStorage);
+        Tensor metadataTensor = Tensor::copyEncodedBackingStorage(
+            ScalarType::UInt8, metadataTensorLayout, metadataStorage);
         StructuredSparsityRequest request(prunedTensor,
                                           prunedTensor,
                                           compressedTensor,
@@ -533,8 +536,8 @@ namespace TensileLite::Client
                 StructuredSparsitySliceRange{.firstSlice = firstSlice,
                                              .sliceCount = endSlice - firstSlice});
         }
-        std::ranges::copy(prunedTensor.storage(), prunedStorage.begin());
-        std::ranges::copy(compressedTensor.storage(), compressedStorage.begin());
-        std::ranges::copy(metadataTensor.storage(), metadataStorage.begin());
+        std::ranges::copy(prunedTensor.rawEncodedBackingStorage(), prunedStorage.begin());
+        std::ranges::copy(compressedTensor.rawEncodedBackingStorage(), compressedStorage.begin());
+        std::ranges::copy(metadataTensor.rawEncodedBackingStorage(), metadataStorage.begin());
     }
 } // namespace TensileLite::Client

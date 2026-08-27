@@ -8,7 +8,10 @@ contains a separate CPU-only module for constructing physical AMD GPU layouts.
 
 - `roc::host-validation-core`
   - The stable, GPU-independent tensor layer.
-  - Exports only `roc/host_validation/tensor.hpp`.
+  - Its primary entry points are `roc/host_validation/scalar.hpp` and
+    `roc/host_validation/tensor.hpp`; `index_order.hpp` is a shared enum and
+    `scalar_codec.hpp` contains transitive template definitions in the `detail`
+    namespace.
   - Builds with an ordinary host compiler and the C++ standard library.
 - `roc::host-validation-amd-gpu-layout`
   - Compiled physical MX layout permutations requested by product adapters.
@@ -100,8 +103,7 @@ The core layer is GEMM- and AMDGPU-agnostic. It contains only:
 - `ScalarType` and `ScalarTypeInfo`;
 - `Shape`;
 - `Layout`;
-- shared-storage, runtime-typed `Tensor`; and
-- allocator-independent `TensorStorage`.
+- shared-storage, runtime-typed `Tensor`.
 
 The core public header must not include or name GEMM, GPU runtimes, GPU
 architectures, product enums, test frameworks, BLAS, generation policies,
@@ -131,13 +133,9 @@ Shape::linearIndex(coordinates, IndexOrder);
 Shape::coordinates(linearIndex, IndexOrder);
 
 Layout::Layout(Shape, std::vector<ptrdiff_t>, ptrdiff_t offset = 0);
-Layout::contiguous(const Shape&);
 Layout::contiguousLastDimensionFastest(const Shape&);
 Layout::contiguousFirstDimensionFastest(const Shape&);
 Layout::shape();
-Layout::rank();
-Layout::extent(dimension);
-Layout::elementCount();
 Layout::strides();
 Layout::stride(dimension);
 Layout::offset();
@@ -148,40 +146,36 @@ Scalar::fromStorage(ScalarType, encodedBytes);
 Scalar::zero(ScalarType);
 Scalar::one(ScalarType);
 Scalar::type();
-Scalar::storage();
+Scalar::rawEncodedBackingStorage();
 Scalar::as<T>();
-
-TensorStorage::allocate(bytes);
-TensorStorage::allocateUninitialized(bytes);
-TensorStorage::wrap(owner, mutableBytes);
 
 Tensor::Tensor(ScalarType, Shape);
 Tensor::Tensor(ScalarType, Layout);
-Tensor::Tensor(ScalarType, Shape, TensorStorageAllocator);
-Tensor::Tensor(ScalarType, Layout, TensorStorageAllocator);
-Tensor::wrapStorage(ScalarType, Layout, TensorStorage);
-Tensor::fromStorage(ScalarType, Layout, std::vector<std::byte>);
-Tensor::fromValues(ScalarType, Shape, values);
-Tensor::fromNativeValues(Shape, nativeValues);
-Tensor::fromNative(Layout, nativeValues);
+Tensor::allocateUninitialized(ScalarType, Shape/Layout);
+Tensor::copyEncodedBackingStorage(ScalarType, Layout, encodedBytes);
+Tensor::takeOwnershipOfEncodedBackingStorage(ScalarType, Layout, encodedBytes);
+Tensor::shareExternalMutableBackingStorage(ScalarType, Layout, lifetimeAnchor, mutableBytes);
+Tensor::copyValuesWithConversion(ScalarType, Shape, values);
+Tensor::copyNativeValues(Shape, nativeValues);
+Tensor::copyNativeStorage(Layout, nativeValues);
 Tensor::type();
 Tensor::shape();
 Tensor::layout();
-Tensor::storage();
+Tensor::elementCount();
+Tensor::rawEncodedBackingStorage();
 Tensor::loadAs<T>(indices);
 Tensor::storeFrom(indices, value);
-Tensor::alias(Layout);
-Tensor::clone();
-Tensor::clone(TensorStorageAllocator);
-Tensor::copyTo(destination);
-Tensor::copyTo(destination, linearIndices);
-Tensor::copyFrom(Tensor);
-Tensor::copyFrom(Tensor, linearIndices);
-Tensor::reshape(Shape);
-Tensor::pad(Shape);
-Tensor::permute(destinationToSource);
-Tensor::to(ScalarType);
-Tensor::to(ScalarType, ScalarConversionOptions);
+Tensor::shareStorageWithLayout(Layout);
+Tensor::deepCopy();
+Tensor::copyAddressedStorageTo(destination);
+Tensor::copySelectedElementsTo(destination, linearIndices);
+Tensor::copyLogicalElementsFrom(Tensor);
+Tensor::copySelectedElementsFrom(Tensor, linearIndices);
+Tensor::reshapeSharingStorage(Shape);
+Tensor::copyWithZeroPadding(Shape);
+Tensor::copyWithPermutedDimensions(destinationToSource);
+Tensor::copyConvertedTo(ScalarType);
+Tensor::copyConvertedTo(ScalarType, ScalarConversionOptions);
 ```
 
 `Scalar` owns one encoded runtime-typed value inline. It has no shape, layout, or
@@ -190,32 +184,44 @@ one encoded value; it does not retain the supplied span.
 
 `Tensor` is a reference-counted handle. Copy construction and assignment copy
 type/layout metadata and share the same storage; mutations are visible through
-every alias. `clone()` is the explicit deep-copy operation. `alias(Layout)`
-creates another layout over the same owned storage. Shallow constness is
-intentional: a const Tensor handle may still mutate its shared data.
+every alias. `deepCopy()` is the explicit deep-copy operation.
+`shareStorageWithLayout(Layout)` creates another layout over the same owned
+storage. Shallow constness is intentional: a const Tensor handle may still
+mutate its shared data.
 
-`reshape()` returns a shallow alias and requires contiguous
-last-dimension-fastest storage with the same logical element count. `pad()`
-returns an owning Tensor with unchanged rank, no smaller extent, and zero bits
-in newly allocated storage.
-`permute()` returns an owning contiguous Tensor; its argument maps each
-destination dimension to one source dimension. Padding and permutation copy
-encoded scalar bits directly, including packed and cross-byte formats.
+`reshapeSharingStorage()` returns a shallow alias and requires contiguous
+last-dimension-fastest storage with the same logical element count.
+`copyWithZeroPadding()` returns an owning Tensor with unchanged rank, no smaller
+extent, and zero bits in newly allocated storage.
+`copyWithPermutedDimensions()` returns an owning contiguous Tensor; its argument
+maps each destination dimension to one source dimension. Padding and
+permutation copy encoded scalar bits directly, including packed and cross-byte
+formats.
 
-Every Tensor participates in owning its storage lifetime. The default storage
-uses ordinary host bytes; an allocator callback may return owned storage backed
-by a product-specific allocator such as pooled HIP-pinned memory. Native-array
-factories copy into owned storage. `TensorStorage::wrap` requires a lifetime
-owner and anchors an existing mutable allocation; `Tensor::wrapStorage` retains
-that owner without copying. There is no public unowned tensor/view type.
+Every Tensor participates in owning its storage lifetime. Default construction
+uses ordinary zero-initialized host bytes. Copy factories retain their complete
+encoded input, including product-required physical padding.
+`shareExternalMutableBackingStorage()` accepts a `shared_ptr<void>` lifetime
+anchor and a mutable byte range; it retains the anchor and shares the bytes
+without copying. The anchor may own an object such as a pooled pinned allocation
+rather than point at the bytes directly. The caller must ensure the byte range
+remains valid for the anchor's lifetime. There is no public unowned tensor/view
+type.
+
+`rawEncodedBackingStorage()` exposes that complete byte range, including any
+physical padding not addressed by the logical layout. `deepCopy()` preserves the
+complete backing range. `copyAddressedStorageTo()` instead transfers the smallest
+bit range covering the layout while preserving unrelated boundary bits in packed
+storage. `copyLogicalElementsFrom()` and the selected-element variants operate on
+logical coordinates; overlapping aliases are staged through an independent copy.
 
 Layout strides and offsets are measured in logical scalar elements, including
 for sub-byte formats; the tensor layer performs the element-to-bit addressing
 internally.
 
-`to(ScalarType)` performs explicit runtime storage conversion while preserving
-shape, strides, and offset. Same-type conversion copies the layout's required
-raw storage without decoding; cross-type conversion decodes and re-encodes
+`copyConvertedTo(ScalarType)` performs explicit runtime storage conversion while
+preserving shape, strides, and offset. Same-type conversion copies the complete
+raw backing storage without decoding; cross-type conversion decodes and re-encodes
 logical values through the core scalar codecs. Option-bearing overloads make
 integer rounding (`TowardZero` or deterministic `NearestEven`) and overflow
 handling (`Reject`, `Saturate`, or `ModuloWrap`) explicit. NaN-to-integer and
@@ -286,9 +292,9 @@ AxpbyResult result = referenceAxpby(problem);
 ```
 
 Either input may be absent, but at least one is required. The Tensors must share
-one shape. The owning overload creates a contiguous result and accepts an
-optional `TensorStorageAllocator`. `AxpbyRequest` binds the same problem to a
-caller-owned destination when a specific output layout is required.
+one shape. The owning overload creates a contiguous result. `AxpbyRequest` binds
+the same problem to a caller-owned destination when a specific output layout is
+required.
 
 ## Softmax
 
@@ -301,8 +307,7 @@ SoftmaxProblem problem(
 SoftmaxResult result = referenceSoftmax(problem);
 ```
 
-The owning overload returns a contiguous output and accepts an optional
-`TensorStorageAllocator`. `SoftmaxRequest` writes a caller-owned destination
+The owning overload returns a contiguous output. `SoftmaxRequest` writes a caller-owned destination
 when a specific output layout is required. Input and output storage types may
 differ. The accumulator is explicitly Float32 or Float64, and the
 implementation subtracts each slice's maximum before exponentiation.
@@ -325,7 +330,7 @@ LayerNormResult result = referenceLayerNorm(problem);
 
 `meanType` and `inverseVarianceType` independently request statistics whose
 shape removes the normalized axis. The owning overload returns contiguous
-tensors and accepts an optional `TensorStorageAllocator`. `LayerNormRequest`
+tensors. `LayerNormRequest`
 writes caller-owned destinations. Gamma and beta are optional vectors over the
 normalized axis.
 
@@ -403,8 +408,8 @@ output.selection = OutputSelection::explicitIndices({0, 3});
 GemmResult owned = referenceGemm(problem, output, execution);
 ```
 
-The owning overload accepts an optional `TensorStorageAllocator`, validates the
-output layout and selection before allocation, and zero-initializes D so
+The owning overload validates the output layout and selection before allocation,
+and zero-initializes D so
 unselected logical coordinates and affine-layout gaps are deterministic.
 
 The normalized shapes are A `[M,K]`, B `[K,N]`, and C/D `[M,N]`.
@@ -469,8 +474,8 @@ result = hv.reference_gemm_result(request)
 Python `VectorBinding`, `BlockScaleBinding`, `GemmOperand`, `GemmEpilogue`,
 `GemmProblem`, `GemmRequest`, and `GemmResult` are direct bindings of the C++
 types. C and D are explicit tensors; the result aliases D. Requests retain
-shallow Tensor handles, so inputs, outputs, aliases, and allocator-backed
-storage remain alive for the synchronous call.
+shallow Tensor handles, so inputs, outputs, aliases, and externally shared
+backing storage remain alive for the synchronous call.
 `reference_gemm_flat_result(a, b, c, ...)` is the explicitly named convenience
 that builds native descriptors and allocates a contiguous output.
 `GemmProblem` plus `GemmOutputOptions` exposes the same owning path with an
@@ -538,9 +543,6 @@ distributions have typed parameter objects; fixed patterns use named factories.
 `MxScaleGenerationMode` independently selects derived per-block scales or a
 constant minimum, one, two, maximum, or NaN scale.
 
-The allocator overload applies one `TensorStorageAllocator` to data, scales,
-scale indices, and the decoded reference tensor.
-
 The operation is GEMM- and architecture-agnostic. A product adapter identifies
 which tensor axis is block-scaled and may subsequently transform the natural
 scale bytes for an architecture-specific upload layout. GFX950/GFX1250
@@ -579,9 +581,9 @@ auxiliary E input/output, scale-D, scale-E, raw output, and AMax. The
 hipBLASLt pointer and `hipDataType` translation lives in its private client
 adapter and is not compiled by this component.
 
-The owning overload returns contiguous outputs, accepts an optional
-`TensorStorageAllocator`, and initializes every unselected logical output to
-numeric zero independently of allocator contents. `EpilogueRequest` binds
+The owning overload returns contiguous outputs and initializes every unselected
+logical output to numeric zero independently of previous storage contents.
+`EpilogueRequest` binds
 existing destinations, preserves unselected coordinates, and optionally
 accumulates into an existing AMax value.
 
@@ -607,8 +609,7 @@ ReductionResult result = referenceSum(problem);
 The current implementation supports F32, F64, I32, complex-F32, and complex-F64
 accumulation, runtime input/output storage types, validated signed-strided layouts
 used by current consumers, rank-zero outputs, and multiple reduction axes. The
-owning overload derives a contiguous output shape and accepts an optional
-`TensorStorageAllocator`. `ReductionRequest` writes a caller-owned destination.
+owning overload derives a contiguous output shape. `ReductionRequest` writes a caller-owned destination.
 hipBLASLt's bias-gradient adapter represents its matrix as a strided tensor and
 reduces the K axis; no product type enters the component.
 
@@ -646,8 +647,7 @@ The operation supports:
 - optional fused 2:4 metadata encoding; and
 - independent slice ranges for caller-selected parallel scheduling.
 
-A problem's owning overload derives contiguous output shapes and accepts an
-optional `TensorStorageAllocator`. `StructuredSparsityRequest` binds existing
+A problem's owning overload derives contiguous output shapes. `StructuredSparsityRequest` binds existing
 destinations, permits exact input/pruned in-place operation, and exposes slice
 ranges. Every other input/output storage overlap is rejected.
 
@@ -739,7 +739,7 @@ The NumPy suite independently checks:
 - the OCP E8M0 no-zero contract;
 - affine layout decoding;
 - owned NumPy conversions with gapped and negative affine strides, source-copy
-  independence, and explicit Tensor clone behavior;
+  independence, and explicit Tensor deep-copy behavior;
 - deterministic generation, logical index ordering, complex component
   recipes, and structured comparison;
 - pointwise, selected, complex, non-finite, Frobenius, ULP, allclose-search,

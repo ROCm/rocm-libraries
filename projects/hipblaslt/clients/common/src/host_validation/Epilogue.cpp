@@ -37,15 +37,16 @@ namespace hipblaslt::host_validation
 
         std::complex<double> scalarValue(const void* pointer, ScalarType type, const char* name)
         {
-            const Layout layout = Layout::contiguous(Shape{1});
-            Tensor       value(type, layout, constStorage(pointer, type, layout, name));
+            const Layout layout = Layout::contiguousLastDimensionFastest(Shape{1});
+            Tensor value =
+                Tensor::copyEncodedBackingStorage(type, layout, constStorage(pointer, type, layout, name));
             return {value.loadAs<double>({0}), 0.0};
         }
 
         void copyBack(void* destination, const Tensor& tensor)
         {
-            if(!tensor.storage().empty())
-                std::memcpy(destination, tensor.storage().data(), tensor.storage().size());
+            if(!tensor.rawEncodedBackingStorage().empty())
+                std::memcpy(destination, tensor.rawEncodedBackingStorage().data(), tensor.rawEncodedBackingStorage().size());
         }
     } // namespace
 
@@ -67,17 +68,17 @@ namespace hipblaslt::host_validation
                                       {1, static_cast<ptrdiff_t>(leadingDimension)});
 
         EpilogueRequest request(
-            Tensor(computeType,
-                   matrixLayout,
-                   constStorage(arguments.input, computeType, matrixLayout, "input")),
-            Tensor(outputType,
-                   matrixLayout,
-                   mutableStorage(arguments.output, outputType, matrixLayout, "output")),
+            Tensor::copyEncodedBackingStorage(
+                computeType, matrixLayout,
+                constStorage(arguments.input, computeType, matrixLayout, "input")),
+            Tensor::copyEncodedBackingStorage(
+                outputType, matrixLayout,
+                mutableStorage(arguments.output, outputType, matrixLayout, "output")),
             computeType);
 
         if(arguments.rawOutput != nullptr)
         {
-            request.rawOutput = Tensor(
+            request.rawOutput = Tensor::copyEncodedBackingStorage(
                 computeType,
                 matrixLayout,
                 mutableStorage(arguments.rawOutput, computeType, matrixLayout, "raw output"));
@@ -88,14 +89,14 @@ namespace hipblaslt::host_validation
         {
             const ScalarType auxiliaryType = scalarType(arguments.auxiliaryType);
             if(arguments.activationApplication == ActivationApplication::Gradient)
-                request.auxiliaryInput = Tensor(
+                request.auxiliaryInput = Tensor::copyEncodedBackingStorage(
                     auxiliaryType,
                     matrixLayout,
                     constStorage(
                         arguments.auxiliary, auxiliaryType, matrixLayout, "auxiliary input"));
             else
             {
-                request.auxiliaryOutput = Tensor(
+                request.auxiliaryOutput = Tensor::copyEncodedBackingStorage(
                     auxiliaryType,
                     matrixLayout,
                     mutableStorage(
@@ -106,11 +107,11 @@ namespace hipblaslt::host_validation
 
         if(arguments.amax != nullptr)
         {
-            const Layout amaxLayout = Layout::contiguous(Shape{1});
+            const Layout amaxLayout = Layout::contiguousLastDimensionFastest(Shape{1});
             request.amax
-                = Tensor(computeType,
-                         amaxLayout,
-                         mutableStorage(arguments.amax, computeType, amaxLayout, "AMax output"));
+                = Tensor::copyEncodedBackingStorage(
+                    computeType, amaxLayout,
+                    mutableStorage(arguments.amax, computeType, amaxLayout, "AMax output"));
             request.amaxType       = request.amax->type();
             request.accumulateAmax = arguments.accumulateAmax;
         }
@@ -119,11 +120,11 @@ namespace hipblaslt::host_validation
         {
             const ScalarType biasType     = scalarType(arguments.biasType);
             const size_t     biasElements = arguments.biasAxis == MatrixAxis::Row ? rows : columns;
-            const Layout     biasLayout   = Layout::contiguous(Shape{biasElements});
+            const Layout     biasLayout   = Layout::contiguousLastDimensionFastest(Shape{biasElements});
             request.bias
-                = VectorBinding{Tensor(biasType,
-                                       biasLayout,
-                                       constStorage(arguments.bias, biasType, biasLayout, "bias")),
+                = VectorBinding{Tensor::copyEncodedBackingStorage(
+                                    biasType, biasLayout,
+                                    constStorage(arguments.bias, biasType, biasLayout, "bias")),
                                 arguments.biasAxis};
         }
 

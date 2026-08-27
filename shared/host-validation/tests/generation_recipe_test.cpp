@@ -33,8 +33,10 @@ void requireThrows(Function&& function, const std::string& message) {
 void requireEqualStorage(const Tensor& first, const Tensor& second, const std::string& message) {
     require(
         first.type() == second.type() && first.layout() == second.layout() &&
-            first.storage().size() == second.storage().size() &&
-            std::equal(first.storage().begin(), first.storage().end(), second.storage().begin()),
+            first.rawEncodedBackingStorage().size() == second.rawEncodedBackingStorage().size() &&
+            std::equal(first.rawEncodedBackingStorage().begin(),
+                       first.rawEncodedBackingStorage().end(),
+                       second.rawEncodedBackingStorage().begin()),
         message);
 }
 

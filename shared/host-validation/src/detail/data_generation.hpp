@@ -470,9 +470,11 @@ struct GenerationRecipeAccess {
                                destination.shape(), logicalIndex);
         const uint64_t offsetBits = bitOffset(destination.type(), elementOffset);
         if (bits <= 32) {
-            writePackedBits(destination.storage(), offsetBits, bits, static_cast<uint32_t>(raw));
+            writePackedBits(destination.rawEncodedBackingStorage(), offsetBits, bits,
+                            static_cast<uint32_t>(raw));
         } else {
-            writeNative<uint64_t>(destination.storage(), static_cast<size_t>(offsetBits / 8), raw);
+            writeNative<uint64_t>(destination.rawEncodedBackingStorage(),
+                                  static_cast<size_t>(offsetBits / 8), raw);
         }
     }
 

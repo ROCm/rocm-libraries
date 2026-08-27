@@ -95,13 +95,15 @@ namespace TensileLite::Client::reference_adapter
         inline std::span<const std::byte>
             storageSpan(ScalarType type, const void* pointer, size_t elements)
         {
-            const Layout layout = Layout::contiguous(Shape{elements});
+            const Layout layout = Layout::contiguousLastDimensionFastest(Shape{elements});
             return {static_cast<const std::byte*>(pointer), storageBytesForLayout(type, layout)};
         }
 
         inline std::complex<double> scalarFromStorage(ScalarType type, const void* pointer)
         {
-            const Tensor view(type, Layout::contiguous(Shape{1}), storageSpan(type, pointer, 1));
+            const Tensor view = Tensor::copyEncodedBackingStorage(
+                type, Layout::contiguousLastDimensionFastest(Shape{1}),
+                storageSpan(type, pointer, 1));
             if(scalarTypeInfo(type).category == ScalarCategory::Complex)
                 return view.loadAs<std::complex<double>>({0});
             return {view.loadAs<double>({0}), 0.0};
@@ -465,17 +467,15 @@ namespace TensileLite::Client::reference_adapter
             const bool readC = beta != std::complex<double>(0.0, 0.0);
             const auto makeAddendTensor = [&](const Layout& layout,
                                               std::span<const std::byte> source) {
-                return readC ? Tensor(typeC, layout, source)
-                             : Tensor(typeC, layout, TensorStorage::allocateUninitialized);
+                return readC ? Tensor::copyEncodedBackingStorage(typeC, layout, source)
+                             : Tensor::allocateUninitialized(typeC, layout);
             };
             const bool initializeOutput = globalSelection.selectsAll()
                                           || scalarTypeInfo(typeD).storageBits % 8 != 0;
             const auto makeOutputTensor = [&](const Layout& layout,
                                               std::span<std::byte> destination) {
-                return initializeOutput ? Tensor(typeD, layout, destination)
-                                        : Tensor(typeD,
-                                                 layout,
-                                                 TensorStorage::allocateUninitialized);
+                return initializeOutput ? Tensor::copyEncodedBackingStorage(typeD, layout, destination)
+                                        : Tensor::allocateUninitialized(typeD, layout);
             };
             if(!readA)
             {
@@ -484,7 +484,8 @@ namespace TensileLite::Client::reference_adapter
             else if(inputs.batchA == nullptr)
             {
                 aStorage = detail::descriptorStorage(typeA, problem.a(), inputs.a, batchOffsetA);
-                aTensor.emplace(typeA, detail::hostValidationLayout(problem.a()), aStorage);
+                aTensor.emplace(Tensor::copyEncodedBackingStorage(
+                    typeA, detail::hostValidationLayout(problem.a()), aStorage));
             }
             if(!readB)
             {
@@ -493,7 +494,8 @@ namespace TensileLite::Client::reference_adapter
             else if(inputs.batchB == nullptr)
             {
                 bStorage = detail::descriptorStorage(typeB, problem.b(), inputs.b, batchOffsetB);
-                bTensor.emplace(typeB, detail::hostValidationLayout(problem.b()), bStorage);
+                bTensor.emplace(Tensor::copyEncodedBackingStorage(
+                    typeB, detail::hostValidationLayout(problem.b()), bStorage));
             }
             if(inputs.batchC == nullptr)
             {
@@ -527,15 +529,15 @@ namespace TensileLite::Client::reference_adapter
                 if(inputs.batchBias == nullptr)
                 {
                     biasStorage = detail::descriptorStorage(*biasType, problem.bias(), inputs.bias);
-                    biasTensor.emplace(
-                        *biasType, detail::hostValidationLayout(problem.bias()), biasStorage);
+                    biasTensor.emplace(Tensor::copyEncodedBackingStorage(
+                        *biasType, detail::hostValidationLayout(problem.bias()), biasStorage));
                     if(problem.useGradient())
                     {
                         biasOutputStorage = detail::mutableDescriptorStorage(
                             *biasType, problem.bias(), const_cast<void*>(inputs.bias));
-                        biasOutputTensor.emplace(*biasType,
-                                                 detail::hostValidationLayout(problem.bias()),
-                                                 biasOutputStorage);
+                        biasOutputTensor.emplace(Tensor::copyEncodedBackingStorage(
+                            *biasType, detail::hostValidationLayout(problem.bias()),
+                            biasOutputStorage));
                     }
                 }
             }
@@ -557,9 +559,9 @@ namespace TensileLite::Client::reference_adapter
                 }
                 auxiliaryStorage = detail::mutableDescriptorStorage(
                     *auxiliaryType, *auxiliaryDescriptor, inputs.e);
-                auxiliaryTensor.emplace(*auxiliaryType,
-                                        detail::hostValidationLayout(*auxiliaryDescriptor),
-                                        auxiliaryStorage);
+                auxiliaryTensor.emplace(Tensor::copyEncodedBackingStorage(
+                    *auxiliaryType, detail::hostValidationLayout(*auxiliaryDescriptor),
+                    auxiliaryStorage));
             }
 
             std::optional<ScalarType>  gateType;
@@ -581,8 +583,8 @@ namespace TensileLite::Client::reference_adapter
                 {
                     gateStorage = detail::descriptorStorage(
                         *gateType, *gateDescriptor, inputs.gateResidual);
-                    gateTensor.emplace(
-                        *gateType, detail::hostValidationLayout(*gateDescriptor), gateStorage);
+                    gateTensor.emplace(Tensor::copyEncodedBackingStorage(
+                        *gateType, detail::hostValidationLayout(*gateDescriptor), gateStorage));
                 }
             }
 
@@ -594,7 +596,8 @@ namespace TensileLite::Client::reference_adapter
                     const ScalarType amaxType = toHostValidationScalarType(descriptor.dataType());
                     const auto       storage
                         = detail::mutableDescriptorStorage(amaxType, descriptor, inputs.amaxD);
-                    amax            = Tensor(amaxType, Layout::contiguous(Shape{1}), storage);
+                    amax = Tensor::copyEncodedBackingStorage(
+                        amaxType, Layout::contiguousLastDimensionFastest(Shape{1}), storage);
                     amaxDestination = storage;
                 }
                 catch(std::invalid_argument const& error)
@@ -606,30 +609,30 @@ namespace TensileLite::Client::reference_adapter
             const size_t scaleAlphaLength = problem.getParams().factorDim() == 0 ? m : n;
             if(computeProduct && problem.useScaleAlphaVec())
             {
-                scaleAlpha = Tensor(
+                scaleAlpha = Tensor::copyEncodedBackingStorage(
                     alphaType,
-                    Layout::contiguous(Shape{scaleAlphaLength}),
+                    Layout::contiguousLastDimensionFastest(Shape{scaleAlphaLength}),
                     detail::storageSpan(alphaType, inputs.scaleAlphaVec, scaleAlphaLength));
             }
             if(computeProduct && problem.useScaleAB() == "Scalar")
             {
                 if(preQuantizationScaleA)
-                    scaleA = Tensor(alphaType,
-                                    Layout::contiguous(Shape{1}),
-                                    detail::storageSpan(alphaType, inputs.scaleA, 1));
+                    scaleA = Tensor::copyEncodedBackingStorage(
+                        alphaType, Layout::contiguousLastDimensionFastest(Shape{1}),
+                        detail::storageSpan(alphaType, inputs.scaleA, 1));
                 if(preQuantizationScaleB)
-                    scaleB = Tensor(alphaType,
-                                    Layout::contiguous(Shape{1}),
-                                    detail::storageSpan(alphaType, inputs.scaleB, 1));
+                    scaleB = Tensor::copyEncodedBackingStorage(
+                        alphaType, Layout::contiguousLastDimensionFastest(Shape{1}),
+                        detail::storageSpan(alphaType, inputs.scaleB, 1));
             }
             else if(computeProduct && problem.useScaleAB() == "Vector")
             {
-                scaleA = Tensor(alphaType,
-                                Layout::contiguous(Shape{m}),
-                                detail::storageSpan(alphaType, inputs.scaleA, m));
-                scaleB = Tensor(alphaType,
-                                Layout::contiguous(Shape{n}),
-                                detail::storageSpan(alphaType, inputs.scaleB, n));
+                scaleA = Tensor::copyEncodedBackingStorage(
+                    alphaType, Layout::contiguousLastDimensionFastest(Shape{m}),
+                    detail::storageSpan(alphaType, inputs.scaleA, m));
+                scaleB = Tensor::copyEncodedBackingStorage(
+                    alphaType, Layout::contiguousLastDimensionFastest(Shape{n}),
+                    detail::storageSpan(alphaType, inputs.scaleB, n));
             }
 
             translatedBatches.reserve(batches);
@@ -717,17 +720,17 @@ namespace TensileLite::Client::reference_adapter
                                                  storageBytesForLayout(typeD, layoutD));
                 Tensor currentA = !readA                  ? *aTensor
                                   : inputs.batchA == nullptr
-                                      ? aTensor->alias(layoutA)
-                                      : Tensor(typeA, layoutA, currentAStorage);
+                                      ? aTensor->shareStorageWithLayout(layoutA)
+                                      : Tensor::copyEncodedBackingStorage(typeA, layoutA, currentAStorage);
                 Tensor currentB = !readB                  ? *bTensor
                                   : inputs.batchB == nullptr
-                                      ? bTensor->alias(layoutB)
-                                      : Tensor(typeB, layoutB, currentBStorage);
+                                      ? bTensor->shareStorageWithLayout(layoutB)
+                                      : Tensor::copyEncodedBackingStorage(typeB, layoutB, currentBStorage);
                 Tensor currentC = inputs.batchC == nullptr
-                                      ? cTensor->alias(layoutC)
+                                      ? cTensor->shareStorageWithLayout(layoutC)
                                       : makeAddendTensor(layoutC, currentCStorage);
                 Tensor currentD = inputs.batchD == nullptr
-                                      ? dTensor->alias(layoutD)
+                                      ? dTensor->shareStorageWithLayout(layoutD)
                                       : makeOutputTensor(layoutD, currentDStorage);
 
                 std::optional<VectorBinding>        runtimeBias;
@@ -749,7 +752,7 @@ namespace TensileLite::Client::reference_adapter
                     }
                     else
                     {
-                        const Layout layout = Layout::contiguous(Shape{runtimeBiasLength});
+                        const Layout layout = Layout::contiguousLastDimensionFastest(Shape{runtimeBiasLength});
                         currentBiasStorage  = std::span<const std::byte>(
                             static_cast<const std::byte*>(inputs.batchBias[batch]),
                             storageBytesForLayout(*biasType, layout));
@@ -763,15 +766,17 @@ namespace TensileLite::Client::reference_adapter
                     const Layout biasLayout(Shape{runtimeBiasLength}, {1}, runtimeBiasOffset);
                     runtimeBias
                         = VectorBinding{inputs.batchBias == nullptr
-                                            ? biasTensor->alias(biasLayout)
-                                            : Tensor(*biasType, biasLayout, currentBiasStorage),
+                                            ? biasTensor->shareStorageWithLayout(biasLayout)
+                                            : Tensor::copyEncodedBackingStorage(
+                                                  *biasType, biasLayout, currentBiasStorage),
                                         runtimeBiasAxis};
                     if(problem.useGradient())
                     {
                         runtimeBiasOutput
                             = inputs.batchBias == nullptr
-                                  ? biasOutputTensor->alias(biasLayout)
-                                  : Tensor(*biasType, biasLayout, currentBiasOutputStorage);
+                                  ? biasOutputTensor->shareStorageWithLayout(biasLayout)
+                                  : Tensor::copyEncodedBackingStorage(
+                                        *biasType, biasLayout, currentBiasOutputStorage);
                         runtimeBiasOutputDestination = currentBiasOutputStorage;
                     }
                 }
@@ -789,9 +794,9 @@ namespace TensileLite::Client::reference_adapter
                                               auxiliaryDescriptor->strides()[indexND])},
                                          offsetE);
                     if(problem.useGradient())
-                        auxiliaryInput = auxiliaryTensor->alias(layoutE);
+                        auxiliaryInput = auxiliaryTensor->shareStorageWithLayout(layoutE);
                     else
-                        auxiliaryOutput = auxiliaryTensor->alias(layoutE);
+                        auxiliaryOutput = auxiliaryTensor->shareStorageWithLayout(layoutE);
                 }
 
                 std::optional<Tensor> runtimeGate;
@@ -814,8 +819,9 @@ namespace TensileLite::Client::reference_adapter
                             storageBytesForLayout(*gateType, gateLayout));
                     }
                     runtimeGate = inputs.batchGateResidual == nullptr
-                                      ? gateTensor->alias(gateLayout)
-                                      : Tensor(*gateType, gateLayout, currentGateStorage);
+                                      ? gateTensor->shareStorageWithLayout(gateLayout)
+                                      : Tensor::copyEncodedBackingStorage(
+                                            *gateType, gateLayout, currentGateStorage);
                 }
 
                 OutputSelection outputSelection = OutputSelection::all();
@@ -921,11 +927,12 @@ namespace TensileLite::Client::reference_adapter
         for(const auto& copyBack : copyBacks)
         {
             if(!copyBack.selection || copyBack.selection->selectsAll())
-                copyBack.source.copyTo(copyBack.destination);
+                copyBack.source.copyAddressedStorageTo(copyBack.destination);
             else
             {
-                const auto selected = copyBack.selection->indices(copyBack.source.size());
-                copyBack.source.copyTo(copyBack.destination, selected);
+                const auto selected =
+                    copyBack.selection->indices(copyBack.source.elementCount());
+                copyBack.source.copySelectedElementsTo(copyBack.destination, selected);
             }
         }
     }

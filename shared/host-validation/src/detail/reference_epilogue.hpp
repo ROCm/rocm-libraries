@@ -239,12 +239,7 @@ inline EpiloguePlan validateEpilogueRequest(const EpilogueRequest& request) {
 }
 
 inline bool epilogueTensorStorageOverlaps(const Tensor& left, const Tensor& right) {
-    if (left.storage().empty() || right.storage().empty()) return false;
-    const uintptr_t leftBegin = reinterpret_cast<uintptr_t>(left.storage().data());
-    const uintptr_t rightBegin = reinterpret_cast<uintptr_t>(right.storage().data());
-    const uintptr_t leftEnd = leftBegin + left.storage().size();
-    const uintptr_t rightEnd = rightBegin + right.storage().size();
-    return leftBegin < rightEnd && rightBegin < leftEnd;
+    return byteRangesOverlap(left.rawEncodedBackingStorage(), right.rawEncodedBackingStorage());
 }
 
 inline void validateOwnedEpilogueStorage(const EpilogueRequest& request) {

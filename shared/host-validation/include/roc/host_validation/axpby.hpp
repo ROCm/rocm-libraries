@@ -56,5 +56,4 @@ struct AxpbyResult {
 
 AxpbyRunInfo referenceAxpby(const AxpbyRequest& request);
 AxpbyResult referenceAxpby(const AxpbyProblem& problem);
-AxpbyResult referenceAxpby(const AxpbyProblem& problem, const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation
