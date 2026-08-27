@@ -320,6 +320,41 @@ BenchmarkProblems:
           - Exact: [384, 768, 1, 512]
 
   -
+    - # ProblemType (macro tile 96 at 4 waves, DepthU 512: the fetch group is
+      # spread over both the K slices of a window AND several K windows, so a
+      # wave issues more than one window at a per-wave window offset.)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128 wg1x4
+          - [16, 16, 128, 1,  1, 2, 6,  4, 1]   # MT128x96 wg4x1
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0, 1]
+        - DepthU: [512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [384, 768, 1, 512]
+          - Exact: [384, 768, 1, 1024]
+
+  -
     - # ProblemType (MT192: MIWaveTile 12, strip 4, 3 strips per wave)
       OperationType: GEMM
       DataType: F4
