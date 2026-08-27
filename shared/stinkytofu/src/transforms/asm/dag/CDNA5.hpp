@@ -120,13 +120,20 @@ inline const CDNA5Config& cdna5ConfigForArch(const std::array<int, 3>& arch) {
 
 // mode2 WAR gate: min WMMAs between a WMMA reg-read and a ds_load overwriting it.
 // Runtime-tunable via ST_WAR_GATE so an A/B sweep needs one build, not one per arm.
-// 0 disables the gate: codegen is then identical to gate-less develop.
-inline int mode2WarGateWmmas() {
+// 0 disables the gate; -1 (default) derives it per region from the WMMA cost.
+inline int mode2WarGateWmmasEnv() {
     static const int v = [] {
         const char* e = std::getenv("ST_WAR_GATE");
-        return e != nullptr ? std::atoi(e) : 7;
+        return e != nullptr ? std::atoi(e) : -1;
     }();
     return v;
+}
+
+// The hazard clears when the reading WMMA retires (latencyCycles); in that span
+// latency/issueCycles WMMAs issue. Per-format, so FP4 (8) and FP8 (16) differ.
+inline int deriveWarGateWmmas(int wmmaLatency, int wmmaIssueCycles) {
+    if (wmmaLatency <= 0) return 0;
+    return wmmaLatency / std::max(1, wmmaIssueCycles);
 }
 
 // -------------------------------------------------------------------------
@@ -493,6 +500,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Monotonic BB-wide WMMA counter (not per-region) so cross-region WAR distances stay
     // meaningful.
     int wmmaIssuedCountThisBB_ = 0;
+    // Per-region WAR gate: env override, else derived from the WMMA cost.
+    int warGateWmmas_ = 0;
 
     WMMAIssueConfig wmmaIssueConfig;
 
@@ -880,7 +889,7 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
 
 // (C) mode2 WAR gate: true if this ds_load's dest reg was WMMA-read < gate WMMAs ago.
 bool CDNA5ReadyQueue::warTooCloseToWmmaRead(DAGNode* node) const {
-    const int gate = mode2WarGateWmmas();
+    const int gate = warGateWmmas_;
     if (gate <= 0 || node == nullptr) return false;
     for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
         if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
@@ -1942,6 +1951,10 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
             break;
         }
     }
+    // ST_WAR_GATE >= 0 overrides (for sweeps); otherwise derive from this region's WMMA cost.
+    warGateWmmas_ = mode2WarGateWmmasEnv() >= 0
+                        ? mode2WarGateWmmasEnv()
+                        : deriveWarGateWmmas(wmmaIssueConfig.latency, wmmaIssueConfig.issueCycles);
 
     restoreCrossBBStateFromLoop();
 
