@@ -59,8 +59,10 @@
 #include <msgpack.hpp>
 #include <zlib.h>
 
+#include <Tensile/CachingLibrary.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
+#include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/SolutionBlobCache.hpp>
 #include <Tensile/Tensile.hpp>
 // For Serialization::objectToMap, used to walk a legacy document's top level.
@@ -282,10 +284,13 @@ TEST(SolutionBlobCacheTest, IndicesCoversEverySlice)
     EXPECT_EQ(parses->load(), 0) << "listing indices must not parse";
 }
 
-TEST(SolutionBlobCacheTest, ConcurrentGetOfOneIndexYieldsOneObject)
+// The contract is one retained object per index, not one parse: threads racing
+// on the same index may each deserialize it, and the first result published
+// wins. See SolutionBlobCache::get(). Several matching table rows commonly wrap
+// the same index, so this is the realistic contention case. Run under TSan to
+// check the locking.
+TEST(SolutionBlobCacheTest, ConcurrentGetOfOneIndexYieldsOneRetainedObjectNotOneParse)
 {
-    // Several matching table rows commonly wrap the same index, so this is the
-    // realistic contention case. Run under TSan to check the locking.
     auto parses = std::make_shared<std::atomic<int>>(0);
     auto cache  = makeFakeCache(4, parses);
 
@@ -304,6 +309,12 @@ TEST(SolutionBlobCacheTest, ConcurrentGetOfOneIndexYieldsOneObject)
         EXPECT_EQ(got[t], got[0]) << "thread " << t << " saw a different object";
     }
     EXPECT_EQ(cache->materializedCount(), 1u);
+
+    // Spelling out the half of the contract the assertions above cannot see:
+    // duplicate parses are allowed, one per racing thread at worst, but every
+    // one of them beyond the first is discarded rather than retained.
+    EXPECT_GE(parses->load(), 1);
+    EXPECT_LE(parses->load(), kThreads);
 }
 
 TEST(SolutionBlobCacheTest, ConcurrentGetOfDifferentIndicesIsSafe)
@@ -454,6 +465,20 @@ TEST_F(IndexedLibraryLoadTest, RejectsSliceRunningPastTheBlob)
 {
     auto base = tmpDir / "TensileLibrary_overrun.dat";
     writeIndexedLibrary(base, 2, {0, 0, 64}, {0x01, 0x02});
+
+    auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
+    EXPECT_EQ(library, nullptr);
+}
+
+// An index wider than `int` would be truncated into the slice table, aliasing a
+// different solution. The tree here names the truncated value, so a loader
+// missing this check would accept the file and resolve that index happily.
+TEST_F(IndexedLibraryLoadTest, RejectsIndexTooLargeForInt)
+{
+    constexpr int64_t aliased = (int64_t(1) << 32) + 5; // narrows to 5
+
+    auto base = tmpDir / "TensileLibrary_wideindex.dat";
+    writeIndexedLibrary(base, 2, {aliased, 0, 1}, {0x01}, /*omitBlob=*/false, /*treeIndex=*/5);
 
     auto library = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(base.string());
     EXPECT_EQ(library, nullptr);
@@ -652,4 +677,227 @@ TEST_F(IndexedLibraryParityTest, ResolveByIndexWorksWithoutAnyPriorQuery)
     EXPECT_EQ(solution->index, indices.front());
     EXPECT_EQ(master->blobCache->materializedCount(), 1u)
         << "resolving one index must not materialize the rest";
+}
+
+// ---------------------------------------------------------------------------
+// 4. A lazy master reaching an indexed shard through a placeholder
+// ---------------------------------------------------------------------------
+//
+// This is how every shipped gfx942 configuration is laid out: a master that
+// carries no solutions of its own, a per-arch mapping file, and one placeholder
+// per shard. It is also the path where the indexed format has the most to get
+// wrong, because a lazily loaded shard has no materialized solutions for the
+// parent to merge -- the parent has to adopt the shard's blob cache instead.
+//
+// A shard can be loaded from either side, and both have to end up with the
+// parent able to resolve the shard's indices:
+//   * master-first, through MasterSolutionLibrary::loadLibrary via the mapping;
+//   * placeholder-first, when a query descends into the placeholder node.
+
+namespace
+{
+    using Master  = MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>;
+    using Caching = CachingLibrary<ContractionProblemGemm, ContractionSolution>;
+    using Holder  = PlaceholderLibrary<ContractionProblemGemm, ContractionSolution>;
+
+    constexpr const char* kArch       = "gfx9999";
+    constexpr const char* kShardPrefix = "TensileLibrary_shard_gfx9999";
+
+    /// A master with no solutions of its own whose whole tree is one placeholder,
+    /// matching the shape of a shipped lazy master.
+    void writeLazyMaster(fs::path const& path, std::string const& shardPrefix)
+    {
+        msgpack::sbuffer                  buffer;
+        msgpack::packer<msgpack::sbuffer> packer(buffer);
+
+        packer.pack_map(2);
+        packer.pack(std::string("solutions"));
+        packer.pack_array(0);
+        packer.pack(std::string("library"));
+        packer.pack_map(2);
+        packer.pack(std::string("type"));
+        packer.pack(std::string("Placeholder"));
+        packer.pack(std::string("value"));
+        packer.pack(shardPrefix);
+
+        writeFile(path, std::vector<uint8_t>(buffer.data(), buffer.data() + buffer.size()));
+    }
+
+    /// The per-arch mapping file loadLibrary() consults: index -> shard prefix.
+    void writeMappingFile(fs::path const& path, std::map<std::string, std::string> const& entries)
+    {
+        msgpack::sbuffer buffer;
+        msgpack::pack(buffer, entries);
+
+        writeFile(path, std::vector<uint8_t>(buffer.data(), buffer.data() + buffer.size()));
+    }
+
+    Holder* placeholderOf(Master* master)
+    {
+        auto caching = std::dynamic_pointer_cast<Caching>(master->library);
+        if(!caching)
+            return nullptr;
+        return dynamic_cast<Holder*>(caching->library().get());
+    }
+
+    struct PlaceholderIndexedShardTest : public TempDirTest
+    {
+        std::vector<int> shardIndices;
+
+        fs::path masterPath() const
+        {
+            return tmpDir / ("TensileLibrary_lazy_" + std::string(kArch) + ".dat");
+        }
+
+        /// Lays out a lazy master, its mapping file, and one indexed shard built
+        /// from the committed legacy fixture. Returns false when the fixture is
+        /// unavailable or predates the current schema, so callers can skip.
+        bool layOutLibrary()
+        {
+            auto fixture = legacyFixture();
+            if(!fs::is_regular_file(fixture))
+                return false;
+
+            std::ifstream in(fixture, std::ios::binary | std::ios::ate);
+            if(!in.good())
+                return false;
+            std::vector<char> bytes(static_cast<size_t>(in.tellg()));
+            in.seekg(0);
+            in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+
+            auto handle  = msgpack::unpack(bytes.data(), bytes.size());
+            auto indexed = toIndexed(handle.get());
+            if(indexed.empty())
+                return false;
+
+            // Confirm the fixture still loads before building anything on it.
+            auto legacy = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(
+                fixture.string());
+            if(!legacy)
+                return false;
+            auto* legacyMaster = dynamic_cast<Master*>(legacy.get());
+            if(!legacyMaster || legacyMaster->solutions.empty())
+                return false;
+            for(auto const& entry : legacyMaster->solutions)
+                shardIndices.push_back(entry.first);
+
+            writeFile(tmpDir / (std::string(kShardPrefix) + ".dat.zlib"), deflateBytes(indexed));
+            writeLazyMaster(masterPath(), kShardPrefix);
+            // One range starting at 0, so every index routes to this shard.
+            writeMappingFile(tmpDir
+                                 / ("TensileLiteLibrary_lazy_" + std::string(kArch)
+                                    + "_Mapping.dat"),
+                             {{"0", kShardPrefix}});
+            return true;
+        }
+    };
+} // namespace
+
+TEST_F(PlaceholderIndexedShardTest, MasterFirstResolvesShardIndexWithNoPriorQuery)
+{
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+
+    ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
+    EXPECT_TRUE(master->solutions.empty()) << "a lazy master carries no solutions itself";
+    EXPECT_EQ(master->blobCache, nullptr);
+    EXPECT_TRUE(master->solutionSources.empty()) << "no shard should be loaded yet";
+
+    // The hipBLASLt algo-index path: a lookup with no preceding selection.
+    const int index    = shardIndices.front();
+    auto      solution = master->resolveSolutionByIndex(index);
+
+    ASSERT_NE(solution, nullptr) << "index " << index << " did not resolve through the shard";
+    EXPECT_EQ(solution->index, index);
+    EXPECT_EQ(solution->codeObjectFilename.load(), std::string(kShardPrefix) + ".co")
+        << "the shard's code object name must reach solutions parsed out of its blob";
+
+    ASSERT_EQ(master->solutionSources.size(), 1u) << "one cache registered per shard";
+    auto shardCache = master->solutionSources.begin()->second;
+    ASSERT_NE(shardCache, nullptr);
+    EXPECT_EQ(shardCache->size(), shardIndices.size());
+    EXPECT_EQ(shardCache->materializedCount(), 1u)
+        << "resolving one index must not parse the rest of the shard";
+}
+
+TEST_F(PlaceholderIndexedShardTest, PlaceholderFirstPublishesItsCacheToTheParent)
+{
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+
+    // No mapping file consulted here on purpose: the shard arrives because a
+    // query descended into the placeholder, not because loadLibrary fetched it.
+    auto* placeholder = placeholderOf(master);
+    ASSERT_NE(placeholder, nullptr) << "master's tree is not a placeholder";
+    ASSERT_TRUE(placeholder->loadPlaceholderLibrary());
+
+    ASSERT_EQ(master->solutionSources.size(), 1u)
+        << "the placeholder must publish its shard cache to the owning master";
+
+    const int index    = shardIndices.front();
+    auto      solution = master->resolveSolutionByIndex(index);
+    ASSERT_NE(solution, nullptr) << "parent could not reach a shard the placeholder loaded";
+    EXPECT_EQ(solution->index, index);
+
+    // Both routes have to agree on the object, which is what stops a caller that
+    // selects through the tree and re-fetches by index from getting two.
+    auto viaCache = master->solutionSources.begin()->second->get(index);
+    EXPECT_EQ(solution, viaCache) << "index lookup and the shard's own cache disagree";
+}
+
+TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)
+{
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
+
+    // Master first, then the placeholder for the same shard. Registering the
+    // shard twice would retain a second copy of its blob.
+    ASSERT_NE(master->resolveSolutionByIndex(shardIndices.front()), nullptr);
+    ASSERT_EQ(master->solutionSources.size(), 1u);
+
+    auto* placeholder = placeholderOf(master);
+    ASSERT_NE(placeholder, nullptr);
+    placeholder->loadPlaceholderLibrary();
+
+    EXPECT_EQ(master->solutionSources.size(), 1u)
+        << "a shard reached from both sides must still register exactly once";
+}
+
+TEST_F(PlaceholderIndexedShardTest, EnumerationPublishesLoadedShardSolutions)
+{
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
+    ASSERT_NE(master->resolveSolutionByIndex(shardIndices.front()), nullptr);
+
+    // What the benchmark client's enumeration iterator depends on: the solutions
+    // map it indexes has to be filled, which materializing the caches alone does
+    // not do, because leaves resolve through the cache and never touch that map.
+    master->materializeAllSolutions();
+
+    EXPECT_EQ(master->solutions.size(), shardIndices.size());
+    for(int index : shardIndices)
+        EXPECT_NE(master->solutions.find(index), master->solutions.end())
+            << "index " << index << " missing after enumeration";
 }

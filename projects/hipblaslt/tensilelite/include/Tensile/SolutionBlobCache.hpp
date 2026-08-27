@@ -123,6 +123,15 @@ namespace TensileLite
         /// Returns the solution for `index`, parsing it on first use.
         /// Returns nullptr for an unknown index or a payload that fails to
         /// parse. Safe to call concurrently for the same or different indices.
+        ///
+        /// The guarantee is **one retained object per index, not one parse**.
+        /// Threads racing on the same index can each deserialize it; the first
+        /// result to be published wins and every caller receives that one
+        /// object, while the losers' copies are dropped. That is deliberate:
+        /// parsing under the writer lock would serialize threads working on
+        /// unrelated indices, which is the common case, to save duplicate work
+        /// in the rare one. Callers must not rely on the deserializer running
+        /// exactly once per index.
         std::shared_ptr<MySolution> get(int index) const
         {
             {

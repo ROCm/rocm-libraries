@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <limits>
+
 #include <Tensile/SolutionLibrary.hpp>
 
 #include <Tensile/CachingLibrary.hpp>
@@ -212,6 +214,20 @@ namespace TensileLite
                     {
                         iot::setError(
                             io, concatenate("solutions_index has a negative field at entry ", i / 3));
+                        return false;
+                    }
+                    // Solution indices are `int` everywhere else -- in the slice
+                    // table, in the tree nodes that name them, and in the public
+                    // lookup API -- so anything wider would be silently truncated
+                    // into a key that aliases a different solution.
+                    if(index > static_cast<int64_t>(std::numeric_limits<int>::max()))
+                    {
+                        iot::setError(io,
+                                      concatenate("solutions_index entry ",
+                                                  i / 3,
+                                                  " has index ",
+                                                  index,
+                                                  ", which does not fit in an int"));
                         return false;
                     }
                     // Compared unsigned and by subtraction, never as a sum:
