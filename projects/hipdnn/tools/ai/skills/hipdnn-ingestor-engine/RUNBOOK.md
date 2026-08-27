@@ -520,80 +520,52 @@ grep HIPDNN_ENABLE_KERNEL_INGESTOR $BUILD/CMakeCache.txt
 
 ### 5d. Desk-check the shipped set — no GPU required
 
-The validator proves the tree parses and cross-references. It does **not** check that
-your variant set is internally coherent or that anything will match. These four cost
-seconds and each catches a defect that otherwise surfaces at stage 8, or never:
+The validator proves the tree parses and cross-references. It does **not** check that your
+variant set is internally coherent or that anything will match. Four invariants do, they
+cost seconds, and each catches a defect that otherwise surfaces at stage 8 or never:
 
 ```bash
-KDP=<the shipped .kdp.json under the packed tree>
-python3 - "$KDP" <<'PY'
-import json, sys, collections
-ks = json.load(open(sys.argv[1]))["kernelDescriptors"]
-F = ["dtype","batch","head_size","num_query_heads","num_kv_heads",
-     "seqlen_q","seqlen_kv","causal","sliding_window","block_n"]   # your KMD fields
-F = [f for f in F if f in ks[0]["metadata"]]
-
-# 1. metadata must agree with the spec it claims to describe -- the matcher reads
-#    metadata, the compiler read spec; a drift between them is invisible and fatal.
-#
-#    The spec lives in different places depending on which tree you point this at:
-#    kernel_source.spec on an AUTHORED (pre-pack) tree, provenance.spec on a SHIPPED
-#    (post-pack) one -- packing moves it. Check both, and say so explicitly rather
-#    than silently reporting "none" when NEITHER is present: that silence is
-#    indistinguishable from "checked, found no drift", and reading only
-#    kernel_source.spec made this check dead on every packed tree.
-#
-#    dtype is commonly a SPELLING, not a raw value (one integration paired spec
-#    "bf16"/"fp16" with metadata "BFLOAT16"/"HALF"). If your engine translates the
-#    dtype vocabulary, drop "dtype" from F here or add your own explicit map, or
-#    every row false-positives.
-no_spec = []
-bad = []
-for k in ks:
-    spec = k["kernel_source"].get("spec")
-    if spec is None:
-        spec = k.get("provenance", {}).get("spec")
-    if spec is None:
-        no_spec.append(k["name"])
-        continue
-    for f in F:
-        if f not in spec:
-            continue
-        sv, mv = spec[f], k["metadata"][f]
-        if isinstance(sv, bool):
-            if int(sv) != mv:
-                bad.append((k["name"], f))
-        elif str(sv).lower() != str(mv).lower():
-            bad.append((k["name"], f))
-if no_spec:
-    print("metadata/spec drift: COULD NOT CHECK -- no spec found (wrong tree?) for:", no_spec)
-else:
-    print("metadata/spec drift:", bad or "none")
-
-# 2. no two kernels may share a matcher tuple on the same arch -- one is unreachable
-tups = collections.Counter(tuple(k["metadata"][f] for f in F) for k in ks)
-print("duplicate matcher tuples:", {t:c for t,c in tups.items() if c>1} or "none")
-
-# 3. every variant must be individually addressable in the archive
-toc = [k["kernel_source"].get("toc_key") for k in ks]
-print(f"kernels={len(ks)} distinct toc_key={len(set(toc))}",
-      "OK" if len(set(toc))==len(ks) else "COLLISION -- two variants share one blob")
-
-# 4. symbol names are NOT guaranteed unique. A rocKE kernel_name() may omit fields the
-#    kernel still bakes in -- read your builder's kernel_name() and compare what it
-#    interpolates against what the spec pins. Uniqueness comes from (toc_key, symbol),
-#    never the symbol alone -- do not build anything that keys on the symbol string.
-sym = [k["kernel_source"].get("symbol") for k in ks]
-print("distinct symbols:", len(set(sym)), "of", len(ks),
-      "(fewer is legal -- toc_key disambiguates)")
-PY
+PYTHONPATH=$PROVIDER/descriptor-packaging/python \
+  python3 $PROVIDER/descriptor-packaging/tools/hkp_desk_check.py \
+          <the shipped .kdp.json under the packed tree>
+echo "EXIT=$?"
 ```
+
+**GATE:** exit 0. Exit 1 means an invariant is violated *or* could not be evaluated — the
+tool refuses to report a clean result it did not actually check.
+
+What the four are, and why each matters:
+
+1. **Metadata must agree with the spec it claims to describe.** The matcher reads
+   `metadata`; the compiler read `spec`. Drift between them is invisible and fatal. The
+   spec moves during packing (`kernel_source.spec` when authored, `provenance.spec` once
+   packed), so the tool checks both and reports `COULD NOT CHECK` when neither is present
+   rather than a false clean.
+2. **No two kernels may share a matcher tuple on the same arch** — one of them is
+   unreachable forever.
+3. **Every variant must be individually addressable**: distinct `toc_key`. A collision
+   means two variants resolve to one blob.
+4. **Symbol names are NOT guaranteed unique**, and that is legal. A rocKE `kernel_name()`
+   may omit fields the kernel still bakes in — read yours and compare what it interpolates
+   against what the spec pins. Uniqueness is `(toc_key, symbol)`; never key anything on the
+   symbol string alone.
+
+If your engine translates the dtype vocabulary (spec `"bf16"` against metadata
+`"BFLOAT16"`, say), narrow the compared fields with `--field` rather than reading a wall of
+false positives.
+
+This logic ships as a tested module rather than a snippet in this file, because the
+snippet it replaces was **dead code for its entire life**: it read only
+`kernel_source.spec`, which does not exist on the packed tree this step tells you to point
+it at, so invariant 1 printed "none" no matter what. Code that lives in prose cannot be
+tested, and untested checks fail silently in the direction that looks like success.
 
 Then the check that decides whether stage 8 can pass at all: **for each test graph you
 plan to run, does a shipped variant match it?** Derive the tuple the matcher will compute
-from the graph — remembering any field that is a *derivation* rather than a copy — and
-look it up in the set above. A bundle with no matching variant is declined, and a stage-8
-run of declined graphs proves nothing while looking like a green suite.
+from the graph — remembering any field that is a *derivation* rather than a copy, which
+`graph_contract.md` §5 already listed — and look it up in the set. A bundle with no
+matching variant is declined, and a stage-8 run of declined graphs proves nothing while
+looking like a green suite.
 
 ---
 
