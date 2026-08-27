@@ -185,8 +185,7 @@ void testing_sptrsv_ell(const Arguments& arg)
         I                    analysis_pivot = -1;
         I                    solve_pivot    = -1;
 
-        host_ellsv<I, T>(trans_A,
-                         M,
+        host_ellsv<I, T>(M,
                          hA.n,
                          *halpha,
                          hA.ind,

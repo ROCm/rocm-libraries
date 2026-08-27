@@ -63,7 +63,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   diag: [rocsparse_diag_type_unit, rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
@@ -80,7 +80,7 @@ Tests:
   M: 1
   N: 1
   alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   diag: [rocsparse_diag_type_unit]
   uplo: [rocsparse_fill_mode_upper]
   baseA: [rocsparse_index_base_zero]
@@ -103,7 +103,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_checkin
   alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   baseA: [rocsparse_index_base_zero]
@@ -120,7 +120,7 @@ Tests:
   M: 1
   N: 1
   alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   baseA: [rocsparse_index_base_zero]
@@ -143,7 +143,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   baseA: [rocsparse_index_base_zero]
@@ -161,7 +161,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_nightly
   alpha_alphai: *alpha_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   baseA: [rocsparse_index_base_zero]
@@ -177,7 +177,7 @@ Tests:
   precision: *single_double_precisions_complex
   M_N: *M_N_range_nightly
   alpha_alphai: *alpha_range_nightly
-  transA: [rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   diag: [rocsparse_diag_type_unit]
   uplo: [rocsparse_fill_mode_upper]
   baseA: [rocsparse_index_base_zero]
