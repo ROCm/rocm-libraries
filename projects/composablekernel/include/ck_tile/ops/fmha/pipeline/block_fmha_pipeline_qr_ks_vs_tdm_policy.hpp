@@ -104,10 +104,12 @@ template <typename DataType,
 CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_row_major_lds_descriptor()
 {
     static_assert(Rows > 0 && Cols > 0, "LDS descriptor dimensions must be positive");
-    static_assert(AccessBytes > 0 && AccessBytes % sizeof(DataType) == 0,
+    static_assert(AccessBytes > 0 &&
+                      (AccessBytes * numeric_traits<DataType>::PackedSize) % sizeof(DataType) == 0,
                   "LDS access width must contain a whole number of elements");
 
-    constexpr index_t AccessElements = AccessBytes / sizeof(DataType);
+    constexpr index_t AccessElements =
+        AccessBytes * numeric_traits<DataType>::PackedSize / sizeof(DataType);
 
     if constexpr(!PaddingConfig::kEnabled)
     {
@@ -161,6 +163,14 @@ CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_row_major_lds_descriptor()
 template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
 struct QrTdmLdsArenaLayout;
 
+template <typename Problem>
+struct QrTdmPaddingSelection
+{
+    using Q = LdsPaddingConfig<false, 0, 0>;
+    using K = LdsPaddingConfig<false, 0, 0>;
+    using V = LdsPaddingConfig<false, 0, 0>;
+};
+
 } // namespace detail
 
 // This pipeline is qkv all located in LDS, targeting gfx1250
@@ -175,10 +185,19 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                                            /* NumPrefetchK = */ 1,
                                                            /* NumPrefetchV = */ 1>;
 
+    template <typename Problem>
+    using LdsPaddingConfigQ = typename detail::QrTdmPaddingSelection<Problem>::Q;
+
+    template <typename Problem>
+    using LdsPaddingConfigK = typename detail::QrTdmPaddingSelection<Problem>::K;
+
+    template <typename Problem>
+    using LdsPaddingConfigV = typename detail::QrTdmPaddingSelection<Problem>::V;
+
     template <typename Problem,
-              typename QPadding = detail::LdsPaddingConfig<true, 256, 16>,
-              typename KPadding = detail::LdsPaddingConfig<true, 256, 16>,
-              typename VPadding = detail::LdsPaddingConfig<true, 256, 32>>
+              typename QPadding = LdsPaddingConfigQ<Problem>,
+              typename KPadding = LdsPaddingConfigK<Problem>,
+              typename VPadding = LdsPaddingConfigV<Problem>>
     using LdsArenaLayout = detail::QrTdmLdsArenaLayout<Problem, QPadding, KPadding, VPadding>;
 
     template <typename Problem>
@@ -384,13 +403,14 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     {
         constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kSubQKHeaddim;
+        using DataType              = typename Problem::QDataType;
+        using Padding               = LdsPaddingConfigQ<Problem>;
 
-        constexpr index_t kKPack = GetSmemKPackQ<Problem>();
-
-        return make_naive_tensor_descriptor(make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}),
-                                            make_tuple(number<kKPerBlock>{}, number<1>{}),
-                                            number<kKPack>{},
-                                            number<1>{});
+        return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                              kMPerBlock,
+                                                              kKPerBlock,
+                                                              Padding,
+                                                              16>();
     }
 
     // Plain row-major K LDS desc; same no-swizzle rationale as Q above.
@@ -401,12 +421,14 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         constexpr index_t kKPerBlock =
             LoadOnce ? Problem::BlockFmhaShape::kSubQKHeaddim : Problem::BlockFmhaShape::kK0;
 
-        constexpr index_t kKPack = GetSmemKPackK<Problem>();
+        using DataType = typename Problem::KDataType;
+        using Padding  = LdsPaddingConfigK<Problem>;
 
-        return make_naive_tensor_descriptor(make_tuple(number<kNPerBlock>{}, number<kKPerBlock>{}),
-                                            make_tuple(number<kKPerBlock>{}, number<1>{}),
-                                            number<kKPack>{},
-                                            number<1>{});
+        return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                              kNPerBlock,
+                                                              kKPerBlock,
+                                                              Padding,
+                                                              16>();
     }
 
     template <typename Problem, bool Xor = false>
@@ -414,98 +436,15 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     {
         constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kN0;
+        using DataType = typename Problem::VDataType;
+        using Padding  = LdsPaddingConfigV<Problem>;
 
-        constexpr index_t kKPack = GetSmemKPackV<Problem>();
-
-        constexpr auto v_lds_block_desc = [&]() {
-            if constexpr(Xor)
-            {
-                constexpr auto XorGroupSize =
-                    Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{});
-
-#if CK_TILE_FMHA_HANDLE_XOR_LENGTH_FOLD
-                constexpr auto LDSLayerSize  = 256 / sizeof(typename Problem::VDataType);
-                constexpr auto XorLengthFold = LDSLayerSize / kNPerBlock;
-
-                if constexpr(XorLengthFold > 1)
-                {
-                    constexpr auto v_lds_block_desc_naive = make_naive_tensor_descriptor(
-                        make_tuple(number<kKPerBlock / XorLengthFold>{},
-                                   number<LDSLayerSize / XorGroupSize>{},
-                                   number<XorGroupSize>{}),
-                        make_tuple(number<LDSLayerSize>{}, number<XorGroupSize>{}, number<1>{}),
-                        number<kKPack>{},
-                        number<1>{});
-
-                    constexpr auto v_lds_block_desc_permuted = transform_tensor_descriptor(
-                        v_lds_block_desc_naive,
-                        make_tuple(
-                            make_xor_transform(make_tuple(number<kKPerBlock / XorLengthFold>{},
-                                                          number<LDSLayerSize / XorGroupSize>{})),
-                            make_pass_through_transform(number<XorGroupSize>{})),
-                        make_tuple(sequence<0, 1>{}, sequence<2>{}),
-                        make_tuple(sequence<0, 1>{}, sequence<2>{}));
-
-                    constexpr auto v_lds_block_desc_tmp = transform_tensor_descriptor(
-                        v_lds_block_desc_permuted,
-                        make_tuple(
-                            make_pass_through_transform(number<kKPerBlock / XorLengthFold>{}),
-                            make_unmerge_transform(make_tuple(number<XorLengthFold>{},
-                                                              number<kNPerBlock / XorGroupSize>{})),
-                            make_pass_through_transform(number<XorGroupSize>{})),
-                        make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
-                        make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}));
-
-                    return transform_tensor_descriptor(
-                        v_lds_block_desc_tmp,
-                        make_tuple(
-                            make_merge_transform_v3_division_mod(make_tuple(
-                                number<kKPerBlock / XorLengthFold>{}, number<XorLengthFold>{})),
-                            make_merge_transform_v3_division_mod(make_tuple(
-                                number<kNPerBlock / XorGroupSize>{}, number<XorGroupSize>{}))),
-                        make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
-                        make_tuple(sequence<0>{}, sequence<1>{}));
-                }
-                else
-#endif // CK_TILE_FMHA_HANDLE_XOR_LENGTH_FOLD
-                {
-                    constexpr auto v_lds_block_desc_naive = make_naive_tensor_descriptor(
-                        make_tuple(number<kKPerBlock>{},
-                                   number<kNPerBlock / XorGroupSize>{},
-                                   number<XorGroupSize>{}),
-                        make_tuple(number<kNPerBlock>{}, number<XorGroupSize>{}, number<1>{}),
-                        number<kKPack>{},
-                        number<1>{});
-
-                    constexpr auto v_lds_block_desc_permuted = transform_tensor_descriptor(
-                        v_lds_block_desc_naive,
-                        make_tuple(make_xor_transform(make_tuple(
-                                       number<kKPerBlock>{}, number<kNPerBlock / XorGroupSize>{})),
-                                   make_pass_through_transform(number<XorGroupSize>{})),
-                        make_tuple(sequence<0, 1>{}, sequence<2>{}),
-                        make_tuple(sequence<0, 1>{}, sequence<2>{}));
-
-                    return transform_tensor_descriptor(
-                        v_lds_block_desc_permuted,
-                        make_tuple(
-                            make_pass_through_transform(number<kKPerBlock>{}),
-                            make_merge_transform_v3_division_mod(make_tuple(
-                                number<kNPerBlock / XorGroupSize>{}, number<XorGroupSize>{}))),
-                        make_tuple(sequence<0>{}, sequence<1, 2>{}),
-                        make_tuple(sequence<0>{}, sequence<1>{}));
-                }
-            }
-            else
-            {
-                return make_naive_tensor_descriptor(
-                    make_tuple(number<kKPerBlock>{}, number<kNPerBlock>{}),
-                    make_tuple(number<kNPerBlock>{}, number<1>{}),
-                    number<kKPack>{},
-                    number<1>{});
-            }
-        }();
-
-        return v_lds_block_desc;
+        static_assert(!Xor, "qr_tdm V LDS descriptor must remain row-major");
+        return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                              kKPerBlock,
+                                                              kNPerBlock,
+                                                              Padding,
+                                                              16>();
     }
 
     template <typename Problem>
@@ -837,55 +776,6 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         }
     }
 
-    // -------------------------------------------------------------------------
-    // TDM LDS padding config
-    //
-    // Mirrors the formula in
-    //   gemm_universal_pipeline_ag_bg_cr_policy.hpp:1131 GetLdsPaddingConfig
-    // adapted to fmha shape names. Returns a tuple (IsPadding, PadAmount,
-    // PadInterval) suitable for filling TDMConfig::pad_config (see
-    // amd_tdm_descriptor.hpp). Field semantics:
-    //   * pad_amount:  N -> add (N+1) dwords padding
-    //   * pad_interval N -> insert padding every 2^(N+1) dwords
-    //
-    // Branch selection rationale (do NOT silently change without re-verifying):
-    //   * Q : non-tr-load   (output via plain ds_load, like K)  -> "else" branch
-    //   * K : non-tr-load   (output via plain ds_load)          -> "else" branch
-    //   * V : tr-load       (output via ds_load_tr_b128)        -> "if"   branch
-    // -------------------------------------------------------------------------
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigQ()
-    {
-        // Q LDS padding DISABLED. Enabling the writer-side padding alone
-        // misaligns the plain row-major Q LDS reader; padding is a
-        // bank-conflict perf optimization, not a correctness requirement,
-        // and is deferred to a follow-up perf pass (same as K/V below).
-        return make_tuple(number<false>{}, number<0>{}, number<0>{});
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigK()
-    {
-        // K LDS padding DISABLED. Same rationale as Q above; original
-        // padded implementation mirrors
-        // gemm_universal_pipeline_ag_bg_cr_policy.hpp:1131.
-        return make_tuple(number<false>{}, number<0>{}, number<0>{});
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigV()
-    {
-        // V LDS padding currently DISABLED. Re-enabling the writer-side config
-        // alone misaligns the reader (V LDS read view is plain row-major and
-        // not padding-aware). A full re-enable requires a padding-aware
-        // MakeVLdsBlockDescriptor mirroring gemm pipeline's
-        // MakeBLdsBlockDescriptorForTrLoad
-        // (gemm_universal_pipeline_ag_bg_cr_policy.hpp:1297-1410). Padding is
-        // a bank-conflict-avoidance perf optimization, not a correctness
-        // requirement; deferred to a follow-up perf pass.
-        return make_tuple(number<false>{}, number<0>{}, number<0>{});
-    }
 };
 
 namespace detail {

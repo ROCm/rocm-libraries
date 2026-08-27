@@ -307,20 +307,23 @@ struct BlockFmhaPipelineQRKSVSTdm
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
         {
-            constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
-            tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
-            tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[I1];
-            tdm_config_q.pad_config.pad_interval = LdsPaddingConfigQ[number<2>{}];
+            using QRaw = detail::EncodedTdmPadding<
+                typename Policy::template LdsPaddingConfigQ<Problem>>;
+            tdm_config_q.pad_enable              = QRaw::kEnabled;
+            tdm_config_q.pad_config.pad_amount   = QRaw::kPadAmount;
+            tdm_config_q.pad_config.pad_interval = QRaw::kPadInterval;
 
-            constexpr auto LdsPaddingConfigK     = Policy::template GetLdsPaddingConfigK<Problem>();
-            tdm_config_k.pad_enable              = LdsPaddingConfigK[I0];
-            tdm_config_k.pad_config.pad_amount   = LdsPaddingConfigK[I1];
-            tdm_config_k.pad_config.pad_interval = LdsPaddingConfigK[number<2>{}];
+            using KRaw = detail::EncodedTdmPadding<
+                typename Policy::template LdsPaddingConfigK<Problem>>;
+            tdm_config_k.pad_enable              = KRaw::kEnabled;
+            tdm_config_k.pad_config.pad_amount   = KRaw::kPadAmount;
+            tdm_config_k.pad_config.pad_interval = KRaw::kPadInterval;
 
-            constexpr auto LdsPaddingConfigV     = Policy::template GetLdsPaddingConfigV<Problem>();
-            tdm_config_v.pad_enable              = LdsPaddingConfigV[I0];
-            tdm_config_v.pad_config.pad_amount   = LdsPaddingConfigV[I1];
-            tdm_config_v.pad_config.pad_interval = LdsPaddingConfigV[number<2>{}];
+            using VRaw = detail::EncodedTdmPadding<
+                typename Policy::template LdsPaddingConfigV<Problem>>;
+            tdm_config_v.pad_enable              = VRaw::kEnabled;
+            tdm_config_v.pad_config.pad_amount   = VRaw::kPadAmount;
+            tdm_config_v.pad_config.pad_interval = VRaw::kPadInterval;
         }
 
         // Q tile in LDS
@@ -940,20 +943,23 @@ struct BlockFmhaPipelineQRKSVSTdm
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
         {
-            constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
-            tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
-            tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[I1];
-            tdm_config_q.pad_config.pad_interval = LdsPaddingConfigQ[number<2>{}];
+            using QRaw = detail::EncodedTdmPadding<
+                typename Policy::template LdsPaddingConfigQ<Problem>>;
+            tdm_config_q.pad_enable              = QRaw::kEnabled;
+            tdm_config_q.pad_config.pad_amount   = QRaw::kPadAmount;
+            tdm_config_q.pad_config.pad_interval = QRaw::kPadInterval;
 
-            constexpr auto LdsPaddingConfigK     = Policy::template GetLdsPaddingConfigK<Problem>();
-            tdm_config_k.pad_enable              = LdsPaddingConfigK[I0];
-            tdm_config_k.pad_config.pad_amount   = LdsPaddingConfigK[I1];
-            tdm_config_k.pad_config.pad_interval = LdsPaddingConfigK[number<2>{}];
+            using KRaw = detail::EncodedTdmPadding<
+                typename Policy::template LdsPaddingConfigK<Problem>>;
+            tdm_config_k.pad_enable              = KRaw::kEnabled;
+            tdm_config_k.pad_config.pad_amount   = KRaw::kPadAmount;
+            tdm_config_k.pad_config.pad_interval = KRaw::kPadInterval;
 
-            constexpr auto LdsPaddingConfigV     = Policy::template GetLdsPaddingConfigV<Problem>();
-            tdm_config_v.pad_enable              = LdsPaddingConfigV[I0];
-            tdm_config_v.pad_config.pad_amount   = LdsPaddingConfigV[I1];
-            tdm_config_v.pad_config.pad_interval = LdsPaddingConfigV[number<2>{}];
+            using VRaw = detail::EncodedTdmPadding<
+                typename Policy::template LdsPaddingConfigV<Problem>>;
+            tdm_config_v.pad_enable              = VRaw::kEnabled;
+            tdm_config_v.pad_config.pad_amount   = VRaw::kPadAmount;
+            tdm_config_v.pad_config.pad_interval = VRaw::kPadInterval;
         }
 
         // Q tile in LDS

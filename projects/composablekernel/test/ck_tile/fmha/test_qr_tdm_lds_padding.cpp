@@ -232,8 +232,9 @@ constexpr bool validate_arena_layouts()
     using DecodeProblem  = TestFmhaProblem<DataType, 64>;
     using Policy         = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
 
-    using PrefillAll = typename Policy::template LdsArenaLayout<PrefillProblem>;
-    using DecodeAll  = typename Policy::template LdsArenaLayout<DecodeProblem>;
+    using PrefillAll =
+        typename Policy::template LdsArenaLayout<PrefillProblem, QKPad, QKPad, VPad>;
+    using DecodeAll = typename Policy::template LdsArenaLayout<DecodeProblem, QKPad, QKPad, VPad>;
 
     static_assert(PrefillAll::kQOffset == 0);
     static_assert(PrefillAll::kK0Offset == 0);
@@ -304,6 +305,55 @@ constexpr bool validate_arena_layouts()
 
 static_assert(validate_arena_layouts<ck_tile::bf16_t>());
 static_assert(validate_arena_layouts<ck_tile::half_t>());
+
+template <typename DataType, ck_tile::index_t M>
+constexpr bool validate_policy_coupling()
+{
+    using Problem = TestFmhaProblem<DataType, M>;
+    using Policy  = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+    using QConfig = typename Policy::template LdsPaddingConfigQ<Problem>;
+    using KConfig = typename Policy::template LdsPaddingConfigK<Problem>;
+    using VConfig = typename Policy::template LdsPaddingConfigV<Problem>;
+    using QRaw    = ck_tile::detail::EncodedTdmPadding<QConfig>;
+    using KRaw    = ck_tile::detail::EncodedTdmPadding<KConfig>;
+    using VRaw    = ck_tile::detail::EncodedTdmPadding<VConfig>;
+    using Layout  = typename Policy::template LdsArenaLayout<Problem>;
+
+    constexpr auto q_desc = Policy::template MakeQLdsBlockDescriptor<Problem>();
+    constexpr auto k_desc = Policy::template MakeKLdsBlockDescriptor<Problem, (M > 64)>();
+    constexpr auto v_desc = Policy::template MakeVLdsBlockDescriptor<Problem>();
+
+    static_assert(std::is_same_v<QConfig, NoPad>);
+    static_assert(std::is_same_v<KConfig, NoPad>);
+    static_assert(std::is_same_v<VConfig, NoPad>);
+    static_assert(!QRaw::kEnabled && QRaw::kPadInterval == 0 && QRaw::kPadAmount == 0);
+    static_assert(!KRaw::kEnabled && KRaw::kPadInterval == 0 && KRaw::kPadAmount == 0);
+    static_assert(!VRaw::kEnabled && VRaw::kPadInterval == 0 && VRaw::kPadAmount == 0);
+    static_assert(q_desc.calculate_offset(ck_tile::make_tuple(1, 0)) == 128);
+    static_assert(k_desc.get_element_space_size() == (M > 64 ? 64 * 128 : 64 * 32));
+    static_assert(v_desc.get_element_space_size() == 64 * 128);
+    static_assert(Layout::kArenaBytes == (M > 64 ? 65536 : 20480));
+
+    using EnabledQ = ck_tile::detail::LdsPaddingConfig<true, 256, 16>;
+    using EnabledRaw = ck_tile::detail::EncodedTdmPadding<EnabledQ>;
+    constexpr auto enabled_desc =
+        ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                               M,
+                                                               128,
+                                                               EnabledQ,
+                                                               16>();
+    static_assert(EnabledRaw::kPadInterval == 5 && EnabledRaw::kPadAmount == 3);
+    static_assert(enabled_desc.get_element_space_size() > q_desc.get_element_space_size());
+    static_assert(!std::is_same_v<ck_tile::remove_cvref_t<decltype(enabled_desc)>,
+                                  ck_tile::remove_cvref_t<decltype(q_desc)>>);
+
+    return true;
+}
+
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 128>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 64>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 128>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 64>());
 
 TEST(QrTdmLdsPadding, CompileTimeConfiguration) { SUCCEED(); }
 
