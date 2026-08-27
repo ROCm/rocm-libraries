@@ -695,7 +695,7 @@ enum hipblaslt_argument : int
 };
 #undef CREATE_ENUM
 
-#if __clang__
+#if defined(__clang__)
 #define HIPBLASLT_CLANG_STATIC static
 #else
 #define HIPBLASLT_CLANG_STATIC
