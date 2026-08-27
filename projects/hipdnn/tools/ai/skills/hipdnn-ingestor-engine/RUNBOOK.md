@@ -824,10 +824,17 @@ a sibling pack test in `src/tests/engines/kernel_ingestor_engine/packs/`.
 ### 8c. Wire the engine into CI — otherwise the tests you wrote never run against it
 
 **This is a required deliverable, not a follow-up.** Bundles are discovered and run
-against whatever engine *wins* the graph. A new engine competing with an incumbent (ASM
-SDPA, for attention) may never execute while the suite passes — green, and blind to you.
+against whatever engine *wins* the graph. A new engine competing with an established
+incumbent for the same op may never execute while the suite passes — green, and blind to
+you.
 Adding tests without this step leaves no CI evidence that your engine works, and the next
 change to the matcher, the kernel or the packager breaks it silently.
+
+Two local aids while you develop, neither a substitute for the pinned target: build with
+the incumbent engine's `ENABLE_<X>_ENGINE=OFF` so it cannot win (proves nothing about CI,
+where it is present), and **assert on engine identity, not only on numbers** — a test that
+checks the output is correct proves *something* computed it; one that also checks which
+engine was selected proves yours did.
 
 The mechanism is one target per engine, pinned with `--test-engine`:
 
