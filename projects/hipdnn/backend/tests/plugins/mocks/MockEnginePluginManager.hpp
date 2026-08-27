@@ -9,7 +9,12 @@
 
 #include <filesystem>
 #include <gmock/gmock.h>
+#include <map>
+#include <optional>
 #include <set>
+#include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace hipdnn_backend::plugin
@@ -33,6 +38,49 @@ public:
                 getLoadedPluginFiles,
                 (),
                 (const, override));
+
+    /// Declares what admission left of a plugin. Mock plugins never go through the
+    /// real admission hooks, so by default one contributes everything it declares.
+    void setAcceptedEngineIds(const EnginePlugin& plugin, std::vector<int64_t> engineIds)
+    {
+        _accepted[&plugin] = std::move(engineIds);
+    }
+
+    std::vector<int64_t> acceptedEngineIds(const EnginePlugin& plugin) const override
+    {
+        const auto it = _accepted.find(&plugin);
+        return it != _accepted.end() ? it->second : plugin.getAllEngineIds();
+    }
+
+    /// Ownership is what name resolution reads, and the inherited live set is
+    /// filled by admission hooks a mock plugin never runs. Stand in for them on
+    /// the same terms acceptedEngineIds() does: a plugin owns what it contributes,
+    /// and the first plugin to claim an ID keeps it.
+    const std::unordered_map<int64_t, const EnginePlugin*>& liveEngines() const override
+    {
+        _live.clear();
+        for(const auto& plugin : getPlugins())
+        {
+            for(const auto id : acceptedEngineIds(*plugin))
+            {
+                _live.emplace(id, plugin.get());
+            }
+        }
+        return _live;
+    }
+
+    /// Admission fills the real cache and a mock plugin never runs it, so ask the
+    /// owning plugin: a test names an engine the same way a plugin does.
+    std::optional<std::string> engineEntryPointName(int64_t engineId) const override
+    {
+        const auto* owner = engineOwner(engineId);
+        return owner != nullptr && owner->hasEngineName() ? owner->getEngineName(engineId)
+                                                          : std::optional<std::string>{};
+    }
+
+private:
+    std::map<const EnginePlugin*, std::vector<int64_t>> _accepted;
+    mutable std::unordered_map<int64_t, const EnginePlugin*> _live;
 };
 
 } // namespace hipdnn_backend::plugin

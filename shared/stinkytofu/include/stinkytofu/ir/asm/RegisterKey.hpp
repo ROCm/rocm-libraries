@@ -100,4 +100,18 @@ void forEachRegUnit(const StinkyRegister& reg, Fn&& fn) {
     }
 }
 
+inline void addSources(RegKeySet& sources, const StinkyInstruction& inst) {
+    for (const StinkyRegister& src : inst.getSrcRegs())
+        forEachRegUnit(src, [&](const RegKey& key) { sources.insert(key); });
+}
+
+inline bool hasDestSourceOverlap(const StinkyInstruction& inst, const RegKeySet& sources) {
+    for (const StinkyRegister& dest : inst.getDestRegs()) {
+        bool overlaps = false;
+        forEachRegUnit(dest, [&](const RegKey& key) { overlaps |= sources.contains(key); });
+        if (overlaps) return true;
+    }
+    return false;
+}
+
 }  // namespace stinkytofu
