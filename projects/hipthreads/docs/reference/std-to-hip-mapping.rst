@@ -25,10 +25,10 @@ Threads
     - hipThreads
     - Header
   * - ``std::thread``
-    - ``hip::thread``
+    - ``hip::wthread``
     - ``<hip/thread>``
   * - ``std::thread::id``
-    - ``hip::thread::id``
+    - ``hip::wthread::id``
     - ``<hip/thread>``
   * - ``std::this_thread::get_id``
     - ``hip::this_thread::get_id``

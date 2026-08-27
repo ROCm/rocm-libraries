@@ -26,7 +26,7 @@ int main(int, char**) {
   // Try to lock-shared a mutex that is not locked yet. This should succeed.
   {
     ::std::shared_timed_mutex m;
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared();
@@ -44,7 +44,7 @@ int main(int, char**) {
     ::std::shared_timed_mutex m;
     m.lock();
 
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared();
@@ -62,7 +62,7 @@ int main(int, char**) {
   {
     ::std::shared_timed_mutex m;
     m.lock_shared();
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared();

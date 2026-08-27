@@ -340,7 +340,6 @@ add_subdirectory(01_contraction)
 add_subdirectory(02_elementwise)
 add_subdirectory(03_reduction)
 
-add_subdirectory(python)
 # Test entries for the install-tree category filters.
 #
 # Two building-block lists keep the three filters distinct in intent:
@@ -365,8 +364,10 @@ add_subdirectory(python)
 # category parser from test_categories.yaml.
 
 set(_HIPTENSOR_HOST_TESTS
+  batched_contraction_test
   contraction_mode_test
   elementwise_cpu_test
+  elementwise_mode_test
   elementwise_op_test
   hiptensor_options_test
   logger_test
@@ -404,6 +405,8 @@ set(_HIPTENSOR_DEVICE_TESTS
   "complex_scale_contraction_test_m4n4k4|01_contraction/complex_scale_test_params_rank4.yaml"
   "complex_scale_contraction_test_m5n5k5|01_contraction/complex_scale_test_params_rank5.yaml"
   "complex_scale_contraction_test_m6n6k6|01_contraction/complex_scale_test_params_rank6.yaml"
+  "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
+  "plan_lifetime_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
   "bilinear_contraction_with_unary_ops_test|NONE"
@@ -486,12 +489,14 @@ set(_HIPTENSOR_BENCH_TESTS
 )
 
 # Helper: append one add_test + set_tests_properties to the main install
-# fragment. WORKING_DIRECTORY is the install prefix root (../.. from the
-# installed bin/hiptensor/ fragment) so ./bin/<binary> and the -y config
-# path resolve regardless of ctest's cwd.
+# fragment. We deliberately do NOT set WORKING_DIRECTORY: when it is unset,
+# CTest runs the test from (and resolves a relative COMMAND against) the
+# directory containing this CTestTestfile.cmake fragment, i.e. the installed
+# bin/hiptensor/. So callers spell the executable relative to bin/hiptensor/
+# ("../<binary>") and the -y config relative to it ("configs/<...>").
 function(_hiptensor_emit_test test_name command)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"${test_name}\" ${command})\n")
-    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"${test_name}\" PROPERTIES WORKING_DIRECTORY \"../..\" SKIP_REGULAR_EXPRESSION \"HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device\")\n")
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"${test_name}\" PROPERTIES SKIP_REGULAR_EXPRESSION \"HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device\")\n")
 endfunction()
 
 # A config yaml is "effectively empty" when it carries no test parameters.
@@ -536,7 +541,7 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
 
     if(_hiptensor_suffix STREQUAL "quick")
         foreach(_hiptensor_host IN LISTS _HIPTENSOR_HOST_TESTS)
-            _hiptensor_emit_test("${_hiptensor_host} ${_hiptensor_suffix}" "\"./bin/${_hiptensor_host}\"")
+            _hiptensor_emit_test("${_hiptensor_host} ${_hiptensor_suffix}" "\"../${_hiptensor_host}\"")
         endforeach()
     endif()
 
@@ -544,7 +549,7 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
         string(REPLACE "|" ";" _hiptensor_dev_fields "${_hiptensor_dev}")
         list(GET _hiptensor_dev_fields 0 _hiptensor_dev_bin)
         list(GET _hiptensor_dev_fields 1 _hiptensor_dev_cfg)
-        set(_hiptensor_cmd "\"./bin/${_hiptensor_dev_bin}\"")
+        set(_hiptensor_cmd "\"../${_hiptensor_dev_bin}\"")
         if(NOT _hiptensor_dev_cfg STREQUAL "NONE")
             # dev_cfg is "<component>/<rest>"; the on-disk source lives at
             # <component>/configs/<cfgdir>/<rest>. Skip this (test, tier) when
@@ -559,7 +564,7 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
             if(_hiptensor_cfg_empty)
                 continue()
             endif()
-            string(APPEND _hiptensor_cmd " -y ./bin/${PROJECT_NAME}/configs/${_hiptensor_cfgdir}/${_hiptensor_dev_cfg}")
+            string(APPEND _hiptensor_cmd " -y configs/${_hiptensor_cfgdir}/${_hiptensor_dev_cfg}")
         endif()
         _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}")
     endforeach()
@@ -576,7 +581,7 @@ foreach(_hiptensor_family "ffm-quick|emulation/quick" "ffm-full|emulation/full")
         string(REPLACE "|" ";" _hiptensor_dev_fields "${_hiptensor_dev}")
         list(GET _hiptensor_dev_fields 0 _hiptensor_dev_bin)
         list(GET _hiptensor_dev_fields 1 _hiptensor_dev_cfg)
-        set(_hiptensor_cmd "\"./bin/${_hiptensor_dev_bin}\"")
+        set(_hiptensor_cmd "\"../${_hiptensor_dev_bin}\"")
         if(NOT _hiptensor_dev_cfg STREQUAL "NONE")
             # Skip this (test, tier) when its config is empty (see tier loop).
             string(FIND "${_hiptensor_dev_cfg}" "/" _hiptensor_dev_slash)
@@ -589,7 +594,7 @@ foreach(_hiptensor_family "ffm-quick|emulation/quick" "ffm-full|emulation/full")
             if(_hiptensor_cfg_empty)
                 continue()
             endif()
-            string(APPEND _hiptensor_cmd " -y ./bin/${PROJECT_NAME}/configs/${_hiptensor_cfgdir}/${_hiptensor_dev_cfg}")
+            string(APPEND _hiptensor_cmd " -y configs/${_hiptensor_cfgdir}/${_hiptensor_dev_cfg}")
         endif()
         _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}")
     endforeach()
@@ -602,7 +607,7 @@ foreach(_hiptensor_bench IN LISTS _HIPTENSOR_BENCH_TESTS)
     string(REPLACE "|" ";" _hiptensor_bench_fields "${_hiptensor_bench}")
     list(GET _hiptensor_bench_fields 0 _hiptensor_bench_bin)
     list(GET _hiptensor_bench_fields 1 _hiptensor_bench_cfg)
-    set(_hiptensor_cmd "\"./bin/${_hiptensor_bench_bin}\" -y ./bin/${PROJECT_NAME}/configs/bench/${_hiptensor_bench_cfg}")
+    set(_hiptensor_cmd "\"../${_hiptensor_bench_bin}\" -y configs/bench/${_hiptensor_bench_cfg}")
     string(APPEND _hiptensor_cmd " --hot_runs 5 --cold_runs 1")
     _hiptensor_emit_test("${_hiptensor_bench_bin} bench" "${_hiptensor_cmd}")
 endforeach()

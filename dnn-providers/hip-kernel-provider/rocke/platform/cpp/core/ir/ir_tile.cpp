@@ -152,24 +152,46 @@ static rocke_value_t** rocke_build_mem_operands(rocke_ir_builder_t* b,
 /*  LDS (shared memory) -- alloc                                          */
 /* ===================================================================== */
 
+rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b,
+                                     const rocke_type_t* elem,
+                                     const int* shape,
+                                     int rank,
+                                     const char* name_hint,
+                                     int exclusive)
+{
+    const rocke_type_t* t;
+    rocke_attr_map_t attrs;
+    const rocke_attr_map_t* attrs_p = NULL;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    t = rocke_smem_type(b, elem, shape, rank, exclusive);
+    if(!t)
+    {
+        return NULL;
+    }
+    /* Carry the exclusive bit as an op attr so it round-trips through the
+     * ck.dsl.ir/v1 serializer (the type name deliberately omits it). Only
+     * emitted when set, so the default stays byte-identical. Ignored by the
+     * native .ll lowering (which reads the SmemType's smem_exclusive). */
+    if(exclusive)
+    {
+        attrs = rocke_i_attrs(b);
+        rocke_attr_set_bool(b, &attrs, "exclusive", true);
+        attrs_p = &attrs;
+    }
+    return rocke_i_op1(
+        b, ROCKE_OP_TILE_SMEM_ALLOC, NULL, 0, t, attrs_p, name_hint ? name_hint : "smem");
+}
+
 rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,
                                   const rocke_type_t* elem,
                                   const int* shape,
                                   int rank,
                                   const char* name_hint)
 {
-    const rocke_type_t* t;
-    if(!rocke_i_live(b))
-    {
-        return NULL;
-    }
-    t = rocke_smem_type(b, elem, shape, rank);
-    if(!t)
-    {
-        return NULL;
-    }
-    return rocke_i_op1(
-        b, ROCKE_OP_TILE_SMEM_ALLOC, NULL, 0, t, NULL, name_hint ? name_hint : "smem");
+    return rocke_b_smem_alloc_ex(b, elem, shape, rank, name_hint, 0);
 }
 
 /* ===================================================================== */
@@ -736,4 +758,51 @@ rocke_op_t* rocke_b_inline_asm_multi(rocke_ir_builder_t* b,
      * given result_types reproduces the emission for any N. */
     return rocke_b_inline_asm(
         b, asm_template, constraints, operands, num_operands, result_types, num_results, opts);
+}
+
+/* ---- tile.exec_* -- wavelet pipeline exec-mask split (MFMA path) ----
+ *
+ * These emit AMDGPU exec-mask manipulation instructions used by the wavelet
+ * pipeline's MFMA variant to split math-wave and load-wave execution paths
+ * without divergent LLVM branches (which would deadlock barriers).
+ *
+ * Python counterparts in IRBuilder: exec_and_saveexec / exec_xor /
+ * exec_or_saveexec / exec_or (core/ir.py lines 2985-3025).
+ */
+
+rocke_value_t* rocke_b_exec_and_saveexec(rocke_ir_builder_t* b, rocke_value_t* mask)
+{
+    if(!rocke_i_live(b) || !mask)
+        return NULL;
+    const rocke_type_t* i64_t = rocke_i64();
+    rocke_op_t* op = rocke_i_op(
+        b, ROCKE_OP_TILE_EXEC_AND_SAVEEXEC, &mask, 1, &i64_t, 1, NULL, NULL, 0, "exec_save", NULL);
+    return op ? op->results[0] : NULL;
+}
+
+rocke_value_t* rocke_b_exec_xor(rocke_ir_builder_t* b, rocke_value_t* saved)
+{
+    if(!rocke_i_live(b) || !saved)
+        return NULL;
+    const rocke_type_t* i64_t = rocke_i64();
+    rocke_op_t* op = rocke_i_op(
+        b, ROCKE_OP_TILE_EXEC_XOR, &saved, 1, &i64_t, 1, NULL, NULL, 0, "exec_compl", NULL);
+    return op ? op->results[0] : NULL;
+}
+
+rocke_value_t* rocke_b_exec_or_saveexec(rocke_ir_builder_t* b, rocke_value_t* compl_v)
+{
+    if(!rocke_i_live(b) || !compl_v)
+        return NULL;
+    const rocke_type_t* i64_t = rocke_i64();
+    rocke_op_t* op = rocke_i_op(
+        b, ROCKE_OP_TILE_EXEC_OR_SAVEEXEC, &compl_v, 1, &i64_t, 1, NULL, NULL, 0, "exec_tmp", NULL);
+    return op ? op->results[0] : NULL;
+}
+
+void rocke_b_exec_or(rocke_ir_builder_t* b, rocke_value_t* saved)
+{
+    if(!rocke_i_live(b) || !saved)
+        return;
+    rocke_i_op(b, ROCKE_OP_TILE_EXEC_OR, &saved, 1, NULL, 0, NULL, NULL, 0, "v", NULL);
 }

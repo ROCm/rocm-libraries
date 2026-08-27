@@ -14,7 +14,7 @@ with open("../CMakeLists.txt", encoding="utf-8") as f:
 left_nav_title = f"hipThreads {version_number} Documentation"
 
 # for PDF output on Read the Docs
-project = "hipThreads Documentation"
+project = "hipThreads"
 author = "Advanced Micro Devices, Inc."
 copyright = "Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
@@ -33,12 +33,21 @@ exclude_patterns = [
 ]
 
 extensions = ["rocm_docs", "rocm_docs.doxygen"]
+
+# Theme-related settings
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/hipthreads/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
 
 external_projects_current_project = "hipthreads"
 
-# hipThreads is class-heavy (thread, mutex, condition_variable, ...). By default
+# hipThreads is class-heavy (wthread, mutex, condition_variable, ...). By default
 # Breathe shows only the class summary, not its members. Expand documented public
 # members so the API reference lists join/detach/lock/etc. (A member without a
 # Doxygen comment will not appear; add "undoc-members" here to show those too.)

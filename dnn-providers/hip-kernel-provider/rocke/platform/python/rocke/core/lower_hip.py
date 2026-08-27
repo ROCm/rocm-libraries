@@ -1590,6 +1590,21 @@ class _Lowerer:
             f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
         )
 
+    def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
+        """Lower the packed-fp16 atomic add via the AMDGPU builtin.
+
+        Emits ``__builtin_amdgcn_global_atomic_fadd_v2f16``, the HIP
+        counterpart of LLVM's ``llvm.amdgcn.global.atomic.fadd.v2f16``
+        intrinsic (gfx940+). The input is a ``half2`` and the result is
+        the pre-add value at the slot.
+        """
+        ptr, idx, val = op.operands
+        self._emit(
+            f"half2 {_name(op.result)} = "
+            f"__builtin_amdgcn_global_atomic_fadd_v2f16("
+            f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
+        )
+
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
         """HIP debug shim for P15 MX MFMA scaled.
 

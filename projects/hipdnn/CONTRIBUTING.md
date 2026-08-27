@@ -52,7 +52,7 @@ All contributions must meet the following requirements before they can be merged
   - Run tests with `ninja check` to verify ASAN compliance
   - Note: Some HIP-related tests may be skipped due to AddressSanitizer incompatibility
 - **GPU Test Handling**:
-  - Mark GPU-dependent tests with `SKIP_IF_NO_DEVICE()`
+  - Mark GPU-dependent tests with `SKIP_IF_NO_DEVICES()`
   - Tests must be skippable without GPU (warnings, not errors)
 - **Test Coverage**:
   - Maintain overall 80% code coverage target

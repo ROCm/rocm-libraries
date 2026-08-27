@@ -239,7 +239,16 @@ struct MIOPEN_EXPORT Handle : miopenHandle
 
     std::string GetDbBasename() const
     {
-        return GetDbBasename(GetTargetProperties(), GetMaxComputeUnits());
+        const auto& target = GetTargetProperties();
+        const auto db_id   = target.DbId();
+        if(db_id == "gfx1100" || db_id == "gfx1102" || db_id == "gfx1151" || db_id == "gfx1200" ||
+           db_id == "gfx1201")
+        {
+            std::ostringstream ss;
+            ss << db_id << std::hex << GetMaxHardwareComputeUnits();
+            return ss.str();
+        }
+        return GetDbBasename(target, GetMaxComputeUnits());
     }
 
     std::unique_ptr<HandleImpl> impl;
@@ -318,6 +327,23 @@ private:
 };
 
 inline std::ostream& operator<<(std::ostream& os, const Handle& handle) { return handle.Print(os); }
+
+/// Returns the compute-unit count to use when selecting a *system* database by
+/// closest CU count. For most devices this is just the real CU count, but some
+/// ASICs ship no dedicated system DB and must borrow a sibling's tuning.
+///
+/// Low-CU gfx942 parts ship no dedicated system DB. The default closest-by-CU
+/// search would otherwise land them on a sibling whose tuning is a poorer match;
+/// redirect them to the higher-CU gfx942 system database instead.
+///
+/// This affects system-DB selection only; user DBs continue to use the device's
+/// own basename, so the device still reads/writes its own tuned data.
+inline int GetSysDbSelectionCu(const std::string& db_id, int real_cu_count)
+{
+    if(db_id == "gfx942" && real_cu_count <= 80)
+        return 304;
+    return real_cu_count;
+}
 
 struct AutoEnableProfiling
 {

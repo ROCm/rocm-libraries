@@ -30,7 +30,7 @@ int main(int, char**)
   assert(s.try_acquire());
   assert(!s.try_acquire());
   s.release(2);
-  hip::thread t = support::make_test_thread([&](){
+  hip::wthread t = support::make_test_thread([&](){
     assert(s.try_acquire());
   });
   t.join();

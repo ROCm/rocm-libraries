@@ -1,107 +1,102 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+/**
+ * Single-kernel benchmark entry point for batched_contraction_multi_abd.
+ *
+ * The kernel header is force-included at compile time via:
+ *   -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE
+ *
+ * That header exports to global scope:
+ *   SelectedKernel, KERNEL_NAME,
+ *   AsDataType, BsDataType, DsDataType, EDataType, AccDataType,
+ *   ALayout, BLayout, ELayout, DsLayout,
+ *   NumATensors, NumBTensors, NumDTensors,
+ *   NumDimsG, NumDimsM, NumDimsN, NumDimsK
+ */
+
 #include <iostream>
-#include <functional>
-#include <tuple>
-#include <exception>
-#include <sstream>
-#include <vector>
+#include <stdexcept>
 #include <string>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
-#include "contraction_multi_abd_profiler.hpp"
-#include "contraction_multi_abd_common.hpp"
+#include "contraction_multi_abd_benchmark.hpp"
 
 inline auto create_args(int argc, char* argv[])
 {
-    ck_tile::ArgParser arg_parser;
-    arg_parser.insert("g_dims", "2", "G dimensions separated by comma. Default is 2.")
-        .insert("m_dims", "256", "M dimensions separated by comma. Default is 256.")
-        .insert("n_dims", "128", "N dimensions separated by comma. Default is 128.")
-        .insert("k_dims", "64", "K dimensions separated by comma. Default is 64.")
-        .insert("verify", "1", "For validation. Default is 1, validation on CPU.")
-        .insert("log", "false", "Whether to output kernel instance information. Default is false.")
-        .insert("warmup", "50", "Number of warmup iterations. Default is 50.")
-        .insert("repeat", "100", "Number of benchmark iterations. Default is 100.")
-        .insert("timer", "true", "Whether to use GPU timer. Default is true.")
-        .insert("init",
-                "0",
-                "Tensor initialization method. 0=random, 1=linear, 2=constant(1). Default is 0.")
-        .insert(
-            "metric", "0", "Performance metric. 0=latency, 1=tflops, 2=bandwidth. Default is 0.")
-        .insert("csv_filename", "", "CSV output filename. Default is empty (no CSV).")
-        .insert("json_output",
-                "false",
-                "Whether to output results in JSON format only. Default is false.");
-
-    bool result = arg_parser.parse(argc, argv);
-    return std::make_tuple(result, arg_parser);
-}
-
-void benchmark_single(const ck_tile::ArgParser& arg_parser)
-{
-    auto g_dims = parse_dimensions(arg_parser.get_str("g_dims"));
-    auto m_dims = parse_dimensions(arg_parser.get_str("m_dims"));
-    auto n_dims = parse_dimensions(arg_parser.get_str("n_dims"));
-    auto k_dims = parse_dimensions(arg_parser.get_str("k_dims"));
-
-    ContractionMultiABDProblem problem;
-    problem.g_dims_  = g_dims;
-    problem.m_dims_  = m_dims;
-    problem.n_dims_  = n_dims;
-    problem.k_dims_  = k_dims;
-    problem.g_total_ = calculate_total(g_dims);
-    problem.m_total_ = calculate_total(m_dims);
-    problem.n_total_ = calculate_total(n_dims);
-    problem.k_total_ = calculate_total(k_dims);
-
-    Settings setting{arg_parser.get_int("warmup"),
-                     arg_parser.get_int("repeat"),
-                     arg_parser.get_bool("timer"),
-                     arg_parser.get_int("verify"),
-                     arg_parser.get_int("init"),
-                     arg_parser.get_bool("log"),
-                     arg_parser.get_str("csv_filename"),
-                     /*flush_cache=*/false,
-                     /*rotating_count=*/0,
-                     arg_parser.get_bool("json_output")};
-
-    auto& profiler = ContractionMultiABDProfiler::instance(setting);
-
-    try
-    {
-        auto kernel_func = [](const ck_tile::BatchedContractionMultiABDHostArgs<NumDimG,
-                                                                                NumDimM,
-                                                                                NumDimN,
-                                                                                NumDimK,
-                                                                                NumATensor,
-                                                                                NumBTensor,
-                                                                                NumDTensor>& args,
-                              const ck_tile::stream_config& stream) {
-            return SelectedKernel::launch(args, stream);
-        };
-
-        profiler.benchmark(problem, kernel_func);
-        profiler.select_best_instance(static_cast<Metric>(arg_parser.get_int("metric")));
-    }
-    catch(const std::exception& e)
-    {
-        std::cerr << "Benchmark failed: " << e.what() << std::endl;
-    }
+    ck_tile::ArgParser p;
+    // Defaults must match the shipped kernel defaults (NUM_DIM_G=1, M=2, N=2, K=1),
+    // otherwise a no-argument run always aborts on the dimension-count check below.
+    p.insert("g_dims", "2", "G (batch) dimensions, comma-separated")
+        .insert("m_dims", "4,256", "M dimensions, comma-separated")
+        .insert("n_dims", "16,128", "N dimensions, comma-separated")
+        .insert("k_dims", "64", "K dimensions, comma-separated")
+        .insert("verify", "0", "Verify output vs CPU reference (1=yes, 0=no)")
+        .insert("warmup", "50", "Warmup iterations")
+        .insert("repeat", "100", "Benchmark iterations")
+        .insert("timer", "true", "Use GPU timer (true/false)")
+        .insert("log", "false", "Log kernel launch info (true/false)");
+    bool ok = p.parse(argc, argv);
+    return std::make_pair(ok, p);
 }
 
 int main(int argc, char* argv[])
 {
     try
     {
-        auto [result, parser] = create_args(argc, argv);
-        if(!result)
+        auto [ok, parser] = create_args(argc, argv);
+        if(!ok)
             return EXIT_FAILURE;
 
-        benchmark_single(parser);
-        return 0;
+        ContractionMultiABDProblem problem;
+        problem.g_dims = parse_dims(parser.get_str("g_dims"));
+        problem.m_dims = parse_dims(parser.get_str("m_dims"));
+        problem.n_dims = parse_dims(parser.get_str("n_dims"));
+        problem.k_dims = parse_dims(parser.get_str("k_dims"));
+
+        // Validate counts match the compiled kernel
+        if(static_cast<int>(problem.g_dims.size()) != NumDimsG ||
+           static_cast<int>(problem.m_dims.size()) != NumDimsM ||
+           static_cast<int>(problem.n_dims.size()) != NumDimsN ||
+           static_cast<int>(problem.k_dims.size()) != NumDimsK)
+        {
+            std::cerr << "Dimension count mismatch: kernel compiled with G=" << NumDimsG
+                      << " M=" << NumDimsM << " N=" << NumDimsN << " K=" << NumDimsK << "\n";
+            return EXIT_FAILURE;
+        }
+
+        // Every extent must be strictly positive. A zero or negative value parses
+        // fine but produces zero-sized (or, for a negative pair whose product is
+        // positive, undersized) buffers, and a zero K divides by zero when the
+        // reference inputs are initialized to 1/K.
+        auto check_positive = [](const auto& dims, const char* name) {
+            for(size_t i = 0; i < dims.size(); ++i)
+            {
+                if(dims[i] <= 0)
+                {
+                    std::cerr << name << "[" << i << "]=" << dims[i]
+                              << " is not strictly positive.\n";
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        if(!check_positive(problem.g_dims, "g_dims") || !check_positive(problem.m_dims, "m_dims") ||
+           !check_positive(problem.n_dims, "n_dims") || !check_positive(problem.k_dims, "k_dims"))
+        {
+            return EXIT_FAILURE;
+        }
+
+        run_contraction_multi_abd_benchmark(problem,
+                                            parser.get_int("warmup"),
+                                            parser.get_int("repeat"),
+                                            parser.get_bool("verify"),
+                                            parser.get_bool("log"),
+                                            parser.get_bool("timer"));
+
+        return EXIT_SUCCESS;
     }
     catch(const std::exception& e)
     {

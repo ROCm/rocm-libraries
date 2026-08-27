@@ -8,14 +8,15 @@
 #include <set>
 #include <sstream>
 
+#include "harness/BundleMetadata.hpp"
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
+#include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
-#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
@@ -26,7 +27,7 @@
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
-#include "harness/input-init/SynthesizeInputs.hpp"
+#include "harness/input-init/FillInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -150,6 +151,9 @@ void IntegrationBundleVerificationHarness::runComparison()
         return;
     case VerificationMode::AUTO:
         runAutoMode();
+        return;
+    case VerificationMode::GOLDEN_CHECK:
+        runGoldenCheckMode();
         return;
     default:
         FAIL() << "Unknown verification mode";
@@ -292,6 +296,37 @@ void IntegrationBundleVerificationHarness::runAutoMode()
     }
 }
 
+void IntegrationBundleVerificationHarness::runGoldenCheckMode()
+{
+    if(!_bundle->hasGoldenOutputs)
+    {
+        skipUnverifiable("no golden data (verification-mode=golden-check)");
+        return;
+    }
+
+    OutputTensors cpuOutputs;
+    const RefRunResult result
+        = runReferenceCapturingOutputs(ReferenceExecutorType::CPU, cpuOutputs);
+    switch(result.status)
+    {
+    case RefStatus::CAPABILITY_MISS:
+        skipUnverifiable("CPU ref cannot run this op (golden-check): " + result.message);
+        return;
+    case RefStatus::RUNTIME_ERROR:
+        recordRefError("CPU ref errored (golden-check): " + result.message);
+        FAIL() << "CPU ref errored (golden-check): " << result.message;
+        return;
+    case RefStatus::RAN:
+        compareEach(cpuOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
+            return *_bundle->tensors->at(uid);
+        });
+        return;
+    default:
+        FAIL() << "Unknown RefStatus";
+        return;
+    }
+}
+
 // ---- inputs ----------------------------------------------------------------
 
 bool IntegrationBundleVerificationHarness::ensureInputsAvailable()
@@ -300,10 +335,10 @@ bool IntegrationBundleVerificationHarness::ensureInputsAvailable()
     {
         return true;
     }
-    return synthesizeInputs();
+    return fillBundleInputs();
 }
 
-bool IntegrationBundleVerificationHarness::synthesizeInputs()
+bool IntegrationBundleVerificationHarness::fillBundleInputs()
 {
     const auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -322,24 +357,11 @@ bool IntegrationBundleVerificationHarness::synthesizeInputs()
         leafInputUids.push_back(uid);
     }
 
-    auto synthResult = hipdnn_integration_tests::synthesizeInputs(
-        wrapper.getGraph(), inputs, leafInputUids, _synthesisConfig);
-    if(!synthResult.filled)
+    auto fillResult = hipdnn_integration_tests::fillInputs(
+        wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes);
+    if(!fillResult.filled)
     {
-        skipUnverifiable(synthResult.reason);
-        return false;
-    }
-
-    auto missing = _synthesisConfig.unfilled(leafInputUids);
-    if(!missing.empty())
-    {
-        std::ostringstream os;
-        os << "cannot synthesize:";
-        for(const int64_t uid : missing)
-        {
-            os << " uid=" << uid;
-        }
-        skipUnverifiable(os.str());
+        skipUnverifiable(fillResult.reason);
         return false;
     }
 
@@ -357,6 +379,44 @@ bool IntegrationBundleVerificationHarness::synthesizeInputs()
 // make an unwritten output indistinguishable from a legitimately-computed zero,
 // so engine and reference could silently agree on garbage (both untouched zeros)
 // and the comparison would vacuously pass.
+namespace detail
+{
+std::unordered_map<int64_t, void*> buildVariantPack(
+    TensorMap& inputs,
+    OutputTensors& outputs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorAttributes,
+    const std::vector<int64_t>& outputTensorUids,
+    bool useDevice)
+{
+    std::unordered_map<int64_t, void*> variantPack;
+    const std::set<int64_t> outputUids(outputTensorUids.begin(), outputTensorUids.end());
+
+    for(auto& [uid, tensor] : inputs)
+    {
+        if(outputUids.count(uid) != 0)
+        {
+            continue;
+        }
+
+        const auto attrIt = tensorAttributes.find(uid);
+        const bool isRuntimePassByValue
+            = attrIt != tensorAttributes.end() && attrIt->second->is_runtime_pass_by_value();
+        variantPack[uid] = hipdnn_test_sdk::utilities::selectVariantPackPointer(
+            *tensor, useDevice, isRuntimePassByValue);
+    }
+
+    for(auto& [uid, tensor] : outputs)
+    {
+        variantPack[uid] = hipdnn_test_sdk::utilities::selectVariantPackPointer(
+            *tensor, useDevice, /*isRuntimePassByValue=*/false);
+    }
+
+    return variantPack;
+}
+}
+
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs() const
 {
     const auto wrapper = _bundle->graphWrapper();
@@ -375,23 +435,9 @@ std::unordered_map<int64_t, void*>
     IntegrationBundleVerificationHarness::buildVariantPack(OutputTensors& outputs,
                                                            bool useDevice) const
 {
-    std::unordered_map<int64_t, void*> variantPack;
-    const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
-                                       _bundle->outputTensorUids.end());
-
-    for(auto& [uid, tensor] : *_bundle->tensors)
-    {
-        if(outputUids.count(uid) != 0)
-        {
-            continue;
-        }
-        variantPack[uid] = useDevice ? tensor->rawDeviceData() : tensor->rawHostData();
-    }
-    for(auto& [uid, tensor] : outputs)
-    {
-        variantPack[uid] = useDevice ? tensor->rawDeviceData() : tensor->rawHostData();
-    }
-    return variantPack;
+    const auto wrapper = _bundle->graphWrapper();
+    return detail::buildVariantPack(
+        *_bundle->tensors, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice);
 }
 
 std::optional<OutputTensors>
@@ -546,59 +592,20 @@ void IntegrationBundleVerificationHarness::compareOutputTensor(
 
     if(!passed)
     {
+        const auto label = labelFor(uid, attrs);
+        hipdnn_test_sdk::utilities::ComparisonContext ctx;
+        ctx.contextLine = "Bundle: " + _bundlePath.string();
+        ctx.tensorLabel = label + " (UID " + std::to_string(uid) + ", output)";
+        ctx.dtypeName = hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
+        ctx.atol = atol;
+        ctx.rtol = rtol;
+
         std::ostringstream report;
-        report << reportHeader(uid, attrs, dataType, expected, atol, rtol);
-        appendTensorDiff(report, uid, attrs, dataType, expected, actual, atol, rtol);
+        report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, expected);
+        hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(
+            report, dataType, label, expected, actual, atol, rtol);
         EXPECT_TRUE(false) << report.str();
     }
-}
-
-void IntegrationBundleVerificationHarness::appendTensorDiff(
-    std::ostream& os,
-    int64_t uid,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-    hipdnn_data_sdk::utilities::ITensor& expected,
-    hipdnn_data_sdk::utilities::ITensor& actual,
-    float atol,
-    float rtol)
-{
-    using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-    using hipdnn_data_sdk::types::bfloat16;
-    using hipdnn_data_sdk::types::half;
-
-    switch(dataType)
-    {
-    case DT::FLOAT:
-        appendFpDiff<float>(os, uid, attrs, expected, actual, atol, rtol);
-        return;
-    case DT::HALF:
-        appendFpDiff<half>(os, uid, attrs, expected, actual, atol, rtol);
-        return;
-    case DT::BFLOAT16:
-        appendFpDiff<bfloat16>(os, uid, attrs, expected, actual, atol, rtol);
-        return;
-    case DT::DOUBLE:
-        appendFpDiff<double>(os, uid, attrs, expected, actual, atol, rtol);
-        return;
-    default:
-        os << "  (no element-wise diff available for this data type)\n";
-    }
-}
-
-template <typename T>
-void IntegrationBundleVerificationHarness::appendFpDiff(
-    std::ostream& os,
-    int64_t uid,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-    hipdnn_data_sdk::utilities::ITensor& expected,
-    hipdnn_data_sdk::utilities::ITensor& actual,
-    float atol,
-    float rtol)
-{
-    const auto summary
-        = hipdnn_test_sdk::utilities::computeTensorDiff<T>(expected, actual, atol, rtol);
-    hipdnn_test_sdk::utilities::printTensorDiffSummary(os, labelFor(uid, attrs), summary);
 }
 
 std::string IntegrationBundleVerificationHarness::labelFor(
@@ -608,40 +615,15 @@ std::string IntegrationBundleVerificationHarness::labelFor(
     return (name != nullptr && !name->empty()) ? name->str() : ("uid=" + std::to_string(uid));
 }
 
-std::string IntegrationBundleVerificationHarness::reportHeader(
-    int64_t uid,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-    hipdnn_data_sdk::utilities::ITensor& expected,
-    float atol,
-    float rtol) const
-{
-    std::ostringstream os;
-    os << "\nGolden comparison FAILED\n"
-       << "  Bundle: " << _bundlePath << "\n"
-       << "  Tensor: " << labelFor(uid, attrs) << " (UID " << uid << ", output)\n"
-       << "  Shape:  " << hipdnn_test_sdk::utilities::StreamVec(expected.dims()) << "  "
-       << dataTypeName(dataType) << "\n"
-       << "  Tolerance: atol=" << atol << " rtol=" << rtol << "\n";
-    return os.str();
-}
-
-std::string IntegrationBundleVerificationHarness::dataTypeName(
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
-{
-    return hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
-}
-
 void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 {
-    if(auto reason = hipdnn_test_sdk::utilities::checkVramRequirement(
-           _bundle->metadata, TestConfig::get().getCurrentDeviceVramMb()))
+    if(auto reason
+       = checkVramRequirement(_bundle->metadata, TestConfig::get().getCurrentDeviceVramMb()))
     {
         GTEST_SKIP() << *reason;
     }
 
-    if(auto reason = hipdnn_test_sdk::utilities::checkArchCompatibility(
-           _bundle->metadata, TestConfig::get().getCurrentArch()))
+    if(auto reason = checkArchCompatibility(_bundle->metadata, TestConfig::get().getCurrentArch()))
     {
         GTEST_SKIP() << *reason;
     }

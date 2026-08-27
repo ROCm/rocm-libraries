@@ -37,7 +37,7 @@ int main(int, char**) {
   // Try to lock-shared a mutex that is not locked yet. This should succeed immediately.
   {
     ::std::shared_timed_mutex m;
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared_until(cuda::std::chrono::steady_clock::now() + cuda::std::chrono::milliseconds(1));
@@ -61,7 +61,7 @@ int main(int, char**) {
     ::std::shared_timed_mutex m;
     m.lock();
 
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         ++ready;
@@ -103,7 +103,7 @@ int main(int, char**) {
     ::std::shared_timed_mutex m;
     m.lock();
 
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         auto elapsed = measure([&] {

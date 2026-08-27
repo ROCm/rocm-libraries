@@ -8,6 +8,7 @@
 #include "HipdnnDataType.h"
 #include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
+#include "HipdnnMoeGroupedMatmulMode.h"
 #include "HipdnnNormFwdPhase.h"
 #include "HipdnnPaddingMode.h"
 #include "HipdnnPointwiseMode.h"
@@ -15,6 +16,7 @@
 #include "HipdnnResampleMode.h"
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/moe_grouped_matmul_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
@@ -69,5 +71,11 @@ hipdnnResampleMode_t fromSdkResampleMode(hipdnn_flatbuffers_sdk::data_objects::R
 // Converts between C-API hipdnnPaddingMode_t and SDK PaddingMode enum values.
 hipdnn_flatbuffers_sdk::data_objects::PaddingMode toSdkPaddingMode(hipdnnPaddingMode_t mode);
 hipdnnPaddingMode_t fromSdkPaddingMode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode mode);
+
+// Converts between C-API hipdnnMoeGroupedMatmulMode_t and SDK MoeGroupedMatmulMode enum values.
+hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode
+    toSdkMoeGroupedMatmulMode(hipdnnMoeGroupedMatmulMode_t mode);
+hipdnnMoeGroupedMatmulMode_t
+    fromSdkMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode);
 
 } // namespace hipdnn_backend

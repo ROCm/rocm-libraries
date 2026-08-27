@@ -11,9 +11,9 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
-// template <class F, class ...Args> thread(F&& f, Args&&... args);
+// template <class F, class ...Args> wthread(F&& f, Args&&... args);
 
 
 #include <hip/thread>
@@ -33,7 +33,7 @@ int main(int, char **)
     // call in an extended lambda causes an ADL lookup.
 #ifdef __HIP_DEVICE_COMPILE__ 
     Holder<Incomplete> *p = nullptr;
-    hip::thread t(f, p);
+    hip::wthread t(f, p);
     t.join();
 #endif
     return 0;

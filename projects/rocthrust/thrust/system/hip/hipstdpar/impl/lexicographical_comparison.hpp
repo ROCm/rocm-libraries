@@ -65,6 +65,8 @@ inline bool lexicographical_compare(execution::parallel_unsequenced_policy, I0 f
     return false;
   }
 
+  ::hipstd::__maybe_bind_globals();
+
   const auto n0 = l0 - f0;
   const auto n1 = l1 - f1;
   const auto n  = ::std::min(n0, n1);
@@ -103,6 +105,8 @@ inline bool lexicographical_compare(execution::parallel_unsequenced_policy, I0 f
   {
     return false;
   }
+
+  ::hipstd::__maybe_bind_globals();
 
   const auto n0 = l0 - f0;
   const auto n1 = l1 - f1;

@@ -46,7 +46,7 @@ int main(int, char**) {
 
     m.lock();
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       ready = true;
       m.lock();
       assert(!is_locked_from_main);
@@ -72,7 +72,7 @@ int main(int, char**) {
     hip::std::atomic<int> &counter = *counter_ptr;
     hip::spin_mutex &mutex = *mutex_ptr;
 
-    hip::std::inplace_vector<hip::thread, 10> threads;
+    hip::std::inplace_vector<hip::wthread, 10> threads;
     for (int i = 0; i != 10; ++i) {
       threads.push_back(support::make_test_thread([&] {
         mutex.lock();

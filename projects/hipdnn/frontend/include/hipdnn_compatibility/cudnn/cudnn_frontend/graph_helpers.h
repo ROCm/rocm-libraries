@@ -31,6 +31,40 @@ using hipdnn_frontend::error_t;
 // The log macros forward their `<<`-streamed argument straight into hipDNN's
 // frontend INFO logger. HIPDNN_FE_LOG_INFO gates on HIPDNN_LOG_LEVEL (off by
 // default) and accepts a stream expression, so chained `<<` arguments work.
+//
+// Under NV_CUDNN_FRONTEND_DISABLE_LOGGING (a compile-time cuDNN-frontend
+// contract) the macros expand to a statement that evaluates nothing, matching
+// cuDNN FE. This is compile-time, unlike the runtime env bridge in
+// logging_bridge.h which only takes effect after cudnnCreate().
+#ifdef NV_CUDNN_FRONTEND_DISABLE_LOGGING
+
+#ifndef CUDNN_FE_LOG
+#define CUDNN_FE_LOG(X) \
+    do                  \
+    {                   \
+    } while(0)
+#endif
+#ifndef CUDNN_FE_LOG_LABEL
+#define CUDNN_FE_LOG_LABEL(X) \
+    do                        \
+    {                         \
+    } while(0)
+#endif
+#ifndef CUDNN_FE_LOG_LABEL_ENDL
+#define CUDNN_FE_LOG_LABEL_ENDL(X) \
+    do                             \
+    {                              \
+    } while(0)
+#endif
+#ifndef CUDNN_FE_LOG_BANNER
+#define CUDNN_FE_LOG_BANNER(X) \
+    do                         \
+    {                          \
+    } while(0)
+#endif
+
+#else
+
 #ifndef CUDNN_FE_LOG
 #define CUDNN_FE_LOG(X) HIPDNN_FE_LOG_INFO(X)
 #endif
@@ -53,6 +87,8 @@ using hipdnn_frontend::error_t;
 #define CUDNN_FE_LOG_BANNER(X) \
     HIPDNN_FE_LOG_INFO("[cudnn_frontend] === " << X << " ===") // NOLINT(bugprone-macro-parentheses)
 #endif
+
+#endif // NV_CUDNN_FRONTEND_DISABLE_LOGGING
 
 /// @brief Evaluate an expression returning `error_t`; on `is_bad()`, log and
 /// propagate it. Mirrors cuDNN FE's `CHECK_CUDNN_FRONTEND_ERROR`.

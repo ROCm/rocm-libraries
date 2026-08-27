@@ -26,7 +26,7 @@ int main(int, char**)
   s.release();
   s.acquire();
 
-  hip::thread t = support::make_test_thread([&](){
+  hip::wthread t = support::make_test_thread([&](){
     s.acquire();
   });
   s.release(2);

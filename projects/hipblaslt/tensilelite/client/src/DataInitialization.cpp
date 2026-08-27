@@ -2942,6 +2942,7 @@ namespace TensileLite
             inputs->d             = (void*)ptrs[ContractionProblemGemm::TENSOR::D];
             inputs->e             = (void*)ptrs[ContractionProblemGemm::TENSOR::E];
             inputs->bias          = (void*)ptrs[ContractionProblemGemm::TENSOR::BIAS];
+            inputs->gateResidual  = (void*)ptrs[ContractionProblemGemm::TENSOR::GATE_RESIDUAL];
             inputs->scaleA        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEA];
             inputs->scaleB        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEB];
             inputs->scaleC        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEC];
@@ -2958,7 +2959,8 @@ namespace TensileLite
             inputs->batchB    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::B];
             inputs->batchC    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::C];
             inputs->batchD    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::D];
-            inputs->batchBias = (void**)batchPtrs[ContractionProblemGemm::TENSOR::BIAS];
+            inputs->batchBias         = (void**)batchPtrs[ContractionProblemGemm::TENSOR::BIAS];
+            inputs->batchGateResidual = (void**)batchPtrs[ContractionProblemGemm::TENSOR::GATE_RESIDUAL];
 
             inputs->gpu = isGPU;
 
@@ -2990,9 +2992,13 @@ namespace TensileLite
 
             inputs->ws = ws;
 
+            // Pre-size vector to avoid reallocation
+            inputs->grouped.resize(offsets[0].size());
+
             for(int idx = 0; idx < offsets[0].size(); idx++)
             {
-                ContractionInputs   unit;
+                ContractionInputs& unit = inputs->grouped[idx];
+
                 std::vector<size_t> maxElements;
                 for(size_t j = 0; j < offsets.size(); j++)
                 {
@@ -3007,7 +3013,6 @@ namespace TensileLite
                     }
                 }
                 setContractionInputs(u8Ptr, batchPtrs, ws, cdata, maxElements, isGPU, &unit);
-                inputs->grouped.push_back(unit);
 
                 u8Ptr[ContractionProblemGemm::TENSOR::A] += multiplyElementSize(
                     offsets[ContractionProblemGemm::TENSOR::A][idx], problem.a().elementBytes());

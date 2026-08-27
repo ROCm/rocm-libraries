@@ -85,7 +85,7 @@ struct WorkQueue {
 
 // Initializing cpuWorkQueue.pushCount to the maximum value of a uint32_t forces the GPU to keep polling until we update
 // cpuWorkQueue.pushCount with the value of cpuWorkQueuePushCount from the CPU. We do this update once there are no
-// more hip::thread objects in the current scope.
+// more hip::wthread objects in the current scope.
 __device__ WorkQueue<CPU_WORK_QUEUE_SIZE> cpuWorkQueue = {0, -1U};
 ::std::atomic<uint32_t> cpuWorkQueuePushCount = 0;
 
@@ -376,24 +376,24 @@ static __host__ void prepDeviceForWork() {
     }(), -1U);
 
     if (isFirstTime) {
-        // Initalize numVcores, so device code can call hip::thread::hardware_concurrency
-        static uint32_t temp2 = hip::thread::hardware_concurrency();
+        // Initalize numVcores, so device code can call hip::wthread::hardware_concurrency
+        static uint32_t temp2 = hip::wthread::hardware_concurrency();
         __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(numVcores), &temp2, sizeof(temp2), 0, hipMemcpyHostToDevice, getEnqueingStream()));
     } else {
         // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
         // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its copy in that stream, and we need to make
-        // sure the change made by the last thread's destructor doesn't get over-written.
+        // sure the change made by the last wthread's destructor doesn't get over-written.
         // cpuWorkQueue.pushCount is initialized to -1U, so we don't need to do this the first time through.
         __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
         __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     }
 
-    hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(hip::thread::max_width()), 0, mainStream);
+    hipLaunchKernelGGL(threading_main, dim3(wthread::hardware_concurrency()), dim3(hip::wthread::max_width()), 0, mainStream);
 
     // Workaround for Windows lazy kernel dispatch:
     // On Windows, kernel dispatch is delayed until something triggers a flush of the stream (eg. hipStreamSynchronize).
     // Without this workaround, threading_main is queued but never actually dispatched to the GPU, causing later
-    // hip::thread operations to hang (work is submitted to cpuWorkQueue but the kernel that processes it never starts).
+    // hip::wthread operations to hang (work is submitted to cpuWorkQueue but the kernel that processes it never starts).
     //
     // We can't call hipStreamSynchronize(mainStream) on the calling thread because threading_main is a persistent
     // kernel that will loop forever until it's told to stop - the sync would block until the kernel finishes, which
@@ -485,7 +485,7 @@ static __device__ bool shouldKeepPollingForWork() {
 
 static __global__ void threading_main() {
     for (bool workFound = true; workFound || shouldKeepPollingForWork();) {
-        // TODO: why do we need this when blockDim.x == hip::thread::max_width() == warpSize?
+        // TODO: why do we need this when blockDim.x == hip::wthread::max_width() == warpSize?
         __syncthreads();
         workFound = invokeNext();
         if (!workFound)
@@ -499,7 +499,7 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
     WorkNode_Header **link_to_self = oldWorkNode->lock();
     if (link_to_self == nullptr) {
         // workitem has already finished, so the scheduler has no way of finding oldWorkNode. Thus, we don't have to
-        // worry about updating its state or copying it. Just return so the hip::thread destructor can free oldWorkNode.
+        // worry about updating its state or copying it. Just return so the hip::wthread destructor can free oldWorkNode.
         ::free(newWorkNode);
         return;
     }
@@ -536,7 +536,7 @@ _LIBHIPTHREADS_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::c
 #endif
 }
 
-__device__ hip::thread::id get_id() noexcept {
+__device__ hip::wthread::id get_id() noexcept {
     using namespace internal;
     __shared__ hip::__thread_id::underlying_type base_vtid;
     if (threadIdx.x == 0) {
@@ -547,7 +547,7 @@ __device__ hip::thread::id get_id() noexcept {
     // TODO: What if only some of the fibers call this_thread::get_id()? This could deadlock. Also, what if the fiber
     // with threadIdx.x == 0 isn't one of the calling fibers?
     __syncthreads();
-    return hip::__thread_id(base_vtid * thread::max_width() + threadIdx.x);
+    return hip::__thread_id(base_vtid * wthread::max_width() + threadIdx.x);
 
     // Something along these lines might work for when threadIdx.x == 0 isn't among the calling fibers.
     // __shared__ hip::__thread_id::underlying_type base_vtid;
@@ -562,13 +562,13 @@ __device__ hip::thread::id get_id() noexcept {
     //     }
     //     __syncthreads();
     // } while (base_vtid == 0);
-    // return hip::__thread_id(base_vtid * thread::max_width() + threadIdx.x);
+    // return hip::__thread_id(base_vtid * wthread::max_width() + threadIdx.x);
 }
 
 __device__ void pseudo_yield() {
     using namespace internal;
 
-    // TODO: This won't work if the new thread has a width greater than the current one.
+    // TODO: This won't work if the new wthread has a width greater than the current one.
     // What happens if we just force the Exec mask to all 1s using inline asm?
 
     // TODO: what kind of synchronization do we need here? Is this good enough?
@@ -596,16 +596,16 @@ __device__ unsigned int get_fiber_id() noexcept {
 
 } // namespace this_thread
 
-__host__ thread::thread() noexcept {
+__host__ wthread::wthread() noexcept {
     prepDeviceForWork();
 }
 
-__host__ __device__ thread &thread::operator=(thread &&other) noexcept {
+__host__ __device__ wthread &wthread::operator=(wthread &&other) noexcept {
 #ifdef __HIP_DEVICE_COMPILE__
     if (joinable()) [[unlikely]] {
-        __HIPTHREADS_REPORT_MISUSE("move-assigned onto a still-joinable hip::thread. A hip::thread must be "
+        __HIPTHREADS_REPORT_MISUSE("move-assigned onto a still-joinable hip::wthread. A hip::wthread must be "
                                    "join()ed or detach()ed before it is destroyed or move-assigned onto.");
-        // Nonfatal mode: detection recorded; leave *this owning its thread.
+        // Nonfatal mode: detection recorded; leave *this owning its wave.
         return *this;
     }
 
@@ -622,10 +622,10 @@ __host__ __device__ thread &thread::operator=(thread &&other) noexcept {
     return *this;
 }
 
-__host__ __device__ thread::~thread() {
+__host__ __device__ wthread::~wthread() {
 #ifdef __HIP_DEVICE_COMPILE__
     if (joinable()) [[unlikely]] {
-        __HIPTHREADS_REPORT_MISUSE("destroyed a still-joinable hip::thread. A hip::thread must be join()ed "
+        __HIPTHREADS_REPORT_MISUSE("destroyed a still-joinable hip::wthread. A hip::wthread must be join()ed "
                                    "or detach()ed before it is destroyed or move-assigned onto.");
         // Nonfatal mode: detection recorded; detach so the still-running work
         // node is cleaned up and the test can continue to a clean exit.
@@ -642,34 +642,34 @@ __host__ __device__ thread::~thread() {
 #endif
 }
 
-// TODO: Maybe instead of returning different ids for each fiber based on a user-provided index, a single thread::id
-// should hold info for all the fibers? Do we even want to differentiate IDs between fibers? thread::id is supposed to
+// TODO: Maybe instead of returning different ids for each fiber based on a user-provided index, a single wthread::id
+// should hold info for all the fibers? Do we even want to differentiate IDs between fibers? wthread::id is supposed to
 // be a pretty opaque type anyways, and is generally only used as a key for storing/sorting threads in containers.
-__host__ __device__ thread::id thread::get_id(uint32_t index) const {
+__host__ __device__ wthread::id wthread::get_id(uint32_t index) const {
     if (!joinable()) {
         return {};
     }
 
 #ifdef __HIP_DEVICE_COMPILE__
-    // Don't need to lock because it's illegal for hip::thread::detach to be called at the same time as any other
-    // hip::thread method, so we know worknode_d won't change while we're in this function.
+    // Don't need to lock because it's illegal for hip::wthread::detach to be called at the same time as any other
+    // hip::wthread method, so we know worknode_d won't change while we're in this function.
     // Also, since vthread_id doesn't change, we don't need to force a fetch from memory, a cached value is fine.
     assert(index < cached_tdata.width);
 #else // __HIP_DEVICE_COMPILE__
     if (index >= cached_tdata.width) {
-        throw ::std::out_of_range("thread::get_id: index is greater than thread width");
+        throw ::std::out_of_range("wthread::get_id: index is greater than thread width");
     }
 #endif // !__HIP_DEVICE_COMPILE__
-    return hip::__thread_id(cached_tdata.vthread_id * thread::max_width() + index);
+    return hip::__thread_id(cached_tdata.vthread_id * wthread::max_width() + index);
 }
 
-__host__ __device__ void thread::join() {
+__host__ __device__ void wthread::join() {
 #ifdef __HIP_DEVICE_COMPILE__
     // TODO: check that the user has called hip::start(), in case they use a hip kernel launch to get here
     // Nonfatal mode: nothing to join; detection recorded, __HIPTHREADS_ASSERT causes early return.
     __HIPTHREADS_ASSERT(joinable(),
-                        "join() called on a hip::thread that has no associated thread (not joinable). "
-                        "Only a joinable hip::thread (one that has not been join()ed or detach()ed) "
+                        "join() called on a hip::wthread that has no associated thread (not joinable). "
+                        "Only a joinable hip::wthread (one that has not been join()ed or detach()ed) "
                         "may be join()ed.");
     // A cached value is ok here because if we did call join on ourselves, then we would have been the ones to write to
     // worknode_d->link_to_self when we popped worknode_d off the work queue. It's also not possible for
@@ -677,7 +677,7 @@ __host__ __device__ void thread::join() {
     // detach, and the actively executing thread is by definition, not finished.
     // Nonfatal mode: a self-join can never complete; detection recorded, __HIPTHREADS_ASSERT causes early return.
     __HIPTHREADS_ASSERT(worknode_d->link_to_self != &currentWorkNode[blockIdx.x],
-                        "join() called on the hip::thread associated with the currently-running thread "
+                        "join() called on the hip::wthread associated with the currently-running thread "
                         "(self-join). A thread cannot join itself; this would spin forever.");
     // We don't need to lock here because we know nobody is going to call detach on worknode_d.
     while (!worknode_d->isSchedulerDoneWith()) {
@@ -685,13 +685,13 @@ __host__ __device__ void thread::join() {
         __builtin_amdgcn_s_sleep(8);
     }
 
-    // WorkNode<T> is trivially destructible (checked in hip::thread constructor), so we can safely use free instead
+    // WorkNode<T> is trivially destructible (checked in hip::wthread constructor), so we can safely use free instead
     // of delete
     ::free(worknode_d);
     worknode_d = nullptr;
 #else // __HIP_DEVICE_COMPILE__
     if (!joinable()) {
-        throw ::std::system_error(::std::error_code(EINVAL, ::std::system_category()), "thread::join failed");
+        throw ::std::system_error(::std::error_code(EINVAL, ::std::system_category()), "wthread::join failed");
     }
 
     // We don't have to worry about worknode_d getting invalidated by detach because we would have to be the one calling detach
@@ -704,12 +704,12 @@ __host__ __device__ void thread::join() {
 #endif // !__HIP_DEVICE_COMPILE__
 }
 
-__host__ __device__ void thread::detach() {
+__host__ __device__ void wthread::detach() {
 #ifdef __HIP_DEVICE_COMPILE__
     // Nonfatal mode: nothing to detach; detection recorded, __HIPTHREADS_ASSERT causes early return.
     __HIPTHREADS_ASSERT(joinable(),
-                        "detach() called on a hip::thread that has no associated thread (not joinable). "
-                        "Only a joinable hip::thread (one that has not been join()ed or detach()ed) "
+                        "detach() called on a hip::wthread that has no associated thread (not joinable). "
+                        "Only a joinable hip::wthread (one that has not been join()ed or detach()ed) "
                         "may be detach()ed.");
 
     worknode_d->release();
@@ -717,7 +717,7 @@ __host__ __device__ void thread::detach() {
     worknode_d = nullptr;
 #else // __HIP_DEVICE_COMPILE__
     if (!joinable()) {
-        throw ::std::system_error(::std::error_code(EINVAL, ::std::system_category()), "thread::detach failed");
+        throw ::std::system_error(::std::error_code(EINVAL, ::std::system_category()), "wthread::detach failed");
     }
     hipLaunchKernelGGL(detachWorkNode, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
     // No sync needed because hip::free does the hipFreeAsync in EnqueingStream.
@@ -726,7 +726,7 @@ __host__ __device__ void thread::detach() {
 }
 
 [[gnu::const]]
-__host__ unsigned int thread::hardware_concurrency() noexcept {
+__host__ unsigned int wthread::hardware_concurrency() noexcept {
     try {
         static uint32_t multiprocessorCount = [](){
             int temp;
@@ -754,7 +754,7 @@ __host__ unsigned int thread::hardware_concurrency() noexcept {
         return 1;
     }
 }
-__device__ unsigned int thread::hardware_concurrency() noexcept {
+__device__ unsigned int wthread::hardware_concurrency() noexcept {
     return numVcores;
 }
 }
