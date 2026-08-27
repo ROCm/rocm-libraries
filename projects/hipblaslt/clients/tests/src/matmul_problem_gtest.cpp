@@ -60,10 +60,10 @@ namespace
     {
         EXPECT_EQ(matrix.apiType, type);
         EXPECT_EQ(matrix.hostType, hipblaslt::host_validation::scalarType(type));
-        ASSERT_EQ(matrix.layout.rank(), 3);
-        EXPECT_EQ(matrix.layout.extent(0), rows);
-        EXPECT_EQ(matrix.layout.extent(1), columns);
-        EXPECT_EQ(matrix.layout.extent(2), batches);
+        ASSERT_EQ(matrix.layout.shape().rank(), 3);
+        EXPECT_EQ(matrix.layout.shape().extent(0), rows);
+        EXPECT_EQ(matrix.layout.shape().extent(1), columns);
+        EXPECT_EQ(matrix.layout.shape().extent(2), batches);
         EXPECT_EQ(matrix.layout.stride(0), 1);
         EXPECT_EQ(matrix.layout.stride(1), leadingDimension);
         EXPECT_EQ(matrix.layout.stride(2), batchStride);

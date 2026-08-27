@@ -175,11 +175,11 @@ namespace TensileLite::Client
         if(expected == nullptr && bytes != 0)
             throw std::invalid_argument("TensileLite expected comparison buffer is null.");
         return roc::host_validation::compare(
-            roc::host_validation::Tensor(
+            roc::host_validation::Tensor::copyEncodedBackingStorage(
                 scalarType,
                 layout,
                 std::span<const std::byte>(static_cast<const std::byte*>(observed), bytes)),
-            roc::host_validation::Tensor(
+            roc::host_validation::Tensor::copyEncodedBackingStorage(
                 scalarType,
                 layout,
                 std::span<const std::byte>(static_cast<const std::byte*>(expected), bytes)),

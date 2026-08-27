@@ -180,16 +180,16 @@ int main(int argc, char** argv)
         = roc::host_validation::generate(roc::host_validation::ScalarType::Float32,
                                          roc::host_validation::Shape{A_clean.size()},
                                          ones);
-    std::memcpy(A_clean.data(), cleanTensor.storage().data(), cleanTensor.storage().size());
+    std::memcpy(A_clean.data(), cleanTensor.rawEncodedBackingStorage().data(), cleanTensor.rawEncodedBackingStorage().size());
     roc::host_validation::Tensor bTensor = roc::host_validation::generate(
         roc::host_validation::ScalarType::Float32, roc::host_validation::Shape{B.size()}, ones);
-    std::memcpy(B.data(), bTensor.storage().data(), bTensor.storage().size());
+    std::memcpy(B.data(), bTensor.rawEncodedBackingStorage().data(), bTensor.rawEncodedBackingStorage().size());
     std::vector<float> A_dirty = A_clean;
     const auto         nan     = roc::host_validation::GenerationRecipe::realOnly(
         roc::host_validation::GenerationRecipe::typeNaN());
-    roc::host_validation::Tensor dirtyTensor = cleanTensor.clone();
+    roc::host_validation::Tensor dirtyTensor = cleanTensor.deepCopy();
     roc::host_validation::generateAt(dirtyTensor, 0, nan);
-    std::memcpy(A_dirty.data(), dirtyTensor.storage().data(), dirtyTensor.storage().size());
+    std::memcpy(A_dirty.data(), dirtyTensor.rawEncodedBackingStorage().data(), dirtyTensor.rawEncodedBackingStorage().size());
 
     for(int i = 1; i <= total; ++i)
     {

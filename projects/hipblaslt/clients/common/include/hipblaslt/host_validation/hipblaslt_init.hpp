@@ -460,7 +460,7 @@ inline void hipblaslt_init_nan(T* A, size_t N)
     const auto recipe
         = hipblaslt::host_validation::nanRecipe(hipblaslt::host_validation::scalarType<T>());
     hipblaslt::host_validation::initializeTensor(
-        A, roc::host_validation::Layout::contiguous(roc::host_validation::Shape{N}), recipe);
+        A, roc::host_validation::Layout::contiguousLastDimensionFastest(roc::host_validation::Shape{N}), recipe);
 }
 
 template <typename T>
@@ -474,7 +474,7 @@ inline void hipblaslt_init_nan(void* A, size_t N, hipDataType type)
     hipblaslt::host_validation::detail::initializeRuntimeTensor(
         A,
         type,
-        roc::host_validation::Layout::contiguous(roc::host_validation::Shape{N}),
+        roc::host_validation::Layout::contiguousLastDimensionFastest(roc::host_validation::Shape{N}),
         hipblaslt::host_validation::detail::RuntimeInitialization::General,
         "hipblaslt_init_nan",
         true,
@@ -553,7 +553,7 @@ inline void hipblaslt_init_zero(T* A, size_t start_offset, size_t end_offset)
 {
     hipblaslt::host_validation::initializeTensor(
         A + start_offset,
-        roc::host_validation::Layout::contiguous(
+        roc::host_validation::Layout::contiguousLastDimensionFastest(
             roc::host_validation::Shape{end_offset - start_offset}),
         roc::host_validation::GenerationRecipe::realOnly(
             roc::host_validation::GenerationRecipe::zero()));

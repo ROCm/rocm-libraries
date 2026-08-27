@@ -363,20 +363,8 @@ Tensor generate(ScalarType type, Layout layout, const GenerationRecipe& recipe) 
     return result;
 }
 
-Tensor generate(ScalarType type, Layout layout, const GenerationRecipe& recipe,
-                const TensorStorageAllocator& allocator) {
-    Tensor result(type, std::move(layout), allocator);
-    generate(result, recipe);
-    return result;
-}
-
 Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe) {
-    return generate(type, Layout::contiguous(shape), recipe);
-}
-
-Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe,
-                const TensorStorageAllocator& allocator) {
-    return generate(type, Layout::contiguous(shape), recipe, allocator);
+    return generate(type, Layout::contiguousLastDimensionFastest(shape), recipe);
 }
 
 GenerationRunInfo generateAt(Tensor destination, size_t logicalIndex,

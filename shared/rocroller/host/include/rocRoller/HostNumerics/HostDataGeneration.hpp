@@ -133,7 +133,7 @@ namespace rocRoller::HostNumerics
     {
         static_assert(std::is_trivially_copyable_v<T>);
 
-        auto const storage = tensor.storage();
+        auto const storage = tensor.rawEncodedBackingStorage();
         if(storage.size() > std::numeric_limits<size_t>::max() - (sizeof(T) - 1))
             throw std::overflow_error("Host tensor storage container count overflow.");
 
@@ -170,7 +170,8 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument(
                 "rocRoller host tensor storage does not match its descriptor and packing.");
 
-        return roc::host_validation::Tensor(type, layout, std::as_bytes(values));
+        return roc::host_validation::Tensor::copyEncodedBackingStorage(
+            type, layout, std::as_bytes(values));
     }
 
     template <typename T, typename Allocator>

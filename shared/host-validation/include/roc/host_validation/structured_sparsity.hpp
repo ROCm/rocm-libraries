@@ -172,11 +172,7 @@ struct TwoOfFourMetadataResult {
 StructuredSparsityRunInfo applyStructuredSparsity(const StructuredSparsityRequest& request,
                                                   StructuredSparsitySliceRange sliceRange = {});
 StructuredSparsityResult applyStructuredSparsity(const StructuredSparsityProblem& problem);
-StructuredSparsityResult applyStructuredSparsity(const StructuredSparsityProblem& problem,
-                                                 const TensorStorageAllocator& allocator);
 
 TwoOfFourMetadataRunInfo encodeTwoOfFourMetadata(const TwoOfFourMetadataRequest& request);
 TwoOfFourMetadataResult encodeTwoOfFourMetadata(const TwoOfFourMetadataProblem& problem);
-TwoOfFourMetadataResult encodeTwoOfFourMetadata(const TwoOfFourMetadataProblem& problem,
-                                                const TensorStorageAllocator& allocator);
 }  // namespace roc::host_validation

@@ -34,7 +34,7 @@ namespace
     Tensor nativeTensor(ScalarType type, Layout layout, std::array<T, Size> const& values)
     {
         auto const bytes = std::as_bytes(std::span(values));
-        return Tensor::fromStorage(
+        return Tensor::takeOwnershipOfEncodedBackingStorage(
             type, std::move(layout), std::vector<std::byte>(bytes.begin(), bytes.end()));
     }
 
@@ -44,7 +44,7 @@ namespace
         storage.reserve(values.size());
         for(uint8_t value : values)
             storage.push_back(static_cast<std::byte>(value));
-        return Tensor::fromStorage(ScalarType::E8M0, Layout::contiguous(shape), std::move(storage));
+        return Tensor::takeOwnershipOfEncodedBackingStorage(ScalarType::E8M0, Layout::contiguousLastDimensionFastest(shape), std::move(storage));
     }
 
     void testUnscaledReference()

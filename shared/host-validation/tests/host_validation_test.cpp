@@ -33,21 +33,22 @@ void testRuntimeReferenceGemm() {
     const std::array<float, 2> scaleB{5, 7};
 
     GemmRequest problem(
-        GemmOperand(
-            Tensor::fromNative<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a))),
-        GemmOperand(
-            Tensor::fromNative<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b))),
-        Tensor::fromNative<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)), d,
+        GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}),
+                                                     std::span<const float>(a))),
+        GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}),
+                                                     std::span<const float>(b))),
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)), d,
         ScalarType::Float32);
     problem.epilogue.beta = 1.0;
     problem.epilogue.bias = VectorBinding{
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(bias)),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
+                                         std::span<const float>(bias)),
         MatrixAxis::Row,
     };
-    problem.epilogue.scaleA =
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(scaleA));
-    problem.epilogue.scaleB =
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(scaleB));
+    problem.epilogue.scaleA = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(scaleA));
+    problem.epilogue.scaleB = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(scaleB));
     problem.epilogue.activation = Activation::Relu;
 
     GemmExecution execution;
@@ -64,8 +65,8 @@ void testRuntimeReferenceGemm() {
         64 * 2 * 7 + 1 + 1,
         0,
     };
-    require(compare(d, Tensor::fromNative<float>(Layout(Shape{2, 2}, {1, 2}),
-                                                 std::span<const float>(expected)))
+    require(compare(d, Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}),
+                                                        std::span<const float>(expected)))
                 .passed(),
             "Runtime reference GEMM result mismatch.");
 
@@ -82,71 +83,31 @@ void testRuntimeReferenceGemm() {
         .layout = owningLayout,
         .selection = OutputSelection::explicitIndices({0, 1}),
     };
-    size_t allocatorCalls = 0;
-    const TensorStorageAllocator nonzeroAllocator = [&allocatorCalls](size_t bytes) {
-        ++allocatorCalls;
-        TensorStorage storage = TensorStorage::allocate(bytes);
-        std::fill(storage.mutableBytes().begin(), storage.mutableBytes().end(), std::byte{0xa5});
-        return storage;
-    };
-    const GemmResult owned = referenceGemm(owningProblem, owningOutput, nonzeroAllocator,
-                                           {.backend = GemmBackend::Pointwise});
-    require(allocatorCalls == 1 && owned.output.layout() == owningLayout &&
-                owned.runInfo.outputElementsWritten == 2 &&
+    const GemmResult owned =
+        referenceGemm(owningProblem, owningOutput, {.backend = GemmBackend::Pointwise});
+    require(owned.output.layout() == owningLayout && owned.runInfo.outputElementsWritten == 2 &&
                 owned.output.loadAs<float>({0, 0}) == expected[0] &&
                 owned.output.loadAs<float>({0, 1}) == expected[2] &&
                 owned.output.loadAs<float>({1, 0}) == 0 && owned.output.loadAs<float>({1, 1}) == 0,
             "Owning reference GEMM result contract mismatch.");
     std::array<float, 11> ownedStorage;
-    std::memcpy(ownedStorage.data(), owned.output.storage().data(), sizeof(ownedStorage));
+    std::memcpy(ownedStorage.data(), owned.output.rawEncodedBackingStorage().data(),
+                sizeof(ownedStorage));
     std::array<float, 11> expectedOwnedStorage{};
     expectedOwnedStorage[1] = expected[0];
     expectedOwnedStorage[3] = expected[2];
     require(ownedStorage == expectedOwnedStorage,
-            "Owning reference GEMM retained allocator-dependent storage.");
+            "Owning reference GEMM did not zero unselected storage.");
 
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceGemm(
-            owningProblem,
-            {.layout = Layout::contiguous(Shape{1, 1}), .selection = OutputSelection::all()},
-            nonzeroAllocator);
+        (void)referenceGemm(owningProblem,
+                            {.layout = Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                             .selection = OutputSelection::all()});
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation && allocatorCalls == 1,
-            "Owning reference GEMM allocated before validating its output layout.");
-
-    TensorStorage overlappingStorage = TensorStorage::allocate(4 * sizeof(float));
-    Tensor overlappingA = Tensor::wrapStorage(ScalarType::Float32, Layout::contiguous(Shape{2, 2}),
-                                              overlappingStorage);
-    overlappingA.storeFrom({0, 0}, 1.0f);
-    overlappingA.storeFrom({0, 1}, 2.0f);
-    overlappingA.storeFrom({1, 0}, 3.0f);
-    overlappingA.storeFrom({1, 1}, 4.0f);
-    const std::array<float, 4> overlapB{1, 0, 0, 1};
-    const std::array<float, 4> overlapC{};
-    GemmProblem overlapProblem(
-        GemmOperand(overlappingA),
-        GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                              std::span<const float>(overlapB))),
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                  std::span<const float>(overlapC)),
-        ScalarType::Float32, ScalarType::Float32);
-    size_t overlappingAllocatorCalls = 0;
-    const TensorStorageAllocator overlappingAllocator = [&overlappingStorage,
-                                                         &overlappingAllocatorCalls](size_t) {
-        ++overlappingAllocatorCalls;
-        return overlappingStorage;
-    };
-    bool rejectedOverlap = false;
-    try {
-        (void)referenceGemm(overlapProblem, {}, overlappingAllocator);
-    } catch (const std::invalid_argument&) {
-        rejectedOverlap = true;
-    }
-    require(rejectedOverlap && overlappingAllocatorCalls == 1,
-            "Owning reference GEMM accepted output storage that overlaps an input.");
+    require(rejectedBeforeAllocation, "Owning reference GEMM accepted an invalid output layout.");
 }
 
 void testZeroGemmScalarsSuppressNonFiniteOperands() {
@@ -160,17 +121,20 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
     Tensor output(ScalarType::Float32, Shape{2, 2});
 
     GemmRequest alphaZero(
-        GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                              std::span<const float>(nonFiniteA))),
-        GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                              std::span<const float>(nonFiniteB))),
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(finiteC)),
+        GemmOperand(
+            Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                             std::span<const float>(nonFiniteA))),
+        GemmOperand(
+            Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                             std::span<const float>(nonFiniteB))),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                         std::span<const float>(finiteC)),
         output, ScalarType::Float32);
     alphaZero.epilogue.alpha = 0.0;
     alphaZero.epilogue.beta = 2.0;
     referenceGemm(alphaZero);
-    require(compare(output, Tensor::fromNative<float>(
-                                Layout::contiguous(Shape{2, 2}),
+    require(compare(output, Tensor::copyNativeStorage<float>(
+                                Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                 std::span<const float>(std::array<float, 4>{2, 4, 6, 8})))
                 .passed(),
             "Zero alpha propagated a non-finite GEMM operand.");
@@ -178,17 +142,18 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
     const std::array<float, 4> finiteA{1, 2, 3, 4};
     const std::array<float, 4> finiteB{5, 6, 7, 8};
     const std::array<float, 4> nonFiniteC{infinity, infinity, infinity, infinity};
-    GemmRequest betaZero(GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                                               std::span<const float>(finiteA))),
-                         GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                                               std::span<const float>(finiteB))),
-                         Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                                   std::span<const float>(nonFiniteC)),
-                         output, ScalarType::Float32);
+    GemmRequest betaZero(
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(finiteA))),
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(finiteB))),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                         std::span<const float>(nonFiniteC)),
+        output, ScalarType::Float32);
     betaZero.epilogue.beta = 0.0;
     referenceGemm(betaZero);
-    require(compare(output, Tensor::fromNative<float>(
-                                Layout::contiguous(Shape{2, 2}),
+    require(compare(output, Tensor::copyNativeStorage<float>(
+                                Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                 std::span<const float>(std::array<float, 4>{19, 22, 43, 50})))
                 .passed(),
             "Zero beta propagated a non-finite C operand.");
@@ -200,12 +165,12 @@ void testRuntimeMixedAndBlockScaledGemm() {
     const std::array<float, 2> aValues{1.25f, 2.5f};
     const std::array<float, 2> bValues{2.0f, 3.0f};
     const std::array<float, 1> cValues{1.0f};
-    Tensor a =
-        Tensor::fromValues(ScalarType::Float8E4M3, Shape{1, 2}, std::span<const float>(aValues));
-    Tensor b =
-        Tensor::fromValues(ScalarType::Float8E5M2, Shape{2, 1}, std::span<const float>(bValues));
-    Tensor c =
-        Tensor::fromValues(ScalarType::BFloat16, Shape{1, 1}, std::span<const float>(cValues));
+    Tensor a = Tensor::copyValuesWithConversion(ScalarType::Float8E4M3, Shape{1, 2},
+                                                std::span<const float>(aValues));
+    Tensor b = Tensor::copyValuesWithConversion(ScalarType::Float8E5M2, Shape{2, 1},
+                                                std::span<const float>(bValues));
+    Tensor c = Tensor::copyValuesWithConversion(ScalarType::BFloat16, Shape{1, 1},
+                                                std::span<const float>(cValues));
     Tensor d(ScalarType::Float16, Shape{1, 1});
 
     GemmOperand operandA(a);
@@ -219,17 +184,17 @@ void testRuntimeMixedAndBlockScaledGemm() {
     const std::array<float, 1> zero{0};
     const std::array<float, 2> scaleAValues{2, 4};
     const std::array<float, 2> scaleBValues{8, 16};
-    Tensor blockA =
-        Tensor::fromValues(ScalarType::Float32, Shape{1, 4}, std::span<const float>(ones));
-    Tensor blockB =
-        Tensor::fromValues(ScalarType::Float32, Shape{4, 1}, std::span<const float>(ones));
-    Tensor blockC =
-        Tensor::fromValues(ScalarType::Float32, Shape{1, 1}, std::span<const float>(zero));
+    Tensor blockA = Tensor::copyValuesWithConversion(ScalarType::Float32, Shape{1, 4},
+                                                     std::span<const float>(ones));
+    Tensor blockB = Tensor::copyValuesWithConversion(ScalarType::Float32, Shape{4, 1},
+                                                     std::span<const float>(ones));
+    Tensor blockC = Tensor::copyValuesWithConversion(ScalarType::Float32, Shape{1, 1},
+                                                     std::span<const float>(zero));
     Tensor blockD(ScalarType::Float32, Shape{1, 1});
-    Tensor scalesA =
-        Tensor::fromValues(ScalarType::E8M0, Shape{1, 2}, std::span<const float>(scaleAValues));
-    Tensor scalesB =
-        Tensor::fromValues(ScalarType::E8M0, Shape{1, 2}, std::span<const float>(scaleBValues));
+    Tensor scalesA = Tensor::copyValuesWithConversion(ScalarType::E8M0, Shape{1, 2},
+                                                      std::span<const float>(scaleAValues));
+    Tensor scalesB = Tensor::copyValuesWithConversion(ScalarType::E8M0, Shape{1, 2},
+                                                      std::span<const float>(scaleBValues));
 
     GemmOperand blockOperandA(blockA);
     GemmOperand blockOperandB(blockB);
@@ -252,35 +217,36 @@ void testPointwiseRoutes() {
     const std::array<float, 4> scaleB{1, 1, 7, 11};
 
     auto makeProblem = [&](Tensor output) {
-        GemmOperand operandA(
-            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 7}), std::span<const float>(a)));
-        GemmOperand operandB(
-            Tensor::fromNative<float>(Layout::contiguous(Shape{7, 2}), std::span<const float>(b)));
+        GemmOperand operandA(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{1, 7}), std::span<const float>(a)));
+        GemmOperand operandB(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{7, 2}), std::span<const float>(b)));
         operandA.blockScale = BlockScaleBinding{
-            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 3}),
-                                      std::span<const float>(scaleA)),
+            Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 3}),
+                                             std::span<const float>(scaleA)),
             3,
         };
         operandB.blockScale = BlockScaleBinding{
-            Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                      std::span<const float>(scaleB)),
+            Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                             std::span<const float>(scaleB)),
             4,
         };
         GemmRequest problem(
             std::move(operandA), std::move(operandB),
-            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 2}), std::span<const float>(c)),
+            Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 2}),
+                                             std::span<const float>(c)),
             std::move(output), ScalarType::Float32);
         problem.outputSelection = OutputSelection::explicitIndices({1});
         return problem;
     };
 
     Tensor automaticOutput =
-        Tensor::fromNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
+        Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
     GemmRequest automaticProblem = makeProblem(automaticOutput);
     const GemmRunInfo automatic = referenceGemm(automaticProblem);
 
     Tensor pointwiseOutput =
-        Tensor::fromNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
+        Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
     GemmRequest pointwiseProblem = makeProblem(pointwiseOutput);
     const GemmRunInfo pointwise =
         referenceGemm(pointwiseProblem, {
@@ -289,7 +255,7 @@ void testPointwiseRoutes() {
                                         });
 
     const Tensor expected =
-        Tensor::fromNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, 184});
+        Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, 184});
     require(
         compare(automaticOutput, expected).passed() && compare(pointwiseOutput, expected).passed(),
         "Automatic and explicit Pointwise routes diverged.");
@@ -309,12 +275,13 @@ void testExactIntegerGemm() {
     const std::array<int32_t, 1> c{std::numeric_limits<int32_t>::max()};
     Tensor d(ScalarType::Int32, Shape{1, 1});
     GemmRequest problem(
-        GemmOperand(
-            Tensor::fromNative(Layout::contiguous(Shape{1, 1}), std::span<const int32_t>(a))),
-        GemmOperand(
-            Tensor::fromNative(Layout::contiguous(Shape{1, 1}), std::span<const int32_t>(b))),
-        Tensor::fromNative(Layout::contiguous(Shape{1, 1}), std::span<const int32_t>(c)), d,
-        ScalarType::Int32);
+        GemmOperand(Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                              std::span<const int32_t>(a))),
+        GemmOperand(Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                              std::span<const int32_t>(b))),
+        Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                  std::span<const int32_t>(c)),
+        d, ScalarType::Int32);
     problem.epilogue.beta = 2.0;
     referenceGemm(problem);
 
@@ -347,16 +314,18 @@ void testRuntimeComplexAndExplicitAxisGemm() {
     const std::array<std::complex<float>, 1> complexC{};
     Tensor complexD(ScalarType::ComplexFloat32, Shape{1, 1});
 
-    GemmOperand complexOperandA(Tensor::fromNative<std::complex<float>>(
-        Layout::contiguous(Shape{1, 1}), std::span<const std::complex<float>>(complexA)));
+    GemmOperand complexOperandA(Tensor::copyNativeStorage<std::complex<float>>(
+        Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+        std::span<const std::complex<float>>(complexA)));
     complexOperandA.conjugate = true;
-    GemmRequest complexProblem(
-        std::move(complexOperandA),
-        GemmOperand(Tensor::fromNative<std::complex<float>>(
-            Layout::contiguous(Shape{1, 1}), std::span<const std::complex<float>>(complexB))),
-        Tensor::fromNative<std::complex<float>>(Layout::contiguous(Shape{1, 1}),
-                                                std::span<const std::complex<float>>(complexC)),
-        complexD, ScalarType::ComplexFloat32);
+    GemmRequest complexProblem(std::move(complexOperandA),
+                               GemmOperand(Tensor::copyNativeStorage<std::complex<float>>(
+                                   Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                   std::span<const std::complex<float>>(complexB))),
+                               Tensor::copyNativeStorage<std::complex<float>>(
+                                   Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                   std::span<const std::complex<float>>(complexC)),
+                               complexD, ScalarType::ComplexFloat32);
     referenceGemm(complexProblem);
     require(complexD.loadAs<std::complex<float>>({0, 0}) == std::complex<float>(11.0f, -2.0f),
             "Runtime complex GEMM result mismatch.");
@@ -367,19 +336,22 @@ void testRuntimeComplexAndExplicitAxisGemm() {
     const std::array<float, 2> columnBias{2, 3};
     Tensor realD(ScalarType::Float32, Shape{1, 2});
     GemmRequest axisProblem(
-        GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}),
-                                              std::span<const float>(realA))),
-        GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{1, 2}),
-                                              std::span<const float>(realB))),
-        Tensor::fromNative<float>(Layout::contiguous(Shape{1, 2}), std::span<const float>(realC)),
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(realA))),
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{1, 2}), std::span<const float>(realB))),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 2}),
+                                         std::span<const float>(realC)),
         realD, ScalarType::Float32);
     axisProblem.epilogue.bias = VectorBinding{
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(columnBias)),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
+                                         std::span<const float>(columnBias)),
         MatrixAxis::Column,
     };
     referenceGemm(axisProblem);
-    require(compare(realD, Tensor::fromNative<float>(Layout::contiguous(Shape{1, 2}),
-                                                     std::span<const float>(columnBias)))
+    require(compare(realD, Tensor::copyNativeStorage<float>(
+                               Layout::contiguousLastDimensionFastest(Shape{1, 2}),
+                               std::span<const float>(columnBias)))
                 .passed(),
             "Runtime GEMM explicit column-axis bias mismatch.");
 }
@@ -391,15 +363,16 @@ void testOutputSelection() {
     const std::array<float, 4> b{5, 6, 7, 8};
     const std::array<float, 4> c{};
     Tensor d =
-        Tensor::fromNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
+        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
 
     GemmRequest problem(
-        GemmOperand(
-            Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(a))),
-        GemmOperand(
-            Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(b))),
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(c)), d,
-        ScalarType::Float32);
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(a))),
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(b))),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                         std::span<const float>(c)),
+        d, ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
     const GemmRunInfo runInfo = referenceGemm(problem);
     require(runInfo.outputElementsWritten == 2 && runInfo.outputElementsCovered == 2,
@@ -454,10 +427,12 @@ void testReferenceEpilogue() {
     Tensor amax(ScalarType::Float32, Shape{1});
 
     EpilogueRequest problem(
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(input)),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                         std::span<const float>(input)),
         output, rawOutput, auxiliary, amax, ScalarType::Float32);
     problem.bias = VectorBinding{
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(bias)),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
+                                         std::span<const float>(bias)),
         MatrixAxis::Row,
     };
     problem.outputScale = 2.0;
@@ -472,7 +447,7 @@ void testReferenceEpilogue() {
                 output.loadAs<float>({1, 0}) == 10 && output.loadAs<float>({1, 1}) == 0,
             "Reference epilogue output mismatch.");
     require(compare(rawOutput,
-                    Tensor::fromNativeValues<float>(Shape{2, 2}, std::array<float, 4>{0, 4, 10, 0}))
+                    Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{0, 4, 10, 0}))
                 .passed(),
             "Reference epilogue raw output mismatch.");
     require(auxiliary.loadAs<float>({0, 0}) == -3 && auxiliary.loadAs<float>({0, 1}) == 6 &&
@@ -483,15 +458,17 @@ void testReferenceEpilogue() {
     const std::array<float, 4> gradientInput{10, 20, 30, 40};
     const std::array<float, 4> activationInput{-1, 1, 2, -2};
     Tensor gradientOutput(ScalarType::Float32, Shape{2, 2});
-    EpilogueRequest gradient(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                                       std::span<const float>(gradientInput)),
-                             gradientOutput, ScalarType::Float32);
-    gradient.auxiliaryInput = Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                                        std::span<const float>(activationInput));
+    EpilogueRequest gradient(
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                         std::span<const float>(gradientInput)),
+        gradientOutput, ScalarType::Float32);
+    gradient.auxiliaryInput =
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                         std::span<const float>(activationInput));
     gradient.activation = Activation::Relu;
     gradient.activationApplication = ActivationApplication::Gradient;
     referenceEpilogue(gradient);
-    require(compare(gradientOutput, Tensor::fromNativeValues<float>(
+    require(compare(gradientOutput, Tensor::copyNativeValues<float>(
                                         Shape{2, 2}, std::array<float, 4>{0, 20, 30, 0}))
                 .passed(),
             "Reference gradient epilogue mismatch.");
@@ -499,31 +476,46 @@ void testReferenceEpilogue() {
     const std::array<float, 4> gate{0.5f, 2.0f, -1.0f, 0.25f};
     Tensor gatedOutput(ScalarType::Float32, Shape{2, 2});
     EpilogueRequest gated(
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(input)),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                         std::span<const float>(input)),
         gatedOutput, ScalarType::Float32);
-    gated.gateResidual =
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(gate));
+    gated.gateResidual = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(gate));
     gated.outputScale = 2.0;
     referenceEpilogue(gated);
-    require(compare(gatedOutput, Tensor::fromNativeValues<float>(
+    require(compare(gatedOutput, Tensor::copyNativeValues<float>(
                                      Shape{2, 2}, std::array<float, 4>{-1.5f, 6.0f, -7.0f, -1.75f}))
                 .passed(),
             "Reference gate-residual epilogue mismatch.");
 
     const std::array<float, 4> int8Input{-200.0f, -128.5f, 126.5f, 300.0f};
     Tensor int8Output(ScalarType::Int8, Shape{2, 2});
-    EpilogueRequest saturatingInt8(Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}),
-                                                             std::span<const float>(int8Input)),
-                                   int8Output, ScalarType::Float32);
+    EpilogueRequest saturatingInt8(
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                         std::span<const float>(int8Input)),
+        int8Output, ScalarType::Float32);
     saturatingInt8.outputConversion = OutputConversion::SaturatingInt8;
     referenceEpilogue(saturatingInt8);
-    require(compare(int8Output, Tensor::fromNativeValues<int8_t>(
+    require(compare(int8Output, Tensor::copyNativeValues<int8_t>(
                                     Shape{2, 2}, std::array<int8_t, 4>{-128, -128, 126, 127}))
                 .passed(),
             "Reference epilogue Int8 saturation mismatch.");
 
-    const Tensor ownedInput =
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2, 2}), std::span<const float>(input));
+    constexpr double highPrecisionInput = 1.0000000001;
+    const std::array<double, 1> highPrecisionValues{highPrecisionInput};
+    Tensor highPrecisionOutput(ScalarType::Float64, Shape{1, 1});
+    EpilogueRequest highPrecisionActivation(
+        Tensor::copyNativeStorage<double>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                          highPrecisionValues),
+        highPrecisionOutput, ScalarType::Float64);
+    highPrecisionActivation.activation = Activation::Sigmoid;
+    referenceEpilogue(highPrecisionActivation);
+    const double expectedHighPrecision = 1.0 / (1.0 + std::exp(-highPrecisionInput));
+    require(std::abs(highPrecisionOutput.loadAs<double>({0, 0}) - expectedHighPrecision) < 1e-15,
+            "Float64 reference activation used reduced-precision intermediates.");
+
+    const Tensor ownedInput = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(input));
     EpilogueProblem ownedProblem(ownedInput, ScalarType::Float16, ScalarType::Float32);
     ownedProblem.rawOutputType = ScalarType::Float32;
     ownedProblem.auxiliaryOutputType = ScalarType::BFloat16;
@@ -534,15 +526,8 @@ void testReferenceEpilogue() {
     ownedProblem.activation = Activation::Relu;
     ownedProblem.outputSelection = OutputSelection::explicitIndices({1, 2});
 
-    size_t allocatorCalls = 0;
-    const TensorStorageAllocator nonzeroAllocator = [&allocatorCalls](size_t bytes) {
-        ++allocatorCalls;
-        TensorStorage storage = TensorStorage::allocate(bytes);
-        std::fill(storage.mutableBytes().begin(), storage.mutableBytes().end(), std::byte{0xa5});
-        return storage;
-    };
-    const EpilogueResult owned = referenceEpilogue(ownedProblem, nonzeroAllocator);
-    require(allocatorCalls == 4 && owned.output.layout() == Layout::contiguous(Shape{2, 2}) &&
+    const EpilogueResult owned = referenceEpilogue(ownedProblem);
+    require(owned.output.layout() == Layout::contiguousLastDimensionFastest(Shape{2, 2}) &&
                 owned.rawOutput && owned.auxiliaryOutput && owned.amax &&
                 owned.runInfo.outputElementsWritten == 2 &&
                 owned.runInfo.rawOutputElementsWritten == 2 &&
@@ -557,7 +542,7 @@ void testReferenceEpilogue() {
                 owned.auxiliaryOutput->loadAs<float>({0, 0}) == 0 &&
                 owned.auxiliaryOutput->loadAs<float>({1, 1}) == 0 &&
                 owned.amax->loadAs<float>({0}) == 5,
-            "Owning reference epilogue retained allocator-dependent unselected values.");
+            "Owning reference epilogue did not zero unselected values.");
 
     EpilogueProblem emptySelection = ownedProblem;
     emptySelection.outputSelection = OutputSelection::strided(4, 1);
@@ -574,34 +559,17 @@ void testReferenceEpilogue() {
     EpilogueProblem invalidProblem(ownedInput, ScalarType::E8M0, ScalarType::Float32);
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceEpilogue(invalidProblem, nonzeroAllocator);
+        (void)referenceEpilogue(invalidProblem);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation && allocatorCalls == 4,
-            "Owning reference epilogue allocated before validating output type.");
-
-    TensorStorage overlappingStorage = TensorStorage::allocate(ownedInput.storage().size());
-    size_t overlappingAllocatorCalls = 0;
-    const TensorStorageAllocator overlappingAllocator = [&overlappingStorage,
-                                                         &overlappingAllocatorCalls](size_t) {
-        ++overlappingAllocatorCalls;
-        return overlappingStorage;
-    };
-    bool rejectedOverlap = false;
-    try {
-        (void)referenceEpilogue(ownedProblem, overlappingAllocator);
-    } catch (const std::invalid_argument&) {
-        rejectedOverlap = true;
-    }
-    require(rejectedOverlap && overlappingAllocatorCalls == 4,
-            "Owning reference epilogue accepted overlapping allocator results.");
+    require(rejectedBeforeAllocation, "Owning reference epilogue accepted an invalid output type.");
 
     Tensor preservedOutput =
-        Tensor::fromNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
-    Tensor preservedRaw = preservedOutput.clone();
-    Tensor preservedAuxiliary = preservedOutput.clone();
-    Tensor accumulatedAmax = Tensor::fromNativeValues<float>(Shape{1}, std::array<float, 1>{100});
+        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
+    Tensor preservedRaw = preservedOutput.deepCopy();
+    Tensor preservedAuxiliary = preservedOutput.deepCopy();
+    Tensor accumulatedAmax = Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{100});
     EpilogueRequest preserved(ownedInput, preservedOutput, preservedRaw, preservedAuxiliary,
                               accumulatedAmax, ScalarType::Float32);
     preserved.outputSelection = OutputSelection::explicitIndices({0, 3});
@@ -621,8 +589,8 @@ void testReferenceReduction() {
 
     std::array<float, 30> storage;
     storage.fill(-1);
-    Tensor input =
-        Tensor::fromNative<float>(Layout(Shape{2, 3, 4}, {15, 5, 1}), std::span<float>(storage));
+    Tensor input = Tensor::copyNativeStorage<float>(Layout(Shape{2, 3, 4}, {15, 5, 1}),
+                                                    std::span<float>(storage));
     for (size_t batch = 0; batch < 2; ++batch) {
         for (size_t row = 0; row < 3; ++row) {
             for (size_t column = 0; column < 4; ++column)
@@ -636,9 +604,17 @@ void testReferenceReduction() {
     require(run.outputElementsWritten == 3 && run.inputElementsRead == 24,
             "Reference reduction run information mismatch.");
     require(compare(output,
-                    Tensor::fromNativeValues<float>(Shape{3}, std::array<float, 3>{412, 492, 572}))
+                    Tensor::copyNativeValues<float>(Shape{3}, std::array<float, 3>{412, 492, 572}))
                 .passed(),
             "Reference reduction result mismatch.");
+
+    const std::array<int32_t, 2> wrappingInputValues{std::numeric_limits<int32_t>::max(), 1};
+    const ReductionResult wrappingSum = referenceSum(
+        ReductionProblem(Tensor::copyNativeStorage<int32_t>(
+                             Layout::contiguousLastDimensionFastest(Shape{2}), wrappingInputValues),
+                         ScalarType::Int32, ScalarType::Int32, {0}));
+    require(wrappingSum.output.loadAs<int32_t>({}) == std::numeric_limits<int32_t>::min(),
+            "Int32 reference reduction did not use defined wrapping arithmetic.");
 
     Tensor maximumAbsolute(ScalarType::Float32, Shape{});
     const ReductionRunInfo maximumRun =
@@ -650,37 +626,27 @@ void testReferenceReduction() {
 
     const ReductionProblem ownedProblem(input, ScalarType::Float32, ScalarType::Float32, {0, 2});
     const ReductionResult owned = referenceSum(ownedProblem);
-    require(owned.output.layout() == Layout::contiguous(Shape{3}) &&
+    require(owned.output.layout() == Layout::contiguousLastDimensionFastest(Shape{3}) &&
                 owned.output.type() == ScalarType::Float32 &&
                 owned.runInfo.outputElementsWritten == 3 && owned.runInfo.inputElementsRead == 24 &&
-                compare(owned.output, Tensor::fromNativeValues<float>(
+                compare(owned.output, Tensor::copyNativeValues<float>(
                                           Shape{3}, std::array<float, 3>{412, 492, 572}))
                     .passed(),
             "Owning reference sum result contract mismatch.");
 
-    size_t allocatorCalls = 0;
-    const TensorStorageAllocator allocator = [&allocatorCalls](size_t bytes) {
-        ++allocatorCalls;
-        return TensorStorage::allocate(bytes);
-    };
-    const ReductionResult allocated = referenceSum(ownedProblem, allocator);
-    require(allocatorCalls == 1 && allocated.output.layout() == Layout::contiguous(Shape{3}),
-            "Owning reference sum did not use the supplied allocator exactly once.");
-
     const ReductionProblem invalidProblem(input, ScalarType::Float32, ScalarType::Float32, {0, 0});
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceSum(invalidProblem, allocator);
+        (void)referenceSum(invalidProblem);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation && allocatorCalls == 1,
-            "Owning reference sum allocated before validating its axes.");
+    require(rejectedBeforeAllocation, "Owning reference sum accepted invalid axes.");
 
     const ReductionResult ownedMaximum =
         referenceMaximumAbsolute(input, ScalarType::Float32, ScalarType::Float32);
     require(ownedMaximum.output.shape() == Shape{} &&
-                ownedMaximum.output.layout() == Layout::contiguous(Shape{}) &&
+                ownedMaximum.output.layout() == Layout::contiguousLastDimensionFastest(Shape{}) &&
                 ownedMaximum.runInfo.outputElementsWritten == 1 &&
                 ownedMaximum.runInfo.inputElementsRead == 24 &&
                 ownedMaximum.output.loadAs<float>({}) == 123.0f,
@@ -692,22 +658,24 @@ void testStructuredSparsity() {
 
     std::array<float, 20> inputStorage;
     inputStorage.fill(-99);
-    Tensor input(ScalarType::Float32, Layout(Shape{2, 8}, {10, 1}),
-                 std::as_writable_bytes(std::span<float>(inputStorage)));
+    Tensor input =
+        Tensor::copyEncodedBackingStorage(ScalarType::Float32, Layout(Shape{2, 8}, {10, 1}),
+                                          std::as_writable_bytes(std::span<float>(inputStorage)));
     for (size_t row = 0; row < 2; ++row)
         for (size_t column = 0; column < 8; ++column)
             input.storeFrom({row, column}, static_cast<float>(1 + row * 8 + column));
 
     std::array<float, 20> prunedStorage;
     prunedStorage.fill(-7);
-    Tensor pruned(ScalarType::Float32, Layout(Shape{2, 8}, {10, 1}),
-                  std::as_writable_bytes(std::span<float>(prunedStorage)));
+    Tensor pruned =
+        Tensor::copyEncodedBackingStorage(ScalarType::Float32, Layout(Shape{2, 8}, {10, 1}),
+                                          std::as_writable_bytes(std::span<float>(prunedStorage)));
     std::array<float, 8> compressedStorage{};
-    Tensor compressed = Tensor::fromNative<float>(Layout::contiguous(Shape{2, 4}),
-                                                  std::span<float>(compressedStorage));
+    Tensor compressed = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{2, 4}), std::span<float>(compressedStorage));
     std::array<uint8_t, 8> indexStorage{};
-    Tensor retainedIndices = Tensor::fromNative<uint8_t>(Layout::contiguous(Shape{2, 4}),
-                                                         std::span<uint8_t>(indexStorage));
+    Tensor retainedIndices = Tensor::copyNativeStorage<uint8_t>(
+        Layout::contiguousLastDimensionFastest(Shape{2, 4}), std::span<uint8_t>(indexStorage));
 
     StructuredSparsityPattern pattern;
     pattern.axis = 1;
@@ -765,7 +733,7 @@ void testStructuredSparsity() {
         "Fused structured sparsity metadata mismatch.");
 
     Tensor inPlace =
-        Tensor::fromNativeValues<float>(Shape{8}, std::array<float, 8>{1, 2, 3, 4, 5, 6, 7, 8});
+        Tensor::copyNativeValues<float>(Shape{8}, std::array<float, 8>{1, 2, 3, 4, 5, 6, 7, 8});
     Tensor inPlaceCompressed(ScalarType::Float32, Shape{4});
     Tensor inPlaceIndices(ScalarType::UInt8, Shape{4});
     pattern.axis = 0;
@@ -781,27 +749,21 @@ void testStructuredSparsity() {
     ownedPattern.axis = 0;
     ownedPattern.fixedPositions = {0, 2};
     StructuredSparsityProblem ownedProblem(
-        Tensor::fromNativeValues<float>(Shape{12}, std::span<const float>(ownedValues)),
+        Tensor::copyNativeValues<float>(Shape{12}, std::span<const float>(ownedValues)),
         ownedPattern, {.retainedIndices = true, .twoOfFourMetadata = true});
-    size_t allocatorCalls = 0;
-    const TensorStorageAllocator nonzeroAllocator = [&allocatorCalls](size_t bytes) {
-        ++allocatorCalls;
-        TensorStorage storage = TensorStorage::allocate(bytes);
-        std::fill(storage.mutableBytes().begin(), storage.mutableBytes().end(), std::byte{0xa5});
-        return storage;
-    };
-    const StructuredSparsityResult owned = applyStructuredSparsity(ownedProblem, nonzeroAllocator);
-    require(allocatorCalls == 4 && owned.pruned.layout() == Layout::contiguous(Shape{12}) &&
-                owned.compressed.layout() == Layout::contiguous(Shape{6}) &&
-                owned.retainedIndices &&
-                owned.retainedIndices->layout() == Layout::contiguous(Shape{6}) &&
-                owned.twoOfFourMetadata &&
-                owned.twoOfFourMetadata->layout() == Layout::contiguous(Shape{2}) &&
-                owned.runInfo.groupsProcessed == 3,
-            "Owning structured-sparsity result contract mismatch.");
+    const StructuredSparsityResult owned = applyStructuredSparsity(ownedProblem);
+    require(
+        owned.pruned.layout() == Layout::contiguousLastDimensionFastest(Shape{12}) &&
+            owned.compressed.layout() == Layout::contiguousLastDimensionFastest(Shape{6}) &&
+            owned.retainedIndices &&
+            owned.retainedIndices->layout() == Layout::contiguousLastDimensionFastest(Shape{6}) &&
+            owned.twoOfFourMetadata &&
+            owned.twoOfFourMetadata->layout() == Layout::contiguousLastDimensionFastest(Shape{2}) &&
+            owned.runInfo.groupsProcessed == 3,
+        "Owning structured-sparsity result contract mismatch.");
     require(owned.twoOfFourMetadata->loadAs<uint8_t>({0}) == 0x88 &&
                 owned.twoOfFourMetadata->loadAs<uint8_t>({1}) == 0x08,
-            "Owning structured-sparsity metadata retained allocator-dependent bits.");
+            "Owning structured-sparsity metadata retained unexpected bits.");
 
     StructuredSparsityPattern invalidMetadataPattern = ownedPattern;
     invalidMetadataPattern.retainedElements = 1;
@@ -811,49 +773,33 @@ void testStructuredSparsity() {
         {.retainedIndices = false, .twoOfFourMetadata = true});
     bool rejectedBeforeAllocation = false;
     try {
-        (void)applyStructuredSparsity(invalidMetadataProblem, nonzeroAllocator);
+        (void)applyStructuredSparsity(invalidMetadataProblem);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation && allocatorCalls == 4,
-            "Owning structured sparsity allocated before validating metadata policy.");
+    require(rejectedBeforeAllocation,
+            "Owning structured sparsity accepted an invalid metadata policy.");
 
-    TensorStorage overlappingStorage = TensorStorage::allocate(ownedProblem.input.storage().size());
-    size_t overlappingAllocatorCalls = 0;
-    const TensorStorageAllocator overlappingAllocator = [&overlappingStorage,
-                                                         &overlappingAllocatorCalls](size_t) {
-        ++overlappingAllocatorCalls;
-        return overlappingStorage;
-    };
-    bool rejectedOverlap = false;
-    try {
-        (void)applyStructuredSparsity(ownedProblem, overlappingAllocator);
-    } catch (const std::invalid_argument&) {
-        rejectedOverlap = true;
-    }
-    require(rejectedOverlap && overlappingAllocatorCalls == 4,
-            "Owning structured sparsity accepted overlapping allocator results.");
-
-    const TwoOfFourMetadataResult ownedMetadata = encodeTwoOfFourMetadata(
-        TwoOfFourMetadataProblem(*owned.retainedIndices, 0), nonzeroAllocator);
-    require(allocatorCalls == 5 && ownedMetadata.metadata.shape() == Shape{2} &&
+    const TwoOfFourMetadataResult ownedMetadata =
+        encodeTwoOfFourMetadata(TwoOfFourMetadataProblem(*owned.retainedIndices, 0));
+    require(ownedMetadata.metadata.shape() == Shape{2} &&
                 ownedMetadata.metadata.loadAs<uint8_t>({0}) == 0x88 &&
                 ownedMetadata.metadata.loadAs<uint8_t>({1}) == 0x08,
             "Owning two-of-four metadata result contract mismatch.");
 
     const std::array<uint8_t, 2> invalidRetainedValues{2, 1};
     const TwoOfFourMetadataProblem invalidRetained(
-        Tensor::fromNativeValues<uint8_t>(Shape{2},
+        Tensor::copyNativeValues<uint8_t>(Shape{2},
                                           std::span<const uint8_t>(invalidRetainedValues)),
         0);
     rejectedBeforeAllocation = false;
     try {
-        (void)encodeTwoOfFourMetadata(invalidRetained, nonzeroAllocator);
+        (void)encodeTwoOfFourMetadata(invalidRetained);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation && allocatorCalls == 5,
-            "Owning two-of-four metadata allocated before validating retained positions.");
+    require(rejectedBeforeAllocation,
+            "Owning two-of-four metadata accepted invalid retained positions.");
 
     StructuredSparsityPattern widePattern;
     widePattern.axis = 0;
@@ -891,7 +837,7 @@ void testIndexedGeneration() {
     generate(candidates,
              GenerationRecipe::realOnly(GenerationRecipe::candidateSet({.values = candidateValues}),
                                         {.seed = candidateSeed}));
-    for (size_t index = 0; index < candidates.size(); ++index) {
+    for (size_t index = 0; index < candidates.elementCount(); ++index) {
         const double expected =
             candidateValues[counterRandom(candidateSeed,
                                           generation_random_domain_version_1::realComponent,
@@ -922,10 +868,12 @@ void testIndexedGeneration() {
             GenerationRecipe::realOnly(GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}),
                                        {.seed = 0x12345678, .indexOrder = order});
         generate(whole, exactRecipe);
-        for (size_t index = 0; index < whole.size(); ++index)
+        for (size_t index = 0; index < whole.elementCount(); ++index)
             generateAt(elementwise, index, exactRecipe);
-        require(std::equal(whole.storage().begin(), whole.storage().end(),
-                           elementwise.storage().begin(), elementwise.storage().end()),
+        require(std::equal(whole.rawEncodedBackingStorage().begin(),
+                           whole.rawEncodedBackingStorage().end(),
+                           elementwise.rawEncodedBackingStorage().begin(),
+                           elementwise.rawEncodedBackingStorage().end()),
                 "Whole-tensor and elementwise generation encodings differ.");
     }
 
@@ -953,8 +901,10 @@ void testIndexedGeneration() {
     generate(oneThread, parallelRecipe);
     omp_set_num_threads(4);
     generate(fourThreads, parallelRecipe);
-    require(std::equal(oneThread.storage().begin(), oneThread.storage().end(),
-                       fourThreads.storage().begin(), fourThreads.storage().end()),
+    require(std::equal(oneThread.rawEncodedBackingStorage().begin(),
+                       oneThread.rawEncodedBackingStorage().end(),
+                       fourThreads.rawEncodedBackingStorage().begin(),
+                       fourThreads.rawEncodedBackingStorage().end()),
             "Ordinary generation changed with OpenMP thread count.");
 
     Tensor aliased(ScalarType::Float32, Layout(Shape{8192}, {0}));
@@ -1012,8 +962,8 @@ void testReferenceAxpby() {
 
     const std::array<std::complex<float>, 1> complexXValues{std::complex<float>(1, 2)};
     const std::array<std::complex<float>, 1> complexYValues{std::complex<float>(3, -1)};
-    Tensor complexX = Tensor::fromNativeValues<std::complex<float>>(Shape{1}, complexXValues);
-    Tensor complexY = Tensor::fromNativeValues<std::complex<float>>(Shape{1}, complexYValues);
+    Tensor complexX = Tensor::copyNativeValues<std::complex<float>>(Shape{1}, complexXValues);
+    Tensor complexY = Tensor::copyNativeValues<std::complex<float>>(Shape{1}, complexYValues);
     Tensor complexOutput(ScalarType::ComplexFloat32, Shape{1});
     AxpbyRequest complexRequest(complexX, complexY, complexOutput, ScalarType::ComplexFloat32);
     complexRequest.alpha = std::complex<double>(0.5, 1.0);
@@ -1026,43 +976,32 @@ void testReferenceAxpby() {
     ownedProblem.alpha = 2.0;
     ownedProblem.beta = -0.5;
     const AxpbyResult owned = referenceAxpby(ownedProblem);
-    require(owned.output.layout() == Layout::contiguous(shape) &&
+    require(owned.output.layout() == Layout::contiguousLastDimensionFastest(shape) &&
                 owned.output.type() == ScalarType::Float32 &&
                 owned.runInfo.outputElementsWritten == shape.elementCount() &&
                 owned.output.loadAs<float>({1, 0, 1}) ==
                     2.0f * x.loadAs<float>({1, 0, 1}) - 0.5f * y.loadAs<float>({1, 0, 1}),
             "Owning reference AXPBY result contract mismatch.");
 
-    size_t allocatorCalls = 0;
-    const TensorStorageAllocator allocator = [&allocatorCalls](size_t bytes) {
-        ++allocatorCalls;
-        return TensorStorage::allocate(bytes);
-    };
-    const AxpbyResult allocated = referenceAxpby(ownedProblem, allocator);
-    require(allocatorCalls == 1 && allocated.output.layout() == Layout::contiguous(shape),
-            "Owning reference AXPBY did not use the supplied allocator exactly once.");
-
     AxpbyProblem invalidProblem(std::nullopt, std::nullopt, ScalarType::Float32,
                                 ScalarType::Float32);
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceAxpby(invalidProblem, allocator);
+        (void)referenceAxpby(invalidProblem);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation && allocatorCalls == 1,
-            "Owning reference AXPBY allocated before validating its problem.");
+    require(rejectedBeforeAllocation, "Owning reference AXPBY accepted an invalid problem.");
 
     AxpbyProblem invalidCoefficient(x, std::nullopt, ScalarType::Float32, ScalarType::Float32);
     invalidCoefficient.alpha = std::complex<double>(1.0, 1.0);
     rejectedBeforeAllocation = false;
     try {
-        (void)referenceAxpby(invalidCoefficient, allocator);
+        (void)referenceAxpby(invalidCoefficient);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation && allocatorCalls == 1,
-            "Owning reference AXPBY allocated before validating its coefficients.");
+    require(rejectedBeforeAllocation, "Owning reference AXPBY accepted invalid coefficients.");
 }
 
 void testReferenceSoftmax() {
@@ -1100,30 +1039,20 @@ void testReferenceSoftmax() {
 
     const SoftmaxProblem ownedProblem(input, ScalarType::Float32, 1, ScalarType::Float32);
     const SoftmaxResult owned = referenceSoftmax(ownedProblem);
-    require(owned.output.layout() == Layout::contiguous(shape) &&
+    require(owned.output.layout() == Layout::contiguousLastDimensionFastest(shape) &&
                 owned.output.type() == ScalarType::Float32 && owned.runInfo.slicesProcessed == 4 &&
                 owned.runInfo.outputElementsWritten == shape.elementCount(),
             "Owning reference softmax result contract mismatch.");
-
-    size_t allocatorCalls = 0;
-    const TensorStorageAllocator allocator = [&allocatorCalls](size_t bytes) {
-        ++allocatorCalls;
-        return TensorStorage::allocate(bytes);
-    };
-    const SoftmaxResult allocated = referenceSoftmax(ownedProblem, allocator);
-    require(allocatorCalls == 1 && allocated.output.layout() == Layout::contiguous(shape),
-            "Owning reference softmax did not use the supplied allocator exactly once.");
 
     const SoftmaxProblem invalidProblem(input, ScalarType::Float32, shape.rank(),
                                         ScalarType::Float32);
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceSoftmax(invalidProblem, allocator);
+        (void)referenceSoftmax(invalidProblem);
     } catch (const std::out_of_range&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation && allocatorCalls == 1,
-            "Owning reference softmax allocated before validating its problem.");
+    require(rejectedBeforeAllocation, "Owning reference softmax accepted an invalid problem.");
 }
 
 void testReferenceLayerNorm() {
@@ -1140,10 +1069,10 @@ void testReferenceLayerNorm() {
     }
     const std::array<float, 3> gammaValues{1.0f, 2.0f, 0.5f};
     const std::array<float, 3> betaValues{0.25f, -0.5f, 1.0f};
-    const Tensor gamma =
-        Tensor::fromValues(ScalarType::Float16, Shape{3}, std::span<const float>(gammaValues));
-    const Tensor beta =
-        Tensor::fromValues(ScalarType::BFloat16, Shape{3}, std::span<const float>(betaValues));
+    const Tensor gamma = Tensor::copyValuesWithConversion(ScalarType::Float16, Shape{3},
+                                                          std::span<const float>(gammaValues));
+    const Tensor beta = Tensor::copyValuesWithConversion(ScalarType::BFloat16, Shape{3},
+                                                         std::span<const float>(betaValues));
     Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 12}));
     Tensor mean(ScalarType::Float32, Layout(Shape{2, 2}, {3, 1}));
     Tensor inverseVariance(ScalarType::Float32, Layout(Shape{2, 2}, {1, 3}));
@@ -1168,9 +1097,11 @@ void testReferenceLayerNorm() {
     ownedProblem.gamma = gamma;
     ownedProblem.beta = beta;
     const LayerNormResult owned = referenceLayerNorm(ownedProblem);
-    require(owned.output.layout() == Layout::contiguous(shape) && owned.mean &&
-                owned.mean->layout() == Layout::contiguous(Shape{2, 2}) && owned.inverseVariance &&
-                owned.inverseVariance->layout() == Layout::contiguous(Shape{2, 2}) &&
+    require(owned.output.layout() == Layout::contiguousLastDimensionFastest(shape) && owned.mean &&
+                owned.mean->layout() == Layout::contiguousLastDimensionFastest(Shape{2, 2}) &&
+                owned.inverseVariance &&
+                owned.inverseVariance->layout() ==
+                    Layout::contiguousLastDimensionFastest(Shape{2, 2}) &&
                 owned.runInfo.slicesProcessed == 4 &&
                 owned.runInfo.outputElementsWritten == shape.elementCount() &&
                 owned.runInfo.meanElementsWritten == 4 &&
@@ -1178,25 +1109,15 @@ void testReferenceLayerNorm() {
                 owned.output.loadAs<float>({0, 1, 0}) == -0.5f,
             "Owning reference LayerNorm result contract mismatch.");
 
-    size_t allocatorCalls = 0;
-    const TensorStorageAllocator allocator = [&allocatorCalls](size_t bytes) {
-        ++allocatorCalls;
-        return TensorStorage::allocate(bytes);
-    };
-    const LayerNormResult allocated = referenceLayerNorm(ownedProblem, allocator);
-    require(allocatorCalls == 3 && allocated.mean && allocated.inverseVariance,
-            "Owning reference LayerNorm did not allocate each requested result exactly once.");
-
     LayerNormProblem invalidProblem = ownedProblem;
     invalidProblem.epsilon = std::numeric_limits<double>::quiet_NaN();
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceLayerNorm(invalidProblem, allocator);
+        (void)referenceLayerNorm(invalidProblem);
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
     }
-    require(rejectedBeforeAllocation && allocatorCalls == 3,
-            "Owning reference LayerNorm allocated before validating epsilon.");
+    require(rejectedBeforeAllocation, "Owning reference LayerNorm accepted invalid epsilon.");
 
     LayerNormProblem outputOnly(input, ScalarType::Float32, 1, ScalarType::Float32);
     const LayerNormResult outputOnlyResult = referenceLayerNorm(outputOnly);
@@ -1207,7 +1128,7 @@ void testReferenceLayerNorm() {
 
     const std::array<float, 3> rankOneValues{1.0f, 2.0f, 3.0f};
     LayerNormProblem rankOne(
-        Tensor::fromNativeValues<float>(Shape{3}, std::span<const float>(rankOneValues)),
+        Tensor::copyNativeValues<float>(Shape{3}, std::span<const float>(rankOneValues)),
         ScalarType::Float32, 0, ScalarType::Float32);
     rankOne.meanType = ScalarType::Float32;
     const LayerNormResult rankOneResult = referenceLayerNorm(rankOne);
@@ -1225,12 +1146,13 @@ void testActivations() {
     Tensor d(ScalarType::Float32, Shape{1, 1});
 
     GemmRequest problem(
-        GemmOperand(
-            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(a))),
-        GemmOperand(
-            Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(b))),
-        Tensor::fromNative<float>(Layout::contiguous(Shape{1, 1}), std::span<const float>(c)), d,
-        ScalarType::Float32);
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(a))),
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b))),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                         std::span<const float>(c)),
+        d, ScalarType::Float32);
 
     problem.epilogue.activation = Activation::Gelu;
     referenceGemm(problem);
@@ -1264,12 +1186,13 @@ void testStridedAndOffsetViews() {
 
     const Layout outputLayout(Shape{2, 2}, {1, 5}, 1);
     GemmRequest problem(
-        GemmOperand(
-            Tensor::fromNative<float>(Layout(Shape{2, 3}, {4, 1}), std::span<const float>(a))),
-        GemmOperand(
-            Tensor::fromNative<float>(Layout(Shape{3, 2}, {3, 1}), std::span<const float>(b))),
-        Tensor::fromNative<float>(Layout(Shape{2, 2}, {1, 4}), std::span<const float>(c)),
-        Tensor::fromStorage(ScalarType::Float32, outputLayout, std::move(dStorage)),
+        GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {4, 1}),
+                                                     std::span<const float>(a))),
+        GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {3, 1}),
+                                                     std::span<const float>(b))),
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 4}), std::span<const float>(c)),
+        Tensor::takeOwnershipOfEncodedBackingStorage(ScalarType::Float32, outputLayout,
+                                                     std::move(dStorage)),
         ScalarType::Float32);
     Tensor d = problem.d;
     problem.epilogue.alpha = 2.0;
@@ -1283,12 +1206,13 @@ void testStridedAndOffsetViews() {
     expected[2] = 2 * 139 + 3;
     expected[6] = 2 * 64 + 3;
     expected[7] = 2 * 154 + 3;
-    const auto comparison =
-        compare(d, Tensor::fromNative<float>(outputLayout, std::span<const float>(expected)));
+    const auto comparison = compare(
+        d, Tensor::copyNativeStorage<float>(outputLayout, std::span<const float>(expected)));
     require(comparison.passed(), "Strided GEMM matrix comparison failed.");
     const auto storageValue = [&d](size_t index) {
         float value;
-        std::memcpy(&value, d.storage().data() + index * sizeof(float), sizeof(value));
+        std::memcpy(&value, d.rawEncodedBackingStorage().data() + index * sizeof(float),
+                    sizeof(value));
         return value;
     };
     require(storageValue(0) == -99 && storageValue(3) == -99 && storageValue(11) == -99,
@@ -1340,8 +1264,8 @@ void testGenerationAndComparison() {
     ComparisonOptions nonFiniteOptions;
     nonFiniteOptions.relativeTolerance = 1.0;
     const auto nonFiniteResult =
-        compare(Tensor::fromNative(std::span<const double>(nonFiniteA)),
-                Tensor::fromNative(std::span<const double>(nonFiniteB)), nonFiniteOptions);
+        compare(Tensor::copyNativeStorage(std::span<const double>(nonFiniteA)),
+                Tensor::copyNativeStorage(std::span<const double>(nonFiniteB)), nonFiniteOptions);
     require(nonFiniteResult.mismatches == 1,
             "Comparison did not distinguish finite and infinite values.");
 
@@ -1349,9 +1273,9 @@ void testGenerationAndComparison() {
     generatedStorage.fill(-1);
     std::vector<std::byte> generatedBytes(sizeof(generatedStorage));
     std::memcpy(generatedBytes.data(), generatedStorage.data(), generatedBytes.size());
-    Tensor generated =
-        Tensor::fromStorage(ScalarType::Int32, Layout(Shape{2, 2}, std::vector<ptrdiff_t>{1, 3}, 1),
-                            std::move(generatedBytes));
+    Tensor generated = Tensor::takeOwnershipOfEncodedBackingStorage(
+        ScalarType::Int32, Layout(Shape{2, 2}, std::vector<ptrdiff_t>{1, 3}, 1),
+        std::move(generatedBytes));
     generate(generated,
              [](std::span<const size_t> indices) { return 10 * indices[1] + indices[0]; });
     require(generated.loadAs<int>({0, 0}) == 0 && generated.loadAs<int>({1, 0}) == 1 &&
@@ -1359,7 +1283,8 @@ void testGenerationAndComparison() {
             "Matrix generation produced incorrect logical values.");
     const auto generatedStorageValue = [&generated](size_t index) {
         int value;
-        std::memcpy(&value, generated.storage().data() + index * sizeof(int), sizeof(value));
+        std::memcpy(&value, generated.rawEncodedBackingStorage().data() + index * sizeof(int),
+                    sizeof(value));
         return value;
     };
     require(generatedStorageValue(0) == -1 && generatedStorageValue(3) == -1 &&
@@ -1370,7 +1295,7 @@ void testGenerationAndComparison() {
     const GenerationRecipe runtimeGeneration = GenerationRecipe::realOnly(
         GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}), {.seed = 7});
     generate(runtimeExpected, runtimeGeneration);
-    Tensor runtimeObserved = runtimeExpected.clone();
+    Tensor runtimeObserved = runtimeExpected.deepCopy();
     runtimeObserved.storeFrom({1, 2}, runtimeExpected.loadAs<float>({1, 2}) + 1.0f);
     ComparisonOptions runtimeComparisonOptions;
     runtimeComparisonOptions.absoluteTolerance = 0.0;
@@ -1393,8 +1318,8 @@ void testComparisonProgram() {
     emptyOptions.maxReportedMismatches = 0;
     emptyOptions.selection.indexOrder = IndexOrder::FirstDimensionFastest;
     const auto compareEmpty = [&](const ComparisonOptions& options) {
-        return compare(Tensor::fromNative(emptyLayout, std::span<const float>(emptyStorage)),
-                       Tensor::fromNative(emptyLayout, std::span<const float>(emptyStorage)),
+        return compare(Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
+                       Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
                        options);
     };
     const ComparisonResult emptyResult = compareEmpty(emptyOptions);
@@ -1443,8 +1368,8 @@ void testComparisonProgram() {
     evidenceOnly.computeUlp = true;
     evidenceOnly.ulpType = ScalarType::Float64;
     const ComparisonResult evidenceResult =
-        compare(Tensor::fromNative(std::span<const double>(evidenceObserved)),
-                Tensor::fromNative(std::span<const double>(evidenceExpected)), evidenceOnly);
+        compare(Tensor::copyNativeStorage(std::span<const double>(evidenceObserved)),
+                Tensor::copyNativeStorage(std::span<const double>(evidenceExpected)), evidenceOnly);
     require(!evidenceResult.pointwiseEvaluated && !evidenceResult.frobeniusEvaluated &&
                 !evidenceResult.ulpEvaluated && evidenceResult.passed() &&
                 evidenceResult.frobeniusDifference == 1.0 && evidenceResult.ulpCompared == 1,
@@ -1458,8 +1383,8 @@ void testComparisonProgram() {
     reversedMetrics.computeFrobenius = true;
     reversedMetrics.maxReportedMismatches = 0;
     const auto reversedRuntimeResult =
-        compare(Tensor::fromNative(reversedLayout, std::span<const double>(reversedStorage)),
-                Tensor::fromNative(reversedLayout, std::span<const double>(reversedStorage)),
+        compare(Tensor::copyNativeStorage(reversedLayout, std::span<const double>(reversedStorage)),
+                Tensor::copyNativeStorage(reversedLayout, std::span<const double>(reversedStorage)),
                 reversedMetrics);
     require(reversedRuntimeResult.compared == 3 && reversedRuntimeResult.frobeniusDifference == 0.0,
             "Negative-stride comparison produced incorrect evidence.");
@@ -1474,9 +1399,9 @@ void testComparisonProgram() {
     selected.selection.indexOrder = IndexOrder::FirstDimensionFastest;
     selected.selection.stride = 2;
     selected.computeFrobenius = false;
-    const auto selectedResult =
-        compare(Tensor::fromNative(layout, std::span<const float>(observedStorage)),
-                Tensor::fromNative(layout, std::span<const float>(expectedStorage)), selected);
+    const auto selectedResult = compare(
+        Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
+        Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), selected);
     require(selectedResult.compared == 3 && selectedResult.mismatches == 1,
             "Selected comparison visited the wrong logical elements.");
     require(selectedResult.reportedMismatches[0].index == 4 &&
@@ -1489,9 +1414,9 @@ void testComparisonProgram() {
     paddedMetrics.computeFrobenius = true;
     paddedMetrics.maxReportedMismatches = 0;
     paddedMetrics.selection.indexOrder = IndexOrder::FirstDimensionFastest;
-    const auto paddedMetricResult =
-        compare(Tensor::fromNative(layout, std::span<const float>(observedStorage)),
-                Tensor::fromNative(layout, std::span<const float>(expectedStorage)), paddedMetrics);
+    const auto paddedMetricResult = compare(
+        Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
+        Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), paddedMetrics);
     require(paddedMetricResult.compared == 6 && paddedMetricResult.frobeniusDifference > 0.0,
             "Regular strided comparison produced incorrect evidence.");
 
@@ -1501,24 +1426,26 @@ void testComparisonProgram() {
     fastIntegerOptions.computePointwiseStatistics = false;
     fastIntegerOptions.computeFrobenius = false;
     fastIntegerOptions.maxReportedMismatches = 0;
-    const auto fastIntegerComparison = compare(
-        Tensor::fromNative(std::span<const uint64_t>(wideIntegerObserved)),
-        Tensor::fromNative(std::span<const uint64_t>(wideIntegerExpected)), fastIntegerOptions);
+    const auto fastIntegerComparison =
+        compare(Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerObserved)),
+                Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerExpected)),
+                fastIntegerOptions);
     require(!fastIntegerComparison.passed() && fastIntegerComparison.mismatches == 1,
             "Fast comparison rounded distinct wide integers together.");
 
     fastIntegerOptions.maxReportedMismatches = 1;
-    const auto reportedIntegerComparison = compare(
-        Tensor::fromNative(std::span<const uint64_t>(wideIntegerObserved)),
-        Tensor::fromNative(std::span<const uint64_t>(wideIntegerExpected)), fastIntegerOptions);
+    const auto reportedIntegerComparison =
+        compare(Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerObserved)),
+                Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerExpected)),
+                fastIntegerOptions);
     require(!reportedIntegerComparison.passed() && reportedIntegerComparison.mismatches == 1 &&
                 reportedIntegerComparison.reportedMismatches.size() == 1 &&
                 !reportedIntegerComparison.reportedMismatches[0].matched,
             "Detailed comparison changed the wide-integer pointwise decision.");
 
     const auto runtimeIntegerComparison =
-        compare(Tensor::fromNative(std::span<const uint64_t>(wideIntegerObserved)),
-                Tensor::fromNative(std::span<const uint64_t>(wideIntegerExpected)));
+        compare(Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerObserved)),
+                Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerExpected)));
     require(!runtimeIntegerComparison.passed() && runtimeIntegerComparison.mismatches == 1,
             "Runtime detailed comparison rounded distinct wide integers together.");
 
@@ -1527,16 +1454,16 @@ void testComparisonProgram() {
     subUnitIntegerTolerance.computePointwiseStatistics = false;
     subUnitIntegerTolerance.computeFrobenius = false;
     subUnitIntegerTolerance.maxReportedMismatches = 0;
-    require(!compare(Tensor::fromNative(std::span<const uint64_t>(wideIntegerObserved)),
-                     Tensor::fromNative(std::span<const uint64_t>(wideIntegerExpected)),
+    require(!compare(Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerObserved)),
+                     Tensor::copyNativeStorage(std::span<const uint64_t>(wideIntegerExpected)),
                      subUnitIntegerTolerance)
                  .passed(),
             "Runtime comparison lost a sub-unit tolerance at the uint64 precision boundary.");
 
     const std::array<int64_t, 1> signedIntegerObserved{std::numeric_limits<int64_t>::lowest()};
     const std::array<int64_t, 1> signedIntegerExpected{std::numeric_limits<int64_t>::max()};
-    require(!compare(Tensor::fromNative(std::span<const int64_t>(signedIntegerObserved)),
-                     Tensor::fromNative(std::span<const int64_t>(signedIntegerExpected)))
+    require(!compare(Tensor::copyNativeStorage(std::span<const int64_t>(signedIntegerObserved)),
+                     Tensor::copyNativeStorage(std::span<const int64_t>(signedIntegerExpected)))
                  .passed(),
             "Runtime comparison overflowed the signed-integer decision.");
 
@@ -1548,8 +1475,8 @@ void testComparisonProgram() {
     metrics.computeUlp = true;
     metrics.ulpType = ScalarType::Float64;
     const auto metricResult =
-        compare(Tensor::fromNative(std::span<const double>(observed)),
-                Tensor::fromNative(std::span<const double>(expected)), metrics);
+        compare(Tensor::copyNativeStorage(std::span<const double>(observed)),
+                Tensor::copyNativeStorage(std::span<const double>(expected)), metrics);
     require(std::abs(metricResult.frobeniusExpected - 5.0) < 1e-12 &&
                 std::abs(metricResult.frobeniusObserved - 5.0) < 1e-12 &&
                 std::abs(metricResult.frobeniusDifference - std::sqrt(18.0)) < 1e-12 &&
@@ -1561,8 +1488,8 @@ void testComparisonProgram() {
     sampledMetrics.selection.first = 1;
     sampledMetrics.selection.stride = 2;
     const auto sampledMetricResult =
-        compare(Tensor::fromNative(std::span<const double>(observed)),
-                Tensor::fromNative(std::span<const double>(expected)), sampledMetrics);
+        compare(Tensor::copyNativeStorage(std::span<const double>(observed)),
+                Tensor::copyNativeStorage(std::span<const double>(expected)), sampledMetrics);
     require(sampledMetricResult.compared == 1,
             "Irregular comparison selection visited the wrong element count.");
 
@@ -1573,8 +1500,9 @@ void testComparisonProgram() {
     ulp.computeUlp = true;
     ulp.ulpType = ScalarType::Float64;
     ulp.maximumUlpTolerance = 1.0;
-    const auto ulpResult = compare(Tensor::fromNative(std::span<const double>(ulpObserved)),
-                                   Tensor::fromNative(std::span<const double>(ulpExpected)), ulp);
+    const auto ulpResult =
+        compare(Tensor::copyNativeStorage(std::span<const double>(ulpObserved)),
+                Tensor::copyNativeStorage(std::span<const double>(ulpExpected)), ulp);
     require(ulpResult.maximumUlp == 1.0 && ulpResult.averageUlp == 1.0 &&
                 ulpResult.pointwiseEvaluated && !ulpResult.frobeniusEvaluated &&
                 ulpResult.ulpEvaluated && ulpResult.ulpPassed,
@@ -1584,6 +1512,8 @@ void testComparisonProgram() {
             "Encoded ULP distance mishandled the F32 zero/subnormal boundary.");
     require(encodedUlpDistance(1.0, 1.5, ScalarType::Float4E2M1) == 1.0,
             "Encoded ULP distance mishandled a packed scalar sign width.");
+    require(encodedUlpDistance(1.0, 2.0, ScalarType::E5M3) == 8.0,
+            "Encoded ULP distance treated unsigned E5M3 as a signed encoding.");
 
     const std::array<std::complex<double>, 2> complexExpected{
         std::complex<double>(std::numeric_limits<double>::infinity(), 2.0),
@@ -1591,9 +1521,10 @@ void testComparisonProgram() {
     const auto complexObserved = complexExpected;
     ComparisonOptions nonFinite;
     nonFinite.equalNaNs = true;
-    const auto nonFiniteResult = compare(
-        Tensor::fromNative(std::span<const std::complex<double>>(complexObserved)),
-        Tensor::fromNative(std::span<const std::complex<double>>(complexExpected)), nonFinite);
+    const auto nonFiniteResult =
+        compare(Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexObserved)),
+                Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexExpected)),
+                nonFinite);
     require(nonFiniteResult.passed() && nonFiniteResult.matchedInfinities == 1 &&
                 nonFiniteResult.matchedNaNs == 1,
             "Complex non-finite comparison policy is incorrect.");
@@ -1602,9 +1533,9 @@ void testComparisonProgram() {
     ComparisonOptions noPointwiseStatistics;
     noPointwiseStatistics.computePointwiseStatistics = false;
     noPointwiseStatistics.computeFrobenius = false;
-    const ComparisonResult noPointwiseStatisticsResult =
-        compare(Tensor::fromNative(std::span<const double>(doubleInfinity)),
-                Tensor::fromNative(std::span<const float>(floatInfinity)), noPointwiseStatistics);
+    const ComparisonResult noPointwiseStatisticsResult = compare(
+        Tensor::copyNativeStorage(std::span<const double>(doubleInfinity)),
+        Tensor::copyNativeStorage(std::span<const float>(floatInfinity)), noPointwiseStatistics);
     require(
         noPointwiseStatisticsResult.passed() && noPointwiseStatisticsResult.matchedInfinities == 0,
         "Disabled pointwise statistics collected matched infinities.");
@@ -1619,35 +1550,39 @@ void testComparisonProgram() {
     const std::array<double, 1> referenceValue{10.0};
     ComparisonOptions numpyBoundary = allCloseComparisonOptions(0.0, 0.2);
     numpyBoundary.computeFrobenius = false;
-    require(compare(Tensor::fromNative(std::span<const double>(lowerValue)),
-                    Tensor::fromNative(std::span<const double>(referenceValue)), numpyBoundary)
-                .passed(),
-            "Allclose rejected the inclusive NumPy boundary.");
-    require(!compare(Tensor::fromNative(std::span<const double>(referenceValue)),
-                     Tensor::fromNative(std::span<const double>(lowerValue)), numpyBoundary)
+    require(
+        compare(Tensor::copyNativeStorage(std::span<const double>(lowerValue)),
+                Tensor::copyNativeStorage(std::span<const double>(referenceValue)), numpyBoundary)
+            .passed(),
+        "Allclose rejected the inclusive NumPy boundary.");
+    require(!compare(Tensor::copyNativeStorage(std::span<const double>(referenceValue)),
+                     Tensor::copyNativeStorage(std::span<const double>(lowerValue)), numpyBoundary)
                  .passed(),
             "Allclose lost NumPy's expected-reference asymmetry.");
     numpyBoundary.strictTolerance = true;
-    require(!compare(Tensor::fromNative(std::span<const double>(lowerValue)),
-                     Tensor::fromNative(std::span<const double>(referenceValue)), numpyBoundary)
-                 .passed(),
-            "Strict tolerance did not preserve the legacy exclusive boundary.");
+    require(
+        !compare(Tensor::copyNativeStorage(std::span<const double>(lowerValue)),
+                 Tensor::copyNativeStorage(std::span<const double>(referenceValue)), numpyBoundary)
+             .passed(),
+        "Strict tolerance did not preserve the legacy exclusive boundary.");
 
     const std::array<std::complex<double>, 1> componentwiseObserved{std::complex<double>(1.0, 1.0)};
     const std::array<std::complex<double>, 1> componentwiseExpected{std::complex<double>(0.0, 0.0)};
     ComparisonOptions componentwiseComplex = allCloseComparisonOptions(1.0, 0.0);
     componentwiseComplex.computeFrobenius = false;
-    require(
-        !compare(Tensor::fromNative(std::span<const std::complex<double>>(componentwiseObserved)),
-                 Tensor::fromNative(std::span<const std::complex<double>>(componentwiseExpected)),
-                 componentwiseComplex)
-             .passed(),
-        "Complex allclose did not apply magnitude tolerance.");
+    require(!compare(Tensor::copyNativeStorage(
+                         std::span<const std::complex<double>>(componentwiseObserved)),
+                     Tensor::copyNativeStorage(
+                         std::span<const std::complex<double>>(componentwiseExpected)),
+                     componentwiseComplex)
+                 .passed(),
+            "Complex allclose did not apply magnitude tolerance.");
     componentwiseComplex.complexPointwiseMode = ComplexPointwiseMode::Componentwise;
     require(
-        compare(Tensor::fromNative(std::span<const std::complex<double>>(componentwiseObserved)),
-                Tensor::fromNative(std::span<const std::complex<double>>(componentwiseExpected)),
-                componentwiseComplex)
+        compare(
+            Tensor::copyNativeStorage(std::span<const std::complex<double>>(componentwiseObserved)),
+            Tensor::copyNativeStorage(std::span<const std::complex<double>>(componentwiseExpected)),
+            componentwiseComplex)
             .passed(),
         "Explicit componentwise complex comparison rejected passing components.");
 
@@ -1655,12 +1590,13 @@ void testComparisonProgram() {
     magnitudePointwiseOnly.computePointwiseStatistics = false;
     magnitudePointwiseOnly.computeFrobenius = false;
     magnitudePointwiseOnly.selection.indexOrder = IndexOrder::FirstDimensionFastest;
-    require(
-        !compare(Tensor::fromNative(std::span<const std::complex<double>>(componentwiseObserved)),
-                 Tensor::fromNative(std::span<const std::complex<double>>(componentwiseExpected)),
-                 magnitudePointwiseOnly)
-             .passed(),
-        "The optimized pointwise-only path ignored complex magnitude mode.");
+    require(!compare(Tensor::copyNativeStorage(
+                         std::span<const std::complex<double>>(componentwiseObserved)),
+                     Tensor::copyNativeStorage(
+                         std::span<const std::complex<double>>(componentwiseExpected)),
+                     magnitudePointwiseOnly)
+                 .passed(),
+            "The optimized pointwise-only path ignored complex magnitude mode.");
 
     const std::array<std::complex<double>, 1> magnitudeBoundaryObserved{
         std::complex<double>(0.0, 0.0)};
@@ -1668,20 +1604,20 @@ void testComparisonProgram() {
         std::complex<double>(3.0, 4.0)};
     ComparisonOptions magnitudeBoundary = allCloseComparisonOptions(0.0, 1.0);
     magnitudeBoundary.computeFrobenius = false;
-    require(
-        compare(
-            Tensor::fromNative(std::span<const std::complex<double>>(magnitudeBoundaryObserved)),
-            Tensor::fromNative(std::span<const std::complex<double>>(magnitudeBoundaryExpected)),
-            magnitudeBoundary)
-            .passed(),
-        "Complex allclose rejected its inclusive magnitude boundary.");
-    require(
-        !compare(
-             Tensor::fromNative(std::span<const std::complex<double>>(magnitudeBoundaryExpected)),
-             Tensor::fromNative(std::span<const std::complex<double>>(magnitudeBoundaryObserved)),
-             magnitudeBoundary)
-             .passed(),
-        "Complex allclose lost expected-magnitude asymmetry.");
+    require(compare(Tensor::copyNativeStorage(
+                        std::span<const std::complex<double>>(magnitudeBoundaryObserved)),
+                    Tensor::copyNativeStorage(
+                        std::span<const std::complex<double>>(magnitudeBoundaryExpected)),
+                    magnitudeBoundary)
+                .passed(),
+            "Complex allclose rejected its inclusive magnitude boundary.");
+    require(!compare(Tensor::copyNativeStorage(
+                         std::span<const std::complex<double>>(magnitudeBoundaryExpected)),
+                     Tensor::copyNativeStorage(
+                         std::span<const std::complex<double>>(magnitudeBoundaryObserved)),
+                     magnitudeBoundary)
+                 .passed(),
+            "Complex allclose lost expected-magnitude asymmetry.");
 
     const double quietNaN = std::numeric_limits<double>::quiet_NaN();
     const std::array<std::complex<double>, 1> crossComponentNaNObserved{
@@ -1691,8 +1627,8 @@ void testComparisonProgram() {
     ComparisonOptions magnitudeEqualNaNs = allCloseComparisonOptions(0.0, 0.0, true);
     magnitudeEqualNaNs.computeFrobenius = false;
     const ComparisonResult crossComponentNaNResult = compare(
-        Tensor::fromNative(std::span<const std::complex<double>>(crossComponentNaNObserved)),
-        Tensor::fromNative(std::span<const std::complex<double>>(crossComponentNaNExpected)),
+        Tensor::copyNativeStorage(std::span<const std::complex<double>>(crossComponentNaNObserved)),
+        Tensor::copyNativeStorage(std::span<const std::complex<double>>(crossComponentNaNExpected)),
         magnitudeEqualNaNs);
     require(crossComponentNaNResult.passed() && crossComponentNaNResult.matchedNaNs == 1,
             "Complex magnitude comparison did not match logical NaN values.");
@@ -1701,15 +1637,15 @@ void testComparisonProgram() {
     const std::array<std::complex<double>, 1> complexInfinity{
         std::complex<double>(infinity, infinity)};
     const ComparisonResult complexInfinityResult =
-        compare(Tensor::fromNative(std::span<const std::complex<double>>(complexInfinity)),
-                Tensor::fromNative(std::span<const std::complex<double>>(complexInfinity)),
+        compare(Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexInfinity)),
+                Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexInfinity)),
                 magnitudeEqualNaNs);
     require(complexInfinityResult.passed() && complexInfinityResult.matchedInfinities == 1,
             "Complex magnitude comparison did not count a matched infinity as one logical value.");
     ComparisonOptions magnitudeInfinityWithFrobenius = allCloseComparisonOptions(0.0, 0.0, true);
     const ComparisonResult complexInfinityWithFrobeniusResult =
-        compare(Tensor::fromNative(std::span<const std::complex<double>>(complexInfinity)),
-                Tensor::fromNative(std::span<const std::complex<double>>(complexInfinity)),
+        compare(Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexInfinity)),
+                Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexInfinity)),
                 magnitudeInfinityWithFrobenius);
     require(complexInfinityWithFrobeniusResult.passed() &&
                 complexInfinityWithFrobeniusResult.matchedInfinities == 1,
@@ -1721,9 +1657,9 @@ void testComparisonProgram() {
         std::complex<double>(infinity, 2.0)};
     ComparisonOptions permissiveComplexInfinity = allCloseComparisonOptions(infinity, infinity);
     permissiveComplexInfinity.computeFrobenius = false;
-    require(!compare(Tensor::fromNative(
+    require(!compare(Tensor::copyNativeStorage(
                          std::span<const std::complex<double>>(mismatchedComplexInfinityObserved)),
-                     Tensor::fromNative(
+                     Tensor::copyNativeStorage(
                          std::span<const std::complex<double>>(mismatchedComplexInfinityExpected)),
                      permissiveComplexInfinity)
                  .passed(),
@@ -1733,13 +1669,13 @@ void testComparisonProgram() {
     const std::array<std::complex<double>, 1> mixedComplex{std::complex<double>(3.0, 4.0)};
     ComparisonOptions mixedMagnitude = allCloseComparisonOptions(0.0, 1.0);
     mixedMagnitude.computeFrobenius = false;
-    require(compare(Tensor::fromNative(std::span<const double>(mixedReal)),
-                    Tensor::fromNative(std::span<const std::complex<double>>(mixedComplex)),
+    require(compare(Tensor::copyNativeStorage(std::span<const double>(mixedReal)),
+                    Tensor::copyNativeStorage(std::span<const std::complex<double>>(mixedComplex)),
                     mixedMagnitude)
                 .passed(),
             "Mixed real/complex comparison did not scale tolerance by the complex reference.");
-    require(!compare(Tensor::fromNative(std::span<const std::complex<double>>(mixedComplex)),
-                     Tensor::fromNative(std::span<const double>(mixedReal)), mixedMagnitude)
+    require(!compare(Tensor::copyNativeStorage(std::span<const std::complex<double>>(mixedComplex)),
+                     Tensor::copyNativeStorage(std::span<const double>(mixedReal)), mixedMagnitude)
                  .passed(),
             "Mixed real/complex comparison lost expected-magnitude asymmetry.");
 
@@ -1750,10 +1686,10 @@ void testComparisonProgram() {
     ComparisonOptions signedZeroNaN = allCloseComparisonOptions(0.0, 0.0, true);
     signedZeroNaN.equalSignedZero = false;
     signedZeroNaN.computeFrobenius = false;
-    const ComparisonResult signedZeroNaNResult =
-        compare(Tensor::fromNative(std::span<const std::complex<double>>(signedZeroNaNObserved)),
-                Tensor::fromNative(std::span<const std::complex<double>>(signedZeroNaNExpected)),
-                signedZeroNaN);
+    const ComparisonResult signedZeroNaNResult = compare(
+        Tensor::copyNativeStorage(std::span<const std::complex<double>>(signedZeroNaNObserved)),
+        Tensor::copyNativeStorage(std::span<const std::complex<double>>(signedZeroNaNExpected)),
+        signedZeroNaN);
     require(signedZeroNaNResult.passed() && signedZeroNaNResult.matchedNaNs == 1 &&
                 signedZeroNaNResult.signedZeroMismatches == 0,
             "Logical complex NaN matching did not precede signed-zero classification.");
@@ -1763,8 +1699,8 @@ void testComparisonProgram() {
     const std::array<double, 1> closeObserved{1.00009};
     const std::array<double, 1> closeExpected{1.0};
     const auto tolerance = findAllCloseTolerance(
-        Tensor::fromNative(std::span<const double>(closeObserved)),
-        Tensor::fromNative(std::span<const double>(closeExpected)),
+        Tensor::copyNativeStorage(std::span<const double>(closeObserved)),
+        Tensor::copyNativeStorage(std::span<const double>(closeExpected)),
         std::span<const double>(absoluteCandidates), std::span<const double>(relativeCandidates));
     require(tolerance && tolerance->absolute == 1e-4 && tolerance->relative == 0.0,
             "Allclose tolerance search selected the wrong candidate.");
@@ -1774,21 +1710,23 @@ void testComparisonProgram() {
     const std::array<std::complex<double>, 1> complexSearchExpected{std::complex<double>(0.0, 0.0)};
     const std::array<double, 1> complexSearchAbsoluteCandidates{0.1};
     const std::array<double, 1> complexSearchRelativeCandidates{0.0};
-    require(!findAllCloseTolerance(
-                Tensor::fromNative(std::span<const std::complex<double>>(complexSearchObserved)),
-                Tensor::fromNative(std::span<const std::complex<double>>(complexSearchExpected)),
-                std::span<const double>(complexSearchAbsoluteCandidates),
-                std::span<const double>(complexSearchRelativeCandidates)),
-            "Allclose tolerance search defaulted complex values to componentwise comparison.");
+    require(
+        !findAllCloseTolerance(
+            Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexSearchObserved)),
+            Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexSearchExpected)),
+            std::span<const double>(complexSearchAbsoluteCandidates),
+            std::span<const double>(complexSearchRelativeCandidates)),
+        "Allclose tolerance search defaulted complex values to componentwise comparison.");
     ComparisonOptions componentwiseSearch = allCloseComparisonOptions();
     componentwiseSearch.complexPointwiseMode = ComplexPointwiseMode::Componentwise;
-    require(findAllCloseTolerance(
-                Tensor::fromNative(std::span<const std::complex<double>>(complexSearchObserved)),
-                Tensor::fromNative(std::span<const std::complex<double>>(complexSearchExpected)),
-                std::span<const double>(complexSearchAbsoluteCandidates),
-                std::span<const double>(complexSearchRelativeCandidates), componentwiseSearch)
-                .has_value(),
-            "Allclose tolerance search did not preserve explicit componentwise comparison.");
+    require(
+        findAllCloseTolerance(
+            Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexSearchObserved)),
+            Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexSearchExpected)),
+            std::span<const double>(complexSearchAbsoluteCandidates),
+            std::span<const double>(complexSearchRelativeCandidates), componentwiseSearch)
+            .has_value(),
+        "Allclose tolerance search did not preserve explicit componentwise comparison.");
 
     std::array<float, 5> rangedSentinel{
         std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
@@ -1805,12 +1743,12 @@ void testComparisonProgram() {
         std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
         std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
         std::numeric_limits<float>::infinity()};
-    Tensor guardedView =
-        Tensor::fromNative<float>(Layout(Shape{2, 2}, {1, 3}), std::span<const float>(guarded));
+    Tensor guardedView = Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 3}),
+                                                          std::span<const float>(guarded));
     require(checkUnusedTensorStorage(guardedView, guarded.size()).passed(),
             "Unwritten tensor padding sentinel was rejected.");
     const float writtenPadding = 0.0f;
-    std::memcpy(guardedView.storage().data() + 2 * sizeof(float), &writtenPadding,
+    std::memcpy(guardedView.rawEncodedBackingStorage().data() + 2 * sizeof(float), &writtenPadding,
                 sizeof(writtenPadding));
     const auto sentinel = checkUnusedTensorStorage(guardedView, guarded.size());
     require(

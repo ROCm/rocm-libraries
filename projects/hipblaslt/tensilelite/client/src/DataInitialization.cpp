@@ -168,14 +168,14 @@ namespace TensileLite
             using namespace roc::host_validation;
 
             const ScalarType type   = swizzleScalarType(dataType, kind);
-            Layout           layout = Layout::contiguous(shape);
+            Layout           layout = Layout::contiguousLastDimensionFastest(shape);
             const size_t     bytes  = storageBytesForLayout(type, layout);
             if(source == nullptr && bytes != 0)
                 throw std::invalid_argument("Cannot swizzle a null tensor buffer.");
 
-            return Tensor(type,
-                          std::move(layout),
-                          std::span<const std::byte>(static_cast<const std::byte*>(source), bytes));
+            return Tensor::copyEncodedBackingStorage(
+                type, std::move(layout),
+                std::span<const std::byte>(static_cast<const std::byte*>(source), bytes));
         }
 
         void* copySwizzleTensor(const TensorDescriptor&             descriptor,
@@ -185,7 +185,7 @@ namespace TensileLite
         {
             const size_t bytes
                 = roc::host_validation::storageBytesForLayout(source.type(), source.layout());
-            const auto storage = source.storage();
+            const auto storage = source.rawEncodedBackingStorage();
             if(storage.size() != bytes)
                 throw std::runtime_error("Swizzled tensor has an unexpected storage byte count.");
             if(destination == nullptr && bytes != 0)
@@ -2561,13 +2561,13 @@ namespace TensileLite
                                                                 SwizzleTensorKind::Data,
                                                                 Shape{tiledSize, unrolledSize},
                                                                 p.cpuInput.valid.get());
-                        Tensor paddedTensor = tmpTensor.pad(paddedShape);
-                        Tensor reshaped = paddedTensor.reshape(Shape{paddedShape[0] / MiM_N,
+                        Tensor paddedTensor = tmpTensor.copyWithZeroPadding(paddedShape);
+                        Tensor reshaped = paddedTensor.reshapeSharingStorage(Shape{paddedShape[0] / MiM_N,
                                                                      MiM_N,
                                                                      paddedShape[1] / (MiK * PackK),
                                                                      MiK / MiKv,
                                                                      MiKv * PackK});
-                        Tensor permuted = reshaped.permute(dataSwizzlePermutation);
+                        Tensor permuted = reshaped.copyWithPermutedDimensions(dataSwizzlePermutation);
                         ptr             = copySwizzleTensor(
                             desc, p.gpuInput.valid.get(), permuted, hipMemcpyHostToDevice);
                         g_swizzleCache.emplace(swizzleKey, std::move(permuted));
@@ -2630,10 +2630,10 @@ namespace TensileLite
                             Shape paddedShape{
                                 batch, tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
 
-                            Tensor paddedTensor = tmpTensor.pad(paddedShape);
-                            Tensor reshaped     = paddedTensor.reshape(
+                            Tensor paddedTensor = tmpTensor.copyWithZeroPadding(paddedShape);
+                            Tensor reshaped     = paddedTensor.reshapeSharingStorage(
                                 Shape{batch, paddedShape[1], paddedShape[2] / dimk, dimk});
-                            Tensor permuted = reshaped.permute(unrollMajorMXSwizzlePermutation);
+                            Tensor permuted = reshaped.copyWithPermutedDimensions(unrollMajorMXSwizzlePermutation);
                             ptr             = copySwizzleTensor(
                                 desc, p.gpuInput.valid.get(), permuted, hipMemcpyHostToDevice);
                         }
@@ -2650,10 +2650,10 @@ namespace TensileLite
                             Shape paddedShape{
                                 batch, (unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
 
-                            Tensor paddedTensor = tmpTensor.pad(paddedShape);
-                            Tensor reshaped     = paddedTensor.reshape(
+                            Tensor paddedTensor = tmpTensor.copyWithZeroPadding(paddedShape);
+                            Tensor reshaped     = paddedTensor.reshapeSharingStorage(
                                 Shape{batch, paddedShape[1] / dimk, dimk, paddedShape[2]});
-                            Tensor permuted = reshaped.permute(tiledMajorMXSwizzlePermutation);
+                            Tensor permuted = reshaped.copyWithPermutedDimensions(tiledMajorMXSwizzlePermutation);
                             ptr             = copySwizzleTensor(
                                 desc, p.gpuInput.valid.get(), permuted, hipMemcpyHostToDevice);
                         }

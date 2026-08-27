@@ -23,8 +23,10 @@ void require(bool condition, const char* message) {
 
 bool sameStorage(const Tensor& first, const Tensor& second) {
     return first.type() == second.type() && first.layout() == second.layout() &&
-           first.storage().size() == second.storage().size() &&
-           std::equal(first.storage().begin(), first.storage().end(), second.storage().begin());
+           first.rawEncodedBackingStorage().size() == second.rawEncodedBackingStorage().size() &&
+           std::equal(first.rawEncodedBackingStorage().begin(),
+                      first.rawEncodedBackingStorage().end(),
+                      second.rawEncodedBackingStorage().begin());
 }
 
 bool sameResult(const MxGenerationResult& first, const MxGenerationResult& second) {
@@ -117,7 +119,7 @@ int main() {
                      scalarTypeInfo(dataType).storageBits +
                  7) /
                 8;
-            require(result.data.storage().size() == expectedBytes,
+            require(result.data.rawEncodedBackingStorage().size() == expectedBytes,
                     "MX padded data-storage size mismatch.");
         }
     }
@@ -151,29 +153,9 @@ int main() {
         const MxGenerationResult result = generateMx(fp6PackingTail);
         checkReference(fp6PackingTail, result);
         const size_t physicalElements = static_cast<size_t>(leadingDimension);
-        require(result.data.storage().size() == (physicalElements * 6 + 7) / 8,
+        require(result.data.rawEncodedBackingStorage().size() == (physicalElements * 6 + 7) / 8,
                 "FP6 packing-tail storage size mismatch.");
     }
-
-    MxGenerationProblem allocatorProblem;
-    allocatorProblem.dataType = ScalarType::Float6E3M2;
-    allocatorProblem.scaleType = ScalarType::E8M0;
-    allocatorProblem.shape = Shape{5, 1};
-    allocatorProblem.leadingDimension = 7;
-    allocatorProblem.blockAxis = 0;
-    allocatorProblem.blockSize = 4;
-    std::vector<size_t> allocationSizes;
-    const MxGenerationResult allocated = generateMx(allocatorProblem, [&](size_t bytes) {
-        allocationSizes.push_back(bytes);
-        return TensorStorage::allocate(bytes);
-    });
-    require(allocationSizes.size() == 4,
-            "MX allocator overload did not allocate all four result tensors.");
-    require(allocationSizes[0] == allocated.data.storage().size() &&
-                allocationSizes[1] == allocated.scales.storage().size() &&
-                allocationSizes[2] == allocated.scaleIndices.storage().size() &&
-                allocationSizes[3] == allocated.reference.storage().size(),
-            "MX allocator received a size different from its result tensor storage.");
 
     const std::array deterministicRecipes{
         MxDataRecipe::identity(),
@@ -230,7 +212,8 @@ int main() {
         constantScale.scale = mode;
         const MxGenerationResult result = generateMx(constantScale);
         for (size_t scaleIndex = 0; scaleIndex < result.scales.shape()[0]; ++scaleIndex)
-            require(std::to_integer<uint8_t>(result.scales.storage()[scaleIndex]) == expectedRaw,
+            require(std::to_integer<uint8_t>(
+                        result.scales.rawEncodedBackingStorage()[scaleIndex]) == expectedRaw,
                     "MX explicit constant-scale generation mismatch.");
         checkReference(constantScale, result);
     }
@@ -239,7 +222,8 @@ int main() {
     maximumScale.scale = MxScaleGenerationMode::Maximum;
     const MxGenerationResult maximumScaled = generateMx(maximumScale);
     for (size_t scaleIndex = 0; scaleIndex < maximumScaled.scales.shape()[0]; ++scaleIndex)
-        require(std::to_integer<uint8_t>(maximumScaled.scales.storage()[scaleIndex]) == 0xfeU,
+        require(std::to_integer<uint8_t>(
+                    maximumScaled.scales.rawEncodedBackingStorage()[scaleIndex]) == 0xfeU,
                 "MX explicit maximum-scale generation mismatch.");
     checkReference(maximumScale, maximumScaled);
 
@@ -247,7 +231,8 @@ int main() {
     nanScale.scale = MxScaleGenerationMode::NaN;
     const MxGenerationResult nanScaled = generateMx(nanScale);
     for (size_t scaleIndex = 0; scaleIndex < nanScaled.scales.shape()[0]; ++scaleIndex)
-        require(std::to_integer<uint8_t>(nanScaled.scales.storage()[scaleIndex]) == 0xffU,
+        require(std::to_integer<uint8_t>(nanScaled.scales.rawEncodedBackingStorage()[scaleIndex]) ==
+                    0xffU,
                 "MX explicit NaN-scale generation mismatch.");
     checkReference(nanScale, nanScaled);
 

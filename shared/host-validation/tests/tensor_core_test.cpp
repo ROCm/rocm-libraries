@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <roc/host_validation/tensor.hpp>
 #include <span>
 #include <stdexcept>
@@ -50,8 +51,8 @@ void requireInvalidArgument(Function function, const char* message) {
 int main() {
     using namespace roc::host_validation;
 
-    static_assert(
-        std::is_same_v<decltype(std::declval<const Tensor&>().storage()), std::span<std::byte>>);
+    static_assert(std::is_same_v<decltype(std::declval<const Tensor&>().rawEncodedBackingStorage()),
+                                 std::span<std::byte>>);
 
     const Shape shape{2, 3};
     require(shape.rank() == 2, "Shape rank mismatch.");
@@ -74,13 +75,23 @@ int main() {
                 dimensionalShape.coordinates(17, IndexOrder::LastDimensionFastest) ==
                     std::vector<size_t>({1, 1, 1}),
             "Shape coordinate conversion mismatch.");
+    const Shape overflowingLinearShape{std::numeric_limits<size_t>::max(), 2};
+    const std::array<size_t, 2> overflowingLinearCoordinates{std::numeric_limits<size_t>::max() - 1,
+                                                             1};
+    requireOverflow(
+        [&] {
+            (void)overflowingLinearShape.linearIndex(overflowingLinearCoordinates,
+                                                     IndexOrder::LastDimensionFastest);
+        },
+        "Shape linear index accepted overflowing coordinate arithmetic.");
     const Layout rowMajor = Layout::contiguousLastDimensionFastest(shape);
     const Layout columnMajor = Layout::contiguousFirstDimensionFastest(shape);
-    require(rowMajor == Layout::contiguous(shape),
+    require(rowMajor == Layout::contiguousLastDimensionFastest(shape),
             "Contiguous compatibility API changed dimension order.");
-    require(rowMajor.rank() == 2 && rowMajor.dimensions().size() == 2 && rowMajor.extent(0) == 2 &&
-                rowMajor.elementCount() == 6 && rowMajor.elementCount(0, 1) == 2 &&
-                rowMajor.elementCountExcluding(0) == 3 && rowMajor.stride(0) == 3 &&
+    require(rowMajor.shape().rank() == 2 && rowMajor.shape().dimensions().size() == 2 &&
+                rowMajor.shape().extent(0) == 2 && rowMajor.shape().elementCount() == 6 &&
+                rowMajor.shape().elementCount(0, 1) == 2 &&
+                rowMajor.shape().elementCountExcluding(0) == 3 && rowMajor.stride(0) == 3 &&
                 rowMajor.stride(1) == 1,
             "Last-dimension-fastest layout helper mismatch.");
     require(columnMajor.stride(0) == 1 && columnMajor.stride(1) == 2,
@@ -91,30 +102,16 @@ int main() {
     require(tensor.loadAs<float>({1, 2}) == 7.0f, "Owning tensor view mismatch.");
     require(tensor.layout().strides()[0] == 3 && tensor.layout().strides()[1] == 1,
             "Contiguous tensor strides mismatch.");
-    require(tensor.storage().size() == 6 * sizeof(float), "Float32 storage size mismatch.");
+    require(tensor.rawEncodedBackingStorage().size() == 6 * sizeof(float),
+            "Float32 storage size mismatch.");
 
     const std::array<float, 3> nativeValues{2.0f, 4.0f, 6.0f};
     const Tensor nativeTensor =
-        Tensor::fromNativeValues<float>(Shape{3}, std::span<const float>(nativeValues));
+        Tensor::copyNativeValues<float>(Shape{3}, std::span<const float>(nativeValues));
     require(nativeTensor.type() == ScalarType::Float32 && nativeTensor.loadAs<float>({2}) == 6.0f,
             "Native tensor factory mismatch.");
 
-    size_t allocatorCalls = 0;
-    TensorStorageAllocator allocator = [&allocatorCalls](size_t bytes) {
-        ++allocatorCalls;
-        return TensorStorage::allocate(bytes + 16);
-    };
-    Tensor allocated(ScalarType::Float32, Shape{2}, allocator);
-    require(allocatorCalls == 1 && allocated.storage().size() == 2 * sizeof(float) + 16,
-            "Tensor storage allocator contract mismatch.");
-    allocated.storeFrom({1}, 5.0f);
-    Tensor allocatedClone = allocated.clone(allocator);
-    allocatedClone.storeFrom({1}, 9.0f);
-    require(allocatorCalls == 2 && allocated.loadAs<float>({1}) == 5.0f &&
-                allocatedClone.loadAs<float>({1}) == 9.0f,
-            "Allocator-backed Tensor clone mismatch.");
-
-    Tensor uninitialized(ScalarType::Float32, Shape{2}, TensorStorage::allocateUninitialized);
+    Tensor uninitialized = Tensor::allocateUninitialized(ScalarType::Float32, Shape{2});
     uninitialized.storeFrom({0}, 3.0f);
     uninitialized.storeFrom({1}, 7.0f);
     require(uninitialized.loadAs<float>({0}) == 3.0f && uninitialized.loadAs<float>({1}) == 7.0f,
@@ -124,37 +121,77 @@ int main() {
     copied.storeFrom({1, 2}, 11.0f);
     require(tensor.loadAs<float>({1, 2}) == 11.0f,
             "Copying a tensor did not preserve shared-storage semantics.");
-    Tensor cloned = tensor.clone();
+    Tensor cloned = tensor.deepCopy();
     cloned.storeFrom({1, 2}, 13.0f);
     require(tensor.loadAs<float>({1, 2}) == 11.0f && cloned.loadAs<float>({1, 2}) == 13.0f,
             "Tensor clone did not deep-copy storage.");
+
+    auto externalOwner = std::make_shared<std::vector<std::byte>>(sizeof(float));
+    std::weak_ptr<std::vector<std::byte>> externalLifetime = externalOwner;
+    Tensor externallyShared = Tensor::shareExternalMutableBackingStorage(
+        ScalarType::Float32, Layout::contiguousLastDimensionFastest(Shape{1}), externalOwner,
+        std::span<std::byte>(*externalOwner));
+    externalOwner.reset();
+    externallyShared.storeFrom({0}, 17.0f);
+    require(!externalLifetime.expired() && externallyShared.loadAs<float>({0}) == 17.0f,
+            "Externally shared Tensor did not retain its lifetime anchor.");
+    requireInvalidArgument(
+        [&] {
+            (void)Tensor::shareExternalMutableBackingStorage(
+                ScalarType::Float32, Layout::contiguousLastDimensionFastest(Shape{1}), {},
+                externallyShared.rawEncodedBackingStorage());
+        },
+        "Externally shared Tensor accepted nonempty storage without a lifetime anchor.");
+
+    std::vector<std::byte> paddedBackingStorage(2 * sizeof(float), std::byte{0x5a});
+    Tensor paddedBacking = Tensor::takeOwnershipOfEncodedBackingStorage(
+        ScalarType::Float32, Layout::contiguousLastDimensionFastest(Shape{1}),
+        std::move(paddedBackingStorage));
+    Tensor paddedBackingCopy = paddedBacking.deepCopy();
+    require(paddedBacking.rawEncodedBackingStorage().size() == 2 * sizeof(float) &&
+                paddedBackingCopy.rawEncodedBackingStorage().size() == 2 * sizeof(float) &&
+                std::ranges::equal(paddedBacking.rawEncodedBackingStorage(),
+                                   paddedBackingCopy.rawEncodedBackingStorage()),
+            "Tensor deep copy did not preserve complete backing storage.");
+
+    const std::array<int, 4> overlappingValues{1, 2, 3, 4};
+    Tensor overlappingCopy = Tensor::copyValuesWithConversion(
+        ScalarType::Int32, Shape{4}, std::span<const int>(overlappingValues));
+    Tensor overlappingSource = overlappingCopy.shareStorageWithLayout(Layout(Shape{3}, {1}, 0));
+    Tensor overlappingDestination =
+        overlappingCopy.shareStorageWithLayout(Layout(Shape{3}, {1}, 1));
+    overlappingDestination.copyLogicalElementsFrom(overlappingSource);
+    require(overlappingCopy.loadAs<int>({0}) == 1 && overlappingCopy.loadAs<int>({1}) == 1 &&
+                overlappingCopy.loadAs<int>({2}) == 2 && overlappingCopy.loadAs<int>({3}) == 3,
+            "Overlapping Tensor copy did not preserve source values.");
 
     Tensor reshapeSource(ScalarType::Int32, Shape{2, 3});
     for (size_t row = 0; row < 2; ++row)
         for (size_t column = 0; column < 3; ++column)
             reshapeSource.storeFrom({row, column}, static_cast<int32_t>(row * 3 + column));
-    Tensor reshaped = reshapeSource.reshape(Shape{3, 2});
+    Tensor reshaped = reshapeSource.reshapeSharingStorage(Shape{3, 2});
     require(reshaped.shape() == Shape{3, 2} && reshaped.loadAs<int32_t>({1, 1}) == 3,
             "Tensor reshape changed logical linear order.");
     reshaped.storeFrom({2, 1}, 19);
     require(reshapeSource.loadAs<int32_t>({1, 2}) == 19,
             "Tensor reshape did not return a shallow alias.");
-    requireInvalidArgument([&] { (void)reshapeSource.reshape(Shape{7}); },
+    requireInvalidArgument([&] { (void)reshapeSource.reshapeSharingStorage(Shape{7}); },
                            "Tensor reshape accepted a different element count.");
 
     Tensor packedPaddingSource(ScalarType::Int4, Shape{3});
     packedPaddingSource.storeFrom({0}, -8);
     packedPaddingSource.storeFrom({1}, -3);
     packedPaddingSource.storeFrom({2}, 7);
-    const Tensor packedPadded = packedPaddingSource.pad(Shape{5});
-    require(packedPadded.shape() == Shape{5} && packedPadded.storage().size() == 3 &&
+    const Tensor packedPadded = packedPaddingSource.copyWithZeroPadding(Shape{5});
+    require(packedPadded.shape() == Shape{5} &&
+                packedPadded.rawEncodedBackingStorage().size() == 3 &&
                 packedPadded.loadAs<int32_t>({0}) == -8 &&
                 packedPadded.loadAs<int32_t>({1}) == -3 && packedPadded.loadAs<int32_t>({2}) == 7 &&
                 packedPadded.loadAs<int32_t>({3}) == 0 && packedPadded.loadAs<int32_t>({4}) == 0,
             "Tensor padding did not preserve packed values and zero-fill new elements.");
-    requireInvalidArgument([&] { (void)packedPaddingSource.pad(Shape{2}); },
+    requireInvalidArgument([&] { (void)packedPaddingSource.copyWithZeroPadding(Shape{2}); },
                            "Tensor padding accepted a shrinking shape.");
-    requireInvalidArgument([&] { (void)packedPaddingSource.pad(Shape{3, 1}); },
+    requireInvalidArgument([&] { (void)packedPaddingSource.copyWithZeroPadding(Shape{3, 1}); },
                            "Tensor padding accepted a different rank.");
 
     Tensor permutationSource(ScalarType::Int12, Shape{2, 3});
@@ -162,8 +199,9 @@ int main() {
         for (size_t column = 0; column < 3; ++column)
             permutationSource.storeFrom({row, column}, static_cast<int32_t>(100 * row + column));
     const std::array<size_t, 2> transpose{1, 0};
-    const Tensor permutationResult = permutationSource.permute(transpose);
-    require(permutationResult.shape() == Shape{3, 2} && permutationResult.storage().size() == 9,
+    const Tensor permutationResult = permutationSource.copyWithPermutedDimensions(transpose);
+    require(permutationResult.shape() == Shape{3, 2} &&
+                permutationResult.rawEncodedBackingStorage().size() == 9,
             "Tensor permutation produced the wrong packed output geometry.");
     for (size_t row = 0; row < 2; ++row)
         for (size_t column = 0; column < 3; ++column)
@@ -173,12 +211,15 @@ int main() {
     const std::array<size_t, 2> duplicatePermutation{0, 0};
     const std::array<size_t, 2> outOfRangePermutation{0, 2};
     const std::array<size_t, 1> wrongRankPermutation{0};
-    requireInvalidArgument([&] { (void)permutationSource.permute(duplicatePermutation); },
-                           "Tensor permutation accepted a duplicate dimension.");
-    requireInvalidArgument([&] { (void)permutationSource.permute(outOfRangePermutation); },
-                           "Tensor permutation accepted an out-of-range dimension.");
-    requireInvalidArgument([&] { (void)permutationSource.permute(wrongRankPermutation); },
-                           "Tensor permutation accepted the wrong rank.");
+    requireInvalidArgument(
+        [&] { (void)permutationSource.copyWithPermutedDimensions(duplicatePermutation); },
+        "Tensor permutation accepted a duplicate dimension.");
+    requireInvalidArgument(
+        [&] { (void)permutationSource.copyWithPermutedDimensions(outOfRangePermutation); },
+        "Tensor permutation accepted an out-of-range dimension.");
+    requireInvalidArgument(
+        [&] { (void)permutationSource.copyWithPermutedDimensions(wrongRankPermutation); },
+        "Tensor permutation accepted the wrong rank.");
 
     Tensor packedCopySource(ScalarType::Int4, Shape{4});
     packedCopySource.storeFrom({0}, -8);
@@ -186,10 +227,10 @@ int main() {
     packedCopySource.storeFrom({2}, 2);
     packedCopySource.storeFrom({3}, 7);
     Tensor packedCopyDestination(ScalarType::Int4, Shape{4});
-    for (size_t index = 0; index < packedCopyDestination.size(); ++index)
+    for (size_t index = 0; index < packedCopyDestination.elementCount(); ++index)
         packedCopyDestination.storeFrom({index}, 1);
     const std::array<size_t, 2> selectedCopyIndices{1, 3};
-    packedCopyDestination.copyFrom(packedCopySource, selectedCopyIndices);
+    packedCopyDestination.copySelectedElementsFrom(packedCopySource, selectedCopyIndices);
     require(packedCopyDestination.loadAs<int32_t>({0}) == 1 &&
                 packedCopyDestination.loadAs<int32_t>({1}) == -3 &&
                 packedCopyDestination.loadAs<int32_t>({2}) == 1 &&
@@ -200,9 +241,9 @@ int main() {
         static_cast<std::byte>(0x11),
         static_cast<std::byte>(0x11),
     };
-    packedCopySource.copyTo(packedCopyBytes, selectedCopyIndices);
-    const Tensor selectedPackedCopy(
-        ScalarType::Int4, Layout::contiguous(Shape{4}),
+    packedCopySource.copySelectedElementsTo(packedCopyBytes, selectedCopyIndices);
+    const Tensor selectedPackedCopy = Tensor::copyEncodedBackingStorage(
+        ScalarType::Int4, Layout::contiguousLastDimensionFastest(Shape{4}),
         std::span<std::byte>(packedCopyBytes.data(), packedCopyBytes.size()));
     require(selectedPackedCopy.loadAs<int32_t>({0}) == 1 &&
                 selectedPackedCopy.loadAs<int32_t>({1}) == -3 &&
@@ -211,24 +252,33 @@ int main() {
             "Selected Tensor copy-to changed unselected packed elements.");
 
     std::array<std::byte, 2> fullPackedCopy{};
-    packedCopySource.copyTo(fullPackedCopy);
+    packedCopySource.copyAddressedStorageTo(fullPackedCopy);
     require(std::equal(fullPackedCopy.begin(), fullPackedCopy.end(),
-                       packedCopySource.storage().begin()),
+                       packedCopySource.rawEncodedBackingStorage().begin()),
             "Full Tensor copy-to changed packed storage.");
+
+    Tensor packedBoundarySource(ScalarType::Int4, Shape{2});
+    packedBoundarySource.storeFrom({0}, 1);
+    packedBoundarySource.storeFrom({1}, 7);
+    const Tensor highNibble = packedBoundarySource.shareStorageWithLayout(Layout(Shape{1}, {1}, 1));
+    std::array<std::byte, 1> packedBoundaryDestination{std::byte{0x02}};
+    highNibble.copyAddressedStorageTo(packedBoundaryDestination);
+    require(packedBoundaryDestination[0] == std::byte{0x72},
+            "Packed Tensor copy-to changed bits outside the addressed layout.");
 
     const Layout offsetLayout(Shape{2}, {1}, 2);
     Tensor offsetCopySource(ScalarType::Int32, offsetLayout);
-    std::fill(offsetCopySource.storage().begin(), offsetCopySource.storage().end(),
-              static_cast<std::byte>(0x7f));
+    std::fill(offsetCopySource.rawEncodedBackingStorage().begin(),
+              offsetCopySource.rawEncodedBackingStorage().end(), static_cast<std::byte>(0x7f));
     offsetCopySource.storeFrom({0}, 3);
     offsetCopySource.storeFrom({1}, 5);
     std::array<std::byte, 4 * sizeof(int32_t)> offsetCopyDestination{};
-    offsetCopySource.copyTo(offsetCopyDestination);
+    offsetCopySource.copyAddressedStorageTo(offsetCopyDestination);
     require(std::all_of(offsetCopyDestination.begin(),
                         offsetCopyDestination.begin() + 2 * sizeof(int32_t),
                         [](std::byte value) { return value == std::byte{0}; }),
             "Tensor copy-to changed storage before the layout's first element.");
-    const Tensor offsetCopyResult(
+    const Tensor offsetCopyResult = Tensor::copyEncodedBackingStorage(
         ScalarType::Int32, offsetLayout,
         std::span<std::byte>(offsetCopyDestination.data(), offsetCopyDestination.size()));
     require(
@@ -236,10 +286,13 @@ int main() {
         "Tensor copy-to missed an offset layout value.");
 
     std::array<std::byte, 1> undersizedCopyDestination{};
-    requireInvalidArgument([&] { packedCopySource.copyTo(undersizedCopyDestination); },
-                           "Full Tensor copy-to accepted undersized storage.");
     requireInvalidArgument(
-        [&] { packedCopySource.copyTo(undersizedCopyDestination, selectedCopyIndices); },
+        [&] { packedCopySource.copyAddressedStorageTo(undersizedCopyDestination); },
+        "Full Tensor copy-to accepted undersized storage.");
+    requireInvalidArgument(
+        [&] {
+            packedCopySource.copySelectedElementsTo(undersizedCopyDestination, selectedCopyIndices);
+        },
         "Selected Tensor copy-to accepted undersized storage.");
 
     Tensor paddedTensor(ScalarType::Int32, Layout(Shape{2, 2}, std::vector<ptrdiff_t>{1, 3}, 1));
@@ -247,7 +300,7 @@ int main() {
     paddedTensor.storeFrom({1, 1}, 9);
     require(paddedTensor.loadAs<int32_t>({0, 0}) == 4 && paddedTensor.loadAs<int32_t>({1, 1}) == 9,
             "Strided tensor layout mismatch.");
-    requireInvalidArgument([&] { (void)paddedTensor.reshape(Shape{4}); },
+    requireInvalidArgument([&] { (void)paddedTensor.reshapeSharingStorage(Shape{4}); },
                            "Tensor reshape accepted a noncontiguous layout.");
 
     Tensor paddedAlias = paddedTensor;
@@ -259,11 +312,12 @@ int main() {
             "Const tensor handle did not retain shallow mutability.");
 
     const std::array<int32_t, 3> reversedStorage{1, 2, 3};
-    const Tensor reversed(ScalarType::Int32, Layout(Shape{3}, std::vector<ptrdiff_t>{-1}, 2),
-                          std::as_bytes(std::span<const int32_t>(reversedStorage)));
+    const Tensor reversed = Tensor::copyEncodedBackingStorage(
+        ScalarType::Int32, Layout(Shape{3}, std::vector<ptrdiff_t>{-1}, 2),
+        std::as_bytes(std::span<const int32_t>(reversedStorage)));
     require(reversed.loadAs<int32_t>({0}) == 3 && reversed.loadAs<int32_t>({2}) == 1,
             "Negative-stride tensor layout mismatch.");
-    const Tensor reversedFloat = reversed.to(ScalarType::Float32);
+    const Tensor reversedFloat = reversed.copyConvertedTo(ScalarType::Float32);
     require(reversedFloat.layout() == reversed.layout() &&
                 reversedFloat.loadAs<float>({0}) == 3.0f &&
                 reversedFloat.loadAs<float>({2}) == 1.0f,
@@ -316,9 +370,9 @@ int main() {
     }
 
     const std::array<float, 2> conversionSource{1.1f, -2.25f};
-    const Tensor convertedBFloat16 =
-        Tensor::fromNativeValues<float>(Shape{2}, conversionSource).to(ScalarType::BFloat16);
-    const Tensor convertedBack = convertedBFloat16.to(ScalarType::Float32);
+    const Tensor convertedBFloat16 = Tensor::copyNativeValues<float>(Shape{2}, conversionSource)
+                                         .copyConvertedTo(ScalarType::BFloat16);
+    const Tensor convertedBack = convertedBFloat16.copyConvertedTo(ScalarType::Float32);
     requireNear(convertedBack.loadAs<float>({0}), 1.1015625f, 0.0f,
                 "Tensor conversion did not apply BFloat16 rounding.");
     requireNear(convertedBack.loadAs<float>({1}), -2.25f, 0.0f,
@@ -331,7 +385,7 @@ int main() {
     int4View.storeFrom({2}, 0);
     int4View.storeFrom({3}, 7);
     int4View.storeFrom({4}, 9);
-    require(int4.storage().size() == 3, "Int4 packed storage size mismatch.");
+    require(int4.rawEncodedBackingStorage().size() == 3, "Int4 packed storage size mismatch.");
     require(int4.loadAs<int32_t>({0}) == -8 && int4.loadAs<int32_t>({1}) == -3 &&
                 int4.loadAs<int32_t>({3}) == 7 && int4.loadAs<int32_t>({4}) == 7,
             "Int4 packed codec mismatch.");
@@ -340,7 +394,8 @@ int main() {
     Tensor int12(ScalarType::Int12, Shape{2});
     int12.storeFrom({0}, -2048);
     int12.storeFrom({1}, 2047);
-    require(scalarTypeInfo(ScalarType::Int12).isPacked() && int12.storage().size() == 3,
+    require(scalarTypeInfo(ScalarType::Int12).isPacked() &&
+                int12.rawEncodedBackingStorage().size() == 3,
             "Int12 packed storage size mismatch.");
     require(int12.loadAs<int32_t>({0}) == -2048 && int12.loadAs<int32_t>({1}) == 2047,
             "Int12 cross-byte codec mismatch.");
@@ -350,12 +405,13 @@ int main() {
     fp4.storeFrom({1}, -0.5f);
     fp4.storeFrom({2}, 1.5f);
     fp4.storeFrom({3}, 6.0f);
-    const Tensor fp4Copy = fp4.to(ScalarType::Float4E2M1);
-    require(
-        fp4Copy.storage().size() == fp4.storage().size() &&
-            std::equal(fp4Copy.storage().begin(), fp4Copy.storage().end(), fp4.storage().begin()),
-        "Same-type tensor conversion changed raw storage.");
-    const Tensor fp4Float = fp4.to(ScalarType::Float32);
+    const Tensor fp4Copy = fp4.copyConvertedTo(ScalarType::Float4E2M1);
+    require(fp4Copy.rawEncodedBackingStorage().size() == fp4.rawEncodedBackingStorage().size() &&
+                std::equal(fp4Copy.rawEncodedBackingStorage().begin(),
+                           fp4Copy.rawEncodedBackingStorage().end(),
+                           fp4.rawEncodedBackingStorage().begin()),
+            "Same-type tensor conversion changed raw storage.");
+    const Tensor fp4Float = fp4.copyConvertedTo(ScalarType::Float32);
     requireNear(fp4Float.loadAs<float>({0}), -6.0f, 0.0f,
                 "Packed tensor conversion minimum mismatch.");
     requireNear(fp4Float.loadAs<float>({2}), 1.5f, 0.0f,

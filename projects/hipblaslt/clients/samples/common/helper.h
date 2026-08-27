@@ -97,7 +97,7 @@ namespace hipblaslt_sample_detail
         auto generated = hipblaslt::host_validation::tensorFromMutableStorage(
             values,
             elements,
-            roc::host_validation::Layout::contiguous(roc::host_validation::Shape{elements}));
+            roc::host_validation::Layout::contiguousLastDimensionFastest(roc::host_validation::Shape{elements}));
         roc::host_validation::generate(generated, recipe);
         hipblaslt::host_validation::copyTensorStorageTo(values, elements, generated);
     }

@@ -135,12 +135,12 @@ void compare(const char* title, const std::vector<T>& cpuOutput, const std::vect
         = roc::host_validation::compare(hipblaslt::host_validation::tensorFromStorage(
                                             cpuOutput.data(),
                                             cpuOutput.size(),
-                                            roc::host_validation::Layout::contiguous(
+                                            roc::host_validation::Layout::contiguousLastDimensionFastest(
                                                 roc::host_validation::Shape{cpuOutput.size()})),
                                         hipblaslt::host_validation::tensorFromStorage(
                                             refOutput.data(),
                                             refOutput.size(),
-                                            roc::host_validation::Layout::contiguous(
+                                            roc::host_validation::Layout::contiguousLastDimensionFastest(
                                                 roc::host_validation::Shape{refOutput.size()})));
     std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
@@ -181,10 +181,10 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
 
     using namespace roc::host_validation;
     Tensor referenceOutput = hipblaslt::host_validation::tensorFromMutableStorage(
-        refOutput.data(), refOutput.size(), Layout::contiguous(Shape{}));
+        refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
     referenceMaximumAbsolute(
         hipblaslt::host_validation::tensorFromStorage(
-            cpuInput.data(), cpuInput.size(), Layout::contiguous(Shape{numElements})),
+            cpuInput.data(), cpuInput.size(), Layout::contiguousLastDimensionFastest(Shape{numElements})),
         referenceOutput,
         ScalarType::Float32);
     hipblaslt::host_validation::copyTensorStorageTo(

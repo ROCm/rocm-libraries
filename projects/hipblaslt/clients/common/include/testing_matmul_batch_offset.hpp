@@ -282,7 +282,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
             scalarType<Tc>());
         problem.epilogue.alpha = static_cast<double>(alpha);
         problem.epilogue.beta  = static_cast<double>(beta);
-        result.copyFrom(referenceGemm(problem).output);
+        result.copyLogicalElementsFrom(referenceGemm(problem).output);
         copyTensorStorageTo(
             expectedD.data() + batch * dPlan.matrixElements, dPlan.matrixElements, result);
     }

@@ -12,9 +12,10 @@ int main() {
     const std::array<float, 4> b{5, 7, 6, 8};
     const Layout layout(Shape{2, 2}, {1, 2});
     Tensor output(ScalarType::Float32, layout);
-    GemmRequest problem(GemmOperand(Tensor::fromNative<float>(layout, std::span<const float>(a))),
-                        GemmOperand(Tensor::fromNative<float>(layout, std::span<const float>(b))),
-                        output, output, ScalarType::Float32);
+    GemmRequest problem(
+        GemmOperand(Tensor::copyNativeStorage<float>(layout, std::span<const float>(a))),
+        GemmOperand(Tensor::copyNativeStorage<float>(layout, std::span<const float>(b))), output,
+        output, ScalarType::Float32);
     BlasGemmBackend backend;
     referenceGemm(problem,
                   {
