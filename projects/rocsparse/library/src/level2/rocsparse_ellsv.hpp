@@ -47,8 +47,8 @@ namespace rocsparse
                                     rocsparse_const_spmat_descr A,
                                     rocsparse_analysis_policy   analysis_policy,
                                     rocsparse_ellsv_info*       p_ellsv_info,
-                                    void*                       temp_buffer,
-                                    size_t                      buffer_size);
+                                    size_t                      buffer_size,
+                                    void*                       temp_buffer);
 
     rocsparse_status ellsv_solve_buffer_size(rocsparse_handle            handle,
                                              rocsparse_operation         trans,
@@ -66,8 +66,8 @@ namespace rocsparse
                                  rocsparse_const_dnvec_descr x,
                                  rocsparse_dnvec_descr       y,
                                  rocsparse_ellsv_info        ellsv_info,
-                                 void*                       temp_buffer,
-                                 size_t                      buffer_size);
+                                 size_t                      buffer_size,
+                                 void*                       temp_buffer);
 
     inline size_t ellsv_align256(size_t bytes)
     {

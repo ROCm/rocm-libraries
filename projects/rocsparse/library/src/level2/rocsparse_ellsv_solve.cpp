@@ -86,8 +86,8 @@ namespace rocsparse
                                                       rocsparse_dnvec_descr       y,
                                                       const void*                 row_map,
                                                       void*                       zero_pivot,
-                                                      void*                       temp_buffer,
                                                       size_t                      buffer_size,
+                                                      void*                       temp_buffer,
                                                       bool                        is_host_mode)
     {
         constexpr uint32_t BLOCKSIZE = 1024;
@@ -296,8 +296,8 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
                                         rocsparse_const_dnvec_descr x,
                                         rocsparse_dnvec_descr       y,
                                         rocsparse_ellsv_info        ellsv_info,
-                                        void*                       temp_buffer,
-                                        size_t                      buffer_size)
+                                        size_t                      buffer_size,
+                                        void*                       temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -374,8 +374,8 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
                                      y,
                                      trm_info->get_row_map(),
                                      ei->get_singularity_numeric_exact()->get_position(),
-                                     temp_buffer,
                                      buffer_size,
+                                     temp_buffer,
                                      is_host_mode));
 
     return rocsparse_status_success;

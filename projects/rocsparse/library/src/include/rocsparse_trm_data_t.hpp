@@ -74,8 +74,8 @@ namespace rocsparse
                                      rocsparse_index_base      idx_base,
                                      rocsparse::trm_info_t*    info,
                                      rocsparse::pivot_info_t*  pivot_info,
-                                     void*                     temp_buffer,
-                                     size_t                    buffer_size);
+                                     size_t                    buffer_size,
+                                     void*                     temp_buffer);
 }
 
 namespace rocsparse
@@ -213,8 +213,8 @@ namespace rocsparse
                                       const void*               ell_col_ind,
                                       int64_t                   ell_width,
                                       rocsparse_index_base      idx_base,
-                                      void*                     temp_buffer,
-                                      size_t                    buffer_size)
+                                      size_t                    buffer_size,
+                                      void*                     temp_buffer)
         {
             rocsparse::trm_info_t* trm_info = new rocsparse::trm_info_t();
 
@@ -231,8 +231,8 @@ namespace rocsparse
                                                                 idx_base,
                                                                 trm_info,
                                                                 this,
-                                                                temp_buffer,
-                                                                buffer_size));
+                                                                buffer_size,
+                                                                temp_buffer));
             return trm_info;
         }
 
@@ -246,8 +246,8 @@ namespace rocsparse
                                       const I*                  ell_col_ind,
                                       int64_t                   ell_width,
                                       rocsparse_index_base      idx_base,
-                                      void*                     temp_buffer,
-                                      size_t                    buffer_size)
+                                      size_t                    buffer_size,
+                                      void*                     temp_buffer)
         {
             return create(handle,
                           trans,
@@ -260,8 +260,8 @@ namespace rocsparse
                           ell_col_ind,
                           ell_width,
                           idx_base,
-                          temp_buffer,
-                          buffer_size);
+                          buffer_size,
+                          temp_buffer);
         }
 
         template <typename... ARGS>
@@ -342,8 +342,8 @@ namespace rocsparse
                                   const void*               ell_col_ind,
                                   int64_t                   ell_width,
                                   rocsparse_index_base      idx_base,
-                                  void*                     temp_buffer,
-                                  size_t                    buffer_size)
+                                  size_t                    buffer_size,
+                                  void*                     temp_buffer)
         {
             return this->recreate(trans,
                                   descr->fill_mode,
@@ -358,8 +358,8 @@ namespace rocsparse
                                   ell_col_ind,
                                   ell_width,
                                   idx_base,
-                                  temp_buffer,
-                                  buffer_size);
+                                  buffer_size,
+                                  temp_buffer);
         }
 
         template <typename I, typename T>
@@ -372,8 +372,8 @@ namespace rocsparse
                                   const I*                  ell_col_ind,
                                   int64_t                   ell_width,
                                   rocsparse_index_base      idx_base,
-                                  void*                     temp_buffer,
-                                  size_t                    buffer_size)
+                                  size_t                    buffer_size,
+                                  void*                     temp_buffer)
         {
             return this->recreate(trans,
                                   descr->fill_mode,
@@ -388,8 +388,8 @@ namespace rocsparse
                                   ell_col_ind,
                                   ell_width,
                                   idx_base,
-                                  temp_buffer,
-                                  buffer_size);
+                                  buffer_size,
+                                  temp_buffer);
         }
     };
 
