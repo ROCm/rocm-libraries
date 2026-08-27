@@ -12,7 +12,7 @@ GlobalParameters:
   EnqueuesPerSync: 100
   SyncsPerBenchmark: 1
   PrintSolutionRejectionReason: True
-  NumElementsToValidate: 0
+  NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 3
   Device: 0
@@ -49,7 +49,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 2, 2,  2, 2]
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64  wg2x2
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [1024]
@@ -81,7 +81,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 6, 2,  1, 4]
+          - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128  wg1x4
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [512]
@@ -112,7 +112,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128  wg2x2
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [512]
@@ -143,7 +143,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 12, 4,  1, 4]
+          - [16, 16, 128, 1,  1, 12, 4,  1, 4]   # MT192x256  wg1x4
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
@@ -174,7 +174,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 8, 8,  2, 2]
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256  wg2x2
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
