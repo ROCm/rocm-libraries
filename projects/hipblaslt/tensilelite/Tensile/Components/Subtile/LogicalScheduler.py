@@ -3482,27 +3482,34 @@ class LogicalScheduler:
                 for uid in range(maxUnroll):
                     mt1_ops.extend(self._make_preloop_mt1_grs_uid(uid))
                     mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
+                # GR reorder (Experiment 3): MT1 GRs issued before WaitGR so both
+                # MT0 and MT1 prefetch batches are in-flight simultaneously during
+                # the barrier window. WaitGROp already uses vmcnt(0) (drain all),
+                # so no vmcnt adjustment is needed. On the last iteration
+                # (LoopCounterL==1) MT1 GRs are issued unnecessarily but harmlessly
+                # — the NLL guard still fires after ds_reads and routes the exit.
                 emitted = self._to_emitted([
                     *preloop_ops,
                     initC_op,
+                    *mt1_ops,                              # ← moved before WaitGR
                     WaitGROp(wait_gr_counts=WaitGRCounts()),
                     SyncOp(),
                     *self._make_lr_all_tensors(lr_tiles),
                     SkipOp(compare='LE', value=1, target='NLL'),
-                    *mt1_ops,
                     *gl2_preloop_ops,
                     SkipOp(compare='LE', value=2, target='NGLL'),
                 ])
             else:
+                # GR reorder (Experiment 3): same rationale as the multi-DU path above.
                 emitted = self._to_emitted([
                     *self._make_gr_all_tensors(0, all_tiles),
                     *self._make_depops_all_tensors(GRIncOp),
                     initC_op,
+                    *self._make_preloop_mt1_grs(),         # ← moved before WaitGR
                     WaitGROp(wait_gr_counts=WaitGRCounts()),
                     SyncOp(),
                     *self._make_lr_all_tensors(lr_tiles),
                     SkipOp(compare='LE', value=1, target='NLL'),
-                    *self._make_preloop_mt1_grs(),
                     *gl2_preloop_ops,
                     SkipOp(compare='LE', value=2, target='NGLL'),
                 ])
