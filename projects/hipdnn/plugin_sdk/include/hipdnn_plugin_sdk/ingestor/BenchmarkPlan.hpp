@@ -21,6 +21,7 @@
 #include <hip/hip_runtime.h>
 
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -73,10 +74,10 @@ struct HipEventPair
 
 } // namespace detail
 
-/// An IPlan owning one GenericPlan per knob-filtered catalog entry. Times each candidate
-/// on the first execute() and delegates every call to the fastest. Wraps GenericPlan
-/// rather than widening it, leaving single-kernel construction, workspace query, and the
-/// null-prepared check unchanged.
+/// An IPlan owning one GenericPlan per knob-filtered catalog entry. Times each candidate on
+/// the first execute() and delegates every call to the one that measured fastest. Wraps
+/// GenericPlan rather than widening it, leaving single-kernel construction, workspace
+/// query, and the null-prepared check unchanged.
 ///
 /// Timing goes through IPlan::execute() only; this class touches no dispatcher,
 /// PreparedDispatch, or HIP launch API.
@@ -293,9 +294,14 @@ private:
     }
 
 protected:
-    /// The fastest of BENCHMARK_ITERATIONS timed executes, after BENCHMARK_WARMUP_RUNS
-    /// untimed ones. Returns nullopt if the candidate threw or could not be timed; both
-    /// score the candidate unusable rather than throwing out of resolveChosen().
+    /// The representative time of BENCHMARK_ITERATIONS timed executes, after
+    /// BENCHMARK_WARMUP_RUNS untimed ones. Returns nullopt if the candidate threw or could
+    /// not be timed; both score the candidate unusable rather than throwing out of
+    /// resolveChosen().
+    ///
+    /// Samples are reduced with robustMean() rather than by taking the fastest: a kernel
+    /// that is usually slower but occasionally lucky would win on its best sample and then
+    /// serve its typical time on every dispatch the cached ranking covers.
     std::optional<double> sampleCandidate(size_t index,
                                           const THandle& handle,
                                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -310,7 +316,8 @@ protected:
                 candidate.plan->execute(handle, deviceBuffers, numDeviceBuffers, workspace);
             }
 
-            double bestMs = std::numeric_limits<double>::max();
+            std::vector<double> samples;
+            samples.reserve(BENCHMARK_ITERATIONS);
             for(int iteration = 0; iteration < BENCHMARK_ITERATIONS; ++iteration)
             {
                 const auto sampleMs
@@ -322,9 +329,9 @@ protected:
                                            << "' failed to time a launch; scored unusable");
                     return std::nullopt;
                 }
-                bestMs = std::min(bestMs, *sampleMs);
+                samples.push_back(*sampleMs);
             }
-            return bestMs;
+            return hipdnn_data_sdk::utilities::detail::robustMean(samples);
         }
         catch(const std::exception& error)
         {

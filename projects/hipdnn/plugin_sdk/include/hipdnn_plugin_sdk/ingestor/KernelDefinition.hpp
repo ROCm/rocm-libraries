@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -32,6 +33,21 @@ struct KernelDefinition
     /// kernel of an unrestricted pack gets. Read at match time, so one pack can hold an
     /// implementation per capability -- an MFMA build beside a portable one.
     std::vector<std::string> arch;
+    /// Copied from KernelDescriptor::originDirectory; `source.library` is relative to it,
+    /// so an adapter needs both to name a file.
+    std::filesystem::path originDirectory;
+    /// The kernel's authored name, carried so a dispatch-time diagnostic can name the
+    /// descriptor the way the loader does.
+    std::string name;
+    /// Copied from KernelDescriptor::treeRoot: the descriptor tree originDirectory was
+    /// found under, which is the boundary `source.library` may not resolve outside of.
+    ///
+    /// Appended rather than placed beside originDirectory deliberately. The two are the
+    /// same type, and `name` between them is a std::string that converts implicitly to
+    /// path, so inserting a path field there would silently rebind every positional
+    /// initializer after it while still compiling -- the exact hazard the assertion below
+    /// exists to catch.
+    std::filesystem::path treeRoot;
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {
@@ -97,6 +113,37 @@ struct KernelDefinition
         return *value;
     }
 };
+
+// KernelDefinition is built positionally, ten initializers at a time, so its field count
+// is pinned here the way KernelSource's is in Descriptors.hpp. std::string converts
+// implicitly to std::filesystem::path, so a path field inserted ahead of originDirectory
+// would otherwise compile and silently rebind every initializer after it. Only the count
+// -- two same-typed members swapped past each other still brace-initialize.
+static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
+                                               DescriptorId,
+                                               DescriptorId,
+                                               DescriptorId,
+                                               KernelSource,
+                                               MetadataValues,
+                                               int64_t,
+                                               std::vector<std::string>,
+                                               std::filesystem::path,
+                                               std::string,
+                                               std::filesystem::path>
+                  && !detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
+                                                       DescriptorId,
+                                                       DescriptorId,
+                                                       DescriptorId,
+                                                       KernelSource,
+                                                       MetadataValues,
+                                                       int64_t,
+                                                       std::vector<std::string>,
+                                                       std::filesystem::path,
+                                                       std::string,
+                                                       std::filesystem::path,
+                                                       std::string>,
+              "KernelDefinition gained or lost a field; append only, then extend this "
+              "assertion and every positional construction of it.");
 
 } // namespace hipdnn_plugin_sdk::ingestor
 
