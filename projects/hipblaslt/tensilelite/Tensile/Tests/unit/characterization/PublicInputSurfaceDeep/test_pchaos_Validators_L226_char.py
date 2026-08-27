@@ -35,7 +35,6 @@ from Tensile.Toolchain.Validators import (
     supportedCCompiler,
     supportedCxxCompiler,
     supportedDeviceEnumerator,
-    supportedHip,
     supportedOffloadBundler,
 )
 
@@ -123,7 +122,6 @@ def test_real_guard_true_hipinfo_posix():
         supportedCxxCompiler(file),
         supportedCCompiler(file),
         supportedOffloadBundler(file),
-        supportedHip(file),
         supportedDeviceEnumerator(file),
     ))
     assert result is True, f"Expected guard=True for {file!r} on POSIX, got False"
@@ -136,7 +134,6 @@ def test_real_guard_true_gcc_posix():
         supportedCxxCompiler(file),
         supportedCCompiler(file),
         supportedOffloadBundler(file),
-        supportedHip(file),
         supportedDeviceEnumerator(file),
     ))
     assert result is True, f"Expected guard=True for {file!r} on POSIX, got False"
@@ -149,7 +146,6 @@ def test_real_guard_false_amdclang_plus_plus_posix():
         supportedCxxCompiler(file),
         supportedCCompiler(file),
         supportedOffloadBundler(file),
-        supportedHip(file),
         supportedDeviceEnumerator(file),
     ))
     assert result is False, f"Expected guard=False for {file!r} on POSIX, got True"
@@ -162,7 +158,6 @@ def test_real_guard_false_amdgpu_arch_posix():
         supportedCxxCompiler(file),
         supportedCCompiler(file),
         supportedOffloadBundler(file),
-        supportedHip(file),
         supportedDeviceEnumerator(file),
     ))
     assert result is False, f"Expected guard=False for {file!r} on POSIX, got True"
@@ -180,7 +175,6 @@ def test_helper_agrees_with_real_guard_all_witnesses():
             supportedCxxCompiler(file),
             supportedCCompiler(file),
             supportedOffloadBundler(file),
-            supportedHip(file),
             supportedDeviceEnumerator(file),
         ))
         helper = toolchain_component_rejected(file)
