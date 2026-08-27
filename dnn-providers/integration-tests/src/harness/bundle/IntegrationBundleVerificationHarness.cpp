@@ -67,7 +67,7 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
                                                    status.get_message());
         if(!allVerdicts.empty())
         {
-            SupportClaimReport::get().recordGraphWithClaimsVerified();
+            supportClaimCoverage().graphsQueried++;
         }
 
         const bool hasPinnedEngine = TestConfig::get().hasEngineName();
@@ -77,7 +77,7 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
         std::string failureAggregate;
         for(const auto& v : allVerdicts)
         {
-            SupportClaimReport::get().record(v);
+            SupportClaimVerdicts::get().record(v);
             if(isFailure(v.verdict) && (!hasPinnedEngine || v.engineName == pinnedName))
             {
                 failureAggregate += formatVerdictMessage(v);
@@ -161,6 +161,11 @@ VerificationMode IntegrationBundleVerificationHarness::getVerificationMode() con
     return TestConfig::get().getVerificationMode();
 }
 
+bool IntegrationBundleVerificationHarness::isEnforcingSupportClaims() const
+{
+    return TestConfig::get().enforceSupportClaims();
+}
+
 void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level)
 {
     ASSERT_NE(level, EnforcementLevel::FULL)
@@ -184,41 +189,44 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
         return;
     }
 
-    const auto allVerdicts = observeAllSupport(status.get_code(),
-                                               engineIds,
-                                               _claimLocator,
-                                               LoadedEngineTable::get().all(),
-                                               status.get_message());
-    if(!allVerdicts.empty())
-    {
-        SupportClaimReport::get().recordGraphWithClaimsVerified();
-    }
-
     const std::string rung
         = level == EnforcementLevel::APPLICABILITY ? "applicability" : "buildable";
 
-    const std::string pinnedName = std::string(TestConfig::get().getEngineName());
-
-    std::string failureAggregate;
-    for(const auto& v : allVerdicts)
+    if(isEnforcingSupportClaims())
     {
-        SupportClaimReport::get().record(v);
-        if(isFailure(v.verdict) && v.engineName == pinnedName)
+        const auto allVerdicts = observeAllSupport(status.get_code(),
+                                                   engineIds,
+                                                   _claimLocator,
+                                                   LoadedEngineTable::get().all(),
+                                                   status.get_message());
+        if(!allVerdicts.empty())
         {
-            failureAggregate += formatVerdictMessage(v);
+            supportClaimCoverage().graphsQueried++;
         }
-    }
-    if(!failureAggregate.empty())
-    {
-        FAIL() << "[rung=" << rung << "] " << failureAggregate;
-        return;
-    }
 
-    if(allVerdicts.empty())
-    {
-        skipUnverifiable("enforcement_level=" + rung
-                         + " but no support claims found for loaded engines");
-        return;
+        const std::string pinnedName = std::string(TestConfig::get().getEngineName());
+
+        std::string failureAggregate;
+        for(const auto& v : allVerdicts)
+        {
+            SupportClaimVerdicts::get().record(v);
+            if(isFailure(v.verdict) && v.engineName == pinnedName)
+            {
+                failureAggregate += formatVerdictMessage(v);
+            }
+        }
+        if(!failureAggregate.empty())
+        {
+            FAIL() << "[rung=" << rung << "] " << failureAggregate;
+            return;
+        }
+
+        if(allVerdicts.empty())
+        {
+            skipUnverifiable("enforcement_level=" + rung
+                             + " but no support claims found for loaded engines");
+            return;
+        }
     }
 
     const int64_t targetEngineId = TestConfig::get().getEngineId();
@@ -233,6 +241,7 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
 
     if(level == EnforcementLevel::APPLICABILITY)
     {
+        _verified = true;
         return;
     }
 
@@ -244,16 +253,14 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
     ASSERT_TRUE(result.is_good()) << "[rung=buildable] " << result.get_message();
     result = graph.build_plans();
     ASSERT_TRUE(result.is_good()) << "[rung=buildable] " << result.get_message();
+    _verified = true;
 }
 
 void IntegrationBundleVerificationHarness::runComparison()
 {
     if(_bundle->metadata.enforcementLevel != EnforcementLevel::FULL)
     {
-        if(TestConfig::get().enforceSupportClaims())
-        {
-            enforceAtLevel(_bundle->metadata.enforcementLevel);
-        }
+        enforceAtLevel(_bundle->metadata.enforcementLevel);
         return;
     }
 
@@ -314,6 +321,7 @@ std::optional<OutputTensors> IntegrationBundleVerificationHarness::runEngineOrSk
     auto engineOutputs = runEngineCapturingOutputs(error);
     if(!engineOutputs && !::testing::Test::HasFatalFailure())
     {
+        _verified = true;
         skipEngineCouldNotRun(_bundlePath, error);
     }
     return engineOutputs;
@@ -501,14 +509,7 @@ bool IntegrationBundleVerificationHarness::fillBundleInputs()
 
 // ---- engine + reference runs -----------------------------------------------
 
-// Output buffers are filled with a sentinel (NaN for float types, type max for
-// integer types) rather than zero. This is the standard hipdnn practice — see
-// CpuReferenceGraphExecutor and GraphTensorBundle::sentinelFillOutputTensors —
-// and it arms allClose's NaN/sentinel guard: any output element the executor
-// fails to write stays NaN and is caught as a hard failure. Zero-filling would
-// make an unwritten output indistinguishable from a legitimately-computed zero,
-// so engine and reference could silently agree on garbage (both untouched zeros)
-// and the comparison would vacuously pass.
+// Sentinel-filled (NaN) so unwritten outputs are caught by allClose.
 namespace detail
 {
 std::unordered_map<int64_t, void*> buildVariantPack(
@@ -681,8 +682,6 @@ void IntegrationBundleVerificationHarness::compareEach(OutputTensors& engineOutp
         auto* attrs = tensorAttrMap.at(uid);
         const auto dataType = attrs->data_type();
 
-        // resolveTolerance derives the max-across-nodes default and applies the
-        // TOML per-test override in one place, shared with the graph harness.
         float atol = 0.0f;
         float rtol = 0.0f;
         tolerance::resolveTolerance(wrapper, dataType, currentTestName(), atol, rtol);
@@ -695,6 +694,7 @@ void IntegrationBundleVerificationHarness::compareEach(OutputTensors& engineOutp
 
 void IntegrationBundleVerificationHarness::skipUnverifiable(const std::string& reason)
 {
+    _verified = true;
     UnverifiableBundleReport::get().record(
         _bundlePath.string(), reason, UnverifiableSeverity::UNVERIFIABLE);
     GTEST_SKIP() << "Unverifiable: " << reason << " (" << _bundlePath << ")";
@@ -724,6 +724,7 @@ void IntegrationBundleVerificationHarness::compareOutputTensor(
 {
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, atol, rtol);
     const bool passed = validator->allClose(expected, actual);
+    _verified = true;
 
     if(!passed)
     {

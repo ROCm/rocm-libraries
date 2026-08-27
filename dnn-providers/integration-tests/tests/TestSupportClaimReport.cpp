@@ -9,9 +9,12 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
-using hipdnn_integration_tests::bundle::SupportClaimReport;
+using hipdnn_integration_tests::bundle::printSupportClaimSummary;
+using hipdnn_integration_tests::bundle::supportClaimCoverage;
+using hipdnn_integration_tests::bundle::SupportClaimVerdicts;
 using hipdnn_integration_tests::bundle::SupportResult;
 using hipdnn_integration_tests::bundle::SupportVerdict;
+using hipdnn_integration_tests::bundle::verifiedNothing;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -30,16 +33,30 @@ SupportResult makeResult(SupportVerdict v)
                          {}};
 }
 
+std::string summary()
+{
+    std::ostringstream oss;
+    printSupportClaimSummary(supportClaimCoverage(), SupportClaimVerdicts::get(), oss);
+    return oss.str();
+}
+
 class TestSupportClaimReport : public ::testing::Test
 {
 protected:
     void SetUp() override
     {
-        SupportClaimReport::get().reset();
+        clearAll();
     }
     void TearDown() override
     {
-        SupportClaimReport::get().reset();
+        clearAll();
+    }
+
+private:
+    static void clearAll()
+    {
+        supportClaimCoverage() = {};
+        SupportClaimVerdicts::get().clear();
     }
 };
 
@@ -51,9 +68,7 @@ protected:
 
 TEST_F(TestSupportClaimReport, PrintIsNoOpWhenEmpty)
 {
-    std::ostringstream oss;
-    SupportClaimReport::get().print(oss);
-    EXPECT_TRUE(oss.str().empty());
+    EXPECT_TRUE(summary().empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -62,53 +77,53 @@ TEST_F(TestSupportClaimReport, PrintIsNoOpWhenEmpty)
 
 TEST_F(TestSupportClaimReport, RecordsSatisfied)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::SATISFIED), 1u);
-    EXPECT_EQ(SupportClaimReport::get().getTotalRecorded(), 1u);
-    EXPECT_FALSE(SupportClaimReport::get().hasFailures());
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::SATISFIED));
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::SATISFIED), 1u);
+    EXPECT_EQ(SupportClaimVerdicts::get().total(), 1u);
+    EXPECT_FALSE(SupportClaimVerdicts::get().hasFailures());
 }
 
 TEST_F(TestSupportClaimReport, RecordsClaimBroken)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::CLAIM_BROKEN), 1u);
-    EXPECT_TRUE(SupportClaimReport::get().hasFailures());
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::CLAIM_BROKEN), 1u);
+    EXPECT_TRUE(SupportClaimVerdicts::get().hasFailures());
 }
 
 TEST_F(TestSupportClaimReport, RecordsQueryErrored)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::QUERY_ERRORED));
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::QUERY_ERRORED), 1u);
-    EXPECT_TRUE(SupportClaimReport::get().hasFailures());
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::QUERY_ERRORED));
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::QUERY_ERRORED), 1u);
+    EXPECT_TRUE(SupportClaimVerdicts::get().hasFailures());
 }
 
 TEST_F(TestSupportClaimReport, RecordsEngineNotLoaded)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::ENGINE_NOT_LOADED));
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::ENGINE_NOT_LOADED), 1u);
-    EXPECT_FALSE(SupportClaimReport::get().hasFailures());
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::ENGINE_NOT_LOADED));
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::ENGINE_NOT_LOADED), 1u);
+    EXPECT_FALSE(SupportClaimVerdicts::get().hasFailures());
 }
 
 TEST_F(TestSupportClaimReport, RecordsUnclaimedSupport)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::UNCLAIMED_SUPPORT));
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::UNCLAIMED_SUPPORT), 1u);
-    EXPECT_FALSE(SupportClaimReport::get().hasFailures());
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::UNCLAIMED_SUPPORT));
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::UNCLAIMED_SUPPORT), 1u);
+    EXPECT_FALSE(SupportClaimVerdicts::get().hasFailures());
 }
 
 TEST_F(TestSupportClaimReport, RecordsNotEnforced)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::NOT_ENFORCED));
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::NOT_ENFORCED), 1u);
-    EXPECT_FALSE(SupportClaimReport::get().hasFailures());
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::NOT_ENFORCED));
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::NOT_ENFORCED), 1u);
+    EXPECT_FALSE(SupportClaimVerdicts::get().hasFailures());
 }
 
-// A verdict the report has never seen counts zero rather than misreporting.
+// A verdict the log has never seen counts zero rather than misreporting.
 TEST_F(TestSupportClaimReport, CountIsZeroForUnseenVerdict)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::CLAIM_BROKEN), 0u);
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::NOT_ENFORCED), 0u);
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::SATISFIED));
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::CLAIM_BROKEN), 0u);
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::NOT_ENFORCED), 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -117,62 +132,66 @@ TEST_F(TestSupportClaimReport, CountIsZeroForUnseenVerdict)
 
 TEST_F(TestSupportClaimReport, MultipleRecordsAccumulate)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
-    SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
-    SupportClaimReport::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
-    SupportClaimReport::get().record(makeResult(SupportVerdict::NOT_ENFORCED));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::SATISFIED));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::SATISFIED));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::NOT_ENFORCED));
 
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::SATISFIED), 2u);
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::CLAIM_BROKEN), 1u);
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::NOT_ENFORCED), 1u);
-    EXPECT_EQ(SupportClaimReport::get().getTotalRecorded(), 4u);
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::SATISFIED), 2u);
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::CLAIM_BROKEN), 1u);
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::NOT_ENFORCED), 1u);
+    EXPECT_EQ(SupportClaimVerdicts::get().total(), 4u);
 }
 
 // ---------------------------------------------------------------------------
-// Reset clears everything
+// Clearing each accumulator
 // ---------------------------------------------------------------------------
 
-TEST_F(TestSupportClaimReport, ResetClearsAll)
+TEST_F(TestSupportClaimReport, ClearEmptiesTheVerdictLog)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
-    SupportClaimReport::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
-    SupportClaimReport::get().recordGraphFound();
-    SupportClaimReport::get().recordGraphWithClaims();
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::SATISFIED));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
 
-    SupportClaimReport::get().reset();
+    SupportClaimVerdicts::get().clear();
 
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::SATISFIED), 0u);
-    EXPECT_EQ(SupportClaimReport::get().count(SupportVerdict::CLAIM_BROKEN), 0u);
-    EXPECT_EQ(SupportClaimReport::get().getTotalRecorded(), 0u);
-    EXPECT_EQ(SupportClaimReport::get().getGraphsFound(), 0u);
-    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaims(), 0u);
-    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaimsVerified(), 0u);
-    EXPECT_FALSE(SupportClaimReport::get().hasFailures());
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::SATISFIED), 0u);
+    EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::CLAIM_BROKEN), 0u);
+    EXPECT_EQ(SupportClaimVerdicts::get().total(), 0u);
+    EXPECT_FALSE(SupportClaimVerdicts::get().hasFailures());
+}
+
+TEST_F(TestSupportClaimReport, CoverageResetsToZero)
+{
+    supportClaimCoverage().graphsFound = 3;
+    supportClaimCoverage().graphsWithClaims = 2;
+    supportClaimCoverage().graphsQueried = 1;
+
+    supportClaimCoverage() = {};
+
+    EXPECT_EQ(supportClaimCoverage().graphsFound, 0u);
+    EXPECT_EQ(supportClaimCoverage().graphsWithClaims, 0u);
+    EXPECT_EQ(supportClaimCoverage().graphsQueried, 0u);
 }
 
 // ---------------------------------------------------------------------------
-// The nesting invariant: queried ⊆ withClaimsFound ⊆ found. The queried count
-// is an explicit counter (recordGraphWithClaimsVerified), not derived from _records.size(),
-// because multi-engine enforcement produces N records per graph.
+// The nesting invariant: queried ⊆ withClaims ⊆ found. The queried count is its
+// own counter, not derived from the verdict log, because multi-engine
+// enforcement produces N verdicts per graph.
 // ---------------------------------------------------------------------------
 
-TEST_F(TestSupportClaimReport, QueriedCountTracksExplicitCalls)
+TEST_F(TestSupportClaimReport, QueriedCountIsIndependentOfVerdictCount)
 {
-    for(int i = 0; i < 5; ++i)
-    {
-        SupportClaimReport::get().recordGraphFound();
-    }
-    SupportClaimReport::get().recordGraphWithClaims();
-    SupportClaimReport::get().recordGraphWithClaims();
+    supportClaimCoverage().graphsFound = 5;
+    supportClaimCoverage().graphsWithClaims = 2;
+    supportClaimCoverage().graphsQueried = 1;
 
-    SupportClaimReport::get().recordGraphWithClaimsVerified();
-    SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
-    SupportClaimReport::get().record(makeResult(SupportVerdict::NOT_ENFORCED));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::SATISFIED));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::NOT_ENFORCED));
 
-    EXPECT_EQ(SupportClaimReport::get().getGraphsFound(), 5u);
-    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaims(), 2u);
-    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaimsVerified(), 1u);
-    EXPECT_EQ(SupportClaimReport::get().getTotalRecorded(), 2u);
+    EXPECT_EQ(supportClaimCoverage().graphsFound, 5u);
+    EXPECT_EQ(supportClaimCoverage().graphsWithClaims, 2u);
+    EXPECT_EQ(supportClaimCoverage().graphsQueried, 1u);
+    EXPECT_EQ(SupportClaimVerdicts::get().total(), 2u);
 }
 
 // ---------------------------------------------------------------------------
@@ -181,15 +200,12 @@ TEST_F(TestSupportClaimReport, QueriedCountTracksExplicitCalls)
 
 TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
 {
-    SupportClaimReport::get().recordGraphFound();
-    SupportClaimReport::get().recordGraphFound();
-    SupportClaimReport::get().recordGraphWithClaims();
-    SupportClaimReport::get().recordGraphWithClaimsVerified();
-    SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
+    supportClaimCoverage().graphsFound = 2;
+    supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsQueried = 1;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::SATISFIED));
 
-    std::ostringstream oss;
-    SupportClaimReport::get().print(oss);
-    const auto output = oss.str();
+    const auto output = summary();
 
     EXPECT_NE(output.find("SUPPORT CLAIM SUMMARY"), std::string::npos);
     EXPECT_NE(output.find("2 found, 1 with claims, 1 queried"), std::string::npos);
@@ -199,11 +215,9 @@ TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
 
 TEST_F(TestSupportClaimReport, PrintLevel2ShowsFailureDetail)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
 
-    std::ostringstream oss;
-    SupportClaimReport::get().print(oss);
-    const auto output = oss.str();
+    const auto output = summary();
 
     EXPECT_NE(output.find("CLAIM FAILURES"), std::string::npos);
     EXPECT_NE(output.find("test/bundle"), std::string::npos);
@@ -212,11 +226,9 @@ TEST_F(TestSupportClaimReport, PrintLevel2ShowsFailureDetail)
 
 TEST_F(TestSupportClaimReport, PrintLevel3ListsUnclaimedBundles)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::UNCLAIMED_SUPPORT));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::UNCLAIMED_SUPPORT));
 
-    std::ostringstream oss;
-    SupportClaimReport::get().print(oss);
-    const auto output = oss.str();
+    const auto output = summary();
 
     EXPECT_NE(output.find("UNCLAIMED SUPPORT"), std::string::npos);
     // A bare count is not actionable — the bundle has to be named.
@@ -226,24 +238,16 @@ TEST_F(TestSupportClaimReport, PrintLevel3ListsUnclaimedBundles)
 
 TEST_F(TestSupportClaimReport, PrintShowsNoFailureSectionForEngineNotLoaded)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::ENGINE_NOT_LOADED));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::ENGINE_NOT_LOADED));
 
-    std::ostringstream oss;
-    SupportClaimReport::get().print(oss);
-    const auto output = oss.str();
-
-    EXPECT_EQ(output.find("CLAIM FAILURES"), std::string::npos);
+    EXPECT_EQ(summary().find("CLAIM FAILURES"), std::string::npos);
 }
 
 TEST_F(TestSupportClaimReport, PrintShowsNoFailureSectionWhenOnlySatisfied)
 {
-    SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::SATISFIED));
 
-    std::ostringstream oss;
-    SupportClaimReport::get().print(oss);
-    const auto output = oss.str();
-
-    EXPECT_EQ(output.find("CLAIM FAILURES"), std::string::npos);
+    EXPECT_EQ(summary().find("CLAIM FAILURES"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
@@ -254,27 +258,20 @@ TEST_F(TestSupportClaimReport, PrintShowsNoFailureSectionWhenOnlySatisfied)
 
 TEST_F(TestSupportClaimReport, PrintIsSilentWhenGraphsFoundButNoSidecars)
 {
-    for(int i = 0; i < 100; ++i)
-    {
-        SupportClaimReport::get().recordGraphFound();
-    }
+    supportClaimCoverage().graphsFound = 100;
 
     // No sidecars, so no records: every one of those graphs evaluated to
     // NO_SIDECAR, and NO_SIDECAR is never recorded.
-    std::ostringstream oss;
-    SupportClaimReport::get().print(oss);
-    EXPECT_TRUE(oss.str().empty());
+    EXPECT_TRUE(summary().empty());
 }
 
 TEST_F(TestSupportClaimReport, PrintShowsNotEnforcedOnceASidecarExists)
 {
-    SupportClaimReport::get().recordGraphFound();
-    SupportClaimReport::get().recordGraphWithClaims();
-    SupportClaimReport::get().record(makeResult(SupportVerdict::NOT_ENFORCED));
+    supportClaimCoverage().graphsFound = 1;
+    supportClaimCoverage().graphsWithClaims = 1;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::NOT_ENFORCED));
 
-    std::ostringstream oss;
-    SupportClaimReport::get().print(oss);
-    const auto output = oss.str();
+    const auto output = summary();
 
     // Enforcing nothing is a result, not silence that reads as success.
     EXPECT_NE(output.find("SUPPORT CLAIM SUMMARY"), std::string::npos);
@@ -286,12 +283,10 @@ TEST_F(TestSupportClaimReport, PrintShowsNotEnforcedOnceASidecarExists)
 // from a run with nothing to enforce.
 TEST_F(TestSupportClaimReport, PrintShowsDiscoveryCountsWhenNothingWasQueried)
 {
-    SupportClaimReport::get().recordGraphFound();
-    SupportClaimReport::get().recordGraphWithClaims();
+    supportClaimCoverage().graphsFound = 1;
+    supportClaimCoverage().graphsWithClaims = 1;
 
-    std::ostringstream oss;
-    SupportClaimReport::get().print(oss);
-    const auto output = oss.str();
+    const auto output = summary();
 
     EXPECT_NE(output.find("SUPPORT CLAIM SUMMARY"), std::string::npos);
     EXPECT_NE(output.find("1 with claims, 0 queried"), std::string::npos);
@@ -304,22 +299,22 @@ TEST_F(TestSupportClaimReport, PrintShowsDiscoveryCountsWhenNothingWasQueried)
 TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenNothingDiscovered)
 {
     // (0, 0) → false: no graph carried a claim, so there was nothing to enforce.
-    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneVerified());
+    EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
 }
 
 TEST_F(TestSupportClaimReport, EmptyQueryGuardTrippedWhenDiscoveredButNoQueries)
 {
     // (N, 0) → true: claim-bearing graphs exist but not one was ever queried.
-    SupportClaimReport::get().recordGraphWithClaims();
-    EXPECT_TRUE(SupportClaimReport::get().claimsFoundButNoneVerified());
+    supportClaimCoverage().graphsWithClaims = 1;
+    EXPECT_TRUE(verifiedNothing(supportClaimCoverage()));
 }
 
 TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenQueriesObserved)
 {
-    SupportClaimReport::get().recordGraphWithClaims();
-    SupportClaimReport::get().recordGraphWithClaimsVerified();
-    SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
-    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneVerified());
+    supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsQueried = 1;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::SATISFIED));
+    EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
 }
 
 // An errored query is still an observed query. Counting only the ones that
@@ -327,18 +322,18 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenQueriesObserved)
 // hand it a green exit code — the precise silence this guard exists to break.
 TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenEveryQueryErrored)
 {
-    SupportClaimReport::get().recordGraphWithClaims();
-    SupportClaimReport::get().recordGraphWithClaimsVerified();
-    SupportClaimReport::get().record(makeResult(SupportVerdict::QUERY_ERRORED));
-    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneVerified());
+    supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsQueried = 1;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::QUERY_ERRORED));
+    EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
 }
 
 TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWithOnlyQueries)
 {
     // (0, N) → false: queries ran but no graph carried a claim.
-    SupportClaimReport::get().recordGraphWithClaimsVerified();
-    SupportClaimReport::get().record(makeResult(SupportVerdict::SATISFIED));
-    EXPECT_FALSE(SupportClaimReport::get().claimsFoundButNoneVerified());
+    supportClaimCoverage().graphsQueried = 1;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::SATISFIED));
+    EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
 }
 
 // ---------------------------------------------------------------------------
@@ -348,26 +343,22 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWithOnlyQueries)
 
 TEST_F(TestSupportClaimReport, MultiEngineQueriedCountIsPerGraph)
 {
-    SupportClaimReport::get().recordGraphFound();
-    SupportClaimReport::get().recordGraphWithClaims();
-    SupportClaimReport::get().recordGraphWithClaimsVerified();
+    supportClaimCoverage().graphsFound = 1;
+    supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsQueried = 1;
 
     SupportResult r1 = makeResult(SupportVerdict::SATISFIED);
     r1.engineName = "ENGINE_A";
     SupportResult r2 = makeResult(SupportVerdict::NOT_ENFORCED);
     r2.engineName = "ENGINE_B";
 
-    SupportClaimReport::get().record(r1);
-    SupportClaimReport::get().record(r2);
+    SupportClaimVerdicts::get().record(r1);
+    SupportClaimVerdicts::get().record(r2);
 
-    EXPECT_EQ(SupportClaimReport::get().getGraphsWithClaimsVerified(), 1u);
-    EXPECT_EQ(SupportClaimReport::get().getTotalRecorded(), 2u);
+    EXPECT_EQ(supportClaimCoverage().graphsQueried, 1u);
+    EXPECT_EQ(SupportClaimVerdicts::get().total(), 2u);
 
-    std::ostringstream oss;
-    SupportClaimReport::get().print(oss);
-    const auto output = oss.str();
-
-    EXPECT_NE(output.find("1 queried (2 verdicts)"), std::string::npos);
+    EXPECT_NE(summary().find("1 queried (2 verdicts)"), std::string::npos);
 }
 
 // NOLINTEND(readability-identifier-naming)

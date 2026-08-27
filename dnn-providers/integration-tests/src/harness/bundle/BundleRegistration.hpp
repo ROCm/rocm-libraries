@@ -264,10 +264,10 @@ inline void registerBundleTests()
     {
         if(TestConfig::get().enforceSupportClaims())
         {
-            SupportClaimReport::get().recordGraphFound();
+            supportClaimCoverage().graphsFound++;
             if(std::filesystem::exists(detail::sidecarPathFor(disc)))
             {
-                SupportClaimReport::get().recordGraphWithClaims();
+                supportClaimCoverage().graphsWithClaims++;
             }
         }
 

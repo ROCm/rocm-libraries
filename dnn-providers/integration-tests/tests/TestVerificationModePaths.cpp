@@ -1,14 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Tests the verification mode dispatch logic in the harness:
-//
-//   AUTO mode:    golden → GPU ref → CPU ref → SKIP
-//   GOLDEN mode:  golden or SKIP
-//   GPU/CPU mode: explicit ref or SKIP/FAIL
-//
-// Each test overrides getVerificationMode() and the executor stubs to exercise
-// one branch without touching the TestConfig singleton.
+// Verification mode dispatch: AUTO/GOLDEN/GPU/CPU paths.
 
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
@@ -76,9 +69,11 @@ protected:
         return nullptr;
     }
 
-    // These tests exercise verification-mode dispatch, not the VRAM/arch
-    // hardware guards. Override to a no-op so they don't reach into the
-    // (uninitialized-in-this-binary) TestConfig singleton.
+    bool isEnforcingSupportClaims() const override
+    {
+        return false;
+    }
+
     void applyMetadataGuards() const override {}
 
 private:
@@ -406,6 +401,38 @@ TEST_F(TestVerificationModePathsFixture, CpuModeCapabilityMissSkips)
 
     EXPECT_TRUE(anySkipped(results));
     EXPECT_FALSE(anyFailed(results));
+}
+
+// ── Enforcement-level gate ──────────────────────────────────────────────────
+// Non-FULL bundles always route to enforceAtLevel(), not the comparison path.
+// Proof: the engine stub never runs (enforceAtLevel does its own graph work).
+
+TEST_F(TestVerificationModePathsFixture, NonFullBundleRoutesToEnforcementPath)
+{
+    auto bundle = loadBundle("enforce_gate", /*includeGoldenOutput=*/true);
+    bundle->metadata.enforcementLevel = EnforcementLevel::APPLICABILITY;
+
+    bool engineCalled = false;
+    ::testing::TestPartResultArray results;
+    try
+    {
+        runCapturing(
+            std::move(bundle),
+            VerificationMode::AUTO,
+            [&](std::unordered_map<int64_t, void*>& vp) {
+                engineCalled = true;
+                writeOutput(vp, K_OUTPUT_VALUE);
+            },
+            matchingRef(),
+            &results);
+    }
+    catch(...) // NOLINT(bugprone-empty-catch)
+    {
+        // enforceAtLevel() may throw on deviceless CI (no GPU handle).
+    }
+
+    EXPECT_FALSE(engineCalled)
+        << "non-FULL bundle must route to enforceAtLevel(), not the comparison path";
 }
 
 // NOLINTEND(readability-identifier-naming)
