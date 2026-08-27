@@ -156,6 +156,10 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
     # col_scatter only.
     if int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1:
         return None
+    # Same coupling when the other-axis waves take K slices of a strip that a
+    # single axis-wave owns: that sub-strip offset also lands in the chunk index.
+    if int(getattr(tileInfo, "grKSplit", 1)) > 1:
+        return None
     try:
         stack = int(tileInfo.subtileShape[0])
     except Exception:
@@ -185,7 +189,9 @@ def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
     # absorb the wave's contribution to the physical chunk index, and the bank
     # model shows col_scatter reaches 1-way at stacks 2, 4, 8 and 16 alike (the
     # XOR is only preferred elsewhere because it costs fewer VALU ops).
-    if int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1:
+    # Any per-wave sub-strip offset -- axis-waves sharing a strip, or other-axis
+    # waves taking K slices of one -- needs col_scatter.
+    if int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1 or int(getattr(tileInfo, "grKSplit", 1)) > 1:
         if stack not in (2, 4, 8, 16, 32):
             return None
     elif stack not in _COL_SCATTER_STACKS:

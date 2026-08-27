@@ -504,12 +504,25 @@ class TileInfo:
       # every wave covers the strip exactly once instead of once per other-axis
       # wave.  Guarded on the strip's load blocks dividing evenly, else a wave
       # would own a fractional block.
+      #
+      # The fetch group for one strip is grWavesPerStrip axis-waves times the
+      # other-axis waves that would otherwise refetch it.  That is numWaves when
+      # the axis-waves already share the strip, and otherWaves when a wave owns
+      # whole strips -- using numWaves there would under-fetch, because the axis
+      # split has already divided the work.
+      _otherWaves = max(1, self.numWaves // self.waveGroupSize)
       _coopWaves = self.grWavesPerStrip if _isTLU1 else self.numWaves
-      if _isTLU1 and self.grWavesPerStrip > 1 and self.numWaves > self.grWavesPerStrip:
+      if _isTLU1 and _otherWaves > 1:
+        _cand = self.grWavesPerStrip * _otherWaves
         _stripBytes = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
-        if _stripBytes % gr_cfg.bytesPerLoad(self.numWaves) == 0:
-          _coopWaves = self.numWaves
+        if _cand > _coopWaves and _stripBytes % gr_cfg.bytesPerLoad(_cand) == 0:
+          _coopWaves = _cand
+      self.grOtherAxisWaves = _otherWaves
       self.grCoopWaves = _coopWaves
+      # K slices a strip is cut into so the other-axis waves stop refetching it.
+      # >1 means a per-wave sub-strip offset is applied, which the XOR swizzle
+      # cannot absorb -- SubtileTLUSwizzle keys off this to pick col_scatter.
+      self.grKSplit = max(1, _coopWaves // max(1, self.grWavesPerStrip)) if _isTLU1 else 1
       _grLoadWaves = _coopWaves
       # Effective wave count for GR cooperative-load math (numGRPerSubtile,
       # localGRGranularity).  TLU=1 waves partition free-dim strips instead of
