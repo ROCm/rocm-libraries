@@ -1163,6 +1163,31 @@ class Solution(collections.abc.Mapping):
               if mtTiles % cand == 0:
                 stack = cand
                 break
+            # The waves that fetch a strip divide it by (blocks per strip) x
+            # (K windows).  When there are fewer such slots than waves in the
+            # group, the surplus waves have nowhere of their own to read and
+            # reissue a load some other wave already made, so the operand comes
+            # off memory more than once per tile.
+            # A macro tile that is not a power of two is where this shows up --
+            # 96 free-dim elements give 6 MFMA-M tiles, hence only a 2-tile
+            # stack and a 16B run per K row -- but the shortage is what matters,
+            # not the tile, and a wide wavefront or a shallow DepthU reaches it
+            # from the other direction.  Test the slots.
+            wgSize     = state["MIWaveGroup"][0 if tc == 'A' else 1]
+            numWaves   = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
+            otherWaves = max(1, numWaves // wgSize)
+            perWave    = max(1, mtTiles // wgSize)
+            fetchGroup = max(1, stack // perWave) * otherWaves
+            stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * 0.5
+            slots      = int(stripBytes // (state["WavefrontSize"] * 16)) \
+                         * (state["DepthU"] // state["MatrixInstK"])
+            if slots < fetchGroup:
+              reject(state, printRejectionReason,
+                     "UseSubtileImpl=1 TLU=1 fp4 leaves the LDS strip on tensor %s with "
+                     "%d (block x K window) slots for a fetch group of %d, so the surplus "
+                     "waves refetch it (MacroTile=%d, DepthU=%d, stack=%d)"
+                     % (tc, slots, fetchGroup, mtFree, state["DepthU"], stack))
+              return
             state[f"_ABTilePair{tc}"] = {
               2: "AB_B4_TLU1",
               4: "AB_B4_TLU1_4x1",
