@@ -14,6 +14,87 @@
 // Probably it is limited by compiler optimization.
 #define CK_TILE_FMHA_HANDLE_XOR_LENGTH_FOLD 0
 namespace ck_tile {
+
+namespace detail {
+
+template <index_t X>
+CK_TILE_HOST_DEVICE constexpr index_t integer_log2_exact()
+{
+    static_assert(X > 0 && (X & (X - 1)) == 0,
+                  "integer_log2_exact requires a positive power of two");
+
+    index_t value  = X;
+    index_t result = 0;
+    while(value > 1)
+    {
+        value >>= 1;
+        ++result;
+    }
+    return result;
+}
+
+template <bool Enabled, index_t IntervalBytes, index_t PadBytes>
+inline constexpr bool is_valid_lds_padding_config_v =
+    (!Enabled && IntervalBytes == 0 && PadBytes == 0) ||
+    (Enabled && IntervalBytes >= 8 && IntervalBytes <= 1024 && IntervalBytes % 4 == 0 &&
+     (IntervalBytes & (IntervalBytes - 1)) == 0 && PadBytes >= 4 && PadBytes <= 512 &&
+     PadBytes % 4 == 0);
+
+template <bool Enabled_, index_t IntervalBytes_, index_t PadBytes_>
+struct LdsPaddingConfig
+{
+    static_assert(is_valid_lds_padding_config_v<Enabled_, IntervalBytes_, PadBytes_>,
+                  "invalid LDS padding configuration");
+
+    static constexpr bool kEnabled          = Enabled_;
+    static constexpr index_t kIntervalBytes = IntervalBytes_;
+    static constexpr index_t kPadBytes      = PadBytes_;
+};
+
+template <typename Config>
+struct EncodedTdmPadding
+{
+    private:
+    static constexpr index_t raw_pad_interval = [] {
+        if constexpr(Config::kEnabled)
+        {
+            return integer_log2_exact<Config::kIntervalBytes / 4>() - 1;
+        }
+        else
+        {
+            return 0;
+        }
+    }();
+
+    static constexpr index_t raw_pad_amount = [] {
+        if constexpr(Config::kEnabled)
+        {
+            return Config::kPadBytes / 4 - 1;
+        }
+        else
+        {
+            return 0;
+        }
+    }();
+
+    static_assert(!Config::kEnabled || (raw_pad_interval >= 0 && raw_pad_interval <= 7),
+                  "TDM padding interval field overflows");
+    static_assert(!Config::kEnabled || (raw_pad_amount >= 0 && raw_pad_amount <= 127),
+                  "TDM padding amount field overflows");
+    static_assert(!Config::kEnabled ||
+                      ((index_t{1} << (raw_pad_interval + 1)) * 4 == Config::kIntervalBytes),
+                  "TDM padding interval does not round-trip");
+    static_assert(!Config::kEnabled || ((raw_pad_amount + 1) * 4 == Config::kPadBytes),
+                  "TDM padding amount does not round-trip");
+
+    public:
+    static constexpr bool kEnabled             = Config::kEnabled;
+    static constexpr index_t kPadInterval      = raw_pad_interval;
+    static constexpr index_t kPadAmount        = raw_pad_amount;
+};
+
+} // namespace detail
+
 // This pipeline is qkv all located in LDS, targeting gfx1250
 struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     : BlockFmhaPipelineQXKSVSCustomPolicy</* QLoadOnce = */ true,
