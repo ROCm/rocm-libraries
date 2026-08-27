@@ -16,7 +16,7 @@ namespace hipdnn_integration_tests::gpu_graph_executor::detail
 struct GpuLayernormBwdSignatureKey
 {
     const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType{
-        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes};
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormBackwardAttributes};
     hipdnn_flatbuffers_sdk::data_objects::DataType dyDataType{
         hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
     hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType{
@@ -69,6 +69,7 @@ struct GpuLayernormBwdSignatureKey
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
 
         dyDataType = dyTensorAttr->data_type();
+        dxDataType = dxTensorAttr->data_type();
         scaleBiasDataType = scaleTensorAttr->data_type();
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
@@ -79,7 +80,6 @@ struct GpuLayernormBwdSignatureKey
         {
             meanInvVarianceDataType = dxDataType;
         }
-        dxDataType = dxTensorAttr->data_type();
         computeDataType = computeType;
     }
 
@@ -185,11 +185,8 @@ struct GpuLayernormBwdSignatureKey
         if constexpr(DxDataType != MeanInvVarianceDataType)
         {
             // Without optional mean/rstd tensors: match dx as UNSET (void) is not allowed
-            map[GpuLayernormBwdSignatureKey(DyDataType,
-                                            ScaleBiasDataType,
-                                            hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
-                                            DxDataType,
-                                            ComputeDataType)]
+            map[GpuLayernormBwdSignatureKey(
+                DyDataType, ScaleBiasDataType, DxDataType, DxDataType, ComputeDataType)]
                 = std::make_unique<GpuLayernormBwdPlanBuilder<DyDataType,
                                                               ScaleBiasDataType,
                                                               DxDataType,
@@ -201,7 +198,7 @@ struct GpuLayernormBwdSignatureKey
 
 inline std::ostream& operator<<(std::ostream& os, const GpuLayernormBwdSignatureKey& key)
 {
-    os << "GpuLayernormBwd(dy=)" << key.dyDataType << ", scaleBias=" << key.scaleBiasDataType
+    os << "GpuLayernormBwd(dy=" << key.dyDataType << ", scaleBias=" << key.scaleBiasDataType
        << ", meanInvVar=" << key.meanInvVarianceDataType << ", dx=" << key.dxDataType
        << ", compute=" << key.computeDataType << ")";
     return os;

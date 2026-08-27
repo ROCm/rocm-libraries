@@ -56,41 +56,16 @@ inline flatbuffers::FlatBufferBuilder
     tensors.push_back(CreateTensorAttributesDirect(
         builder, biasUid, "bias", scaleBiasDataType, &biasStrides, &biasDims));
     const std::vector<int64_t> epsilonDimsStrides = {1};
-    TensorValue epsilonTensorValueType;
-    ::flatbuffers::Offset<void> epsilonTensorValue;
-    switch(computeDataType)
-    {
-    case DataType::DOUBLE:
-        epsilonTensorValueType = TensorValue::Float64Value;
-        epsilonTensorValue = builder.CreateStruct(Float64Value(epsilon)).Union();
-        break;
-    case DataType::FLOAT:
-        epsilonTensorValueType = TensorValue::Float32Value;
-        epsilonTensorValue
-            = builder.CreateStruct(Float32Value(static_cast<float>(epsilon))).Union();
-        break;
-    case DataType::HALF:
-        epsilonTensorValueType = TensorValue::Float16Value;
-        epsilonTensorValue
-            = builder.CreateStruct(Float16Value(static_cast<float>(epsilon))).Union();
-        break;
-    case DataType::BFLOAT16:
-        epsilonTensorValueType = TensorValue::BFloat16Value;
-        epsilonTensorValue
-            = builder.CreateStruct(BFloat16Value(static_cast<float>(epsilon))).Union();
-        break;
-    default:
-        throw std::runtime_error("Invalid data type for epsilon");
-    }
-    tensors.push_back(CreateTensorAttributesDirect(builder,
-                                                   epsilonUid,
-                                                   "epsilon",
-                                                   computeDataType,
-                                                   &epsilonDimsStrides,
-                                                   &epsilonDimsStrides,
-                                                   false,
-                                                   epsilonTensorValueType,
-                                                   epsilonTensorValue));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder,
+                                     epsilonUid,
+                                     "epsilon",
+                                     DataType::DOUBLE,
+                                     &epsilonDimsStrides,
+                                     &epsilonDimsStrides,
+                                     false,
+                                     TensorValue::Float64Value,
+                                     builder.CreateStruct(Float64Value(epsilon)).Union()));
     if(meanUid.has_value() && meanDims.has_value() && meanStrides.has_value()
        && meanInvVarianceDataType.has_value())
     {

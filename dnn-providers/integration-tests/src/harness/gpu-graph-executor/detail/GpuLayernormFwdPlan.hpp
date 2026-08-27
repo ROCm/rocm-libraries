@@ -187,7 +187,9 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), YDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->epsilon_tensor_uid(), ComputeDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap,
+                          nodeAttributes->epsilon_tensor_uid(),
+                          hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE);
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
             CHECK_OPTIONAL_TENSOR_TYPE(

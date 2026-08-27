@@ -183,11 +183,8 @@ struct GpuLayernormFwdSignatureKey
         if constexpr(XDataType != MeanInvVarianceDataType)
         {
             // Without optional mean/rstd tensors: match dx as UNSET (void) is not allowed
-            map[GpuLayernormFwdSignatureKey(XDataType,
-                                            ScaleBiasDataType,
-                                            hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
-                                            YDataType,
-                                            ComputeDataType)]
+            map[GpuLayernormFwdSignatureKey(
+                XDataType, ScaleBiasDataType, XDataType, YDataType, ComputeDataType)]
                 = std::make_unique<GpuLayernormFwdPlanBuilder<XDataType,
                                                               ScaleBiasDataType,
                                                               XDataType,
@@ -199,7 +196,7 @@ struct GpuLayernormFwdSignatureKey
 
 inline std::ostream& operator<<(std::ostream& os, const GpuLayernormFwdSignatureKey& key)
 {
-    os << "GpuLayernormFwd(x=)" << key.xDataType << ", scaleBias=" << key.scaleBiasDataType
+    os << "GpuLayernormFwd(x=" << key.xDataType << ", scaleBias=" << key.scaleBiasDataType
        << ", meanInvVar=" << key.meanInvVarianceDataType << ", y=" << key.yDataType
        << ", compute=" << key.computeDataType << ")";
     return os;
