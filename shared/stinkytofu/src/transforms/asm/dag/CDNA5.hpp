@@ -889,6 +889,9 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
 
 // (C) mode2 WAR gate: true if this ds_load's dest reg was WMMA-read < gate WMMAs ago.
 bool CDNA5ReadyQueue::warTooCloseToWmmaRead(DAGNode* node) const {
+    // Nothing to recover without va_vsrc tracking: the gate is pure cost there.
+    if (!getPassContext().getPassFeatureConfig().dagFeatures.enableESM2TrackValuVsrc)
+        return false;
     const int gate = warGateWmmas_;
     if (gate <= 0 || node == nullptr) return false;
     for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
