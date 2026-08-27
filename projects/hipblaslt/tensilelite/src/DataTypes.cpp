@@ -202,44 +202,7 @@ namespace rocisa
         std::string strValue;
         stream >> strValue;
 
-#if 1
         t = TensileLite::DataTypeInfo::Get(strValue).dataType;
-
-#else
-
-        if(strValue == ToString(rocisa::DataType::Float))
-            t = rocisa::DataType::Float;
-        else if(strValue == ToString(rocisa::DataType::Double))
-            t = rocisa::DataType::Double;
-        else if(strValue == ToString(rocisa::DataType::ComplexFloat))
-            t = rocisa::DataType::ComplexFloat;
-        else if(strValue == ToString(rocisa::DataType::ComplexDouble))
-            t = rocisa::DataType::ComplexDouble;
-        else if(strValue == ToString(rocisa::DataType::Half))
-            t = rocisa::DataType::Half;
-        else if(strValue == ToString(rocisa::DataType::Int8x4))
-            t = rocisa::DataType::Int8x4;
-        else if(strValue == ToString(rocisa::DataType::Int32))
-            t = rocisa::DataType::Int32;
-        else if(strValue == ToString(rocisa::DataType::Int64))
-            t = rocisa::DataType::Int64;
-        else if(strValue == ToString(rocisa::DataType::Int8))
-            t = rocisa::DataType::Int8;
-        else if(strValue == ToString(rocisa::DataType::XFloat32))
-            t = rocisa::DataType::XFloat32;
-        else if(std::all_of(strValue.begin(), strValue.end(), isdigit))
-        {
-            int value = atoi(strValue.c_str());
-            if(value >= 0 && value < static_cast<int>(rocisa::DataType::Count))
-                t = static_cast<DataType>(value);
-            else
-                throw std::runtime_error(concatenate("Can't convert ", strValue, " to DataType."));
-        }
-        else
-        {
-            throw std::runtime_error(concatenate("Can't convert ", strValue, " to DataType."));
-        }
-#endif
 
         return stream;
     }

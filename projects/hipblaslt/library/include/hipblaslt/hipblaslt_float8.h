@@ -123,11 +123,7 @@ struct HIPBLASLT_EXPORT hipblaslt_f8: public __hip_fp8_e4m3
     HIP_HOST operator _Float16() const
 #endif
     {
-#if HIP_FP8_CVT_FAST_PATH
         return _Float16(float(*this));
-#else
-        return _Float16(float(*this));
-#endif
     }
 
     // check for zero — OCP E4M3: signed zero S.0000.000 → +0 = 0x00, -0 = 0x80.
@@ -226,12 +222,7 @@ struct HIPBLASLT_EXPORT hipblaslt_bf8: public __hip_fp8_e5m2
     HIP_HOST operator _Float16() const
 #endif
     {
-#if HIP_FP8_CVT_FAST_PATH
-        //TODO: use single CVT instruction
         return _Float16(float(*this));
-#else
-        return _Float16(float(*this));
-#endif
     }
 
     // check for zero — OCP E5M2: signed zero S.00000.00 → +0 = 0x00, -0 = 0x80.

@@ -3099,27 +3099,6 @@ namespace
         return nullptr;
     }
 
-#if 0
-    /**************************************************************************
-    * We normally print error messages only once, to avoid excessive logging *
-    **************************************************************************/
-    void print_once(const std::ostream& msg)
-    {
-        if(rocblaslt_suppress_tensile_error_messages())
-            return;
-        static constexpr char varname[] = "ROCBLASLT_VERBOSE_TENSILE_ERROR";
-        static const char*    verbose   = getenv(varname);
-        if(!verbose)
-        {
-            static auto& once = std::cerr
-                                << msg
-                                << "\nThis message will be only be displayed once, unless the "
-                                << varname << " environment variable is set." << std::endl;
-        }
-        else
-            std::cerr << msg << std::endl;
-    }
-#endif
 } // namespace
 
 struct TensileDataGemm
@@ -3495,10 +3474,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(!solution)
         {
-#if 0
-            std::ostream msg;
-            print_once(msg << "\nrocblaslt error: No Tensile solution found for " << prob);
-#endif
             status = rocblaslt_status_not_implemented;
         }
         else
@@ -3565,19 +3540,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -3622,19 +3587,9 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -3719,19 +3674,9 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -3942,19 +3887,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -4108,19 +4043,9 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -4171,19 +4096,9 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: "
-                       << "Is hostDeviceUserArgs not match the size of the problem type? " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: "
-                       << "Is hostDeviceUserArgs not match the size of the problem type? " << prob);
-#endif
     }
 
     return status;
@@ -4295,19 +4210,9 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -4358,19 +4263,9 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
