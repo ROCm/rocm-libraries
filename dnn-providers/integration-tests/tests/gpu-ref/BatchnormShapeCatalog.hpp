@@ -62,7 +62,7 @@ inline std::vector<BatchnormTestCase> getBatchnormMedium4DTestCases()
 {
     return {
         {{16, 32, 4, 8}}, // 16384
-        {{2, 1, 225, 225}}, // 130050
+        {{2, 1, 225, 225}}, // 101250
         {{3, 1, 127, 127}}, // 48387
         {{1, 65536, 1, 1}} // 65536
     };
@@ -80,37 +80,67 @@ inline std::vector<BatchnormTestCase> getBatchnormMedium5DTestCases()
 }
 
 // ============================================================================
-// Large test cases for comprehensive validation
+// Large edge test cases for comprehensive validation
 // ============================================================================
 
-inline std::vector<BatchnormTestCase> getBatchnormLarge3DTestCases()
+inline std::vector<BatchnormTestCase> getBatchnormLargeEdge3DTestCases()
 {
     return {
-        {{8, 32, 2048}}, // 524288
-        {{16, 128, 512}}, // 1038576
-        {{968, 1, 128}} //  1160704
+        {{1, 2048, 256}}, // 524288
+        {{16, 1, 65536}}, // 1048576
+        {{4096, 1, 333}} //  1363968
     };
 }
 
-inline std::vector<BatchnormTestCase> getBatchnormLarge4DTestCases()
+inline std::vector<BatchnormTestCase> getBatchnormLargeEdge4DTestCases()
+{
+    return {
+        {{1, 1, 2660, 2660}}, // 7075600
+        {{1, 276480, 1, 1}}, // 276480
+        {{16777216, 1, 1, 1}}, // 16777216
+        {{1, 4480, 48, 32}}, // 6881280
+        {{56, 1, 128, 128}}, // 917504
+        {{256, 2048, 1, 1}} // 524288
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBatchnormLargeEdge5DTestCases()
+{
+    return {
+        {{6291456, 1, 1, 1, 1}}, // 6291456
+        {{1, 8388608, 1, 1, 1}}, // 8388608
+        {{1, 1, 160, 160, 160}} // 4096000
+    };
+}
+
+// ============================================================================
+// Large stress test cases for full validation
+// ============================================================================
+
+inline std::vector<BatchnormTestCase> getBatchnormLargeStress3DTestCases()
+{
+    return {
+        {{8, 32, 2048}}, // 524288
+        {{16, 128, 512}}, // 1048576
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBatchnormLargeStress4DTestCases()
 {
     return {
         {{16, 288, 48, 32}}, // 7077888
         {{16, 576, 1, 30}}, // 276480
         {{16, 2048, 16, 32}}, // 16777216
         {{128, 35, 48, 32}}, // 6881280
-        {{56, 1, 128, 128}}, // 917504
-        {{256, 2048, 1, 1}} // 524288
     };
 }
 
-inline std::vector<BatchnormTestCase> getBatchnormLarge5DTestCases()
+inline std::vector<BatchnormTestCase> getBatchnormLargeStress5DTestCases()
 {
     return {
         {{16, 128, 8, 24, 16}}, // 6291456
         {{32, 128, 8, 16, 16}}, // 8388608
         {{2048, 1024, 2, 1, 1}}, // 4194304
-        {{512, 1, 24, 24, 24}} // 7077888
     };
 }
 

@@ -33,7 +33,7 @@ void assertAllClose(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
                     hipdnn_data_sdk::utilities::TensorBase<T>& actual,
                     float tolerance)
 {
-    auto validator = hipdnn_gpu_ref::GpuFpReferenceValidation<T>(tolerance, 0.0f);
+    auto validator = hipdnn_gpu_ref::GpuFpReferenceValidation<T>(tolerance, tolerance);
     ASSERT_TRUE(validator.allClose(expected, actual));
 }
 

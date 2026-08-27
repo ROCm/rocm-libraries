@@ -71,18 +71,30 @@ void runGpuVsCpuBatchnormFwd(const std::vector<int64_t>& ioDims, const TensorLay
     auto outputGpu = Tensor<OutputDataType>(ioDims, layout);
 
     constexpr float MEAN = 1e-3f;
-    constexpr float STDDEV = 1e-2f;
-    constexpr float INV_VARIANCE = 1.0f / (STDDEV * STDDEV);
+    constexpr float STDDEV = 1e2f;
+    constexpr float INV_VARIANCE = 1.0f / (STDDEV * STDDEV); // 1e-4
+    constexpr float SCALE_BIAS_RANGE = 1.0f;
+    const float tolerance = getToleranceInference<OutputDataType>();
+
+    /*
+      We have to be careful that the magnitude of the expected results isn't
+      always less than the absolute tolerance thresholds - fp32: 2e-4f, fp16: 5e-4f, bfp16: 8e-3f
+
+      |x-MEAN| -> range ~[0, 1e2]
+      inhat = |(x-MEAN) * INV_VARIANCE| -> range ~[0, 1e-2]
+      y = |SCALE_BIAS_RANGE| * inhat + |SCALE_BIAS_RANGE| -> range ~[0, 1e-2]
+
+      The expected output values of the order of magnitued 1e-2 will be above all the tolerance
+      thresholds and provide test coverage.
+    */
 
     unsigned int seed = getGlobalTestSeed();
     inputTensor.fillWithValues(NormalDistGenerator<InputDataType>(seed++, MEAN, STDDEV), true);
-
-    const float scaleBiasRange = 1e-5f;
-    scaleTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-scaleBiasRange),
-                                     static_cast<ScaleBiasDataType>(scaleBiasRange),
+    scaleTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
+                                     static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
                                      seed++);
-    biasTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-scaleBiasRange),
-                                    static_cast<ScaleBiasDataType>(scaleBiasRange),
+    biasTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
+                                    static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
                                     seed++);
     estimatedMeanTensor.fillWithValue(static_cast<MeanVarDataType>(MEAN));
     invVarTensor.fillWithValue(static_cast<MeanVarDataType>(INV_VARIANCE));
@@ -101,7 +113,7 @@ void runGpuVsCpuBatchnormFwd(const std::vector<int64_t>& ioDims, const TensorLay
                                           ComputeDataType>(
         inputTensor, scaleTensor, biasTensor, estimatedMeanTensor, invVarTensor, outputGpu);
 
-    assertAllClose(outputCpu, outputGpu, getToleranceInference<OutputDataType>());
+    assertAllClose(outputCpu, outputGpu, tolerance);
 }
 
 // ============================================================================

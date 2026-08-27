@@ -727,48 +727,32 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdRef3DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn(getBatchnormLarge3DTestCases())));
+                                          ::testing::ValuesIn(getBatchnormLargeEdge3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdRef3DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn(getBatchnormLarge3DTestCases())));
+                                          ::testing::ValuesIn(getBatchnormLargeEdge3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdRef3DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn(getBatchnormLarge3DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuBatchnormFwdRef3DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn([]() {
-                                              auto v = getBatchnormSmall3DTestCases();
-                                              auto m = getBatchnormMedium3DTestCases();
-                                              auto l = getBatchnormLarge3DTestCases();
-                                              v.insert(v.end(), m.begin(), m.end());
-                                              v.insert(v.end(), l.begin(), l.end());
-                                              return v;
-                                          }())));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuBatchnormFwdRef3DFp16,
-                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn([]() {
-                                              auto v = getBatchnormSmall3DTestCases();
-                                              auto m = getBatchnormMedium3DTestCases();
-                                              auto l = getBatchnormLarge3DTestCases();
-                                              v.insert(v.end(), m.begin(), m.end());
-                                              v.insert(v.end(), l.begin(), l.end());
-                                              return v;
-                                          }())));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuBatchnormFwdRef3DBfp16,
-                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn([]() {
-                                              auto v = getBatchnormSmall3DTestCases();
-                                              auto m = getBatchnormMedium3DTestCases();
-                                              auto l = getBatchnormLarge3DTestCases();
-                                              v.insert(v.end(), m.begin(), m.end());
-                                              v.insert(v.end(), l.begin(), l.end());
-                                              return v;
-                                          }())));
+                                          ::testing::ValuesIn(getBatchnormLargeEdge3DTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    TestGpuBatchnormFwdRef3DFp32,
+    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                     ::testing::ValuesIn(getBatchnormLargeStress3DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    TestGpuBatchnormFwdRef3DFp16,
+    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                     ::testing::ValuesIn(getBatchnormLargeStress3DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    TestGpuBatchnormFwdRef3DBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                     ::testing::ValuesIn(getBatchnormLargeStress3DTestCases())));
 
 // ============================================================================
 // 4D (NCHW/NHWC) tests
@@ -801,48 +785,32 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdRef4DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn(getBatchnormLarge4DTestCases())));
+                                          ::testing::ValuesIn(getBatchnormLargeEdge4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdRef4DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn(getBatchnormLarge4DTestCases())));
+                                          ::testing::ValuesIn(getBatchnormLargeEdge4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdRef4DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn(getBatchnormLarge4DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuBatchnormFwdRef4DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn([]() {
-                                              auto v = getBatchnormSmall4DTestCases();
-                                              auto m = getBatchnormMedium4DTestCases();
-                                              auto l = getBatchnormLarge4DTestCases();
-                                              v.insert(v.end(), m.begin(), m.end());
-                                              v.insert(v.end(), l.begin(), l.end());
-                                              return v;
-                                          }())));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuBatchnormFwdRef4DFp16,
-                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn([]() {
-                                              auto v = getBatchnormSmall4DTestCases();
-                                              auto m = getBatchnormMedium4DTestCases();
-                                              auto l = getBatchnormLarge4DTestCases();
-                                              v.insert(v.end(), m.begin(), m.end());
-                                              v.insert(v.end(), l.begin(), l.end());
-                                              return v;
-                                          }())));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuBatchnormFwdRef4DBfp16,
-                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn([]() {
-                                              auto v = getBatchnormSmall4DTestCases();
-                                              auto m = getBatchnormMedium4DTestCases();
-                                              auto l = getBatchnormLarge4DTestCases();
-                                              v.insert(v.end(), m.begin(), m.end());
-                                              v.insert(v.end(), l.begin(), l.end());
-                                              return v;
-                                          }())));
+                                          ::testing::ValuesIn(getBatchnormLargeEdge4DTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    TestGpuBatchnormFwdRef4DFp32,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     ::testing::ValuesIn(getBatchnormLargeStress4DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    TestGpuBatchnormFwdRef4DFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     ::testing::ValuesIn(getBatchnormLargeStress4DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    TestGpuBatchnormFwdRef4DBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     ::testing::ValuesIn(getBatchnormLargeStress4DTestCases())));
 
 // ============================================================================
 // 5D (NCDHW/NDHWC) shape tests
@@ -875,45 +843,29 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdRef5DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn(getBatchnormLarge5DTestCases())));
+                                          ::testing::ValuesIn(getBatchnormLargeEdge5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdRef5DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn(getBatchnormLarge5DTestCases())));
+                                          ::testing::ValuesIn(getBatchnormLargeEdge5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdRef5DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn(getBatchnormLarge5DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuBatchnormFwdRef5DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn([]() {
-                                              auto v = getBatchnormSmall5DTestCases();
-                                              auto m = getBatchnormMedium5DTestCases();
-                                              auto l = getBatchnormLarge5DTestCases();
-                                              v.insert(v.end(), m.begin(), m.end());
-                                              v.insert(v.end(), l.begin(), l.end());
-                                              return v;
-                                          }())));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuBatchnormFwdRef5DFp16,
-                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn([]() {
-                                              auto v = getBatchnormSmall5DTestCases();
-                                              auto m = getBatchnormMedium5DTestCases();
-                                              auto l = getBatchnormLarge5DTestCases();
-                                              v.insert(v.end(), m.begin(), m.end());
-                                              v.insert(v.end(), l.begin(), l.end());
-                                              return v;
-                                          }())));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuBatchnormFwdRef5DBfp16,
-                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn([]() {
-                                              auto v = getBatchnormSmall5DTestCases();
-                                              auto m = getBatchnormMedium5DTestCases();
-                                              auto l = getBatchnormLarge5DTestCases();
-                                              v.insert(v.end(), m.begin(), m.end());
-                                              v.insert(v.end(), l.begin(), l.end());
-                                              return v;
-                                          }())));
+                                          ::testing::ValuesIn(getBatchnormLargeEdge5DTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    TestGpuBatchnormFwdRef5DFp32,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     ::testing::ValuesIn(getBatchnormLargeStress5DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    TestGpuBatchnormFwdRef5DFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     ::testing::ValuesIn(getBatchnormLargeStress5DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    TestGpuBatchnormFwdRef5DBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     ::testing::ValuesIn(getBatchnormLargeStress5DTestCases())));
