@@ -1749,7 +1749,7 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const conv::ProblemDescription& probl
         yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
     bool isColMajor = problem.IsLayoutNHWC();
-    bool transA     = problem.IsLayoutNHWC();
+    bool transA     = isColMajor;
     bool transB     = problem.IsLayoutNHWC() ? false : (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
     int n           = static_cast<int>(std::accumulate(
@@ -2193,7 +2193,7 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const conv::ProblemDescription& 
         yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
     bool isColMajor = problem.IsLayoutNHWC();
-    bool transA     = problem.IsLayoutNHWC();
+    bool transA     = isColMajor;
     bool transB     = false;
     int m           = wei_k / groupCount;
     int n           = static_cast<int>(std::accumulate(
