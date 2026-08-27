@@ -167,6 +167,14 @@ come from the model.
   clocks, more reps, more iterations, interleaved pairing, cold-card warm-up, a robust median —
   **all failed**; clocks in particular are flat to 0.13% while throughput moves 6.5%. What works
   is **aggregating across shapes**, not across repeats. Quote a null as *"no effect above X%"*.
+- **Warm the GPU once per device before the first timed call, and discard that call.** The GPU
+  idles down between invocations, so the **first call after a long idle is an outlier** — and its
+  sign is **architecture-dependent**: gfx1201 measures position 0 at **-6.6%** median, gfx1100 at
+  **+7.6%** on a short shape (11/11 trials positive across two shapes; only **+0.2%** on a long
+  shape, so it is a *short-call* effect that a long call amortises inside its own window). Whichever
+  arm you measure first absorbs it, which makes it a **bias, not noise**. Cost is under a second.
+  Do not port the *magnitude or direction* to a new part without measuring — a 7-trial, one-shape
+  probe is enough to fix the sign.
 - **A/A arm placed LAST** so it brackets the whole interleave and sees maximum position drift.
 - **Report geomean AND flops-weighted wall-clock.** They have disagreed in sign on this
   workload.
