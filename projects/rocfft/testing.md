@@ -12,7 +12,7 @@ multi-process single/multi-device.
 
 rocFFT tests rely on googletest and some python scripts included in the rocFFT git repository.
 
-## Develoment Workflow
+## Development Workflow
 
 Tests are compiled with `BUILD_CLIENTS_TESTS` and `BUILD_CLIENTS_BENCH`, or just `BUILD_CLIENTS` to
 cover both.
@@ -33,22 +33,22 @@ describes a complex forward FFT of length 8, in-place, using single-precision, a
 strides of 1 (with other information about batch distance and offset included as well).  This maps
 1:1 with information provided to the library via the public API.  Multi-device transforms are also
 covered by this tokenization format (though the format becomes increasingly verbose as more
-information is added).  The token format is not part of the public API or rocFFT, but can be useful
+information is added).  The token format is not part of the public API of rocFFT, but can be useful
 for users when providing bug reports or otherwise inspecting logs.  The tokens are used for both
 accuracy and performance tests.
 
 ## Resources and runtime robustness
 
-rocFFT tests will attempt to use as all of GPU's memory, and all of the host's memory in order to
-test as many transform sizes as possible. rocfft-test will query the device and the host in order to
-determine if a given problem size will fit into the available hardware resources, and will either
+rocFFT tests will attempt to use as all of the GPU's memory, and all of the host's memory in order
+to test as many transform sizes as possible. rocfft-test will query the device and the host in order
+to determine if a given problem size will fit into the available hardware resources, and will either
 not generate the test (if the memory footprint exceeds the hardware's availability) or skips the
 tests (if rocfft-test detects at runtime that not enough memory is available).  Since the runtime
 code to detect available memory and the actual memory allocation occur at different times, and we
 don't have a mutex on allocating memory on the host or the device, it may be that the available
 memory, as reported by runtime queries, is not actually available at allocation time.  For both host
 and device allocations, if the allocator returns failure, then that test is skipped.  However, the
-host reference FFT library also allocates memory internally, which, in the case of a OOM error, is
+host reference FFT library also allocates memory internally, which, in the case of an OOM error, is
 not something from which rocfft-test can recover.  (Host-side OOM errors are generally bad news.)
 We also maintain a safety margin on how much memory we allocate in order to improve test robustness.
 
@@ -56,9 +56,9 @@ The number of failed allocations is tracked and reported at the end of `rocfft-t
 There is a command-line option to report allocation errors as failures instead of just skipped
 tests.
 
-In and API setting, the accounting of host and device memory is complicated by the fact that this
-is, in fact, a shared memory pool.  To deal with this, host memory and device memory are allocated
-via structs that track this accounting, with extra care given to the somewhat overly optimistic hip
+In an API setting, the accounting of host and device memory is complicated by the fact that this is,
+in fact, a shared memory pool.  To deal with this, host memory and device memory are allocated via
+structs that track this accounting, with extra care given to the somewhat overly optimistic hip
 runtime, which may not track host memory allocations.
 
 
@@ -76,7 +76,7 @@ compilation or execution in these cases.
 #### Unit tests
 
 Unit tests are correctness tests verify the behaviour of the library infrastructure.  For example,
-correctness tests cover API behaviour for cases where a user man provide invalid parameters, or
+correctness tests cover API behaviour for cases where a user may provide invalid parameters, or
 whether internal library infrastructure behaves as expected.
 
 The API correctness is handled by rocfft-test, where gtest names are `rocfft_UnitTest.*`
@@ -91,21 +91,20 @@ format validation tests) are provided by rocfft-test under the gtest filter
 
 #### Bit-wise reproducibility tests
 
-rocFFT offers bit-wise reproducibility!  We test this by hashing the output using, and re-running
-the test suite to verify bit-wise reproducibility.  Bit-wise reproducibility requires that one be
-running the same version of rocFFT, identical ROCm stacks (compiler/runtime/driver), and the same
-GPU model.
+rocFFT offers bit-wise reproducibility!  We test this by hashing the output and re-running the test
+suite to verify bit-wise reproducibility.  Bit-wise reproducibility requires that one be running the
+same version of rocFFT, identical ROCm stacks (compiler/runtime/driver), and the same GPU model.
 
 #### Samples
 
-Samples are currently located in a separate repository.  The purpose of the samplese repository is
-pedogical; as such, it should work with the latest release of rocFFT.  New API features and
+Samples are currently located in a separate repository.  The purpose of the samples repository is
+pedagogical; as such, it should work with the latest release of rocFFT.  New API features and
 behaviour in the rocFFT library will therefore reside in the rocFFT repository, and will be moved to
 the samples repository after the library changes are made available in a public release.  In order
 to ensure that these samples behave correctly, these should be tested as part of the pre-commit and
 nightly testing.
 
-There is a gap in that these tests are not currently run the TheRock's CI.
+There is a gap in that these tests are not currently run in the TheRock's CI.
 
 #### Feature Flags
 
@@ -113,7 +112,7 @@ Features under development, or for specific use cases may be controlled by featu
 the cmake or execution stage.  These options need to be tested, and, in some cases, combinations of
 these flags need to be tested.
 
-There is a gap in that combinations of flags are not currently run the TheRock's CI.
+There is a gap in that combinations of flags are not currently run in the TheRock's CI.
 
 #### Accuracy tests
 
@@ -171,9 +170,9 @@ pre-submit checks, but should be run in a targeted fashion and on a slower (eg m
 
 ASAN (address sanitizer) coverage is enabled in rocFFT via `BUILD_ADDRESS_SANITIZER`.
 
-TSAN (thread sanitizer) and other sanitizer enabled in rocFFT.
+TSAN (thread sanitizer) and other sanitizers are not enabled in rocFFT.
 
-clange-format is run to check for code format issues.
+clang-format is run to check for code format issues.
 
 cppcheck is run for static analysis.
 
@@ -230,9 +229,9 @@ Post-processing of the data from the test is handled by statistical tests, and w
 the T-test, Mood's median test, and the Mann-Whitney U test (also known as the Wilcoxon rank-sum
 test).  While the data distribution of execution times does not follow a normal distribution, the
 T-test only requires that the difference between the distributions follows is normally distributed,
-which is generally accepted to be true when thee sample size is at least 20.  The three tests answer
+which is generally accepted to be true when the sample size is at least 20.  The three tests answer
 subtly different questions, ie the differences of the mean, the median, or the rank, though, for
-realistic data, these tend to be all agree.  Since we also test multiple points in parameter space
+realistic data, these tend to all agree.  Since we also test multiple points in parameter space
 together, it's also important to use a multi-hypothesis testing framework in order to avoid
 p-hacking oneself.  rocFFT implements the Bonferroni correction and the Benjamini–Hochberg procedure
 in order to reduce the false-positive rate.
@@ -268,28 +267,28 @@ Performance testing is currently not implemented in TheRock due to infrastructur
 
 Pre-submit tests currently cover unit tests and accuracy tests for:
 
-** gfx94X, gfx950, gfx125X on Linux in a docker image
-** gfx1151 on Windows
+- gfx94X, gfx950, gfx125X on Linux in a docker image
+- gfx1151 on Windows
 
 This is small subset of the architectures supported by rocFFT, which is a gap in testing due to
-infrascturcture issues in TheRock's CI.  We should do at least smoke tests on all architectures, and
+infrasctructure issues in TheRock's CI.  We should do at least smoke tests on all architectures, and
 performance tests when changes may affect performance.
 
 
 The CI tests in TheRock reduce the test probability to 1% due to performance issues in the CI
-infrastucture, which results in an uncomfortably low number of tests being run.  Previously the test
-probability was at 100%.  This is a gap in testing due to infrastructure issues in TheRock's CI.  We
-should increa this probability to at least 50%, which can be accomplished by increasing test
-timeouts and providing faster host hardware.
+infrastructure, which results in an uncomfortably low number of tests being run.  Previously the
+test probability was at 100%.  This is a gap in testing due to infrastructure issues in TheRock's
+CI.  We should increase this probability to at least 50%, which can be accomplished by increasing
+test timeouts and providing faster host hardware.
 
 Static analysis (formatting and cppcheck) is gating for PRs.
 
-There are no multi-gpu tests run, performance tests isn't run, and multi-process tests are not run.
+There are no multi-gpu tests run, performance tests aren't run, and multi-process tests are not run.
 These gaps are due to infractucture availability issues.
 
 ### Desired testing standard 
 
-Our objective is to have targetted static analysis, unit test, integration tests, and performance
+Our objective is to have targeted static analysis, unit test, integration tests, and performance
 tests on all architectures combinations that rocFFT supports.  Tests should be performed pre-submit
-using a targetted testing strategy (eg documentation builds don't need performance testing), with a
+using a targeted testing strategy (eg documentation builds don't need performance testing), with a
 weekly build to confirm.
