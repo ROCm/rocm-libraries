@@ -102,12 +102,12 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
         = roc::host_validation::compare(hipblaslt::host_validation::tensorFromStorage(
                                             gpuResult.data(),
                                             gpuResult.size(),
-                                            roc::host_validation::Layout::contiguous(
+                                            roc::host_validation::Layout::contiguousLastDimensionFastest(
                                                 roc::host_validation::Shape{gpuResult.size()})),
                                         hipblaslt::host_validation::tensorFromStorage(
                                             reference.data(),
                                             reference.size(),
-                                            roc::host_validation::Layout::contiguous(
+                                            roc::host_validation::Layout::contiguousLastDimensionFastest(
                                                 roc::host_validation::Shape{reference.size()})),
                                         {.absoluteTolerance = 1e-5, .maxReportedMismatches = 10});
     for(const auto& mismatch : comparison.reportedMismatches)

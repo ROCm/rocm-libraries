@@ -142,26 +142,26 @@ void swizzle_tensor(T*               dst,
         }
     }
 
-    Tensor tmpTensor(
+    Tensor tmpTensor = Tensor::copyEncodedBackingStorage(
         tensorType,
-        Layout::contiguous(Shape(colMaj ? std::vector<size_t>{b, k, m_n}
+        Layout::contiguousLastDimensionFastest(Shape(colMaj ? std::vector<size_t>{b, k, m_n}
                                         : std::vector<size_t>{b, m_n, k})),
         std::as_bytes(std::span<const T>(compact)));
     if(colMaj)
-        tmpTensor = tmpTensor.permute({0, 2, 1});
+        tmpTensor = tmpTensor.copyWithPermutedDimensions({0, 2, 1});
 
     auto       MultipleM_N = MiM_N;
     auto       MultipleK   = MiK * PackK;
     const auto paddedM_N   = (m_n / MultipleM_N + !!(m_n % MultipleM_N)) * MultipleM_N;
     const auto paddedK     = (k / MultipleK + !!(k % MultipleK)) * MultipleK;
-    Tensor paddedTensor = tmpTensor.pad(Shape{b, paddedM_N, paddedK});
-    Tensor reshaped     = paddedTensor.reshape(
+    Tensor paddedTensor = tmpTensor.copyWithZeroPadding(Shape{b, paddedM_N, paddedK});
+    Tensor reshaped     = paddedTensor.reshapeSharingStorage(
         Shape{b, paddedM_N / MiM_N, MiM_N, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK});
-    Tensor permuted = reshaped.permute({0, 1, 3, 4, 2, 5});
+    Tensor permuted = reshaped.copyWithPermutedDimensions({0, 1, 3, 4, 2, 5});
     const size_t outputBytes = b * paddedM_N * paddedK * sizeof(T);
-    if(permuted.storage().size() != outputBytes)
+    if(permuted.rawEncodedBackingStorage().size() != outputBytes)
         throw std::runtime_error("swizzle_tensor produced an unexpected storage size.");
-    std::memcpy(static_cast<void*>(dst), permuted.storage().data(), outputBytes);
+    std::memcpy(static_cast<void*>(dst), permuted.rawEncodedBackingStorage().data(), outputBytes);
 }
 
 void swizzle_tensor_type(HipHostBuffer&       dst,

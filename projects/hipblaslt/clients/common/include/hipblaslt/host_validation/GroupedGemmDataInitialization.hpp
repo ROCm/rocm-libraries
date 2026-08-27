@@ -40,7 +40,7 @@ namespace hipblaslt::host_validation
             const uint64_t recipeSeed
                 = initialization::seedForSequence(seed, static_cast<uint64_t>(sequence));
             initializeTensor(values.data(),
-                             Layout::contiguous(Shape{static_cast<size_t>(size)}),
+                             Layout::contiguousLastDimensionFastest(Shape{static_cast<size_t>(size)}),
                              GenerationRecipe::realOnly(component, {.seed = recipeSeed}));
         };
 

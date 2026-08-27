@@ -59,7 +59,7 @@ void hipblaslt_init_device(
     initialization.positiveOnly     = positiveOnly;
 
     Tensor     matrix  = hipblaslt::host_validation::generateMatrix(initialization);
-    const auto storage = matrix.storage();
+    const auto storage = matrix.rawEncodedBackingStorage();
     if(!storage.empty())
     {
         if(destination == nullptr)

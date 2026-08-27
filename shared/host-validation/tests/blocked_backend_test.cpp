@@ -40,24 +40,27 @@ GemmRequest makeProblem(const std::vector<float>& a, const std::vector<float>& b
     using namespace roc::host_validation;
 
     return GemmRequest(
-        GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{rows, reductionElements}),
-                                              std::span<const float>(a))),
-        GemmOperand(Tensor::fromNative<float>(Layout::contiguous(Shape{reductionElements, columns}),
-                                              std::span<const float>(b))),
-        Tensor::fromNative<float>(Layout::contiguous(Shape{rows, columns}),
-                                  std::span<const float>(c)),
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{rows, reductionElements}),
+            std::span<const float>(a))),
+        GemmOperand(Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{reductionElements, columns}),
+            std::span<const float>(b))),
+        Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{rows, columns}),
+            std::span<const float>(c)),
         std::move(d), ScalarType::Float32);
 }
 
 roc::host_validation::Tensor makeOutput(size_t rows, size_t columns, float value) {
     using namespace roc::host_validation;
     std::vector<float> values(rows * columns, value);
-    return Tensor::fromNativeValues<float>(Shape{rows, columns}, values);
+    return Tensor::copyNativeValues<float>(Shape{rows, columns}, values);
 }
 
 void fillTensor(const roc::host_validation::Tensor& tensor, float value) {
     std::vector<size_t> indices(tensor.shape().rank(), 0);
-    for (size_t linearIndex = 0; linearIndex < tensor.size(); ++linearIndex) {
+    for (size_t linearIndex = 0; linearIndex < tensor.elementCount(); ++linearIndex) {
         tensor.storeFrom(indices, value);
         for (size_t dimension = tensor.shape().rank(); dimension > 0; --dimension) {
             const size_t index = dimension - 1;
@@ -73,8 +76,9 @@ void configureFinalizer(GemmRequest& problem, const std::vector<float>& columnBi
     problem.epilogue.alpha = 1.25;
     problem.epilogue.beta = -0.5;
     problem.epilogue.bias = VectorBinding{
-        Tensor::fromNative<float>(Layout::contiguous(Shape{columnBias.size()}),
-                                  std::span<const float>(columnBias)),
+        Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{columnBias.size()}),
+            std::span<const float>(columnBias)),
         MatrixAxis::Column,
     };
     problem.epilogue.activation = Activation::Relu;
@@ -114,10 +118,10 @@ ParityRunInfo runParity(GemmRequest& pointwiseProblem, GemmRequest& blockedProbl
 
 void requireOnlySelectedOutputsStored(const roc::host_validation::Tensor& output,
                                       const OutputSelection& selection) {
-    std::vector<size_t> selected = selection.indices(output.size());
+    std::vector<size_t> selected = selection.indices(output.elementCount());
     std::sort(selected.begin(), selected.end());
     selected.erase(std::unique(selected.begin(), selected.end()), selected.end());
-    for (size_t index = 0; index < output.size(); ++index) {
+    for (size_t index = 0; index < output.elementCount(); ++index) {
         if (!std::binary_search(selected.begin(), selected.end(), index))
             require(output.loadAs<float>({index / output.shape()[1], index % output.shape()[1]}) ==
                         untouchedValue,
@@ -136,16 +140,17 @@ void testFinalizerAndSmallEdgeBlock() {
     BlockedGemmBackend backend;
 
     GemmRequest problem(
-        GemmOperand(
-            Tensor::fromNative<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a))),
-        GemmOperand(
-            Tensor::fromNative<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b))),
-        Tensor::fromNative<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)),
-        d.alias(Layout(Shape{2, 2}, {1, 2})), ScalarType::Float32);
+        GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}),
+                                                     std::span<const float>(a))),
+        GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}),
+                                                     std::span<const float>(b))),
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)),
+        d.shareStorageWithLayout(Layout(Shape{2, 2}, {1, 2})), ScalarType::Float32);
     problem.epilogue.alpha = 2;
     problem.epilogue.beta = 3;
     problem.epilogue.bias = VectorBinding{
-        Tensor::fromNative<float>(Layout::contiguous(Shape{2}), std::span<const float>(bias)),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
+                                         std::span<const float>(bias)),
         MatrixAxis::Row,
     };
     problem.epilogue.activation = Activation::Relu;
@@ -167,7 +172,7 @@ void testFinalizerAndSmallEdgeBlock() {
     require(full.outputElementsWritten == 4 && full.outputElementsCovered == 4,
             "Full blocked GEMM reported the wrong output counts.");
     const Tensor expected =
-        Tensor::fromNativeValues<float>(Shape{2, 2}, std::array<float, 4>{120, 0, 132, 0});
+        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{120, 0, 132, 0});
     require(compare(d, expected).passed(), "Blocked backend result mismatch.");
 
     fillTensor(d, untouchedValue);
@@ -300,13 +305,15 @@ void testBlockScaledSelectionBlockPlan() {
     GemmRequest blockedProblem =
         makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
     const BlockScaleBinding blockScaleA{
-        Tensor::fromNative<float>(Layout::contiguous(Shape{rows, scaleBlocks}),
-                                  std::span<const float>(scaleA)),
+        Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{rows, scaleBlocks}),
+            std::span<const float>(scaleA)),
         8,
     };
     const BlockScaleBinding blockScaleB{
-        Tensor::fromNative<float>(Layout::contiguous(Shape{columns, scaleBlocks}),
-                                  std::span<const float>(scaleB)),
+        Tensor::copyNativeStorage<float>(
+            Layout::contiguousLastDimensionFastest(Shape{columns, scaleBlocks}),
+            std::span<const float>(scaleB)),
         8,
     };
     pointwiseProblem.a.blockScale = blockScaleA;
@@ -431,14 +438,15 @@ void testParallelPointwiseSelection() {
     const std::vector<float> c(rows * columns, 0.0f);
     Tensor output = makeOutput(rows, columns, sentinel);
     GemmRequest problem = makeProblem(a, b, c, output, rows, reductionElements, columns);
-    problem.outputSelection = OutputSelection::primeStride(output.size(), output.size(), 128);
+    problem.outputSelection =
+        OutputSelection::primeStride(output.elementCount(), output.elementCount(), 128);
 
     referenceGemm(problem, {
                                .backend = GemmBackend::Pointwise,
                                .requireRequestedBackend = true,
                            });
 
-    const std::vector<size_t> selected = problem.outputSelection.indices(output.size());
+    const std::vector<size_t> selected = problem.outputSelection.indices(output.elementCount());
     for (const size_t linearIndex : selected) {
         const size_t row = linearIndex / columns;
         const size_t column = linearIndex % columns;

@@ -15,18 +15,10 @@ SoftmaxRunInfo referenceSoftmax(const SoftmaxRequest& request) {
 
 SoftmaxResult referenceSoftmax(const SoftmaxProblem& problem) {
     const Shape& outputShape = detail::validateSoftmaxProblem(problem);
-    Tensor output(problem.outputType, Layout::contiguous(outputShape));
+    Tensor output(problem.outputType, Layout::contiguousLastDimensionFastest(outputShape));
     SoftmaxRequest request(problem, output);
     const SoftmaxRunInfo runInfo = referenceSoftmax(request);
     return {.output = std::move(output), .runInfo = runInfo};
 }
 
-SoftmaxResult referenceSoftmax(const SoftmaxProblem& problem,
-                               const TensorStorageAllocator& allocator) {
-    const Shape& outputShape = detail::validateSoftmaxProblem(problem);
-    Tensor output(problem.outputType, Layout::contiguous(outputShape), allocator);
-    SoftmaxRequest request(problem, output);
-    const SoftmaxRunInfo runInfo = referenceSoftmax(request);
-    return {.output = std::move(output), .runInfo = runInfo};
-}
 }  // namespace roc::host_validation

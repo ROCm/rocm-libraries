@@ -204,8 +204,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
 
     roc::host_validation::MxGenerationResult result = roc::host_validation::generateMx(problem);
 
-    std::vector<uint8_t> scaleBytes(result.scales.storage().size());
-    std::memcpy(scaleBytes.data(), result.scales.storage().data(), scaleBytes.size());
+    std::vector<uint8_t> scaleBytes(result.scales.rawEncodedBackingStorage().size());
+    std::memcpy(scaleBytes.data(), result.scales.rawEncodedBackingStorage().data(), scaleBytes.size());
     const size_t blockedScaleExtent
         = (problem.shape[problem.blockAxis] + problem.blockSize - 1) / problem.blockSize;
     const size_t fastScaleExtent = problem.blockAxis == 0 ? blockedScaleExtent : problem.shape[0];
@@ -213,17 +213,17 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     scaleBytes                   = swizzleScaleBytes(
         std::move(scaleBytes), scaleLayout, slowScaleExtent, fastScaleExtent, problem.blockSize);
 
-    if(data.size() < result.data.storage().size())
+    if(data.size() < result.data.rawEncodedBackingStorage().size())
         throw std::invalid_argument("generateMXInput data output is too small.");
     if(scale.size() < scaleBytes.size())
         throw std::invalid_argument("generateMXInput scale output is too small.");
 
-    std::memcpy(data.data(), result.data.storage().data(), result.data.storage().size());
+    std::memcpy(data.data(), result.data.rawEncodedBackingStorage().data(), result.data.rawEncodedBackingStorage().size());
     std::memcpy(scale.data(), scaleBytes.data(), scaleBytes.size());
 
     std::vector<float> reference(problem.shape.elementCount());
     std::memcpy(
-        reference.data(), result.reference.storage().data(), reference.size() * sizeof(float));
+        reference.data(), result.reference.rawEncodedBackingStorage().data(), reference.size() * sizeof(float));
     return reference;
 }
 

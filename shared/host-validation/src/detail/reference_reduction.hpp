@@ -149,7 +149,7 @@ ReductionRunInfo referenceReductionTyped(const ReductionRequest& request,
                 result += value;
             } else {
                 if (request.operation == ReductionOperation::Sum) {
-                    result += value;
+                    result = wrappingAdd(result, value);
                 } else {
                     const Accumulator magnitude = static_cast<Accumulator>(std::abs(value));
                     if constexpr (std::is_floating_point_v<Accumulator>) {
