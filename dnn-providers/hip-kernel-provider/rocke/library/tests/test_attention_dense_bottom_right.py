@@ -97,12 +97,16 @@ def test_unsupported_combinations_are_rejected(over, needle):
 
 def test_the_removed_alignment_guard_was_unreachable():
     """Records why there is no "(seqlen_kv - seqlen_q) must be a multiple of block_n"
-    check: under the current shape rules it could never fire.
+    check: on the NON-RAGGED path it could never fire.
 
-    seqlen_q must be a multiple of the 256-row query tile, seqlen_kv a multiple of
-    block_n, and every legal block_n divides 256 -- so seqlen_q is a multiple of block_n
-    too and the difference always is as well. Enumerated rather than argued, so this
-    starts failing if the shape rules change and the assumption quietly stops holding.
+    On that path seqlen_q must be a multiple of the 256-row query tile and seqlen_kv a
+    multiple of block_n, and every legal block_n divides 256 -- so seqlen_q is a multiple
+    of block_n too and the difference always is as well. The ragged path deliberately
+    lifts those length rules under bottom-right, which is why the offset there is
+    arbitrary and the KV-tile bound has to ceil.
+
+    Enumerated rather than argued, so this starts failing if the non-ragged shape rules
+    change and the assumption quietly stops holding.
 
     The KV-tile bound is a ceil independently of this, so an offset that DID land
     mid-tile would still be covered. That is what the ragged/varlen follow-up needs,
@@ -130,8 +134,12 @@ def test_ragged_accepts_arbitrary_chunk_lengths(sq, skv):
     on gfx950 by the AOT parity suite; this test guards the spec-level contract.
     """
     spec = _spec(
-        seqlen_q=sq, seqlen_kv=skv, num_query_heads=4, num_kv_heads=1,
-        ragged=True, causal_bottom_right=True,
+        seqlen_q=sq,
+        seqlen_kv=skv,
+        num_query_heads=4,
+        num_kv_heads=1,
+        ragged=True,
+        causal_bottom_right=True,
     )
     ok, why = supports_attention_dense(spec, arch="gfx950")
     assert ok, why
@@ -139,11 +147,20 @@ def test_ragged_accepts_arbitrary_chunk_lengths(sq, skv):
 
 
 def test_ragged_without_bottom_right_is_still_self_attention_only():
-    """The relaxation is scoped to bottom-right. Plain ragged cross-attention has no
-    diagonal to place the queries on, so it stays rejected."""
+    """The relaxation is scoped to bottom-right, so the on-point negative case is
+    top-left causal rather than non-causal: `causal_bottom_right` is the axis this
+    moved. A top-left diagonal gives a short query block nowhere to sit, so ragged
+    cross-attention stays rejected there."""
     with pytest.raises(ValueError, match="self-attention only"):
-        _spec(seqlen_q=197, seqlen_kv=400, num_query_heads=4, num_kv_heads=1,
-              ragged=True, causal=False)
+        _spec(
+            seqlen_q=197,
+            seqlen_kv=400,
+            num_query_heads=4,
+            num_kv_heads=1,
+            ragged=True,
+            causal=True,
+            causal_bottom_right=False,
+        )
 
 
 def test_gfx942_refuses_the_field_it_does_not_implement():
@@ -185,7 +202,9 @@ def test_top_left_and_bottom_right_actually_differ():
     """Guards the whole feature. Names are anonymized first, so this fails if the offset
     is dropped from the mask -- leaving only a renamed copy of the top-left kernel."""
     tl = _ll(_spec(seqlen_q=256, seqlen_kv=512), anonymize=True)
-    br = _ll(_spec(seqlen_q=256, seqlen_kv=512, causal_bottom_right=True), anonymize=True)
+    br = _ll(
+        _spec(seqlen_q=256, seqlen_kv=512, causal_bottom_right=True), anonymize=True
+    )
     assert tl != br
 
 
@@ -226,6 +245,84 @@ def test_dispatch_maps_mask_type_2_to_bottom_right():
     assert spec.causal is True
     assert spec.causal_bottom_right is True
     assert "_br" in spec.kernel_name()
+
+
+@pytest.mark.parametrize("block_n", [96, 160, 192, 224])
+def test_supports_rejects_block_n_not_dividing_the_query_tile(block_n):
+    """The KV-tile bound leaves the query-block term outside its ceil, which is exact
+    only if block_n divides the 256-row query tile. Where it does not, the bound falls
+    short and drops keys -- silently, since a short bound is still a legal loop.
+
+    block_n=96 at seqlen_q=512 is the worked case: the bound reaches tile 5 while the
+    last query needs tile 5 inclusive. gfx942 gates this already; gfx950 relies on it
+    just as much, and did not.
+    """
+    from kernels.gfx950.attention_dense import _BLOCK_M
+
+    assert _BLOCK_M % block_n != 0, "test is only meaningful for a non-divisor"
+    # seqlen_kv has to stay a multiple of block_n or the spec rejects it for that
+    # instead, and the gate under test never runs.
+    ok, why = supports_attention_dense(
+        _spec(
+            seqlen_q=512,
+            seqlen_kv=block_n * 8,
+            num_query_heads=4,
+            num_kv_heads=1,
+            block_n=block_n,
+        ),
+        arch="gfx950",
+    )
+    assert not ok and "query tile" in why
+
+
+@pytest.mark.parametrize("block_n", [32, 64, 128, 256])
+def test_supports_still_accepts_every_block_n_that_divides_the_query_tile(block_n):
+    """The other side of the gate: the rejection must not narrow the supported set."""
+    ok, why = supports_attention_dense(
+        _spec(
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=4,
+            num_kv_heads=1,
+            block_n=block_n,
+        ),
+        arch="gfx950",
+    )
+    assert ok, why
+
+
+@pytest.mark.parametrize("sq, skv", [(197, 400), (300, 1234), (512, 4097), (100, 8000)])
+def test_dispatch_produces_ragged_bottom_right_at_arbitrary_lengths(sq, skv):
+    """Dispatch must be able to BUILD the spec these lengths need, not merely have a
+    kernel that could run it.
+
+    The four shapes below are the ones the ragged tests declare supported. Building the
+    spec by hand with ragged=True proves the kernel works and nothing else: dispatch
+    decides `ragged` itself, and while it gated that on seqlen_q == seqlen_kv these
+    requests fell to the aligned path and died on its 256-multiple rule. That is a
+    capability nothing could reach, which is the failure this test exists to prevent.
+    """
+    from dispatch.attention.common import AttentionRequest
+    from dispatch.attention.gfx950 import dense_spec_for_request
+
+    req = AttentionRequest(
+        arch="gfx950",
+        batch=1,
+        seqlen_q=sq,
+        seqlen_k=skv,
+        nhead_q=4,
+        nhead_k=1,
+        hdim_q=128,
+        hdim_v=128,
+        dtype="bf16",
+        mask_type=2,
+        algorithm="attention_dense",
+    )
+    spec = dense_spec_for_request(req)
+    assert spec.causal_bottom_right is True
+    assert spec.ragged is True, "arbitrary lengths must take the ragged path"
+    ok, why = supports_attention_dense(spec, arch="gfx950")
+    assert ok, why
 
 
 def test_dispatch_leaves_top_left_alone():

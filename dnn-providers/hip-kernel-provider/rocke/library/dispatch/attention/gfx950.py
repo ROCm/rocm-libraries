@@ -51,9 +51,16 @@ def _dense_spec(req: OperatorRequest):
     sw = int(req.sliding_window)
     use_sinks = bool(req.use_sinks)
     bn = _DENSE_BLOCK_N
-    # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
-    # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
-    ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % bn != 0))
+    # MaskType.BOTTOM_RIGHT_CAUSAL. Read before the ragged gate below, which depends
+    # on it.
+    bottom_right = int(req.mask_type) == _MASK_BOTTOM_RIGHT_CAUSAL
+    # On-chip ragged padding for lengths that are not a 256/block_n multiple. Normally
+    # self-attention only (seqlen_q == seqlen_kv), because a shorter query block has no
+    # diagonal to sit on -- EXCEPT under bottom-right, which supplies exactly that. A
+    # chunked-prefill request is the case: its KV cache is whatever length it is, so
+    # without this the spec falls to the aligned path and the 256-multiple check rejects
+    # it.
+    ragged = (sq == sk or bottom_right) and ((sq % _BLOCK_M != 0) or (sk % bn != 0))
     nqb = (sq + _BLOCK_M - 1) // _BLOCK_M
     work = nqb * int(req.nhead_q) * int(req.batch)
     np = int(req.dense_num_persistent)
@@ -68,12 +75,12 @@ def _dense_spec(req: OperatorRequest):
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
         )
-    # MaskType.BOTTOM_RIGHT_CAUSAL. Only the non-persistent grid implements the shifted
-    # diagonal, so under "auto" -- where persistent is a heuristic about work size, not
-    # something the caller asked for -- pick the grid that can serve the mask instead of
-    # declining. An explicit dense_persistent="on" is a caller request, so leave it and
-    # let the spec reject the combination.
-    bottom_right = int(req.mask_type) == _MASK_BOTTOM_RIGHT_CAUSAL
+    # Only the non-persistent grid implements the shifted diagonal, so under "auto" --
+    # where persistent is a heuristic about work size, not something the caller asked
+    # for -- pick the grid that can serve the mask instead of declining. An explicit
+    # dense_persistent="on" is a caller request, so leave it and let the spec reject the
+    # combination. The grid that ran stays visible: select() sets kernel_name_override
+    # from the spec name, which carries persist{N} only when persistent.
     if bottom_right and mode == "auto":
         persistent = False
     return AttentionDenseSpec(
