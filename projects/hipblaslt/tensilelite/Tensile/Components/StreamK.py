@@ -1314,8 +1314,6 @@ class StreamK(Component):
             module.add(SCBranchSCC1(labelName=perTilePartialLabel.getLabelName(), comment="per-tile partialIdx"))
             module.add(SBranch(labelName=globalPartialLabel.getLabelName(), comment="ragged -> global partialIdx"))
             module.add(noTilesPartial)
-            writer.releaseStreamKConstSgpr(sSkt)
-            writer.releaseStreamKConstSgpr(sGrid)
             module.add(SBranch(labelName=globalPartialLabel.getLabelName(), comment="no tiles -> global partialIdx"))
 
             module.add(perTilePartialLabel)
