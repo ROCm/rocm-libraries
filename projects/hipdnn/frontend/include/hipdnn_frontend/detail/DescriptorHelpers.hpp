@@ -233,6 +233,26 @@ inline Error
     if(tensor->has_ragged_offset())
     {
         const auto& raggedOffset = tensor->get_ragged_offset();
+
+        // The aux must have backing storage and must not itself be ragged.
+        // Rejecting a nested aux also breaks any offset cycle (every node in a
+        // cycle is ragged, so the first hop is rejected) before the recursion
+        // below could overflow the stack. Mirrors the backend deserialize
+        // enforcement in GraphDescriptor::relinkRaggedOffsets.
+        if(raggedOffset->get_is_virtual())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Ragged-offset aux tensor " + std::to_string(raggedOffset->get_uid())
+                        + " of tensor " + std::to_string(uid) + " must not be virtual"};
+        }
+        if(raggedOffset->has_ragged_offset())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Ragged-offset aux tensor " + std::to_string(raggedOffset->get_uid())
+                        + " of tensor " + std::to_string(uid)
+                        + " must not itself carry a ragged offset"};
+        }
+
         HIPDNN_CHECK_ERROR(createOrFindTensorDesc(tensorDescs, raggedOffset));
         HIPDNN_CHECK_ERROR(
             setDescriptorAttrTensorRef(desc.get(),

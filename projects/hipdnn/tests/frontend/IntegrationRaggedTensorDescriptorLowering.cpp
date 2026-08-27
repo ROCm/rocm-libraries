@@ -87,6 +87,8 @@ protected:
         SHARED, // both inputs point at the same aux tensor
         SEPARATE, // each input owns a distinct aux tensor
         AUX_IS_INPUT, // in0's aux is in1, which is also the second ADD operand
+        NESTED, // in0's aux itself carries a ragged offset (illegal)
+        VIRTUAL, // in0's aux is marked virtual (illegal: no backing storage)
     };
 
     // Builds a minimal binary pointwise (ADD) graph over in0/in1, wiring the
@@ -133,6 +135,20 @@ protected:
         case AuxWiring::AUX_IS_INPUT:
             in0->set_ragged_offset(in1);
             break;
+        case AuxWiring::NESTED:
+        {
+            auto aux = makeAux(K_RAGGED_OFFSET_UID);
+            aux->set_ragged_offset(in1);
+            in0->set_ragged_offset(aux);
+            break;
+        }
+        case AuxWiring::VIRTUAL:
+        {
+            auto aux = makeAux(K_RAGGED_OFFSET_UID);
+            aux->set_is_virtual(true);
+            in0->set_ragged_offset(aux);
+            break;
+        }
         default:
             break;
         }
@@ -180,6 +196,19 @@ protected:
             return {};
         }
         return serializeDescriptor(rawDesc);
+    }
+
+    // Lowers a frontend graph expected to carry a malformed ragged aux and
+    // asserts the descriptor lowering path rejects it with INVALID_VALUE.
+    // validate() has no ragged-specific checks, so lowering is the enforcement
+    // point (mirroring the backend deserialize rejections).
+    static void expectLoweringRejected(TestableGraphLowering& graph, hipdnnHandle_t handle)
+    {
+        auto validated = graph.validate();
+        EXPECT_EQ(validated.code, ErrorCode::OK) << validated.err_msg;
+
+        auto built = graph.build_operation_graph_via_descriptors(handle);
+        EXPECT_EQ(built.code, ErrorCode::INVALID_VALUE) << built.err_msg;
     }
 
     // Maps each tensor UID to its ragged-offset link (-1 when absent), the
@@ -361,4 +390,21 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, NonRaggedGraphHasNoTensorLinkI
             << "tensor uid " << t->uid
             << " unexpectedly carries ragged_offset_tensor_uid in a non-ragged graph.";
     }
+}
+
+// A ragged-offset aux that itself carries a ragged offset is illegal: lowering
+// must reject it (also breaking the offset cycle) rather than recursing without
+// bound while building the tensor descriptors.
+TEST_F(IntegrationRaggedTensorDescriptorLowering, NestedRaggedOffsetRejectedInLowering)
+{
+    auto graph = makeBinaryPointwiseGraph(AuxWiring::NESTED);
+    expectLoweringRejected(*graph, _handle);
+}
+
+// A virtual ragged-offset aux has no backing storage and must be rejected at
+// lowering, symmetric with the backend deserialize enforcement.
+TEST_F(IntegrationRaggedTensorDescriptorLowering, VirtualRaggedOffsetRejectedInLowering)
+{
+    auto graph = makeBinaryPointwiseGraph(AuxWiring::VIRTUAL);
+    expectLoweringRejected(*graph, _handle);
 }
