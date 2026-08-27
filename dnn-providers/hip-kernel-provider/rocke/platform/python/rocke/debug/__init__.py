@@ -6,7 +6,7 @@ from .logical_value_reconstruction import (
     logical_snapshot,
     reconstruct_logical_value,
 )
-from .logical_value_rendering import decode_logical_value, values_human
+from .logical_value_rendering import decode_logical_value, render_readable
 from .register_value_decoding import decode_word_value
 from .stopped_wave_snapshot import (
     SNAPSHOT_SCHEMA,
@@ -32,5 +32,5 @@ __all__ = [
     "load_snapshot",
     "logical_snapshot",
     "reconstruct_logical_value",
-    "values_human",
+    "render_readable",
 ]

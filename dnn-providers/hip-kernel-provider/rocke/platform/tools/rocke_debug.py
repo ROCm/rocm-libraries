@@ -30,8 +30,8 @@ from rocke.debug.logical_value_reconstruction import (
 from rocke.debug.logical_value_rendering import (
     decode_logical_value,
     decode_word,
+    render_readable,
     unavailable_value,
-    values_human,
 )
 from rocke.debug.register_value_decoding import DTYPES, FLOAT8_FORMATS
 from rocke.debug.rocgdb_value_locations import (
@@ -155,6 +155,7 @@ def _print_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--format", choices=("human", "jsonl"), default="human")
     parser.add_argument("--float8-format", choices=FLOAT8_FORMATS, default="ocp")
     parser.add_argument("--exec", dest="exec_expression", default="$exec")
+    parser.add_argument("--show-sources", action="store_true")
     parser.add_argument("--help", action="help")
     return parser
 
@@ -347,7 +348,7 @@ if gdb is not None:
                 rendered = (
                     records_jsonl(records)
                     if args.format == "jsonl"
-                    else values_human(records)
+                    else render_readable(records, show_sources=args.show_sources)
                 )
                 gdb.write(rendered + "\n")
             except (TypeError, ValueError, RuntimeError, gdb.error) as error:

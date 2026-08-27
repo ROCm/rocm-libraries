@@ -221,3 +221,15 @@ def test_print_command_discovers_description_and_registers(monkeypatch):
     assert "acc f32 [2x2] layout=test.acc status=available" in writes[0]
     assert "1.0 2.0" in writes[0]
     assert "~3.0 ~4.0" in writes[0]
+
+
+def test_print_command_can_show_logical_cell_sources(monkeypatch):
+    commands, writes, reads = _load_with_fake_gdb(monkeypatch)
+
+    commands["rocke print"].invoke("--show-sources", False)
+
+    assert reads == ["$pc", "$pc", "$exec", "$v2", "$v3"]
+    assert len(writes) == 1
+    assert "sources (lane/register):" in writes[0]
+    assert "0: L0/$v2 L0/$v3" in writes[0]
+    assert "1: ~L1/$v2 ~L1/$v3" in writes[0]
