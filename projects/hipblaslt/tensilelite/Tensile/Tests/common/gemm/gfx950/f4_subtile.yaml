@@ -484,3 +484,40 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [256, 256, 1, 256]
           - Exact: [512, 512, 1, 512]
+  -
+    - # Edge and tail coverage.  Every other block sizes M, N and K to whole
+      # macro tiles and whole DepthU, so neither the M/N edge nor the tail loop
+      # is reached; the buffer limits and the tail masking are untested there.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [200, 256, 1, 256]   # M edge
+          - Exact: [256, 200, 1, 256]   # N edge
+          - Exact: [256, 256, 1, 320]   # K tail (320 = DepthU + 64)
+          - Exact: [256, 256, 1, 384]   # K tail (384 = DepthU + 128)
+          - Exact: [200, 200, 1, 320]   # M and N edge with a K tail
