@@ -59,6 +59,37 @@ since the aux epilogue changes the store path:
 
 **Verdict across all three measured arm-sets: parity to slightly better, at ~1/3 the kernels.**
 
+> ### Independent re-verification, 2026-08-27 — all four ProblemTypes
+>
+> The arm-sets below ran at time-derived iterations (~10 ms accumulated), which bottoms out near
+> **10 iterations on large shapes** — a regime where warmup distorts a library-vs-library ratio.
+> Since `lean` is the *smaller* library, the concern was that this flattered it. Re-measured at
+> **2 000 iterations with a doubling check**, on **8 shapes drawn at random** from
+> `eval_shapes_1000.json` (seed 4711), 32 CU:
+>
+> | catalog | lean / wide kernels | ratio range | every shape converged? |
+> |---|---|---|---|
+> | HHS | — | large 1.001, med 0.991 | yes |
+> | BBS | 98 / 246 | 0.961-1.017 | yes |
+> | AuxH | 99 / 250 | 0.977-1.025 | yes |
+> | AuxB | 100 / 253 | **0.988-1.006** | yes |
+>
+> **Parity holds on all four, independently.** AuxB is the tightest — widest deviation 1.2%.
+>
+> **Two caveats on how to read the numbers above this box.** (1) The A/A floor is *not* a
+> significance yardstick: it runs a library against itself, so both arms warm up identically and it
+> is blind to the variance that limits a library-vs-library ratio. (2) That variance is **2-5%** on
+> this setup, and five attempts to reduce it (clocks, reps, iterations, interleaved pairing,
+> cold-card warm-up, a robust median) all failed. So differences like "98.99% vs a 99.39% floor"
+> are **below the resolution** — the honest statement is *no detectable difference*, which is what
+> the re-verification confirms. Do not read the ~1% geomean "cost" on HHS, or the ~1.8% AuxH
+> "gain", as real effects.
+>
+> Method, mechanism and the failed floor-reduction attempts:
+> `wiki/05_workflow/lean_catalog_port.md` §1c in `ror-claude-skills` (branch `vmijovic/skills`);
+> the check is `tools/lean_catalog/check_convergence.py`, and the AuxH/AuxB bench profiles now ship
+> with it.
+
 | arm-set | lean geomean | lean wall-clock | A/A floor (wall) |
 |---|---|---|---|
 | navi32 HHS @ 60 CU | 98.99% | 99.54% | 99.39% |
