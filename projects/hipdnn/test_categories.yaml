@@ -53,3 +53,7 @@ test_categories:
       - "hipdnn_public_backend_tests"
       - "hipdnn_backend_logging_shutdown_tests"
       - "hipdnn_public_frontend_tests"
+      # Build tree only: hipdnn_list_engines_smoke runs a CMake driver script rather than an
+      # installed gtest binary, so it is absent from the installed CTestTestfile.cmake. See
+      # tools/CMakeLists.txt.
+      - "hipdnn_list_engines_smoke"
