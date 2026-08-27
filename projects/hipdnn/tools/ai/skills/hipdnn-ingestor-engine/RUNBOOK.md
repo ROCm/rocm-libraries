@@ -321,6 +321,31 @@ maximum** — count them and name them in the file. Rows you are unsure of go in
 `UNSURE` and become step-3 questions; that is what step 3 is for. Hitting the cap is not
 failure, it is the step working.
 
+**The self-check, when you feel the "let me verify this properly" pull:** ask *is this
+file open because a specific `UNSURE` row needs it, or because I am not ready to write
+yet?* The second is the stall, and from the inside it is indistinguishable from
+diligence. If you cannot name the row the source resolves, you are past the cap — write
+the file.
+
+**If you are supervising this agent, do not rely on either rule above.** They were
+written after an agent stalled here for 110 minutes; the agent that then read them, and
+said unprompted that they were clear and binding, drifted past them twice more in the
+same run, for 25 and 50 minutes. Its own diagnosis was right: *"there's no forcing
+function that fires until I choose to invoke it myself."* Self-monitoring does not close
+this one, and an agent affirming the rule is not evidence that it will hold.
+
+The check that works costs one command:
+
+```bash
+ls $WORKTREE/mining.md
+```
+
+Run it around 20 minutes in. If the file is missing, interrupt with **do not read another
+file until `mining.md` exists** — that exact instruction produced a 331-line file within
+minutes, both times it was used. And when asking a quiet agent for status, ask what it
+has **written**, not what it has **found**: a stalled agent answers the second question
+fluently and at length, and that fluency is the tell.
+
 Discovery commands for the five deliverables. **None of these names is guaranteed** — a
 command that prints nothing means you looked for the wrong name, not that the kernel has
 no rules. `rocke-mining.md` carries the fallbacks:

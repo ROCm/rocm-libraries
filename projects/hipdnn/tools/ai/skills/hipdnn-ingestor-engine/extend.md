@@ -5,6 +5,11 @@ runbook step — you don't arrive here from `RUNBOOK.md`, and nothing in it send
 You owe: the addition spliced into a live descriptor directory, only *new* UUIDs minted,
 and a **whole-directory** validator pass proving the pieces already there stayed valid.
 
+**Variables.** `$REPO`, `$PROVIDER`, `$GEN`, `$BUILD` are set in `RUNBOOK.md`'s "Set
+these once" block. You do not otherwise use RUNBOOK in this flow, but you still need that
+block — set them before running anything below. `$EXISTING_DIR` is the descriptor
+directory the first command below locates.
+
 Everything about turning a kernel into descriptors and hook bodies is unchanged from the
 create flow — mine the kernel per `rocke-mining.md`, implement the five hooks per
 `native-pack.md`, read `graph-contract.md` when the addition changes what the engine can

@@ -4,6 +4,19 @@
 constraint row given a verdict, before you go to step 3. This file tells you what to
 extract and how to classify it.
 
+**Variables and the budget, restated here because this is the file you will be inside
+when they bind.** `$REPO`, `$PROVIDER`, `$GEN`, `$MODULE`, `$ARCH` are set in
+`RUNBOOK.md`'s "Set these once" block — set them before running anything below.
+`$M` is `$PROVIDER/rocke/library/$MODULE`, the kernel module itself. `$KDP` is the path
+to your shipped `.kdp.json`, which does not exist until step 4 generates it.
+
+**The budget: draft `mining.md` after the kernel module and its spec, before ANY third
+source. Then five sources *beyond the kernel module*, maximum** — count them and name
+them in the file. This document is long and every section below points at more places to
+look; the cap is what stops that from becoming the whole run. Rows you are unsure of go
+in marked `UNSURE` and become step-3 questions. Hitting the cap is not failure, it is the
+step working.
+
 **Why this comes after the graph contract.** Step 2a (`graph_contract.md`) already told
 you what the graph can ask for, and which of the kernel's fields are derivations rather
 than a direct match. Mining does not re-derive that mapping — it tells you what the

@@ -54,7 +54,7 @@ The nine stages, in order. A run is **incomplete** until stage 8:
 | 4 | Descriptors generated | `generate.py` exit 0, emitting the **full variant set** — not one kernel (see `RUNBOOK.md` § Sizing the variant set) |
 | 5 | **Hook bodies implemented** | `graph_match`, `kernel_match`, `score`, dispatch all written — no `// TODO` left in a code path the engine reaches |
 | 6 | Spliced | Every applicable CMake/registration point applied, edits made not just described |
-| 7 | Built | Provider compiles with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`; engine appears in `hipdnn_list_engines` |
+| 7 | Built | Provider compiles with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`; engine appears in `hipdnn_list_engines` — **as an FNV-1a hex id, not as your engine name.** Grepping the literal name finds nothing *even on success* (AICK-1901); compute the hash and grep for that, per `RUNBOOK.md` step 7c |
 | 8 | **Tested on device, and wired into CI** | Quick-tier cases covering every supported feature of THIS op (many tiny graphs, budget-bounded) plus standard-tier cases at realistic sizes, added to `dnn-providers/integration-tests/`; **an `add_external_integration_test_target` pinned to this engine via `ENGINE_NAME`**, so the suite exercises yours rather than whichever engine wins; and a real graph dispatching on the target arch, verified against a reference |
 | 9 | Handed back | Residual judgment calls surfaced to the human with a recommendation |
 
@@ -108,6 +108,11 @@ metadata field, or a `workspaceBytes` that returns 0 because the kernel needs no
 legitimate starting point — *if* you say so explicitly and explain what would change it.
 What is never acceptable is leaving a body empty, or reporting a stage you skipped as
 though it were out of scope.
+
+One carve-out, because disclosure does not rescue it: **a `score` returning a
+*constant* is not a placeholder.** It makes ranking arbitrary and hides
+mis-specialization, and saying so in the report does not change that. Rank on one real
+knob or explain why the pack has nothing to rank on (`native-pack.md` § score).
 
 **If you cannot reach stage 8, say which stage you stopped at and why**, in those terms.
 "Blocked at stage 7: no gfx950 device reachable" is a good report. "Descriptors generated

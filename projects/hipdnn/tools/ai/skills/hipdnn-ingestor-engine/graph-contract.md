@@ -3,6 +3,10 @@
 **You were sent here from RUNBOOK step 2a.** You owe `graph_contract.md` on disk before you
 start step 2b (mining the kernel). This file tells you what to put in it.
 
+**Variables.** `$REPO` and `$OPTABLE` (your op's FlatBuffers table, e.g.
+`SdpaAttributes`) are set in `RUNBOOK.md`'s "Set these once" block. Set them before
+running any command below — the first one uses `$REPO`.
+
 **Why this comes first.** The matcher you write in step 6 is a translation between two
 descriptions of the same operation: the kernel's, which lives in Python, and hipDNN's,
 which lives in a schema. Miners who start on the kernel side arrive at the matcher having

@@ -5,6 +5,10 @@ five hooks filled in — `grep -c "FILL THIS OUT"` at zero — before you go to 
 file tells you what each hook's body must do and the traps that make a green build mean
 nothing.
 
+**Variables.** `$REPO`, `$PROVIDER`, `$GEN`, `$BUILD` are set in `RUNBOOK.md`'s "Set
+these once" block. Set them before running any command below — nothing enforces that you
+arrived through RUNBOOK, and the first command here uses `$PROVIDER`.
+
 **What you arrive with.** `graph_contract.md` told you what the graph can ask for and
 where kernel and hipDNN disagree; `mining.md` told you what the kernel can actually
 answer, including its rejection checklist. This step is where those two documents become
