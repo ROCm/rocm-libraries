@@ -148,8 +148,25 @@ come from the model.
 
 ## 7. Benchmarking
 
-- **`--fixed-iters` is mandatory when arms differ in library size** (here 60 vs 238 kernels):
-  tiered iteration counts charge one-time library init unevenly.
+- **`--fixed-iters` is mandatory, but not for the reason first written here** (corrected
+  2026-08-27). The old rule said tiered iterations charge *library init* unevenly when arms differ
+  in **library size**. Measured, that is wrong: fitting `timed_total = a*iters + C` gives
+  `C ~ 2-4 ms` whether the library holds **1 kernel or 298** — flat and non-monotonic — and the
+  harness times only the loop, so it is **warmup**, not init. Warmup is **common-mode**: two
+  kernels in the *same* library each gain ~10% from 10 to 2 000 iterations while their **ratio**
+  moves 2%. So it largely cancels when the arms dispatch the **same or overlapping** kernels (a
+  reduction A/B is robust) and bites when they dispatch **different** ones (a re-map, a pool swap,
+  a single-kernel probe). Size is not the trigger; *divergent kernel selection* is.
+- **Verify the iteration count instead of assuming one.** Measure at N and 2N and require the
+  ratio to hold. Tool: `check_convergence.py` in the `lean_catalog` toolkit
+  (`ror-claude-skills`, branch `vmijovic/skills`), which also draws shapes at random from an eval
+  set, refuses to start if another `hipblaslt-bench` is live, and samples for a co-tenant during
+  every measurement.
+- **Nothing here resolves better than ~5%.** Repeats of the *same* ratio at *fixed* iterations
+  scatter **2-5%** (re-measured 4.71% on a verified-idle machine). Five attempts to reduce it —
+  clocks, more reps, more iterations, interleaved pairing, cold-card warm-up, a robust median —
+  **all failed**; clocks in particular are flat to 0.13% while throughput moves 6.5%. What works
+  is **aggregating across shapes**, not across repeats. Quote a null as *"no effect above X%"*.
 - **A/A arm placed LAST** so it brackets the whole interleave and sees maximum position drift.
 - **Report geomean AND flops-weighted wall-clock.** They have disagreed in sign on this
   workload.
