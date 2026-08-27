@@ -349,17 +349,28 @@ try
         rocsparse_status status{};
         switch(sptrsv_descr->get_format())
         {
+        case rocsparse_format_csr:
+        case rocsparse_format_coo:
+        case rocsparse_format_csc:
+        {
+            auto csrsv_info = sptrsv_descr->get_csrsv_info();
+            status = rocsparse::csrsv_zero_pivot(handle, csrsv_info, rocsparse_indextype_i64, data);
+            break;
+        }
         case rocsparse_format_ell:
         {
             auto ellsv_info = sptrsv_descr->get_ellsv_info();
             status = rocsparse::ellsv_zero_pivot(handle, ellsv_info, rocsparse_indextype_i64, data);
             break;
         }
-        default:
+        case rocsparse_format_bsr:
+        case rocsparse_format_bell:
+        case rocsparse_format_sell:
+        case rocsparse_format_coo_aos:
         {
-            auto csrsv_info = sptrsv_descr->get_csrsv_info();
-            status = rocsparse::csrsv_zero_pivot(handle, csrsv_info, rocsparse_indextype_i64, data);
-            break;
+            // LCOV_EXCL_START
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            // LCOV_EXCL_STOP
         }
         }
 
