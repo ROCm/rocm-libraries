@@ -93,6 +93,71 @@ struct EncodedTdmPadding
     static constexpr index_t kPadAmount        = raw_pad_amount;
 };
 
+template <typename DataType,
+          index_t Rows,
+          index_t Cols,
+          typename PaddingConfig,
+          index_t AccessBytes,
+          typename std::enable_if<!PaddingConfig::kEnabled ||
+                                      numeric_traits<DataType>::PackedSize == 1,
+                                  bool>::type = false>
+CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_row_major_lds_descriptor()
+{
+    static_assert(Rows > 0 && Cols > 0, "LDS descriptor dimensions must be positive");
+    static_assert(AccessBytes > 0 && AccessBytes % sizeof(DataType) == 0,
+                  "LDS access width must contain a whole number of elements");
+
+    constexpr index_t AccessElements = AccessBytes / sizeof(DataType);
+
+    if constexpr(!PaddingConfig::kEnabled)
+    {
+        return make_naive_tensor_descriptor(make_tuple(number<Rows>{}, number<Cols>{}),
+                                            make_tuple(number<Cols>{}, number<1>{}),
+                                            number<AccessElements>{},
+                                            number<1>{});
+    }
+    else
+    {
+        static_assert(numeric_traits<DataType>::PackedSize == 1,
+                      "qr_tdm LDS padding does not support packed data types");
+
+        constexpr index_t ElementBytes  = sizeof(DataType);
+        constexpr index_t LogicalBytes  = Rows * Cols * ElementBytes;
+        constexpr index_t IntervalBytes = PaddingConfig::kIntervalBytes;
+        constexpr index_t PadBytes      = PaddingConfig::kPadBytes;
+
+        static_assert(IntervalBytes % ElementBytes == 0,
+                      "LDS padding interval must contain a whole number of elements");
+        static_assert(PadBytes % ElementBytes == 0,
+                      "LDS padding amount must contain a whole number of elements");
+        static_assert(LogicalBytes % IntervalBytes == 0,
+                      "padded LDS descriptor requires complete logical intervals");
+
+        constexpr index_t ElementsPerInterval = IntervalBytes / ElementBytes;
+        constexpr index_t PadElements         = PadBytes / ElementBytes;
+        constexpr index_t NumIntervals        = LogicalBytes / IntervalBytes;
+
+        constexpr auto interval_desc = make_naive_tensor_descriptor(
+            make_tuple(number<NumIntervals>{}, number<ElementsPerInterval>{}),
+            make_tuple(number<ElementsPerInterval + PadElements>{}, number<1>{}),
+            number<AccessElements>{},
+            number<1>{});
+
+        constexpr auto flat_desc = transform_tensor_descriptor(
+            interval_desc,
+            make_tuple(make_merge_transform_v3_division_mod(
+                make_tuple(number<NumIntervals>{}, number<ElementsPerInterval>{}))),
+            make_tuple(sequence<0, 1>{}),
+            make_tuple(sequence<0>{}));
+
+        return transform_tensor_descriptor(
+            flat_desc,
+            make_tuple(make_unmerge_transform(make_tuple(number<Rows>{}, number<Cols>{}))),
+            make_tuple(sequence<0>{}),
+            make_tuple(sequence<0, 1>{}));
+    }
+}
+
 } // namespace detail
 
 // This pipeline is qkv all located in LDS, targeting gfx1250
@@ -813,5 +878,204 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         return make_tuple(number<false>{}, number<0>{}, number<0>{});
     }
 };
+
+namespace detail {
+
+template <typename TensorTag, typename Problem, bool LoadOnce>
+CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_writer_distribution()
+{
+    using Policy = BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+
+    if constexpr(TensorTag::Id == 0)
+    {
+        return Policy::template MakeQDramTileDistribution<Problem>();
+    }
+    else if constexpr(TensorTag::Id == 1)
+    {
+        return Policy::template MakeKDramTileDistribution<Problem, LoadOnce>();
+    }
+    else
+    {
+        static_assert(TensorTag::Id == 2, "unknown qr_tdm tensor tag");
+        return Policy::template MakeVDramTileDistribution<Problem>();
+    }
+}
+
+template <typename TensorTag, typename Problem>
+CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_reader_distribution()
+{
+    using Policy = BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+
+    if constexpr(TensorTag::Id == 0)
+    {
+        return Policy::template MakeQRegTileDistribution<Problem>();
+    }
+    else if constexpr(TensorTag::Id == 1)
+    {
+        return Policy::template MakeKRegTileDistribution<Problem>();
+    }
+    else
+    {
+        static_assert(TensorTag::Id == 2, "unknown qr_tdm tensor tag");
+        return Policy::template MakeVRegTileDistribution<Problem>();
+    }
+}
+
+template <typename TensorTag, typename Problem, bool LoadOnce = false>
+CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_issue_geometry()
+{
+    using Shape       = typename Problem::BlockFmhaShape;
+    using DataType    = std::conditional_t<TensorTag::Id == 0,
+                                        typename Problem::QDataType,
+                                        std::conditional_t<TensorTag::Id == 1,
+                                                           typename Problem::KDataType,
+                                                           typename Problem::VDataType>>;
+    using Padding     = typename TensorTag::PaddingConfig;
+    constexpr auto d  = make_qr_tdm_writer_distribution<TensorTag, Problem, LoadOnce>();
+    using Distribution = remove_cvref_t<decltype(d)>;
+
+    constexpr index_t Rows = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
+    constexpr index_t Cols = TensorTag::Id == 0   ? Shape::kSubQKHeaddim
+                             : TensorTag::Id == 1 ? (LoadOnce ? Shape::kSubQKHeaddim : Shape::kK0)
+                                                  : Shape::kN1;
+    constexpr index_t NumWaves    = Problem::kBlockSize / get_warp_size();
+    constexpr index_t RowsPerWave = Rows / NumWaves;
+    constexpr auto raw_box_dim =
+        to_sequence(d.get_ys_to_d_descriptor().get_lengths()).reverse();
+    constexpr auto lds_desc = make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                                    Rows,
+                                                                    Cols,
+                                                                    Padding,
+                                                                    16>();
+
+    static_assert(numeric_traits<DataType>::PackedSize == 1);
+    static_assert(Distribution::NDimP == 1);
+    static_assert(raw_box_dim.size() == 2);
+    static_assert(Rows % NumWaves == 0);
+
+    bool valid = Problem::kBlockSize == 128 && Shape::kQKHeaddim == 128 &&
+                 Shape::kSubQKHeaddim == 128 && NumWaves == 4 &&
+                 raw_box_dim[number<0>{}] == Cols &&
+                 raw_box_dim[number<1>{}] == RowsPerWave &&
+                 raw_box_dim[number<0>{}] * raw_box_dim[number<1>{}] * sizeof(DataType) ==
+                     RowsPerWave * Cols * sizeof(DataType) &&
+                 RowsPerWave * NumWaves == Rows;
+
+    for(index_t wave = 0; wave < NumWaves; ++wave)
+    {
+        const auto adaptor_coord = make_tensor_adaptor_coordinate(
+            d.get_ps_ys_to_xs_adaptor(),
+            container_concat(array<index_t, 1>{wave}, array<index_t, Distribution::NDimY>{0}));
+        const auto origin = adaptor_coord.get_bottom_index();
+        const index_t logical_byte_origin = (origin[number<0>{}] * Cols + origin[number<1>{}]) *
+                                            sizeof(DataType);
+        const index_t physical_byte_origin =
+            Padding::kEnabled
+                ? logical_byte_origin +
+                      (logical_byte_origin / Padding::kIntervalBytes) * Padding::kPadBytes
+                : logical_byte_origin;
+
+        valid = valid && origin[number<0>{}] == wave * RowsPerWave &&
+                origin[number<1>{}] == 0 &&
+                (!Padding::kEnabled || logical_byte_origin % Padding::kIntervalBytes == 0) &&
+                physical_byte_origin % 16 == 0 &&
+                lds_desc.calculate_offset(origin) * sizeof(DataType) == physical_byte_origin;
+    }
+
+    if constexpr(TensorTag::Id == 1 && LoadOnce)
+    {
+        constexpr index_t k0_loops = Shape::kQKHeaddim / Shape::kK0;
+        valid = valid && Shape::kQKHeaddim == Shape::kSubQKHeaddim &&
+                Shape::kSubQKHeaddim % Shape::kK0 == 0 &&
+                k0_loops * Shape::kK0 == Shape::kQKHeaddim && Cols == Shape::kSubQKHeaddim &&
+                lds_desc.get_length(number<1>{}) == Shape::kSubQKHeaddim && Shape::kK0 == 32;
+    }
+
+    return valid;
+}
+
+template <typename TensorTag, typename Problem>
+CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_reader_segments()
+{
+    using Shape     = typename Problem::BlockFmhaShape;
+    using DataType  = std::conditional_t<TensorTag::Id == 0,
+                                       typename Problem::QDataType,
+                                       std::conditional_t<TensorTag::Id == 1,
+                                                          typename Problem::KDataType,
+                                                          typename Problem::VDataType>>;
+    using Padding   = typename TensorTag::PaddingConfig;
+    constexpr auto d = make_qr_tdm_reader_distribution<TensorTag, Problem>();
+    using Distribution = remove_cvref_t<decltype(d)>;
+
+    constexpr bool IsPrefill = Shape::kM0 > 64;
+    constexpr index_t Rows   = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
+    constexpr index_t Cols   = TensorTag::Id == 0   ? Shape::kSubQKHeaddim
+                               : TensorTag::Id == 1 ? (IsPrefill ? Shape::kSubQKHeaddim : Shape::kK0)
+                                                    : Shape::kN1;
+    constexpr index_t WindowRows = TensorTag::Id == 2 ? Shape::kK1 : Rows;
+    constexpr index_t WindowCols = TensorTag::Id == 1 ? Shape::kK0 : Cols;
+    constexpr index_t RowWindows = TensorTag::Id == 2 ? Rows / WindowRows : 1;
+    constexpr index_t ColWindows = TensorTag::Id == 1 && IsPrefill ? Cols / WindowCols : 1;
+    constexpr index_t VectorElements = 16 / sizeof(DataType);
+
+    static_assert(numeric_traits<DataType>::PackedSize == 1);
+    static_assert(Distribution::NDimP == 2);
+
+    constexpr auto lds_desc = make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                                    Rows,
+                                                                    Cols,
+                                                                    Padding,
+                                                                    16>();
+    using LdsView = decltype(make_tensor_view<address_space_enum::lds>(
+        static_cast<DataType*>(nullptr), lds_desc));
+    using ReaderWindow = decltype(make_tile_window(std::declval<LdsView>(),
+                                                   make_tuple(number<WindowRows>{},
+                                                              number<WindowCols>{}),
+                                                   array<index_t, 2>{0, 0},
+                                                   d));
+    using ReaderTraits = typename ReaderWindow::Traits;
+
+    constexpr auto safe_vectors = ReaderWindow::get_window_adaptor_ys_safe_vector_length_strides();
+    constexpr auto safe_lengths = safe_vectors[number<0>{}];
+    constexpr auto safe_strides = safe_vectors[number<1>{}];
+    constexpr index_t VectorDim = ReaderTraits::VectorDimY;
+
+    bool valid = ReaderTraits::ScalarPerVector == VectorElements &&
+                 safe_lengths[VectorDim] >= VectorElements && safe_strides[VectorDim] == 1 &&
+                 lds_desc.get_length(number<0>{}) == Rows &&
+                 lds_desc.get_length(number<1>{}) == Cols &&
+                 (TensorTag::Id != 1 || WindowCols == Shape::kK0) &&
+                 (!Padding::kEnabled || Padding::kIntervalBytes % 16 == 0) &&
+                 (!Padding::kEnabled || Padding::kPadBytes % 16 == 0);
+
+    for(index_t row_window = 0; row_window < RowWindows; ++row_window)
+    {
+        for(index_t col_window = 0; col_window < ColWindows; ++col_window)
+        {
+            const index_t row         = row_window * WindowRows;
+            const index_t col         = col_window * WindowCols;
+            const index_t logical_byte = (row * Cols + col) * sizeof(DataType);
+            const index_t physical_byte =
+                lds_desc.calculate_offset(make_tuple(row, col)) * sizeof(DataType);
+
+            valid = valid && row < Rows && col < Cols && logical_byte % 16 == 0 &&
+                    physical_byte % 16 == 0 &&
+                    (!Padding::kEnabled ||
+                     logical_byte % Padding::kIntervalBytes + 16 <= Padding::kIntervalBytes);
+        }
+    }
+
+    if constexpr(TensorTag::kTranspose)
+    {
+        valid = valid &&
+                TransposeTileDistrChecker<Distribution, DataType, DefaultTranspose<DataType>>::
+                    distr_encoding_valid &&
+                DefaultTranspose<DataType>::SubtileMinorDimension == VectorElements;
+    }
+
+    return valid;
+}
+
+} // namespace detail
 
 } // namespace ck_tile
