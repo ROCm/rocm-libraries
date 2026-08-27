@@ -193,7 +193,7 @@ JsonLogic sub-expression that expresses each. The residue — the handful of che
 | **Graph structure (exact / fusion)** | `{"==": ["$graph.node_count", 3]}`, and each intermediate `"$conv_out.virtual"` | node-count gate, fusion legality |
 | **Cross-tensor / arithmetic** | `{"==": ["$q.dims[1]", "$k.dims[2]"]}`, `{"<": ["$q.dims[3]", 129]}`, `{"==": [{"%": ["$q.dims[1]", "$k.dims[1]"]}, 0]}` | arithmetic and comparison gates |
 | **Device property** | `{"<=": ["$kernel.lds_per_block", "$device.lds_size"]}` (arch is a pack property, not a criterion) | LDS/occupancy budgets; `getDeviceString` arch → pack `arch` |
-| **Needs real C++** | not a criterion; a native matcher listed beside the descriptor ([§6](#6-the-native-matcher-escape-hatch)) | overflow guards, contradiction checks, derived-shape relations |
+| **Needs real C++** | not a criterion; a native matcher listed beside the descriptor ([§6](#6-the-native-matcher-escape-hatch)) | |
 
 Architecture gates *applicability* at pack selection via the KDP `arch` property and the per-arch
 `kpack` manifest ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria),
@@ -338,7 +338,7 @@ distinct registries and distinct signatures, and conflating them is the mistake 
 decides what an engine serves, the other narrows which of its packs apply.
 
 ```jsonc
-// pack.matcherIds: [ <the UMD above>, <"hipdnn.sdpa.strides_fit_u32">, ... ]
+// pack.matcherIds: [ <the UMD above>, <"hipdnn.sdpa.mask_self_consistent">, ... ]
 ```
 
 **Why the hatch sits beside the expression language rather than inside it.** An escape hatch that
@@ -366,34 +366,6 @@ uid. Widening that variant is an additive change to one type, and the operand or
 stage shares ([RFC 0020 § 6.1](0020_UniversalEngineDescriptor.md#61-the-published-field-set-normative))
 is what keeps the declarative and native spellings in step when it happens.
 
-The grounded cases that take this path:
-
-- **Integer-overflow guards.** `wouldFwdByteStridesFitUint32` / `byteStrideFitsU32`
-  (`SdpaFwdPlanBuilder.cpp:124`, called at `:313`; `SdpaPlanUtils.hpp:159`): the kernarg struct
-  stores byte strides as `uint32`, so the check must be exact and fail closed.
-- **Derived-quantity relations.** NumPy-broadcast affine-shape compatibility
-  (`BatchnormApplicabilityChecks.cpp:181`), layernorm normalized-dim reconciliation
-  (`LayernormApplicabilityChecks.cpp:70`), and RMSnorm `inv_rms` derived shape
-  (`RMSnormApplicabilityChecks.cpp:107`) each compute a shape and compare it, beyond the constraint
-  vocabulary.
-- **Contradiction checks.** `getMaskType` throws when mask attributes contradict
-  (`SdpaFwdPlanBuilder.cpp:293`); a matcher encodes "the mask attributes are self-consistent".
-
-**GQA divisibility is not one of them.** `nhead_q % nhead_k == 0 && nhead_k != 0`
-(`SdpaBwdPlanBuilder.cpp:565`) is expressible with `%` ([§4](#4-the-shared-expression-language)),
-and with no hatch inside the language there is no longer a "centralize the zero-guard as a
-predicate" alternative to weigh: it stays declarative, and the unknown-propagation rule of
-[Appendix A.2](#a2-variable-references-and-resolution)
-supplies the fail-closed behavior.
-
-**Kernel-table lookups are a migration artifact, not a lasting matcher.** The
-`getKernelNameKey` / CSV-registry lookups (`SdpaFwdPlanBuilder.cpp:301`, and three through
-`lookupKernelNameKey` in `SdpaBwdPlanBuilder.cpp:670-675`) exist because today the builder resolves which prebuilt code object serves
-a shape. Under the UKD model the KDP names the code object directly and the heuristic ranks candidates,
-so these lookups mostly dissolve into ordinary constraints plus the Launch's kernel source. Where a
-residual "is there a row for this exact combination" gate remains during coexistence, it is a native
-matcher.
-
 **The registry a provider ships is part of its published contract**, unchanged from
 [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria): a pack naming a `matchSymbol`
 the running provider does not ship fails to resolve, and fails closed. What changes is that this is
@@ -409,7 +381,7 @@ needs C++, then a full provider.
 
 ## 7. Composite Criteria
 
-Composition is native to the language, so `(A AND B) OR C` is stated directly in the one `criteria`
+Composition is native to the expression language, so `(A AND B) OR C` is stated directly in the one `criteria`
 tree with no extra mechanism
 ([§4](#4-the-shared-expression-language)):
 
@@ -630,8 +602,7 @@ untrusted or simply malformed, so they must be bounded and fail closed rather th
 - **A bounded, fail-closed interpreter.** Expression depth and step count, checked arithmetic, and
   declining on an unknown symbol, an unrecognized operator key, an out-of-range axis, or a type error
   are the language's contract, stated here pending its follow-up: evaluation is bounded and total,
-  so a criteria expression terminates and cannot trap. Overflow is the same class of bug the
-  `strides_fit_u32` native matcher guards ([§6](#6-the-native-matcher-escape-hatch)).
+  so a criteria expression terminates and cannot trap.
 - **Quarantine, not cascade.** A bad descriptor is quarantined on load with a diagnostic; the rest load
   ([RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery)).
 - **Fuzzing.** A seed corpus of patterns, criteria, and graphs plus a fuzzer over the loader and
@@ -740,8 +711,8 @@ lowering. The kernel-table lookups dissolve into the KDP as described in
 The SDPA-forward check collapses into one UED pattern, one UMD, and one native matcher. Compared to
 the hand-written
 builder (`SdpaFwdPlanBuilder.cpp:169-317`), the node-shape gates become the engine's pattern, each
-remaining C++ gate becomes a criteria sub-expression, and only the two
-genuinely non-declarative gates (uint32 stride fit, mask self-consistency) stay in C++ — as a native
+remaining C++ gate becomes a criteria sub-expression, and only the one
+genuinely non-declarative gate (mask self-consistency) stays in C++ — as a native
 matcher the pack lists beside the criteria, not as criteria themselves
 ([§6](#6-the-native-matcher-escape-hatch)). Note the head dimension is a dim of `$q`, read
 positionally, not an attribute ([RFC 0020 § 5](0020_UniversalEngineDescriptor.md#5-the-graph-model-the-pattern-matches)).
@@ -784,7 +755,7 @@ pack's matcher then constrains what that pattern bound:
     {"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]}
   ]}
   // arch is a pack property (KDP.arch), not a match criterion
-  // uint32 stride fit and mask self-consistency are a native matcher the pack lists
+  // mask self-consistency is a native matcher the pack lists
   // alongside this descriptor (§7), conjoined with these criteria by the ingestor
 }
 ```
@@ -803,7 +774,6 @@ Mapping to the hand-written code:
 | `k.dims[1] == v.dims[1]` head count (:272-276) | UMD `{"==": ["$v.dims[1]", "$k.dims[1]"]}` |
 | head dim, enforced implicitly by a registry miss (`key.empty()`, :309) | UMD `{"==": ["$q.dims[3]", 128]}`, stated explicitly |
 | `getMaskType` throw-on-contradiction (:293) | native matcher ([§6](#6-the-native-matcher-escape-hatch)) |
-| `wouldFwdByteStridesFitUint32` (:313) | native matcher ([§6](#6-the-native-matcher-escape-hatch)) |
 | `getKernelNameKey` table lookup (:301) | dissolves into the KDP's Launch ([§6](#6-the-native-matcher-escape-hatch)) |
 
 The split is visible in the two columns: everything about *which graph* is the engine's, everything
@@ -1038,7 +1008,7 @@ are stated locally: unknown propagation in A.2, short-circuit order in
 
 The operator set is closed in the sense that matters to a descriptor: there is no registry,
 namespace, dotted key, or provider hook by which one introduces an operator, so an unlisted
-operation key — including a dotted one such as `{"hipdnn.strides_fit_u32": [...]}` — is refused at
+operation key — including a dotted one such as `{"hipdnn.mask_self_consistent": [...]}` — is refused at
 compile at whatever revision is in force. The published vocabulary still grows additively across
 revisions. A check the operators cannot express belongs to a native criterion listed beside this
 descriptor in the pack ([§6](#6-the-native-matcher-escape-hatch)).
