@@ -30,7 +30,6 @@
 
 #include <hip/hip_runtime.h>
 
-// comment out following macro to disable FP8/BF8 types
 #define TENSILE_USE_FP8_BF8
 
 #define HIP_HOST_DEVICE __host__ __device__
@@ -527,4 +526,3 @@ namespace std
     }
 
 } // namespace std
-

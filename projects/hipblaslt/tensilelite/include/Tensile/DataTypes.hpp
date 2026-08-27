@@ -103,9 +103,6 @@ namespace TensileLite
         static void registerAllTypeInfo();
         static void registerAllTypeInfoOnce();
 
-        /// When TENSILE_USE_FP6/BF6/FP4 are off (no hip_ext_ocp.h path), register minimal DataTypeInfo for msgpack load.
-        static void registerThinOcpFpTypesWhenNoExtOcp();
-
         template <typename T>
         static void registerTypeInfo();
 
@@ -299,43 +296,31 @@ namespace TensileLite
     };
 
 #ifdef _WIN32
-#ifdef TENSILE_USE_FP6
     template <>
     struct TypeInfo<Float6> : public BaseTypeInfo<Float6, rocisa::DataType::Float6, 1, false, false>
     {
     };
-#endif // TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
     template <>
     struct TypeInfo<BFloat6> : public BaseTypeInfo<BFloat6, rocisa::DataType::BFloat6, 1, false, false>
     {
     };
-#endif // TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
     template <>
     struct TypeInfo<Float4> : public BaseTypeInfo<Float4, rocisa::DataType::Float4, 1, false, false>
     {
     };
-#endif // TENSILE_USE_FP4
 #else // _WIN32
-#ifdef TENSILE_USE_FP6
     template <>
     struct TypeInfo<Float6x32> : public BaseTypeInfo<Float6x32, rocisa::DataType::Float6, 32, false, false>
     {
     };
-#endif // TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
     template <>
     struct TypeInfo<BFloat6x32> : public BaseTypeInfo<BFloat6x32, rocisa::DataType::BFloat6, 32, false, false>
     {
     };
-#endif // TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
     template <>
     struct TypeInfo<Float4x2> : public BaseTypeInfo<Float4x2, rocisa::DataType::Float4, 2, false, false>
     {
     };
-#endif // TENSILE_USE_FP4
 #endif // _WIN32
     template <>
     struct TypeInfo<E8>
@@ -364,15 +349,11 @@ namespace TensileLite
                                          Float8_fnuz,
                                          BFloat8_fnuz,
                                          int8_t,
-#if !defined(_WIN32) && defined(TENSILE_USE_FP6)
+#ifndef _WIN32
                                          Float6x32,
-#endif // !_WIN32 && TENSILE_USE_FP6
-#if !defined(_WIN32) && defined(TENSILE_USE_BF6)
                                          BFloat6x32,
-#endif // !_WIN32 && TENSILE_USE_BF6
-#if !defined(_WIN32) && defined(TENSILE_USE_FP4)
                                          Float4x2,
-#endif // !_WIN32 && TENSILE_USE_FP4
+#endif // !_WIN32
                                          E8
                                         >;
 
@@ -442,7 +423,7 @@ namespace TensileLite
         return static_cast<T>(*std::get_if<Int8x4>(&val));
     }
 
-#if !defined(_WIN32) && defined(TENSILE_USE_FP6)
+#ifndef _WIN32
     // Convert variants to type T
     template <typename T>
     typename std::enable_if<std::is_same<Float6x32, T>::value, T>::type
@@ -456,9 +437,7 @@ namespace TensileLite
             throw std::runtime_error("Unsupported variant cast type.");
         }
     }
-#endif // !_WIN32 && TENSILE_USE_FP6
 
-#if !defined(_WIN32) && defined(TENSILE_USE_BF6)
     // Convert variants to type T
     template <typename T>
     typename std::enable_if<std::is_same<BFloat6x32, T>::value, T>::type
@@ -472,9 +451,7 @@ namespace TensileLite
             throw std::runtime_error("Unsupported variant cast type.");
         }
     }
-#endif // !_WIN32 && TENSILE_USE_BF6
 
-#if !defined(_WIN32) && defined(TENSILE_USE_FP4)
     // Convert variants to type T
     template <typename T>
     typename std::enable_if<std::is_same<Float4x2, T>::value, T>::type
@@ -488,7 +465,7 @@ namespace TensileLite
             throw std::runtime_error("Unsupported variant cast type.");
         }
     }
-#endif // !_WIN32 && TENSILE_USE_FP4
+#endif // !_WIN32
 
     TENSILELITEHOST_EXPORT std::string ToString(ConstantVariant d);
     TENSILELITEHOST_EXPORT bool        CompareValue(const ConstantVariant& d, double value);
@@ -529,4 +506,3 @@ namespace TensileLite
  * @}
  */
 } // namespace TensileLite
-
