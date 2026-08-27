@@ -27,12 +27,9 @@
 #pragma once
 
 #include "CSVStackFile.hpp"
+#include "ClientConfig.hpp"
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
-
-#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
-#endif
 
 #include <cstddef>
 #include <string>
