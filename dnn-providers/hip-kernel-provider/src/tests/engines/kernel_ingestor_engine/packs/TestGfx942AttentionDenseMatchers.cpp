@@ -14,6 +14,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -292,6 +293,101 @@ std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
     return matcher(context);
+}
+
+constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx942_attention_dense.kernel_match";
+constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx942_attention_dense.score";
+
+/// A candidate whose baked metadata describes the default GraphSpec above. Each test
+/// perturbs ONE field, so a refusal is attributable to that field alone -- the same
+/// discipline the graph_match cases use.
+///
+/// Hand-built rather than read from the shipped bundle on purpose: these tests must be
+/// able to express a variant that does NOT exist, which is exactly what proves
+/// kernel_match compares rather than waves through. TestGfx942AttentionDensePacks.cpp
+/// covers the complementary direction -- that the SHIPPED descriptors say what the
+/// config promised.
+struct KernelSpec
+{
+    std::string dtype = "BF16";
+    int64_t headSize = HEAD_SIZE;
+    int64_t numQueryHeads = HEADS;
+    int64_t numKvHeads = HEADS;
+    int64_t seqLenQ = SEQ;
+    int64_t seqLenKv = SEQ;
+    int64_t batch = BATCH;
+    int64_t causal = 1;
+    int64_t blockN = 64;
+    int64_t blockM = 256;
+};
+
+hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
+{
+    hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+    kernel.kernelId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-00000000dea1");
+    kernel.packId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-00000000dea2");
+    kernel.dispatchId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-00000000dea3");
+    kernel.metadata = {
+        {std::string("dtype"), spec.dtype},
+        {std::string("head_size"), spec.headSize},
+        {std::string("num_query_heads"), spec.numQueryHeads},
+        {std::string("num_kv_heads"), spec.numKvHeads},
+        {std::string("seqlen_q"), spec.seqLenQ},
+        {std::string("seqlen_kv"), spec.seqLenKv},
+        {std::string("batch"), spec.batch},
+        {std::string("causal"), spec.causal},
+        {std::string("block_n"), spec.blockN},
+        {std::string("block_m"), spec.blockM},
+    };
+    return kernel;
+}
+
+/// Runs graph_match then kernel_match, as the runtime does: kernel_match reads the
+/// tokens graph_match bound, so calling it on an unmatched graph is not a state the
+/// engine can reach.
+bool matchesKernel(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
+{
+    registerNativeIngestorSymbols();
+    const auto graphMatcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
+        std::string(GRAPH_MATCHER_SYMBOL));
+    const auto kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+        std::string(KERNEL_MATCHER_SYMBOL));
+
+    auto builder = buildSdpaGraph(graphSpec);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto bound = graphMatcher(context);
+    EXPECT_TRUE(bound.has_value()) << "graph_match declined the graph before kernel_match ran";
+    if(!bound.has_value())
+    {
+        return false;
+    }
+    return kernelMatcher(context, *bound, makeKernel(kernelSpec));
+}
+
+double scoreOf(const KernelSpec& kernelSpec)
+{
+    registerNativeIngestorSymbols();
+    const auto graphMatcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
+        std::string(GRAPH_MATCHER_SYMBOL));
+    const auto scorer
+        = hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL));
+
+    auto builder = buildSdpaGraph(GraphSpec{});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto bound = graphMatcher(context);
+    EXPECT_TRUE(bound.has_value());
+    return scorer(context, bound.value_or(BoundTokens{}), makeKernel(kernelSpec));
 }
 
 // ---------------------------------------------------------------------------
@@ -609,6 +705,161 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesUnsupportedMmaCoreMode)
     GraphSpec spec;
     spec.mmaCoreMode = data_objects::DataType::BFLOAT16;
     EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// kernel_match -- does THIS candidate's baked metadata fit the graph?
+//
+// Every shape field is compiled into the emitted binary, so each of these is a
+// silent-wrong-answer guard: the K/V buffer-resource extent is sized from `batch` at
+// build time, the KV-loop trip count is `seqlen_kv // block_n`, and the grid comes from
+// `seqlen_q`/`num_query_heads`/`batch`. A candidate that disagrees on any of them would
+// be served zero-fill or a truncated loop rather than faulting.
+// ---------------------------------------------------------------------------
+
+TEST(Gfx942AttentionDenseKernelMatch, AcceptsTheCandidateBakedForThisGraph)
+{
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, KernelSpec{}));
+}
+
+TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherDtype)
+{
+    KernelSpec kernel;
+    kernel.dtype = "FP16";
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
+}
+
+TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadSize)
+{
+    KernelSpec kernel;
+    kernel.headSize = 64;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
+}
+
+TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherBatch)
+{
+    // The defect class this check exists for: `batch` is baked into the K/V
+    // buffer-resource extent (attention_dense.py:1264-1265), so a graph with a larger
+    // batch than the variant was compiled for reads zero-fill past the bound -- in
+    // bounds, no fault, wrong numbers.
+    KernelSpec kernel;
+    kernel.batch = 1;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
+}
+
+TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherSequenceLength)
+{
+    KernelSpec shorterQ;
+    shorterQ.seqLenQ = 512;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, shorterQ));
+
+    KernelSpec shorterKv;
+    shorterKv.seqLenKv = 512;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, shorterKv));
+}
+
+TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadCount)
+{
+    KernelSpec queryHeads;
+    queryHeads.numQueryHeads = 8;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, queryHeads));
+
+    KernelSpec kvHeads;
+    kvHeads.numKvHeads = 2;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, kvHeads));
+}
+
+TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForTheOtherMask)
+{
+    // The graph's mask is a DERIVATION (left_bound/right_bound/diagonal_alignment or
+    // the deprecated booleans); the candidate bakes a plain 0/1. A mismatch here serves
+    // a non-causal kernel for a causal graph: a valid-looking wrong answer.
+    KernelSpec nonCausal;
+    nonCausal.causal = 0;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, nonCausal));
+
+    GraphSpec noMaskGraph;
+    noMaskGraph.leftBound = std::nullopt;
+    noMaskGraph.rightBound = std::nullopt;
+    EXPECT_FALSE(matchesKernel(noMaskGraph, KernelSpec{}));
+    EXPECT_TRUE(matchesKernel(noMaskGraph, nonCausal));
+}
+
+TEST(Gfx942AttentionDenseKernelMatch, RefusesATileThatDoesNotDivideTheSequence)
+{
+    // The knob-selection rows. block_n must divide seqlen_kv and block_m must divide
+    // seqlen_q -- tested against the CANDIDATE rather than a constant, so a different
+    // tile can serve what this one cannot.
+    KernelSpec badBlockN;
+    badBlockN.blockN = 48; // 256 % 48 != 0
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, badBlockN));
+
+    KernelSpec badBlockM;
+    badBlockM.blockM = 384; // 256 % 384 != 0
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, badBlockM));
+}
+
+TEST(Gfx942AttentionDenseKernelMatch, RefusesANonPositiveTile)
+{
+    KernelSpec zeroBlockN;
+    zeroBlockN.blockN = 0;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, zeroBlockN));
+
+    KernelSpec zeroBlockM;
+    zeroBlockM.blockM = 0;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, zeroBlockM));
+}
+
+TEST(Gfx942AttentionDenseKernelMatch, AcceptsEitherShippedTileForA256KeyGraph)
+{
+    // Both shipped block_n values divide 256, so both are applicable and `score`
+    // decides. This is what makes the ranking test below meaningful rather than
+    // vacuous -- and it is why block_n=32 is never SELECTED at these shapes.
+    KernelSpec wide;
+    wide.blockN = 64;
+    KernelSpec narrow;
+    narrow.blockN = 32;
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, wide));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, narrow));
+}
+
+// ---------------------------------------------------------------------------
+// score -- ranks the survivors. Higher wins.
+// ---------------------------------------------------------------------------
+
+TEST(Gfx942AttentionDenseScore, RanksTheWiderKvTileHigher)
+{
+    // A larger KV tile amortises the per-tile barrier, LDS publication and loop
+    // overhead across more keys. This is the engine's ONLY free axis once
+    // kernel_match has pinned every shape field.
+    KernelSpec wide;
+    wide.blockN = 64;
+    KernelSpec narrow;
+    narrow.blockN = 32;
+    EXPECT_GT(scoreOf(wide), scoreOf(narrow));
+}
+
+TEST(Gfx942AttentionDenseScore, DoesNotReturnAConstant)
+{
+    // A constant score makes ranking arbitrary and hides mis-specialization, so it is
+    // not a legitimate placeholder however honestly it is disclosed. This test is the
+    // mechanical guard on that.
+    KernelSpec wide;
+    wide.blockN = 64;
+    KernelSpec narrow;
+    narrow.blockN = 32;
+    EXPECT_NE(scoreOf(wide), scoreOf(narrow));
+}
+
+TEST(Gfx942AttentionDenseScore, IgnoresAxesThatKernelMatchAlreadyPinned)
+{
+    // dtype/head_size/shape are decided by kernel_match, so score must not also rank on
+    // them -- two candidates differing only there would otherwise be ordered by an axis
+    // that carries no performance meaning.
+    const KernelSpec bf16;
+    KernelSpec fp16;
+    fp16.dtype = "FP16";
+    EXPECT_EQ(scoreOf(bf16), scoreOf(fp16));
 }
 
 } // namespace
