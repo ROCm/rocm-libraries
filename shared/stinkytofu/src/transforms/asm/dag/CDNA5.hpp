@@ -1093,7 +1093,10 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     }
     const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
     // mode2 WAR gate: hold back a ds_load too close after its WMMA reader (while WMMAs remain).
-    const bool warTooClose = !wmmaQueue.empty() && warTooCloseToWmmaRead(pickedDS);
+    // Skip the first ds_load of a WMMA window: it feeds the next WMMA, so deferring it
+    // starves compute instead of just reordering. Later loads in the window have slack.
+    const bool warTooClose = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ > 0 &&
+                             warTooCloseToWmmaRead(pickedDS);
     const bool dsBaseOk =
         pickedDS && !dsCapReached && !warTooClose && !destOverlapsActiveWmmaSrc(pickedDS);
     int dsThrottleWait = 0;
