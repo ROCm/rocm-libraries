@@ -125,6 +125,37 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [2048, 2048, 1, 65536]
 
+  # MT192x256 -- 192 is 12 MFMA-M tiles, also not a power of two.
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 12, 4,  1, 4]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [3072, 4096, 1, 65536]
+
   # MT256x256, GR 16x1 / LR 8x1 -- GR run is a full 128B cacheline
   -
     - # ProblemType

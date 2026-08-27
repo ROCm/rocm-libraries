@@ -1132,6 +1132,32 @@ class Solution(collections.abc.Mapping):
               if mtTiles % cand == 0:
                 stack = cand
                 break
+            # A macro tile that is not a power of two (96 -> 6 tiles) only
+            # divides down to a 2-tile stack, i.e. a 16B contiguous run per K
+            # row.  Such a strip may be too small to spread across the waves
+            # that would otherwise each refetch it: the fetch group has
+            # (blocks per strip) x (K windows) slots to fill, and when that is
+            # short of the group size the surplus waves duplicate the load.
+            # Over-allocating the strip up to the next power of two costs the
+            # padding M tiles -- fetched into LDS, never read back, since
+            # emitSingleDsRead indexes tiles as sId0 % stackM with
+            # sId0 < mtTiles -- but it enlarges the strip enough to absorb the
+            # whole group.  Only worth it when it strictly lowers the bytes
+            # fetched, i.e. when the duplication it removes exceeds the padding
+            # it adds; measured, a 2x refetch beats 4/3x padding comfortably
+            # while a 1x fetch loses to it.
+            rounded = min(16, 1 << (mtTiles - 1).bit_length()) if mtTiles > 1 else 2
+            if rounded > stack:
+              wgSize     = state["MIWaveGroup"][0 if tc == 'A' else 1]
+              numWaves   = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
+              otherWaves = max(1, numWaves // wgSize)
+              perWave    = max(1, mtTiles // wgSize)
+              fetchGroup = max(1, stack // perWave) * otherWaves
+              stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * 0.5
+              slots      = int(stripBytes // (state["WavefrontSize"] * 16)) \
+                           * (state["DepthU"] // state["MatrixInstK"])
+              if slots < fetchGroup:
+                stack = rounded
             state[f"_ABTilePair{tc}"] = {
               2: "AB_B4_TLU1",
               4: "AB_B4_TLU1_4x1",
