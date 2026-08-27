@@ -449,13 +449,20 @@ $GEN/.venv/bin/python generate.py --config configs/$SLUG.yaml --output-dir /tmp/
 $GEN/.venv/bin/python generate.py --config configs/$SLUG.yaml --output-dir /tmp/$SLUG
 echo "EXIT=$?"
 python3 -c "
-import json; d=json.load(open('/tmp/$SLUG/descriptors/rocKE/$SLUG/'+'$SLUG'.split('_',1)[1]+'.kdp.json'))
-print('kernels:', len(d['kernelDescriptors']))"
+import glob, json
+for p in sorted(glob.glob('/tmp/$SLUG/descriptors/rocKE/$SLUG/*.kdp.json')):
+    print(p.rsplit('/', 1)[1], '->', len(json.load(open(p))['kernelDescriptors']), 'kernels')"
 ```
 
-**GATE:** exit 0, and the kernel count equals the variant set you agreed in step 3.
-Exit 1 is a `ConfigError` — read it; usually a mistyped field, a knob on a non-int field,
-or a kernel `arch` outside its pack's `arch`.
+**GATE:** exit 0, at least one `.kdp.json` printed, and the kernel count equals the
+variant set you agreed in step 3. Exit 1 is a `ConfigError` — read it; usually a mistyped
+field, a knob on a non-int field, or a kernel `arch` outside its pack's `arch`.
+
+The glob is deliberate: **do not construct the KDP filename by hand.** The generator names
+it from `IngestorGenerator/codegen/models.py:374` (`kdp_stem`) — the bare engine slug for a
+single-pack engine (`$SLUG.kdp.json`), the slug plus the pack name for a multi-pack one.
+Printing nothing means the generator wrote nothing, which is a step-4 failure, not a
+naming detail to work around.
 
 **Step 5 does not need this copy.** All three validation rungs and the desk check run
 against `/tmp/$SLUG/descriptors` and `/tmp/${SLUG}_pack` directly — verified end to end on
