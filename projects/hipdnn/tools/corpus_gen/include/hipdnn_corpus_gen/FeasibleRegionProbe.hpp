@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <random>
 
 /// @file FeasibleRegionProbe.hpp
 /// @brief Locates the bounds of an engine's problem region by asking it (RFC 0019.13 §5.3).
@@ -126,6 +127,65 @@ inline bool foundAcceptedBeyond(const MembershipOracle& oracle,
 }
 
 } // namespace detail
+
+/// What random sampling found inside a bound.
+struct InteriorDensity
+{
+    /// Values put to the predicate.
+    int64_t sampled = 0;
+
+    /// How many were accepted. Equal to @ref sampled for a solid interval.
+    int64_t accepted = 0;
+
+    /// Share of the interval a uniform proposal can expect to keep. An estimate from a
+    /// sample, not a measurement of the region: a low number is strong evidence of holes, and
+    /// 1.0 is only evidence that this many draws happened to miss them.
+    double acceptedFraction() const
+    {
+        return sampled == 0 ? 0.0 : static_cast<double>(accepted) / static_cast<double>(sampled);
+    }
+};
+
+/// @brief Samples uniformly inside `[low, high]` to see how solid the interval is.
+///
+/// The bound searches walk in powers of two and verify on an even schedule, so both are blind
+/// to a region whose acceptance is aligned to their own stride -- a kernel admitting only
+/// multiples of 512, probed from 512, answers yes to every question either one asks. Uniform
+/// random draws have no stride to collide with, so they see the holes those searches cannot:
+/// one draw in such a region is accepted with probability 1/512.
+///
+/// @param seed Fixed by the caller, because §5.8 requires a corpus reproducible from its
+///             seed, and a density that moved between runs would move the proposal count
+///             derived from it. Randomised against the region's structure, not across runs.
+///
+/// @returns The counts. The caller decides what to do with them: a low fraction says a
+///          uniform proposal over this interval will waste that share of its draws, which is
+///          the rejection rate §5.3 requires a generator to report rather than absorb.
+inline InteriorDensity estimateInteriorDensity(const MembershipOracle& oracle,
+                                               int64_t low,
+                                               int64_t high,
+                                               int64_t samples,
+                                               uint64_t seed)
+{
+    InteriorDensity density;
+    if(high <= low || samples <= 0)
+    {
+        return density;
+    }
+
+    std::mt19937_64 generator(seed);
+    std::uniform_int_distribution<int64_t> distribution(low, high);
+
+    for(int64_t sample = 0; sample < samples; ++sample)
+    {
+        ++density.sampled;
+        if(oracle(distribution(generator)))
+        {
+            ++density.accepted;
+        }
+    }
+    return density;
+}
 
 /// @brief Highest accepted value at or below @p ceiling.
 ///

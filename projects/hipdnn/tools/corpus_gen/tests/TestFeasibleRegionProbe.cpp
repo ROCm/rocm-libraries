@@ -119,6 +119,54 @@ TEST(TestFeasibleRegionProbe, AnAlignmentRuleMatchingTheSearchStrideIsInvisible)
     EXPECT_FALSE(probeUpperBound(region, 500, 1 << 20).has_value());
 }
 
+TEST(TestFeasibleRegionProbe, RandomInteriorSamplingSeesWhatTheStrideSearchCannot)
+{
+    // The complement to the case above. Both bound searches move in powers of two and are
+    // blind to this region; uniform draws have no stride to collide with, so they land off a
+    // multiple of 512 almost every time and the interval is exposed as porous.
+    const auto region = [](int64_t value) { return value % 512 == 0; };
+
+    const auto density = estimateInteriorDensity(region, 512, 1 << 20, 200, /*seed=*/1234);
+
+    EXPECT_EQ(density.sampled, 200);
+    // 1/512 of the interval qualifies, so 200 draws expect well under one hit.
+    EXPECT_LT(density.acceptedFraction(), 0.05);
+}
+
+TEST(TestFeasibleRegionProbe, ASolidIntervalSamplesSolid)
+{
+    // The control. Without it, a sampler that rejected everything would pass the case above
+    // while telling us nothing.
+    const auto region = [](int64_t value) { return value >= 1 && value <= 100000; };
+
+    const auto density = estimateInteriorDensity(region, 1, 100000, 200, /*seed=*/1234);
+
+    EXPECT_EQ(density.accepted, 200);
+    EXPECT_DOUBLE_EQ(density.acceptedFraction(), 1.0);
+}
+
+TEST(TestFeasibleRegionProbe, InteriorSamplingIsReproducibleFromItsSeed)
+{
+    // Randomised against the region's structure, not across runs: §5.8 needs the corpus this
+    // feeds to be reproducible, and a differing seed must actually change the draw or the
+    // parameter is decoration.
+    // Compares the values drawn rather than how many were accepted. Two seeds produce
+    // different sequences with certainty; their accepted *counts* agree by chance about one
+    // run in nine, which would be a rare, confusing failure rather than a signal.
+    const auto sequenceFor = [](uint64_t seed) {
+        std::vector<int64_t> asked;
+        const auto recording = [&asked](int64_t value) {
+            asked.push_back(value);
+            return value % 7 == 0;
+        };
+        estimateInteriorDensity(recording, 1, 1000000, 100, seed);
+        return asked;
+    };
+
+    EXPECT_EQ(sequenceFor(99), sequenceFor(99));
+    EXPECT_NE(sequenceFor(99), sequenceFor(100));
+}
+
 TEST(TestFeasibleRegionProbe, ReportsHolesForAnExcludedBand)
 {
     // A band carved out of the middle: accepted below 1000 and above 8000, rejected between.
