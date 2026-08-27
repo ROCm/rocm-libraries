@@ -421,7 +421,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                            : rocsparse_status_success,
 >>>>>>> efce309b819 (adressing some comments)
                                            "That's not the supposed configuration");
-
+    
     const int64_t M = A->rows;
     if(M == 0 || nrhs == 0)
     {
