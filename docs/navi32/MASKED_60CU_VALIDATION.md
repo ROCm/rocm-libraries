@@ -341,6 +341,31 @@ measurable.
 > Corrected advice: **widen the pool first — it is ~4x the lever — then the table fit becomes
 > worth doing.** By size, the table matters most on tiny shapes (91.4%) and not at all on small
 > (100.0%).
+>
+> ### Correction, 2026-08-27 — "~9x the A/A floor, so it is real" is not a sound test
+>
+> **The A/A floor is the wrong yardstick for this comparison.** An A/A control runs a library
+> against *itself*, so both arms warm up identically: it bounds **noise** and is structurally blind
+> to the variance that actually limits a library-vs-library ratio. Measured on this machine,
+> repeats of the *same* ratio at *fixed* iterations scatter **2-5%**, and five attempts to reduce
+> that (clocks, more reps, more iterations, interleaved pairing, cold-card warm-up, a robust
+> median) **all failed**. So a 3.4 pt effect is **at** the resolution limit, not 9x above it.
+>
+> **The effect does reproduce, but not as significant.** An independent draw of **70 random shapes
+> from `eval_shapes_1000.json`** (seed 20260827, 0 skipped, dense vs sparse over an identical
+> 246-kernel pool at 32 CU) gives geomean **1.029, 95% CI [0.989, 1.074]** — consistent with the
+> 3.4 pt figure, but **the interval includes 1.0**. Per-shape it changes sign: dense wins 32,
+> sparse wins 21, 17 tie, worst **0.540**, best **2.145**.
+>
+> **What to carry forward:** the 80/20 decomposition and "widen the pool first" are unaffected —
+> the 13.8 pt pool effect is an order of magnitude above the floor. The **table** half should be
+> quoted as *"~3 pt, at the limit of what this setup resolves"*, and any future table work should
+> be judged on a many-shape aggregate with a CI rather than against an A/A floor.
+>
+> Full method, the warmup mechanism, and the five failed floor-reduction attempts:
+> `skills/tensile-tuning/references/wiki/05_workflow/lean_catalog_port.md` §1c in
+> `ror-claude-skills` (branch `vmijovic/skills`), plus
+> `tools/lean_catalog/check_convergence.py` which enforces the doubling check.
 
 **Caveat, stated because it cuts both ways.** gfx1153's table was fitted for gfx1153, not for
 this configuration, so this is not a test of an *optimally* fitted table. But note the result is
