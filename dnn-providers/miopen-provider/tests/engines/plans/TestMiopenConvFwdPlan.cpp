@@ -49,6 +49,56 @@ TEST(TestConvFwdParams, InitializesAllTensorsFromValidGraph)
     EXPECT_NO_THROW(params.conv());
 }
 
+TEST(TestConvFwdParams, PadsOneDimensionalGraphToTwoDimensions)
+{
+    // NCL tensors with one spatial dimension. MIOpen has no 1D convolution, so
+    // the provider pads the tensors to 4D and the convolution to 2 spatial dims.
+    const std::vector<int64_t> xDims = {1, 4, 8};
+    const std::vector<int64_t> xStrides = {32, 8, 1};
+    const std::vector<int64_t> wDims = {4, 4, 3};
+    const std::vector<int64_t> wStrides = {12, 3, 1};
+    const std::vector<int64_t> yDims = {1, 4, 6};
+    const std::vector<int64_t> yStrides = {24, 6, 1};
+    const std::vector<int64_t> convPrePadding = {0};
+    const std::vector<int64_t> convPostPadding = {0};
+    const std::vector<int64_t> convStrides = {1};
+    const std::vector<int64_t> convDilation = {1};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                       xStrides,
+                                                                       wDims,
+                                                                       wStrides,
+                                                                       yDims,
+                                                                       yStrides,
+                                                                       convPrePadding,
+                                                                       convPostPadding,
+                                                                       convStrides,
+                                                                       convDilation);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    const ConvFwdParams params(*attrs, graph.getTensorMap());
+
+    EXPECT_EQ(params.spatialDimCount(), 1);
+
+    for(const auto* tensor : {&params.x(), &params.w(), &params.y()})
+    {
+        int dimCount = 0;
+        EXPECT_EQ(miopenGetTensorDescriptorSize(tensor->tensorDescriptor(), &dimCount),
+                  miopenStatusSuccess);
+        EXPECT_EQ(dimCount, 4);
+    }
+
+    int convSpatialDimCount = 0;
+    EXPECT_EQ(miopenGetConvolutionSpatialDim(params.conv().convDescriptor(), &convSpatialDimCount),
+              miopenStatusSuccess);
+    EXPECT_EQ(convSpatialDimCount, 2);
+}
+
 TEST(TestConvFwdParams, ThrowsOnAssymetricPadding)
 {
     const std::vector<int64_t> xDims = {1, 1, 1, 1};

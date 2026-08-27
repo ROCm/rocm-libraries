@@ -20,9 +20,9 @@ ConvFwdParams::ConvFwdParams(
     bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
-    , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
-    , _w(miopen_utils::createTensor(tensorMap, attributes.w_tensor_uid()))
-    , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
+    , _x(miopen_utils::createPaddedTensor(tensorMap, attributes.x_tensor_uid()))
+    , _w(miopen_utils::createPaddedTensor(tensorMap, attributes.w_tensor_uid()))
+    , _y(miopen_utils::createPaddedTensor(tensorMap, attributes.y_tensor_uid()))
 {
     const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
     const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
@@ -76,7 +76,9 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {
-    const size_t expectedDims = _params.spatialDimCount() + 2;
+    // The tensors are padded to at least 4D, so compare against the padded rank.
+    const size_t expectedDims
+        = miopen_utils::paddedConvSpatialDimCount(_params.spatialDimCount()) + 2;
     int wDimCount = 0;
     int yDimCount = 0;
     miopenGetTensorDescriptorSize(_params.w().tensorDescriptor(), &wDimCount);

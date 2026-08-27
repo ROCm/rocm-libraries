@@ -115,7 +115,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor4dPassthrough)
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createBatchnormTensor(tensorMap, 42);
+    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     EXPECT_EQ(result.uid(), 42);
 
@@ -160,7 +160,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor5dPassthrough)
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createBatchnormTensor(tensorMap, 42);
+    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     EXPECT_EQ(result.uid(), 42);
 
@@ -208,7 +208,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor3dNclPadsToNchw)
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createBatchnormTensor(tensorMap, 42);
+    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     // Should be padded to 4D with W=1 and stride[3]=1 for NCHW
     int numDims = 0;
@@ -249,7 +249,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor3dNlcPadsToNhwc)
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {42, attrPtr}};
 
-    auto result = miopen_utils::createBatchnormTensor(tensorMap, 42);
+    auto result = miopen_utils::createPaddedTensor(tensorMap, 42);
 
     // Should be padded to 4D with W=1 and stride[3]=C for NHWC
     int numDims = 0;
