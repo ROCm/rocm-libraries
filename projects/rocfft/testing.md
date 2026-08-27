@@ -53,10 +53,10 @@ not something from which rocfft-test can recover.  (Host-side OOM errors are gen
 We also maintain a safety margin on how much memory we allocate in order to improve test robustness.
 
 The number of failed allocations is tracked and reported at the end of `rocfft-test`'s execution.
-There is a command-line option to report allocation errors as failures instead of just skipped
+There is a command-line option to report hip runtime errors as failures instead of just skipped
 tests.
 
-In an API setting, the accounting of host and device memory is complicated by the fact that this is,
+In an APU setting, the accounting of host and device memory is complicated by the fact that this is,
 in fact, a shared memory pool.  To deal with this, host memory and device memory are allocated via
 structs that track this accounting, with extra care given to the somewhat overly optimistic hip
 runtime, which may not track host memory allocations.
@@ -92,8 +92,12 @@ format validation tests) are provided by rocfft-test under the gtest filter
 #### Bit-wise reproducibility tests
 
 rocFFT offers bit-wise reproducibility!  We test this by hashing the output and re-running the test
-suite to verify bit-wise reproducibility.  Bit-wise reproducibility requires that one be running the
-same version of rocFFT, identical ROCm stacks (compiler/runtime/driver), and the same GPU model.
+suite to verify that the hashes match.  We use sha256, the source-code for which is included in the
+rocFFT repository (note that we do not use std::hash, which does not guarantee stability between
+executions).
+
+Bit-wise reproducibility requires that one be running the same version of rocFFT, identical ROCm
+stacks (compiler/runtime/driver), and the same GPU model.
 
 #### Samples
 
@@ -219,7 +223,7 @@ In order to eliminate the correlation between jitter and testing case, the perfo
 experimental design is to load both the control and test versions of the rocFFT library into the
 same executable and randomize the execution order for the two cases.  This is handled by
 dyna-rocfft-bench (and dyna_rocfft_mpi_worker for the multi-process case) using dlopen for Linux and
-/LoadLibraryA for Windows.  For cases where this framework does not apply (eg comparing performance
+LoadLibraryA for Windows.  For cases where this framework does not apply (eg comparing performance
 between two different devices) rocfft-bench is usable as a single-library client, though the risk of
 false-positives is naturally higher.  On the other hand, one is unlikely to be testing the
 performance impact of a software change between two different devices, so the importance of
@@ -227,14 +231,14 @@ false-positives is fairly small in this case.
 
 Post-processing of the data from the test is handled by statistical tests, and we have implemented
 the T-test, Mood's median test, and the Mann-Whitney U test (also known as the Wilcoxon rank-sum
-test).  While the data distribution of execution times does not follow a normal distribution, the
-T-test only requires that the difference between the distributions follows is normally distributed,
-which is generally accepted to be true when the sample size is at least 20.  The three tests answer
-subtly different questions, ie the differences of the mean, the median, or the rank, though, for
-realistic data, these tend to all agree.  Since we also test multiple points in parameter space
-together, it's also important to use a multi-hypothesis testing framework in order to avoid
-p-hacking oneself.  rocFFT implements the Bonferroni correction and the Benjamini–Hochberg procedure
-in order to reduce the false-positive rate.
+test).  While the data distribution of execution times tends to not follow a normal distribution,
+the T-test only requires that the sampling distribution of the difference in means be approximately
+normal, which the central limit theorem justifies for sufficiently large sample sizes (which we take
+to be at least 20).  The three tests answer subtly different questions, ie the differences of the
+mean, the median, or the rank, though, for realistic data, these tend to all agree.  Since we also
+test multiple points in parameter space together, it's also important to use a multi-hypothesis
+testing framework in order to avoid p-hacking oneself.  rocFFT implements the Bonferroni correction
+and the Benjamini–Hochberg procedure in order to reduce the false-positive rate.
 
 In addition to statistical testing, rocFFT provides confidence intervals for transform execution
 time.  Since the data tends to not be normally distributed and have long tails, the central tendency
@@ -270,7 +274,7 @@ Pre-submit tests currently cover unit tests and accuracy tests for:
 - gfx94X, gfx950, gfx125X on Linux in a docker image
 - gfx1151 on Windows
 
-This is small subset of the architectures supported by rocFFT, which is a gap in testing due to
+This is a small subset of the architectures supported by rocFFT, which is a gap in testing due to
 infrasctructure issues in TheRock's CI.  We should do at least smoke tests on all architectures, and
 performance tests when changes may affect performance.
 
@@ -283,7 +287,11 @@ test timeouts and providing faster host hardware.
 
 Static analysis (formatting and cppcheck) is gating for PRs.
 
-There are no multi-gpu tests run, performance tests aren't run, and multi-process tests are not run.
+Multi-gpu tests are run when a PR is manually tagged with `ci:multi-gpu`; at least a
+smoketest-levelsample should be run on any relevant PR, and this should be done automatically.  This
+is a gap in TheRock's CI infrastructure.
+
+In general, performance tests aren't run, and multi-process tests are not run.
 These gaps are due to infractucture availability issues.
 
 ### Desired testing standard 
