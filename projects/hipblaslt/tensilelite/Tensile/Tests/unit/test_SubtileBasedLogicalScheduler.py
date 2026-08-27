@@ -15,6 +15,7 @@ Organized by pass:
   12. Integration    — Full pipeline with real instructions
 """
 import pytest
+from types import SimpleNamespace
 from Tensile.Components.Subtile.Kernel import (
     TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4, CD_F32, CD_F32_W32,
 )
@@ -34,6 +35,94 @@ from Tensile.Components.Subtile.LogicalScheduler import (
 )
 from unittest.mock import MagicMock
 from rocisa.code import Module
+from rocisa.instruction import SNop
+
+
+def test_plsin_capture_planner_matches_exact_acc_source():
+    sched = LogicalScheduler(make_cfg_256x256_fp4())
+    producer = SimpleNamespace(acc=SimpleNamespace(
+        regName=None, regType='a', regIdx=8, regNum=1))
+    em = SimpleNamespace(opType='mfma', instructions=[producer])
+    anchor = SNop(0)
+    fillers = [SNop(0) for _ in range(17)]
+    readInst = SNop(0)
+    gap = MagicMock()
+    capture = {"pairs": [{
+        "gap": gap,
+        "gapAnchor": anchor,
+        "reads": [(readInst, SimpleNamespace(
+            regName=None, regType='a', regIdx=8, regNum=1))],
+    }]}
+    store = SimpleNamespace(flatitems=lambda: [anchor, *fillers, readInst])
+
+    moved = sched._planCapturedTerminalMfmas(
+        [[[em]]], [capture], store, requiredCycles=17)
+
+    assert moved == 1
+    assert em.instructions == []
+    assert gap.add.call_count == 1
+    assert gap.add.call_args.args[0].acc.regIdx == 8
+
+
+def test_plsin_capture_mapping_failure_does_not_mutate_loop():
+    sched = LogicalScheduler(make_cfg_256x256_fp4())
+    mfma = SimpleNamespace(acc=SimpleNamespace(
+        regName=None, regType='a', regIdx=0, regNum=1))
+    em = SimpleNamespace(opType='mfma', instructions=[mfma])
+    anchor, readInst = SNop(0), SNop(0)
+    capture = {"pairs": [{
+        "gap": MagicMock(),
+        "gapAnchor": anchor,
+        "reads": [(readInst, SimpleNamespace(
+            regName=None, regType='a', regIdx=99, regNum=1))],
+    }]}
+    store = SimpleNamespace(flatitems=lambda: [anchor, readInst])
+
+    moved = sched._planCapturedTerminalMfmas(
+        [[[em]]], [capture], store, requiredCycles=1)
+
+    assert moved == 0
+    assert em.instructions == [mfma]
+
+
+def test_plsin_capture_planner_uses_latest_safe_gap_in_every_path():
+    sched = LogicalScheduler(make_cfg_256x256_fp4())
+    producer = SimpleNamespace(acc=SimpleNamespace(
+        regName=None, regType='a', regIdx=8, regNum=2))
+    em = SimpleNamespace(opType='mfma', instructions=[producer])
+    flat = []
+    captures = []
+    lateGaps = []
+    earlyGaps = []
+    for _ in range(2):
+        earlyAnchor, lateAnchor = SNop(0), SNop(0)
+        read0, read1 = SNop(0), SNop(0)
+        earlyGap, lateGap = MagicMock(), MagicMock()
+        flat.extend([earlyAnchor, SNop(0), lateAnchor])
+        flat.extend(SNop(0) for _ in range(17))
+        flat.extend([read0, read1])
+        captures.append({"pairs": [
+            {"gap": earlyGap, "gapAnchor": earlyAnchor, "reads": []},
+            {"gap": lateGap, "gapAnchor": lateAnchor, "reads": [
+                (read0, SimpleNamespace(
+                    regName=None, regType='a', regIdx=8, regNum=1)),
+                (read1, SimpleNamespace(
+                    regName=None, regType='a', regIdx=9, regNum=1)),
+            ]},
+        ]})
+        earlyGaps.append(earlyGap)
+        lateGaps.append(lateGap)
+    store = SimpleNamespace(flatitems=lambda: flat)
+
+    moved = sched._planCapturedTerminalMfmas(
+        [[[em]]], captures, store, requiredCycles=17)
+
+    assert moved == 1
+    assert em.instructions == []
+    assert all(gap.add.call_count == 0 for gap in earlyGaps)
+    assert all(gap.add.call_count == 1 for gap in lateGaps)
+    assert lateGaps[0].add.call_args.args[0] is not \
+        lateGaps[1].add.call_args.args[0]
 
 
 def makeTileInfo(tc, kernel):

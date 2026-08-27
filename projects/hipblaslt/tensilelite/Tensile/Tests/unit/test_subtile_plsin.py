@@ -20,7 +20,6 @@ _PLSIN = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_PLSIN)
 computeSubtilePlsin = _PLSIN.computeSubtilePlsin
 plsinLargeTile = _PLSIN.plsinLargeTile
-PLSIN_WEAVE_LOOKAHEAD = _PLSIN.PLSIN_WEAVE_LOOKAHEAD
 
 
 class _DType:
@@ -191,25 +190,3 @@ def test_plsin_large_tile_does_not_gate_eligibility():
     kernel["MacroTile1"] = 512
     assert plsinLargeTile(kernel) is True
     assert computeSubtilePlsin(kernel) is True
-
-
-# ── PLSIN_WEAVE_LOOKAHEAD: shared profitability threshold ──
-
-
-def test_weave_lookahead_is_shared_positive_constant():
-    # The scheduler weave (LogicalScheduler) and the eligibility gate must read the
-    # SAME lookahead. Lock its value here so a change in one place without the other
-    # is caught (the two are documented to move together in Plsin.py).
-    assert PLSIN_WEAVE_LOOKAHEAD == 2
-    assert PLSIN_WEAVE_LOOKAHEAD > 0
-
-
-def test_eligible_tile_has_more_store_pairs_than_lookahead():
-    # Gate/weave consistency: any tile the gate accepts must leave at least one
-    # store-pair in the loop to hide the woven pairs under, i.e.
-    # numStorePairs (= MIWT0*MIWT1//2) > PLSIN_WEAVE_LOOKAHEAD.
-    kernel = _eligible_kernel()
-    miwt = kernel["MIWaveTile"]
-    assert computeSubtilePlsin(kernel) is True
-    numStorePairs = miwt[0] * miwt[1] // 2
-    assert numStorePairs > PLSIN_WEAVE_LOOKAHEAD

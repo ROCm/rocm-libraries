@@ -22,14 +22,6 @@
 #
 ################################################################################
 
-# Store-pairs ahead a pair's terminal MFMAs are issued (the MFMA->accvgpr_read
-# latency window). Single source of truth shared by the eligibility gate
-# (computeSubtilePlsin) and the scheduler weave (LogicalScheduler): the gate admits
-# a tile only when numStorePairs > this value, so at least one pair is left in the
-# loop to hide the woven ones under. They MUST move together.
-PLSIN_WEAVE_LOOKAHEAD = 2
-
-
 def plsinLargeTile(kernel):
     """Tiles whose macro tile exceeds 256 in either dimension.
 
@@ -94,14 +86,6 @@ def computeSubtilePlsin(kernel):
     # the arch-VGPR budget and emit out-of-range v>=256.
     storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
                          min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
-    # Overlap feasibility: the weave only weaves store-pairs with pair index >=
-    # weaveLA. numStorePairs = MIWT0*MIWT1//2; at or below the threshold no pair
-    # is woven, so PLSIN would be pure overhead. weaveLA is the shared constant the
-    # scheduler weave (Components/Subtile/LogicalScheduler.py) reads too, so the gate
-    # and the weave move together.
-    weaveLA = PLSIN_WEAVE_LOOKAHEAD
-    numStorePairs = (miwt[0] * miwt[1] // 2) if (bool(miwt) and len(miwt) == 2) else 0
-    overlapPossible = numStorePairs > weaveLA
     # Two-wide MIWaveTile dimensions leave insufficient SGPR headroom for the
     # MX-scale descriptors once the fused-store state is live (for example,
     # [2,4] needs 103 SGPRs against gfx950's 102-SGPR cap).
@@ -132,9 +116,7 @@ def computeSubtilePlsin(kernel):
     registerFail = ((not spillFree)
                     or (not storeFitsVgpr)
                     or (not mxBlockScaleSgprFits))
-    # Pure profitability (weave-overlap threshold): correct and register-safe, just
-    # below the pair-count where the weave overlaps anything. The structural NLL
-    # requirement (PGR >= 1) is already enforced by structuralFail above.
-    profitFail = not overlapPossible
-
-    return not (structuralFail or registerFail or profitFail)
+    # Weave feasibility is determined later from the generated store's exact
+    # producer/consumer dependencies. If no terminal MFMA has a safe gap, the
+    # scheduler leaves the loop unchanged and emits the fused store conservatively.
+    return not (structuralFail or registerFail)

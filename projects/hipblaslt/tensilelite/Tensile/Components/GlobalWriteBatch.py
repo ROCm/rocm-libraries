@@ -2252,7 +2252,15 @@ class GlobalWriteBatchWriter:
         #   element 2: tt0=2 (sba=0)   (if MIWaveTile[0]>2)
         #   ...
         # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
-        storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
+        # In the full-tile PLSIN weave, keep each pair's reads, epilogue and store
+        # in one runtime stream. Routing stores to the deferred storeCode module
+        # would place an entire batch of accvgpr reads before the first MFMA gap;
+        # then a producer woven into that gap would execute after its consumer.
+        # Other paths preserve the target branch's GroupLoadStore routing.
+        inlineFusedWeave = (is16bitSubtile and self._weaveMode
+                            and self._fusedFullTileNoGuards())
+        storeCodeModule = module if inlineFusedWeave else \
+                          (storeCode if self.kernel["GroupLoadStore"] else module)
         if is16bitSubtile:
           tt0 = element[1]  # d0: thread-tile index along M
           # Epilogue (bias/activation) is applied per-element in iteration order.
@@ -2794,6 +2802,15 @@ class GlobalWriteBatchWriter:
     module.add(nFullLabel)
     module.add(nMaskDone)
 
+  def _weaveCapturePair(self, pairIdx):
+    capture = self.parentWriter.states.subtileWeaveCaptureCurrent
+    if capture is None:
+      return None
+    pairs = capture["pairs"]
+    while len(pairs) <= pairIdx:
+      pairs.append({"reads": [], "gap": None, "gapAnchor": None})
+    return pairs[pairIdx]
+
   def _popSubtileAccVgprReads(self, elementIdx: int) -> Module:
     """PostLoopStoreInNll weave (4d-3b): pop ONE element's accvgpr_read items.
 
@@ -2811,7 +2828,13 @@ class GlobalWriteBatchWriter:
       for rIdx in range(0, regsPerScalar):
         dstIdx = self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx \
                  - self.parentWriter.states.c.startVgprValu
-        module.add(replaceHolder(self.codeAccVgprRead.popFirstItem(), dstIdx))
+        readInst = replaceHolder(self.codeAccVgprRead.popFirstItem(), dstIdx)
+        pairCapture = self._weaveCapturePair(
+          self.parentWriter.states.subtileWeavePairCounter)
+        if pairCapture is not None:
+          srcs = getattr(readInst, "srcs", None)
+          pairCapture["reads"].append((readInst, srcs[0] if srcs else None))
+        module.add(readInst)
     return module
 
   def _weaveReadForEpilogue(self, module, elementIdx: int):
@@ -2933,9 +2956,17 @@ class GlobalWriteBatchWriter:
     Readiness (this pair's own MFMAs) is guaranteed by the caller emitting them
     before the accvgpr_read; here we only pre-issue future pairs' MFMAs."""
     module = Module("16bitSubtilePairedStoreWoven")
-    module.add(self._emit16bitSubtilePairedStorePhase1(
-      addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN))
-    self._weaveEmitGroup(module, pairIdx + self._weaveLookahead())
+    phase1 = self._emit16bitSubtilePairedStorePhase1(
+      addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+    module.add(phase1)
+    gap = Module(f"PlsinGap_pair{pairIdx}")
+    self._weaveEmitGroup(gap, pairIdx + self._weaveLookahead())
+    module.add(gap)
+    pairCapture = self._weaveCapturePair(pairIdx)
+    if pairCapture is not None:
+      phase1Items = list(phase1.flatitems())
+      pairCapture["gap"] = gap
+      pairCapture["gapAnchor"] = phase1Items[-1] if phase1Items else None
     module.add(self._emit16bitSubtilePairedStorePhase2(addrCalc, tt0=tt0))
     return module
 

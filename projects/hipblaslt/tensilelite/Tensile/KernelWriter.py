@@ -51,7 +51,7 @@ from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
-from .Components.Subtile.Plsin import computeSubtilePlsin, PLSIN_WEAVE_LOOKAHEAD
+from .Components.Subtile.Plsin import computeSubtilePlsin
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -410,12 +410,14 @@ class StateValues:
   # default to the "not weaving" value, so a non-PLSIN kernel is unaffected.
   subtileFusedWeave: bool                = False   # inside the fused-NLL weave store
   subtileFusedFullTileStore: bool        = False   # fused store is the full-tile (no-edge) arm
-  subtileWeaveLookahead: int             = PLSIN_WEAVE_LOOKAHEAD  # store-pairs ahead a pair's MFMAs are issued (always set to weaveLA before use)
+  subtileWeaveLookahead: int             = 0       # capture mode emits no speculative fixed-lookahead groups
   subtileWeavePairCounter: int           = 0       # next store-pair index being emitted
   subtileMBlockSize: int                 = 0       # OOB-guard M block size (MatrixInstM)
   subtileWeaveMfmaGroups: Optional[dict] = None    # {pair: [terminal mfma insts]} being woven
   subtileWeaveMfmaGroupsMaster: Optional[dict] = None  # pristine master re-copied per store type
   subtileWeaveEmitted: Optional[set]     = None    # store-pairs whose MFMAs are already emitted
+  subtileWeaveCaptureInstances: Optional[list] = None  # generated activation/store-path captures
+  subtileWeaveCaptureCurrent: Optional[dict] = None     # capture receiving the current store path
   subtileHoistedStoreInit: Optional[list] = None   # split store-init units hoisted into the loop
   subtileHoistedWriteIndices: Optional[dict] = None  # coord VGPRs hoisted from NGLL
   subtileRecomputeCoords: bool           = False   # recompute store coords INTO existing (hoisted) VGPRs (numIter<PGR)
