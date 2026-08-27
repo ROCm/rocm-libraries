@@ -53,9 +53,21 @@ def _parse_args(argv):
         action="append",
         dest="fields",
         default=[],
-        help="A KMD field the matcher keys on; repeatable. Defaults to a "
-        "generic attention-shaped list -- narrow this to your own KMD's "
-        "fields for a meaningful invariant-1/2 check.",
+        help="A KMD field the matcher keys on; repeatable. This is the "
+        "MATCHER-TUPLE identity (invariant 2). Defaults to a generic "
+        "attention-shaped list -- narrow it to your own KMD's fields for a "
+        "meaningful check. Narrowing this does NOT narrow --drift-field.",
+    )
+    p.add_argument(
+        "--drift-field",
+        action="append",
+        dest="drift_fields",
+        default=[],
+        help="A field to compare between metadata and the authored spec "
+        "(invariant 1); repeatable. Defaults to whatever --field resolves "
+        "to. Separate from --field on purpose: dropping a field here to "
+        "silence a drift report must never remove it from the matcher-tuple "
+        "identity, which would manufacture false duplicate collisions.",
     )
     return p.parse_args(argv)
 
@@ -63,8 +75,9 @@ def _parse_args(argv):
 def main(argv=None):
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     fields = tuple(args.fields) if args.fields else DEFAULT_MATCHER_FIELDS
+    drift_fields = tuple(args.drift_fields) if args.drift_fields else None
     kernels = load_kernels(Path(args.kdp))
-    report = DeskCheckReport(kernels, fields)
+    report = DeskCheckReport(kernels, fields, drift_fields)
     print(report.render())
     return 0 if report.ok else 1
 

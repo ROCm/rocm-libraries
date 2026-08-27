@@ -14,6 +14,28 @@ on an authored (pre-pack) tree via ``kernel_source.spec`` or a shipped
 (post-pack) one via ``provenance.spec`` interchangeably, and treats "neither
 location has a spec" as a distinct, reported outcome rather than a silent
 "no drift".
+
+Three things this module got wrong in its first form, all invisible to its
+own 179 tests and all found by pointing the CLI at a real 32-kernel bundle:
+
+1. ``dtype`` compared two DELIBERATE vocabularies as if they were one. rocKE
+   specs spell it ``"bf16"``; hipDNN metadata carries the enum name
+   ``"BFLOAT16"`` (or, in the tiled bundle, ``"BF16"``). Both describe the
+   same type, so a raw string compare false-positived on every rocKE kernel
+   that ships. See ``_DTYPE_ALIASES`` -- the fix normalises the vocabularies
+   rather than dropping the field, because dtype is the field most worth
+   checking: ``spec "bf16"`` against ``metadata "HALF"`` is a real, fatal
+   drift and still fails.
+2. One field list fed BOTH invariant 1 and invariant 2. Narrowing it to
+   silence a drift false-positive silently removed the same field from the
+   matcher-tuple identity, manufacturing false collisions in the check whose
+   entire job is catching unreachable variants. The two now take independent
+   lists (``fields`` vs ``drift_fields``).
+3. ``duplicate_matcher_tuples`` derived its field set from ``kernels[0]``
+   alone, so a heterogeneous variant set either raised ``KeyError`` or --
+   depending only on list order -- silently dropped a field from the tuple
+   identity and reported false collisions. It now takes the union across all
+   kernels and represents an absent field explicitly.
 """
 
 from __future__ import annotations
@@ -21,6 +43,63 @@ from __future__ import annotations
 import collections
 import json
 from pathlib import Path
+
+# Two vocabularies describe one type: a rocKE spec spells the dtype the way
+# the builder's Python takes it ("bf16"), while the KMD metadata carries the
+# hipDNN DataType enum name the matcher compares against the graph
+# ("BFLOAT16" -- projects/hipdnn/flatbuffers_sdk/schemas/data_types.fbs:6-26).
+# Neither is wrong, and the difference is not drift. Normalising both sides
+# through this table keeps the check live on the field most likely to drift
+# for real: spec "bf16" against metadata "HALF" is a genuine, fatal mismatch
+# and still reports. An unrecognised spelling on either side falls back to a
+# plain case-insensitive compare, so an engine with its own vocabulary is
+# still checked rather than waved through.
+_DTYPE_ALIASES = {
+    "BF16": "BFLOAT16",
+    "BFLOAT16": "BFLOAT16",
+    "FP16": "HALF",
+    "HALF": "HALF",
+    "FLOAT16": "HALF",
+    "FP32": "FLOAT",
+    "FLOAT": "FLOAT",
+    "FLOAT32": "FLOAT",
+    "FP64": "DOUBLE",
+    "DOUBLE": "DOUBLE",
+    "FP8E4M3": "FP8_E4M3",
+    "FP8E5M2": "FP8_E5M2",
+    "FP8E4M3FNUZ": "FP8_E4M3_FNUZ",
+    "FP8E5M2FNUZ": "FP8_E5M2_FNUZ",
+    "FP4E2M1": "FP4_E2M1",
+    "FP6E2M3": "FP6_E2M3",
+    "FP6E3M2": "FP6_E3M2",
+}
+
+# Sentinel for "this kernel does not declare that field at all", so a tuple
+# identity can say so explicitly instead of silently shortening.
+_ABSENT = "<absent>"
+
+
+def _canonical_dtype(value) -> str:
+    """A dtype spelling reduced to the one token both vocabularies mean, or
+    the plain lowercased string when the spelling is not one this module
+    knows -- an unknown vocabulary stays compared, never skipped."""
+    token = "".join(ch for ch in str(value) if ch.isalnum()).upper()
+    return _DTYPE_ALIASES.get(token, str(value).lower())
+
+
+def _values_agree(field: str, spec_v, meta_v) -> bool:
+    """One spec value against one metadata value, per-field.
+
+    Booleans compare as ints because a KMD carries ``causal: 1`` for a spec's
+    ``causal: True``; dtype compares through the vocabulary table; everything
+    else is the case-insensitive string compare the original snippet did,
+    which is what a numeric field wants."""
+    if isinstance(spec_v, bool):
+        return int(spec_v) == meta_v
+    if field == "dtype":
+        return _canonical_dtype(spec_v) == _canonical_dtype(meta_v)
+    return str(spec_v).lower() == str(meta_v).lower()
+
 
 # The KMD fields a desk-check typically compares. Callers should narrow this
 # to fields their own KMD actually declares (see `--field`); it is a default,
@@ -80,10 +159,14 @@ def metadata_spec_drift(
     tree) is present per kernel; raises `DeskCheckNoSpecFound` if a kernel has
     neither, rather than silently treating it as clean.
 
-    dtype is commonly a SPELLING, not a raw value (one integration paired
-    spec "bf16"/"fp16" with metadata "BFLOAT16"/"HALF") -- if your engine
-    translates the dtype vocabulary, drop "dtype" from `fields` or the row
-    false-positives.
+    ``dtype`` is a SPELLING on both sides and the two sides speak different
+    vocabularies on purpose -- a rocKE spec's ``"bf16"`` and a KMD's
+    ``"BFLOAT16"`` are the same type. ``_values_agree`` normalises them, so
+    this stays a live check on the field rather than a wall of false
+    positives (spec ``"bf16"`` against metadata ``"HALF"`` still fails).
+    This function's `fields` is INDEPENDENT of the matcher-tuple identity
+    used by `duplicate_matcher_tuples`: narrowing one must never silently
+    narrow the other.
     """
     bad = []
     for k in kernels:
@@ -92,11 +175,7 @@ def metadata_spec_drift(
         for f in fields:
             if f not in spec or f not in meta:
                 continue
-            spec_v, meta_v = spec[f], meta[f]
-            if isinstance(spec_v, bool):
-                if int(spec_v) != meta_v:
-                    bad.append((k["name"], f))
-            elif str(spec_v).lower() != str(meta_v).lower():
+            if not _values_agree(f, spec[f], meta[f]):
                 bad.append((k["name"], f))
     return bad
 
@@ -106,10 +185,20 @@ def duplicate_matcher_tuples(
 ) -> dict[tuple, int]:
     """Invariant 2: no two kernels may share a matcher tuple on the same
     arch -- one of them is unreachable. Returns {tuple: count} for every
-    tuple shared by more than one kernel (empty means none)."""
-    present = [f for f in fields if kernels and f in kernels[0].get("metadata", {})]
+    tuple shared by more than one kernel (empty means none).
+
+    The compared field set is the UNION of `fields` present in ANY kernel's
+    metadata, not the fields of ``kernels[0]``. Keying off the first kernel
+    made the tuple identity depend on list order: a set where only a later
+    kernel declared a field either raised ``KeyError`` or silently dropped
+    that field from the identity and reported collisions that do not exist.
+    A kernel that does not declare a field in the union gets `_ABSENT` for
+    it, which is itself distinguishing -- "declares no block_n" and
+    "declares block_n=64" are genuinely different variants.
+    """
+    present = [f for f in fields if any(f in k.get("metadata", {}) for k in kernels)]
     tups = collections.Counter(
-        tuple(k["metadata"][f] for f in present) for k in kernels
+        tuple(k.get("metadata", {}).get(f, _ABSENT) for f in present) for k in kernels
     )
     return {t: c for t, c in tups.items() if c > 1}
 
@@ -154,18 +243,32 @@ class DeskCheckReport:
     "all None -- collision". Invariant 4 is informational and never fails
     the report even when applicable -- a shared symbol with distinct
     toc_keys is a documented, tolerated shape, not a defect.
+
+    `fields` is the MATCHER-TUPLE identity (invariant 2). `drift_fields` is
+    the set invariant 1 compares against the spec, and defaults to `fields`
+    only because they usually coincide. They are separate parameters because
+    one list feeding both is a trap: narrowing the comparison to silence a
+    drift report used to delete the same field from the tuple identity and
+    manufacture false collisions in the check whose entire job is catching
+    unreachable variants. Narrow one, and the other is untouched.
     """
 
-    def __init__(self, kernels: list[dict], fields=DEFAULT_MATCHER_FIELDS):
+    def __init__(
+        self,
+        kernels: list[dict],
+        fields=DEFAULT_MATCHER_FIELDS,
+        drift_fields=None,
+    ):
         self.kernel_count = len(kernels)
         self.fields = tuple(fields)
+        self.drift_fields = self.fields if drift_fields is None else tuple(drift_fields)
         self.spec_drift_error: str | None = None
         self.drift: list[tuple[str, str]] = []
         try:
-            self.drift = metadata_spec_drift(kernels, fields)
+            self.drift = metadata_spec_drift(kernels, self.drift_fields)
         except DeskCheckNoSpecFound as exc:
             self.spec_drift_error = str(exc)
-        self.duplicate_tuples = duplicate_matcher_tuples(kernels, fields)
+        self.duplicate_tuples = duplicate_matcher_tuples(kernels, self.fields)
 
         self.toc_applicable = _field_applicable(kernels, "toc_key")
         self.toc_distinct, self.toc_total = (

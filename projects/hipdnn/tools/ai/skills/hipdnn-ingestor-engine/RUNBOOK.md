@@ -550,9 +550,14 @@ What the four are, and why each matters:
    against what the spec pins. Uniqueness is `(toc_key, symbol)`; never key anything on the
    symbol string alone.
 
-If your engine translates the dtype vocabulary (spec `"bf16"` against metadata
-`"BFLOAT16"`, say), narrow the compared fields with `--field` rather than reading a wall of
-false positives.
+Your spec and your metadata may spell the same value two different ways on purpose — a
+rocKE spec's `"bf16"` against a KMD's `"BFLOAT16"`. That is not drift and the tool knows
+it: dtype spellings are normalised before comparison, so `bf16`/`BFLOAT16` agrees while
+`bf16`/`HALF` still fails. For any *other* field your engine translates, narrow the drift
+comparison with `--drift-field` — **not** `--field`. `--field` is the matcher-tuple
+identity: dropping a field from it removes that field from what makes a variant distinct,
+and invariant 2 then reports collisions between variants that are genuinely different.
+The two lists are deliberately separate for exactly this reason.
 
 This logic ships as a tested module rather than a snippet in this file, because the
 snippet it replaces was **dead code for its entire life**: it read only

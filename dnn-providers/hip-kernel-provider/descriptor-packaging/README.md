@@ -50,6 +50,16 @@ pass); exit 1 means a real violation or a spec that could not be found anywhere.
 Invariant 4 (symbol non-uniqueness) is informational only and never affects the exit
 code on its own.
 
+Two field lists, deliberately independent: `--field` is the MATCHER-TUPLE identity
+(invariant 2), `--drift-field` is what invariant 1 compares against the authored spec,
+defaulting to `--field`. They were one list at first, and that was a trap: a spec and a
+KMD legitimately spell the same value differently (`spec "bf16"` against `metadata
+"BFLOAT16"`), so silencing the resulting false drift with `--field` also removed the
+field from what makes a variant distinct, and invariant 2 then reported 16 false
+collisions on the real 32-kernel gfx950 bundle. dtype specifically no longer needs
+silencing at all -- spellings are normalised through `_DTYPE_ALIASES`, so
+`bf16`/`BFLOAT16` agrees while `bf16`/`HALF` still fails.
+
 ```bash
 PYTHONPATH=descriptor-packaging/python:rocke/library:rocke/platform/python:/opt/rocm-kpack/python \
     python3 -m pytest descriptor-packaging/tests/test_desk_check_invariants.py -q
