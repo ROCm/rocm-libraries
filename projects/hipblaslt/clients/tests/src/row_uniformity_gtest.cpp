@@ -2083,6 +2083,8 @@ namespace
 
     TEST(RowUniformityGridSteering_pre_checkin, AllPartialNonDivisorFRequiresCapability)
     {
+        // T=4, I=17 (K=1088, DepthU=64), g0=8=T*F with F=2 and 2 does not divide 17.
+        // Without perTileExtraIters: snap to T. With capability: keep T*F.
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
         device.skDynamicGrid = 0;
@@ -2094,15 +2096,21 @@ namespace
             = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
         ASSERT_EQ(tiles, 4u);
         ASSERT_EQ(I, 17u);
+        // The whole point of the case: F=2 must NOT divide I, otherwise the
+        // capability bit is not what decides the outcome.
+        ASSERT_EQ(I % 2, 1u);
 
+        // Mode off: fixed grid unchanged.
         EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 8u);
 
         problem.setParams().setUniformSummationOrder(true);
         solution->internalArgsSupport.perTileExtraIters = false;
-        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles);
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles)
+            << "Without perTileExtraIters, F that does not divide I must snap down to T";
 
         solution->internalArgsSupport.perTileExtraIters = true;
-        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 8u);
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 8u)
+            << "With perTileExtraIters, F need not divide I; keep T*F when workspace fits";
     }
 
     TEST(RowUniformityGridSteering_pre_checkin, ParallelSnapSkipsFIRequirement)
@@ -2129,14 +2137,80 @@ namespace
             << "Parallel snap must skip F | I and keep T*F when workspace fits";
     }
 
-    TEST(RowUniformityGridSteering_pre_checkin, ModeOffLeavesParallelReduction)
+    TEST(RowUniformityGridSteering_pre_checkin, ModeOffLeavesNaturalGridAndReduction)
     {
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
-        auto problem  = uniformityGemm(512, 512, 8192);
+        device.skFixedGrid      = 0;
+        device.skMaxCUs         = 0;
+        device.skGridMultiplier = 1;
+
+        auto         problem = uniformityGemm(512, 512, 8192);
+        const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
 
         EXPECT_FALSE(problem.getParams().uniformSummationOrder());
-        EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel);
+
+        const auto   redOff  = solution->getSKReduction(problem, device);
+        const size_t gridOff = solution->getSKGrid(problem, device, tiles, redOff);
+
+        // Flag stays false (default): a second call must land on the same
+        // reduction AND the same grid, i.e. the steering is inert when off.
+        EXPECT_EQ(solution->getSKReduction(problem, device), redOff);
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, redOff), gridOff);
+
+        // Confirm the off path above was actually parallel so the comparison is
+        // meaningful. USO-on admits parallel for this eligible shape.
+        EXPECT_EQ(redOff, origami::reduction_t::parallel);
+    }
+
+    // MinItersPerCU (ContractionSolution.cpp, mirrors origami::streamk) is the
+    // floor on iterations per Stream-K workgroup that the F-star search
+    // enforces via `if((I / F) < MinItersPerCU) continue;`. Every other case
+    // here sits at or above the floor, so lowering the constant would go
+    // unnoticed. Bracket it from both sides with parallel reduction, which
+    // skips the F | I requirement and therefore isolates this one condition:
+    //   I=16, F=2 -> I/F == 8 must be ACCEPTED (fails if the floor rises to 9)
+    //   I=15, F=2 -> I/F == 7 must be REJECTED (fails if the floor drops to 7)
+    TEST(RowUniformityGridSteering_pre_checkin, MinItersPerCUBoundaryIsEight)
+    {
+        auto device          = uniformitySteeringDevice();
+        device.skDynamicGrid = 0;
+        device.skFixedGrid   = 8; // g0 = 8 = T * 2 with T = 4
+
+        // K=1024, DepthU=64 -> I = 16, so I / F = 8 sits exactly on the floor.
+        {
+            auto         solution = uniformitySteeringSolution();
+            auto         problem  = uniformityGemm(256, 256, 1024);
+            const size_t tiles    = problem.getNumTiles(solution->sizeMapping, 1);
+            const size_t I
+                = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+            ASSERT_EQ(tiles, 4u);
+            ASSERT_EQ(I, 16u);
+            ASSERT_EQ(I / 2, 8u);
+
+            problem.setParams().setUniformSummationOrder(true);
+            EXPECT_EQ(
+                solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel), 8u)
+                << "I/F == MinItersPerCU (8) is admissible; F=2 must be kept";
+        }
+
+        // K=960, DepthU=64 -> I = 15, so I / F = 7 is one below the floor.
+        {
+            auto         solution = uniformitySteeringSolution();
+            auto         problem  = uniformityGemm(256, 256, 960);
+            const size_t tiles    = problem.getNumTiles(solution->sizeMapping, 1);
+            const size_t I
+                = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+            ASSERT_EQ(tiles, 4u);
+            ASSERT_EQ(I, 15u);
+            ASSERT_EQ(I / 2, 7u);
+
+            problem.setParams().setUniformSummationOrder(true);
+            EXPECT_EQ(
+                solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel), tiles)
+                << "I/F == 7 is below MinItersPerCU (8); F=2 must be refused and "
+                   "the grid must snap down to all-full (T)";
+        }
     }
 
 } // namespace
