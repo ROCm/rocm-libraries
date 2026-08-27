@@ -77,7 +77,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem)
+        ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
         if problem.select_path() != "2d":
@@ -119,8 +119,10 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
             # ``_enable_gfx942_fp16_flash`` is the real narrowing; nothing here
-            # claims a feature it turns down, so the full set stays declared.
-            supports_features=ATTENTION_FEATURES,
+            # claims a feature it turns down. fp8 is the one exception -- this is
+            # an fp16-only flash path with no fp8 dequant kernel -- so it is
+            # dropped rather than left for the dtype gate to catch by accident.
+            supports_features=ATTENTION_FEATURES - {"fp8"},
         ),
         _supports=support,
         select_spec=select,

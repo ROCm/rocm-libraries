@@ -448,6 +448,11 @@ inline bool isBufferMemStore(const StinkyInstruction& inst) {
     return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst);
 }
 
+inline bool isVmemTexStore(const StinkyInstruction& inst) {
+    return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst) ||
+           isGlobalStoreAsyncFromLds(inst);
+}
+
 /// Check if instruction is a scheduling fence pseudo-instruction.
 /// Fences emit no assembly but carry MemTokenData ordering constraints.
 inline bool isFence(const StinkyInstruction& inst) {
@@ -544,9 +549,11 @@ inline bool isAsyncMemOp(const StinkyInstruction& inst) {
     return isGlobalStoreAsyncFromLds(inst);
 }
 
-inline bool isVMem(const StinkyInstruction& inst) {
+// Vector memory outside the DS and FLAT classes.
+inline bool isVmemTex(const StinkyInstruction& inst) {
     return isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) ||
-           isGLOBALOrAtomic(inst) || isAsyncMemOp(inst);
+           isGLOBALOrAtomic(inst) || isAsyncMemOp(inst) || isGlobalPrefetch(inst) ||
+           isTensorLoad(inst);
 }
 
 inline bool isDSRead(const StinkyInstruction& inst) {
