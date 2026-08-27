@@ -179,8 +179,9 @@ The last three kinds are where defects live:
 
 - **Derivation** — both sides express the concept, differently. The rule is a computation,
   not a comparison, and the computation is yours to get right. If an incumbent engine
-  already serves this op, it has almost certainly solved the same derivation:
-  `src/engines/<incumbent>/plans/` is worth reading before you invent one. So is the
+  already serves this op, it has almost certainly solved the same derivation: look for a
+  `plans/` directory under `src/engines/<incumbent>/` (not every engine has one) and read
+  it before you invent your own. So is the
   reference executor under `integration-tests/gpu-ref/kernels/<op>/`, whose predicate
   *defines* the mapping you will be verified against — off-by-ones included.
   *(SDPA is the sharp example: hipDNN has no `causal` boolean at all. Causality is derived

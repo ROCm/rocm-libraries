@@ -1,5 +1,17 @@
 # Mining a rocKE kernel for what the matcher must enforce
 
+**You were sent here from RUNBOOK step 2b.** You owe `mining.md` on disk, every
+constraint row given a verdict, before you go to step 3. This file tells you what to
+extract and how to classify it.
+
+**Why this comes after the graph contract.** Step 2a (`graph_contract.md`) already told
+you what the graph can ask for, and which of the kernel's fields are derivations rather
+than a direct match. Mining does not re-derive that mapping — it tells you what the
+*kernel* additionally pins that the graph side never sees: spec-internal knobs, launch
+geometry, ABI shape, and hard-fault conditions that live only in Python. Read 2a first;
+arriving here without it means reverse-engineering the graph side under time pressure
+while writing C++, which is where this skill's worst defects have come from.
+
 A rocKE kernel's restrictions live **only** in Python. Nothing carries them into hipDNN,
 and nothing checks that you got them right. An integration that skips this step advertises
 a kernel that then faults or returns wrong numbers — and every mechanical check stays
@@ -128,39 +140,32 @@ different knob, not to decline the graph. `graph_match` returning `nullopt` empt
 **whole engine's catalog**, so an overly narrow gate there is far more expensive than an
 overly narrow `kernel_match`.
 
-### The rule the graph spells differently from the kernel
+### Deriving the kernel's own mapping, once a field is a derivation
 
-A spec field is not always a graph field, even when both exist and mean the same thing.
-Before you write `attrs.<x>() == spec.<x>` for any rule, **find the field in the op's
-`.fbs` and confirm it is spelled the same way**. Where it is not, the rule is a
-*derivation*, not a comparison, and the derivation is yours to get right.
+`graph_contract.md` §5 already classified which of the kernel's fields are
+**derivations** — concepts both sides express, but spelled differently — and named the
+hipDNN side. What it cannot give you is how the *kernel itself* computes its value,
+because that exists only in the Python. Getting it backwards from a "logical" guess
+produces a wrong number that every mechanical check waves through; that direction is
+yours to nail down here, not to re-derive from the classification table.
 
-The gfx950 dense kernel has two such fields, and they are its two most important:
+**Get the exact mapping from the reference executor, not from a convention.** Stage 8
+verifies you against `integration-tests/gpu-ref/kernels/<op>/`, whose predicate *defines*
+the mapping you are held to. Read the kernel's own key-set or formula and the reference's
+side by side, and equate them term by term rather than assuming the "obvious" direction.
 
-| Spec field | hipDNN spelling | Derivation |
-|---|---|---|
-| `causal` (bool) | **no such field** | `left_bound`/`right_bound`/`diagonal_alignment`, with the deprecated `causal_mask`/`causal_mask_bottom_right` booleans taking precedence when set |
-| `sliding_window` (int) | **no such field** | `left_bound + 1` — see below |
-
-**Get the off-by-one from the reference executor, not from a convention.** Stage 8
-compares you against `integration-tests/gpu-ref/kernels/sdpa/GpuRefSdpaFwd.cpp`, so its
-predicate *defines* the mapping. Read the two key-sets and equate them:
-
-```
-kernel    (attention_dense.py:832,843):  keep iff ktok > q - W      -> keys [q-W+1, q], W keys
-reference (GpuRefSdpaFwd.cpp:141-147):   drop iff skv < sq - L      -> keys [q-L,   q], L+1 keys
-                                          => W = L + 1
-```
-
-and note the asymmetry the reference states in its own comment — *"+1 on the right bound,
-none on the left bound"* — so `right_bound == 0` maps with **no** offset. Guessing either
-direction is a silent one-key error on every masked graph.
-
-Alignment is the same shape of problem: the reference shifts by
-`offset = topLeft ? 0 : (Skv - Sq)` (`:92`); a kernel masking on raw absolute token
-indices implements TOP_LEFT only, so `BOTTOM_RIGHT` is servable **iff `Sq == Skv`**.
-Declining it outright is the over-rejection trap — every shipped causal `SdpaFwd` bundle
-is BOTTOM_RIGHT *and* square, so a blanket decline serves none of them.
+*(The gfx950 dense kernel's sliding-window field is the sharp instance — it isn't even
+named in the schema, only derived. The kernel keeps a key iff `ktok > q - W`
+(`attention_dense.py:832,843`); the reference drops iff `skv < sq - L`
+(`GpuRefSdpaFwd.cpp:141-147`); so `W = L + 1`. The reference's own comment states the
+asymmetry — "+1 on the right bound, none on the left bound" — so guessing either
+direction is a silent one-key error on every masked graph. Alignment is the same shape of
+problem: the reference shifts by `offset = topLeft ? 0 : (Skv - Sq)`; a kernel masking on
+raw absolute token indices implements one alignment convention only, and the other is
+servable exactly when a shape restriction the reference states holds. Declining it
+outright instead of checking that restriction is the over-rejection trap — every shipped
+bundle exercising that alignment happens to meet the restriction, so a blanket decline
+would silently serve none of them.)*
 
 ### A third kind: the knob-selection constraint
 
@@ -192,9 +197,10 @@ the engine can serve at all.
 
 **Unrepresentable — a real capability with no hipDNN attribute to carry it.** Some rocKE
 features change *semantics* (so they are not tuning knobs) yet have no corresponding
-field anywhere in the hipDNN graph schema (so they are not graph-derivable either).
-`has_softcap` and `use_qq_bias` on `attention_tiled_2d` are both this: grep
-`projects/hipdnn` for either and you get nothing.
+field anywhere in the hipDNN graph schema (so they are not graph-derivable either). Grep
+the schema tree for the spec field's name; a real hit count of zero is the signature.
+*(Two boolean mode flags on a gfx950 tiled-attention kernel are this today — grep
+`projects/hipdnn` for either name and nothing comes back.)*
 
 Do not force these into the other two buckets. The honest handling is:
 
@@ -206,9 +212,11 @@ Do not force these into the other two buckets. The honest handling is:
 
 **Bound-checked rather than equality-checked.** A graph fact is usually compared against a
 baked value for *equality* — but sometimes the baked value is a **capacity**, and the
-correct test is an inequality. `attention_tiled_2d` compiles `binary_search_iters` from
-`num_seqs`, and that kernel correctly serves any runtime `num_seqs <= 2^iters - 1`. An
-equality check there would decline graphs the kernel handles perfectly.
+correct test is an inequality: the kernel serves any runtime value up to what it was
+compiled for, not only the one value a naive equality check would demand. *(A gfx950
+tiled-attention kernel compiles a binary-search iteration count from its sequence-length
+bound, and correctly serves any runtime sequence length the resulting bound covers; an
+equality check there would decline graphs the kernel handles perfectly.)*
 
 When a KMD field is derived from a graph quantity rather than equal to it, say so in the
 table and write the inequality into `kernel_match`. Read the field's own derivation in the
@@ -263,16 +271,18 @@ you cannot see from C++.
 and **verify the shape per kernel. Do not assume a template.** rocKE kernels differ
 fundamentally here, and getting it wrong corrupts memory rather than erroring:
 
-- **Some append optional arguments conditionally.** `attention_dense`'s signature grows
-  by `[sink_ptr]` when `use_sinks`, `[cu_seqlens_q, cu_seqlens_kv]` when `varlen`,
-  `[block_tables, kv_lens, block_table_stride]` when `paged` — so the argument *count*
-  depends on the spec, and `launch()` must replay the same conditionals.
-- **Others declare every slot unconditionally.** `attention_tiled_2d` declares
-  `sink_ptr`, `alibi_slopes_ptr` and `qq_bias_ptr` as plain `b.param(...)` with no `if`
-  around them; the compile-time `USE_SINKS`/`USE_ALIBI`/`USE_QQ_BIAS` flags decide whether
-  the kernel *reads* the slot, not whether the slot *exists*. Here the argument count is
-  fixed and a "conditional" `launch()` would misalign every pointer after the first
-  disabled feature.
+- **Some kernels append optional arguments conditionally** — the argument *count* depends
+  on which optional features the spec turns on, and `launch()` must replay the same
+  conditionals to stay aligned. *(A dense attention kernel's signature growing by
+  `[sink_ptr]` when sinks are enabled, then further by variable-length and paged-specific
+  pointers under their own flags, is the instance worth knowing: three independent
+  conditionals stacking in the same signature.)*
+- **Others declare every slot unconditionally** — every optional pointer is a plain
+  `b.param(...)` with no `if` around it, and a compile-time flag decides only whether the
+  kernel *reads* the slot, never whether the slot *exists*. Here the argument count is
+  fixed, and a "conditional" `launch()` would misalign every pointer after the first
+  disabled feature. *(A tiled attention variant that declares its optional pointers this
+  way is the instance: same three-feature shape as above, opposite ABI convention.)*
 
 Determine which by reading the `b.param` declarations line by line and noting whether
 each sits inside an `if`. Then mirror exactly that in `launch()`, and cite the Python
@@ -421,3 +431,20 @@ Before writing the pack, produce:
 Show 1, 2 and 5 to the human when you present the batch confirmation, plus any
 unrepresentable feature you found. These are exactly the decisions they can correct and
 you cannot verify alone.
+
+---
+
+## GATE
+
+```bash
+ls mining.md
+grep -c '^|' mining.md      # the constraint table has rows
+```
+
+`mining.md` exists, every row of the constraint table carries a verdict (a bucket, or
+`UNSURE`), the layout statement names the arithmetic that proves it, and the ABI list
+states per argument whether its slot is conditional. Rows still `UNSURE` at the source
+cap are not a blocker — they are step 3's questions.
+
+Then go to step 3 and send the batch message. You now know what the kernel can answer;
+the human decides what to build.

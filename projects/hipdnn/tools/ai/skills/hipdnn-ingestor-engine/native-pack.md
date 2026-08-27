@@ -1,5 +1,15 @@
 # Implementing the native pack — the five hooks
 
+**You were sent here from RUNBOOK step 6.** You owe `packs/<Name>Native.cpp` with all
+five hooks filled in — `grep -c "FILL THIS OUT"` at zero — before you go to step 7. This
+file tells you what each hook's body must do and the traps that make a green build mean
+nothing.
+
+**What you arrive with.** `graph_contract.md` told you what the graph can ask for and
+where kernel and hipDNN disagree; `mining.md` told you what the kernel can actually
+answer, including its rejection checklist. This step is where those two documents become
+C++: your step-2 rejection checklist is the `graph_match` body, in severity order.
+
 The generator emits `packs/<Name>Native.cpp` with every body `// TODO - FILL THIS OUT`.
 Filling them is **the** integration work; descriptors are scaffolding around it. This file
 is how.
@@ -19,8 +29,9 @@ finds every one ever added if your tree has none.
 
 **Copy their SHAPES, not their RULES.** Every rocKE reference pack in this codebase's
 history has shipped at least one *applicability* defect, and a copier inherits it
-silently. Two that were found by checking a pack's rejection list against real bundle
-data — both present in the gfx950 dense SDPA pack as first authored:
+silently. Two were found by checking a pack's rejection list against real bundle data —
+both present in the first authored SDPA pack, worth knowing as a worked illustration of
+the failure shape:
 
 - Its `causal` derivation read only the deprecated `causal_mask` /
   `causal_mask_bottom_right` booleans. Every shipped `quick/SdpaFwd` bundle leaves those
@@ -28,17 +39,20 @@ data — both present in the gfx950 dense SDPA pack as first authored:
   `causal = 0` for a causal graph and matched a **non-causal kernel**. Wrong numbers, no
   fault, matcher green.
 - Its `mma_core_mode != UNSET` rejection declined every shipped SdpaFwd bundle, because
-  they all set `"float"` (`FLOAT = 1`, `data_types.fbs`). The engine then serves nothing
-  and the suite stays green because another engine wins.
+  they all set `"float"` (`FLOAT = 1`, `data_types.fbs`). The engine then served nothing
+  and the suite stayed green because another engine won.
 
 **The general rules behind those two, which outlive any particular file:**
 
 - **A graph concept with no matching spec field is a *derivation*, and derivations are
-  where reference packs go wrong.** hipDNN's SDPA schema has no `causal` boolean at all;
-  causality comes off `left_bound`/`right_bound`/`diagonal_alignment`, with the deprecated
-  booleans taking precedence *only when set*. Find the canonical derivation in the tree and
-  call it rather than reimplementing it — for masks that is
-  `asm_sdpa_engine/plans/SdpaPlanUtils.hpp` (`getMaskType`).
+  where reference packs go wrong.** `graph_contract.md` §5 already named which of your
+  fields are derivations and how the graph side spells them; `mining.md` has the kernel's
+  own mapping. If an incumbent engine already serves this op, its plan builder —
+  `src/engines/<incumbent-engine>/plans/` — has almost certainly solved the same
+  derivation; find the canonical implementation there and call it rather than
+  reimplementing it. *(SDPA's canonical mask derivation lives in
+  `asm_sdpa_engine/plans/SdpaPlanUtils.hpp`'s `getMaskType`; the reference pack above
+  shipped without calling it.)*
 - **Never write an optional-enum rejection as `field() != DEFAULT` without checking what
   shipped bundles actually set.** A frontend default that is a non-zero enum value makes
   the naive form an over-rejection that fails *silently*: the engine registers, builds and
@@ -99,18 +113,15 @@ Structure, in order:
    covering only the first admits graphs carrying the rest. Aux outputs and quantization
    fan out the same way.
 
-   So work from the schema, not from memory: open the op's `.fbs` table (e.g.
-   `SdpaAttributes` in `projects/hipdnn/**/*.fbs`), list **every** optional field, and
-   account for each one — implemented, or explicitly rejected. Two of them are easy to
-   miss because they are hipDNN-graph concepts with no rocKE counterpart, so
-   `rocke-mining.md`'s Python-scoped checklist will never surface them:
-
-   - `scale_tensor_uid` — a *device-resident* scale. A kernel taking `scale` as a launch
-     scalar cannot accept it, and nothing about the Python spec says so.
-   - `mma_core_mode` and the quantization scale UIDs — likewise absent from the spec.
-   - `implementation` (`AttentionImplementation`: AUTO/COMPOSITE/UNIFIED) — an execution
-     strategy hint with no rocKE counterpart. A pack that never reads it silently ignores
-     a COMPOSITE/UNIFIED request.
+   So work from the schema, not from memory: open the op's `.fbs` table under
+   `flatbuffers_sdk/schemas/<op>_attributes.fbs`, list **every** optional field, and
+   account for each one — implemented, or explicitly rejected. Some are easy to miss
+   because they are hipDNN-graph concepts with no rocKE counterpart, so
+   `rocke-mining.md`'s Python-scoped checklist will never surface them. *(SDPA's table
+   has three: a device-resident `scale_tensor_uid` a launch-scalar kernel cannot accept,
+   an `mma_core_mode` field and quantization scale UIDs with no rocKE analogue, and an
+   `implementation` execution-strategy hint (`AttentionImplementation`:
+   AUTO/COMPOSITE/UNIFIED) that a pack silently ignores if it never reads it.)*
 
    **Do not rely on a curated list, including this one — it has already gone stale once**
    (`implementation` was missing from it, and the one shipped pack audited against this
@@ -139,13 +150,15 @@ Structure, in order:
 
 ### The layout check
 
-Most rocKE kernels bake a memory layout into their address arithmetic and accept **no
-stride parameters**. A graph in another layout is indexed as if it were in this one:
-in-bounds reads of the wrong elements — **silently wrong values, no fault**.
+**The general rule: a kernel that bakes a layout must assert it, or a graph in another
+layout is indexed as if it were in this one** — in-bounds reads of the wrong elements,
+**silently wrong values, no fault**. Most rocKE kernels bake a memory layout into their
+address arithmetic and accept **no stride parameters**, so this check has nowhere else to
+live but `graph_match`.
 
 Derive the expected strides from the kernel's own arithmetic (see `rocke-mining.md`), then
-assert them. The reference, for a kernel whose dims are `[B,H,S,D]` but whose memory is
-token-major BSHD:
+assert every one the kernel depends on. Worked example — a kernel whose dims are
+`[B,H,S,D]` but whose memory is token-major BSHD (the shipped attention instance):
 
 ```cpp
 bool hasBshdStrides(const data_objects::TensorAttributes* tensor)
@@ -222,11 +235,13 @@ candidate, read the metadata.
 auto code = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
 ```
 
-**The `options` argument throws on a BSHD tensor — do not pass the real one.**
-`KernelCompileOptions` classifies whatever tensor it is handed as NCHW or NHWC, and a
-BSHD attention tensor is neither, so constructing it from your actual query tensor
-throws at `prepare()` time. `PointwiseNative.cpp` passes its real tensor and is the
-natural thing to copy — it works there only because a pointwise tensor *is* classifiable.
+**The general trap: `options` is constructed by classifying a real tensor, and throws if
+that tensor's layout does not fit the classifier's vocabulary — do not pass the real one
+when your layout doesn't.** `KernelCompileOptions` classifies whatever tensor it is
+handed as NCHW or NHWC; a layout the classifier has no category for (BSHD attention
+memory is the instance today) throws at `prepare()` time if you construct it from your
+actual query tensor. `PointwiseNative.cpp` passes its real tensor and is the natural
+thing to copy — it works there only because a pointwise tensor *is* classifiable.
 
 For a KPACK attention kernel, pass a layout-neutral stand-in (a minimal tensor whose
 classification is irrelevant), and say in a comment why it is safe: the KPACK path
@@ -318,10 +333,11 @@ destroyed per handle.
 
 1. **`graph_match` → `nullopt` disables the entire engine** for that graph.
 2. **The output tensor is not reliable at match time.** Check it in `prepare()`.
-3. **`KernelCompileOptions` classifies its tensor as NCHW or NHWC and throws on anything
-   else.** A BSHD tensor is neither. The reference passes a layout-neutral stand-in, which
-   is safe *only* because the KPACK path never reads those options. An `EMBEDDED_SOURCE`
-   kernel in a BSHD pack needs a real answer here.
+3. **`KernelCompileOptions` throws if the tensor you construct it from doesn't fit its
+   layout vocabulary** (BSHD attention memory is neither NCHW nor NHWC). Pass a
+   layout-neutral stand-in when the real tensor doesn't classify — safe *only* when the
+   kernel path never reads those options (KPACK). An `EMBEDDED_SOURCE` kernel needs a
+   real answer here.
 4. **An unchecked optional attribute is silently not performed.** Reject every mode you do
    not implement.
 5. **`DeviceProperties` in arch-gated tests must be constructed by value**, never queried
@@ -329,3 +345,19 @@ destroyed per handle.
 6. **The `ingestorPacks()` table row is load-bearing.** Declaration without the row: the
    static-archive linker drops the translation unit, so the pack vanishes from unit tests
    while the `.so` keeps working — no build error either way.
+
+---
+
+## GATE
+
+```bash
+grep -c "FILL THIS OUT" $PROVIDER/src/engines/kernel_ingestor_engine/packs/*Native.cpp
+```
+
+Must be `0`. That alone is necessary, not sufficient: every rejection in your step-2
+checklist must actually appear in `graph_match`, every schema field from the completeness
+check must be consumed or explicitly rejected, and the `ingestorPacks()` row must exist
+for both the declaration and the `s_packs` entry.
+
+Then go to step 7 and splice, build, pack and confirm. You now have five real hooks;
+step 7 makes the build see them.
