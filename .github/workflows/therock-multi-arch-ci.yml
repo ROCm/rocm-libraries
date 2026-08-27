@@ -17,7 +17,7 @@ name: TheRock Multi-Arch CI
 # TheRock ref: the resolve_therock_ref job picks one concrete ROCm/TheRock SHA
 # for the whole run. The setup job checks out the pinned TheRock SHA and
 # re-exports it as needs.setup.outputs.ref. The `uses:
-# ROCm/TheRock/...@064a788` lines below are the workflow-definition refs
+# ROCm/TheRock/...@b45a060` lines below are the workflow-definition refs
 # (Actions requires a literal there), and the matching `ref:` inputs are the
 # build-source refs consumed by those reusable workflows.
 
@@ -100,7 +100,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
+          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -119,7 +119,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
@@ -141,7 +141,7 @@ jobs:
       # Concrete SHA resolved once by resolve_therock_ref; setup re-exports the
       # checked-out commit as needs.setup.outputs.ref for downstream jobs.
       # TODO: After multi-arch CI is fully migrated to TheRock, remove the explicit ref here
-      ref: 064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
+      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
       # Pass external repo info for stage-impact analysis
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
@@ -154,7 +154,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -168,7 +168,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
+      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
     permissions:
       contents: read
       id-token: write
@@ -182,7 +182,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -194,7 +194,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
+      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
     permissions:
       contents: read
       id-token: write
@@ -213,7 +213,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
+          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
