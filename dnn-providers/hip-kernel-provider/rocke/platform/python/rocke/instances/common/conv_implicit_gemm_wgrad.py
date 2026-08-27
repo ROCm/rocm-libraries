@@ -1247,7 +1247,7 @@ def build_implicit_gemm_conv_wgrad(
     final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
 
     if _is_split_k and op.family == "wmma":
-        # WMMA split-K: f32-only atomic-add via the WMMA C-fragment layout.
+        # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
         _emit_wgrad_split_k_epilogue_wmma(
             b,
             spec,
