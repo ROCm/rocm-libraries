@@ -22,7 +22,7 @@
 # gfx950 256 -> gfx950100) and skips the rest, so no per-run gtest filter is needed.
 #
 # Env (provided by TheRock's test_component.yml): AMDGPU_FAMILIES (required), THEROCK_BIN_DIR
-# (default ./build/bin), OUTPUT_ARTIFACTS_DIR (default ./build).
+# (default ./build/bin), OUTPUT_ARTIFACTS_DIR (default ./build), TEST_TYPE (quick/standard/...).
 
 import json
 import os
@@ -144,6 +144,17 @@ def build_rocjitsu(workdir: Path):
 
 
 def main():
+    # dbsync is a heavy, specialist check (~15 min on gfx942); the `quick` tier is a fast sanity gate
+    # for non-component (build/CI) changes and shouldn't pay for it. Component PRs (standard/
+    # comprehensive) and nightlies (comprehensive) run it in full. TheRock sets TEST_TYPE on the test
+    # step (test_component.yml). Skip == success, so it never blocks.
+    if os.environ.get("TEST_TYPE") == "quick":
+        print(
+            "TEST_TYPE=quick: skipping GPU-free dbsync (covered by component PRs + nightlies).",
+            flush=True,
+        )
+        return 0
+
     family = os.environ.get("AMDGPU_FAMILIES", "")
     entry = FAMILY_MAP.get(family)
     if entry is None:
