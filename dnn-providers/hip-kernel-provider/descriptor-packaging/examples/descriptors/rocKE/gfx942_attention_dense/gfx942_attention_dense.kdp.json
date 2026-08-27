@@ -1,0 +1,1695 @@
+{
+  "version": "1.0",
+  "id": "9c3e3a3d-f336-446b-8965-4fba06d1fe4a",
+  "name": "hipkernel:gfx942_attention_dense",
+  "matchers": [
+    "989f893d-62f2-44e7-95bb-ea4c7155fde5"
+  ],
+  "engine": "a8442f5b-2608-49a5-9a0d-4696efbd52d7",
+  "dispatch": "2df995f0-5923-4dc5-ae4a-edd9040dfd9d",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "9e08af68-b84d-403c-bf75-23f39164cdbe",
+      "name": "attention_dense.bf16_d64_mha256_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "41c3c860-e538-4480-8f5f-d3ce997c6e5d",
+      "name": "attention_dense.bf16_d64_mha256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "dd50ad18-047f-4ad9-a790-307b86ca0f7d",
+      "name": "attention_dense.bf16_d64_mha256_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2c852814-8c65-4f90-9ec7-5f3e50f6482d",
+      "name": "attention_dense.bf16_d64_mha256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "dd1923e5-dc48-4736-a90d-34d1d236bec7",
+      "name": "attention_dense.bf16_d128_mha256_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "17f2c1f9-0398-43c7-8e8c-ea1556430323",
+      "name": "attention_dense.bf16_d128_mha256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9f301171-aea4-4276-8ecd-c5a7c48cdc80",
+      "name": "attention_dense.bf16_d128_mha256_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1278cd97-81db-4e41-a118-84be03462677",
+      "name": "attention_dense.bf16_d128_mha256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7139b9a1-dbce-45b9-9f52-a8a2ca93e229",
+      "name": "attention_dense.fp16_d64_mha256_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9d91bd38-fb67-4f39-a208-55cb0216f322",
+      "name": "attention_dense.fp16_d64_mha256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "578b4350-be11-4e7b-ab8e-2de9daa8f1df",
+      "name": "attention_dense.fp16_d64_mha256_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "932d98fa-aad8-4fa2-ac0c-0e28de7bcc72",
+      "name": "attention_dense.fp16_d64_mha256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "64b38ac2-aa69-473c-8623-2b7c7fe58f29",
+      "name": "attention_dense.fp16_d128_mha256_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ee6fcafb-53ba-467f-b22d-330cd899137d",
+      "name": "attention_dense.fp16_d128_mha256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "03eb8903-3721-45f0-a99b-62af88d20a3c",
+      "name": "attention_dense.fp16_d128_mha256_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "192aa457-1806-4a20-9eb5-7b6ffb124c93",
+      "name": "attention_dense.fp16_d128_mha256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "eb2f0f71-2bcf-423e-95b0-6087ba2eb3cd",
+      "name": "attention_dense.bf16_d64_gqa256_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8c707f94-81a2-431a-b07f-f27151058985",
+      "name": "attention_dense.bf16_d64_gqa256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a3126eef-7272-44f0-b1cb-bb74d4846715",
+      "name": "attention_dense.bf16_d64_gqa256_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f68542af-9b82-4af8-be56-6393bbd3161e",
+      "name": "attention_dense.bf16_d64_gqa256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2113eca4-922a-4dd3-8e97-b851114bde65",
+      "name": "attention_dense.bf16_d128_gqa256_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "52e6313f-02ec-45eb-9467-7469c853d5fd",
+      "name": "attention_dense.bf16_d128_gqa256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2e5c0cc6-bd85-4e8e-b05d-2dd9ea8cefc5",
+      "name": "attention_dense.bf16_d128_gqa256_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2edce7b0-6afd-466e-b329-0c837fd25e8f",
+      "name": "attention_dense.bf16_d128_gqa256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "fc8016fd-4666-4b6b-8594-16bc37a7299a",
+      "name": "attention_dense.fp16_d64_gqa256_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "35815392-d28f-42ee-96a3-855f31c433d7",
+      "name": "attention_dense.fp16_d64_gqa256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "24854269-0f8b-4046-82e5-e164f1d2ced5",
+      "name": "attention_dense.fp16_d64_gqa256_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7ef01b5c-c1eb-4dab-8794-f4ae028fee7e",
+      "name": "attention_dense.fp16_d64_gqa256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f825bec7-25fd-47e7-865f-a80c4503155c",
+      "name": "attention_dense.fp16_d128_gqa256_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5c951cb7-3181-4549-9ddc-97c51ff9c2f0",
+      "name": "attention_dense.fp16_d128_gqa256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "82e43fa4-75aa-46fd-a632-99ae907fce63",
+      "name": "attention_dense.fp16_d128_gqa256_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9c453733-4527-455f-8dbe-2108327048f6",
+      "name": "attention_dense.fp16_d128_gqa256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 256,
+          "num_query_heads": 8,
+          "num_kv_heads": 2,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "seqlen_q": 256,
+        "seqlen_kv": 256,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "07fd44d6-e164-4e5c-b57b-44ad56d37b6b",
+      "name": "attention_dense.bf16_d64_mha512_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8a33bd9a-6cb7-4bfc-b674-fc6260f28711",
+      "name": "attention_dense.bf16_d64_mha512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4b465a95-5aab-47db-815c-6510e176c601",
+      "name": "attention_dense.bf16_d64_mha512_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "53ead327-ea42-436f-b1e7-d012b9658545",
+      "name": "attention_dense.bf16_d64_mha512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "03ffc9cb-f6fc-494a-a756-d378241af3ef",
+      "name": "attention_dense.bf16_d128_mha512_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1d89680e-ed9a-472e-9822-144018ef4a53",
+      "name": "attention_dense.bf16_d128_mha512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0010fae0-2c11-4e12-be32-20f52478751e",
+      "name": "attention_dense.bf16_d128_mha512_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9e953ee3-b9d8-4ca5-be16-7aad92a5577b",
+      "name": "attention_dense.bf16_d128_mha512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6fcceb34-d549-463d-857e-a1c0e35993af",
+      "name": "attention_dense.fp16_d64_mha512_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1bdf8ca0-8536-4e94-bc85-a53091c50487",
+      "name": "attention_dense.fp16_d64_mha512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "01ddc1c8-512d-42f6-97c3-a5dc56165fc8",
+      "name": "attention_dense.fp16_d64_mha512_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7d8ddd39-cdbf-423e-9ee4-8a4c62be76b5",
+      "name": "attention_dense.fp16_d64_mha512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7cc1384e-f5f3-4364-83a2-cdb249930f6f",
+      "name": "attention_dense.fp16_d128_mha512_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "44eda469-c2f5-4b74-8db1-07d6d917162a",
+      "name": "attention_dense.fp16_d128_mha512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8f2d3212-8344-4980-8d41-7fd2b08296e7",
+      "name": "attention_dense.fp16_d128_mha512_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4fbb468a-88be-4fd8-8ca8-396dd1811767",
+      "name": "attention_dense.fp16_d128_mha512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 512,
+          "seqlen_kv": 512,
+          "num_query_heads": 8,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "seqlen_q": 512,
+        "seqlen_kv": 512,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx942"
+  ]
+}
