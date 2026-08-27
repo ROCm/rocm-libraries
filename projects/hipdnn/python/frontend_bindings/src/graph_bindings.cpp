@@ -48,6 +48,22 @@ using namespace hipdnn_frontend;
 namespace
 {
 
+// Unwraps the optional handle taken by the engine-name-reporting bindings. Python cannot
+// overload, so where C++ offers a handle-taking form alongside a handle-free one those
+// bindings take a single trailing handle defaulting to None. None yields a null handle,
+// which Graph resolves from the built-in registry.
+hipdnnHandle_t optionalRawHandle(const nb::object& handle)
+{
+    if(handle.is_none())
+    {
+        return nullptr;
+    }
+
+    auto handlePtr = handle.attr("get")();
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+}
+
 // Shared body for both autotune() bindings. The UID-keyed and tensor-keyed variant
 // packs differ only in their key type, which Graph::autotune() itself overloads on.
 // Pointers cross the boundary as integers, exactly as the execute() binding does.
@@ -245,17 +261,20 @@ void graphBindings(nb::module_& m)
              "errors when no add_engine_*() spec was added.")
         .def(
             "get_plan_name",
-            [](const graph::Graph& g) {
+            [](const graph::Graph& g, const nb::object& handle) {
                 std::string name;
-                const auto err = g.get_plan_name(name);
+                const auto err = g.get_plan_name(optionalRawHandle(handle), name);
                 if(err.is_bad())
                 {
                     throw std::runtime_error("Failed to get plan name: " + err.get_message());
                 }
                 return name;
             },
-            "Engine name of the active plan, for example the autotune winner. Raises "
-            "RuntimeError when no plan is active.")
+            nb::arg("handle") = nb::none(),
+            "Engine name of the active plan, for example the autotune winner. Pass the "
+            "handle the graph was built with to name plugin-supplied engines; without it "
+            "only the built-in registry is consulted and such engines report a hex ID. "
+            "Raises RuntimeError when no plan is active.")
         .def(
             "execute_plan_at_index",
             [](const graph::Graph& g,
@@ -305,9 +324,10 @@ void graphBindings(nb::module_& m)
             "separately, since the exception already separates that case from a zero size.")
         .def(
             "get_plan_name_at_index",
-            [](const graph::Graph& g, int64_t planIndex) {
+            [](const graph::Graph& g, int64_t planIndex, const nb::object& handle) {
                 std::string name;
-                const auto err = g.get_plan_name_at_index(planIndex, name);
+                const auto err
+                    = g.get_plan_name_at_index(optionalRawHandle(handle), planIndex, name);
                 if(err.is_bad())
                 {
                     throw std::runtime_error("Failed to get plan name: " + err.get_message());
@@ -315,7 +335,10 @@ void graphBindings(nb::module_& m)
                 return name;
             },
             nb::arg("plan_index"),
-            "Engine name backing one compiled plan (hex fallback for unregistered engines).")
+            nb::arg("handle") = nb::none(),
+            "Engine name backing one compiled plan. Pass the handle the graph was built "
+            "with to name plugin-supplied engines; without it only the built-in registry "
+            "is consulted and such engines report a hex ID.")
         .def("build_plan_at_index",
              &graph::Graph::build_plan_at_index,
              nb::arg("plan_index"),
@@ -324,9 +347,11 @@ void graphBindings(nb::module_& m)
              "out-of-bounds, barred or invalid plan.")
         .def(
             "get_engine_configs",
-            [](graph::Graph& g, const std::vector<HeuristicMode>& modes) {
+            [](graph::Graph& g,
+               const std::vector<HeuristicMode>& modes,
+               const nb::object& handle) {
                 std::vector<EngineConfigInfo> configs;
-                const auto err = g.get_engine_configs(configs, modes);
+                const auto err = g.get_engine_configs(optionalRawHandle(handle), configs, modes);
                 if(err.is_bad())
                 {
                     throw std::runtime_error("Failed to get engine configs: " + err.get_message());
@@ -334,8 +359,12 @@ void graphBindings(nb::module_& m)
                 return configs;
             },
             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("handle") = nb::none(),
             "Discover engine metadata (id, name, knobs, workspace estimate) for the built "
-            "operation graph. Requires build_operation_graph() to have been called first.")
+            "operation graph. Requires build_operation_graph() to have been called first. "
+            "Pass the handle the graph was built with to name plugin-supplied engines; "
+            "without it engine_name falls back to the built-in registry and reports a hex "
+            "ID for engines it does not carry.")
         .def(
             "get_knobs_for_engine",
             [](const graph::Graph& g, int64_t engineId) {

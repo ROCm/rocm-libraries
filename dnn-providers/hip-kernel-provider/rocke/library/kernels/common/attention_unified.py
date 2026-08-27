@@ -433,6 +433,7 @@ def _reject_fp8_format_arch_mismatch(
 
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
+    arch: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Return whether CK DSL can run this problem without fallback today.
 
@@ -458,7 +459,9 @@ def supports_native_unified_attention(
     if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
-        rejected = _reject_fp8_format_arch_mismatch(problem, _resolve_attention_arch())
+        rejected = _reject_fp8_format_arch_mismatch(
+            problem, arch or _resolve_attention_arch()
+        )
         if rejected is not None:
             return rejected
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):
@@ -563,9 +566,10 @@ def supports_native_unified_attention_tiled(
 
 def supports_native_unified_attention_3d_tiled(
     problem: UnifiedAttentionProblem,
+    arch: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Return whether the optimized tiled MFMA 3D split-KV path can run this."""
-    arch = _resolve_attention_arch()
+    arch = arch or _resolve_attention_arch()
     rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
