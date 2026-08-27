@@ -8,6 +8,7 @@ Documentation for rocFFT is available at
 ### Added
 
 * Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+* Added support for very large FFTs on gfx1250.
 
 ### Resolved issues
 

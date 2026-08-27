@@ -339,10 +339,10 @@ class Gfx942DenseTuning:
 
     # use_exp2_fast: force the P2 single-instruction exp2 on/off.
     #   None (default) -> :func:`_use_exp2_fast`, which owns the measured verdict
-    #   (now on for ALL configs; the former bf16-D128 spill holdout is stale).
+    #   (on for all configs except short-sequence bf16 head_dim=128, which reverts
+    #   to plain exp2 -- see _use_exp2_fast for the seqlen gate).
     #   Numerically safe in both directions here -- both softmax arguments are
-    #   always <= 0 -- so unlike ``use_cfvst`` this one is a pure perf A/B and
-    #   is not gated.
+    #   always <= 0 -- so correctness never depends on it; the gate is pure perf.
     use_exp2_fast: bool | None = None
 
     # waves_per_eu: override the emitted ``amdgpu-waves-per-eu`` attribute.
@@ -409,7 +409,7 @@ class Gfx942DenseTuning:
     def resolved_use_exp2_fast(self, spec: AttentionDenseSpec) -> bool:
         """Resolved exp2_fast decision (``None`` -> :func:`_use_exp2_fast`)."""
         if self.use_exp2_fast is None:
-            return _use_exp2_fast(spec.head_size, spec.dtype)
+            return _use_exp2_fast(spec.head_size, spec.dtype, spec.seqlen_q)
         return bool(self.use_exp2_fast)
 
     def resolved_waves_per_eu(self, spec: AttentionDenseSpec) -> int:
@@ -480,7 +480,7 @@ def _tuning_name_tags(spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning") -> 
     ):
         parts.append("vswz1" if swz else "vswz0")
     e2f = tuning.resolved_use_exp2_fast(spec)
-    if e2f != _use_exp2_fast(spec.head_size, spec.dtype):
+    if e2f != _use_exp2_fast(spec.head_size, spec.dtype, spec.seqlen_q):
         parts.append("e2f1" if e2f else "e2f0")
     if tuning.iglp != _DEFAULT_TUNING.iglp:
         parts.append("iglp1" if tuning.iglp else "iglp0")
@@ -555,25 +555,37 @@ def _rows_per_instr(head_size: int) -> int:
     return _DMA_ELEMS_PER_INSTR // head_size
 
 
-def _use_exp2_fast(head_size: int, dtype: str) -> bool:
+def _use_exp2_fast(head_size: int, dtype: str, seqlen: int) -> bool:
     """Whether softmax uses ``exp2_fast`` (one v_exp_f32, no range-reduction guard).
 
-    Enabled for all configs. exp2_fast is a strict VALU reduction and the dominant P2
-    lever on the (post-P1) VALU-bound path, and is always numerically safe here -- both
-    softmax args (alpha's m_i - m_new and p's s - m_new) are <= 0, exactly exp2_fast's
-    precondition, independent of head_size and dtype.
+    Enabled for all configs EXCEPT short-sequence bf16 head_dim=128 (see the guard
+    below). exp2_fast is a strict VALU reduction and the dominant P2 lever on the
+    (post-P1) VALU-bound path, and is always numerically safe here -- both softmax
+    args (alpha's m_i - m_new and p's s - m_new) are <= 0, exactly exp2_fast's
+    precondition, independent of head_size and dtype. So this is a pure perf gate,
+    never a correctness one.
 
-    bf16 D128 was previously the sole holdout, disabled on a measurement (plan §6.1:
-    175 -> 256 VGPR / 22 spill over the waves-per-eu=2 cap) that no longer reproduces
-    on the current kernel: rocprofv3 register capture on the shipped bf16-D128 causal
-    kernel (GQA 32/8, Sq 1024-16384, both the default and persistent grids) reads a
-    lower VGPR count with exp2_fast than without, 0 scratch, numerically identical to
-    plain exp2. The softmax/rescale body has not changed since the kernel was first
-    committed, so this is a stale measurement rather than a schedule that shifted under
-    it; the holdout is removed. head_size is no longer a gate -- correctness holds for
-    every head_size (the <= 0 precondition is universal); a new head_size would only
-    warrant a fresh occupancy check, never a correctness one.
+    Short-sequence bf16 D128 guard. exp2_fast is a net win only where the kernel is
+    VALU-bound. For bf16 head_dim=128 prefill that clearly holds at seqlen >= 4096; at
+    seqlen <= 1024 the kernel is occupancy/latency-bound and exp2_fast's register/
+    schedule shift clearly regresses it. seqlen == 2048 sits in the same-node run-to-run
+    noise band (the exp2_fast-vs-plain delta there is smaller than same-node measurement
+    variance), so its sign is not reliably resolvable. fp16 D128 -- byte-identical across the
+    exp2_fast boundary -- is flat at every seqlen, which pins the regression to this
+    kernel. The guard uses the conservative cut seqlen < 4096: it reverts every clear
+    regressor (and the noisy 2048 case) to plain exp2 -- its original perf -- so no shape
+    regresses, at the cost of forgoing at most a noise-level 2048 win. head_dim != 128
+    and fp16 are unaffected.
+
+    Scope: measured on gfx942 against the current develop dense builder (causal, square
+    Sq==Skv). Full-mask square short-seq shapes take the same cut on the same mechanism
+    (identical kernel/softmax), not separately measured. The gfx950 dense kernel makes an
+    independent exp2_fast decision (its own builder) and is not covered here. 4096 is a
+    gfx942 / ROCm-7.2.2 sweep snapshot -- re-measure via the dense sweep harness on a
+    toolchain or kernel change rather than treating it as a fixed constant.
     """
+    if dtype == "bf16" and head_size == 128 and seqlen < 4096:
+        return False
     return True
 
 
@@ -1587,9 +1599,9 @@ def _build_attention_dense_single_buffer(
             # max(m_i, tile_max) >= m_i) and p's s - m_new (m_new >= tile_max >= every
             # s) -- exactly exp2_fast's precondition (no overflow; v_exp_f32 flushes
             # large negatives to 0). Cuts ~99 VALU/tile at D128, the dominant
-            # MFMA-starving residual once conflict-free V (P1) lands. Enabled for
-            # every config, including bf16 D128 -- its former spill holdout no
-            # longer reproduces; rationale + matrix in _use_exp2_fast's docstring.
+            # MFMA-starving residual once conflict-free V (P1) lands. Enabled by
+            # _use_exp2_fast for every config except short-sequence bf16 D128, which
+            # reverts to plain exp2; rationale + seqlen gate in that docstring.
             exp2 = b.exp2_fast if tuning.resolved_use_exp2_fast(spec) else b.exp2
             alpha = exp2(b.fsub(m_i, m_new))
 

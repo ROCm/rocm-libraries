@@ -3900,9 +3900,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmbr(rocblas_handle handle,
 
     \f[
         \begin{array}{cl}
-        QC & \: \text{No transpose from the left,}\\
+        QC   & \: \text{No transpose from the left,}\\
         Q^TC & \: \text{Transpose from the left,}\\
-        CQ & \: \text{No transpose from the right, and}\\
+        CQ   & \: \text{No transpose from the right, and}\\
         CQ^T & \: \text{Transpose from the right.}
         \end{array}
     \f]
