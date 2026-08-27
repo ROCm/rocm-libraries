@@ -18,7 +18,7 @@ from rocisa.register import RegisterPool
 import Tensile.KernelWriter as kw_module
 from Tensile.KernelWriter import KernelWriter
 import Tensile.KernelWriterAssembly as kwa_module
-from Tensile.Components.StreamK import StreamKTwoTileDPFirst
+from Tensile.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
 from Tensile.Common.GlobalParameters import defaultSolution, globalParameters
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
 from Tensile.Common.Types import IsaInfo, IsaVersion, SemanticVersion
@@ -1146,3 +1146,69 @@ def test_streamk3_pap_has_next_persistent_iteration_uses_streamkiter_compare():
     assert "s_cmp_ge_u32 s[sgprStreamKIter], s[sgprStreamKIterEnd]" in rendered
     assert "No next persistent iteration" in rendered
     assert "s_cbranch_scc1 label_SK_SkipNllPAP_unit" in rendered
+
+
+class _PapFetchWriter:
+    def __init__(self):
+        self.labels = _StubLabels()
+        self.sgprPool = RegisterPool(
+            0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False
+        )
+
+
+def _fake_fetch(self, writer, kernel, preventOverflow=True, uniqueLabels=False):
+    sidx = writer.sgprPool.checkOut(1, "workItemIdx")
+    return _module_with_comment("fakeFetch", "unit: queue pop"), sidx
+
+
+def test_sk4_pap_has_next_primes_before_drain_check(monkeypatch):
+    # SK4 PAP must stash SkNextWorkItem and set SkPrefetchPrimed before the
+    # TotalItems drain compare so the back-edge never re-pops a termination token.
+    monkeypatch.setattr(StreamKDynamic, "_fetchWorkItemAndBroadcast", _fake_fetch)
+    from rocisa.code import Label
+
+    skip_label = Label("SK_SkipNllPAP_sk4", "")
+    module = StreamKDynamic().papHasNextPersistentIteration(
+        _PapFetchWriter(), {"StreamK": 4}, skip_label
+    )
+    rendered = str(module)
+    primed = rendered.find("s[sgprSkPrefetchPrimed]")
+    drain = rendered.find("s[sgprTotalItems]")
+    assert primed != -1 and drain != -1 and primed < drain
+    assert "s[sgprSkNextWorkItem]" in rendered
+
+
+def test_sk5_pap_has_next_dispatches_static_and_dynamic(monkeypatch):
+    # SK5 PAP is a runtime hybrid: mode==0 keeps the SK3 StreamKIter compare;
+    # mode!=0 reuses the SK4 pop-and-prime handoff.
+    monkeypatch.setattr(StreamKHybrid, "_fetchWorkItemAndBroadcast", _fake_fetch)
+    from rocisa.code import Label
+
+    skip_label = Label("SK_SkipNllPAP_sk5", "")
+    module = StreamKHybrid().papHasNextPersistentIteration(
+        _PapFetchWriter(), {"StreamK": 5}, skip_label
+    )
+    rendered = str(module)
+    assert "s[sgprStreamKHybridMode]" in rendered
+    assert "s[sgprStreamKIter]" in rendered
+    assert "s[sgprSkPrefetchPrimed]" in rendered
+    assert "s[sgprSkNextWorkItem]" in rendered
+
+
+def test_sk4_pap_setup_next_tile_uses_stashed_work_item(monkeypatch):
+    monkeypatch.setattr(
+        StreamKDynamic,
+        "_computeNextTileIdentity",
+        lambda self, writer, kernel, sidx, tpa, tpb: _module_with_comment(
+            "computeNextTileIdentity", "unit: tile identity"
+        ),
+    )
+    module = StreamKDynamic().prefetchAcrossPersistentSetupNextTile(
+        _PapFetchWriter(),
+        {"StreamK": 4},
+        {"tensorChar": "A"},
+        {"tensorChar": "B"},
+    )
+    rendered = str(module)
+    assert "s[sgprSkNextWorkItem]" in rendered
+    assert "unit: tile identity" in rendered
