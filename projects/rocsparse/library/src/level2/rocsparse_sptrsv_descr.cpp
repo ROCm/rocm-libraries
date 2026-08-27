@@ -156,14 +156,24 @@ void _rocsparse_sptrsv_descr::set_compute_datatype(rocsparse_datatype value)
 }
 
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-rocsparse_diagonal_mode _rocsparse_sptrsv_descr::get_diagonal_mode() const
+rocsparse_solve_mode _rocsparse_sptrsv_descr::get_solve_mode() const
 {
-    return this->m_diagonal_mode;
+    return this->m_solve_mode;
 }
 
-void _rocsparse_sptrsv_descr::set_diagonal_mode(rocsparse_diagonal_mode value)
+void _rocsparse_sptrsv_descr::set_solve_mode(rocsparse_solve_mode value)
 {
-    this->m_diagonal_mode = value;
+    this->m_solve_mode = value;
+}
+
+rocsparse_diagonal_modifier _rocsparse_sptrsv_descr::get_diagonal_modifier() const
+{
+    return this->m_diagonal_modifier;
+}
+
+void _rocsparse_sptrsv_descr::set_diagonal_modifier(rocsparse_diagonal_modifier value)
+{
+    this->m_diagonal_modifier = value;
 }
 #endif
 

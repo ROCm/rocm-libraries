@@ -209,7 +209,7 @@ void testing_sptrsv_bad_arg(const Arguments& arg)
             case rocsparse_sptrsv_input_operation:
             case rocsparse_sptrsv_input_analysis_policy:
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-            case rocsparse_sptrsv_input_diagonal_mode:
+            case rocsparse_sptrsv_input_solve_mode:
 #endif
             {
                 EXPECT_ROCSPARSE_STATUS(
@@ -343,7 +343,7 @@ void testing_sptrsv_bad_arg(const Arguments& arg)
                         break;
                     }
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-                    case rocsparse_sptrsv_input_diagonal_mode:
+                    case rocsparse_sptrsv_input_solve_mode:
                     {
                         break;
                     }

@@ -110,7 +110,8 @@ Tests:
   transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
-  diagonal_mode: [rocsparse_diagonal_mode_signed, rocsparse_diagonal_mode_absolute]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   apol: *all_rocsparse_analysis_policy
   sptrsv_alg: [rocsparse_sptrsv_alg_default]

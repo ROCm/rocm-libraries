@@ -1090,7 +1090,8 @@ typedef enum rocsparse_sptrsv_input_
     rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-    rocsparse_sptrsv_input_diagonal_mode /**< Select the diagonal mode \ref rocsparse_diagonal_mode for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSV descriptor. */
 #endif
 } rocsparse_sptrsv_input;
 

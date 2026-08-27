@@ -492,22 +492,36 @@ namespace rocsparse_clients
                                        p_error);
         }
 
-        // Select the diagonal solve mode (rocsparse_diagonal_mode as an int, so the
-        // helper compiles when ROCSPARSE_WITH_DIAGONAL_SOLVE is off). It is togglable,
-        // so it can be set after the analysis stage.
-        void set_diagonal_mode(int32_t diagonal_mode)
+        void set_solve_mode(int32_t solve_mode)
         {
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-            rocsparse_error               p_error[1] = {nullptr};
-            const rocsparse_diagonal_mode dm = static_cast<rocsparse_diagonal_mode>(diagonal_mode);
+            rocsparse_error            p_error[1] = {nullptr};
+            const rocsparse_solve_mode dm         = static_cast<rocsparse_solve_mode>(solve_mode);
             rocsparse_sptrsv_set_input(this->m_handle,
                                        this->m_descr,
-                                       rocsparse_sptrsv_input_diagonal_mode,
+                                       rocsparse_sptrsv_input_solve_mode,
                                        &dm,
                                        sizeof(dm),
                                        p_error);
 #else
-            (void)diagonal_mode;
+            (void)solve_mode;
+#endif
+        }
+
+        void set_diagonal_modifier(int32_t diagonal_modifier)
+        {
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+            rocsparse_error                   p_error[1] = {nullptr};
+            const rocsparse_diagonal_modifier dm
+                = static_cast<rocsparse_diagonal_modifier>(diagonal_modifier);
+            rocsparse_sptrsv_set_input(this->m_handle,
+                                       this->m_descr,
+                                       rocsparse_sptrsv_input_diagonal_modifier,
+                                       &dm,
+                                       sizeof(dm),
+                                       p_error);
+#else
+            (void)diagonal_modifier;
 #endif
         }
 
@@ -560,7 +574,8 @@ namespace rocsparse_clients
                      rocsparse_clients::dnvec_descr<T>&       y,
                      const rocsparse_diag_type                diag,
                      const rocsparse_fill_mode                uplo,
-                     int32_t                                  diagonal_mode,
+                     int32_t                                  solve_mode,
+                     int32_t                                  diagonal_modifier,
                      int64_t*                                 symbolic,
                      int64_t*                                 exact)
     {
@@ -602,24 +617,24 @@ namespace rocsparse_clients
                 const T* p    = host.val.data() + i * A.get_stride();
                 const T* p_hx = x.host().data() + i * x.get_stride();
                 T*       p_hy = y.host().data() + i * y.get_stride();
-                if(diagonal_mode != 0)
+                if(solve_mode != 0)
                 {
                     J sp = -1, np = -1;
-                    host_diagonal_solve<I, J, T>(operation,
-                                                 host.m,
-                                                 1,
-                                                 *halpha,
-                                                 host.ptr,
-                                                 host.ind,
-                                                 p,
-                                                 p_hx,
-                                                 p_hy,
-                                                 host.m,
-                                                 rocsparse_order_column,
-                                                 host.base,
-                                                 diagonal_mode,
-                                                 &sp,
-                                                 &np);
+                    host_diagonal_solve_csr<I, J, T>(operation,
+                                                     host.m,
+                                                     1,
+                                                     *halpha,
+                                                     host.ptr,
+                                                     host.ind,
+                                                     p,
+                                                     p_hx,
+                                                     p_hy,
+                                                     host.m,
+                                                     rocsparse_order_column,
+                                                     host.base,
+                                                     diagonal_modifier,
+                                                     &sp,
+                                                     &np);
                     symbolic[i] = sp;
                     exact[i]    = np;
                 }
@@ -662,24 +677,24 @@ namespace rocsparse_clients
                 const T* p_hx = x.host().data() + i * x.get_stride();
                 T*       p_hy = y.host().data() + i * y.get_stride();
 
-                if(diagonal_mode != 0)
+                if(solve_mode != 0)
                 {
                     J sp = -1, np = -1;
-                    host_diagonal_solve<I, J, T>(operation,
-                                                 host.m,
-                                                 1,
-                                                 *halpha,
-                                                 host.ptr,
-                                                 host.ind,
-                                                 p,
-                                                 p_hx,
-                                                 p_hy,
-                                                 host.m,
-                                                 rocsparse_order_column,
-                                                 host.base,
-                                                 diagonal_mode,
-                                                 &sp,
-                                                 &np);
+                    host_diagonal_solve_csc<I, J, T>(operation,
+                                                     host.n,
+                                                     1,
+                                                     *halpha,
+                                                     host.ptr,
+                                                     host.ind,
+                                                     p,
+                                                     p_hx,
+                                                     p_hy,
+                                                     host.n,
+                                                     rocsparse_order_column,
+                                                     host.base,
+                                                     diagonal_modifier,
+                                                     &sp,
+                                                     &np);
                     symbolic[i] = sp;
                     exact[i]    = np;
                 }
@@ -749,7 +764,7 @@ void testing_sptrsv(const Arguments& arg)
 #endif
 
 #ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
-    if(arg.diagonal_mode != 0)
+    if(arg.solve_mode != 0)
     {
         return;
     }
@@ -797,7 +812,8 @@ void testing_sptrsv(const Arguments& arg)
     rocsparse_clients::sptrsv_descr sptrsv_descr(
         handle, batch_count, operation, alg, ttype, ttype, apol);
 
-    sptrsv_descr.set_diagonal_mode(arg.diagonal_mode);
+    sptrsv_descr.set_solve_mode(arg.solve_mode);
+    sptrsv_descr.set_diagonal_modifier(arg.diagonal_modifier);
 
     rocsparse_clients::sptrsv_analysis(handle, sptrsv_descr, A, x, y, p_error);
 
@@ -838,7 +854,8 @@ void testing_sptrsv(const Arguments& arg)
                                                 y,
                                                 diag,
                                                 uplo,
-                                                arg.diagonal_mode,
+                                                arg.solve_mode,
+                                                arg.diagonal_modifier,
                                                 cpu_symbolic_position,
                                                 cpu_numeric_position);
 
