@@ -198,6 +198,10 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         strideTile   = int(int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"])
         strideUnroll = mt + ldsPad
         strideWave   = numTileInInst * matrixInstT * vectorWidth
+        # contigOut: wave base spans its whole contiguous block of MIWaveTile[tile01] tiles.
+        contigOut = kernel.get("UseSubtileImpl") or kernel.get("WaveContiguousOutput")
+        if contigOut:
+            strideWave = strideWave * kernel["MIWaveTile"][tile01]
 
         with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMA_tmpSgprInfo") as tmpSgprInfo:
             # tile offset = (wtId%16)//8*8
