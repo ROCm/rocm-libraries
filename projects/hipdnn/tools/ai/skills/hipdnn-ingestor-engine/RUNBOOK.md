@@ -217,8 +217,13 @@ and stage 8 has nothing to compare against. Say so **now**.
 Packs arch-prune before the matcher runs, so stage 8 must run on `$ARCH` and no other GPU
 will do. A partition visible in `sinfo` can still reject you.
 
+**`skill://alola-gpu-test` owns the submit host, partition, account and gres names** —
+read it rather than guessing, and rather than inventing a hostname. Step 8d sends you
+there to *run*; you need it here, at step 1, to find out whether running is possible at
+all.
+
 ```bash
-LOGIN=<slurm-submit-host>
+LOGIN=<submit host from skill://alola-gpu-test>
 ssh $LOGIN "sinfo -N -h -o '%P|%N|%t|%G' | grep $ARCH"        # live, or drained?
 ssh $LOGIN "squeue -h -o '%b' | grep -c $ARCH"                 # queue depth
 ssh $LOGIN "sbatch --test-only -p <part> -A <acct> \
@@ -665,16 +670,30 @@ cp /tmp/$SLUG/packs/*Native.cpp \
 checklist is the `graph_match` body, in its severity order — silent-wrong-answer checks
 first.
 
-**GATE:**
+**GATE — two commands, and the second is the one that catches real holes:**
 
 ```bash
+# 1. No unfinished hook.
 grep -c "FILL THIS OUT" $PROVIDER/src/engines/kernel_ingestor_engine/packs/*Native.cpp
+
+# 2. No graph attribute silently ignored. -h, and ONE schema -- see native-pack.md.
+FBS=$REPO/projects/hipdnn/flatbuffers_sdk/schemas/<op>_attributes.fbs
+grep -hoP '^\s+\K[a-z_]+(?=:)' "$FBS" | while read f; do
+    grep -q "$f(" $PROVIDER/src/engines/kernel_ingestor_engine/packs/<Name>Native.cpp \
+        || echo "UNCHECKED: $f"
+done
 ```
 
-Must be `0`. A `// TODO` in a path the engine reaches is an unfinished integration, not a
-placeholder. Placeholders are allowed — a `score` that ranks one knob, a `workspaceBytes`
-that returns 0 because the kernel needs no scratch — *if you say so and say what would
-replace it*. Silence is not.
+The first must be `0`. A `// TODO` in a path the engine reaches is an unfinished
+integration, not a placeholder. Placeholders are allowed — a `score` that ranks one knob,
+a `workspaceBytes` that returns 0 because the kernel needs no scratch — *if you say so and
+say what would replace it*. Silence is not.
+
+The second must print nothing you have not deliberately accounted for. An empty
+`grep -c` and a wall of `UNCHECKED:` lines is the exact state that ships a matcher which
+ignores an attribute the graph can set — the shipped `AttentionDenseNative.cpp` still
+prints `UNCHECKED: implementation` today. `native-pack.md` § 6 has the reasoning and what
+counts as accounted for.
 
 ---
 
@@ -708,12 +727,20 @@ cat /tmp/$SLUG/fragments/*.txt
 linker drops the translation unit, so the pack vanishes from unit tests while the plugin
 `.so` still works — no build error either way.
 
-**Check the struct before writing the row**; the fragment may not match it:
+**Check the struct before writing the row**; the fragment may not match it. Do not
+eyeball this — a test already does the comparison mechanically, against the real header:
 
 ```bash
 sed -n '/struct IngestorPack/,/};/p' \
     $PROVIDER/src/engines/kernel_ingestor_engine/IngestorPacks.hpp
+$GEN/.venv/bin/python -m pytest $GEN/tests/test_fragment_struct_arity.py -q
 ```
+
+**GATE:** that suite green. It parses the real `IngestorPack` struct out of the real
+header and compares its field count against the arity the generator emits, so a struct
+that gained a field while the template did not is caught here rather than as a confusing
+link error later. A `sed` print alone is a look-and-compare instruction, which is exactly
+what got hand-splicing wrong before.
 
 ### 7b. Build and pack
 
@@ -975,7 +1002,7 @@ correctly — the defect is upstream.
 
 ```
 Produces:      a completion report against all nine stages
-Gate:          grep -c '^### [0-9]' <report> == 9
+Gate:          nine numbered stage sections in the report (command below)
 Typical time:  30 minutes
 ```
 
@@ -984,6 +1011,16 @@ stage stopped you and what would unblock it. Then, per `SKILL.md` § Output cont
 was proven and what was not, every hook's state, which splice points applied, the tests
 you added by tier and path, whether the validator actually ran, and the judgment calls you
 are handing back — each with a recommendation.
+
+**GATE:**
+
+```bash
+test "$(grep -c '^### [0-9]' <report>)" -eq 9 && echo "PASS" || echo "FAIL"
+```
+
+`grep -c` alone will not do it: its exit status means "matched at least once", not
+"matched exactly nine times", so a report with three sections exits 0 just like a
+complete one. The `test -eq` wrapper is the part that can actually fail.
 
 Be precise about the ladder. A green validator proves parse, cross-reference, symbol
 resolution and construction. `hipdnn_list_engines` adds "the pack registered." **Neither

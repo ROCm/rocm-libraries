@@ -129,14 +129,24 @@ Structure, in order:
    completeness check and treat anything it prints as a hole:
 
    ```bash
-   grep -oP '^\s+\K[a-z_]+(?=:)' <op>_attributes.fbs | while read f; do
+   # ONE .fbs, and -h. A glob that matches two schemas (sdpa_attributes.fbs and
+   # sdpa_backward_attributes.fbs both match `*sdpa*attributes.fbs`) makes grep
+   # prefix each hit with its filename, so every $f becomes "path.fbs:field",
+   # matches nothing, and all 71 fields report UNCHECKED -- a wall of noise that
+   # reads as "audit this later" and gets skipped. With -h on the single schema
+   # you own, the real output is one line.
+   FBS=$REPO/projects/hipdnn/flatbuffers_sdk/schemas/<op>_attributes.fbs
+   grep -hoP '^\s+\K[a-z_]+(?=:)' "$FBS" | while read f; do
        grep -q "$f(" packs/<Name>Native.cpp || echo "UNCHECKED: $f"
    done
    ```
 
-   Every name it prints must be either consumed or explicitly rejected — not merely
+   **GATE:** every name it prints is either consumed or explicitly rejected — not merely
    absent because no shipped bundle varies it yet. A field is safe to skip only once you
    have written down, in a comment, why its only legal value is inert for this kernel.
+   Run it against the real shipped `AttentionDenseNative.cpp` and it prints exactly
+   `UNCHECKED: implementation` out of SDPA's 41 fields — one real, still-open hole, which
+   is what a working completeness check looks like.
 
    **Do not invent a default for a scalar the graph did not supply**, even a
    mathematically obvious one like `attn_scale_value = 1/sqrt(head_size)`. If the schema
