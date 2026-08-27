@@ -24,6 +24,13 @@ that silently failed to load is visible, instead of landing on the same answer b
 `get_knobs_for_engine` reports the top-ranked kernel's `block_size` as the knob default,
 which is how a test reads the outcome.
 
+## Where it lives
+
+Under `src/integration_tests/`, staged into the descriptor build tree so the integration
+tests find it beside the shipped packs, and excluded from `install`. A two-leaf model over
+one feature has no business in a customer's plugin directory; it is scaffolding that has to
+sit where the engine looks, not product.
+
 ## What this is not
 
 **Not a worked example of a good feature set.** The signature is one field,

@@ -367,6 +367,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         pointwise/pointwise_add.kdp.json
         pointwise/pointwise_mul.kdp.json
         pointwise/pointwise_sub.kdp.json
+    )
+
+    # Staged beside the shipped descriptors but never installed. pointwise_model exists to
+    # keep the model-backed heuristic path covered (RFC 0019 §7); its "model" is two
+    # hand-written leaves over one feature, which belongs in a test tree and not in a
+    # customer's plugin directory. Staging is what the integration tests read, so the pack
+    # has to reach the build tree -- it simply must not reach the install.
+    set(HIPDNN_TEST_DESCRIPTOR_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/integration_tests/kernel_ingestor_engine/fixtures")
+    set(HIPDNN_TEST_DESCRIPTOR_FILES
         pointwise_model/pointwise_model.kmd.json
         pointwise_model/pointwise_model.ued.json
         pointwise_model/pointwise_model.uhd.json
@@ -395,12 +405,26 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         list(APPEND _staged_descriptors "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}")
     endforeach()
 
+    # Same staging, different source root and no install counterpart.
+    foreach(_descriptor IN LISTS HIPDNN_TEST_DESCRIPTOR_FILES)
+        add_custom_command(
+            OUTPUT "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${HIPDNN_TEST_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+                    "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}"
+            DEPENDS "${HIPDNN_TEST_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+            COMMENT "Staging test descriptor ${_descriptor}"
+            VERBATIM
+        )
+        list(APPEND _staged_descriptors "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}")
+    endforeach()
+
     # The pointwise_model pack's heuristic is a trained artifact rather than a symbol, so
     # two of its files are binary and cannot be staged by copying from the source tree.
     # They are generated instead -- see tools/uhd_model_gen for why they are not committed.
     # Listed as outputs of one command because a single run writes both, and both are
     # inputs to the staging target below, so a test target that pulls the descriptors in
-    # gets them too.
+    # gets them too. Not installed, for the same reason the pack's JSON is not.
     set(_generated_model_artifacts
         "${HIPDNN_DESCRIPTOR_BUILD_DIR}/pointwise_model/pointwise_model.uhd.fb"
         "${HIPDNN_DESCRIPTOR_BUILD_DIR}/pointwise_model/pointwise_model.bin"
@@ -443,13 +467,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         )
     endforeach()
 
-    # The generated pair keeps that same invariant, but has to come from the build tree:
-    # it has no source-tree copy to install. Omitting it would install a pointwise_model
-    # UHD whose artifact is missing, which degrades to declared order at run time and says
-    # so only in a log -- exactly the silent difference the loop above exists to prevent.
-    install(
-        FILES ${_generated_model_artifacts}
-        DESTINATION
-            "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}/pointwise_model"
-    )
+    # HIPDNN_TEST_DESCRIPTOR_FILES and the generated model artifacts are deliberately
+    # absent here. They are staged for the integration tests and stop at the build tree.
 endif()
