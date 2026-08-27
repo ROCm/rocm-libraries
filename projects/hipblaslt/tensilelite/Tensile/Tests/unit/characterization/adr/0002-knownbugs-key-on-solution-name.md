@@ -2,6 +2,7 @@
 
 Status:  Accepted
 Defect:  none - behavior is intended (motivating context: ROCM-7144)
+Commit:  910c561 (PR #9355) — https://github.com/ROCm/rocm-libraries/commit/910c5616ec501f5ab750931e5064f0eff1eb89b8 — landed on develop via PR #9355's squash merge, d250cc8
 
 ## Context
 `TensileLogic.KnownBugs` originally keyed each documented `--check-all` skip on

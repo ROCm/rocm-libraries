@@ -2,6 +2,13 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## (Unreleased) hipCUB 
+
+### Changed
+
+* Benchmarking now uses primbench for its benchmarks instead of Google Benchmark.
+  * See `shared/primbench/README.md` for its documentation.
+
 ## hipCUB 4.6.0 for ROCm 10.0
  
 ### Added
