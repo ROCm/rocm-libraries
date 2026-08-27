@@ -391,6 +391,21 @@ class MacroInstruction(Instruction):
 # this case and let the literal-string fallthrough emit it untouched,
 # which is byte-correct for inspection but not semantically meaningful
 # until the macro-expansion pass lands.
+# Hardware condition/mask register container strings -> canonical RegType
+# strings accepted by ``stinkytofu.Register(type, idx, count)`` (see
+# RegisterType.def). Values mirror StinkyRegister::get{VCC,EXEC,SCC}Register.
+_SPECIAL_REG_TYPE = {
+    "vcc": "vcc",
+    "vcc_lo": "vcc_lo",
+    "vcc_hi": "vcc_hi",
+    "exec": "exec",
+    "exec_lo": "exec_lo",
+    "exec_hi": "exec_hi",
+    "scc": "SCC",
+    "SCC": "SCC",
+}
+
+
 def _to_stinky_register(arg: Any) -> Any:
     """Convert a rocisa-side instruction operand to a stinkytofu Register.
 
@@ -417,7 +432,22 @@ def _to_stinky_register(arg: Any) -> Any:
     if isinstance(arg, str):
         return _st.Register(arg)
     if isinstance(arg, _Container):
-        return _st.Register(arg.toString())
+        s = arg.toString()
+        # Hardware condition/mask registers (VCC/EXEC/SCC) must be lowered to
+        # *structured* StinkyRegisters (RegType-typed, idx 0), not opaque
+        # literal-string registers. The C++ implicit-operand legalizer
+        # (legalizeImplicitSpecialRegisters / getVCCRegister / getEXECRegister)
+        # adds these same structured registers for the implicit vcc/exec reads &
+        # writes; if an explicit operand here stayed a literal string it would
+        # NOT match the implicit form in def-use/dependency analysis, so the
+        # scheduler could freely reorder across an exec/vcc write (e.g. move a
+        # predicated VALU ahead of `s_mov exec, ...`), corrupting the active-lane
+        # mask and producing NaNs. Other Container keywords (e.g. buffer "null"/
+        # "off") are genuinely opaque and stay literal strings.
+        reg_type = _SPECIAL_REG_TYPE.get(s)
+        if reg_type is not None:
+            return _st.Register(reg_type, 0, 1)
+        return _st.Register(s)
     raise TypeError(
         f"rocisa_stinkytofu_adaptor.instruction: cannot coerce operand of "
         f"type {type(arg).__name__!r} into a stinkytofu Register. Supported "
@@ -2284,6 +2314,29 @@ _WAIT_MARKER_DSCNT = "\x00@WD@"
 _WAIT_MARKER_KMCNT = "\x00@WK@"
 
 
+def _make_swaitcnt(comment: str = "", vlcnt: int = -1, vscnt: int = -1,
+                   dlcnt: int = -1, dscnt: int = -1, kmcnt: int = -1) -> Any:
+    """Build one logical ``s_waitcnt`` carrying per-counter SWaitCntData.
+
+    The C++ lowering (ToStinkyAsmPass) forwards this to a ``SWaitCntData``
+    modifier and calls ``legalizeWaitCnt`` before the O3 pipeline, splitting it
+    into the gfx12+ typed waits (s_wait_loadcnt / s_wait_dscnt / ...) exactly as
+    the native rocisa->asm path does. This replaces the old comment-marker +
+    assembly-text post-processing scheme, which left an opaque combined
+    ``s_waitcnt`` in the IR that ``waitReconstruction()`` could not rebuild — so
+    it was never stripped/re-inserted and perturbed scheduling.
+
+    If every counter is ``-1`` (a no-op wait) no SWaitCntData is attached and a
+    bare ``s_waitcnt`` is returned unchanged.
+    """
+    import stinkytofu as _st  # noqa: WPS433
+
+    inst = _st.SWaitCnt(_to_stinky_register(0), comment)
+    if any(c != -1 for c in (vlcnt, vscnt, dlcnt, dscnt, kmcnt)):
+        inst.set_swaitcnt(vlcnt=vlcnt, vscnt=vscnt, dlcnt=dlcnt, dscnt=dscnt, kmcnt=kmcnt)
+    return inst
+
+
 class _SWaitCnt(Instruction):
     """``s_waitcnt`` primitive (lgkmcnt/vmcnt combined)."""
 
@@ -2323,22 +2376,11 @@ class _SWaitCnt(Instruction):
         to loadcnt (VMEM load counter), mirroring the native C++
         AllHwMappings.cpp logic that sets dlcnt=lgkmcnt, vlcnt=vmcnt.
         """
-        import stinkytofu as _st  # noqa: WPS433
-
-        insts: List[Any] = []
-        if self.lgkmcnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(self.lgkmcnt),
-                _WAIT_MARKER_DSCNT + self.comment,
-            ))
-        if self.vmcnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(self.vmcnt),
-                _WAIT_MARKER_LOADCNT + self.comment,
-            ))
-        if not insts:
-            return _st.SWaitCnt(_to_stinky_register(0), self.comment)
-        return insts
+        return _make_swaitcnt(
+            comment=self.comment,
+            vlcnt=self.vmcnt,
+            dscnt=self.lgkmcnt,
+        )
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2371,12 +2413,7 @@ class _SWaitCntVscnt(Instruction):
         return self.formatWithComment(f"s_waitcnt_vscnt null, {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        return _st.SWaitCnt(
-            _to_stinky_register(self.cnt),
-            _WAIT_MARKER_STORECNT + self.comment,
-        )
+        return _make_swaitcnt(comment=self.comment, vscnt=self.cnt)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2409,12 +2446,7 @@ class _SWaitStorecnt(Instruction):
         return self.formatWithComment(f"s_wait_storecnt {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        return _st.SWaitCnt(
-            _to_stinky_register(self.cnt),
-            _WAIT_MARKER_STORECNT + self.comment,
-        )
+        return _make_swaitcnt(comment=self.comment, vscnt=self.cnt)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2447,12 +2479,7 @@ class _SWaitLoadcnt(Instruction):
         return self.formatWithComment(f"s_wait_loadcnt {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        return _st.SWaitCnt(
-            _to_stinky_register(self.cnt),
-            _WAIT_MARKER_LOADCNT + self.comment,
-        )
+        return _make_swaitcnt(comment=self.comment, vlcnt=self.cnt)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2485,12 +2512,7 @@ class _SWaitKMcnt(Instruction):
         return self.formatWithComment(f"s_wait_kmcnt {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        return _st.SWaitCnt(
-            _to_stinky_register(self.cnt),
-            _WAIT_MARKER_KMCNT + self.comment,
-        )
+        return _make_swaitcnt(comment=self.comment, kmcnt=self.cnt)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2523,12 +2545,7 @@ class _SWaitDscnt(Instruction):
         return self.formatWithComment(f"s_wait_dscnt {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        return _st.SWaitCnt(
-            _to_stinky_register(self.cnt),
-            _WAIT_MARKER_DSCNT + self.comment,
-        )
+        return _make_swaitcnt(comment=self.comment, dscnt=self.cnt)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2572,13 +2589,12 @@ class SWaitCnt(Instruction):
         return self.formatWithComment(self.instStr)
 
     def to_stinky_logical(self) -> Any:
-        """Decompose into individual gfx12+ wait logical instructions.
+        """Emit one logical ``s_waitcnt`` carrying all requested counters.
 
-        Returns a list of SWaitCnt logical instructions with type markers
-        so the post-processing step can emit the correct opcodes.
+        The C++ ``legalizeWaitCnt`` (invoked in ToStinkyAsmPass before the O3
+        pipeline) splits it into the gfx12+ typed waits, exactly as the native
+        rocisa->asm path does.
         """
-        import stinkytofu as _st  # noqa: WPS433
-
         # rocisa SWaitCnt::setupInstructions treats waitAll as "wait for
         # everything": vlcnt = vscnt = dscnt = kmcnt = 0. Mirror that here so a
         # bare SWaitCnt(waitAll=True) lowers to the four typed gfx12 waits rather
@@ -2588,30 +2604,13 @@ class SWaitCnt(Instruction):
         vlcnt = 0 if self.waitAll else self.vlcnt
         vscnt = 0 if self.waitAll else self.vscnt
 
-        insts: List[Any] = []
-        if dscnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(dscnt),
-                _WAIT_MARKER_DSCNT + self.comment,
-            ))
-        if kmcnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(kmcnt),
-                _WAIT_MARKER_KMCNT + self.comment,
-            ))
-        if vlcnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(vlcnt),
-                _WAIT_MARKER_LOADCNT + self.comment,
-            ))
-        if vscnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(vscnt),
-                _WAIT_MARKER_STORECNT + self.comment,
-            ))
-        if not insts:
-            return _st.SWaitCnt(_to_stinky_register(0), self.comment)
-        return insts
+        return _make_swaitcnt(
+            comment=self.comment,
+            vlcnt=vlcnt,
+            vscnt=vscnt,
+            dscnt=dscnt,
+            kmcnt=kmcnt,
+        )
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -4158,10 +4157,11 @@ def _make_tensor_load_class():
             kwargs["group2"] = _to_stinky_register(group2)
         if group3 is not None:
             kwargs["group3"] = _to_stinky_register(group3)
-        return _st.TensorLoadToLds(
+        logical = _st.TensorLoadToLds(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             **kwargs)
+        return logical
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
