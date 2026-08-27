@@ -33,20 +33,20 @@ namespace
     hipblaslt::client::MatmulPreparation
         prepare(const Arguments& arguments, bool swizzleA = false, bool swizzleB = false)
     {
-        const auto cases     = hipblaslt::client::normalizeMatmulCases(arguments);
+        const auto problems  = hipblaslt::client::normalizeMatmulProblems(arguments);
         const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(arguments);
-        return hipblaslt::client::prepareMatmulCases(arguments,
-                                                     cases,
-                                                     arguments.a_type,
-                                                     arguments.b_type,
-                                                     arguments.c_type,
-                                                     arguments.d_type,
-                                                     dataTypes.computeScalar,
-                                                     dataTypes.coefficient,
-                                                     dataTypes.biasStorage,
-                                                     swizzleA,
-                                                     swizzleB,
-                                                     false);
+        return hipblaslt::client::prepareMatmulProblems(arguments,
+                                                        problems,
+                                                        arguments.a_type,
+                                                        arguments.b_type,
+                                                        arguments.c_type,
+                                                        arguments.d_type,
+                                                        dataTypes.computeScalar,
+                                                        dataTypes.coefficient,
+                                                        dataTypes.biasStorage,
+                                                        swizzleA,
+                                                        swizzleB,
+                                                        false);
     }
 
     void expectMatrix(const hipblaslt::client::MatmulMatrix& matrix,
@@ -71,30 +71,30 @@ namespace
     }
 } // namespace
 
-TEST(MatmulTestCase, NormalizesLogicalMatrixGeometry)
+TEST(MatmulProblem, NormalizesLogicalMatrixGeometry)
 {
     auto arguments   = baseArguments();
     arguments.transB = 'T';
 
-    const auto cases = hipblaslt::client::normalizeMatmulCases(arguments);
+    const auto problems = hipblaslt::client::normalizeMatmulProblems(arguments);
 
-    ASSERT_EQ(cases.size(), 1);
-    const auto& testCase = cases.front();
-    EXPECT_EQ(testCase.m, 3);
-    EXPECT_EQ(testCase.n, 5);
-    EXPECT_EQ(testCase.k, 7);
-    EXPECT_EQ(testCase.operationA, HIPBLAS_OP_N);
-    EXPECT_EQ(testCase.operationB, HIPBLAS_OP_T);
-    EXPECT_EQ(testCase.batchMode, HIPBLASLT_BATCH_MODE_STRIDED);
-    EXPECT_EQ(testCase.batchCount, 1);
-    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 1, 4, 28, 28);
-    expectMatrix(testCase.b, HIP_R_16BF, 5, 7, 1, 8, 56, 56);
-    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 1, 6, 30, 30);
-    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 1, 9, 45, 45);
-    EXPECT_FALSE(testCase.auxiliary);
+    ASSERT_EQ(problems.size(), 1);
+    const auto& problem = problems.front();
+    EXPECT_EQ(problem.m, 3);
+    EXPECT_EQ(problem.n, 5);
+    EXPECT_EQ(problem.k, 7);
+    EXPECT_EQ(problem.operationA, HIPBLAS_OP_N);
+    EXPECT_EQ(problem.operationB, HIPBLAS_OP_T);
+    EXPECT_EQ(problem.batchMode, HIPBLASLT_BATCH_MODE_STRIDED);
+    EXPECT_EQ(problem.batchCount, 1);
+    expectMatrix(problem.a, HIP_R_16F, 3, 7, 1, 4, 28, 28);
+    expectMatrix(problem.b, HIP_R_16BF, 5, 7, 1, 8, 56, 56);
+    expectMatrix(problem.c, HIP_R_32F, 3, 5, 1, 6, 30, 30);
+    expectMatrix(problem.d, HIP_R_32F, 3, 5, 1, 9, 45, 45);
+    EXPECT_FALSE(problem.auxiliary);
 }
 
-TEST(MatmulTestCase, KeepsDistinctStridedBatchGeometry)
+TEST(MatmulProblem, KeepsDistinctStridedBatchGeometry)
 {
     auto arguments        = baseArguments();
     arguments.batch_count = 4;
@@ -106,18 +106,18 @@ TEST(MatmulTestCase, KeepsDistinctStridedBatchGeometry)
     arguments.use_e       = true;
     arguments.aux_type    = HIP_R_16F;
 
-    const auto  cases    = hipblaslt::client::normalizeMatmulCases(arguments);
-    const auto& testCase = cases.front();
+    const auto  problems = hipblaslt::client::normalizeMatmulProblems(arguments);
+    const auto& problem  = problems.front();
 
-    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 4, 4, 0, 112);
-    expectMatrix(testCase.b, HIP_R_16BF, 7, 5, 4, 8, 202, 808);
-    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 4, 6, 303, 1212);
-    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 4, 9, 404, 1616);
-    ASSERT_TRUE(testCase.auxiliary);
-    expectMatrix(*testCase.auxiliary, HIP_R_16F, 3, 5, 4, 10, 505, 2020);
+    expectMatrix(problem.a, HIP_R_16F, 3, 7, 4, 4, 0, 112);
+    expectMatrix(problem.b, HIP_R_16BF, 7, 5, 4, 8, 202, 808);
+    expectMatrix(problem.c, HIP_R_32F, 3, 5, 4, 6, 303, 1212);
+    expectMatrix(problem.d, HIP_R_32F, 3, 5, 4, 9, 404, 1616);
+    ASSERT_TRUE(problem.auxiliary);
+    expectMatrix(*problem.auxiliary, HIP_R_16F, 3, 5, 4, 10, 505, 2020);
 }
 
-TEST(MatmulTestCase, PointerArraysUseCanonicalLogicalBatchOffsets)
+TEST(MatmulProblem, PointerArraysUseCanonicalLogicalBatchOffsets)
 {
     auto arguments        = baseArguments();
     arguments.batch_mode  = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
@@ -127,17 +127,17 @@ TEST(MatmulTestCase, PointerArraysUseCanonicalLogicalBatchOffsets)
     arguments.stride_c[0] = 303;
     arguments.stride_d[0] = 404;
 
-    const auto  cases    = hipblaslt::client::normalizeMatmulCases(arguments);
-    const auto& testCase = cases.front();
+    const auto  problems = hipblaslt::client::normalizeMatmulProblems(arguments);
+    const auto& problem  = problems.front();
 
-    EXPECT_EQ(testCase.batchMode, HIPBLASLT_BATCH_MODE_POINTER_ARRAY);
-    expectMatrix(testCase.a, HIP_R_16F, 3, 7, 3, 4, 28, 28);
-    expectMatrix(testCase.b, HIP_R_16BF, 7, 5, 3, 8, 40, 40);
-    expectMatrix(testCase.c, HIP_R_32F, 3, 5, 3, 6, 30, 30);
-    expectMatrix(testCase.d, HIP_R_32F, 3, 5, 3, 9, 45, 45);
+    EXPECT_EQ(problem.batchMode, HIPBLASLT_BATCH_MODE_POINTER_ARRAY);
+    expectMatrix(problem.a, HIP_R_16F, 3, 7, 3, 4, 28, 28);
+    expectMatrix(problem.b, HIP_R_16BF, 7, 5, 3, 8, 40, 40);
+    expectMatrix(problem.c, HIP_R_32F, 3, 5, 3, 6, 30, 30);
+    expectMatrix(problem.d, HIP_R_32F, 3, 5, 3, 9, 45, 45);
 }
 
-TEST(MatmulTestCase, NormalizesEachGroupedProblem)
+TEST(MatmulProblem, NormalizesEachGroupedProblem)
 {
     auto arguments         = baseArguments();
     arguments.grouped_gemm = 2;
@@ -156,19 +156,19 @@ TEST(MatmulTestCase, NormalizesEachGroupedProblem)
     arguments.stride_d[1]  = 1004;
     arguments.stride_e[1]  = 1005;
 
-    const auto cases = hipblaslt::client::normalizeMatmulCases(arguments);
+    const auto problems = hipblaslt::client::normalizeMatmulProblems(arguments);
 
-    ASSERT_EQ(cases.size(), 2);
-    EXPECT_EQ(cases[1].m, 11);
-    EXPECT_EQ(cases[1].n, 13);
-    EXPECT_EQ(cases[1].k, 17);
-    expectMatrix(cases[1].a, HIP_R_16F, 11, 17, 2, 12, 1001, 2002);
-    expectMatrix(cases[1].b, HIP_R_16BF, 17, 13, 2, 18, 1002, 2004);
-    expectMatrix(cases[1].c, HIP_R_32F, 11, 13, 2, 14, 1003, 2006);
-    expectMatrix(cases[1].d, HIP_R_32F, 11, 13, 2, 15, 1004, 2008);
+    ASSERT_EQ(problems.size(), 2);
+    EXPECT_EQ(problems[1].m, 11);
+    EXPECT_EQ(problems[1].n, 13);
+    EXPECT_EQ(problems[1].k, 17);
+    expectMatrix(problems[1].a, HIP_R_16F, 11, 17, 2, 12, 1001, 2002);
+    expectMatrix(problems[1].b, HIP_R_16BF, 17, 13, 2, 18, 1002, 2004);
+    expectMatrix(problems[1].c, HIP_R_32F, 11, 13, 2, 14, 1003, 2006);
+    expectMatrix(problems[1].d, HIP_R_32F, 11, 13, 2, 15, 1004, 2008);
 }
 
-TEST(MatmulTestCase, MakesCEqualsDExplicit)
+TEST(MatmulProblem, MakesCEqualsDExplicit)
 {
     auto arguments        = baseArguments();
     arguments.c_equal_d   = true;
@@ -176,33 +176,33 @@ TEST(MatmulTestCase, MakesCEqualsDExplicit)
     arguments.stride_c[0] = 303;
     arguments.stride_d[0] = 404;
 
-    const auto  cases    = hipblaslt::client::normalizeMatmulCases(arguments);
-    const auto& testCase = cases.front();
+    const auto  problems = hipblaslt::client::normalizeMatmulProblems(arguments);
+    const auto& problem  = problems.front();
 
-    EXPECT_TRUE(testCase.cEqualsD);
-    EXPECT_EQ(testCase.c.layout, testCase.d.layout);
-    EXPECT_EQ(testCase.d.layout.stride(1), arguments.ldc[0]);
-    EXPECT_EQ(testCase.d.layout.stride(2), arguments.stride_c[0]);
+    EXPECT_TRUE(problem.cEqualsD);
+    EXPECT_EQ(problem.c.layout, problem.d.layout);
+    EXPECT_EQ(problem.d.layout.stride(1), arguments.ldc[0]);
+    EXPECT_EQ(problem.d.layout.stride(2), arguments.stride_c[0]);
 }
 
-TEST(MatmulTestCase, RejectsInvalidSerializedGeometry)
+TEST(MatmulProblem, RejectsInvalidSerializedGeometry)
 {
     auto arguments       = baseArguments();
     arguments.batch_mode = 2;
-    EXPECT_THROW(hipblaslt::client::normalizeMatmulCases(arguments), std::invalid_argument);
+    EXPECT_THROW(hipblaslt::client::normalizeMatmulProblems(arguments), std::invalid_argument);
 
     arguments              = baseArguments();
     arguments.grouped_gemm = MAX_SUPPORTED_NUM_PROBLEMS + 1;
-    EXPECT_THROW(hipblaslt::client::normalizeMatmulCases(arguments), std::invalid_argument);
+    EXPECT_THROW(hipblaslt::client::normalizeMatmulProblems(arguments), std::invalid_argument);
 
     arguments      = baseArguments();
     arguments.M[0] = -1;
-    EXPECT_THROW(hipblaslt::client::normalizeMatmulCases(arguments), std::invalid_argument);
+    EXPECT_THROW(hipblaslt::client::normalizeMatmulProblems(arguments), std::invalid_argument);
 
     arguments           = baseArguments();
     arguments.c_equal_d = true;
     arguments.d_type    = HIP_R_16F;
-    EXPECT_THROW(hipblaslt::client::normalizeMatmulCases(arguments), std::invalid_argument);
+    EXPECT_THROW(hipblaslt::client::normalizeMatmulProblems(arguments), std::invalid_argument);
 }
 
 TEST(MatmulDataTypes, ResolvesDefaultsOnce)
@@ -222,13 +222,13 @@ TEST(MatmulPreparation, ComputesLogicalStorageAndScalarState)
 {
     const auto preparation = prepare(baseArguments());
 
-    ASSERT_EQ(preparation.cases.size(), 1);
-    const auto& preparedCase = preparation.cases.front();
-    EXPECT_EQ(preparedCase.a.elements, 28);
-    EXPECT_EQ(preparedCase.b.elements, 40);
-    EXPECT_EQ(preparedCase.outputCopyElements, 45);
-    EXPECT_EQ(preparedCase.alpha.f32, 1.0f);
-    EXPECT_EQ(preparedCase.beta.f32, 0.0f);
+    ASSERT_EQ(preparation.problems.size(), 1);
+    const auto& preparedProblem = preparation.problems.front();
+    EXPECT_EQ(preparedProblem.a.elements, 28);
+    EXPECT_EQ(preparedProblem.b.elements, 40);
+    EXPECT_EQ(preparedProblem.outputCopyElements, 45);
+    EXPECT_EQ(preparedProblem.alpha.f32, 1.0f);
+    EXPECT_EQ(preparedProblem.beta.f32, 0.0f);
     EXPECT_EQ(preparation.rotatingBytes, 316);
 }
 
@@ -240,9 +240,9 @@ TEST(MatmulPreparation, CountsPointerArrayStoragePerBatch)
 
     const auto preparation = prepare(arguments);
 
-    ASSERT_EQ(preparation.cases.size(), 1);
-    EXPECT_EQ(preparation.cases.front().a.elements, 28);
-    EXPECT_EQ(preparation.cases.front().b.elements, 40);
+    ASSERT_EQ(preparation.problems.size(), 1);
+    EXPECT_EQ(preparation.problems.front().a.elements, 28);
+    EXPECT_EQ(preparation.problems.front().b.elements, 40);
     EXPECT_EQ(preparation.rotatingBytes, 948);
 }
 
@@ -255,7 +255,7 @@ TEST(MatmulPreparation, CountsDistinctCAndDStorageTypes)
 
     const auto preparation = prepare(arguments);
 
-    ASSERT_EQ(preparation.cases.size(), 1);
+    ASSERT_EQ(preparation.problems.size(), 1);
     EXPECT_EQ(preparation.rotatingBytes, 376);
 }
 
@@ -267,8 +267,8 @@ TEST(MatmulPreparation, IsolatesSwizzledDeviceGeometry)
 
     const auto preparation = prepare(arguments, true);
 
-    ASSERT_EQ(preparation.cases.size(), 1);
-    const auto& preparedA = preparation.cases.front().a;
+    ASSERT_EQ(preparation.problems.size(), 1);
+    const auto& preparedA = preparation.problems.front().a;
     EXPECT_EQ(preparedA.batchStride, 512);
     EXPECT_EQ(preparedA.elements, 2048);
     EXPECT_TRUE(preparedA.replacedUnsupportedBatchStride);
@@ -282,9 +282,9 @@ TEST(MatmulPreparation, MakesScaleAlphaVectorAUnitScalarEpilogue)
 
     const auto preparation = prepare(arguments);
 
-    ASSERT_EQ(preparation.cases.size(), 1);
-    const auto& preparedCase = preparation.cases.front();
-    EXPECT_EQ(preparedCase.scaleAlphaElements, 3);
-    EXPECT_EQ(preparedCase.alpha.f32, 1.0f);
-    EXPECT_TRUE(preparedCase.epilogueEnabled);
+    ASSERT_EQ(preparation.problems.size(), 1);
+    const auto& preparedProblem = preparation.problems.front();
+    EXPECT_EQ(preparedProblem.scaleAlphaElements, 3);
+    EXPECT_EQ(preparedProblem.alpha.f32, 1.0f);
+    EXPECT_TRUE(preparedProblem.epilogueEnabled);
 }
