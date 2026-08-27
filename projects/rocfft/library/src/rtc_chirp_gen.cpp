@@ -49,29 +49,12 @@ static std::string chirp_rtc_args()
     return args;
 }
 
-// The body below reduces i * i modulo 2N exactly, by splitting the
-// product into a high and a low half of integer_type.  Both the
-// high-multiply intrinsic and the weight of the high half (2 raised to
-// the width of integer_type) therefore depend on that width, so emit
-// them to suit.
-static std::string chirp_rtc_mulhi_decls(const KIntType& itype)
+// Type wide enough to hold 2N and the full i * i product for any N that
+// integer_type can express, so that the reduction below is exact.
+static std::string chirp_rtc_wide_type_decl(const KIntType& itype)
 {
-    std::string src;
-
-    src += "__device__ inline integer_type chirp_mul_hi(integer_type a, integer_type b)\n{\n";
-    src += itype == KIntType::U64 ? "    return __umul64hi(a, b);\n"
-                                  : "    return __umulhi(a, b);\n";
-    src += "}\n";
-
-    // Weight of the high half, reduced mod m.  2^64 has no literal, so
-    // reach it as (2^64 - 1) + 1 with the reduction applied twice.
-    src += "__device__ inline integer_type chirp_hi_weight_mod(integer_type m)\n{\n";
-    src += itype == KIntType::U64
-               ? "    return static_cast<integer_type>((~0ull % m + 1ull) % m);\n"
-               : "    return static_cast<integer_type>(0x100000000ull % m);\n";
-    src += "}\n";
-
-    return src;
+    return itype == KIntType::U64 ? "typedef __uint128_t wide_type;\n"
+                                  : "typedef unsigned long long wide_type;\n";
 }
 
 static std::string chirp_rtc_body()
@@ -82,22 +65,14 @@ static std::string chirp_rtc_body()
 
         if(i < N)
         {
-            integer_type twoN = 2 * N;
-            integer_type iSq  = i * i;
+            // The chirp phase is i * i modulo 2N.  Reduce in wide_type:
+            // both 2N and i * i overflow integer_type near the top of its
+            // range, so neither the doubling nor the product can be done
+            // at the kernel's index width.
+            wide_type twoN = 2 * static_cast<wide_type>(N);
+            wide_type iSq  = static_cast<wide_type>(i) * i;
 
-            auto f = (double)iSq / (double)twoN;
-
-            integer_type fRnd = floor(f);
-
-            auto aLow = iSq;
-            auto bLow = twoN * fRnd;
-
-            auto aHi = chirp_mul_hi(i, i);
-            auto bHi = chirp_mul_hi(twoN, fRnd);
-
-            auto f1 = (aHi - bHi) * (double)chirp_hi_weight_mod(twoN) / (double)twoN;
-            auto f2 = (double)((aLow - bLow) % twoN) / (double)twoN;
-            auto fp = (f1 - floor(f1)) + f2;
+            double fp = (double)(iSq % twoN) / (double)twoN;
 
             output[i].x = cos(TWO_PI * fp);
             output[i].y = sin(TWO_PI * fp);
@@ -116,9 +91,9 @@ std::string
     src += common_h;
     src += device_enum_h;
     src += rtc_kint_type_decl(itype);
+    src += chirp_rtc_wide_type_decl(itype);
     src += rtc_precision_type_decl(precision);
     src += "static constexpr double TWO_PI = 6.283185307179586476925286766559;\n";
-    src += chirp_rtc_mulhi_decls(itype);
 
     src += chirp_rtc_header;
     src += chirp_rtc_launch_bounds();
