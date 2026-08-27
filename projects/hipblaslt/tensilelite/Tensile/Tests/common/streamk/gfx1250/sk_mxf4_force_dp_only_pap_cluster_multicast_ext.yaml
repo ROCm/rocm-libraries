@@ -91,7 +91,8 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        # PAP frees self-only MaskB (Cs==1) / MaskA (Ck==1); both stay live otherwise.
+        # Under ForceDPOnly=1 only, PAP frees self-only MaskB (Cs==1) / MaskA (Ck==1);
+        # both stay live otherwise, and ForceDPOnly=0 always keeps them for skipPGR2.
         - ClusterDim: [[2, 1], [4, 1], [8, 1], [1, 2], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
