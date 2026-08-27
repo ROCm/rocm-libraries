@@ -158,6 +158,26 @@ TEST(TestContainer, GetEngineNameReturnsTheDeclaredNameForEveryIngestorEngine)
 }
 #endif
 
+TEST(TestContainer, GetEngineNameNamesEveryAdvertisedEngine)
+{
+    // Read from the same table copyEngineIds reports from, so no build configuration
+    // leaves an advertised engine unasserted.
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
+    uint32_t numEngines = 0;
+    Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
+    ASSERT_GT(numEngines, 0U);
+
+    for(uint32_t i = 0; i < numEngines; ++i)
+    {
+        const char* name = nullptr;
+        EXPECT_EQ(Container::getEngineName(engineIds[i], &name), HIPDNN_PLUGIN_STATUS_SUCCESS)
+            << "no name for advertised engine id " << engineIds[i];
+        ASSERT_NE(name, nullptr);
+        EXPECT_FALSE(std::string(name).empty());
+        EXPECT_EQ(hipdnn_data_sdk::utilities::engineNameToId(name), engineIds[i]);
+    }
+}
+
 TEST(TestContainer, GetEngineNameDeclinesAnUnknownEngineId)
 {
     // Hashed from a name no descriptor set or registered engine carries, so the ID is
