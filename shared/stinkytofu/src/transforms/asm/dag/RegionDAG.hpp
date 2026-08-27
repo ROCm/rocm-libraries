@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cassert>
 #include <iosfwd>
 #include <unordered_map>
 #include <unordered_set>
@@ -40,6 +41,73 @@ struct RegionDAG {
     DAGNodeList nodes;
     std::vector<std::unordered_set<unsigned>> graph;
     std::unordered_map<StinkyInstruction*, unsigned> instToId;
+};
+
+/// Scheduler-only hard ordering constraints layered over an immutable base DAG.
+class HardSchedulingConstraintOverlay {
+   public:
+    explicit HardSchedulingConstraintOverlay(
+        const std::vector<std::unordered_set<unsigned>>& baseGraph)
+        : baseGraph_(baseGraph), graph_(baseGraph.size()), inDegree_(baseGraph.size(), 0) {}
+
+    bool tryAdd(unsigned predecessor, unsigned successor) {
+        assert(predecessor < graph_.size() && successor < graph_.size());
+        if (graph_[predecessor].contains(successor)) return true;
+        if (hasPath(successor, predecessor)) return false;
+        graph_[predecessor].insert(successor);
+        ++inDegree_[successor];
+        return true;
+    }
+
+    bool isReady(unsigned nodeId, unsigned baseInDegree) const {
+        assert(nodeId < inDegree_.size());
+        return baseInDegree == 0 && inDegree_[nodeId] == 0;
+    }
+
+    const std::unordered_set<unsigned>& successors(unsigned nodeId) const {
+        assert(nodeId < graph_.size());
+        return graph_[nodeId];
+    }
+
+    void satisfyFrom(unsigned predecessor) {
+        assert(predecessor < graph_.size());
+        for (unsigned successor : graph_[predecessor]) {
+            assert(inDegree_[successor] > 0);
+            --inDegree_[successor];
+        }
+    }
+
+    unsigned inDegree(unsigned nodeId) const {
+        assert(nodeId < inDegree_.size());
+        return inDegree_[nodeId];
+    }
+
+   private:
+    bool hasPath(unsigned from, unsigned to) const {
+        if (from == to) return true;
+
+        std::vector<unsigned> pending{from};
+        std::vector<bool> visited(graph_.size(), false);
+        visited[from] = true;
+        while (!pending.empty()) {
+            const unsigned current = pending.back();
+            pending.pop_back();
+            for (const auto* graph : {&baseGraph_, &graph_}) {
+                for (unsigned successor : (*graph)[current]) {
+                    if (successor == to) return true;
+                    if (!visited[successor]) {
+                        visited[successor] = true;
+                        pending.push_back(successor);
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    const std::vector<std::unordered_set<unsigned>>& baseGraph_;
+    std::vector<std::unordered_set<unsigned>> graph_;
+    std::vector<unsigned> inDegree_;
 };
 
 /// Add a non-duplicate DAG edge and update the destination in-degree.
