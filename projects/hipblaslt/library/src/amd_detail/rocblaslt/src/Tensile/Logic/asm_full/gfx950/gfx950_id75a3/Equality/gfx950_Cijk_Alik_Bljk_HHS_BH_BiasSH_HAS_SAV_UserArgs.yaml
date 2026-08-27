@@ -273,7 +273,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -431,7 +431,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x32x256_MI16xkxOLh8cAY4lWM_qoMkjBNIB1th8UJvkAREoScJ0WmP4=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -590,7 +590,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -752,7 +752,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -909,7 +909,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x128x64_MI16xjK3zmT2lxk5kXiGmiX7j9-CUzQCYfvK3afAyOeQwB88=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1068,7 +1068,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x192x64_MI16xKUIHM_q4j2dNtYtHr0_1wGImkH5UNyMbCp8y1Gh2alk=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1228,7 +1228,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x192x64_MI16PYbYA67MUI3jpSww0HvQVyVNqzhxPN8HRoQ52CjI27g=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1390,7 +1390,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1553,7 +1553,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1715,7 +1715,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1875,7 +1875,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x32x256_MI16xu-YoJvSLiG-VEg1ISPcE1Vpb0KCNWuJD5TY_P6jU2A0=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2037,7 +2037,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x32x256_MI16xYs66r_gUI939q-x2YSbAJf08FgTcnd0s64PpJ6hHWn0=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2199,7 +2199,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x32x256_MI16x9ooJUFQ2XOWZ9-QJO-zD51DBbNF_J-oDxJjaSJ3iMnA=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2362,7 +2362,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x48x256_MI16xAOlzNhA-8X0ujANEXqCUuOeBgSAgTua04E_loNxwcas=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2527,7 +2527,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x256x64_MI16pelWPkRsDjCzmoTBZy57pF8JF4h3MdLCngoLF-FwwZ8=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2689,7 +2689,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -2849,7 +2849,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT32x32x256_MI16xq7lISYMEoDKKy4YKkDhGhqy0VVO4e6Ja34j298HsHM8=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3014,7 +3014,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3175,7 +3175,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3335,7 +3335,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x64x32_MI32x3qSVMMjNmEJoN75zHm-IblTQ-ZxldVh6Ol6Ojja4JTxM=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3496,7 +3496,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3654,7 +3654,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3817,7 +3817,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -3974,7 +3974,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4137,7 +4137,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4296,7 +4296,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT48x64x64_MI16x1UBZrdH14AN34vS4TwTJAj_PE_QzY_jL42KAmlO44OhY=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4457,7 +4457,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT48x64x128_MI16xdvn1tTxLTPo4W7Ss64d9sw3_I61ZXM3TfJS7N2qd1rM=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4615,7 +4615,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT192x192x64_MI16G5jPquobABIMM8FMzwFDy-f0HrAcClO6P7P-9sjtK7E=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4777,7 +4777,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x192x64_MI16mAiGy5g8ck_LJcGTKwLW4GZK9_FptR8_dyF1S2Qey4M=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -4937,7 +4937,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT192x128x64_MI16pvXWRLvon8mHuNFcCDakiMNeyj6O0mUNgk1IEdhpLj4=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -5099,7 +5099,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x64x32_MI32x3rTtDV19OzcaMsgIYhhztzrHttY6iPRZwyCtPIA22LDQ=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -5259,7 +5259,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT32x64x128_MI16xQfZ23QVt_CQrdzTKdvJa1c2C0lIjKuR5GoIj0qvOYLo=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -5419,7 +5419,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -5580,7 +5580,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -5743,7 +5743,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -5904,7 +5904,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6062,7 +6062,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x96x128_MI16xgd-NPei63RiZibPoPt4meobttxSnclF_qcvBJOn0tSo=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6225,7 +6225,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6388,7 +6388,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT96x96x128_MI16x1SKmYobIyDPf1Q-VnrBdz47c_nFtDLYnXmWvHfvdz_Q=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6548,7 +6548,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x64x64_MI32x7nZGSuA22MUGFb3A-neRshbxL4UY5Irox_b-ZvHZ3q4=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6709,7 +6709,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x64x64_MI16x1V6CQqBTqiT3Y0oyYorpBg9zYKkLx4SAMnl4Pk2o4idY=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -6871,7 +6871,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7032,7 +7032,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x64x128_MI16qllg47CBM2uHPpFLddHV-ML__tfHCjPmMTDNPp8_Qxk=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7194,7 +7194,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7356,7 +7356,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7518,7 +7518,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x192x64_MI16VVMlTkCgFwYpi-OX7xL810j_f7pSCPP2c54-JC4HyyY=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7683,7 +7683,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -7847,7 +7847,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8009,7 +8009,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x192x64_MI168cGintojYLUiq07UgjQbF0SEOPnF_40qKJTKnP5qZ84=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8173,7 +8173,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x192x64_MI16QA-aipd8KTlnzaSex78-dUzHwGD3i2BcWmxCAyy1qsE=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8334,7 +8334,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT160x320x64_MI16vkRf9kjvLqoD8nkyahm-PH7QBhntv0elN6VQRPl4Yzw=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8493,7 +8493,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8656,7 +8656,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8814,7 +8814,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x192x64_MI169YXJG8zu3QyZUHBNkspFoWc_R5Iba8EVQHjZjjn0FgA=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -8974,7 +8974,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x128x128_MI1gyZkl1bnWlkt5GdSWECr5kjKIG61IfkubnpCWzneQPY=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -9136,7 +9136,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x128x128_MI1_UVH1sLd_kGrYVW1yagvcqfyUJ3OuOPaQxgoRRC8dME=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -9298,7 +9298,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -9459,7 +9459,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -9621,7 +9621,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x128x128_MI1Ex6RfyYzw14UXhsNxgnrcajZuyJ3oKu3xxwRQaVn3qc=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -9783,7 +9783,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -9946,7 +9946,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10107,7 +10107,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10269,7 +10269,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT48x64x128_MI16xsO3kKq-GJh3-2mvEuyisAF3FuucT0Z5G9Fbb37Lpwo8=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10427,7 +10427,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10589,7 +10589,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10750,7 +10750,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x128x64_MI16wFJwHNcZcb5AqPGQhtFau4wESDe6iLp7Nmq4tmwy71o=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -10913,7 +10913,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11072,7 +11072,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x256x64_MI16B1M_c3lZMZe5EAKvWQttorWeqojV-Ut6Kc1hmgPqZr4=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11232,7 +11232,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x128x64_MI32qZyYph8AqQt6BJmxvTU1aRNB7-xxqegj2weW1lVzlh8=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11395,7 +11395,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x128x64_MI16I5MNTpbYMiGmxRlHtM6Zw18FPS75OX2l9S_AVrKT5eY=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11557,7 +11557,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11719,7 +11719,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x256x64_MI16GWjMl0WXTcHrOHBiOW0EJU84oImdO6hog3D2d2ElzvA=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -11881,7 +11881,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -12043,7 +12043,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x320x64_MI16xdqf6ta_nRCF6fc2pjt0ovlvZ098YFF0LPz8D49_eTI8=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -12203,7 +12203,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT192x128x64_MI16toBFqFipWs4hQskbke8sJ1CMaBt8_lwf0yIICX3QdQA=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -12363,7 +12363,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -12523,7 +12523,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x128x64_MI16lb8kdEvauhsDZrabIcXxLzvSzrFP0kORqGsHpjuZAbs=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -12684,7 +12684,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT192x128x32_MI329TPqrVLEv1C_KhgkL3B6w7yGYkBY5HrK3LMzU8dsvdU=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -12845,7 +12845,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x192x64_MI16kYc9hQXGsVKmA32VZjQ67IfWcRguKly1Ry2_cnOgBeA=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13008,7 +13008,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13168,7 +13168,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13329,7 +13329,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x224x64_MI16S95fYDy_xmwWPurT7nPZsSfazVg3rIrYb_ceFclP0uw=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13488,7 +13488,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13646,7 +13646,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x160x64_MI16LiFeCrl7EVyBop6HSjmoV9lUEAYdZjl_0xgzs8C3kMg=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13810,7 +13810,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x256x64_MI16ToyR8yFjOY2DA2NbEyLcgza71Wj5dBY8_PDNO0nNw4g=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -13972,7 +13972,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT320x128x64_MI169ESSbZYbJ4eRvRB6ouW4QK1P1uWrVqXyk4wJ-o_oEqU=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14136,7 +14136,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14297,7 +14297,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x256x64_MI1601Zen4aew-iUKAYPPYTFASuG4TUHirgKSQvMP480hbQ=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14460,7 +14460,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14622,7 +14622,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14784,7 +14784,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -14946,7 +14946,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -15107,7 +15107,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -15270,7 +15270,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -15428,7 +15428,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT96x128x64_MI16xNiNWN0FaTEQcuOQIhc2gg6oxodaP-lN-ythTFKj0Vjc=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -15591,7 +15591,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -15758,7 +15758,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -15923,7 +15923,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16089,7 +16089,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16254,7 +16254,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16418,7 +16418,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16582,7 +16582,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16749,7 +16749,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -16911,7 +16911,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -17074,7 +17074,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -17236,7 +17236,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLds: 1
   DirectToLdsA: true
@@ -17400,7 +17400,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT96x128x64_MI16xDBfmO8qMIrOnjvCVrbGv0huXsBnJdSNMsrPXSELA-XE=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -17562,7 +17562,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x48x128_MI16x01qGw5TjkSMQe90ysG6i0YZDnKvKP8VmE4JxF5mPn4I=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -17726,7 +17726,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -17893,7 +17893,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x96x128_MI16x36ggQ1qG5xQ1o7Wt9PgE8ktV8FcS6Q-uBNTple6HpUE=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -18059,7 +18059,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -18222,7 +18222,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x192x64_MI16cLsccmdfSh3nMdbngRFTaNkaCMvXVkeVj420qmgBP9c=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -18390,7 +18390,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x48x128_MI16xr6ojQdBxlJEXXXGTpPFeyjthgjfMb9VBy8fZ2kmyYZU=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -18555,7 +18555,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT32x16x256_MI16xpzNuW27W_z3jWGNifWZczso2aZsSE3pirYoi8EIp4yA=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -18721,7 +18721,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -18888,7 +18888,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -19054,7 +19054,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -19220,7 +19220,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x48x128_MI16xKCf1_-3_b_5lG2lqGClnYbJJfpUhyHNPegKlAS3FBxs=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -19386,7 +19386,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT32x256x64_MI32xEWfvLENucSVOIFNPeqfTUM85eRCeCuhpnVgc2VNphzI=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -19553,7 +19553,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -19720,7 +19720,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLds: 1
   DirectToLdsA: true
@@ -19887,7 +19887,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -20053,7 +20053,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -20220,7 +20220,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLds: 1
   DirectToLdsA: true
@@ -20385,7 +20385,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x96x128_MI16qpf9fNTzkjljbesRhQcNohGWPvNxmqm7Z0GNFt3thE8=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -20553,7 +20553,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -20720,7 +20720,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x64x64_MI16x1PvEANQmbmtrzlmWVYjfck3zCWqtuytlfT5yxIpVWxHg=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -20886,7 +20886,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -21047,7 +21047,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x48x128_MI16xMcCJavsW2sYE0nBuU2x1N4boktd0ofmIInVBOyrhQz4=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -21213,7 +21213,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x48x256_MI16xF8Pt8R1z19FS6jLkqFO2J0vq_fTG0SfVnQjMqW04KxE=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -21382,7 +21382,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -21545,7 +21545,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -21711,7 +21711,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x256x64_MI16qXY5PA3ayldVgqwCHQgYvec0bLGXN5Gjim_knqzs2bM=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -21877,7 +21877,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -22044,7 +22044,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -22207,7 +22207,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -22375,7 +22375,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -22542,7 +22542,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x256x64_MI16wbg2942oFIgFCgyFnKPjIoyJwe19ddtItTDBRObBa0Q=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -22707,7 +22707,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x224x64_MI167WeKK2aM8ACHzVTopuhF0ZZqofcaYrD2AxUwT9d4CZM=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -22876,7 +22876,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -23042,7 +23042,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -23205,7 +23205,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLds: 1
   DirectToLdsA: true
@@ -23375,7 +23375,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -23538,7 +23538,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT48x64x256_MI16xJy9J-79gQl4KXpQPGdkh02Hx4tYK6Oo2DodmJs8oPO4=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLds: 1
   DirectToLdsA: true
@@ -23702,7 +23702,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x64x64_MI32xYuaM-vckDLtLWWu87w6PTYiOGFXDasOnslYGqwXsjMk=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -23866,7 +23866,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x48x128_MI16jNZF8oXNf2AFYXoMZJQtOoymIBcjSepB8d8efshS6xk=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -24033,7 +24033,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x192x64_MI165SWcz1fbAzNWWpqUALsnZFfwgp3AiWb6s7JG3wURNBE=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -24202,7 +24202,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -24370,7 +24370,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -24534,7 +24534,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -24698,7 +24698,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT32x32x256_MI16xADArDeqyz7qeSeVvi8CmpS5JzZfL4yQqNMBMZfGqKIo=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLds: 1
   DirectToLdsA: true
@@ -24866,7 +24866,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -25035,7 +25035,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -25199,7 +25199,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x192x64_MI16wD8g5igln4yhPHlceCAvv7Gbzp3ACjP7VO5obMZB3MY=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -25367,7 +25367,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -25535,7 +25535,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -25700,7 +25700,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -25864,7 +25864,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -26032,7 +26032,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -26196,7 +26196,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -26361,7 +26361,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -26523,7 +26523,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -26691,7 +26691,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -26855,7 +26855,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -27019,7 +27019,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -27184,7 +27184,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x160x64_MI16NuPYUWbwwYnLuRLknxmY5ZRLBD-DNIh2KxWm_IXCAo4=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -27353,7 +27353,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT32x64x128_MI16xUMyXmWpV83e-zvL5qpW6etI6v_e4gWIjcgvqhkoBU74=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -27521,7 +27521,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x192x64_MI1665UnzoBTSPOOISr2OwopUD_wuhaGjJZPJlnTrzyASa8=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -27688,7 +27688,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x192x64_MI167l5pwjQLsx--2VI_sk8VScv07dIRRHdC2fzwhWgJJow=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -27855,7 +27855,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x160x64_MI16YJ8ngMWqEnONgjjRYEC-HO97MwJa0zEx3LAxjxt84fY=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -28027,7 +28027,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -28193,7 +28193,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 32
   DirectToLdsA: false
   DirectToLdsB: false
@@ -28360,7 +28360,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x192x64_MI16Ia6u3_wUXSOVjjblvudnfP6rDU8dMvsOnQHtWl8Izh0=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -28526,7 +28526,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT32x64x256_MI16x7K1K4pG-gKJYxDRuKbC7xQtRYd1qkS0bPbxso0LRCpQ=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -28687,7 +28687,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x96x64_MI16xXsCMgOmiBtN91fpNcCCjgNwg2ZSIegKKxulfvwzpwlg=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -28853,7 +28853,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x80x128_MI16xN7lTyd6__bSjR8CyfxqGxuy36oZT4EH_0qChMjfUsIU=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -29018,7 +29018,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -29182,7 +29182,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT64x64x128_MI16xuHeEGH5mmkUX033lykuEte--iCjgKcQzq-dYHuiXbhY=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -29350,7 +29350,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -29514,7 +29514,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -29679,7 +29679,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_UserArgs_MT16x16x512_MI16x_pVPSrVWMtK0Fg7sxQVWhm2Mz9DAVb2x0wG6VwA-75k=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 512
   DirectToLds: 1
   DirectToLdsA: true
@@ -29842,7 +29842,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_UserArgs_MT16x16x256_MI16xx8m4_xvNXOHt5Opc6v1VHkmS1J5D7fKdaMR0PjyGujQ=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLds: 1
   DirectToLdsA: true
@@ -30009,7 +30009,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_UserArgs_MT64x16x256_MI16xdtHaErXzVm2m64h3KRVvo41e1a0JeRFztl-9FjNoD-w=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -30174,7 +30174,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -30339,7 +30339,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -30504,7 +30504,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_UserArgs_MT128x64x128_MI16KUx1QpGTE5HzOiWA04lhwfdpePN0LPzNDqvwTvP4kN0=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -30670,7 +30670,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -30834,7 +30834,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -30999,7 +30999,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLds: 1
   DirectToLdsA: true
@@ -31165,7 +31165,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_UserArgs_MT64x64x128_MI16xKqIqCeO2TsdZT_-EDG0rgFSrzNOSY1QNoLekYk87bkA=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -31330,7 +31330,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_UserArgs_MT64x64x128_MI16xWLqIXGT8a5wE36x4gMT7S--h4Lm-IGChLUEcBrze7Kc=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -31494,7 +31494,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_UserArgs_MT64x96x128_MI16xszOvLKfHvTyx6puEgbLhSBQtNMArAfsbtwv3gP8gcMQ=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -31657,7 +31657,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x192x64_MI16GbtkM2ZcBamYmh27WAJl5wZLLKfu1lzyPra6i_pZUVo=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -31823,7 +31823,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -31988,7 +31988,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -32157,7 +32157,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -32333,7 +32333,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT128x192x64_MI16LyoivrA1lu-NhRprwj-T3SwR87so7l5NQer2PMWbRQk=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -32489,7 +32489,7 @@ Solutions:
   BaseName: Cijk_Alik_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs_MT256x128x64_MI16NY2uRTjmpv1-lA0Mx9QYshEOL88o6dr6BIoe4opieaU=
   CUCount: null
   CUOccupancy: -1
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -32637,162 +32637,6 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
 - SolutionIndex: 198
-  KernelNameMin: Custom_Cijk_Alik_Bljk_HHS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname0_gfx950
-  SolutionNameMin: Custom_Cijk_Alik_Bljk_HHS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname0_gfx950
-  ActivationFuncCall: false
-  AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
-  BaseName: Custom_Cijk_Alik_Bljk_HHS_BH_MT256x256x64_MI16x16x1_BiasSH_HAS_SAV_UserArgs_shortname0_gfx950
-  CUCount: null
-  CUOccupancy: -1
-  CodeObjectVersion: "4"
-  CustomKernelName: Custom_Cijk_Alik_Bljk_HHS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname0_gfx950
-  DepthU: 64
-  DirectToLds: 1
-  DirectToLdsA: true
-  DirectToLdsB: true
-  EdgeType: ShiftPtr
-  EnableF32XEmulationLds: false
-  EnableF32XdlMathOp: false
-  EnableMatrixInstruction: true
-  ExpandPointerSwap: false
-  ExpertSchedulingMode: 0
-  GlobalReadVectorWidthA: 8
-  GlobalReadVectorWidthB: 8
-  GlobalWriteVectorWidth: 8
-  GuaranteeNoPartialA: true
-  GuaranteeNoPartialB: true
-  GuaranteeNoPartialMetadata: true
-  ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-    SupportUserGSU: true, UseUniversalArgs: true}
-  Kernel: true
-  LSCA: 64
-  LSCB: 64
-  LSPA: 32
-  LSPB: 32
-  LVCA: 8
-  LVCB: 8
-  LVPA: 4
-  LVPB: 4
-  LdsBlockSizePerPadA: 1024
-  LdsBlockSizePerPadB: 1024
-  LdsBytesNoAmax: 133120
-  LdsInitCVgprs: false
-  LdsNumBytes: 133120
-  LdsNumElementsAlignedA: 33280
-  LdsNumElementsAlignedB: 33280
-  LdsNumElementsAlignedMetadata: 0
-  LdsOffsetA: 0
-  LdsOffsetA_Blk: 66560
-  LdsOffsetB: 33280
-  LdsOffsetB_Blk: 99840
-  LdsOffsetBias: 0
-  LdsOffsetBiasGSU: 0
-  LdsOffsetBiasNonGSU: 0
-  LdsOffsetMetadata: 33280
-  LdsOffsetMetadata_Blk: 99840
-  LdsPadA: 8
-  LdsPadB: 8
-  LocalReadVectorWidth: 8
-  LocalSplitU: 1
-  LocalSplitUReuseLDS: 1
-  LocalWriteUseSgprA: true
-  LocalWriteUseSgprB: true
-  LoopIters: 2
-  LoopUnroll: 64
-  MFMA_BF16_1K: false
-  MIBlock: [16, 16, 32, 1, 1, 1]
-  MIInputPerThread: 8
-  MIInputPerThreadA: 8
-  MIInputPerThreadB: 8
-  MIInputPerThreadMetadata: 8
-  MIOutputVectorWidth: 4
-  MIRegPerOut: 1
-  MIWaveGroup: [2, 2]
-  MIWaveTile: [8, 8]
-  MIWaveTileA: 8
-  MIWaveTileB: 8
-  MIWaveTileMetadata: 0
-  MacroTile0: 256
-  MacroTile1: 256
-  MacroTileA: 256
-  MacroTileB: 256
-  MathClocksUnrolledLoop: 0
-  MatrixInstB: 1
-  MatrixInstBM: 1
-  MatrixInstBN: 1
-  MatrixInstK: 32
-  MatrixInstM: 16
-  MatrixInstN: 16
-  MatrixInstruction: [16, 16, 32, 1]
-  MaxLDS: 163840
-  MbskPrefetchMethod: 0
-  NoLdsWriteCode: true
-  NoTailLoop: true
-  NonDTLTailLoopA: false
-  NonDTLTailLoopB: false
-  NonTemporalD: 4
-  NumElementsPerThread: 256
-  NumGlobalWriteVectorsPerThread: 32
-  NumLoadsA: 8
-  NumLoadsB: 8
-  NumLoadsPerpendicularA: 8
-  NumLoadsPerpendicularB: 8
-  NumThreads: 256
-  NumWaveSplitK: 1
-  PackedC0IdxChars: [I]
-  PackedC0IndicesX: [0]
-  PackedC1IdxChars: [J]
-  PackedC1IndicesX: [1]
-  PrefetchGlobalRead: 2
-  SourceSwap: true
-  StaggerU: 0
-  StaggerUStride: 0
-  StoreSwapAddr: true
-  StoreVectorWidth: 8
-  SubGroup0: 8
-  SubGroup1: 32
-  SubGroupA: 8
-  SubGroupB: 32
-  ThreadTile: [1, 1]
-  ThreadTile0: 32
-  ThreadTile1: 8
-  ThreadTileA: 32
-  ThreadTileB: 8
-  TransposeLDS: 1
-  TransposeLDSMetadata: 1
-  ULSGRODoubleG2L: 0
-  UnrollMajorLDSA: true
-  UnrollMajorLDSB: true
-  UnrollMajorLDSMetadata: true
-  UseDotInstruction: false
-  UseF32XEmulation: false
-  Valid: true
-  VectorWidthA: 8
-  VectorWidthB: 8
-  WavefrontSize: 64
-  WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 32
-  WorkspaceCheck: [4, 0, 1]
-  _DepthU: 64
-  _DepthUA: 64
-  _DepthUB: 64
-  _DepthUMetadata: 64
-  _GlobalAccumulation: MultipleBuffer
-  _UseSgprForGRO: 1
-  _VectorStore: 1
-  _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
-  _staggerStrideShift: 0
-  enableLDSTrA: false
-  enableLDSTrB: false
-  reorderGRInstForDTVA: false
-  reorderGRInstForDTVB: false
-  tailLoopOptA: false
-  tailLoopOptB: false
-- SolutionIndex: 199
   KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT64x128x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_2_MXLIBL_MXSFNS_MO40_MGRIPM2_NTn1_NTA4_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKWS0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMXCC1
   SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT64x128x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_2_MXLIBL_MXSFNS_MO40_MGRIPM2_NTn1_NTA4_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKFDPO0_SKWS0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM24_WGMXCC1_WGMXCCGn1
   AdaptiveGemm: 1
@@ -32803,7 +32647,7 @@ Solutions:
   CUOccupancy: -1
   ClusterBarrier: false
   ClusterLocalRead: 0
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -33014,7 +32858,7 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
   ActivationFuncCall: false
-- SolutionIndex: 200
+- SolutionIndex: 199
   KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_2_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO1_SRVW0_SSO0_SVW8_SK3_SKFTR0_SKFDPO0_SKWS0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO1_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1
   SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_2_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW8_SK3_SKFTR0_SKFDPO0_SKWS0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO1_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC1_WGMXCCGn1
   AdaptiveGemm: 1
@@ -33024,7 +32868,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: false
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 128
   DirectToLds: 1
   DirectToLdsA: true
@@ -33232,7 +33076,7 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
   ActivationFuncCall: false
-- SolutionIndex: 201
+- SolutionIndex: 200
   KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x64x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW8_SK3_SKFTR0_SKFDPO0_SKWS0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMXCC1
   SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x64x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW8_SK3_SKFTR0_SKFDPO0_SKWS0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM48_WGMXCC1_WGMXCCGn1
   AdaptiveGemm: 1
@@ -33242,7 +33086,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: false
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 64
   DirectToLds: 1
   DirectToLdsA: true
@@ -33454,7 +33298,7 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
   ActivationFuncCall: false
-- SolutionIndex: 202
+- SolutionIndex: 201
   KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA512_LBSPPB512_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB1_WSGRA2_WSGRB0_WS64_WG16_4_4_WGMXCC1
   SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA512_LBSPPB512_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SU16_SUM0_SUS512_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB1_WSGRA2_WSGRB0_WS64_WG16_4_4_WGMn6_WGMXCC1_WGMXCCGn1
   AssignedDerivedParameters: true
@@ -33463,7 +33307,7 @@ Solutions:
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: false
-  CodeObjectVersion: "4"
+  CodeObjectVersion: '4'
   DepthU: 256
   DirectToLdsA: false
   DirectToLdsB: false
@@ -34068,22 +33912,14 @@ ExactLogic:
   - [197, 0.0]
 - - [1536, 3584, 1, 3584]
   - [196, 0.0]
-- - [4096, 4096, 1, 8192]
-  - [198, 0.0]
-- - [4096, 4096, 1, 16384]
-  - [198, 0.0]
-- - [8192, 8192, 1, 8192]
-  - [198, 0.0]
-- - [8192, 8192, 1, 16384]
-  - [198, 0.0]
 - - [4000, 448, 1, 1000]
-  - [199, 0.0]
+  - [198, 0.0]
 - - [4000, 224, 1, 1000]
-  - [200, 0.0]
+  - [199, 0.0]
 - - [4000, 448, 1, 224]
-  - [201, 0.0]
+  - [200, 0.0]
 - - [100, 32, 1, 1000]
-  - [202, 0.0]
+  - [201, 0.0]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
