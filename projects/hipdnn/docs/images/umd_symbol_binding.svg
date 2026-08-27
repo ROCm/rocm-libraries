@@ -41,7 +41,7 @@
   <text x="345" y="188" font-family="Consolas, monospace" font-size="11">{"in": ["$q.dtype", ["BFLOAT16","FP8_E4M3"]]}</text>
   <text x="345" y="208" font-family="Consolas, monospace" font-size="11">{"==": ["$k.dtype", "$q.dtype"]}</text>
   <text x="345" y="228" font-family="Consolas, monospace" font-size="11">{"==": ["$q.rank", 4]}</text>
-  <text x="345" y="248" font-family="Consolas, monospace" font-size="11">{"==": ["$q.dims[3]", 128]}</text>
+  <text x="345" y="248" font-family="Consolas, monospace" font-size="11">{"==": ["$q.dims[3]", "$kernel.head_size"]}</text>
   <text x="345" y="268" font-family="Consolas, monospace" font-size="11">{"divisible": ["$q.dims[1]", "$k.dims[1]"]}</text>
   <text x="345" y="288" font-family="Consolas, monospace" font-size="11">{"==": ["$q.stride_order", [3,2,1,0]]}</text>
   <text x="345" y="308" font-family="Consolas, monospace" font-size="11">{"not_present": ["$attn_mask"]}</text>

@@ -87,8 +87,12 @@ node's scalar attributes; this descriptor carries the constraints over them.
     // Dims are positional throughout this pack. $q and $o are
     // (batch, num_heads, seqlen_q, head_size); $k and $v are
     // (batch, num_kv_heads, seqlen_kv, head_size).
-    // --- graph-level: a prebuilt kernel serves one fixed compile-time shape ---
-    {"!": ["$graph.is_override_shape_enabled"]},
+    // --- graph-level. A prebuilt kernel serves one fixed compile-time shape, so this matcher
+    //     leaves `allow_override_shape` at its `false` default, and an override-shape graph is
+    //     declined before any criterion runs
+    //     ([RFC 0018 A.1](../0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
+    //     No conjunct restates that: with the default in force, one could never change the
+    //     verdict. ---
     {"==": ["$graph.node_count", 1]},
     // --- 23 of the 24 optional tensors the engine's pattern binds are refused outright. The
     //     24th, the scale tensor, is served, and its gate is further down. ---
@@ -332,9 +336,9 @@ binds `$attn_mask`. The pattern still matches — an optional operand the graph 
 what a `?` binding is for — so the decline lands one stage later: the `not_present` list is the
 first conjunct evaluated over that binding, and it fails before mask mode, dtype, or layout are
 considered. Any of the other 22 refused-outright operands declines the same way. An
-override-shape graph declines for a different reason: `{"!": ["$graph.is_override_shape_enabled"]}`
-rejects it because this kernel bakes its shape at compile time and cannot serve a
-runtime-overridden one.
+override-shape graph declines earlier still, and without a criterion: §2's matcher leaves
+`allow_override_shape` at its `false` default, so the graph is declined before the criteria run
+at all. This kernel bakes its shape at compile time and cannot serve a runtime-overridden one.
 
 **Case C: catalog decline.** Same graph, but `causal_mask=false` and both bounds unbounded
 (`left_bound=-1, right_bound=-1`), so `mask_mode` resolves to `none`. Every other gate still
@@ -359,7 +363,7 @@ The persistent UDD, the measured ~940-970 TFLOPS path (PR #9480):
 
 ```jsonc
 {
-  "schema": "hipdnn.udd/v1",
+  "version": "1.0",
   "id":   "6a0f2d0e-2b6b-4a2b-8c9d-8b8b6f6e9a10",
   "name": "SDPA forward (attention_dense, persistent) dispatch",
   // fixed 1-D grid-stride launch; num_persistent is per-kernel metadata
@@ -395,7 +399,7 @@ over graph dims instead of a `$kernel.*` constant) and shares the identical `arg
 
 ```jsonc
 {
-  "schema": "hipdnn.udd/v1",
+  "version": "1.0",
   "id":   "d5e6c9a4-1f2a-4e3a-9a3b-2f7d0f6c4b21",
   "name": "SDPA forward (attention_dense, default grid) dispatch",
   // $q dims: 0 = batch, 1 = num_heads, 2 = query sequence length, 3 = head size.
@@ -444,7 +448,7 @@ adapter invocation: the builder, plus the exact build values for that instance.
 ```jsonc
 // --- KMD: the engine-wide metadata schema, shared by both KDPs below ---
 {
-  "schema": "hipdnn.kmd/v1",
+  "version": "1.0",
   "id":     "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",
   "name":   "attention_dense variant fields",
   "fields": [
@@ -476,7 +480,7 @@ adapter invocation: the builder, plus the exact build values for that instance.
 //     block_n and decode variants. It trains on the sweep that produced the cohort split; the
 //     host-side `work >= num_persistent` threshold is one decision boundary in that data. ---
 {
-  "schema": "hipdnn.uhd/v1",
+  "version": "1.0",
   "id":     "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
   "name":   "attention_dense forward selector",
   "kind":   "model",
@@ -554,7 +558,7 @@ adapter invocation: the builder, plus the exact build values for that instance.
 
 // --- KDP 1: default grid ---
 {
-  "schema": "hipdnn.kdp/v1",
+  "version":   "1.0",
   "id":        "e3a1b7c4-5d92-4f06-8b3e-6c0d2a9f14b8",
   "name":      "attention_dense fwd d128 bf16 (default grid, gfx950)",
   "arch":      ["gfx950"],
@@ -563,7 +567,7 @@ adapter invocation: the builder, plus the exact build values for that instance.
   "dispatch":  "d5e6c9a4-1f2a-4e3a-9a3b-2f7d0f6c4b21",     // §5's default-grid UDD
   "kernelDescriptors": [
     {
-      "schema": "hipdnn.ukd/v1",
+      "version": "1.0",
       "id":   "3f8a6c1d-2e5b-4a9c-8d7e-1b6f4a3c9e02",
       "name": "attention_dense d128 bf16 causal (default grid, gfx950)",
       // The rocKE source kind: the builder plus this instance's build values. The adapter calls
@@ -588,7 +592,7 @@ adapter invocation: the builder, plus the exact build values for that instance.
 
 // --- KDP 2: persistent grid-stride ---
 {
-  "schema": "hipdnn.kdp/v1",
+  "version":   "1.0",
   "id":        "f70c8d25-4b16-4a3d-9e82-1a5b6f0c7d93",
   "name":      "attention_dense fwd d128 bf16 (persistent grid-stride, gfx950)",
   "arch":      ["gfx950"],
@@ -597,7 +601,7 @@ adapter invocation: the builder, plus the exact build values for that instance.
   "dispatch":  "6a0f2d0e-2b6b-4a2b-8c9d-8b8b6f6e9a10",     // §5's persistent UDD
   "kernelDescriptors": [
     {
-      "schema": "hipdnn.ukd/v1",
+      "version": "1.0",
       "id":   "b1e7d4a0-9c3f-4e6b-8a1d-2f5c9b7e0a44",
       "name": "attention_dense d128 bf16 causal (persistent grid-stride, gfx950)",
       "kernel_source": {

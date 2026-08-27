@@ -179,10 +179,10 @@ JsonLogic sub-expression that expresses each. The residue — the handful of che
 | Hand-written check | JsonLogic criterion | Lowers from |
 |---|---|---|
 | **Opcode** | in the engine's pattern, not a criterion ([RFC 0020 § 4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)) | node attribute-type gate |
-| **Dtype (exact / set)** | `{"==": ["$q.dtype", "BFLOAT16"]}` / `{"in": ["$q.dtype", ["BFLOAT16", "FP8_E4M3"]]}` | `validateDataTypeIsSupported`, `validateFixedDataType` |
+| **Dtype (exact / set)** | `{"==": ["$q.dtype", "BFLOAT16"]}` / `{"in": ["$q.dtype", ["BFLOAT16", "FP8_E4M3"]]}`; pin against a kernel with `{"==": ["$q.dtype", "$kernel.dtype"]}` when the pack ships one binary per dtype (below) | `validateDataTypeIsSupported`, `validateFixedDataType` |
 | **Dtype (relation)** | `{"==": ["$k.dtype", "$q.dtype"]}` | `validateConsistentDataTypes`, `q == k == v` |
 | **Rank** | `{"==": ["$q.rank", 4]}` | `validateDimensionCount`, rank == 4 |
-| **Dim (value / relation)** | `{"==": ["$q.dims[3]", 128]}`; relate with `{"==": ["$k.dims[3]", "$q.dims[3]"]}` | dim reads and cross-tensor dim relations |
+| **Dim (value / relation)** | `{"==": ["$q.dims[3]", 128]}`; relate with `{"==": ["$k.dims[3]", "$q.dims[3]"]}`; pin against a kernel with `{"==": ["$q.dims[3]", "$kernel.head_size"]}` where the value is one the kernel bakes (below) | dim reads and cross-tensor dim relations |
 | **Divisibility** | `{"divisible": [{"*": ["$y.dims[0]", "$y.dims[2]", "$y.dims[3]"]}, "$kernel.MPerBlock"]}` | tile-fit / GEMM-dim gates |
 | **Layout** | `{"==": ["$q.stride_order", [3, 2, 1, 0]]}` ([§5](#5-layout-and-stride-order-criteria)) | `validateSupportedLayout` |
 | **Packing** | `"$q.packed"` (a bound boolean) | `validatePackedTensors` |
@@ -236,7 +236,10 @@ bound.
 ## 4. The Shared Expression Language
 
 A UMD's `criteria` field is a single `Bool`-rooted expression in the **descriptor expression
-language**. That language is a deferred follow-up and is not restated here; until it is written,
+language**. That language is a deferred follow-up, reserved as **RFC 0019**, which is why the series
+numbering steps from this document to
+[RFC 0020](0020_UniversalEngineDescriptor.md) with a gap. It is not restated here; until it is
+written,
 [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)
 is the interim authority for its operator vocabulary, and the semantics this document leans on are
 stated locally in [Appendix A.2](#a2-variable-references-and-resolution) and
@@ -322,13 +325,16 @@ not list ([Appendix A.3](#a3-the-expression-language)) is simply unrecognized
 and refused at compile time ([Appendix A.5](#a5-compile-time-validation-normative)).
 
 Instead, such a check is a **native criterion**: an ordinary `GraphCriterionFn` registered in the
-provider's `NativeRegistry` and named by a `MatchDescriptor`'s `matchSymbol`
+provider's `NativeRegistry` and named by a UMD's `match_symbol`
 ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)). It stays a
 **pack-level** listing beside the descriptor-backed matcher, because what it expresses is a gate on
 the kernel family rather than a statement about the graph shape the engine serves. The ingestor
 conjoins their verdicts: a pack's graph-scoped matchers all run and all must pass, so "this UMD's
 criteria **and** this C++ predicate" is expressed by listing two matcher ids, not by nesting one
-inside the other.
+inside the other. The schema enforces that reading: a UMD carries a criteria expression or a native
+symbol, never both ([Appendix A.1](#a1-the-umd-descriptor-object)), so a conjunction is always
+visible in the pack's matcher list rather than buried inside one descriptor — and a UMD file stays
+either pure data or a name, never a mixture of the two.
 
 **This is the pack-scoped half of a two-part hatch.** The engine-scoped half is the UED's
 `graph_match.native` ([RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative)),
@@ -367,7 +373,7 @@ stage shares ([RFC 0020 § 6.1](0020_UniversalEngineDescriptor.md#61-the-publish
 is what keeps the declarative and native spellings in step when it happens.
 
 **The registry a provider ships is part of its published contract**, unchanged from
-[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria): a pack naming a `matchSymbol`
+[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria): a pack naming a `match_symbol`
 the running provider does not ship fails to resolve, and fails closed. What changes is that this is
 the *only* place a name resolves to C++, so the drop-in story is simple — **a UMD file is pure data
 and always loads identically; a pack that needs C++ is not a drop-in.**
@@ -426,16 +432,21 @@ the structural saving the split buys, and it is why this section specifies only 
 applies only when all pass
 ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)),
 so matchers are the unit of sharing and of evaluation within an engine. A matcher reading only bound
-graph fields (Tensor / Graph / Attributes / Device, [§2](#2-the-symbol-table-criteria-read))
+graph fields (Tensor / Graph / Attributes / Device, [§2](#2-the-symbol-table-criteria-read)) declares
+`scope: "graph"` and
 runs **once per graph**; on failure it prunes every pack that lists it, so the most-shared checks
 (dtype, layout, rank) evaluated first shrink the candidate set fast. A matcher that also reads
-`$kernel.*` is the **same** matcher re-evaluated **once per distinct value of the `$kernel.*` fields
+`$kernel.*` declares `scope: "kernel"` and is the **same** matcher re-evaluated **once per distinct
+value of the `$kernel.*` fields
 it reads**, memoized on those, pruning per kernel rather than per pack. The projection is what makes
 this pay: a kernel's full metadata tuple is unique by construction, so memoizing on the whole tuple
 would save nothing, while a matcher reading one field
 collapses an engine's catalog to that field's handful of distinct values. The compiler already
 computes which `$kernel.*` fields a matcher reads ([§2](#2-the-symbol-table-criteria-read)),
-so the memoization key costs nothing extra. Results are cached across queries.
+so the memoization key costs nothing extra, and the same read set is what
+[Appendix A.5](#a5-compile-time-validation-normative) checks the declared `scope` against, in both
+directions: the two can never disagree at match time because a descriptor where they disagree does
+not compile. Results are cached across queries.
 
 **Short-circuit evaluation.** The matcher relies on written-order short-circuit evaluation, a rule
 this document states locally pending the language follow-up, so a non-match is
@@ -721,14 +732,15 @@ This example is grounded on the asm-SDPA builder because that builder is this RF
 target ([§15](#15-migration)), so the mapping table below doubles as the cutover checklist. It is
 deliberately a different example from
 [RFC 0017 §13](0017_UniversalKernelDescriptor.md#13-worked-example-sdpa-as-a-ukd), which works the
-`attention_dense` kernel family end to end across all six descriptor kinds; that one shows the pair in
+`attention_dense` kernel family end to end across all seven descriptor kinds; that one shows the pair in
 the context of a full UKD, this one shows one hand-written `isApplicable` becoming one pattern plus
 one criteria set.
 
 The engine's pattern is a single `sdpa_fwd` node binding `$q`, `$k`, `$v` and the result `$o`, plus
 the optional operands this kernel intends to decline — `attn_mask`, `page_table_k`, `page_table_v`,
 each declared optional ([RFC 0020 § 4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)), since an operand the pattern never binds cannot be asked
-about at all. The
+about at all. The engine's KMD declares `dtype` and `head_size`, the two graph quantities these
+kernels bake ([§3](#3-criteria-vocabulary)), so the pack's matcher can pin them per candidate. The
 pack's matcher then constrains what that pattern bound:
 
 ```jsonc
@@ -736,27 +748,28 @@ pack's matcher then constrains what that pattern bound:
   "version": "1.0",
   "id":   "9c3f5b2a-7d41-4e88-b6a0-1f2e3d4c5b6a",
   "name": "SDPA forward (d128, bf16/fp8) criteria",
-  "scope": "graph",        // reads no $kernel.*, so it is evaluated once and prunes the whole pack
+  "scope": "kernel",       // reads $kernel.*, so a failure prunes only that candidate
   "criteria": {"and": [
-    {"in": ["$q.dtype", ["BFLOAT16", "FP8_E4M3"]]},                // supported dtype set
+    {"==": ["$q.dtype", "$kernel.dtype"]},                         // the dtype this binary baked
     {"==": ["$k.dtype", "$q.dtype"]}, {"==": ["$v.dtype", "$q.dtype"]},  // q == k == v
     {"==": ["$q.rank", 4]}, {"==": ["$k.rank", 4]},                // (batch, heads, sequence, head dim)
     {"==": ["$v.rank", 4]}, {"==": ["$o.rank", 4]},
     {"==": ["$k.dims[3]", "$q.dims[3]"]},                          // same head dim across q/k/v
     {"==": ["$v.dims[3]", "$q.dims[3]"]},
     {"==": ["$v.dims[1]", "$k.dims[1]"]},                          // same KV head count on k and v
-    {"==": ["$q.dims[3]", 128]},                                   // head dim (last axis) is 128
+    {"==": ["$q.dims[3]", "$kernel.head_size"]},                   // the head dim this binary baked
     {"or": [{"not_present": ["$sdpa_fwd.dropout_probability"]}, {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]},
     {"==": ["$sdpa_fwd.alibi_mask", false]},
     {"==": ["$sdpa_fwd.padding_mask", false]},
     {"or": [{"not_present": ["$sdpa_fwd.generate_stats"]}, {"==": ["$sdpa_fwd.generate_stats", false]}]},
     // unsupported optional operands declined together; `not_present` always evaluates,
     // unlike a field read on an absent operand
-    {"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]}
+    {"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]},
+    {"==": ["$graph.node_count", 1]}                               // exact: this kernel is the whole graph
   ]}
   // arch is a pack property (KDP.arch), not a match criterion
   // mask self-consistency is a native matcher the pack lists
-  // alongside this descriptor (§7), conjoined with these criteria by the ingestor
+  // alongside this descriptor (§6), conjoined with these criteria by the ingestor
 }
 ```
 
@@ -772,7 +785,7 @@ Mapping to the hand-written code:
 | rank == 4 (:252-263) | UMD `{"==": ["$q.rank", 4]}`, one per bound tensor |
 | `q == k == v` dtype (:265-271) | UMD `{"==": ["$k.dtype", "$q.dtype"]}` |
 | `k.dims[1] == v.dims[1]` head count (:272-276) | UMD `{"==": ["$v.dims[1]", "$k.dims[1]"]}` |
-| head dim, enforced implicitly by a registry miss (`key.empty()`, :309) | UMD `{"==": ["$q.dims[3]", 128]}`, stated explicitly |
+| head dim, enforced implicitly by a registry miss (`key.empty()`, :309) | UMD `{"==": ["$q.dims[3]", "$kernel.head_size"]}`, stated explicitly |
 | `getMaskType` throw-on-contradiction (:293) | native matcher ([§6](#6-the-native-matcher-escape-hatch)) |
 | `getKernelNameKey` table lookup (:301) | dissolves into the KDP's Launch ([§6](#6-the-native-matcher-escape-hatch)) |
 
@@ -798,7 +811,7 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
 - **Expression language sharing.** The expression language is shared with the UDD
   ([§4](#4-the-shared-expression-language)), so a change made for one subsystem can affect the
   other. That risk and its mitigation belong to the language follow-up.
-- **Native-symbol contract, at two scopes.** A pack's `matchSymbol` names C++ the provider must ship
+- **Native-symbol contract, at two scopes.** A pack's `match_symbol` names C++ the provider must ship
   ([§6](#6-the-native-matcher-escape-hatch)), and an engine's `graph_match.native` does the same at
   engine scope ([RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative)); a
   drop-in naming an unshipped symbol fails to resolve. Mitigation: version and document the shipped
@@ -835,6 +848,20 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
   heuristic. The residual cost is more engines in the id space, which
   [RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats) sizes for hundreds to low
   thousands.
+- **A positional axis read is legible only by convention.** A criterion names an axis by index, not
+  by name: `$q.dims[3]` is the head dimension because the pattern's operand order says so
+  ([RFC 0020 § 5](0020_UniversalEngineDescriptor.md#5-the-graph-model-the-pattern-matches)). A wrong
+  index therefore resolves and evaluates cleanly, so the pair-validation of
+  [Appendix A.5](#a5-compile-time-validation-normative) proves the *tensor* is bound but never that
+  the *axis* is the intended one, and the same index recurs across criteria, the UDD's grid formulas,
+  and the UHD's `features_signature`. The `stride_order` encoding sharpens this: a stride-rank array
+  is read against the logical axis order rather than spelling the layout out, so BSHD is `[3,1,2,0]`
+  ([§5](#5-layout-and-stride-order-criteria)) and a transposed pair of entries is a legal
+  permutation that silently names a different layout. Mitigation: pin `$x.rank` beside every
+  positional read, comment the axis at each site, and rely on the match-equivalence tests of
+  [§14](#14-testing-and-performance) against the hand-written builder to catch what static
+  validation structurally cannot. Whether dims may be named at all is the shape-matching follow-up's
+  ([RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs)).
 
 ---
 
@@ -905,8 +932,8 @@ The design borrows established ideas; none is a dependency. These informed the m
   ([§4](#4-the-shared-expression-language)).
 - **Stride-order layout:** layout represented as a per-logical-dimension stride-rank array, lower
   meaning faster-varying, since tensors carry no layout enum ([§5](#5-layout-and-stride-order-criteria)).
-- **Native criterion:** the pack-scoped escape hatch; a `GraphCriterionFn` named by a
-  `MatchDescriptor`'s `matchSymbol` and conjoined with a UMD's criteria by the ingestor, for logic
+- **Native criterion:** the pack-scoped escape hatch; a `GraphCriterionFn` named by a UMD's
+  `match_symbol` and conjoined with the pack's other matchers by the ingestor, for logic
   the built-in operators cannot state. It **reads** the engine's binding and returns a verdict. It
   lives beside the expression language, never inside it
   ([§6](#6-the-native-matcher-escape-hatch)).
@@ -948,14 +975,15 @@ appendix fixes the descriptor object and the hipDNN environment its criteria are
 | `name` | string | yes | — | Diagnostics only; not semantic |
 | `version` | string | no | `"1.0"` | Matcher format version, `<major>.<minor>`, gated at load as a **ceiling**: a differing `major`, or a `minor` newer than the runtime's, is refused; an older minor always loads ([§11](#11-serialization-and-versioning)) |
 | `sdk_version` | string | no | `"1.0"` | The hipDNN graph schema version these criteria were authored against, `<major>.<minor>`. Refused at load when newer than the runtime's own schema, and declined at match time against the **floor the graph sets** — a matcher below what the graph requires is skipped instead of asked, declining its packs ([§11](#11-serialization-and-versioning)) |
-| `allow_override_shape` | bool | no | `false` | When `false`, override-shape graphs are declined ([§2](#2-the-symbol-table-criteria-read)) |
+| `allow_override_shape` | bool | no | `false` | The matcher's opt-in to accepting a graph that enables execute-time override shapes. When `false`, such a graph is declined before the criteria run. This is the matcher's own gate and is distinct from `$graph.is_override_shape_enabled`, which is the graph's state ([§2](#2-the-symbol-table-criteria-read), [RFC 0020 § 6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)). A prebuilt kernel that bakes its shape leaves this at the default rather than restating the condition as a criterion |
 | `criteria` | Expr | see below | — | A single expression whose static type is `Bool` (A.3) |
 | `scope` | `"graph"` \| `"kernel"` | yes | — | Which inputs the criteria read, and so what a failure prunes: `graph` is evaluated once per `(graph, device)` and disqualifies **every** kernel in the pack; `kernel` also reads `$kernel.*` and disqualifies **only the candidate** ([§8](#8-the-matcher-compilation-indexing-and-caching)). It is declared rather than inferred so the pruning level is a stated contract, not a consequence of which tokens an expression happens to name |
-| `match_symbol` | string | no | — | The **native criterion** escape hatch: a symbol naming a `GraphCriterionFn` the provider ships, resolved through its registry ([§6](#6-the-native-matcher-escape-hatch)). A UMD carries `criteria`, `match_symbol`, or both; when both, the pack is admitted only if each passes |
+| `match_symbol` | string | no | — | The **native criterion** escape hatch: a symbol naming a `GraphCriterionFn` the provider ships, resolved through its registry ([§6](#6-the-native-matcher-escape-hatch)) |
 
-A UMD carries at least one of `criteria` and `match_symbol`; one that declares neither states no
-check and is refused. No other top-level keys are permitted, and an unknown key is refused. In
-particular a UMD carries no
+**A UMD carries exactly one of `criteria` and `match_symbol`.** One that declares neither states no
+check; one that declares both hides a conjunction inside a descriptor that a pack states by listing
+two matcher ids ([§6](#6-the-native-matcher-escape-hatch)). Either is refused. No other top-level
+keys are permitted, and an unknown key is refused. In particular a UMD carries no
 `schema` member — the `.umd.json` filename already states the type, and a file whose name and body
 disagree has no correct reading, so the body does not restate it ([§11](#11-serialization-and-versioning)).
 Nor does it carry `nodes`: the pattern is the engine's ([§2](#2-the-symbol-table-criteria-read)). Both version fields compare
@@ -1045,12 +1073,19 @@ the UED ([§2](#2-the-symbol-table-criteria-read)).
    `sdk_version`, when present, is a well-formed `<major>.<minor>` string the runtime can honor:
    same `major`, and a `minor` no newer than the runtime's
    ([§11](#11-serialization-and-versioning)).
-2. `scope` is `"graph"` or `"kernel"`, and at least one of `criteria` and `match_symbol` is
+2. `scope` is `"graph"` or `"kernel"`, and exactly one of `criteria` and `match_symbol` is
    present (A.1).
 3. `criteria`, when present, passes the expression language's static validation — operator
    recognition, arity, argument types, and the `Bool` root — and every layout alias in it
-   resolves (A.4). A `kernel`-scoped UMD whose criteria read no `$kernel.*` is accepted but
-   diagnosed: it pays per-candidate evaluation for a decision that cannot vary by candidate.
+   resolves (A.4). Its `$kernel.*` reads must agree with the declared `scope`, in both
+   directions. A `graph`-scoped UMD whose criteria read any `$kernel.*` is **refused**: a
+   graph-scoped verdict is computed once and disqualifies every kernel in the pack
+   ([A.1](#a1-the-umd-descriptor-object)), so reading a per-candidate field there would prune
+   the whole pack on one arbitrary candidate's metadata. A `kernel`-scoped UMD whose criteria
+   read no `$kernel.*` is the harmless converse: accepted, but diagnosed, since it pays
+   per-candidate evaluation for a decision that cannot vary by candidate. The compiler already
+   computes the `$kernel.*` read set to build the memoization projection
+   ([§8](#8-the-matcher-compilation-indexing-and-caching)), so neither check costs a second walk.
 4. `match_symbol`, when present, is registered in the provider's registry
    ([§6](#6-the-native-matcher-escape-hatch)); an unregistered symbol refuses the descriptor
    rather than deferring the failure to match time.

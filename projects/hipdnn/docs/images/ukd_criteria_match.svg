@@ -52,9 +52,9 @@
   <text x="352" y="137" font-family="Consolas, monospace" font-size="11">  results  { O:$o }</text>
   <text x="345" y="168" font-size="10" fill="#8a6d1f" font-weight="600">UMD criteria &#183; one expression tree</text>
   <text x="345" y="188" font-family="Consolas, monospace" font-size="11">{"and": [</text>
-  <text x="345" y="206" font-family="Consolas, monospace" font-size="11">  {"in": ["$q.dtype", ["BFLOAT16"]]},</text>
+  <text x="345" y="206" font-family="Consolas, monospace" font-size="11">  {"==": ["$q.dtype", "$kernel.dtype"]},</text>
   <text x="345" y="224" font-family="Consolas, monospace" font-size="11">  {"==": ["$q.rank", 4]},</text>
-  <text x="345" y="242" font-family="Consolas, monospace" font-size="11">  {"==": ["$q.dims[3]", 128]},</text>
+  <text x="345" y="242" font-family="Consolas, monospace" font-size="11">  {"==": ["$q.dims[3]", "$kernel.head_size"]},</text>
   <text x="345" y="260" font-family="Consolas, monospace" font-size="11">  {"==": ["$k.dims[3]", "$q.dims[3]"]},</text>
   <text x="345" y="278" font-family="Consolas, monospace" font-size="11">  {"!": ["$sdpa_fwd.causal_mask"]}</text>
   <text x="345" y="296" font-family="Consolas, monospace" font-size="11">]}</text>

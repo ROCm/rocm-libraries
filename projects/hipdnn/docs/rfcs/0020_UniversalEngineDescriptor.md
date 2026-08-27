@@ -92,21 +92,24 @@ a follow-up, filling 0017's deferred scope is expected and is not itself a diver
   optional-operand suffix, how nodes connect, and the well-formedness and registry-resolution rules
   a load rejects on. It also adds the **`native` arm** (§ 4.5) beside it, the registry-resolved
   escape hatch 0017 § 5 calls a "native predicate", scoped here to the engine's stage-one match.
-- **Pattern compile at registration (§ 12).** 0017 § 8.1 compiles the pattern on the first
-  `isApplicable`; this RFC pulls it to registration so an unresolvable op or operand name is a load
-  error rather than a first-graph surprise.
+- **Pattern compile at registration (§ 12).** 0017 § 8.1 step 3 defers the pattern's compile — and
+  the native symbol's resolution — to registration and names this section as the authority for it;
+  the mechanism is specified here, so an unresolvable op or operand name is a load error rather
+  than a first-graph surprise.
 - **The graph-schema floor on the engine (§ 4.2).** 0017 § 4 requires a UED to declare the hipDNN
   schema version its pattern was authored against; this RFC gives it a field (`sdk_version`), a
   default, and a comparison rule.
 
 **Divergences (this RFC departs from an 0017 convention):**
 
-- **No in-band type tag (§ 4).** Several of 0017's examples still carry a `schema` tag naming the
-  descriptor kind; a UED carries none, and neither does a UMD
-  ([RFC 0018 § 11](0018_UniversalMatchDescriptor.md#11-serialization-and-versioning)). The
-  descriptor kind is tracked externally by the filename suffix (§ 4), and a `major.minor` `version`
-  field carries compatibility (§ 14). The remaining tagged examples are the types whose own
-  follow-ups have not landed; the loader already rejects `schema` on every one of the seven.
+- **No in-band type tag (§ 4).** 0017 introduced the descriptor kinds with an in-band `schema` tag
+  naming each kind in the body; no descriptor carries one. The kind is tracked externally by the
+  filename suffix (§ 4) and a `major.minor` `version` field carries compatibility (§ 14): a file
+  whose name and body disagree has no correct reading, so the body does not restate the name.
+  Rejecting the key is specified wherever the unknown-member rule is — a UED rejects `schema` as an
+  unknown field (§ 4.2, § 13.1), and so does a UMD
+  ([RFC 0018 § A.1](0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)). The remaining
+  kinds inherit the same rule when their own follow-ups land.
 - **Version-specific validation is not required (§ 13.1).** A single schema validates the
   structural superset across all supported versions. The schema carries `addedInVersion` data
   (§ 4.2) that makes validating a UED against its declared version's exact field set *possible*, but
@@ -116,7 +119,9 @@ No other silent contradictions. In particular the two 0017 § 4 UED fields an ea
 RFC omitted — the `nodes` pattern and `sdk_version` — are carried here (§ 4.2, § 4.3), so the
 field contract is a superset of 0017's, not a subset of it. The pattern is reached through
 `graph_match` rather than as a top-level member, which is what keeps it additive (§ 14.2). Any
-conflict surfaced during review is recorded here.
+conflict surfaced during review is recorded here. The converse ledger, what changed *within* 0017
+when this RFC and RFC 0018 landed beside it, is
+[RFC 0017 § 1.2](0017_UniversalKernelDescriptor.md#12-what-this-revision-changed).
 
 ## 3. Engine Identity
 
@@ -834,8 +839,10 @@ device is skipped before the match is attempted, and the match runs on the first
 that gate. An engine whose packs are *all* arch-excluded therefore never matches at all: there is no
 device it could serve, so walking the graph could only reach the same answer more slowly. The
 binding is computed at most once per (graph, device) and reused by every surviving pack, so
-laziness changes when the work happens, never how often. This orders stage one **after** pack
-resolution and the arch gate, which RFC 0017 § 8.1 states as a single pre-pack step.
+laziness changes when the work happens, never how often. This is RFC 0017 § 8.1's order rather than
+a re-ordering of it: its step 4 resolves the packs and applies the arch gate as it goes, and its
+step 5 runs the match lazily on the first pack that cleared that gate, reasoning the all-excluded
+case the same way.
 
 **Lowering parity, if the pattern is ever lowered.** [RFC 0018 §
 9](0018_UniversalMatchDescriptor.md#9-static-matcher-sketch) sketches pre-compiling a matcher into a
@@ -934,14 +941,14 @@ hand-written engine-registration path. For each UED that passes validation (§ 1
    op-schema registry (§ 5) and compiled once into the in-memory form that runs against live
    graphs, laying out the symbol table it will publish (§ 6.1, § 7); the § 4.3.3 checks are exactly
    the ones this step performs, and the compiled form is shared across every graph the engine sees
-   and across every pack naming it. RFC 0017 § 8.1 has the pattern compile once and stay in the
-   descriptor cache, but reaches it on the first `isApplicable`; this RFC pulls the compile forward
-   to registration, so a name the op-schema registry does not declare is a **load error naming the
-   UED and the node**, not a first-graph surprise. For **`native`**, there is nothing to compile:
-   the symbol is looked up in the provider's graph-match registry, and an unregistered symbol is a
-   load error naming the UED and the symbol (§ 13.2). An **absent** `graph_match` resolves to the
-   empty binding and skips this step. Either way the failure is at registration, before the
-   engine's id is advertised.
+   and across every pack naming it. RFC 0017 § 8.1 step 3 defers the compile to registration and
+   names this section as the authority for it, so a name the op-schema registry does not declare is
+   a **load error naming the UED and the node**, not a first-graph surprise; the compiled form then
+   sits in the descriptor cache that 0017 § 8.1 reads from. For **`native`**, there is nothing to
+   compile: the symbol is looked up in the provider's graph-match registry, and an unregistered
+   symbol is a load error naming the UED and the symbol (§ 13.2). An **absent** `graph_match`
+   resolves to the empty binding and skips this step. Either way the failure is at registration,
+   before the engine's id is advertised.
 3. **Instantiates one generic engine**: a single engine implementation that satisfies hipDNN's
    existing engine contract from descriptor data rather than hand-written code, one instance per
    UED, bound to that UED's descriptors: its `heuristic` (UHD, when it ships one) and `metadata`
