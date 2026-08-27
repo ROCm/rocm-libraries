@@ -19866,6 +19866,24 @@ class KernelWriterAssembly(KernelWriter):
               comment="encode PAP LDS bank in SkPrefetchPrimed"))
     return mod
 
+  def papShiftLocalReadAddrAliases(self, mod: Module, tc: str, tState, shiftSrc, bankKind: str) -> None:
+    # LocalReadAddr{tc} may be more than one VGPR when the tensor's LDS
+    # footprint exceeds maxLDSConstOffset: cal_offset_srcAddr()/LocalRead.py
+    # select "LocalReadAddr{tc}+N" aliases by offset // maxLDSConstOffset.
+    # All aliases point into the same double-buffered LDS region, so every
+    # alias needs the same PAP bank shift, not just the base (+0) register.
+    # Every tensor reaching this helper has a positive count today, since PAP
+    # rejects DirectToVgpr and DirectToVgprMXS{A,B} follow DirectToVgpr{A,B}.
+    # The zero-iteration case is a guard: numVgprLocalReadAddr is 0 for a
+    # tensor zeroed by DirectToVgpr and -1 before allocation runs, and RegSet
+    # emits vgprLocalReadAddr{tc} only for a positive count, so a non-positive
+    # count has to emit nothing rather than an add against a missing symbol.
+    numAddrRegs = tState.numVgprLocalReadAddr // self.states.rpla
+    for i in range(numAddrRegs):
+      regName = f"LocalReadAddr{tc}" if i == 0 else f"LocalReadAddr{tc}+{i}"
+      mod.add(VAddU32(dst=vgpr(regName), src0=vgpr(regName),
+              src1=shiftSrc, comment=f"shift {regName} to {bankKind}"))
+
   def papTdmRestoreLdsBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     mod = Module("TDM restore PAP LDS bank for primed path")
@@ -19896,17 +19914,15 @@ class KernelWriterAssembly(KernelWriter):
 
       for tP in (tPA, tPB):
         tc = tP["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tc}"), src0=vgpr(f"LocalReadAddr{tc}"),
-                src1=blkOffset, comment=f"shift LocalReadAddr{tc} to PAP bank"))
+        tState = self.states.a if tc == "A" else self.states.b
+        self.papShiftLocalReadAddrAliases(mod, tc, tState, blkOffset, "PAP bank")
 
       if kernel["ProblemType"]["MXBlockA"]:
         tcMX = tPA["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=blkOffset, comment=f"shift LocalReadAddr{tcMX} to PAP bank"))
+        self.papShiftLocalReadAddrAliases(mod, tcMX, self.states.mxsa, blkOffset, "PAP bank")
       if kernel["ProblemType"]["MXBlockB"]:
         tcMX = tPB["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=blkOffset, comment=f"shift LocalReadAddr{tcMX} to PAP bank"))
+        self.papShiftLocalReadAddrAliases(mod, tcMX, self.states.mxsb, blkOffset, "PAP bank")
 
     mod.add(skipLbl)
     return mod
@@ -19974,17 +19990,15 @@ class KernelWriterAssembly(KernelWriter):
 
       for tP in (tPA, tPB):
         tc = tP["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tc}"), src0=vgpr(f"LocalReadAddr{tc}"),
-                src1=sgpr(papBankSgpr), comment=f"shift LocalReadAddr{tc} to PAP DTL bank"))
+        tState = self.states.a if tc == "A" else self.states.b
+        self.papShiftLocalReadAddrAliases(mod, tc, tState, sgpr(papBankSgpr), "PAP DTL bank")
 
       if kernel["ProblemType"]["MXBlockA"]:
         tcMX = tPA["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=sgpr(papBankSgpr), comment=f"shift LocalReadAddr{tcMX} to PAP DTL bank"))
+        self.papShiftLocalReadAddrAliases(mod, tcMX, self.states.mxsa, sgpr(papBankSgpr), "PAP DTL bank")
       if kernel["ProblemType"]["MXBlockB"]:
         tcMX = tPB["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=sgpr(papBankSgpr), comment=f"shift LocalReadAddr{tcMX} to PAP DTL bank"))
+        self.papShiftLocalReadAddrAliases(mod, tcMX, self.states.mxsb, sgpr(papBankSgpr), "PAP DTL bank")
 
     mod.add(skipLbl)
     return mod
