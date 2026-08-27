@@ -40,7 +40,8 @@ static int make_cfg(int idx, rocke_wgrad_reduce_spec_t* spec, const char** arch)
     *spec = rocke_wgrad_reduce_spec_default();
     *arch = "gfx950";
 
-    switch (idx) {
+    switch(idx)
+    {
     case 0:
         spec->wg_M = 64;
         spec->wg_N = 576;
@@ -93,7 +94,8 @@ static int make_cfg(int idx, rocke_wgrad_reduce_spec_t* spec, const char** arch)
 
 int main(int argc, char** argv)
 {
-    if (argc < 2) {
+    if(argc < 2)
+    {
         fprintf(stderr, "usage: %s <config_index> [ll|ir|verify]\n", argv[0]);
         return 2;
     }
@@ -102,14 +104,16 @@ int main(int argc, char** argv)
 
     rocke_wgrad_reduce_spec_t spec;
     const char* arch = "gfx950";
-    if (make_cfg(idx, &spec, &arch) != 0) {
+    if(make_cfg(idx, &spec, &arch) != 0)
+    {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
     rocke_ir_builder_t b;
     rocke_kernel_def_t* kernel = rocke_build_wgrad_workspace_reduce_new(&b, &spec, arch);
-    if (kernel == NULL) {
+    if(kernel == NULL)
+    {
         const char* m = rocke_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
         rocke_ir_builder_free(&b);
@@ -117,38 +121,48 @@ int main(int argc, char** argv)
     }
 
     int ret = 0;
-    if (strcmp(mode, "ll") == 0) {
+    if(strcmp(mode, "ll") == 0)
+    {
         char* llvm_text = NULL;
         rocke_status_t st
             = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
-        if (st != ROCKE_OK || !llvm_text) {
+        if(st != ROCKE_OK || !llvm_text)
+        {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
             rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
         free(llvm_text);
-    } else if (strcmp(mode, "ir") == 0) {
+    }
+    else if(strcmp(mode, "ir") == 0)
+    {
         char* ir_text = NULL;
         rocke_status_t st = rocke_ir_serialize(kernel, &ir_text);
-        if (st != ROCKE_OK || !ir_text) {
+        if(st != ROCKE_OK || !ir_text)
+        {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
             rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(ir_text, stdout);
         free(ir_text);
-    } else if (strcmp(mode, "verify") == 0) {
+    }
+    else if(strcmp(mode, "verify") == 0)
+    {
         char** msgs = NULL;
         int nmsg = 0;
         rocke_verify(kernel, &msgs, &nmsg);
-        for (int i = 0; i < nmsg; i++) {
+        for(int i = 0; i < nmsg; i++)
+        {
             fputs(msgs[i], stdout);
             fputc('\n', stdout);
             free(msgs[i]);
         }
         free(msgs);
-    } else {
+    }
+    else
+    {
         fprintf(stderr, "unknown mode '%s' (expected ll|ir|verify)\n", mode);
         ret = 2;
     }
