@@ -180,6 +180,8 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             matrixInstN = kernel["MatrixInstN"] * kernel["MatrixInstBN"] if (kernel["MatrixInstN"] == 4) else matrixInstT
 
             module = Module("ComputeStoreVgprsMFMA")
+            # contigOut: wave coordinate steps by the full MIWaveTile block, not one MI-tile.
+            contigOut = kernel.get("UseSubtileImpl") or kernel.get("WaveContiguousOutput")
 
             # coord 1 : wave part
             module.add(vectorStaticDivide(wave_id, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res))
@@ -187,7 +189,7 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             if kernel["LocalSplitU"] > 1:
                 module.add(vectorStaticRemainder(dummy, tmpVgpr0, tmpVgpr0, kernel["MIWaveGroup"][1], tmpVgpr1Res, tmpSgprInfo))
             # Subtile kernels: each wave owns a contiguous block of MIWaveTile[1]*MIBShape1 cols.
-            waveBlockCols = MIBShape1 * kernel["MIWaveTile"][1] if kernel.get("UseSubtileImpl") else MIBShape1
+            waveBlockCols = MIBShape1 * kernel["MIWaveTile"][1] if contigOut else MIBShape1
             module.add(vectorStaticMultiply(vgpr(tid1), vgpr(tmpVgpr0), waveBlockCols, tmpSgprInfo, "wave coordination offset 1"))
 
             # coord 1 : thread part
@@ -214,7 +216,7 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             module.add(vectorStaticRemainder(dummy, tmpVgpr0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res, tmpSgprInfo))
             # Subtile kernels: each wave owns a contiguous block of MIWaveTile[0]*MIBShape0 rows.
             # wave_id0 * MIWaveTile[0] * MIBShape0 gives the start row of wave's block.
-            waveBlockRows = MIBShape0 * kernel["MIWaveTile"][0] if kernel.get("UseSubtileImpl") else MIBShape0
+            waveBlockRows = MIBShape0 * kernel["MIWaveTile"][0] if contigOut else MIBShape0
             module.add(vectorStaticMultiply(vgpr(tmpVgpr0), vgpr(tmpVgpr0), waveBlockRows, tmpSgprInfo, "wave coordination offset 0"))
 
             # coord 0 : thread part
