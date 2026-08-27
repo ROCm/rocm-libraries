@@ -142,8 +142,8 @@ float GemmFwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
         if(wDesc.GetType() == miopenInt8 && yDesc.GetType() != miopenInt32)
             n_CastTensor = 1;
     }
-    // 3D point-output fwd path with stride==filter can run one strided-batched GEMM.
-    else if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) &&
+    // Point-output fwd path with stride==filter can run one strided-batched GEMM.
+    else if(miopen::conv::IsFwdDataPointOutputStrideEqFilter(problem) &&
             wDesc.GetType() != miopenInt8)
     {
         n_gemm_runs            = 1;
@@ -877,7 +877,7 @@ size_t GemmFwdRest::GetWorkspaceSize(const ExecutionContext& context,
     decltype(auto) wDesc  = problem.GetWeights();
     decltype(auto) yDesc  = problem.GetOut();
 
-    if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) && wDesc.GetType() != miopenInt8)
+    if(miopen::conv::IsFwdDataPointOutputStrideEqFilter(problem) && wDesc.GetType() != miopenInt8)
         return 0;
 
     const auto spatial_dim = conv.GetSpatialDimension();
@@ -962,6 +962,32 @@ bool GemmFwdRest::IsApplicable(const ExecutionContext& context,
                                const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
+    // A point-output shape is one GEMM with no Im2Col, which stays correct channel-last: a
+    // per-batch x slice and a row of w both enumerate C*Z*Y*X, in (z,y,x,c) order instead of
+    // (c,z,y,x), so the dot product pairs the same elements. The shared base check is limited
+    // to the default layout because the Im2Col path it also guards is not layout agnostic, so
+    // cover the channel-last case here, for plain uncasted types only.
+    if(problem.IsLayoutNHWC() && miopen::conv::IsFwdDataPointOutputStrideEqFilter(problem))
+    {
+        const auto& xDesc = problem.GetIn();
+        const auto& wDesc = problem.GetWeights();
+        const auto& yDesc = problem.GetOut();
+
+        if(!problem.AllTensorsDimsFitIntoInt())
+            return false;
+        if(problem.HasNonPackedTensors())
+            return false;
+        if(problem.IsTensorsCasted() || problem.IsFp8() || problem.IsBfp8())
+            return false;
+        if(wDesc.GetType() == miopenInt8)
+            return false;
+        if(gemm::IsAnyBufferBf16(xDesc, yDesc, wDesc) && !gemm::IsBf16Supported)
+            return false;
+        if(gemm::IsAnyBufferFp16(xDesc, yDesc, wDesc) && !gemm::IsFp16Supported)
+            return false;
+        return true;
+    }
+
     if(!GemmFwdBase::IsApplicable(context, problem))
         return false;
 
@@ -973,7 +999,7 @@ bool GemmFwdRest::IsApplicable(const ExecutionContext& context,
     if(GemmFwd1x1_0_2{}.IsApplicable(context, problem))
         return false;
 
-    if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) &&
+    if(miopen::conv::IsFwdDataPointOutputStrideEqFilter(problem) &&
        problem.GetWeights().GetType() != miopenInt8)
         return true;
 
@@ -1002,8 +1028,7 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
 
     const auto workspace_req = GetWorkspaceSize(context, problem);
     const auto use_batched_fwd_point_output =
-        miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) &&
-        wDesc.GetType() != miopenInt8;
+        miopen::conv::IsFwdDataPointOutputStrideEqFilter(problem) && wDesc.GetType() != miopenInt8;
 
     auto solution         = ConvSolution{miopenStatusSuccess};
     solution.workspace_sz = workspace_req;

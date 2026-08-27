@@ -27,6 +27,7 @@
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
 #include <queue>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/core/Function.hpp"
@@ -94,6 +95,10 @@ struct DAGNode {
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };
 
+// A scheduler-only hard ordering constraint: first must issue before second.
+// It is kept separate from the register-dependency DAG.
+using HardSchedulingConstraint = std::pair<StinkyInstruction*, StinkyInstruction*>;
+
 // comparator: return true if a should come *after* b.
 struct CompareByDAGid {
     bool operator()(const DAGNode* a, const DAGNode* b) const {
@@ -160,10 +165,12 @@ class ReadyQueue {
     // Hook called before scheduling each region. \p blockBegin is the start of the basic block
     // (prefix [blockBegin, regionStart) is visible for cross-region / preloop state).
     virtual void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                              IRList::iterator blockBegin) {
+                              IRList::iterator blockBegin,
+                              std::vector<HardSchedulingConstraint>& hardConstraints) {
         (void)regionStart;
         (void)regionEnd;
         (void)blockBegin;
+        (void)hardConstraints;
     }
 
     // Hook called after a basic block has been fully scheduled. When the queue is
