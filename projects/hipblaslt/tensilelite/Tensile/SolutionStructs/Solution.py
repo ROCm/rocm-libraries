@@ -203,6 +203,22 @@ def _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
           and localSubtileGrid[0] % int(loadRatioGR) != 0)
 
 
+def _subtileWaveStraddlesStrip(stack, perWaveMTiles):
+  # A wave has to line up with the LDS strips it reads: either it owns whole
+  # strips (perWaveMTiles a multiple of stack) or several waves share one
+  # (stack a multiple of perWaveMTiles).  Anything else leaves a wave holding a
+  # fraction of a strip, which the per-strip soffset registers cannot address --
+  # the GR emit indexes past the end of localSubtilesRegister.
+  #
+  # Only reachable when the free dim is not a power of two, since the stack is
+  # its largest power-of-two divisor: a macro tile of 192 gives 12 tiles and a
+  # stack of 4, so two waves take 6 tiles each and straddle.  A wave group of 1
+  # on that dim always lines up.
+  if stack <= 0 or perWaveMTiles <= 0:
+    return False
+  return perWaveMTiles % stack != 0 and stack % perWaveMTiles != 0
+
+
 def _validateSubtileGRKPartition(state, printRejectionReason):
   # TODO: TEMPORARY FIX. Reject gfx950 subtile solutions that hit the GR
   # K-partition bug (see _subtileGRKPartitionIsBuggy). Remove once
@@ -216,6 +232,15 @@ def _validateSubtileGRKPartition(state, printRejectionReason):
   from Tensile.Components.Subtile.Kernel import selectABGeometry, TileInfo
   for tc in ("A", "B"):
     tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
+    stack = int(tileInfo.subtileShape[0])
+    perWaveMTiles = int(tileInfo.localMMATileGrid[0])
+    if _subtileWaveStraddlesStrip(stack, perWaveMTiles):
+      reject(state, printRejectionReason,
+             "UseSubtileImpl=1 leaves a wave straddling an LDS strip on tensor %s: "
+             "%d MMA tiles per wave against a strip of %d, so the wave neither owns "
+             "whole strips nor shares one"
+             % (tc, perWaveMTiles, stack))
+      return False
     loadRatioGR = tileInfo.loadRatioGR
     localSubtileGrid = tileInfo.localSubtileGrid
     if _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
