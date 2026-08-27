@@ -280,7 +280,6 @@ namespace TensileLite
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
-                ("platform-idx",             po::value<int>()->default_value(0), "OpenCL Platform Index")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
                 ("sync-after-warmups",       po::value<bool>()->default_value(true), "Synchronize GPU after warmup kernel runs")

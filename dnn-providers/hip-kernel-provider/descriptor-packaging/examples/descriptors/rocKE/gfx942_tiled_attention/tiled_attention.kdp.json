@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "id": "7021d1df-7845-5773-ad35-9f92dbb68146",
+  "name": "hkp_example:tiled_attention",
+  "arch": ["gfx942"],
+  "matchers": [
+    "0f3a9eaa-342f-523e-a827-54d0597827af",
+    "a06e0cb1-b421-5364-beca-d2be0a7652ec"
+  ],
+  "engine": "dadc0932-9f93-503b-a856-1d49800ad7d4",
+  "dispatch": "3db8dc42-af4a-50cc-97ce-b64e75044021",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "b3b98b95-32ca-5ffa-9ba8-138a09e40fba",
+      "name": "example_unified_attention_2d_tiled.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false
+        }
+      },
+      "metadata": {
+        "block_size": 16,
+        "dtype": "BF16",
+        "operation": "ATTENTION"
+      },
+      "priority": 0
+    }
+  ]
+}
