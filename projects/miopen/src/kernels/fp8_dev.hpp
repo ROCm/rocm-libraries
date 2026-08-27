@@ -226,8 +226,7 @@ float_to_fp8_impl(float _x, const int wm, const int we) // bool stoch, uint rng)
         return 0;
 
     uint drop_mask           = (1 << (mfmt - wm)) - 1;
-    const int max_exp =
-        (1 << we) - ((!negative_zero_nan && we == 5) ? 2 : 1);
+    const int max_exp        = (1 << we) - ((!negative_zero_nan && we == 5) ? 2 : 1);
     const int exp_low_cutoff = (128) - (1 << (we - 1)) + 1 - (negative_zero_nan ? 1 : 0);
 
     exponent -= exp_low_cutoff - 1;
@@ -269,8 +268,7 @@ float_to_fp8_impl(float _x, const int wm, const int we) // bool stoch, uint rng)
     }
     if(exponent == 0 && mantissa == 0)
         return negative_zero_nan ? 0 : (sign << 7);
-    if(clip && !negative_zero_nan && we == 4 && exponent == max_exp &&
-       mantissa == (1 << wm) - 1)
+    if(clip && !negative_zero_nan && we == 4 && exponent == max_exp && mantissa == (1 << wm) - 1)
         mantissa--;
     mantissa &= (1 << wm) - 1;
     return (sign << 7) | (exponent << wm) | mantissa;

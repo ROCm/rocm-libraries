@@ -110,9 +110,8 @@ void TestConversions(const Fp8Format& format, bool force_software_fallback, Fp8T
                   std::vector<unsigned char>(data.encoded.begin(), data.encoded.end()));
     }
 
-    const auto output = fp8_type == Fp8Type::Fp8
-                            ? handle.Read<float>(fp8_out_dev, value_count)
-                            : handle.Read<float>(bfp8_out_dev, value_count);
+    const auto output = fp8_type == Fp8Type::Fp8 ? handle.Read<float>(fp8_out_dev, value_count)
+                                                 : handle.Read<float>(bfp8_out_dev, value_count);
     for(std::size_t i = 0; i < value_count; ++i)
     {
         SCOPED_TRACE("value index " + std::to_string(i));
@@ -128,9 +127,9 @@ void TestConversions(const Fp8Format& format, bool force_software_fallback, Fp8T
 
 void TestFormats(Fp8Type fp8_type)
 {
-    constexpr auto inf = std::numeric_limits<float>::infinity();
-    constexpr auto nan = std::numeric_limits<float>::quiet_NaN();
-    constexpr auto max = std::numeric_limits<float>::max();
+    constexpr auto inf                     = std::numeric_limits<float>::infinity();
+    constexpr auto nan                     = std::numeric_limits<float>::quiet_NaN();
+    constexpr auto max                     = std::numeric_limits<float>::max();
     const std::array<Fp8Format, 2> formats = {
         Fp8Format{"fnuz",
                   0,
