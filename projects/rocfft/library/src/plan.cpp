@@ -4825,8 +4825,17 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
 // TODO allgather for placement, transform_type, precision, dimensions, {lengths}, and
 // number_of_transforms and validate that all ranks' args are identical, before proceeding
 #endif
-    if(dimensions > 3)
+    if(dimensions == 0 || dimensions > 3)
+    {
         return rocfft_status_invalid_dimensions;
+    }
+
+    if(std::any_of(lengths, lengths + dimensions, [](size_t length) { return length == 0; })
+       || number_of_transforms == 0)
+    {
+        return rocfft_status_invalid_arg_value;
+    }
+
     try
     {
         plan->placement     = placement;
