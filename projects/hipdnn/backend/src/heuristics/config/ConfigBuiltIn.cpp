@@ -542,20 +542,6 @@ std::optional<std::vector<int64_t>>
     return reordered;
 }
 
-// getEngineNameFromId() throws std::out_of_range for an unregistered id; PR #10645 supersedes
-// this helper with a non-throwing equivalent.
-std::string engineNameOrHex(int64_t id)
-{
-    try
-    {
-        return std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(id));
-    }
-    catch(const std::out_of_range&)
-    {
-        return hipdnn_data_sdk::utilities::formatEngineIdHex(id);
-    }
-}
-
 /// Comma-separated engine names, hex fallback for unregistered ids.
 std::string engineIdsToNames(const std::vector<int64_t>& ids)
 {
@@ -566,7 +552,7 @@ std::string engineIdsToNames(const std::vector<int64_t>& ids)
         {
             joined += ", ";
         }
-        joined += engineNameOrHex(ids[i]);
+        joined += hipdnn_data_sdk::utilities::engineNameOrHex(ids[i]);
     }
     return joined;
 }
