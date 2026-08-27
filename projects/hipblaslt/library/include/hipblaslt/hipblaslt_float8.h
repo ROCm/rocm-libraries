@@ -171,7 +171,7 @@ struct HIPBLASLT_EXPORT hipblaslt_bf8_fnuz: public __hip_fp8_e5m2_fnuz
     : __hip_fp8_e5m2_fnuz(reinterpret_cast<const __half &>(f)) {}
 
         // operator overloadiing -> upcast
-#if HIP_FP8_TYPE_OCP
+#if HIP_FP8_TYPE_FNUZ
     HIP_HOST_DEVICE operator _Float16() const
 #else
     HIP_HOST operator _Float16() const
