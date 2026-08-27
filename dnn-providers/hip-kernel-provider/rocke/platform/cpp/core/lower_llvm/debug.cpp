@@ -18,6 +18,7 @@
  * here fails loudly rather than producing a subtly different profile.
  */
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "rocke/arena.h"
@@ -508,21 +509,9 @@ int rocke_ll_debug_location_id(rocke_lower_t* L, rocke_ll_debug_t* D, const char
     return parent;
 }
 
-int rocke_ll_debug_variable_id(
-    rocke_lower_t* L, rocke_ll_debug_t* D, const char* name, const char* type_name, const char* loc)
+static int
+    dbg_basic_type_id(rocke_lower_t* L, rocke_ll_debug_t* D, const char* type_name, int* bit_width)
 {
-    if(D == NULL || !D->has_variables)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "debug variable metadata was not enabled");
-    }
-    rocke_ll_dbg_frame_t frames[ROCKE_LL_DEBUG_MAX_FRAMES];
-    int n = dbg_parse_loc(L, loc, frames, ROCKE_LL_DEBUG_MAX_FRAMES);
-    if(n == 0)
-    {
-        rocke_ll_fail(
-            L, ROCKE_ERR_VALUE, "debug value %s has no usable source location", name ? name : "");
-    }
-
     int size = 0;
     const char* encoding = NULL;
     if(strcmp(type_name, "i1") == 0)
@@ -558,10 +547,6 @@ int rocke_ll_debug_variable_id(
     }
 
     int type_id = dbg_alloc(D);
-    int variable_id = dbg_alloc(D);
-    int file_id = dbg_file_id(L, D, frames[0].path);
-    int scope_id = n == 1 ? dbg_lexical_block_id(L, D, frames[0].path)
-                          : dbg_inlined_subprogram_id(L, D, &frames[0]);
     dbg_node(L,
              D,
              rocke_arena_printf(&L->arena,
@@ -570,6 +555,81 @@ int rocke_ll_debug_variable_id(
                                 dbg_escape(L, type_name),
                                 size,
                                 encoding));
+    *bit_width = size;
+    return type_id;
+}
+
+static int dbg_type_id(rocke_lower_t* L, rocke_ll_debug_t* D, const char* type_name)
+{
+    size_t len = strlen(type_name);
+    if(len < 7 || strncmp(type_name, "vec<", 4) != 0 || type_name[len - 1] != '>')
+    {
+        int bit_width;
+        return dbg_basic_type_id(L, D, type_name, &bit_width);
+    }
+
+    const char* separator = strrchr(type_name, 'x');
+    if(separator == NULL || separator <= type_name + 4 || separator >= type_name + len - 2)
+    {
+        int bit_width;
+        return dbg_basic_type_id(L, D, type_name, &bit_width);
+    }
+    char* end = NULL;
+    long count = strtol(separator + 1, &end, 10);
+    if(count <= 0 || end != type_name + len - 1)
+    {
+        int bit_width;
+        return dbg_basic_type_id(L, D, type_name, &bit_width);
+    }
+
+    size_t element_len = (size_t)(separator - (type_name + 4));
+    if(element_len >= 32)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unsupported debug scalar type %s", type_name);
+    }
+    char element_name[32];
+    memcpy(element_name, type_name + 4, element_len);
+    element_name[element_len] = '\0';
+
+    int element_bits;
+    int element_id = dbg_basic_type_id(L, D, element_name, &element_bits);
+    int range_id = dbg_alloc(D);
+    int elements_id = dbg_alloc(D);
+    int vector_id = dbg_alloc(D);
+    dbg_node(L, D, rocke_arena_printf(&L->arena, "!%d = !DISubrange(count: %ld)", range_id, count));
+    dbg_node(L, D, rocke_arena_printf(&L->arena, "!%d = !{!%d}", elements_id, range_id));
+    dbg_node(L,
+             D,
+             rocke_arena_printf(&L->arena,
+                                "!%d = !DICompositeType(tag: DW_TAG_array_type, baseType: !%d, "
+                                "size: %ld, flags: DIFlagVector, elements: !%d)",
+                                vector_id,
+                                element_id,
+                                count * element_bits,
+                                elements_id));
+    return vector_id;
+}
+
+int rocke_ll_debug_variable_id(
+    rocke_lower_t* L, rocke_ll_debug_t* D, const char* name, const char* type_name, const char* loc)
+{
+    if(D == NULL || !D->has_variables)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "debug variable metadata was not enabled");
+    }
+    rocke_ll_dbg_frame_t frames[ROCKE_LL_DEBUG_MAX_FRAMES];
+    int n = dbg_parse_loc(L, loc, frames, ROCKE_LL_DEBUG_MAX_FRAMES);
+    if(n == 0)
+    {
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "debug value %s has no usable source location", name ? name : "");
+    }
+
+    int type_id = dbg_type_id(L, D, type_name);
+    int variable_id = dbg_alloc(D);
+    int file_id = dbg_file_id(L, D, frames[0].path);
+    int scope_id = n == 1 ? dbg_lexical_block_id(L, D, frames[0].path)
+                          : dbg_inlined_subprogram_id(L, D, &frames[0]);
     dbg_node(L,
              D,
              rocke_arena_printf(&L->arena,

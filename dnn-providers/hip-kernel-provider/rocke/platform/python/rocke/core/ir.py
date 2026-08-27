@@ -524,46 +524,99 @@ class IRBuilder:
     def get_param(self, name: str) -> Value:
         return self._param_values[name]
 
-    def debug_value(self, name: str, value: Value) -> Value:
-        """Select one scalar SSA value for source-level debugging.
+    def debug_value(
+        self,
+        value_or_name: Value | str | None = None,
+        value: Value | None = None,
+        *,
+        name: str | None = None,
+        logical: dict[str, Any] | None = None,
+    ) -> Value:
+        """Select an SSA value for source-level logical inspection.
 
         The selection is semantic metadata on the kernel, not an executable
         IR operation. LLVM lowering emits ``llvm.dbg.value`` for the selected
         SSA definition while HIP lowering and ordinary code generation remain
-        unchanged. Returning ``value`` allows the concise form
-        ``tid = b.debug_value("tid", b.thread_id_x())``.
+        unchanged. ``debug_value(value)`` derives its default name from the IR
+        value. The positional ``debug_value(name, value)`` form remains supported.
 
-        This first prototype accepts scalar values produced by an operation.
-        Parameters, vectors, tiles, and memory-backed values need separate
-        location and fragment contracts.
+        A direct ``tile.mma`` vector result also receives its complete logical
+        accumulator description. Other vector producers require an explicit
+        ``logical=`` description because their lane/slot interpretation is not
+        implied by the vector type alone.
         """
-        if not name or not name.isidentifier():
-            raise ValueError(f"debug value name must be an identifier, got {name!r}")
-        if value.op is None:
+        if value_or_name is None:
+            if value is None:
+                raise TypeError("debug_value requires an SSA value")
+            selected_value = value
+            selected_name = name or selected_value.name.removeprefix("%")
+        elif isinstance(value_or_name, str):
+            if value is None:
+                raise TypeError("debug_value(name, value) requires an SSA value")
+            if name is not None:
+                raise TypeError("debug_value name was provided twice")
+            selected_name = value_or_name
+            selected_value = value
+        else:
+            if value is not None:
+                raise TypeError("debug_value(value, *, name=...) accepts one SSA value")
+            selected_value = value_or_name
+            selected_name = name or selected_value.name.removeprefix("%")
+
+        if not selected_name or not selected_name.isidentifier():
+            raise ValueError(
+                f"debug value name must be an identifier, got {selected_name!r}"
+            )
+        if selected_value.op is None:
             raise ValueError("debug_value currently requires an op-produced value")
-        if not isinstance(value.type, Type) or isinstance(
-            value.type, (VectorType, PtrType, SmemType)
+        if not isinstance(selected_value.type, Type) or isinstance(
+            selected_value.type, (PtrType, SmemType)
         ):
             raise ValueError(
-                f"debug_value currently supports scalar values, got {value.type.name}"
+                "debug_value supports scalar and register-vector values, got "
+                f"{selected_value.type.name}"
             )
         if not self._capture_loc:
-            return value
+            return selected_value
+        if isinstance(selected_value.type, VectorType) and logical is None:
+            if selected_value.op.name != "tile.mma":
+                raise ValueError(
+                    "debug_value requires logical= for a vector not produced "
+                    "directly by tile.mma"
+                )
+            from .logical_value import mma_accumulator_description
+
+            logical = mma_accumulator_description(
+                name=selected_name,
+                op_id=str(selected_value.op.attrs["op_id"]),
+            )
+        elif logical is not None:
+            logical = dict(logical)
+            logical_name = logical.get("name")
+            if logical_name not in (None, selected_name):
+                raise ValueError(
+                    f"logical value name {logical_name!r} does not match "
+                    f"debug value name {selected_name!r}"
+                )
+            logical["name"] = selected_name
+
         loc = current_source_loc()
         if loc is None:
             raise ValueError("debug_value could not capture a source location")
+        self.kernel.attrs["debug_info"] = True
         selections = self.kernel.attrs.setdefault("debug_values", [])
-        if any(selection["name"] == name for selection in selections):
-            raise ValueError(f"duplicate debug value name {name!r}")
-        selections.append(
-            {
-                "name": name,
-                "value": value.name,
-                "type": value.type.name,
-                "loc": loc,
-            }
-        )
-        return value
+        if any(selection["name"] == selected_name for selection in selections):
+            raise ValueError(f"duplicate debug value name {selected_name!r}")
+        selection = {
+            "name": selected_name,
+            "value": selected_value.name,
+            "type": selected_value.type.name,
+            "loc": loc,
+        }
+        if logical is not None:
+            selection["logical"] = logical
+        selections.append(selection)
+        return selected_value
 
     # ----- compile-time loops -----
 

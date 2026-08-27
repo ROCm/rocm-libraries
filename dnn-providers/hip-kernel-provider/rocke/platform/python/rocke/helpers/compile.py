@@ -135,6 +135,9 @@ def compile_kernel(
     llvm_text = _lower_llvm_via_backend(
         kernel, arch=_lower_arch, backend=backend, spec=spec
     )
+    from ..core.debug_manifest import embed_debug_description
+
+    llvm_text = embed_debug_description(llvm_text, kernel)
     t2 = time.perf_counter()
     hsaco, comgr_t = build_hsaco_from_llvm_ir(
         llvm_text, isa=isa, options=_comgr_options_for_kernel(kernel)
