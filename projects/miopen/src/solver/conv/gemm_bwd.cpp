@@ -73,6 +73,7 @@ bool GemmBwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
 
     // Layout is asserted by the derived solvers that need it.
     return problem.IsDirectionBackwardData() &&
+           (problem.IsLayoutDefault() || problem.IsLayoutNHWC()) &&
            !(gemm::IsAnyBufferBf16(dxDesc, dyDesc, wDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported);
 #else
@@ -910,6 +911,7 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
                     miopen::conv::IsBwdDataPointOutputDirectWritable(problem);
 
                 auto single_gemm_desc        = gemm_desc;
+                single_gemm_desc.isColMajor  = false;
                 single_gemm_desc.batch_count = 1;
                 single_gemm_desc.strideA     = 0;
                 single_gemm_desc.strideB     = 0;
