@@ -4328,28 +4328,14 @@ class LogicalScheduler:
         # ── Pre-loop scheduling (Change A): defer LDS read-address setup ──
         # kernelBodySubtile stashed the A/B + scale LR-offset modules (lraTileAssignment,
         # its DTL swap-vgpr init, lraTileAssignmentScaleSwizzled) on the writer instead of
-        # emitting them in the prologue. Splice them into the preloop right before the
-        # first wait_gr, so this ~750-cycle loop-invariant VALU runs while the prefetch
-        # buffer_loads are in flight (their only consumers -- the post-barrier ds_reads and
-        # main-loop LR swaps -- come after this point). Inserted BEFORE the guard fold so
-        # the address math is front-loaded into the shadow. The preloop is emitted
-        # unscheduled (schedule=False), so the sequential list splice lands them in order.
+        # emitting them in the prologue. These ~750-cycle loop-invariant VALU instructions
+        # run while the prefetch buffer_loads are in flight; their only consumers are the
+        # post-barrier ds_reads and main-loop LR swaps, which come after this point.
+        # Placement: injected into the duplicated initC zone (both fast and slow paths) so
+        # the offset math is interleaved with the buffer_loads as overlapping filler.
+        # The canonical self._preloop_emitted is left untouched (so PAP / per-unroll copies
+        # that deepcopy it remain unaffected); injection happens on the preloop_emitted copy.
         _lraDeferred = getattr(writer, "_deferredPreloopLraModules", None)
-        if (self.config.pgr >= 1
-                and _lraDeferred
-                and not getattr(self, "_lraDeferredIntoPreloop", False)
-                and self._preloop_emitted
-                and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
-            em_list = self._preloop_emitted[0][0]
-            drain_idx = next((i for i, em in enumerate(em_list)
-                              if em.opType == 'wait_gr'), len(em_list))
-            new_id = max((em.moduleId for em in em_list), default=-1) + 1
-            em_list.insert(drain_idx,
-                           EmittedModule(moduleId=new_id,
-                                         instructions=list(_lraDeferred),
-                                         before=None,
-                                         source=None))
-            self._lraDeferredIntoPreloop = True
 
         # ── PLSIN guard-hoist: fold into the preloop global-read shadow ──
         # computePostLoopFusedStore is pure loop-invariant SALU/VALU that writes the
@@ -4397,14 +4383,20 @@ class LogicalScheduler:
                                              before=None,
                                              source=None))
 
-        # ── Preloop split: duplicate initC across fast and slow paths ──
+        # ── Preloop split: duplicate initC + LRA offset across fast and slow paths ──
         #
         # Fast path (K >= DepthU):
-        #   [GRs] -> [initC] -> SBranch PreloopEnd -> [WaitGR, Sync, LR, SkipOps]
+        #   [GRs] -> [initC] -> [lraDeferred] -> SBranch PreloopEnd
+        #                                      -> [WaitGR, Sync, LR, SkipOps]
         #
         # Slow path (K < DepthU):
-        #   Label SkipPreloop -> [initC] -> SCmpEQ/tailJump -> Label PreloopEnd
-        #                                                    -> [WaitGR, Sync, LR, SkipOps]
+        #   Label SkipPreloop -> [initC] -> [lraDeferred] -> SCmpEQ/tailJump
+        #                                                  -> Label PreloopEnd
+        #                                                  -> [WaitGR, Sync, LR, SkipOps]
+        #
+        # lraDeferred (LDS read-address VALU) is placed inside the duplicated zone so it
+        # acts as overlapping filler during the buffer_load window on the fast path, and
+        # correctly sets up addresses on the slow path too.
         #
         # The skip-GR guard above ensures K<DepthU never reaches fast-path GRs.
         # No tail-jump is needed after the fast-path initC for the same reason.
@@ -4434,16 +4426,35 @@ class LogicalScheduler:
                                         comment="K < DepthU: jump to tail loop")
 
             if skipGRForTail:
-                # Fast-path: after fast-path initC, jump unconditionally to PreloopEnd.
-                em_list.insert(init_idx + 1, EmittedModule(
+                # Build the LRA offset instructions to inline on both paths.
+                # _lraDeferred is placed inside the duplicated zone (alongside initC)
+                # so the offset VALU acts as overlapping filler during the buffer_load
+                # window. It appears on both the fast path (K >= DepthU) and the slow
+                # path (K < DepthU) so neither path misses the address setup.
+                lra_instrs = list(_lraDeferred) if _lraDeferred else []
+
+                # Fast-path: initC already at init_idx; append LRA offset, then branch.
+                if lra_instrs:
+                    em_list.insert(init_idx + 1, EmittedModule(
+                        moduleId=next_id,
+                        instructions=lra_instrs,
+                        before=None,
+                        source=None))
+                    next_id += 1
+
+                # After fast-path initC (and optional LRA), jump unconditionally to PreloopEnd.
+                fp_branch_offset = 1 + (1 if lra_instrs else 0)
+                em_list.insert(init_idx + fp_branch_offset, EmittedModule(
                     moduleId=next_id,
                     instructions=[SBranch(labelName=preloopEndLabel.getLabelName(),
                                           comment="K >= DepthU: skip slow-path initC")]))
                 next_id += 1
 
                 # Slow-path: SkipPreloop label + fresh initC (built lazily by populate)
-                # + tail-jump + PreloopEnd label rejoining WaitGR/Sync/LR.
-                em_list.insert(init_idx + 2, EmittedModule(
+                # + LRA offset (duplicate) + tail-jump + PreloopEnd label rejoining
+                # WaitGR/Sync/LR.
+                sp_base = init_idx + fp_branch_offset + 1
+                em_list.insert(sp_base, EmittedModule(
                     moduleId=next_id,
                     instructions=[skipGRLabel]))
                 next_id += 1
@@ -4451,12 +4462,21 @@ class LogicalScheduler:
                 # Copy already-populated instructions from the fast-path initC.
                 # populate() ran before deepcopy, so em_list[init_idx].instructions
                 # already contains the built assembly — duplicate it for the slow path.
-                em_list.insert(init_idx + 3, EmittedModule(
+                em_list.insert(sp_base + 1, EmittedModule(
                     moduleId=next_id,
                     instructions=list(em_list[init_idx].instructions)))
                 next_id += 1
 
-                em_list.insert(init_idx + 4, EmittedModule(
+                if lra_instrs:
+                    em_list.insert(sp_base + 2, EmittedModule(
+                        moduleId=next_id,
+                        instructions=list(lra_instrs),
+                        before=None,
+                        source=None))
+                    next_id += 1
+
+                tail_offset = sp_base + 2 + (1 if lra_instrs else 0)
+                em_list.insert(tail_offset, EmittedModule(
                     moduleId=next_id,
                     instructions=[
                         SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
