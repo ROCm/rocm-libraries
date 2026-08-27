@@ -82,7 +82,6 @@ namespace TensileLite
         {
             hipDeviceProp_t prop;
             HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceId));
-#if HIP_VERSION >= 50220730
             int hip_version;
             HIP_CHECK_EXC(hipRuntimeGetVersion(&hip_version));
             if(hip_version >= 50220730)
@@ -91,7 +90,6 @@ namespace TensileLite
                                                     hipDeviceAttributePhysicalMultiProcessorCount,
                                                     deviceId));
             }
-#endif
             return GetDevice(prop, deviceId);
         }
 
