@@ -40,8 +40,6 @@
  */
 
 #pragma once
-#ifndef _HIPBLASLT_H_
-#define _HIPBLASLT_H_
 
 #include "hipblaslt/hipblaslt-export.h"
 #include "hipblaslt/hipblaslt-version.h"
@@ -1183,5 +1181,3 @@ hipblasStatus_t hipblasLtMatrixTransform(hipblasLtHandle_t              lightHan
 #ifdef __cplusplus
 }
 #endif
-
-#endif // _HIPBLASLT_H_

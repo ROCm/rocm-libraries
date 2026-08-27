@@ -26,8 +26,6 @@
 
 #pragma once
 
-#ifndef _HIPBLASLT_E8_H_
-#define _HIPBLASLT_E8_H_
 
 #include <iostream>
 
@@ -119,5 +117,3 @@ namespace std
         return stream;
     }
 } // namespace std
-
-#endif

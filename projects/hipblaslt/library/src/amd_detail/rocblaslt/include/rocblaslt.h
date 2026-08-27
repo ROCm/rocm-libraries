@@ -29,10 +29,6 @@
  */
 
 #pragma once
-#ifndef _ROCBLASLT_H_
-#define _ROCBLASLT_H_
 
 #include "rocblaslt-auxiliary.h"
 #include "rocblaslt-functions.h"
-
-#endif /* _ROCBLASLT_H_ */
