@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "example/ck_tile/01_fmha/fmha_fwd.hpp"
+#include "ck_tile/host/device_memory.hpp"
 
 #include "gtest/gtest.h"
+
+#include <vector>
 
 namespace {
 
@@ -365,6 +368,284 @@ static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
 static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
               ck_tile::BlockFmhaPipelineQRKSVSAsyncTrload<DispatchProblem>>);
 
+struct RoundTripArgs
+{
+    const void* input;
+    void* output;
+    int* guard_ok;
+};
+
+template <typename TensorTag,
+          typename Problem,
+          typename QConfig,
+          typename KConfig,
+          typename VConfig,
+          ck_tile::index_t RegionIndex>
+struct QrTdmRoundTripKernel
+{
+    using Policy = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+    using Shape  = typename Problem::BlockFmhaShape;
+    using DataType = std::conditional_t<TensorTag::Id == 0,
+                                        typename Problem::QDataType,
+                                        std::conditional_t<TensorTag::Id == 1,
+                                                           typename Problem::KDataType,
+                                                           typename Problem::VDataType>>;
+    using Padding = std::conditional_t<TensorTag::Id == 0,
+                                       QConfig,
+                                       std::conditional_t<TensorTag::Id == 1, KConfig, VConfig>>;
+    using Layout = typename Policy::template LdsArenaLayout<Problem, QConfig, KConfig, VConfig>;
+
+    static constexpr ck_tile::index_t kBlockSize = Problem::kBlockSize;
+    static constexpr bool kPrefill = Shape::kM0 > 64;
+    static constexpr ck_tile::index_t kRows = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
+    static constexpr ck_tile::index_t kCols =
+        TensorTag::Id == 0   ? Shape::kSubQKHeaddim
+        : TensorTag::Id == 1 ? (kPrefill ? Shape::kSubQKHeaddim : Shape::kK0)
+                             : Shape::kN1;
+    static constexpr ck_tile::index_t kRegionOffset = [] {
+        if constexpr(TensorTag::Id == 0)
+            return Layout::kQOffset;
+        else if constexpr(TensorTag::Id == 1)
+            return RegionIndex == 0 ? Layout::kK0Offset : Layout::kK1Offset;
+        else
+            return RegionIndex == 0 ? Layout::kV0Offset : Layout::kV1Offset;
+    }();
+    static constexpr ck_tile::index_t kRegionBytes = [] {
+        if constexpr(TensorTag::Id == 0)
+            return Layout::kQBytes;
+        else if constexpr(TensorTag::Id == 1)
+            return Layout::kKBytes;
+        else
+            return Layout::kVBytes;
+    }();
+
+    __device__ void operator()(RoundTripArgs args) const
+    {
+        using namespace ck_tile;
+        alignas(256) __shared__ unsigned char arena[Layout::kArenaBytes + 16];
+        const index_t tid = get_thread_local_1d_id();
+        for(index_t i = tid; i < Layout::kArenaBytes + 16; i += Problem::kBlockSize)
+            arena[i] = 0x5a;
+        block_sync_lds();
+
+        auto* region = reinterpret_cast<DataType*>(arena + kRegionOffset);
+        constexpr auto lds_desc = detail::make_qr_tdm_row_major_lds_descriptor<
+            DataType, kRows, kCols, Padding, 16>();
+        auto lds_view = make_tensor_view<address_space_enum::lds>(region, lds_desc);
+        auto lds_write_window = make_tile_window(lds_view, lds_desc.get_lengths(), {0, 0});
+
+        const auto input_view = make_naive_tensor_view<address_space_enum::global>(
+            static_cast<const DataType*>(args.input),
+            make_tuple(kRows, kCols),
+            make_tuple(kCols, 1),
+            number<8>{},
+            number<1>{});
+        auto input_window = make_tile_window(
+            input_view,
+            make_tuple(number<kRows>{}, number<kCols>{}),
+            {0, 0},
+            detail::make_qr_tdm_writer_distribution<TensorTag, Problem, TensorTag::Id == 1 &&
+                                                                             kPrefill>());
+
+        TDMConfig config;
+        using Raw = detail::EncodedTdmPadding<Padding>;
+        config.pad_enable              = Raw::kEnabled;
+        config.pad_config.pad_interval = Raw::kPadInterval;
+        config.pad_config.pad_amount   = Raw::kPadAmount;
+        load_tile_tdm(config, lds_write_window, input_window);
+        s_wait_tensorcnt_barrier<0>();
+
+        if constexpr(TensorTag::Id == 0)
+        {
+            auto output_view = make_naive_tensor_view<address_space_enum::global>(
+                static_cast<DataType*>(args.output),
+                make_tuple(kRows, kCols),
+                make_tuple(kCols, 1),
+                number<8>{},
+                number<1>{});
+            auto read_window = make_tile_window(
+                lds_view, lds_desc.get_lengths(), {0, 0}, Policy::template MakeQRegTileDistribution<Problem>());
+            auto output_window = make_tile_window(output_view,
+                                                  lds_desc.get_lengths(),
+                                                  {0, 0},
+                                                  Policy::template MakeQRegTileDistribution<Problem>());
+            store_tile(output_window, load_tile(read_window));
+        }
+        else if constexpr(TensorTag::Id == 1)
+        {
+            auto output_view = make_naive_tensor_view<address_space_enum::global>(
+                static_cast<DataType*>(args.output),
+                make_tuple(kRows, kCols),
+                make_tuple(kCols, 1),
+                number<8>{},
+                number<1>{});
+            constexpr index_t Windows = kPrefill ? Shape::kQKHeaddim / Shape::kK0 : 1;
+            static_for<0, Windows, 1>{}([&](auto i) {
+                constexpr auto lengths = make_tuple(number<Shape::kN0>{}, number<Shape::kK0>{});
+                const array<index_t, 2> origin{0, i * Shape::kK0};
+                auto read_window = make_tile_window(
+                    lds_view, lengths, origin, Policy::template MakeKRegTileDistribution<Problem>());
+                auto output_window = make_tile_window(
+                    output_view, lengths, origin, Policy::template MakeKRegTileDistribution<Problem>());
+                store_tile(output_window, load_tile(read_window));
+            });
+        }
+        else
+        {
+            auto output_view = make_naive_tensor_view<address_space_enum::global>(
+                static_cast<DataType*>(args.output),
+                make_tuple(kCols, kRows),
+                make_tuple(kRows, 1),
+                number<8>{},
+                number<1>{});
+            constexpr index_t Windows = Shape::kN0 / Shape::kK1;
+            static_for<0, Windows, 1>{}([&](auto i) {
+                constexpr auto lengths = make_tuple(number<Shape::kK1>{}, number<Shape::kN1>{});
+                const array<index_t, 2> origin{i * Shape::kK1, 0};
+                auto read_window = make_tile_window(
+                    lds_view, lengths, origin, Policy::template MakeVRegTileDistribution<Problem>());
+                auto tile = load_tile_transpose(read_window);
+                constexpr auto output_lengths =
+                    make_tuple(number<Shape::kN1>{}, number<Shape::kK1>{});
+                const array<index_t, 2> output_origin{0, i * Shape::kK1};
+                auto output_window = make_tile_window(
+                    output_view, output_lengths, output_origin, tile.get_tile_distribution());
+                store_tile(output_window, tile);
+            });
+        }
+
+        block_sync_lds();
+        if(tid == 0)
+        {
+            int ok = 1;
+            for(index_t i = 0; i < Layout::kArenaBytes; ++i)
+                if((i < kRegionOffset || i >= kRegionOffset + kRegionBytes) && arena[i] != 0x5a)
+                    ok = 0;
+            for(index_t i = Layout::kArenaBytes; i < Layout::kArenaBytes + 16; ++i)
+                if(arena[i] != 0x5a)
+                    ok = 0;
+            *args.guard_ok = ok;
+        }
+    }
+};
+
+template <typename TensorTag,
+          typename Problem,
+          typename QConfig,
+          typename KConfig,
+          typename VConfig>
+bool run_qr_tdm_round_trip()
+{
+    using Kernel0 = QrTdmRoundTripKernel<TensorTag, Problem, QConfig, KConfig, VConfig, 0>;
+    using DataType = typename Kernel0::DataType;
+    constexpr ck_tile::index_t Rows = Kernel0::kRows;
+    constexpr ck_tile::index_t Cols = Kernel0::kCols;
+
+    std::vector<DataType> input(Rows * Cols);
+    std::vector<DataType> output(Rows * Cols);
+    for(ck_tile::index_t row = 0; row < Rows; ++row)
+        for(ck_tile::index_t col = 0; col < Cols; ++col)
+            input[row * Cols + col] = static_cast<DataType>((row * 17 + col * 3) % 127);
+
+    ck_tile::DeviceMem input_device(input.size() * sizeof(DataType));
+    ck_tile::DeviceMem output_device(output.size() * sizeof(DataType));
+    ck_tile::DeviceMem guard_device(sizeof(int));
+    input_device.ToDevice(input.data());
+    output_device.SetZero();
+    guard_device.SetZero();
+
+    RoundTripArgs args{input_device.GetDeviceBuffer(),
+                       output_device.GetDeviceBuffer(),
+                       static_cast<int*>(guard_device.GetDeviceBuffer())};
+    const ck_tile::stream_config stream{nullptr, false, 0, 0, 1};
+    const auto block_size =
+        ck_tile::is_wave32() ? Problem::kBlockSize / 2 : Problem::kBlockSize;
+    ck_tile::launch_kernel(stream,
+                           ck_tile::make_kernel(
+                               Kernel0{}, dim3(1), dim3(block_size), 0, args));
+
+    output_device.FromDevice(output.data());
+    int guard_ok = 0;
+    guard_device.FromDevice(&guard_ok);
+    auto validate_result = [&]() {
+        if(guard_ok != 1)
+            return false;
+
+        if constexpr(TensorTag::Id == 2)
+        {
+            for(ck_tile::index_t row = 0; row < Rows; ++row)
+                for(ck_tile::index_t col = 0; col < Cols; ++col)
+                    if(std::memcmp(&input[row * Cols + col],
+                                   &output[col * Rows + row],
+                                   sizeof(DataType)) != 0)
+                        return false;
+        }
+        else if(std::memcmp(input.data(), output.data(), input.size() * sizeof(DataType)) != 0)
+        {
+            return false;
+        }
+        return true;
+    };
+
+    if(!validate_result())
+    {
+        std::cerr << "round-trip failure: tensor=" << TensorTag::Id << ", M="
+                  << Problem::BlockFmhaShape::kM0 << ", q=" << QConfig::kEnabled
+                  << ", k=" << KConfig::kEnabled << ", v=" << VConfig::kEnabled << '\n';
+        return false;
+    }
+
+    if constexpr(Kernel0::kPrefill && TensorTag::Id != 0)
+    {
+        using Kernel1 = QrTdmRoundTripKernel<TensorTag, Problem, QConfig, KConfig, VConfig, 1>;
+        output_device.SetZero();
+        guard_device.SetZero();
+        ck_tile::launch_kernel(stream,
+                               ck_tile::make_kernel(
+                                   Kernel1{}, dim3(1), dim3(block_size), 0, args));
+        output_device.FromDevice(output.data());
+        guard_device.FromDevice(&guard_ok);
+        if(!validate_result())
+        {
+            std::cerr << "round-trip secondary-region failure: tensor=" << TensorTag::Id
+                      << ", M=" << Problem::BlockFmhaShape::kM0 << ", q=" << QConfig::kEnabled
+                      << ", k=" << KConfig::kEnabled << ", v=" << VConfig::kEnabled << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+template <typename DataType, ck_tile::index_t M>
+bool run_round_trip_matrix()
+{
+    using Problem = TestFmhaProblem<DataType, M>;
+
+    return run_qr_tdm_round_trip<QTag, Problem, NoPad, NoPad, NoPad>() &&
+           run_qr_tdm_round_trip<KTag, Problem, NoPad, NoPad, NoPad>() &&
+           run_qr_tdm_round_trip<VTag, Problem, NoPad, NoPad, NoPad>() &&
+           run_qr_tdm_round_trip<QTag, Problem, QKPad, QKPad, VPad>() &&
+           run_qr_tdm_round_trip<KTag, Problem, QKPad, QKPad, VPad>() &&
+           run_qr_tdm_round_trip<VTag, Problem, QKPad, QKPad, VPad>() &&
+           run_qr_tdm_round_trip<QTag, Problem, NoPad, QKPad, VPad>() &&
+           run_qr_tdm_round_trip<KTag, Problem, NoPad, QKPad, VPad>() &&
+           run_qr_tdm_round_trip<VTag, Problem, NoPad, QKPad, VPad>() &&
+           run_qr_tdm_round_trip<QTag, Problem, NoPad, QKPad, NoPad>() &&
+           run_qr_tdm_round_trip<KTag, Problem, NoPad, QKPad, NoPad>() &&
+           run_qr_tdm_round_trip<VTag, Problem, NoPad, QKPad, NoPad>() &&
+           run_qr_tdm_round_trip<QTag, Problem, NoPad, NoPad, VPad>() &&
+           run_qr_tdm_round_trip<KTag, Problem, NoPad, NoPad, VPad>() &&
+           run_qr_tdm_round_trip<VTag, Problem, NoPad, NoPad, VPad>();
+}
+
 TEST(QrTdmLdsPadding, CompileTimeConfiguration) { SUCCEED(); }
+
+TEST(QrTdmLdsPadding, DeviceRoundTrip)
+{
+    EXPECT_TRUE((run_round_trip_matrix<ck_tile::bf16_t, 128>()));
+    EXPECT_TRUE((run_round_trip_matrix<ck_tile::bf16_t, 64>()));
+    EXPECT_TRUE((run_round_trip_matrix<ck_tile::half_t, 128>()));
+    EXPECT_TRUE((run_round_trip_matrix<ck_tile::half_t, 64>()));
+}
 
 } // namespace
