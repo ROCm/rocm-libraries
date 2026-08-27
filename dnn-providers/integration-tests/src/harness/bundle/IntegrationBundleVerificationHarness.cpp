@@ -171,6 +171,12 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
     ASSERT_NE(level, EnforcementLevel::FULL)
         << "enforceAtLevel() handles APPLICABILITY/BUILDABLE only; FULL uses the normal path";
 
+    if(!TestConfig::get().hasEngineName())
+    {
+        skipUnverifiable("enforcement requires --test-engine");
+        return;
+    }
+
     auto handle = getSharedHandle();
 
     const std::vector<uint8_t> graphBytes(
@@ -182,12 +188,6 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
 
     std::vector<int64_t> engineIds;
     auto status = graph.get_ranked_engine_ids(engineIds);
-
-    if(!TestConfig::get().hasEngineName())
-    {
-        skipUnverifiable("enforcement requires --test-engine");
-        return;
-    }
 
     const std::string rung
         = level == EnforcementLevel::APPLICABILITY ? "applicability" : "buildable";

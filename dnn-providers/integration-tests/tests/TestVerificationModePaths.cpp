@@ -405,34 +405,20 @@ TEST_F(TestVerificationModePathsFixture, CpuModeCapabilityMissSkips)
 
 // ── Enforcement-level gate ──────────────────────────────────────────────────
 // Non-FULL bundles always route to enforceAtLevel(), not the comparison path.
-// Proof: the engine stub never runs (enforceAtLevel does its own graph work).
+// Without --test-engine, enforceAtLevel() skips before touching the device.
 
 TEST_F(TestVerificationModePathsFixture, NonFullBundleRoutesToEnforcementPath)
 {
     auto bundle = loadBundle("enforce_gate", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::APPLICABILITY;
 
-    bool engineCalled = false;
     ::testing::TestPartResultArray results;
-    try
-    {
-        runCapturing(
-            std::move(bundle),
-            VerificationMode::AUTO,
-            [&](std::unordered_map<int64_t, void*>& vp) {
-                engineCalled = true;
-                writeOutput(vp, K_OUTPUT_VALUE);
-            },
-            matchingRef(),
-            &results);
-    }
-    catch(...) // NOLINT(bugprone-empty-catch)
-    {
-        // enforceAtLevel() may throw on deviceless CI (no GPU handle).
-    }
+    runCapturing(
+        std::move(bundle), VerificationMode::AUTO, matchingEngine(), matchingRef(), &results);
 
-    EXPECT_FALSE(engineCalled)
-        << "non-FULL bundle must route to enforceAtLevel(), not the comparison path";
+    EXPECT_TRUE(anySkipped(results))
+        << "non-FULL bundle must route to enforceAtLevel(), which skips without --test-engine";
+    EXPECT_FALSE(anyFailed(results));
 }
 
 // NOLINTEND(readability-identifier-naming)
