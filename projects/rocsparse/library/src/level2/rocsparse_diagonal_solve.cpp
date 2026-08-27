@@ -225,14 +225,19 @@ rocsparse_status rocsparse::diagonal_solve(rocsparse_handle              handle,
     // The CSC strided-batch setter stores that stride in columns_values_batch_stride
     // and leaves batch_stride unset (unlike CSR, which fills batch_stride). Pick the
     // right field per format, otherwise batched CSC solves reuse batch 0's diagonal.
-    const int64_t val_batch_stride = (A->format == rocsparse_format_csc)
-                                         ? A->columns_values_batch_stride
-                                         : A->batch_stride;
+    const int64_t val_batch_stride
+        = (A->format == rocsparse_format_csc) ? A->columns_values_batch_stride : A->batch_stride;
+
+    // The zero-pivot buffer is typed like the analysis pivot, i.e. the CSR col
+    // index type. build_csr_from_csc swaps row/col, so for CSC that is row_type;
+    // using col_type would mismatch the analysis pivot on mixed-index matrices.
+    const rocsparse_indextype zero_pivot_indextype
+        = (A->format == rocsparse_format_csc) ? A->row_type : A->col_type;
 
 #define DIAGONAL_SOLVE_DISPATCH(T_)                              \
     rocsparse::diagonal_solve_dispatch<T_>(handle,               \
                                            diag.offset_type,     \
-                                           A->col_type,          \
+                                           zero_pivot_indextype, \
                                            batch_count,          \
                                            A->rows,              \
                                            nrhs,                 \

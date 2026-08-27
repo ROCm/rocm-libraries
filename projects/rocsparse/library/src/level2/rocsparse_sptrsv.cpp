@@ -902,9 +902,15 @@ namespace rocsparse
                 const int64_t batch_count = dnvec_descr_y->batch_count;
                 hipStream_t   stream      = handle->stream;
 
-                csrsv_info->create_singularity_numeric_exact(batch_count, A->col_type, stream);
+                // The analysis pivot is typed like the CSR col index. build_csr_from_csc
+                // swaps row/col for CSC, so use row_type there; otherwise col_type. Using
+                // A->col_type directly mismatches the analysis pivot on mixed-index CSC.
+                const rocsparse_indextype pivot_indextype
+                    = (A->format == rocsparse_format_csc) ? A->row_type : A->col_type;
+
+                csrsv_info->create_singularity_numeric_exact(batch_count, pivot_indextype, stream);
                 auto numeric_exact = csrsv_info->get_singularity_numeric_exact();
-                if(A->col_type == rocsparse_indextype_i32)
+                if(pivot_indextype == rocsparse_indextype_i32)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                         batch_count,
