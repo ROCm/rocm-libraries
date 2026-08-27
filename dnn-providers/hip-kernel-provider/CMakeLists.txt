@@ -241,7 +241,19 @@ else()
     message(STATUS "rocKE features disabled")
 endif()
 
+# Both halves of kpack support ride the ingestor gate and nothing else.
+#
+# The reader is the rocm_kpack shared library ROCm ships, resolved the way this repo's
+# other providers resolve their externals: miopen-provider finds MIOpen, hipblaslt-provider
+# finds the SDKs. The guard lets a superbuild that already defines the target -- one
+# building rocm-kpack as a sibling component -- win over an installed copy.
+#
+# descriptor-packaging resolves the packer separately, from the rocm_kpack Python
+# package. Both halves come from the platform, so nothing here pins a ref.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    if(NOT TARGET rocm::rocm_kpack)
+        find_package(rocm-kpack CONFIG REQUIRED)
+    endif()
     add_subdirectory(descriptor-packaging)
 endif()
 
