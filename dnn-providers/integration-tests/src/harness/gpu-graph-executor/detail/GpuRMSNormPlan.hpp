@@ -248,16 +248,22 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->y_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->epsilon_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
+
+        std::vector<int64_t> operandUids = {nodeAttributes->x_tensor_uid(),
+                                            nodeAttributes->scale_tensor_uid(),
+                                            nodeAttributes->y_tensor_uid()};
 
         if(nodeAttributes->inv_rms_tensor_uid().has_value())
         {
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_rms_tensor_uid().value());
             CHECK_TENSOR_TYPE(
                 tensorMap, nodeAttributes->inv_rms_tensor_uid().value(), ComputeDataTypeEnum);
+            operandUids.push_back(nodeAttributes->inv_rms_tensor_uid().value());
         }
 
         if(nodeAttributes->bias_tensor_uid().has_value())
@@ -265,9 +271,11 @@ public:
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->bias_tensor_uid().value());
             CHECK_TENSOR_TYPE(
                 tensorMap, nodeAttributes->bias_tensor_uid().value(), ScaleDataTypeEnum);
+            operandUids.push_back(nodeAttributes->bias_tensor_uid().value());
         }
 
-        return true;
+        // Reject if I/O or stats tensors are runtime pass-by-value
+        return !anyOperandIsRuntimePassByValue(tensorMap, operandUids);
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>
