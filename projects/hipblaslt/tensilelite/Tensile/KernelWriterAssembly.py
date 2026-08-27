@@ -18068,6 +18068,10 @@ class KernelWriterAssembly(KernelWriter):
         actTempSgpr = tmpSgpr # Get sgpr start address, should always be the same
         elementSgprs = tmpSgpr + ss.cfg.numTempSgprPerBatch
         codeAccVgprRead = deepcopy(self.codes.accVgprRead) if self.states.serializedStore else None
+        if self.states.subtileWeaveCaptureInstances is not None:
+          captureInstance = {"pairs": []}
+          self.states.subtileWeaveCaptureInstances.append(captureInstance)
+          self.states.subtileWeaveCaptureCurrent = captureInstance
         # PostLoopStoreInNll 4d-3b weave: when ActivationType=all, this activation
         # loop duplicates the entire fused-store body once per activation type. The
         # terminal-MFMA weave groups are consumed exactly once (tracked by

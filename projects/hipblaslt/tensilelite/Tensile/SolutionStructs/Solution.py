@@ -60,7 +60,7 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
-from Tensile.Common.Utilities import plsinDebugEnv, plsinWeaveLookahead
+from Tensile.Common.Utilities import plsinDebugEnv
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -1661,10 +1661,8 @@ class Solution(collections.abc.Mapping):
       # it. The structural and register/spill gates below stay enforced, so this can
       # only ever force NON-SPILL macrotiles on (never past the VGPR/SGPR ceiling).
       # Unset (default "0") reproduces the shipped library byte-for-byte.
-      # Note this bypasses the gate WITHOUT lowering the scheduler's weave
-      # lookahead, so a forced sub-threshold tile emits the fused store with zero
-      # pairs actually woven -- useful to isolate the guard-folding win from the
-      # overlap win, but lower TENSILE_PLSIN_DEBUG="TENSILE_WEAVE_LA=..." instead to get both.
+      # Kept as a compatibility/debug control; schedule depth is now derived by
+      # the generated producer/consumer planner.
       forcePlsinFp4F16 = (isFloat4
                           and destType.isHalf()
                           and plsinDebugEnv("TENSILE_PLSIN_FORCE_FP4_F16", "0") != "0")
@@ -1694,19 +1692,6 @@ class Solution(collections.abc.Mapping):
       # the arch-VGPR budget and emit out-of-range v>=256.
       storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
                            min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
-      # Overlap feasibility: the weave only weaves store-pairs with pair index >=
-      # weaveLA. numStorePairs = MIWT0*MIWT1//2; at or below the threshold no pair
-      # is woven, so PLSIN would be pure overhead. Read the same helper and
-      # TENSILE_WEAVE_LA test override as the scheduler so eligibility and emission
-      # cannot disagree.
-      #
-      # MT192x256/MT256x192 use 3 for gfx950 ACC-read correctness; other eligible
-      # tiles, including MT256x256, retain the validated default of 2.
-      weaveLA = int(plsinDebugEnv(
-        "TENSILE_WEAVE_LA",
-        str(plsinWeaveLookahead(state["MacroTile0"], state["MacroTile1"]))))
-      overlapPossible = bool(miwt) and len(miwt) == 2 and \
-                        (miwt[0] * miwt[1] // 2) > weaveLA
       streamKFixupSafe = True
       # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the 102-SGPR
       # gfx9 ceiling; auto-disable just those.
@@ -1729,11 +1714,10 @@ class Solution(collections.abc.Mapping):
       registerFail = ((not spillFree)
                       or (not storeFitsVgpr)
                       or (not mxBlockScaleSgprFits))
-      # Pure profitability (weave-overlap threshold): correct and register-safe, just
-      # below the pair-count where the weave overlaps anything. The ONLY group the
-      # TENSILE_PLSIN_FORCE_FP4_F16 force bypasses.
-      profitFail = ((not overlapPossible)
-                    or (not streamKFixupSafe))
+      # Generated schedule feasibility is decided by LogicalScheduler from exact
+      # producer/consumer ranges. A schedule with no safe group falls back without
+      # extracting terminal MFMAs.
+      profitFail = not streamKFixupSafe
       if structuralFail or registerFail or (profitFail and not forcePlsinFp4F16):
         state["PostLoopStoreInNll"] = False
 

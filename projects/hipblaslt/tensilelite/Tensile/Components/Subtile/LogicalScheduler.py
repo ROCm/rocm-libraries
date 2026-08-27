@@ -39,11 +39,11 @@ from .ScheduleTypes import (
     LogicalSchedule,
     PartitionSchedule,
 )
-from rocisa.instruction import SAddCU32, SSubBU32, SCSelectB32, SCSelectB64, \
+from rocisa.instruction import Instruction, SAddCU32, SSubBU32, SCSelectB32, SCSelectB64, \
     MFMAInstruction, MXMFMAInstruction
 
 from ...Common.GlobalParameters import globalParameters
-from ...Common import plsinDebugEnv, plsinWeaveLookahead
+from ...Common import plsinDebugEnv
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
@@ -3680,11 +3680,8 @@ class LogicalScheduler:
         plainLabel = Label(f"{label}_PlainNLL", "")
         # Runtime front guard: fall through to FUSED only when both hold, else PLAIN.
         module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
-        # gfx950 validation shows that MT192x256 needs one extra store-pair of
-        # MFMA->ACC-read distance; MT256x256 and the other eligible tiles retain 2.
-        weaveLA = int(plsinDebugEnv(
-            "TENSILE_WEAVE_LA",
-            str(plsinWeaveLookahead(kernel["MacroTile0"], kernel["MacroTile1"]))))
+        # The woven store is generated in capture mode first. Its actual ACC-read
+        # instructions and Phase1/Phase2 gaps then drive terminal-MFMA placement.
         fusedEmitted = copy.deepcopy(emitted_3d)
         # Macro tiles larger than 256x256 peak at 256 arch VGPRs in the loop, so the
         # fused store's temporaries (valuC window, coord0/1, and the element batch)
@@ -3731,30 +3728,43 @@ class LogicalScheduler:
                         lendTiles.append((_t.regList.indices[0], len(_t.regList.indices)))
             writer.states.subtileFusedLendVgprs = lendTiles
         else:
-            weaveGroups = self._extractTerminalMfmaGroups(
-                fusedEmitted, keepInLoop=weaveLA)
+            weaveGroups = {}
             writer.states.subtileFusedLendVgprs = []
         savedGroups = writer.states.subtileWeaveMfmaGroups
         savedMaster = writer.states.subtileWeaveMfmaGroupsMaster
-        # weaveGroups is the pristine master: its terminal-MFMA instruction objects
-        # are NEVER added to a module directly. The fused store body is duplicated
-        # once per activation type (ActivationType=all), and each duplicate must
-        # receive its OWN woven terminal MFMAs. _weaveEmitGroup adds objects to a
-        # module (setting their parent), so re-emitting the same objects into a
-        # second activation block is impossible. Instead the activation loop
-        # deep-copies this master per type (re-arming subtileWeaveEmitted). Keep the
-        # master pristine and expose an initial working copy for the first type.
-        writer.states.subtileWeaveMfmaGroupsMaster = weaveGroups
-        writer.states.subtileWeaveMfmaGroups = copy.deepcopy(weaveGroups) if weaveGroups is not None else None
-        writer.states.subtileWeaveLookahead = weaveLA
-        writer.states.subtileWeavePairCounter = 0
-        writer.states.subtileWeaveEmitted = set()
+        savedCaptures = writer.states.subtileWeaveCaptureInstances
+        savedCaptureCurrent = writer.states.subtileWeaveCaptureCurrent
+        savedLookahead = writer.states.subtileWeaveLookahead
+        savedPairCounter = writer.states.subtileWeavePairCounter
+        savedEmitted = writer.states.subtileWeaveEmitted
+        try:
+            # An empty group dict selects paired-store generation without placing
+            # producers. The planner fills each captured gap after generation.
+            writer.states.subtileWeaveMfmaGroupsMaster = weaveGroups
+            writer.states.subtileWeaveMfmaGroups = copy.deepcopy(weaveGroups) if weaveGroups is not None else None
+            writer.states.subtileWeaveLookahead = 0
+            writer.states.subtileWeavePairCounter = 0
+            writer.states.subtileWeaveEmitted = set()
+            writer.states.subtileWeaveCaptureInstances = [] if weaveGroups is not None else None
+            writer.states.subtileWeaveCaptureCurrent = None
+            # 4d-3a/3b: build the real beta0/NonEdge D store exactly once, then use
+            # its captured reads and gaps to perform 4d-3b latency hiding.
+            writer.states.subtileHoistedStoreInit = None
+            storeModule = writer.buildSubtileFusedStore(kernel, writer.tPA, writer.tPB)
+            if weaveGroups is not None:
+                self._planCapturedTerminalMfmas(
+                    fusedEmitted, writer.states.subtileWeaveCaptureInstances,
+                    storeModule,
+                    int(writer.states.archCaps.get("MfmaToAccReadLatency", 0)))
+        finally:
+            writer.states.subtileWeaveMfmaGroups = savedGroups
+            writer.states.subtileWeaveMfmaGroupsMaster = savedMaster
+            writer.states.subtileWeaveCaptureInstances = savedCaptures
+            writer.states.subtileWeaveCaptureCurrent = savedCaptureCurrent
+            writer.states.subtileWeaveLookahead = savedLookahead
+            writer.states.subtileWeavePairCounter = savedPairCounter
+            writer.states.subtileWeaveEmitted = savedEmitted
         fusedLoopModule = self._emitLoop(writer, kernel, f"{label}_FUSED", fusedEmitted)
-        # 4d-3a/3b: the beta0/NonEdge D store at the end of the FUSED NLL. With
-        # subtileWeaveMfmaGroups set, the store interleaves the terminal MFMAs
-        # (4d-3b latency hiding); otherwise it is monolithic (4d-3a).
-        writer.states.subtileHoistedStoreInit = None
-        storeModule = writer.buildSubtileFusedStore(kernel, writer.tPA, writer.tPB)
         # Step 4 store-init hoist: buildSubtileFusedStore stashed the branch/memory-free
         # leading run of the fused store's SrdD address-math prep (when enabled and
         # eligible). Weave it into the FUSED loop's MFMA gaps so that exposed serial SALU
@@ -3768,8 +3778,6 @@ class LogicalScheduler:
             writer.states.subtileHoistedStoreInit = None
         module.add(fusedLoopModule)
         module.add(storeModule)
-        writer.states.subtileWeaveMfmaGroups = savedGroups
-        writer.states.subtileWeaveMfmaGroupsMaster = savedMaster
         # No "did-fuse" flag: the post-loop store dedups by re-evaluating the same
         # emitFusedStoreGuard (a WG that fused here will re-pass the guard there and
         # skip the redundant store). See kernelBodySubtile post-loop dedup.
@@ -3806,29 +3814,17 @@ class LogicalScheduler:
         module.add(doneLabel)
         return module
 
-    def _extractTerminalMfmaGroups(self, emitted_3d, keepInLoop=0):
-        """4d-3b: remove the terminal-subIterK (last K) MFMA instructions from the
-        FUSED loop and return them grouped by store-pair index.
+    @staticmethod
+    def _plsinRegisterIds(container):
+        """Return concrete (register type, index) identities for a container."""
+        if container is None or container.regName is not None:
+            return None
+        return tuple((container.regType, container.regIdx + i)
+                     for i in range(container.regNum))
 
-        emitted_3d: [partition][subIterK][EmittedModule]  (instructions already
-        materialized). The last subIterK slot of each partition holds the terminal
-        MFMA EmittedModule (opType 'mfma'); its instructions accumulate the FINAL
-        acc values (the K<last partials stay in the loop). MFMA C[a,b] writes
-        acc[4a+32b:+3]; the per-pair store reads acc[8p:8p+8], so an MFMA belongs to
-        store-pair p = (accBase // 8). We clear the extracted instructions from the
-        loop and return {p: [mfma insts]}.
-
-        keepInLoop: the first `keepInLoop` store-pairs' MFMAs are LEFT in the loop
-        (not extracted). Those pairs are stored first, so their accs must be ready
-        with the loop's natural (large) MFMA->accvgpr distance; there is no earlier
-        weave slot to give them that distance. Only pairs >= keepInLoop are woven,
-        each issued `keepInLoop` pairs ahead of its accvgpr_read (see GlobalWriteBatch
-        weave), which supplies the MFMA->acc latency window.
-
-        Returns None (caller falls back to monolithic store) if the layout is not the
-        expected 2-MFMA-per-pair contiguous form, so correctness never depends on the
-        weave.
-        """
+    @staticmethod
+    def _plsinTerminalMfmas(emitted_3d):
+        """Inventory terminal MFMAs without mutating the emitted loop."""
         mfmaEms = []   # (EmittedModule, [all its mfma insts])
         allInsts = []
         for partition in emitted_3d:
@@ -3838,32 +3834,95 @@ class LogicalScheduler:
                 if em.opType == 'mfma' and em.instructions:
                     mfmaEms.append((em, list(em.instructions)))
                     allInsts.extend(em.instructions)
-        if not allInsts:
-            return None
-        # Validate the acc layout on ALL terminal MFMAs before mutating anything.
-        pairOf = {}
-        groupsAll = {}
+        return mfmaEms, allInsts
+
+    def _planCapturedTerminalMfmas(self, emitted_3d, captures, storeModule,
+                                   requiredCycles):
+        """Move only producers with a safe generated gap in every runtime path."""
+        mfmaEms, allInsts = self._plsinTerminalMfmas(emitted_3d)
+        if not allInsts or not captures or requiredCycles <= 0:
+            return 0
+        producerByReg = {}
+        writesByProducer = {}
         for inst in allInsts:
-            # MFMA C[a,b] writes acc[4a+32b:+3]; store-pair p = accBase // 8. Read the
-            # base straight off the instruction's acc RegisterContainer instead of
-            # regex-scanning str(inst). Byte-equivalent to the old `acc\[(\d+):` scan:
-            # only a materialized MFMA acc (numeric regIdx, no symbolic RegName) yields
-            # a base; anything else -> bail to the monolithic store (loop unchanged),
-            # so correctness never depends on the weave.
-            acc = getattr(inst, 'acc', None)
-            if acc is None or acc.regName is not None:
-                return None
-            p = acc.regIdx // 8
-            pairOf[id(inst)] = p
-            groupsAll.setdefault(p, []).append(inst)
-        # Expect exactly 2 MFMAs per pair (sba=0 tile + sba=1 tile).
-        if any(len(v) != 2 for v in groupsAll.values()):
-            return None
-        # Valid. Extract pairs >= keepInLoop for weaving; keep the rest in the loop.
-        groups = {p: v for p, v in groupsAll.items() if p >= keepInLoop}
+            ids = self._plsinRegisterIds(getattr(inst, "acc", None))
+            if not ids:
+                continue
+            writesByProducer[id(inst)] = set(ids)
+            for reg in ids:
+                if reg in producerByReg:
+                    producerByReg[reg] = None
+                    continue
+                producerByReg[reg] = inst
+
+        flat = list(storeModule.flatitems())
+        position = {id(item): idx for idx, item in enumerate(flat)}
+        plans = []
+        for capture in captures:
+            consumers = {}
+            consumedRegs = {}
+            seenReadIds = set()
+            candidates = []
+            validCapture = True
+            for pair in capture.get("pairs", []):
+                gap = pair.get("gap")
+                anchor = pair.get("gapAnchor")
+                anchorPos = position.get(id(anchor))
+                if gap is not None and anchorPos is not None:
+                    candidates.append((anchorPos, gap))
+                for readInst, source in pair.get("reads", []):
+                    ids = self._plsinRegisterIds(source)
+                    readPos = position.get(id(readInst))
+                    if (ids is None or len(ids) != 1 or readPos is None
+                            or ids[0] in seenReadIds):
+                        validCapture = False
+                        break
+                    seenReadIds.add(ids[0])
+                    producer = producerByReg.get(ids[0])
+                    if producer is not None:
+                        consumedRegs.setdefault(id(producer), set()).add(ids[0])
+                        consumers.setdefault(id(producer), readPos)
+                        consumers[id(producer)] = min(
+                            consumers[id(producer)], readPos)
+                if not validCapture:
+                    break
+            if not validCapture:
+                plans.append({})
+                continue
+
+            capturePlan = {}
+            for producer in allInsts:
+                readPos = consumers.get(id(producer))
+                if (readPos is None or consumedRegs.get(id(producer)) !=
+                        writesByProducer.get(id(producer))):
+                    continue
+                safeGap = None
+                for anchorPos, gap in candidates:
+                    if anchorPos >= readPos:
+                        continue
+                    cycles = sum(
+                        1 for item in flat[anchorPos + 1:readPos]
+                        if isinstance(item, Instruction))
+                    if cycles >= requiredCycles:
+                        safeGap = gap
+                if safeGap is not None:
+                    capturePlan[id(producer)] = safeGap
+            plans.append(capturePlan)
+
+        moved = {id(inst) for inst in allInsts}
+        for plan in plans:
+            moved.intersection_update(plan.keys())
+        if not moved:
+            return 0
+
+        # Every activation/runtime path receives its own instruction objects.
+        for plan in plans:
+            for producer in allInsts:
+                if id(producer) in moved:
+                    plan[id(producer)].add(copy.deepcopy(producer))
         for em, insts in mfmaEms:
-            em.instructions = [i for i in insts if pairOf[id(i)] < keepInLoop]
-        return groups
+            em.instructions = [inst for inst in insts if id(inst) not in moved]
+        return len(moved)
 
     def _weaveFillersIntoMfmaGaps(self, flat, numFillers, emitFiller, woven,
                                   perGap=None, stride=None, tailStart=None):

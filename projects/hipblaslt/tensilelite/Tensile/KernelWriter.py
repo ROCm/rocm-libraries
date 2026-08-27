@@ -415,6 +415,8 @@ class StateValues:
   subtileWeaveMfmaGroups: Optional[dict] = None    # {pair: [terminal mfma insts]} being woven
   subtileWeaveMfmaGroupsMaster: Optional[dict] = None  # pristine master re-copied per store type
   subtileWeaveEmitted: Optional[set]     = None    # store-pairs whose MFMAs are already emitted
+  subtileWeaveCaptureInstances: Optional[list] = None  # generated activation/store-path captures
+  subtileWeaveCaptureCurrent: Optional[dict] = None     # capture receiving the current store path
   subtileHoistedStoreInit: Optional[list] = None   # split store-init units hoisted into the loop
   subtileHoistedWriteIndices: Optional[dict] = None  # coord VGPRs hoisted from NGLL
   subtileRecomputeCoords: bool           = False   # recompute store coords INTO existing (hoisted) VGPRs (numIter<PGR)

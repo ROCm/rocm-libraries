@@ -59,11 +59,6 @@ def isSubtileMultiDU(kernel) -> bool:
     return kernel.get("_DepthUA", du) < du or kernel.get("_DepthUB", du) < du
 
 
-def plsinWeaveLookahead(macroTile0: int, macroTile1: int) -> int:
-    """Return the hardware-validated PLSIN terminal-MFMA lead."""
-    return 3 if (macroTile0, macroTile1) in ((192, 256), (256, 192)) else 2
-
-
 def _parsePlsinDebugEnv():
     """Parse the single TENSILE_PLSIN_DEBUG umbrella into a {name: value} map.
 
@@ -89,7 +84,7 @@ def plsinDebugEnv(name: str, default=None):
     ``TENSILE_PLSIN_DEBUG`` -- a ';'-separated list of NAME=value pairs whose
     names are the historical TENSILE_* knobs, e.g.
 
-        TENSILE_PLSIN_DEBUG="TENSILE_WEAVE_LA=4;TENSILE_PLSIN_APPLY_ALPHA=1"
+        TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_APPLY_ALPHA=1"
 
     IMPORTANT: this is for development, bring-up and testing ONLY. It is NOT a
     production control surface. In production the fused post-loop store and every
