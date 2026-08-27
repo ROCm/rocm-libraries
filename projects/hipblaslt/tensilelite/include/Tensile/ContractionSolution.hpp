@@ -518,9 +518,10 @@ namespace TensileLite
         // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
-        // Selection-time filter for uniform summation order. Permissive about
-        // facts that only exist at solve(); checkUniformSummationOrder() is
-        // authoritative. Wired into softwarePredicate().
+        // Selection-time filter for uniform summation order. Resolves StreamK /
+        // GSU / StaggerU the same way solve() does and admits only launches
+        // checkUniformSummationOrder() would accept, except the StreamK
+        // Synchronizer pointer (not allocated yet). Wired into softwarePredicate().
         bool                 uniformSummationOrderSupported(Problem const&  problem,
                                                             Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
@@ -856,6 +857,24 @@ namespace TensileLite
 
     private:
         bool handwrittenCustomKernel() const;
+
+        // Same StreamK grid / reduction solve() packs, including the
+        // insufficient-workspace fall back to tree + grid==tiles.
+        StreamKSettings resolveStreamKSettings(Problem const&  problem,
+                                               Hardware const& hardware) const;
+
+        // Reasons checkUniformSummationOrder() would refuse this launch.
+        // Empty means the launch is row-uniform. requireSynchronizer is the
+        // one clause that exists only at solve() (the pointer is not allocated
+        // at heuristic time); selection passes false.
+        std::string uniformSummationOrderLaunchObstacle(
+            Problem const&         problem,
+            Hardware const&        hardware,
+            StreamKSettings const& sk,
+            size_t                 resolvedGlobalAccumulation,
+            uint32_t               gsu,
+            void const*            synchronizer,
+            bool                   requireSynchronizer) const;
 
         // Launch gate. Call once sk and resolvedGlobalAccumulation are final.
         void checkUniformSummationOrder(Problem const&         problem,

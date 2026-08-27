@@ -1166,25 +1166,38 @@ namespace
     //
     // None of these is present in the tuned logic, so no problem shape can
     // produce them; they are exercised against a synthesised solution instead.
-    // The surface used is uniformSummationOrderSupported(), the selection-time
-    // half of the pair: the launch gate is private, and both consult the same
-    // implementation, so a condition asserted here is the condition the gate
-    // rejects on. What is not covered here is the gate's own arithmetic, which
-    // the split cases above cover directly.
+    // The surface used is uniformSummationOrderSupported(), which now resolves
+    // StreamK / GSU / StaggerU the same way solve() does and admits only
+    // launches the gate would accept (except a missing Synchronizer pointer).
+    // Static obstacles still share one implementation with the gate. The
+    // gate's split arithmetic is covered directly by the split cases above;
+    // the tests below pin that selection drops the same configurations.
     // =======================================================================
 
     // A mock device rather than the real one: nothing below depends on the
     // hardware, and this keeps the cases running where there is no GPU.
+    // skDynamicGrid is forced off so StreamK resolution stays on the
+    // non-analytical path (plain AMDGPU has no origami hardware). The
+    // AMDGPU constructor reads TENSILE_STREAMK_DYNAMIC_GRID (default 6 =
+    // k_split_aware), so leaving the field at its post-construction value
+    // would take getSKReduction into HipAMDGPU::analyticalHardware and abort.
     TensileLite::AMDGPU probeHardware()
     {
-        return TensileLite::AMDGPU(
+        auto hardware = TensileLite::AMDGPU(
             TensileLite::AMDGPU::Processor::gfx950, 256, "row_uniformity_probe");
+        hardware.skDynamicGrid = 0;
+        return hardware;
     }
 
     // A minimal StreamK=3 solution that is accepted as it stands, so each case
     // below changes exactly one field and attributes the outcome to it.
     // GlobalAccumulation 4 (PartialsBuffer) and a runtime StaggerU keep the
     // predicate's other clauses satisfied.
+    //
+    // workGroupMapping and workGroupMappingXCC must stay off the origami
+    // defaults (0 and -1): calculateAutoWGM, called from the shared launch
+    // obstacle helper, would otherwise dereference HipAMDGPU::analyticalHardware
+    // on this mock.
     std::shared_ptr<TensileLite::ContractionSolution> probeSolution()
     {
         auto solution                            = std::make_shared<TensileLite::ContractionSolution>();
@@ -1228,7 +1241,37 @@ namespace
     TEST(RowUniformityStreamKRejection_pre_checkin, AdmitsTheProbeConfiguration)
     {
         const auto hardware = probeHardware();
-        EXPECT_TRUE(admitsUniformSummationOrder(*probeSolution(), hardware))
+        auto       solution = probeSolution();
+        auto       problem  = probeProblem();
+
+        ASSERT_EQ(hardware.skDynamicGrid, 0)
+            << "probe AMDGPU must keep StreamK on the non-analytical path; "
+               "plain AMDGPU has no origami hardware";
+        ASSERT_NE(solution->sizeMapping.workGroupMapping, 0)
+            << "workGroupMapping==0 would take the origami WGM path on this mock";
+        ASSERT_NE(solution->sizeMapping.workGroupMappingXCC, -1)
+            << "workGroupMappingXCC==-1 would take the origami WGMXCC path on this mock";
+
+        // Selection now calls getSKReduction / getSKGrid. Those must not abort
+        // on a plain AMDGPU (no analyticalHardware).
+        EXPECT_EQ(solution->getSKReduction(problem, hardware), origami::reduction_t::tree);
+        const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_GT(tiles, 0u);
+        const size_t grid = solution->getSKGrid(problem, hardware, tiles, origami::reduction_t::tree);
+        ASSERT_GT(grid, 0u);
+        const size_t iters
+            = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+        const auto split = TensileLite::streamKStaticSplit(
+            tiles, iters, grid, hardware.skFullTiles, solution->sizeMapping.streamKForceDPOnly != 0);
+        EXPECT_TRUE(TensileLite::streamKStaticSplitRowUniform(
+            split, tiles, iters, grid, solution->internalArgsSupport.perTileExtraIters))
+            << "the unmodified probe must be launch-legal on the static split "
+               "(tiles="
+            << tiles << " grid=" << grid << " skTiles=" << split.skTiles
+            << " skItersPerWG=" << split.skItersPerWG << " extraIters=" << split.extraIters
+            << "); the Synchronizer pointer is the one clause selection skips";
+
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
             << "The unmodified probe must be admitted, or the cases below cannot attribute a "
                "rejection to the single field they change";
     }
@@ -1310,6 +1353,133 @@ namespace
 
         EXPECT_TRUE(admitsUniformSummationOrder(*solution, hardware))
             << "WaveSplitK without StreamK must stay admitted";
+    }
+
+    TEST(RowUniformityStreamKRejection_pre_checkin, HandwrittenCustomKernel)
+    {
+        const auto hardware              = probeHardware();
+        auto       solution              = probeSolution();
+        solution->customKernel.name      = "DummyCustomKernel";
+        solution->customKernel.generated = false;
+
+        EXPECT_FALSE(admitsUniformSummationOrder(*solution, hardware))
+            << "A handwritten custom kernel must be refused under uniform summation order";
+    }
+
+    TEST(RowUniformityStreamKRejection_pre_checkin, CompiledInStaggerU)
+    {
+        const auto hardware                    = probeHardware();
+        auto       solution                    = probeSolution();
+        solution->sizeMapping.streamK          = 0;
+        solution->internalArgsSupport.staggerU = false;
+        solution->sizeMapping.staggerU         = 16;
+        auto problem                           = probeProblem();
+
+        // USO clamps the *resolved* StaggerU to 0. Refusal must therefore come
+        // from the compiled-in field the clamp cannot reach, matching the
+        // launch gate.
+        const int32_t autoWGM
+            = std::get<0>(solution->calculateAutoWGM(problem, &hardware, /*skgrid=*/0));
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &hardware, 0, autoWGM)), 0u)
+            << "uniform summation order clamps resolved StaggerU to 0; this case is about "
+               "the compiled-in field, not a non-zero resolved value";
+
+        EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "Compiled-in StaggerU with no runtime field must be refused";
+    }
+
+    // The old selection filter skipped GSU when AdaptiveGemmGSUA was set, so a
+    // kernel the launch gate would refuse (SingleBuffer GSU>1 that does not
+    // adapt up to MultipleBuffer) could still win the heuristic. Selection
+    // now resolves accumulation the same way solve() does.
+    TEST(RowUniformityStreamKRejection_pre_checkin, AdaptiveGsuThatLaunchWouldReject)
+    {
+        const auto hardware                      = probeHardware();
+        auto       solution                      = probeSolution();
+        solution->sizeMapping.streamK            = 0;
+        solution->sizeMapping.adaptiveGemmGSUA   = 1;
+        solution->sizeMapping.globalAccumulation = 0;
+        solution->sizeMapping.globalSplitU       = 4;
+        auto problem                             = probeProblem();
+
+        // 1024x1024x1024 / MT 128x128 / DepthU 256 → 64 tiles, 4 iters/tile,
+        // GSU 4. AdaptiveGemmGSUA upgrades to MultipleBuffer only when
+        // itersPerTile >= 64 or GSU >= 64, so this shape stays SingleBuffer.
+        const uint32_t gsu = solution->calculateAutoGSU(problem, &hardware);
+        ASSERT_EQ(gsu, 4u);
+        ASSERT_EQ(problem.getAccumulation(hardware, solution->sizeMapping, gsu), 0u)
+            << "this shape must stay on SingleBuffer so the test is about the old adaptive "
+               "skip, not about an MB upgrade the launch gate would accept";
+
+        EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "Adaptive GSU that still resolves to SingleBuffer with GSU>1 must be refused "
+               "at selection, not at the launch gate";
+    }
+
+    // SK4 does not take the static two-tile snap. On this mock device the
+    // grid is the CU count (256) and the tile count is 64, so the launch
+    // gate's divisibility check fails. Selection must drop it rather than
+    // return it as a USO winner.
+    TEST(RowUniformityStreamKRejection_pre_checkin, DynamicStreamKGridDoesNotDivideTiles)
+    {
+        const auto hardware           = probeHardware();
+        auto       solution           = probeSolution();
+        solution->sizeMapping.streamK = 4;
+        auto problem                  = probeProblem();
+
+        ASSERT_EQ(hardware.skDynamicGrid, 0);
+        const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, 64u) << "1024x1024 with MT 128x128";
+        const size_t grid
+            = solution->getSKGrid(problem, hardware, tiles, origami::reduction_t::tree);
+        ASSERT_EQ(grid, static_cast<size_t>(hardware.computeUnitCount))
+            << "SK4 does not take the static two-tile USO snap; mock grid is the CU count";
+        ASSERT_NE(tiles % grid, 0u)
+            << "the launch gate refuses the dynamic-queue path when tiles % grid != 0";
+
+        EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "A dynamic-queue StreamK launch whose grid does not divide the tile count "
+               "must be refused at selection";
+    }
+
+    TEST(RowUniformityStreamKRejection_pre_checkin, FilterIsIdleWhenUniformSummationOrderIsOff)
+    {
+        const auto hardware           = probeHardware();
+        auto       solution           = probeSolution();
+        solution->sizeMapping.streamK = 4;
+        auto problemOn                = probeProblem();
+        auto problemOff               = probeProblem();
+        problemOff.setParams().setUniformSummationOrder(false);
+
+        EXPECT_FALSE(solution->uniformSummationOrderSupported(problemOn, hardware))
+            << "SK4 on this mock is not launch-legal under USO; the idle-filter assertion "
+               "below is only meaningful against that contrast";
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problemOff, hardware))
+            << "The selection filter must not drop kernels when uniform summation order is off";
+    }
+
+    TEST(RowUniformityStreamKRejection_pre_checkin, GroupedGemmStreamKGridIsZero)
+    {
+        const auto hardware = probeHardware();
+        auto       solution = probeSolution();
+        auto       problem  = probeProblem();
+        problem.setGroupedGemm(true);
+
+        EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "Grouped GEMM packs skGrid == 0; a StreamK kernel must not win USO selection";
+    }
+
+    TEST(RowUniformityStreamKRejection_pre_checkin, GroupedGemmNonStreamKStillAdmitted)
+    {
+        const auto hardware           = probeHardware();
+        auto       solution           = probeSolution();
+        solution->sizeMapping.streamK = 0;
+        auto problem                  = probeProblem();
+        problem.setGroupedGemm(true);
+
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "Grouped GEMM without StreamK must stay selectable when the rest of the "
+               "launch is row-uniform";
     }
 
     // Rejection D. The MX cases are a conjunction over a guard, and the
@@ -1607,10 +1777,11 @@ namespace
                         continue;
 
                     // The split is only one of the gate's clauses. Consulting the
-                    // selection-time predicate for the rest -- the accumulation
-                    // mode, the effective GSU, whether the StaggerU clamp reaches
-                    // this kernel -- is what makes the success assertion below an
-                    // assertion about the split and not about the whole gate.
+                    // selection-time predicate for the rest -- it now resolves
+                    // StreamK / GSU / StaggerU the same way solve() does -- is
+                    // what makes the success assertion below an assertion about
+                    // a launch-legal winner, not a kernel the gate would still
+                    // refuse.
                     if(!solution->uniformSummationOrderSupported(tensile, *hardware))
                         continue;
 

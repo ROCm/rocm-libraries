@@ -32,6 +32,7 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Properties.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Utils.hpp>
 
 #include <Tensile/PropertyMatching.hpp>
@@ -114,9 +115,10 @@ namespace TensileLite
                 auto rv = solutions.at(index);
 
                 Task task(hardware, problem, *rv);
-                bool predicateMatch = (*rv->problemPredicate)(problem)
-                                      && (*rv->taskPredicate)(task)
-                                      && (*rv->hardwarePredicate)(hardware);
+                bool predicateMatch
+                    = (*rv->hardwarePredicate)(hardware)
+                      && softwarePredicate(
+                          SolutionLibrarySearchType::DEFAULT, task, hardware, *rv, problem);
                 if(debug)
                 {
                     PredicateDebugger::printHeader(
@@ -149,9 +151,13 @@ namespace TensileLite
                 if(myPerformance > bestPerformance)
                 {
                     Task task(hardware, problem, *(row.second));
-                    bool predicateMatch = (*row.second->problemPredicate)(problem)
-                                          && (*row.second->taskPredicate)(task)
-                                          && (*row.second->hardwarePredicate)(hardware);
+                    bool predicateMatch
+                        = (*row.second->hardwarePredicate)(hardware)
+                          && softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                               task,
+                                               hardware,
+                                               *(row.second),
+                                               problem);
 
                     if(debug)
                     {
@@ -238,8 +244,12 @@ namespace TensileLite
                             Task task(hardware, problem, *(row.second));
                             problem.setWorkspaceSizeGroupedGemm(ws);
                             problem.setGroupedGemmCount(problems.size());
-                            if(!(*row.second->problemPredicate)(problem)
-                               || !(*row.second->taskPredicate)(task))
+                            problem.setGroupedGemm(true);
+                            if(!softwarePredicate(searchType,
+                                                  task,
+                                                  hardware,
+                                                  *(row.second),
+                                                  problem))
                                 useSolution = false;
                         }
                     }
