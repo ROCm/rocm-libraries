@@ -335,8 +335,8 @@ namespace rocsparse
                                                   mat,
                                                   rocsparse_analysis_policy_reuse,
                                                   &ellsv_info,
-                                                  temp_buffer,
-                                                  buffer_size_analysis));
+                                                  buffer_size_analysis,
+                                                  temp_buffer));
                 }
                 return rocsparse_status_success;
             }
@@ -358,8 +358,8 @@ namespace rocsparse
                                                                  x,
                                                                  y,
                                                                  mat->info->get_ellsv_info(),
-                                                                 temp_buffer,
-                                                                 buffer_size_solve));
+                                                                 buffer_size_solve,
+                                                                 temp_buffer));
                 return rocsparse_status_success;
             }
             }
