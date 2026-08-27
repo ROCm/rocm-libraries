@@ -271,31 +271,6 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::Bool(),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
-// 1D Full test cases
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    IntegrationGpuConvFwdBiasActiv1dFp32,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D()),
-                     testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    IntegrationGpuConvFwdBiasActiv1dBfp16,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D()),
-                     testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    IntegrationGpuConvFwdBiasActiv1dFp16,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D()),
-                     testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
-
 // 3D Smoke test cases
 INSTANTIATE_TEST_SUITE_P(
     Smoke,

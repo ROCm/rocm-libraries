@@ -96,7 +96,7 @@ TEST(TestMiopenUtils, GetSpatialDimCountThrowsOnInvalidDims)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestMiopenUtils, CreateBatchnormTensor4dPassthrough)
+TEST(TestMiopenUtils, CreatePaddedTensor4dPassthrough)
 {
     // 4D NCHW tensor should pass through unchanged
     const std::vector<int64_t> dims = {2, 3, 14, 14};
@@ -141,7 +141,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor4dPassthrough)
     EXPECT_EQ(resultStrides[3], 1);
 }
 
-TEST(TestMiopenUtils, CreateBatchnormTensor5dPassthrough)
+TEST(TestMiopenUtils, CreatePaddedTensor5dPassthrough)
 {
     // 5D NCDHW tensor should pass through unchanged
     const std::vector<int64_t> dims = {2, 3, 4, 14, 14};
@@ -188,7 +188,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor5dPassthrough)
     EXPECT_EQ(resultStrides[4], 1);
 }
 
-TEST(TestMiopenUtils, CreateBatchnormTensor3dNclPadsToNchw)
+TEST(TestMiopenUtils, CreatePaddedTensor3dNclPadsToNchw)
 {
     // NCL (channels-first): dims [N, C, L], strides [C*L, L, 1]
     // C stride (14) > L stride (1) = channels-first
@@ -229,7 +229,7 @@ TEST(TestMiopenUtils, CreateBatchnormTensor3dNclPadsToNchw)
     EXPECT_EQ(resultStrides[3], 1); // W stride = 1 for channels-first
 }
 
-TEST(TestMiopenUtils, CreateBatchnormTensor3dNlcPadsToNhwc)
+TEST(TestMiopenUtils, CreatePaddedTensor3dNlcPadsToNhwc)
 {
     // NLC (channels-last): dims [N, C, L], strides [C*L, 1, C]
     // C stride (1) < L stride (3) = channels-last
