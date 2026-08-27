@@ -44,7 +44,8 @@ protected:
     std::shared_ptr<_rocsparse_csrsm_info> m_csrsm_info{};
     float                                  m_local_host_alpha_value[4];
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-    rocsparse_diagonal_mode m_diagonal_mode{rocsparse_diagonal_mode_none};
+    rocsparse_solve_mode        m_solve_mode{rocsparse_solve_mode_triangular};
+    rocsparse_diagonal_modifier m_diagonal_modifier{rocsparse_diagonal_modifier_none};
 #endif
 
 public:
@@ -57,8 +58,10 @@ public:
     void                 set_shared_csrsm_info(std::shared_ptr<_rocsparse_csrsm_info> value);
 
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-    rocsparse_diagonal_mode get_diagonal_mode() const;
-    void                    set_diagonal_mode(rocsparse_diagonal_mode value);
+    rocsparse_solve_mode        get_solve_mode() const;
+    void                        set_solve_mode(rocsparse_solve_mode value);
+    rocsparse_diagonal_modifier get_diagonal_modifier() const;
+    void                        set_diagonal_modifier(rocsparse_diagonal_modifier value);
 #endif
 
     ~_rocsparse_sptrsm_descr();

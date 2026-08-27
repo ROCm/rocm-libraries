@@ -312,7 +312,7 @@ void testing_sptrsm_csr_bad_arg(const Arguments& arg)
                         break;
                     }
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-                    case rocsparse_sptrsm_input_diagonal_mode:
+                    case rocsparse_sptrsm_input_solve_mode:
                     {
                         break;
                     }
@@ -449,7 +449,7 @@ void testing_sptrsm_csr(const Arguments& arg)
     }
 
 #ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
-    if(arg.diagonal_mode != 0)
+    if(arg.solve_mode != 0)
     {
         return;
     }
@@ -784,13 +784,20 @@ void testing_sptrsm_csr(const Arguments& arg)
 
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     {
-        const rocsparse_diagonal_mode diagonal_mode
-            = static_cast<rocsparse_diagonal_mode>(arg.diagonal_mode);
+        const rocsparse_solve_mode solve_mode = static_cast<rocsparse_solve_mode>(arg.solve_mode);
         CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
                                                          sptrsm_descr,
-                                                         rocsparse_sptrsm_input_diagonal_mode,
-                                                         &diagonal_mode,
-                                                         sizeof(diagonal_mode),
+                                                         rocsparse_sptrsm_input_solve_mode,
+                                                         &solve_mode,
+                                                         sizeof(solve_mode),
+                                                         p_error));
+        const rocsparse_diagonal_modifier diagonal_modifier
+            = static_cast<rocsparse_diagonal_modifier>(arg.diagonal_modifier);
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+                                                         sptrsm_descr,
+                                                         rocsparse_sptrsm_input_diagonal_modifier,
+                                                         &diagonal_modifier,
+                                                         sizeof(diagonal_modifier),
                                                          p_error));
     }
 #endif
@@ -826,23 +833,23 @@ void testing_sptrsm_csr(const Arguments& arg)
         // CPU csrsm
         J analysis_pivot = -1;
         J solve_pivot    = -1;
-        if(arg.diagonal_mode != 0)
+        if(arg.solve_mode != 0)
         {
-            host_diagonal_solve<I, J, T>(trans_A,
-                                         M,
-                                         K,
-                                         halpha[0],
-                                         hA.ptr,
-                                         hA.ind,
-                                         hA.val,
-                                         hC,
-                                         hC,
-                                         ldc,
-                                         order_C,
-                                         base,
-                                         arg.diagonal_mode,
-                                         &analysis_pivot,
-                                         &solve_pivot);
+            host_diagonal_solve_csr<I, J, T>(trans_A,
+                                             M,
+                                             K,
+                                             halpha[0],
+                                             hA.ptr,
+                                             hA.ind,
+                                             hA.val,
+                                             hC,
+                                             hC,
+                                             ldc,
+                                             order_C,
+                                             base,
+                                             arg.diagonal_modifier,
+                                             &analysis_pivot,
+                                             &solve_pivot);
         }
         else
         {
