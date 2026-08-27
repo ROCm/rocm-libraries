@@ -1530,7 +1530,13 @@ def _build_tilde_dgrad(
             if is_wmma:
                 if use_cshuffle:
                     _emit_dgrad_cshuffle_epilogue_wmma(
-                        b, spec, op, final_accs, grid, dx_rsrc
+                        b,
+                        spec,
+                        op,
+                        final_accs,
+                        grid,
+                        dx_rsrc,
+                        c_group_base=c_group_base,
                     )
                 else:
                     _emit_dgrad_direct_epilogue_wmma(
@@ -1545,11 +1551,16 @@ def _build_tilde_dgrad(
                         block_n_off_v,
                         dx_rsrc,
                         c0,
+                        c_group_base=c_group_base,
                     )
             elif use_cshuffle:
-                _emit_dgrad_cshuffle_epilogue(b, spec, final_accs, grid, dx_rsrc)
+                _emit_dgrad_cshuffle_epilogue(
+                    b, spec, final_accs, grid, dx_rsrc, c_group_base=c_group_base
+                )
             else:
-                _emit_dgrad_direct_epilogue(b, spec, final_accs, grid, dx_rsrc)
+                _emit_dgrad_direct_epilogue(
+                    b, spec, final_accs, grid, dx_rsrc, c_group_base=c_group_base
+                )
         elif is_wmma:
             if use_cshuffle:
                 _emit_dgrad_tilde_cshuffle_epilogue(

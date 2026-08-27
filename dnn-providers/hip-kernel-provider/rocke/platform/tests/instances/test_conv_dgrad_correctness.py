@@ -397,7 +397,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     def test_fp16_grouped_stride2(self):
         """fp16 grouped dgrad, groups=4, stride=2 — tilde decomposition path."""
-        if ARCH not in _CDNA_ARCHES:
+        if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
             "--dtype",
@@ -465,7 +465,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
     def test_fp16_grouped_split_k(self):
         """fp16 grouped dgrad with split_k>1 — group on y, split_k on z compose;
         even cpg (=16) keeps the packed <2 x f16> atomic pairs in-group."""
-        if ARCH not in _CDNA_ARCHES:
+        if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"split_k dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
             "--dtype",
