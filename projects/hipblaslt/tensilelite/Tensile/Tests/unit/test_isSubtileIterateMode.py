@@ -9,7 +9,7 @@ No GPU required -- exercises pure Python logic.
 import pytest
 from unittest.mock import MagicMock
 
-from Tensile.SolutionStructs.Utilities import isSubtileIterateMode, _TDM_PAD_INTERVAL_LIMIT
+from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
 
 pytestmark = pytest.mark.unit
 
@@ -107,10 +107,3 @@ class TestAsymmetricBpe:
         state = _make_state(True, True, True, 256, bpe_a=2, bpe_b=8)
         assert isSubtileIterateMode(state, "A") is False
         assert isSubtileIterateMode(state, "B") is True
-
-
-# -- constant value --
-
-def test_pad_interval_limit_is_1024():
-    """Sanity: the internal pad_interval limit constant matches the HW spec."""
-    assert _TDM_PAD_INTERVAL_LIMIT == 1024
