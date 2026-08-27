@@ -100,6 +100,8 @@ struct RocprimDeviceBinarySearchNameGenerator
     {
         std::string n = type_tag<typename Params::haystack_type>() + "_"
                         + type_tag<typename Params::needle_type>();
+        if constexpr(std::is_same_v<typename Params::config, use_custom_config>)
+            n += "_Cfg";
         if constexpr(Params::use_graphs)
             n += "_Graphs";
         return n;
