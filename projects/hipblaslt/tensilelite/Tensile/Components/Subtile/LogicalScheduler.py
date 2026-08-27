@@ -4316,13 +4316,14 @@ class LogicalScheduler:
         if plsin and writer._plsinCanBypassEndSummation(kernel):
             plsinFusedExitLabel = Label("SkipPostLoopStore", "")
 
-        skipGRLabel = Label("SkipPreloopGR", "")
+        skipGRLabel = Label("SkipPreloop", "")
+        preloopEndLabel = Label("PreloopEnd", "")
         skipGRForTail = (not kernel["NoTailLoop"]) and self.config.pgr >= 1
         if skipGRForTail:
             module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
-                                 comment="K < DepthU? skip prefetch GR to initC"))
+                                 comment="K < DepthU? skip prefetch GR + initC to slow-path initC"))
             module.add(SCBranchSCC1(labelName=skipGRLabel.getLabelName(),
-                                    comment="K < DepthU: skip prefetch GR, still run initC"))
+                                    comment="K < DepthU: skip prefetch GR, run initC on slow path"))
 
         # ── Pre-loop scheduling (Change A): defer LDS read-address setup ──
         # kernelBodySubtile stashed the A/B + scale LR-offset modules (lraTileAssignment,
@@ -4396,9 +4397,26 @@ class LogicalScheduler:
                                              before=None,
                                              source=None))
 
-        # ── Preloop (initC + tail jump woven around the single init op) ──
-        # Operate on a copy so self._preloop_emitted (read by PAP and the
-        # per-unroll copies) stays untouched.
+        # ── Preloop split: duplicate initC across fast and slow paths ──
+        #
+        # Fast path (K >= DepthU):
+        #   [GRs] -> [initC] -> SBranch PreloopEnd -> [WaitGR, Sync, LR, SkipOps]
+        #
+        # Slow path (K < DepthU):
+        #   Label SkipPreloop -> [initC] -> SCmpEQ/tailJump -> Label PreloopEnd
+        #                                                    -> [WaitGR, Sync, LR, SkipOps]
+        #
+        # The skip-GR guard above ensures K<DepthU never reaches fast-path GRs.
+        # No tail-jump is needed after the fast-path initC for the same reason.
+        # The slow-path initC always exits via tailJump (K<DepthU is always true there).
+        #
+        # EmittedModules with source=None (opType=="") are not dispatched by
+        # populate() — their instructions list is used directly as pre-built assembly.
+        # EmittedModules with source=InlineModuleOp are dispatched as 'inline' and
+        # built lazily by InstructionEmitter.emit_inline() via the build callback.
+        #
+        # Operate on a copy so self._preloop_emitted (read by PAP and per-unroll copies)
+        # stays untouched.
         preloop_emitted = copy.deepcopy(self._preloop_emitted)
         if not kernel["NoTailLoop"]:
             em_list = preloop_emitted[0][0]
@@ -4406,9 +4424,7 @@ class LogicalScheduler:
                              if getattr(em.source, 'label', None) == 'initC_overlap'), None)
             assert init_idx is not None, "preloop must contain the canonical initC op"
             next_id = max(em.moduleId for em in em_list) + 1
-            # After initC, jump to the tail loop when K < DepthU. Under PLSIN the
-            # FUSED NLL bodies sit between here and SkipToEnd and push it past the
-            # +-simm16 short-branch range, so this arm needs the 32-bit form.
+
             if plsin:
                 tailJump = writer.longBranchScc1(
                     endLabel, posNeg=1,
@@ -4416,19 +4432,47 @@ class LogicalScheduler:
             else:
                 tailJump = SCBranchSCC1(labelName=endLabel.getLabelName(),
                                         comment="K < DepthU: jump to tail loop")
-            em_list.insert(init_idx + 1, EmittedModule(
-                moduleId=next_id,
-                instructions=[
-                    SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
-                                comment="K < DepthU? initC done, run tail only"),
-                    tailJump,
-                ]))
-            next_id += 1
+
             if skipGRForTail:
-                # Land the skip-GR guard right before initC.
-                em_list.insert(init_idx, EmittedModule(
+                # Fast-path: after fast-path initC, jump unconditionally to PreloopEnd.
+                em_list.insert(init_idx + 1, EmittedModule(
+                    moduleId=next_id,
+                    instructions=[SBranch(labelName=preloopEndLabel.getLabelName(),
+                                          comment="K >= DepthU: skip slow-path initC")]))
+                next_id += 1
+
+                # Slow-path: SkipPreloop label + fresh initC (built lazily by populate)
+                # + tail-jump + PreloopEnd label rejoining WaitGR/Sync/LR.
+                em_list.insert(init_idx + 2, EmittedModule(
                     moduleId=next_id,
                     instructions=[skipGRLabel]))
+                next_id += 1
+
+                # Copy already-populated instructions from the fast-path initC.
+                # populate() ran before deepcopy, so em_list[init_idx].instructions
+                # already contains the built assembly — duplicate it for the slow path.
+                em_list.insert(init_idx + 3, EmittedModule(
+                    moduleId=next_id,
+                    instructions=list(em_list[init_idx].instructions)))
+                next_id += 1
+
+                em_list.insert(init_idx + 4, EmittedModule(
+                    moduleId=next_id,
+                    instructions=[
+                        SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                  comment="K < DepthU? slow-path initC done, run tail only"),
+                        tailJump,
+                        preloopEndLabel,
+                    ]))
+            else:
+                # skipGRForTail=False (PGR=0 or NoTailLoop variant): no split needed.
+                em_list.insert(init_idx + 1, EmittedModule(
+                    moduleId=next_id,
+                    instructions=[
+                        SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                  comment="K < DepthU? initC done, run tail only"),
+                        tailJump,
+                    ]))
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
                                   preloop_emitted, schedule=False))
 

@@ -3115,11 +3115,11 @@ class TestIntegration:
             sched.deallocVgprTiles(writer)
 
     def test_initD_emitted_on_tail_only_and_preloop_paths(self):
-        """initC is one canonical preloop op reached by every path.
+        """initC is duplicated: once on the fast path (after GRs), once on the slow path.
 
-        Normal path (K>=DepthU): GR issue -> initC -> rest of preloop.
-        Tail-only path (K<DepthU): skip the prefetch GR to the same initC,
-        then jump to the tail loop. No separate/duplicated init block.
+        Fast path (K>=DepthU): GR issue -> initC -> SBranch PreloopEnd -> WaitGR/Sync/LR.
+        Slow path (K<DepthU):  SkipPreloop label -> initC -> tail-jump.
+        Both paths converge at PreloopEnd before WaitGR/Sync/LR.
         """
         kernel = create_kernel(256, 256, fp4=True)
         assert not kernel["NoTailLoop"]
@@ -3140,22 +3140,27 @@ class TestIntegration:
 
             asm = str(sched.emitMainAndExitLoops(writer, kernel))
 
-            # initC emitted exactly once across all paths (no duplicate init).
-            assert asm.count("vgprTiles to zero") == 1, \
-                "initC must be zeroed exactly once"
             assert "InitDForTailOnly" not in asm, "no separate tail-only init block"
 
-            # Unified control flow: skip prefetch GR to initC, then jump to tail.
-            skip_idx = asm.index("SkipPreloopGR:")
-            zero_idx = asm.index("vgprTiles to zero")
-            tail_idx = asm.index("K < DepthU: jump to tail loop")
-            assert skip_idx < zero_idx < tail_idx, \
-                "expected: SkipPreloopGR: -> initC -> jump to tail loop"
+            # initC appears twice: fast-path copy (after GRs) + slow-path copy (SkipPreloop).
+            assert asm.count("vgprTiles to zero") == 2, \
+                "initC must appear on both fast path and slow path"
+
+            # Structural ordering: GRs -> fast initC -> SBranch PreloopEnd ->
+            #                      SkipPreloop -> slow initC -> tail-jump -> PreloopEnd.
+            fast_zero_idx  = asm.index("vgprTiles to zero")
+            branch_end_idx = asm.index("PreloopEnd", fast_zero_idx)
+            skip_idx       = asm.index("SkipPreloop:", branch_end_idx)
+            slow_zero_idx  = asm.index("vgprTiles to zero", skip_idx)
+            tail_idx       = asm.index("K < DepthU: jump to tail loop", slow_zero_idx)
+            preloop_end_idx = asm.index("PreloopEnd:", tail_idx)
+            assert fast_zero_idx < branch_end_idx < skip_idx < slow_zero_idx < tail_idx < preloop_end_idx, \
+                "expected: fast initC -> SBranch PreloopEnd -> SkipPreloop -> slow initC -> tail-jump -> PreloopEnd:"
         finally:
             sched.deallocVgprTiles(writer)
 
     def test_initD_uf1_tail_only_control_flow_invariants(self):
-        """uf==1 (make_cfg_bf16): unified initC control-flow invariants."""
+        """uf==1 (make_cfg_bf16): split-initC control-flow invariants."""
         import re
         kernel = create_kernel(256, 256, fp4=False)
         assert not kernel["NoTailLoop"]
@@ -3175,16 +3180,23 @@ class TestIntegration:
 
             assert "InitDForTailOnly" not in asm, "no separate tail-only init block"
 
-            # initC emitted exactly once (single canonical location).
-            assert asm.count("vgprTiles to zero") == 1, "initC zeroed exactly once"
+            # initC duplicated: fast path (after GRs) + slow path (after SkipPreloop).
+            assert asm.count("vgprTiles to zero") == 2, "initC must appear on both paths"
 
-            assert asm.count("label_SkipPreloopGR:") == 1, "SkipPreloopGR label present"
-            skip_gr = re.findall(r"s_cbranch_scc1\s+label_SkipPreloopGR", asm)
-            assert len(skip_gr) == 1, "K<DepthU guard must skip prefetch GR to initC"
+            # Guard branches to SkipPreloop (not old SkipPreloopGR).
+            assert asm.count("label_SkipPreloop:") == 1, "SkipPreloop label present"
+            skip_gr = re.findall(r"s_cbranch_scc1\s+label_SkipPreloop\b", asm)
+            assert len(skip_gr) == 1, "K<DepthU guard must branch to SkipPreloop"
 
+            # Fast path has unconditional branch to PreloopEnd after fast-path initC.
+            assert asm.count("label_PreloopEnd:") == 1, "PreloopEnd label present"
+            branch_end = re.findall(r"s_branch\s+label_PreloopEnd\b", asm)
+            assert len(branch_end) == 1, "fast path must SBranch to PreloopEnd"
+
+            # Slow path has tail-jump after slow-path initC.
             assert asm.count("label_SkipToEnd:") == 1, "SkipToEnd label must be present"
             tail_jump = re.findall(r"s_cbranch_scc1\s+label_SkipToEnd", asm)
-            assert len(tail_jump) == 1, "K<DepthU must jump to tail loop after initC"
+            assert len(tail_jump) == 1, "K<DepthU slow path must jump to tail loop after initC"
         finally:
             sched.deallocVgprTiles(writer)
 
