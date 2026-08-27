@@ -3484,6 +3484,42 @@ namespace TensileLite
                              size_t                        tiles,
                              origami::reduction_t          reductionStrat,
                              bool const*                   sk5EffectiveDynamic);
+
+        // Reconcile the reduction strategy with the grid that was finally
+        // chosen. The strategy is picked BEFORE the grid -- getSKReduction()
+        // feeds getSKGridImpl() as an input -- so the grid can still land on a
+        // splitting factor F = grid / tiles of 1, which parallel reduction
+        // cannot express: it splits each output tile across F workgroups and
+        // sums the partials in a second kernel, so F < 2 leaves it nothing to
+        // reduce (solve() rejects it outright). Ways the grid gets there:
+        //
+        //   * the uniform-summation-order F-star snap in getSKGridImpl() finds
+        //     no admissible F >= 2 (workspace too small for 2 * tiles partial
+        //     tiles, or ItersPerTile / F below MinItersPerCU) and falls back to
+        //     the all-full grid == tiles;
+        //   * the same snap sees g0 < tiles and snaps up to tiles;
+        //   * skFixedGrid / skMaxCUs / skGridMultiplier / the analytical grid
+        //     land anywhere in [1, 2 * tiles).
+        //
+        // Tree reduction is always expressible at those grids, so fall back to
+        // it rather than failing the launch. Applied AFTER the grid is final
+        // and never fed back into grid selection, so it cannot perturb the
+        // grid.
+        //
+        // Both requiredWorkspaceSize() -- the workspace query the caller sizes
+        // its allocation from -- and resolveStreamKSettings() -- what solve()
+        // launches -- call this on the same (reduction, grid, tiles) triple
+        // immediately after getSKGridImpl(), so query and launch cannot
+        // disagree about which reduction is in play, and therefore cannot
+        // disagree about the workspace it needs.
+        inline origami::reduction_t streamKReconcileReduction(
+            origami::reduction_t reductionStrat, size_t skGrid, size_t tiles)
+        {
+            if(reductionStrat == origami::reduction_t::parallel
+               && (tiles == 0 || (skGrid / tiles) < 2))
+                return origami::reduction_t::tree;
+            return reductionStrat;
+        }
     }
 
     std::vector<KernelInvocation>
@@ -3616,7 +3652,13 @@ namespace TensileLite
 
             sk = resolveStreamKSettings(problem, hardware);
 
-            if(sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
+            // Defensive only: resolveStreamKSettings() runs
+            // streamKReconcileReduction() on the final grid, which demotes
+            // parallel to tree exactly when this condition would hold, so this
+            // is unreachable. Kept so a future path that builds a
+            // StreamKSettings without that reconciliation still fails loudly
+            // rather than launching a fixup kernel with nothing to reduce.
+            if(tiles != 0 && sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
             {
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
                                          "StreamK kernel with splitting factor < 2\n");
@@ -4061,6 +4103,11 @@ namespace TensileLite
                                               reductionStrat,
                                               sizeMapping.streamK == 5 ? &effectiveDynamic
                                                                        : nullptr);
+                // A grid with fewer than two workgroups per tile cannot carry
+                // parallel reduction. Reconcile with the SAME helper
+                // resolveStreamKSettings() uses, on the same triple, so the
+                // size reported here is the size the launch actually needs.
+                reductionStrat = streamKReconcileReduction(reductionStrat, skGrid, tiles);
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
@@ -4490,6 +4537,10 @@ namespace TensileLite
                                 tiles,
                                 sk.reduction,
                                 sizeMapping.streamK == 5 ? &effectiveDynamic : nullptr);
+        // Same reconciliation, same helper, same triple as
+        // requiredWorkspaceSize(). Must run before the workspace-fit fallback
+        // below so that fallback sees the reduction the launch will use.
+        sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
