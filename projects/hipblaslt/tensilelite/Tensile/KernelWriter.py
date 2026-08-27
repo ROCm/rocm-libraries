@@ -37,7 +37,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, GlobalLoadB128, GlobalLoadB192, GlobalLoadB32, \
   GlobalLoadB64, GlobalLoadB96, GlobalLoadD16B16, GlobalLoadD16U8, GlobalLoadD16HIU8, \
   GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
-  MFMAInstruction, MXMFMAInstruction, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
+  MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64
 from rocisa.register import RegisterPool
@@ -5049,9 +5049,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Should check for is swizzled instead of usesubtileimpl
     # TODO: Move this calculation to host-side?
     if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockA"] and kernel["UseSubtileImpl"]:
-      module.addComment("Scale StridesMXSA by 32")
-      module.add(SLShiftLeftB32(sgpr("StridesMXSA"), 5, sgpr("StridesMXSA")))
-      module.add(SLShiftLeftB32(sgpr("StridesMXSB"), 5, sgpr("StridesMXSB")))
+      # The scale GR steps one group per 32 rows of the free dim, so Strides<tc>
+      # has to hold that group's byte span: paddedKBlocks * 32, where
+      # paddedKBlocks is ceil(K/mxBlock) rounded up to a multiple of 8 (the
+      # padding setMXScale applies).
+      #
+      # Strides<tc>+0 is the tensor's first non-unit stride, and which dimension
+      # that is depends on the layout.  With the free dim slow (TLU=0) it is the
+      # free-dim stride, which already equals paddedKBlocks -- so a shift by 5 is
+      # the whole conversion.  With the free dim fastest (TLU=1) it is instead
+      # the stride between K blocks, i.e. the free size, and shifting that gives
+      # a group span scaled by M or N rather than by K: every group past the
+      # first then reads beyond the scale tensor.  Compute the span from K in
+      # that case rather than from a stride that does not describe it.
+      for tc in ("MXSA", "MXSB"):
+        mxBlock = kernel["ProblemType"]["MXBlock%s" % tc[-1]]
+        if kernel["ProblemType"]["TLU%s" % tc] and mxBlock:
+          module.addComment("%s group span = roundUp(ceil(K/%u), 8) * 32" % (tc, mxBlock))
+          module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("SizesSum"), src1=(mxBlock - 1),
+                             comment="K + %u - 1"%mxBlock))
+          module.add(SLShiftRightB32(sgpr("Strides%s"%tc), mxBlock.bit_length() - 1, sgpr("Strides%s"%tc),
+                                     comment="ceil(K/%u) = K blocks"%mxBlock))
+          module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("Strides%s"%tc), src1=7,
+                             comment="+ 8 - 1"))
+          module.add(SLShiftRightB32(sgpr("Strides%s"%tc), 3, sgpr("Strides%s"%tc),
+                                     comment="roundUp(K blocks, 8) / 8"))
+          module.add(SLShiftLeftB32(sgpr("Strides%s"%tc), 8, sgpr("Strides%s"%tc),
+                                    comment="* 8 blocks * 32 bytes"))
+        else:
+          module.addComment("Scale Strides%s by 32" % tc)
+          module.add(SLShiftLeftB32(sgpr("Strides%s"%tc), 5, sgpr("Strides%s"%tc)))
 
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
