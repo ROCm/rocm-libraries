@@ -345,7 +345,9 @@ struct BlockFmhaPipelineQRKSVSTdm
         if(__builtin_isinf_sign(sink_v) >= 0)
         {
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-            if constexpr(kHasLogitsSoftCap)
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
+                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         kHasLogitsSoftCap)
                 set_tile(m, sink_v * scale_s * C_LOG2E);
             else
                 set_tile(m, sink_v * C_LOG2E);
@@ -1034,7 +1036,9 @@ struct BlockFmhaPipelineQRKSVSTdm
         if(__builtin_isinf_sign(sink_v) >= 0)
         {
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-            if constexpr(kHasLogitsSoftCap)
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
+                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         kHasLogitsSoftCap)
                 set_tile(m, sink_v * scale_s * C_LOG2E);
             else
                 set_tile(m, sink_v * C_LOG2E);
