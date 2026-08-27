@@ -40,8 +40,16 @@ ROCJITSU_REF = "481982dfe23e181a302006747c561e7cf43e35ba"  # 2026-06-04
 # covers BOTH MI300X (304 -> gfx942130) and MI300A (228 -> gfx942e4). Extend only for arches that
 # rocjitsu has a KMD config for.
 FAMILY_MAP = {
-    "gfx94X-dcgpu": {"arch": "gfx942", "rj_config": "amdgpu_cdna3_kmd.json", "cus": [304, 228]},
-    "gfx950-dcgpu": {"arch": "gfx950", "rj_config": "amdgpu_cdna4_kmd.json", "cus": [256]},
+    "gfx94X-dcgpu": {
+        "arch": "gfx942",
+        "rj_config": "amdgpu_cdna3_kmd.json",
+        "cus": [304, 228],
+    },
+    "gfx950-dcgpu": {
+        "arch": "gfx950",
+        "rj_config": "amdgpu_cdna4_kmd.json",
+        "cus": [256],
+    },
 }
 
 # Set MIOPEN_DEVICE_ARCH when running. This pins Handle::GetDeviceName() (used by the StaticFDBSync
@@ -82,12 +90,23 @@ def cu_correct_config(in_path: Path, cu_count: int, out_path: Path):
 
 def ensure_build_tools():
     """Install cmake/build-essential/libdrm-dev/git if missing (needs root; container runs --user 0)."""
-    if all(shutil.which(t) for t in ("cmake", "c++", "git")) and Path("/usr/include/libdrm").exists():
+    if (
+        all(shutil.which(t) for t in ("cmake", "c++", "git"))
+        and Path("/usr/include/libdrm").exists()
+    ):
         return
     run(["apt-get", "update"])
     run(
-        ["apt-get", "install", "-y", "--no-install-recommends",
-         "cmake", "build-essential", "libdrm-dev", "git"]
+        [
+            "apt-get",
+            "install",
+            "-y",
+            "--no-install-recommends",
+            "cmake",
+            "build-essential",
+            "libdrm-dev",
+            "git",
+        ]
     )
 
 
@@ -104,10 +123,27 @@ def build_rocjitsu(workdir: Path):
         run(["git", "-C", str(src), "fetch", "--depth", "1", "origin", ROCJITSU_REF])
         run(["git", "-C", str(src), "checkout", "FETCH_HEAD"])
     build = workdir / "rocjitsu-build"
-    run(["cmake", "-S", str(src / "emulation" / "rocjitsu"), "-B", str(build),
-         "-DCMAKE_BUILD_TYPE=Release"])
-    run(["cmake", "--build", str(build), "--target", "rocjitsu_kmd_shim",
-         "-j", str(os.cpu_count() or 4)])
+    run(
+        [
+            "cmake",
+            "-S",
+            str(src / "emulation" / "rocjitsu"),
+            "-B",
+            str(build),
+            "-DCMAKE_BUILD_TYPE=Release",
+        ]
+    )
+    run(
+        [
+            "cmake",
+            "--build",
+            str(build),
+            "--target",
+            "rocjitsu_kmd_shim",
+            "-j",
+            str(os.cpu_count() or 4),
+        ]
+    )
     kmd = build / "lib" / "rocjitsu" / "src" / "rocjitsu" / "kmd" / "librocjitsu_kmd.so"
     if not kmd.exists():
         sys.exit(f"::error::rocjitsu KMD shim not found at {kmd} after build")
@@ -120,7 +156,10 @@ def main():
     if entry is None:
         # Not a rocjitsu-supported family. TheRock's `include_family` should keep this from running,
         # but skip cleanly if it ever does (skip is success, so it never blocks).
-        print(f"AMDGPU_FAMILIES='{family}' has no rocjitsu KMD config -- skipping dbsync.", flush=True)
+        print(
+            f"AMDGPU_FAMILIES='{family}' has no rocjitsu KMD config -- skipping dbsync.",
+            flush=True,
+        )
         return 0
 
     arch = entry["arch"]
@@ -135,10 +174,14 @@ def main():
 
     # Sanity: the arch-specific CK grouped-conv plugin + this arch's SystemDBs must be in the dist.
     plugins = list(dist.rglob(f"libMIOpenCKGroupedConv_{arch}.so"))
-    print(f"CK grouped-conv plugins: {[str(p) for p in dist.rglob('libMIOpenCKGroupedConv_*.so')]}",
-          flush=True)
+    print(
+        f"CK grouped-conv plugins: {[str(p) for p in dist.rglob('libMIOpenCKGroupedConv_*.so')]}",
+        flush=True,
+    )
     if not plugins:
-        sys.exit(f"::error::libMIOpenCKGroupedConv_{arch}.so not present in the fetched dist")
+        sys.exit(
+            f"::error::libMIOpenCKGroupedConv_{arch}.so not present in the fetched dist"
+        )
 
     work = Path("rocjitsu-work").resolve()
     work.mkdir(exist_ok=True)
@@ -148,7 +191,9 @@ def main():
 
     env_base = os.environ.copy()
     env_base["ROCM_PATH"] = str(dist)
-    env_base["LD_LIBRARY_PATH"] = f"{dist / 'lib'}:{env_base.get('LD_LIBRARY_PATH', '')}"
+    env_base["LD_LIBRARY_PATH"] = (
+        f"{dist / 'lib'}:{env_base.get('LD_LIBRARY_PATH', '')}"
+    )
     env_base["LD_PRELOAD"] = str(kmd)
     env_base["MIOPEN_DBSYNC_MAX_THREADS"] = str(DBSYNC_MAX_THREADS)
     if SET_MIOPEN_DEVICE_ARCH:
