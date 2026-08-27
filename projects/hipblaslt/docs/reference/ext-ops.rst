@@ -22,12 +22,6 @@ These extensions support the following:
    This is an independent function used to call and get the result.
    For sample code, see :ref:`sample_hipblaslt_ext_op_layernorm`.
 
-*  ``hipblasltExtAMax``
-
-   Determines the absolute maximum value of a 2D tensor.
-   This is an independent function used to call and get the result.
-   For sample code, see :ref:`sample_hipblaslt_ext_op_amax`.
-
 These APIs are explained in detail below.
 
 hipblasltExtSoftmax()
@@ -38,8 +32,3 @@ hipblasltExtSoftmax()
 hipblasltExtLayerNorm()
 ------------------------------------------
 .. doxygenfunction:: hipblasltExtLayerNorm
-
-
-hipblasltExtAMax()
-------------------------------------------
-.. doxygenfunction:: hipblasltExtAMax

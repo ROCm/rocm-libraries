@@ -93,25 +93,6 @@ hipblasStatus_t hipblasltExtLayerNorm(hipDataType datatype,
         datatype, output, mean, invvar, input, m, n, eps, gamma, beta, stream);
 }
 
-hipblasStatus_t hipblasltAMaxRun(const hipDataType datatype,
-                                 const hipDataType outDatatype,
-                                 void*             output,
-                                 void*             input,
-                                 uint32_t          m,
-                                 uint32_t          n,
-                                 hipStream_t       stream);
-
-hipblasStatus_t hipblasltExtAMax(const hipDataType datatype,
-                                 const hipDataType outDatatype,
-                                 void*             output,
-                                 void*             input,
-                                 uint32_t          m,
-                                 uint32_t          n,
-                                 hipStream_t       stream)
-{
-    return hipblasltAMaxRun(datatype, outDatatype, output, input, m, n, stream);
-}
-
 namespace
 {
     constexpr uint32_t SUPPORTED_MAX_N = 256;
@@ -404,73 +385,6 @@ hipblasStatus_t hipblasltLayerNormRun(hipDataType datatype,
     invocation.args.append("m", m);
     invocation.args.append("n", n);
     invocation.args.append("eps", eps);
-
-    err = adapter->launchKernel(invocation, stream, nullptr, nullptr);
-
-    if(err)
-    {
-        return HIPBLAS_STATUS_INTERNAL_ERROR;
-    }
-
-    return HIPBLAS_STATUS_SUCCESS;
-}
-
-hipblasStatus_t hipblasltAMaxRun(const hipDataType datatype,
-                                 const hipDataType outDatatype,
-                                 void*             output,
-                                 void*             input,
-                                 uint32_t          m,
-                                 uint32_t          n,
-                                 hipStream_t       stream)
-{
-    if(datatype != HIP_R_32F && datatype != HIP_R_16F)
-    {
-        return HIPBLAS_STATUS_NOT_SUPPORTED;
-    }
-
-    if(output == nullptr || input == nullptr || m == 0 || n == 0)
-        return HIPBLAS_STATUS_INVALID_VALUE;
-
-    uint32_t    len = m * n;
-    int         currentDeviceId{};
-    auto        err       = hipGetDevice(&currentDeviceId);
-    auto&       adapter   = extOpLibraries().at(currentDeviceId);
-    auto        gpu       = TensileLite::hip::GetCurrentDevice();
-    const auto  archName  = trimArchName(gpu->archName());
-    auto&       masterLib = getExtOpMasterLibrary();
-    const auto& lib       = masterLib
-                          .getLibrary(archName,
-                                      hipblaslt_ext::AMaxSolutionLibrary::opName,
-                                      hipDataTypeo_char(datatype))
-                          ->as<hipblaslt_ext::AMaxSolutionLibrary>();
-    auto sol = lib.findBestSolution(
-        hipblaslt_ext::AMaxProblem(
-            len, hipDataType_to_tensile_type(datatype), hipDataType_to_tensile_type(outDatatype)),
-        *gpu);
-    const auto kernelName = sol->name();
-    err                   = adapter->initKernel(kernelName);
-
-    TensileLite::KernelInvocation invocation;
-    invocation.kernelName      = kernelName;
-    invocation.codeObjectFile  = sol->getCodeObjectPath();
-    invocation.clusterDim.x    = 1;
-    invocation.clusterDim.y    = 1;
-    invocation.clusterDim.z    = 1;
-    invocation.workGroupSize.x = sol->getNumWorkitems();
-    invocation.workGroupSize.y = 1;
-    invocation.workGroupSize.z = 1;
-    invocation.numWorkGroups.x = 1;
-    invocation.numWorkGroups.y = 1;
-    invocation.numWorkGroups.z = 1;
-    invocation.numWorkItems.x  = sol->getNumWorkitems();
-    invocation.numWorkItems.y  = 1;
-    invocation.numWorkItems.z  = 1;
-    invocation.sharedMemBytes  = 32 * sizeof(float);
-    invocation.args            = TensileLite::KernelArguments(false);
-    invocation.args.reserve(20, 3);
-    invocation.args.append("output", output);
-    invocation.args.append("input", input);
-    invocation.args.append("length", len);
 
     err = adapter->launchKernel(invocation, stream, nullptr, nullptr);
 
