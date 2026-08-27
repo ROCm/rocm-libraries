@@ -66,7 +66,7 @@ TEST(TestGfx942AttentionDensePacks, PackAttentionDenseShipsItsConfiguredKernels)
         return p.name == "hipkernel:gfx942_attention_dense";
     });
     ASSERT_NE(match, set.packs.end());
-    EXPECT_EQ(match->kernels.size(), 48U);
+    EXPECT_EQ(match->kernels.size(), 56U);
 }
 
 TEST(TestGfx942AttentionDensePacks, ExposesTheConfiguredKnobs)
