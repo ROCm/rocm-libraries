@@ -299,6 +299,21 @@ struct KernelDescriptor
     /// resolves from where the file actually is rather than from a loader root. Empty for a
     /// kernel built in memory, which names no file. Filled by the loader, never authored.
     std::filesystem::path originDirectory;
+    /// The descriptor tree @c originDirectory was found under -- the root the loader was
+    /// pointed at, not the file's own folder.
+    ///
+    /// Carried because resolution and CONTAINMENT are different questions. A path is
+    /// resolved against originDirectory (above), but the boundary it may not cross is the
+    /// tree, not the individual descriptor's folder: one archive is shipped per arch shard
+    /// at the shard root, so a descriptor nested inside that shard legitimately climbs out
+    /// of its own directory to reach it. Anchoring containment on originDirectory rejected
+    /// every nested descriptor and made production-packaged kernels unloadable.
+    ///
+    /// The tree root rather than the arch shard root: it is what the loader actually
+    /// walked, so it needs no probing and no assumption about how deep a shard sits, and
+    /// it stays correct for a flat tree where the two coincide. Empty for a kernel built
+    /// in memory. Filled by the loader, never authored.
+    std::filesystem::path treeRoot;
 };
 
 /// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over
