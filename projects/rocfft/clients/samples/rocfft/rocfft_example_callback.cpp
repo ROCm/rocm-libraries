@@ -155,14 +155,8 @@ int main()
     if(hip_status != hipSuccess)
         throw std::runtime_error("hipMemcpy failed.");
 
-    int current_device = hipInvalidDeviceId;
-    int device_count   = 0;
-    if(hipGetDevice(&current_device) != hipSuccess)
-        throw std::runtime_error("hipGetDevice failed");
-    if(hipGetDeviceCount(&device_count) != hipSuccess)
-        throw std::runtime_error("hipGetDeviceCount failed");
-    std::vector<void*> cbdatas(device_count);
-    cbdatas[current_device] = cbdata_dev;
+    std::vector<void*> cbdatas(1);
+    cbdatas[0] = cbdata_dev;
 
     // Add callback to plan description
     auto                    code = compile_callback();

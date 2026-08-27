@@ -65,8 +65,13 @@ std::vector<char> compile_callback()
         throw std::runtime_error("unable to create program");
 
     std::vector<const char*> options;
+#ifdef __HIP_PLATFORM_AMD__
     options.push_back("--offload-arch=amdgcnspirv");
     options.push_back("-c");
+#else
+    options.push_back("-dlto");
+    options.push_back("--relocatable-device-code=true");
+#endif
 
     if(hiprtcCompileProgram(prog, options.size(), options.data()) != HIPRTC_SUCCESS)
     {
@@ -112,7 +117,7 @@ int main()
     std::vector<hipfftDoubleComplex> cdata(Nx), filter(Nx);
     size_t complex_bytes = sizeof(decltype(cdata)::value_type) * cdata.size();
 
-    // Create HIP device object and copy data to device
+    // Allocate device memory and copy data to device
     // Use hipfftComplex for single-precision
     hipfftDoubleComplex *x, *filter_dev;
     hipError_t           hip_rt = hipMalloc(&x, complex_bytes);
@@ -156,14 +161,8 @@ int main()
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
 
-    int current_device = hipInvalidDeviceId;
-    int device_count   = 0;
-    if(hipGetDevice(&current_device) != hipSuccess)
-        throw std::runtime_error("hipGetDevice failed");
-    if(hipGetDeviceCount(&device_count) != hipSuccess)
-        throw std::runtime_error("hipGetDeviceCount failed");
-    std::vector<void*> cbdatas(device_count);
-    cbdatas[current_device] = cbdata_dev;
+    std::vector<void*> cbdatas(1);
+    cbdatas[0] = cbdata_dev;
 
     auto code = compile_callback();
 
@@ -172,10 +171,6 @@ int main()
     hipfftResult hipfft_rt = hipfftCreate(&plan);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
-
-    hipfft_rt = hipfftSetAutoAllocation(plan, 1);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("failed to set auto-allocation policy");
 
     // Set callback on the plan before setting plan details
     hipfft_rt = hipfftXtSetJITCallback(plan,
@@ -190,8 +185,8 @@ int main()
     hipfft_rt = hipfftMakePlan1d(plan, // plan handle
                                  Nx, // transform length
                                  HIPFFT_Z2Z, // transform type (HIPFFT_C2C for single-precision)
-                                 1,
-                                 nullptr); // number of transforms
+                                 1, // number of transforms
+                                 nullptr);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftPlan1d failed");
 
