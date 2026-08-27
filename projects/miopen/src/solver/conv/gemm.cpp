@@ -34,10 +34,9 @@ bool GemmFwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     const auto& yDesc = problem.GetOut();
 
     // rocBlas needs the output to be 32-bit always
-    if(xDesc.GetType() == miopenInt8        //
-       && (yDesc.GetType() != miopenFloat   //
-           && wDesc.GetType() != miopenInt8 //
-           && yDesc.GetType() != miopenInt32))
+    if(xDesc.GetType() == miopenInt8 &&
+       (wDesc.GetType() != miopenInt8 ||
+        (yDesc.GetType() != miopenFloat && yDesc.GetType() != miopenInt32)))
         return false;
 
     const auto rblas_fp8_supported = IsFP8Supported(ctx.GetStream().GetDeviceName());

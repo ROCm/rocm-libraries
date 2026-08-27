@@ -131,10 +131,13 @@ float Im2d2ColGPU(const Handle& handle,
                            ((wei_h - 1) * dilation_h + 1) * type_size;
         if(extreme_case > MAX_LOCAL_MEM)
         {
-            add_params(" -DEXTREME_LARGE");
-            add_params(" -DNUM_CH_TOTAL=" + std::to_string(c_pack));
+            if(!layoutNHWC)
+            {
+                add_params(" -DEXTREME_LARGE");
+                add_params(" -DNUM_CH_TOTAL=" + std::to_string(c_pack));
+            }
         }
-        else
+        else if(!layoutNHWC)
         {
             while(local_mem_sz * type_size > MAX_LOCAL_MEM)
             {
