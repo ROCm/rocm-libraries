@@ -76,6 +76,9 @@ class ConfigureCITest(unittest.TestCase):
 
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 3)
+        self.assertFalse(
+            any(project["run_rocjitsu_race_check"] for project in project_to_run)
+        )
         self.assertEqual(test_type, "standard")
 
     @patch("subprocess.run")
@@ -101,6 +104,23 @@ class ConfigureCITest(unittest.TestCase):
 
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
         self.assertIn("rocprim", str(project_to_run))
+        self.assertEqual(test_type, "standard")
+
+    @patch("subprocess.run")
+    def test_push_does_not_enable_rocjitsu(self, mock_run):
+        args = {
+            "is_push": True,
+        }
+
+        mock_process = MagicMock()
+        mock_process.stdout = "projects/hipblaslt/tensilelite/Tensile/example.py"
+        mock_run.return_value = mock_process
+
+        project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
+        self.assertTrue(project_to_run)
+        self.assertFalse(
+            any(project["run_rocjitsu_race_check"] for project in project_to_run)
+        )
         self.assertEqual(test_type, "standard")
 
     def test_check_for_workflow_file_related_to_ci(self):
@@ -257,28 +277,79 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(test_type, "standard")
 
     @patch("therock_configure_ci.get_modified_paths")
-    def test_retrieve_projects_runs_ci_for_workflow_paths(self, mock_get_modified):
-        mock_get_modified.return_value = [".github/workflows/therock-ci.yml"]
+    def test_workflow_paths_do_not_enable_rocjitsu(self, mock_get_modified):
+        mock_get_modified.return_value = [
+            ".github/workflows/therock-ci-linux.yml",
+            "projects/hiprand/CMakeLists.txt",
+        ]
 
         projects, test_type = therock_configure_ci.retrieve_projects(
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
         # Changes to the shared TheRock CI machinery intentionally expand the
-        # product matrix to every project. The rocjitsu marker must still follow
-        # the hipBLASLt subtree through dependency folding and attach to exactly
-        # one final row; otherwise a workflow-only PR could launch duplicate
-        # instrumentation jobs for unrelated projects.
+        # product matrix to every project, but that synthetic expansion must not
+        # authorize the hipBLASLt-only sidecar.
+        self.assertGreaterEqual(len(projects), 3)
+        self.assertFalse(
+            any(project["run_rocjitsu_race_check"] for project in projects)
+        )
+        self.assertEqual(test_type, "quick")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_hipblaslt_path_enables_rocjitsu_with_workflow_changes(
+        self, mock_get_modified
+    ):
+        mock_get_modified.return_value = [
+            ".github/workflows/therock-ci.yml",
+            "projects/hipblaslt/tensilelite/Tensile/example.py",
+        ]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "base_ref": "HEAD^"}
+        )
+
         rocjitsu_rows = [
             project for project in projects if project["run_rocjitsu_race_check"]
         ]
-        self.assertGreaterEqual(len(projects), 3)
         self.assertEqual(len(rocjitsu_rows), 1)
         self.assertIn(
             "tensilelite",
             rocjitsu_rows[0]["projects_to_test"].split(","),
         )
         self.assertEqual(test_type, "quick")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_sidecar_files_enable_rocjitsu(self, mock_get_modified):
+        sidecar_cases = [
+            (
+                ".github/workflows/therock-rocjitsu-race-check-linux.yml",
+                "quick",
+            ),
+            (
+                ".github/scripts/run_rocjitsu_hipblaslt_race_check.sh",
+                "standard",
+            ),
+        ]
+
+        for sidecar_path, expected_test_type in sidecar_cases:
+            with self.subTest(sidecar_path=sidecar_path):
+                mock_get_modified.return_value = [sidecar_path]
+                projects, test_type = therock_configure_ci.retrieve_projects(
+                    {"is_pull_request": True, "base_ref": "HEAD^"}
+                )
+
+                rocjitsu_rows = [
+                    project
+                    for project in projects
+                    if project["run_rocjitsu_race_check"]
+                ]
+                self.assertEqual(len(rocjitsu_rows), 1)
+                self.assertIn(
+                    "tensilelite",
+                    rocjitsu_rows[0]["projects_to_test"].split(","),
+                )
+                self.assertEqual(test_type, expected_test_type)
 
     def test_parse_test_labels_single_project(self):
         labels = ["test:rocblas"]
@@ -568,6 +639,9 @@ class ConfigureCITest(unittest.TestCase):
 
         # Nightly should test all projects with comprehensive tests (labels ignored)
         self.assertGreater(len(projects), 0)
+        self.assertFalse(
+            any(project["run_rocjitsu_race_check"] for project in projects)
+        )
         self.assertEqual(test_type, "comprehensive")
 
 
