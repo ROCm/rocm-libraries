@@ -300,9 +300,15 @@ identical.
 | `tab1153` — different table, **same pool** | 100.04% | **99.79%** |
 | `wide` — navi31's 306-solution pool | 116.50% | **120.46%** |
 
-**Over this 64-solution pool the table contributes nothing: 0.09 pt above the A/A control,
-against a 0.30 pt floor.** The pool contributes the entire +20.5%. Flat at every jackknife depth
-and in every size band (large 99.9%, medium 99.4%, small 100.1%, tiny 100.3%).
+**Over this 64-solution pool the table contributes nothing detectable: 0.09 pt above the A/A
+control.** The pool contributes the entire +20.5%. Flat at every jackknife depth and in every size
+band (large 99.9%, medium 99.4%, small 100.1%, tiny 100.3%).
+
+> **"Against a 0.30 pt floor" overstates the resolution — see the 2026-08-27 correction below.**
+> The A/A floor measures noise between two *identical* arms and is blind to the variance that
+> limits a library-vs-library ratio, which is **2-5%** here. Read this null as **"no table effect
+> above a few percent"**, which is what makes it consistent with the 3.4 pt effect found later over
+> a richer pool — that one sits below what this arm could have seen.
 
 > **Scope this to the thin pool.** Read as a general claim it is wrong — over the shipped
 > 306-solution pool the table is worth 3.4 pt. See the correction below.

@@ -18,6 +18,13 @@ distant neighbour and run a badly-sized tile.
 > 306-solution pool, sparsifying the table 9 692 → 471 rows costs **3.4 pt** (96.62% vs a 100.38%
 > control), while the pool itself is worth **13.8 pt** — an ~80/20 split of the 17.2 pt total.
 > **Widen the pool first; then the table fit is worth doing.**
+>
+> *(Resolution note, 2026-08-27: the pool figures are an order of magnitude above this setup's
+> ~2-5% measurement floor and are solid. The **table** figures are at that floor — the "moves
+> nothing" null means "no effect above a few percent", and an independent 70-shape replication of
+> the 3.4 pt cost gives 1.029 with a 95% CI of [0.989, 1.074], i.e. consistent but not separable
+> from zero. Quote the table half as "~3 pt, at the limit of what this setup resolves". See
+> `MASKED_60CU_VALIDATION.md`.)*
 > [`MASKED_60CU_VALIDATION.md`](MASKED_60CU_VALIDATION.md)
 
 Widening all four affected TN ProblemTypes measured, on 996–997 stratified shapes each:
