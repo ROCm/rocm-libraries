@@ -220,8 +220,20 @@ def _end_uhd_score_metadata(builder: flatbuffers.Builder) -> int:
 
 
 # UHD table helpers
+#
+# Slot numbers are positions in uhd.fbs's `table UHD`, and they are load-bearing: a writer
+# whose numbering is one behind the schema produces a buffer whose every field is read as
+# its predecessor. That is not a parse error -- the reader sees a well-formed table with the
+# wrong contents -- so it fails as a rejected descriptor rather than as anything that names
+# the cause.
+#
+# This drifted exactly that way once already, when `derived` was inserted at slot 3 and this
+# writer was not updated, silently shifting features_signature onward and making every UHD
+# it emitted unloadable. TestUhdGenArtifact now loads a generated artifact through the C++
+# loader, which is what would catch it next time; keep these in step with the schema, and
+# add new fields only at the end.
 def _start_uhd(builder: flatbuffers.Builder) -> None:
-    builder.StartObject(11)  # 11 fields from uhd.fbs
+    builder.StartObject(13)  # 13 fields from uhd.fbs
 
 
 def _add_uhd_id(builder: flatbuffers.Builder, s: int) -> None:
@@ -236,36 +248,44 @@ def _add_uhd_adapter(builder: flatbuffers.Builder, adapter: int) -> None:
     builder.PrependUint8Slot(2, adapter, ADAPTER_STATIC_ORDER)
 
 
-def _add_uhd_features_signature(builder: flatbuffers.Builder, vec: int) -> None:
+def _add_uhd_derived(builder: flatbuffers.Builder, vec: int) -> None:
     builder.PrependUOffsetTRelativeSlot(3, vec, 0)
 
 
+def _add_uhd_features_signature(builder: flatbuffers.Builder, vec: int) -> None:
+    builder.PrependUOffsetTRelativeSlot(4, vec, 0)
+
+
 def _add_uhd_features_hash(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(4, s, 0)
-
-
-def _add_uhd_objective(builder: flatbuffers.Builder, s: int) -> None:
     builder.PrependUOffsetTRelativeSlot(5, s, 0)
 
 
+def _add_uhd_objective(builder: flatbuffers.Builder, s: int) -> None:
+    builder.PrependUOffsetTRelativeSlot(6, s, 0)
+
+
 def _add_uhd_score(builder: flatbuffers.Builder, table: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(6, table, 0)
+    builder.PrependUOffsetTRelativeSlot(7, table, 0)
 
 
 def _add_uhd_model_artifact_path(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(7, s, 0)
-
-
-def _add_uhd_model_hash(builder: flatbuffers.Builder, s: int) -> None:
     builder.PrependUOffsetTRelativeSlot(8, s, 0)
 
 
+def _add_uhd_model_hash(builder: flatbuffers.Builder, s: int) -> None:
+    builder.PrependUOffsetTRelativeSlot(9, s, 0)
+
+
 def _add_uhd_static_order_fields(builder: flatbuffers.Builder, vec: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(9, vec, 0)
+    builder.PrependUOffsetTRelativeSlot(10, vec, 0)
 
 
 def _add_uhd_custom_library_symbol(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(10, s, 0)
+    builder.PrependUOffsetTRelativeSlot(11, s, 0)
+
+
+def _add_uhd_native_symbol(builder: flatbuffers.Builder, s: int) -> None:
+    builder.PrependUOffsetTRelativeSlot(12, s, 0)
 
 
 def _end_uhd(builder: flatbuffers.Builder) -> int:
