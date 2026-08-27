@@ -31,24 +31,57 @@ namespace hipdnn_test_sdk::utilities
 ///  - **Pollution.** A test run silently mutates state the developer's own runs then
 ///    inherit.
 ///
-/// Construct once in `main()`, before `RUN_ALL_TESTS()`. Doing it there rather than in
-/// a fixture keeps the guarantee whether the binary is launched by ctest or by hand;
-/// a ctest-only `ENVIRONMENT` property does not cover the direct invocation.
+/// Two scopes, chosen by the `Scope` argument:
+///
+///  - `Scope::BINARY` (the default) is constructed once in `main()`, before
+///    `RUN_ALL_TESTS()`. Doing it there rather than in a fixture keeps the guarantee
+///    whether the binary is launched by ctest or by hand; a ctest-only `ENVIRONMENT`
+///    property does not cover the direct invocation. It defers to an explicit
+///    `HIPDNN_CACHE_DIR` already in the environment, so CI or a developer debugging a
+///    specific shard can still point the suite at one.
+///
+///  - `Scope::TEST` is constructed per test case, and *always* takes ownership --
+///    including over the binary-wide instance `main()` already installed, which is why
+///    it cannot defer the way `BINARY` does. A binary-wide root is private to the
+///    process but shared by every case in it, so one case that benchmarks writes a
+///    shard the next case reads back. That is not hypothetical: the ingestor's
+///    `ExecutesCorrectlyWithBenchmarkingEnabled` records a measured ranking for a
+///    single-node FLOAT add, and `ReportsAKnobWhoseValuesComeFromTheCatalog` and
+///    `ReportsTheMaximumWorkspaceAcrossSurvivingKernels` then observe that ranking
+///    instead of the heuristic order -- the knob default and the workspace both follow
+///    `sortedDefinitions().front()`. Worse, the two candidates differ by ~5% of a
+///    microsecond, so which one the sweep records is a coin flip and the failure is
+///    nondeterministic rather than merely order-dependent.
+///
+///    Nesting is what makes this subtle: a `TEST`-scoped instance that deferred to the
+///    already-set `HIPDNN_CACHE_DIR` would be a silent no-op, looking like isolation
+///    while changing nothing. Hence the explicit ownership, and the restore-to-previous
+///    (rather than unset) in the destructor.
 ///
 /// Uses `HIPDNN_CACHE_DIR` rather than `HIPDNN_DISABLE_CACHE`: disabling the cache
 /// outright would make the persistence paths untestable, whereas redirecting keeps
-/// them exercised and merely private to this process.
-///
-/// An explicit `HIPDNN_CACHE_DIR` already in the environment is left untouched, so CI
-/// or a developer debugging a specific shard can still point the suite at one.
+/// them exercised and merely private to this scope. `cacheRoot()` re-reads the variable
+/// on every access with no memoization, which is what makes a mid-process rescope take
+/// effect at all.
 class ScopedTestCacheDir
 {
 public:
-    /// @param binaryTag Short name of the owning test binary; only used to make the
-    ///     scratch directory identifiable when someone goes looking at it.
-    explicit ScopedTestCacheDir(const std::string& binaryTag)
+    /// Whether this instance defers to an already-set HIPDNN_CACHE_DIR (BINARY) or
+    /// always takes it over (TEST). See the class comment: a deferring per-test
+    /// instance nested inside the binary-wide one would isolate nothing.
+    enum class Scope
     {
-        if(!hipdnn_data_sdk::utilities::getEnv("HIPDNN_CACHE_DIR").empty())
+        BINARY,
+        TEST
+    };
+
+    /// @param tag Short name of the owning test binary or case; only used to make the
+    ///     scratch directory identifiable when someone goes looking at it.
+    /// @param scope See Scope.
+    explicit ScopedTestCacheDir(const std::string& tag, Scope scope = Scope::BINARY)
+    {
+        auto existing = hipdnn_data_sdk::utilities::getEnv("HIPDNN_CACHE_DIR");
+        if(!existing.empty() && scope == Scope::BINARY)
         {
             // Caller pinned a cache root deliberately; respect it and own nothing.
             return;
@@ -63,7 +96,7 @@ public:
         bool created = false;
         for(int attempt = 0; attempt < 64 && !created; ++attempt, ++seed)
         {
-            _path = base / ("hipdnn-test-cache-" + binaryTag + "-" + std::to_string(seed));
+            _path = base / ("hipdnn-test-cache-" + tag + "-" + std::to_string(seed));
             created = std::filesystem::create_directory(_path, ignored) && !ignored;
         }
         if(!created)
@@ -74,17 +107,32 @@ public:
             return;
         }
 
+        // Saved rather than assumed empty: a TEST-scoped instance is normally nested
+        // inside the binary-wide one, and unsetting on the way out would strip the
+        // outer isolation from every later case in the process.
+        _previous = std::move(existing);
         hipdnn_data_sdk::utilities::setEnv("HIPDNN_CACHE_DIR", _path.string().c_str());
         _owned = true;
     }
 
+    /// Restores the previous HIPDNN_CACHE_DIR (or unsets it when there was none) and
+    /// removes the scratch tree. Runs on both the passing and failing path, since it is
+    /// a destructor -- an assertion failure that unwinds out of a test body still
+    /// leaves no residue and no redirected environment behind.
     ~ScopedTestCacheDir()
     {
         if(!_owned)
         {
             return;
         }
-        hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_CACHE_DIR");
+        if(_previous.empty())
+        {
+            hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_CACHE_DIR");
+        }
+        else
+        {
+            hipdnn_data_sdk::utilities::setEnv("HIPDNN_CACHE_DIR", _previous.c_str());
+        }
         std::error_code ignored;
         std::filesystem::remove_all(_path, ignored);
     }
@@ -102,6 +150,10 @@ public:
 
 private:
     std::filesystem::path _path;
+    /// The HIPDNN_CACHE_DIR this instance displaced, restored on destruction. Non-empty
+    /// only for a Scope::TEST instance nested inside an outer one; unsetting instead
+    /// would strip that outer isolation from every later case in the process.
+    std::string _previous;
     bool _owned = false;
 };
 

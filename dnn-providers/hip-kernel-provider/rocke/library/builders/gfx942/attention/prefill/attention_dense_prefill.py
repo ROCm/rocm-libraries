@@ -20,8 +20,8 @@ tuning that actually ships lives in ``dispatch.attention.gfx942._dense_spec``
 (per-config ``waves_per_eu``, the 304-CTA persistent grid, the auto persistent
 decision, the ragged path), and a hardcoded CLI default freezes whatever that
 policy happened to be on the day the flag was written. A harness that measures a
-config nobody ships is worse than no harness: it once turned a real +79% into a
-reported -17%.
+config nobody ships is worse than no harness: it once reported a real speedup as a
+regression.
 
 So the flow here is:
 
