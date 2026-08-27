@@ -9743,6 +9743,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalStart",
         "StreamKLocalEnd",
       ]
+      if kernel.get("PrefetchAcrossPersistent"):
+        requiredUnalignedSgprVar.append("SkPrefetchPrimed")
+        self.states.numSgprStreamK += 1
+        # SK4 PAP pops the next tile's work item once, in the prior persistent
+        # iteration's NLL window, and stashes the global work-item index here so
+        # the persistent back-edge's graWorkGroup reuses it instead of popping
+        # again (a second atomic pop would double-consume a queue slot).
+        requiredUnalignedSgprVar.append("SkNextWorkItem")
+        self.states.numSgprStreamK += 1
       # Work stealing: per-WG sticky-empty flag. Persists across the persistent
       # loop back-edge (added to nonPostLoopSgpr below) so each WG only touches
       # its home counter for its valid dispenses + exactly one empty fetch.
@@ -9781,6 +9790,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
         requiredUnalignedSgprVar.append("StreamKStickyEmpty")
       if len(kernel["SpaceFillingAlgo"]):
         requiredUnalignedSgprVar.append("StreamKTileID")
+      if kernel.get("PrefetchAcrossPersistent"):
+        # SK5 PAP mirrors SK3 (static sub-path) and SK4 (dynamic sub-path):
+        # SkPrefetchPrimed marks that the next-tile work item was already popped
+        # in the prior persistent iteration's NLL window; the dynamic sub-path
+        # stashes the popped global work-item index in SkNextWorkItem so the
+        # persistent back-edge's graWorkGroup reuses it instead of popping again
+        # (a second atomic pop would double-consume a queue slot). Both are dead
+        # on the static sub-path (mode==0) but allocated unconditionally because
+        # the mode bit is a runtime value.
+        requiredUnalignedSgprVar.append("SkPrefetchPrimed")
+        self.states.numSgprStreamK += 1
+        requiredUnalignedSgprVar.append("SkNextWorkItem")
+        self.states.numSgprStreamK += 1
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
     elif kernel["StreamK"]:
@@ -10964,7 +10986,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   def isPrefetchAcrossPersistentEnabled(self, kernel):
     """Return True when PAP is enabled for this kernel."""
-    return (kernel["StreamK"] == 3
+    return (kernel["StreamK"] in (3, 4, 5)
             and kernel.get("PrefetchAcrossPersistent", 0)
             and (not kernel.get("SuppressNoLoadLoop", False)
                  or kernel["HalfPLR"])
