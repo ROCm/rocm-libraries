@@ -62,6 +62,38 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [1024, 1024, 1, 65536]
 
+  # MT96x128, GR 2x1 / LR 2x1 -- the 96 dim is not a power of two, so A stacks
+  # only 2 MFMA-M tiles and its fetch spreads over K instead of over M.
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 6, 2,  1, 4]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1536, 2048, 1, 65536]
+
   # MT128x128, GR 8x1 / LR 4x1
   -
     - # ProblemType

@@ -1294,7 +1294,8 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
   axisWaves = kernel["MIWaveGroup"][0] if tc == 'A' else kernel["MIWaveGroup"][1]
   wavesPerStrip = int(getattr(tileInfo, "grWavesPerStrip", 1))
   coopWaves = int(getattr(tileInfo, "grCoopWaves", 1))
-  if axisWaves <= 1 and coopWaves <= 1:
+  winSplit = int(getattr(tileInfo, "grKWindowSplit", 1))
+  if axisWaves <= 1 and coopWaves <= 1 and winSplit <= 1:
     return None
   dst = writer.vgprPool.checkOut(1, tag="_tluWaveAxisGlobalOffset_%s" % tc)
   # Shared strips split by K across the fetching waves; whole-strip ownership
@@ -1353,18 +1354,32 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
   return dst
 
 
-def _tluKSliceGlobalOffset(writer, kernel, module, tileInfo):
-  """Global byte offset of this wave's K slice within the strip it fetches.
+def _tluKWaveSlots(tileInfo):
+  """(kSplit, winSplit, rowsPerSlice, rowsPerWindowRun) for one tile's fetch group.
 
-  Returns None when the strip is not K-split across the other-axis waves.
+  A strip column is cut kSplit ways inside a single K window and winSplit ways
+  across whole K windows.  Fetch-group index g decomposes as
+  ``slice = g % kSplit`` and ``run = (g // kSplit) % winSplit``; the two row
+  counts convert each of those to K rows.  The sId1 an emit sees is the FIRST
+  window of a winSplit-sized group -- both the scheduler's grA.k and the
+  globalReadDoSubtile loop step by winSplit -- so one run is one window.
   """
-  tc = tileInfo.tc
   coop = int(getattr(tileInfo, "grCoopWaves", 1))
   perStrip = max(1, int(getattr(tileInfo, "grWavesPerStrip", 1)))
   kSplit = max(1, coop // perStrip)
-  if kSplit <= 1:
-    return None
-  dst = writer.vgprPool.checkOut(1, tag="_tluKSlice_%s" % tc)
+  winSplit = max(1, int(getattr(tileInfo, "grKWindowSplit", 1)))
+  kRowsPerWindow = int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1])
+  if selectTLUColScatter(tileInfo) is not None:
+    # col_scatter: the load index IS the K column (col = col_group*N + L), so a
+    # wave owning numGRPerSubtile consecutive loads starts that many K rows in.
+    rowsPerSlice = int(tileInfo.numGRPerSubtile)
+  else:
+    rowsPerSlice = kRowsPerWindow // kSplit
+  return kSplit, winSplit, rowsPerSlice, kRowsPerWindow
+
+
+def _tluOtherAxisId(writer, kernel, module, tc, dst):
+  """Emit dst = this wave's index along the axis the operand does NOT depend on."""
   mWaves = kernel["MIWaveGroup"][0]
   wavesize = kernel["WavefrontSize"]
   module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(wavesize.bit_length() - 1),
@@ -1375,22 +1390,68 @@ def _tluKSliceGlobalOffset(writer, kernel, module, tileInfo):
   else:
     module.add(VAndB32(dst=vgpr(dst), src0=vgpr(dst), src1=hex(mWaves - 1),
                comment="%s: otherId = waveId %% %d" % (tc, mWaves)))
-  if selectTLUColScatter(tileInfo) is not None:
-    kRowsPerWave = int(tileInfo.numGRPerSubtile)
+
+
+def _tluKSliceTerms(writer, kernel, module, tileInfo, src, dst, sliceUnit, runUnit, tag):
+  """dst = (src % kSplit)*sliceUnit + ((src // kSplit) % winSplit)*runUnit.
+
+  ``src`` holds the fetch-group index (this wave's other-axis id).  Driven with
+  K-row units for the global address and byte units for the LDS write address
+  so the two stay in lock step.
+  """
+  tc = tileInfo.tc
+  kSplit, winSplit, _, _ = _tluKWaveSlots(tileInfo)
+  otherWaves = int(getattr(tileInfo, "grOtherAxisWaves", 1))
+  tmpS = writer.sgprPool.checkOut(1, tag="%s_s_%s" % (tag, tc), preventOverflow=False)
+  if kSplit > 1:
+    if kSplit < otherWaves:
+      # The group is narrower than the other-axis wave count, so several waves
+      # land on the same slice -- a residual refetch the strip cannot avoid.
+      module.add(VAndB32(dst=vgpr(dst), src0=vgpr(src), src1=hex(kSplit - 1),
+                 comment="%s: K slice = index %% %d" % (tc, kSplit)))
+    else:
+      module.add(VMovB32(dst=vgpr(dst), src=vgpr(src), comment="%s: K slice" % tc))
+    module.add(SMovB32(dst=sgpr(tmpS), src=hex(sliceUnit), comment="%s: per K slice" % tc))
+    module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr(tmpS), src1=vgpr(dst),
+               comment="%s: K-slice base = slice*%d" % (tc, sliceUnit)))
   else:
-    kRows = int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1])
-    kRowsPerWave = kRows // kSplit
+    module.add(VMovB32(dst=vgpr(dst), src=0, comment="%s: no K slice within a window" % tc))
+  if winSplit > 1:
+    run = writer.vgprPool.checkOut(1, tag="%s_run_%s" % (tag, tc))
+    module.add(VLShiftRightB32(dst=vgpr(run), shiftHex=hex(kSplit.bit_length() - 1),
+               src=vgpr(src), comment="%s: drop the K-slice bits" % tc))
+    module.add(VAndB32(dst=vgpr(run), src0=vgpr(run), src1=hex(winSplit - 1),
+               comment="%s: K-window run = index / %d %% %d" % (tc, kSplit, winSplit)))
+    module.add(SMovB32(dst=sgpr(tmpS), src=hex(runUnit), comment="%s: per K-window run" % tc))
+    module.add(VMulLOU32(dst=vgpr(run), src0=sgpr(tmpS), src1=vgpr(run),
+               comment="%s: K-window base = run*%d" % (tc, runUnit)))
+    module.add(VAddU32(dst=vgpr(dst), src0=vgpr(dst), src1=vgpr(run),
+               comment="%s: + K-window run" % tc))
+    writer.vgprPool.checkIn(run)
+  writer.sgprPool.checkIn(tmpS)
+
+
+def _tluKSliceGlobalOffset(writer, kernel, module, tileInfo):
+  """Global byte offset of this wave's K slice within the strip column it fetches.
+
+  Returns None when the column is not K-split across the other-axis waves.
+  """
+  tc = tileInfo.tc
+  kSplit, winSplit, rowsPerSlice, rowsPerRun = _tluKWaveSlots(tileInfo)
+  if kSplit <= 1 and winSplit <= 1:
+    return None
+  dst = writer.vgprPool.checkOut(1, tag="_tluKSlice_%s" % tc)
+  other = writer.vgprPool.checkOut(1, tag="_tluKSliceOther_%s" % tc)
+  _tluOtherAxisId(writer, kernel, module, tc, other)
+  _tluKSliceTerms(writer, kernel, module, tileInfo, other, dst,
+                  rowsPerSlice, rowsPerRun, "_tluKSlice")
+  writer.vgprPool.checkIn(other)
   unrollIdx = kernel["ProblemType"]["IndexUnroll"]
   strideK = writer.strideRef(tc, unrollIdx)
-  tmpS = writer.sgprPool.checkOut(1, tag="_tluKSlice_s_%s" % tc, preventOverflow=False)
-  module.add(SMovB32(dst=sgpr(tmpS), src=hex(kRowsPerWave), comment="%s: K rows per slice" % tc))
-  module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr(tmpS), src1=vgpr(dst),
-        comment="%s: K-slice base = otherId*%d" % (tc, kRowsPerWave)))
   module.add(VMulLOU32(dst=vgpr(dst), src0=strideK, src1=vgpr(dst),
         comment="%s: K row * strideK (elements)" % tc))
   module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(1), src=vgpr(dst),
         comment="%s: elements -> bytes (fp4)" % tc))
-  writer.sgprPool.checkIn(tmpS)
   return dst
 
 
@@ -1567,7 +1628,10 @@ def globalReadDoSubtile(tc, writer, kernel):
 
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
 
-  for j in range(tileInfo.localSubtileGrid[1]):
+  # A K-window split hands each wave every grKWindowSplit'th run of windows, so
+  # the loop issues one window per run and the runtime base picks the run.
+  winSplit = int(getattr(tileInfo, "grKWindowSplit", 1))
+  for j in range(0, int(tileInfo.localSubtileGrid[1]), winSplit):
     for i in range(tileInfo.localSubtileGrid[0]):
       module.addComment0("Emit load for %s subtile: [%u, %u]"%(tc, i, j))
       module.add(emitSubtileBufferLoad(tc, writer, kernel, [i, j]))
@@ -1658,9 +1722,10 @@ def _grDTLInitBase_tlu(writer, kernel, module, tc, ti):
     perWaveBytes = int(ti.numGRPerSubtile * blkBytes)
   else:
     perWaveBytes = int(localSub0 * stripStride)
+  winSplit = int(getattr(ti, "grKWindowSplit", 1))
   # The write base must be keyed the same way as the global offset: by the
   # fetching-wave index for shared strips, by the axis id otherwise.
-  if (coopWaves > 1) if wavesPerStrip > 1 else (axisWaves > 1 or coopWaves > 1):
+  if (coopWaves > 1) if wavesPerStrip > 1 else (axisWaves > 1 or coopWaves > 1 or winSplit > 1):
     wv = writer.vgprPool.checkOut(1, tag="_grDTLInit_tlu_wave_%s" % tc)
     if wavesPerStrip > 1:
       _tluCoopWaveId(writer, kernel, module, ti, wv)
@@ -1987,36 +2052,27 @@ def globalReadPtrUpdates(tc, writer, kernel):
 
 
 def _grDTLAddKSlice(writer, kernel, module, tc, ti, dstVgpr):
-  """Add this wave's K-slice LDS byte offset within its strip to dstVgpr.
+  """Add this wave's K-slice LDS byte offset within its strip column to dstVgpr.
 
   Mirrors the K term _tluKSliceGlobalOffset adds to the global address, so the
   DTL write lands where the read expects it.
   """
-  coop = int(getattr(ti, "grCoopWaves", 1))
-  perStrip = max(1, int(getattr(ti, "grWavesPerStrip", 1)))
-  if max(1, coop // perStrip) <= 1:
+  kSplit, winSplit, _, _ = _tluKWaveSlots(ti)
+  if kSplit <= 1 and winSplit <= 1:
     return
   from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter
   _swz = selectTLUSwizzle(ti); _cs = selectTLUColScatter(ti)
   _pad = int(_cs.padBytes) if _cs else (int(_swz.padBytes) if _swz else 0)
   blkBytes = int(kernel["WavefrontSize"] * ti.gr.config.loadWidth + _pad)
   sliceBytes = int(ti.numGRPerSubtile * blkBytes)
-  mWaves = kernel["MIWaveGroup"][0]
-  wavesize = kernel["WavefrontSize"]
+  # A K window sits one whole strip column of the macro tile further into LDS
+  # (the same term emitSingleBufferLoad applies statically for sId1 > 0).
+  runBytes = int(int(ti.globalSubtileGrid[0]) * stripStrideBytes(ti))
   o = writer.vgprPool.checkOut(1, tag="_grDTLKSlice_%s" % tc)
-  module.add(VLShiftRightB32(dst=vgpr(o), shiftHex=hex(wavesize.bit_length() - 1),
-             src=vgpr("Serial"), comment="%s: waveId" % tc))
-  if tc == 'A':
-    module.add(VLShiftRightB32(dst=vgpr(o), shiftHex=hex(mWaves.bit_length() - 1),
-               src=vgpr(o), comment="%s: otherId = waveId / %d" % (tc, mWaves)))
-  else:
-    module.add(VAndB32(dst=vgpr(o), src0=vgpr(o), src1=hex(mWaves - 1),
-               comment="%s: otherId = waveId %% %d" % (tc, mWaves)))
-  tmpS = writer.sgprPool.checkOut(1, tag="_grDTLKSlice_s_%s" % tc, preventOverflow=False)
-  module.add(SMovB32(dst=sgpr(tmpS), src=hex(sliceBytes), comment="%s: LDS K-slice stride" % tc))
-  module.add(VMulLOU32(dst=vgpr(o), src0=sgpr(tmpS), src1=vgpr(o),
-             comment="%s: K-slice LDS base = otherId*%d" % (tc, sliceBytes)))
-  writer.sgprPool.checkIn(tmpS)
+  other = writer.vgprPool.checkOut(1, tag="_grDTLKSliceOther_%s" % tc)
+  _tluOtherAxisId(writer, kernel, module, tc, other)
+  _tluKSliceTerms(writer, kernel, module, ti, other, o, sliceBytes, runBytes, "_grDTLKSlice")
+  writer.vgprPool.checkIn(other)
   module.add(VAddU32(dst=vgpr(dstVgpr), src0=vgpr(dstVgpr), src1=vgpr(o),
-             comment="%s: + K-slice within strip" % tc))
+             comment="%s: + K slice within the strip column" % tc))
   writer.vgprPool.checkIn(o)
