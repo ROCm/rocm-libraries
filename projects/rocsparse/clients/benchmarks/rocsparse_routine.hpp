@@ -98,6 +98,8 @@ ROCSPARSE_DO_ROUTINE(csritsv)					\
 ROCSPARSE_DO_ROUTINE(spitsv_csr)				\
 ROCSPARSE_DO_ROUTINE(spic0)				\
 ROCSPARSE_FOREACH_ROUTINE_ILDLT0			\
+ROCSPARSE_DO_ROUTINE(dnmat_copy_data)					\
+ROCSPARSE_DO_ROUTINE(dnmat_transpose)					\
 ROCSPARSE_DO_ROUTINE(spilu0)				\
 ROCSPARSE_DO_ROUTINE(sptrsv)				\
 ROCSPARSE_DO_ROUTINE(csr2dense)					\

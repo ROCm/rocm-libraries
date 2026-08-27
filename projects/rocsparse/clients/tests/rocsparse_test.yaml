@@ -135,6 +135,9 @@ include: test_sptrsv_ell.yaml
 include: test_spsm_csr.yaml
 include: test_spsm_csc.yaml
 include: test_spsm_coo.yaml
+include: test_sptrsm.yaml
+include: test_dnmat_copy_data.yaml
+include: test_dnmat_transpose.yaml
 include: test_sptrsm_csr.yaml
 include: test_sptrsm_csc.yaml
 include: test_sptrsm_coo.yaml

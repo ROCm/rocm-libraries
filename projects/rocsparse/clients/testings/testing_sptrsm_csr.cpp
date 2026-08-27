@@ -441,8 +441,9 @@ void testing_sptrsm_csr_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_sptrsm_csr(const Arguments& arg)
 {
-    J M = arg.M;
-    J N = arg.N;
+    static constexpr bool verbose = false;
+    J                     M       = arg.M;
+    J                     N       = arg.N;
     if(M != N)
     {
         return;
@@ -704,6 +705,45 @@ void testing_sptrsm_csr(const Arguments& arg)
     rocsparse_local_dnmat B(B_m, B_n, ldb, dB, ttype, order_B);
     rocsparse_local_dnmat C(C_m, C_n, ldc, dC, ttype, order_C);
     rocsparse_error*      p_error = nullptr;
+    if(verbose)
+    {
+        std::cout << "Test SPTRSM ----------------------------" << std::endl;
+
+        const char* op_A = "";
+        const char* op_B = "";
+        if(trans_A == rocsparse_operation_transpose)
+        {
+            op_A = "^{-T}";
+        }
+        else if(trans_A == rocsparse_operation_conjugate_transpose)
+        {
+            op_A = "^{-C}";
+        }
+        if(trans_B == rocsparse_operation_transpose)
+        {
+            op_B = "^{-T}";
+        }
+        else if(trans_B == rocsparse_operation_conjugate_transpose)
+        {
+            op_B = "^{-C}";
+        }
+
+        std::cout << "C_{" << C_m << " x " << C_n
+                  << "}( order: " << ((order_C == rocsparse_order_row) ? "row" : "col")
+                  << ", ld = " << ldc << " )";
+        std::cout << " = "
+                  << "(" << halpha[0] << ")"
+                  << ((uplo == rocsparse_fill_mode_lower)
+                          ? ((diag == rocsparse_diag_type_unit) ? "(L + Id)" : "(L + D)")
+                          : ((diag == rocsparse_diag_type_unit) ? "(U + Id)" : "(U + D_U)"))
+                  << op_A << "_{" << hA.m << " x " << hA.n << "}";
+
+        std::cout << "*";
+        std::cout << "B" << op_B << "_{" << B_m << " x " << B_n
+                  << "}( order: " << ((order_B == rocsparse_order_row) ? "row" : "col")
+                  << ", ld = " << ldb << " )";
+        std::cout << std::endl;
+    }
 
     CHECK_ROCSPARSE_ERROR(
         rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)));
