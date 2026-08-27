@@ -36,12 +36,16 @@
 #include "rocsparse_singularity.hpp"
 namespace rocsparse
 {
-    // Round sizeof(T) * size up to 256 bytes, the alignment used for arrays
-    // carved out of a user-provided buffer (see e.g. rocsparse_csrsort).
     template <typename T>
     inline size_t align_size(size_t size)
     {
         return ((sizeof(T) * size + 255) / 256) * 256;
+    }
+  
+    template <uint32_t VALUE = 256>
+    inline size_t align_size(const size_t size)
+    {
+        return ((size - 1) / VALUE + 1) * VALUE;
     }
 
 // Return the leftmost significant bit position
