@@ -50,9 +50,9 @@ from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
-from ..KernelWriterModules import hasSequentialValuC
+from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToArchLen
 
-from math import ceil, log2
+from math import ceil, log2, gcd
 
 
 def _scmpGtU32(writer, src, imm, comment=""):
@@ -121,6 +121,8 @@ class GlobalWriteBatchWriter:
     self.cvtVgprStruct = cvtVgprStruct
     self.batchElementSgprs = batchElementSgprs
     self.tmpSgpr = tmpSgpr
+    # SRVW+CLS: offset vgpr lives across batches (checkout in batch 0).
+    self.CompactLoopStoreVgpr = getattr(parentWriter, "compactLoopStoreVgpr", -1)
     self.codeAccVgprRead = codeAccVgprRead
     self.codeMulAlpha = codeMulAlpha
     self.packdata     = packdata
@@ -141,11 +143,7 @@ class GlobalWriteBatchWriter:
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
     self.numBatches = numBatches
 
-    # CompactLoopStore: stash the "next batch's first elt rowInc" passed in via
-    # `inter_iter_rowInc`. Used as the look-ahead fall-through value at the
-    # LAST emitting elt of the batch (cross-batch transition), where the
-    # intra-batch forward scan finds no further emitting elt.
-    # 0 means no override (non-CLS / last batch / atomic).
+    # Next batch's first-elt rowInc (look-ahead at the last emitting elt). 0 = none.
     self.inter_iter_rowInc = inter_iter_rowInc
     self.direct_next_rowInc = direct_next_rowInc
 
@@ -261,83 +259,151 @@ class GlobalWriteBatchWriter:
     return SOrSaveExecB32 if self.wavelen == 32 else SOrSaveExecB64
 
   @staticmethod
-  def computeCLSLayout(kernel, numBatches: int):
+  def clsMaxNIter(kernel) -> int:
+    """
+    Outermost free1/N tile dim with count>1 = max CLS loop iterations.
+    Inner N is unrolled in one body; looping the product would cross a non-uniform boundary.
+    """
+    if not kernel["EnableMatrixInstruction"]:
+      return 1
+    VW1 = kernel["VectorWidthB"]
+    outerTT1 = kernel["MIWaveTile"][1] // VW1
+    matrixInstBN = 1 if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"]
+    if kernel["SourceSwap"]:
+      miT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+      miM_ = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else miT
+      miN_ = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else miT
+      OPM  = miM_ * miN_ // kernel["WavefrontSize"]
+      nDimsOuterToInner = [outerTT1, matrixInstBN, OPM, VW1]
+    else:
+      nDimsOuterToInner = [outerTT1, matrixInstBN, VW1]
+    for _d in nDimsOuterToInner:
+      if _d > 1:
+        return _d
+    return 1
+
+  @staticmethod
+  def alignNEPBForCLS(kernel, nElem, numElementsPerBatch, gwvw, edge):
+    """
+    Shrink NEPB to the largest N-group divisor that still fits the existing VGPR budget.
+    """
+    if not (kernel.get("CompactLoopStore", False) and kernel["EnableMatrixInstruction"] and not edge):
+      return numElementsPerBatch
+    maxNIter = GlobalWriteBatchWriter.clsMaxNIter(kernel)
+    if maxNIter <= 1 or nElem % maxNIter != 0:
+      return numElementsPerBatch
+    elemsPerNGroup = nElem // maxNIter
+    # half/bf16 pack two elements per 32b register, so a batch must be even
+    # unless gwvw already makes the ValuC count even.
+    cdt = kernel["ProblemType"]["ComputeDataType"]
+    needsEven = (cdt.isHalf() or cdt.isBFloat16()) and ((gwvw % 2) == 1)
+    budget = min(elemsPerNGroup, max(1, numElementsPerBatch))
+    for cand in range(budget, 0, -1):
+      if elemsPerNGroup % cand != 0:
+        continue
+      if needsEven and cand > 1 and (cand % 2) != 0:
+        continue
+      return cand
+    return numElementsPerBatch
+
+  @staticmethod
+  def computeCLSLayout(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None, forceNoCompact: bool = False, flatWorkspaceWalk: bool = False):
     """Single source of truth for the CLS loop layout math.
 
-    Returns (batchesPerCLSBody, iterCount, m0Step), all derived from ONE shared
-    read of the MI output layout so the loop trip count and the M0 src stride
-    can never drift apart:
-      - batchesPerCLSBody: how many batches one CLS loop body covers. The body
-        must align to the SrdD-advance period, else the loop would run s_add
-        SrdD too many times.
-      - iterCount: numBatches / batchesPerCLSBody (>= 1).
-      - m0Step: stride of the CLS iter dim in the v_movrelsd_2_b32 src formula
-        (added to M0 each iteration).
-    Which dim is the CLS iter dim depends on the output layout:
-      (a) outerTT1  > 1, VW1 == 1            : iter = wgIdx1, step = OPM*BM*BN*VW0*outerTT0*VW1
-      (b) outerTT1 == 1, VW1 > 1, SS=False   : iter = vw1,    step = OPM*BM*BN*VW0*outerTT0
-      (c) outerTT1 == 1, VW1 == 1, SS=True   : iter = tIdx,   step = NEPBS / inner_dims
-    Store paths not covered by the CLS loop (non-MI, StoreRemap, StreamK) and
-    non-divisible / non-regular layouts fall back to a single iteration
-    (batchesPerCLSBody = numBatches), where m0Step is dead.
+    Returns (batchesPerCLSBody, iterCount, m0Step).
+
+    Two independent constraints must both hold for a valid CLS loop:
+
+    (A) DST/address side -- the loop can only iterate the free1/N (d1) direction.
+        Each iteration advances the store SRD by one row via incToNextRow
+        (SrdD += StrideD1J). The M-side tiles (outerTT0 / vw0) are emitted as
+        immediate store offsets INSIDE one body, so the loop CANNOT step them.
+        Hence iterCount must divide `maxNIter = clsMaxNIter(kernel)`, the OUTERMOST
+        free1/N tile dimension with count > 1 (see clsMaxNIter). When maxNIter == 1
+        there is no N row to step over -> single iteration. (This is why an M-only
+        layout such as MIWaveTile=[6,1] must NOT loop: its "batches" step M via
+        immediate offsets, and looping incToNextRow would write the wrong rows.)
+
+    (B) SRC side -- m0Step is read straight from the acc->arch permutation the
+        store emits (accToArchMapper). A store batch is a contiguous slice of
+        `regsPerBatch = totalLen / numBatches` arch slots; for a candidate
+        iterCount the body is `bodyLen = totalLen / iterCount` arch slots and the
+        per-body src shift must be CONSTANT (arch2acc[d+bodyLen]-arch2acc[d]).
+
+    We take the largest iterCount that divides gcd(maxNIter, numBatches) (so it
+    is a whole-N-row grouping AND splits the batches evenly) and whose (B) shift
+    is uniform. Otherwise a single fully-unrolled iteration (m0Step dead).
+    Pass forceNoCompact=True (or flip the check below) to force iterCount = 1 when debugging.
+    SRVW / StreamK are no longer excluded.
     """
-    batchesPerBody = numBatches
     m0Step = 1
     if not kernel["EnableMatrixInstruction"]:
-      return batchesPerBody, 1, m0Step
+      return numBatches, 1, m0Step
 
-    VW0 = kernel["VectorWidthA"]
-    VW1 = kernel["VectorWidthB"]
-    outerTT0 = kernel["MIWaveTile"][0] // VW0
-    outerTT1 = kernel["MIWaveTile"][1] // VW1
-    miT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
-    miM_ = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else miT
-    miN_ = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else miT
-    matrixInstBM = 1 if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstBM"]
-    matrixInstBN = 1 if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"]
-    OPM   = miM_ * miN_ // kernel["WavefrontSize"]
-    NEPBS = kernel["NumElementsPerBatchStore"]
+    # forceNoCompact / single batch: no loop.
+    if forceNoCompact or numBatches <= 1:
+      return numBatches, 1, m0Step
 
-    if outerTT1 > 1 and VW1 == 1:
-      m0Step = OPM * matrixInstBM * matrixInstBN * VW0 * outerTT0 * VW1
-      if numBatches % outerTT1 == 0:
-        batchesPerBody = max(1, numBatches // outerTT1)
-    elif outerTT1 == 1 and VW1 > 1 and not kernel["SourceSwap"]:
-      m0Step = OPM * matrixInstBM * matrixInstBN * VW0 * outerTT0
-      if numBatches % VW1 == 0:
-        batchesPerBody = max(1, numBatches // VW1)
-    elif outerTT1 == 1 and VW1 == 1 and kernel["SourceSwap"]:
-      inner_dims = VW0 * outerTT0 * matrixInstBM * matrixInstBN
-      if NEPBS % inner_dims == 0:
-        m0Step = max(1, NEPBS // inner_dims)
-        batchesPerBody = max(1, ceil(numBatches / NEPBS))
+    # (A) Only the outermost N tile loops. flatWorkspaceWalk: linear WS soffset, ignore clsMaxNIter.
+    maxNIter = numBatches if flatWorkspaceWalk else GlobalWriteBatchWriter.clsMaxNIter(kernel)
+    if maxNIter <= 1:
+      return numBatches, 1, m0Step
 
-    # StoreRemap / StreamK store paths are not covered by the CLS loop: force a
-    # single iteration (body = all batches). m0Step is left as derived above to
-    # preserve the original emitted SrdD step (it is dead when iterCount == 1).
-    if kernel.get("StoreRemapVectorWidth", 0) != 0 or kernel.get("StreamK", 0) != 0:
-      batchesPerBody = numBatches
+    # (B) acc→arch length must divide numBatches (one body, one M0 step).
+    totalLen = getAccToArchLen(kernel)
+    if totalLen <= 0 or totalLen % numBatches != 0:
+      return numBatches, 1, m0Step
 
-    iterCount = max(1, numBatches // batchesPerBody)
-    return batchesPerBody, iterCount, m0Step
+    MIRPO = kernel["MIRegPerOut"]
+
+    # Unequal batches cannot share one reused body.
+    if not numElementsPerBatch or not gwvw:
+      return numBatches, 1, m0Step
+    regsPerBatch = numElementsPerBatch * gwvw
+    totalVgpr = totalLen * MIRPO
+    if regsPerBatch <= 0 or totalVgpr % regsPerBatch != 0 or totalVgpr // regsPerBatch != numBatches:
+      return numBatches, 1, m0Step
+
+    _, arch2acc = accToArchMapper(kernel)
+
+    def _uniformStep(iterCount):
+      # Per-body acc→arch src shift must be constant.
+      if totalLen % iterCount != 0:
+        return None
+      bodyLen = totalLen // iterCount
+      step = arch2acc[bodyLen] - arch2acc[0]
+      if all(arch2acc[d + bodyLen] - arch2acc[d] == step for d in range(totalLen - bodyLen)):
+        return step
+      return None
+
+    # Largest iterCount that divides gcd(maxNIter, numBatches) and has a uniform src shift.
+    g = gcd(maxNIter, numBatches)
+    for iterCount in range(g, 1, -1):
+      if g % iterCount != 0:
+        continue
+      step = _uniformStep(iterCount)
+      if step is not None:
+        return numBatches // iterCount, iterCount, step * MIRPO
+
+    return numBatches, 1, m0Step
 
   @staticmethod
-  def computeBatchesPerCLSBody(kernel, numBatches: int) -> int:
-    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches)[0]
+  def computeBatchesPerCLSBody(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None) -> int:
+    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches, numElementsPerBatch, gwvw)[0]
 
   def _computeBatchesPerCLSBody(self) -> int:
-    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches)[0]
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw)[0]
 
   @staticmethod
-  def computeCLSIterCount(kernel, numBatches: int) -> int:
+  def computeCLSIterCount(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None) -> int:
     """CLS loop iter count = numBatches / batchesPerCLSBody. Minimum 1."""
-    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches)[1]
+    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches, numElementsPerBatch, gwvw)[1]
 
   def _computeCLSIterCount(self) -> int:
-    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches)[1]
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw)[1]
 
   def _computeCLSLayout(self):
-    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches)
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw)
 
   def emit(self) -> Module:
     assert self._checkAtomicPreconditions()
@@ -705,13 +771,15 @@ class GlobalWriteBatchWriter:
             mask, bufferOOB, True, self.tmpVgpr, tmpInrSgpr, addrCVgpr, self.addrC, 0))
       self._epilogScratchFree(tmpInrSgpr)
 
-    # Init sgpr offset -- NonEdge only. Needed for the delayed-pattern
-    # incrementToNextRow when optSrdIncForRow=1 (NonEdge). Edge path
-    # (optSrdIncForRow=0) can skips the delayed pattern entirely so these inits
-    # might not needed.
-
+    # Primer SGPRs for delayed incrementToNextRow (NonEdge / optSrdIncForRow).
     module.add(SMovB32(dst=sgpr(self.tmpS01),   src=0, comment="Init sgpr offset"))
     module.add(SMovB32(dst=sgpr(self.tmpS01+1), src=0, comment="Init sgpr offset"))
+    if self.kernel["StoreRemapVectorWidth"] and self.kernel["CompactLoopStore"]:
+      # Batch 0 checks out; later batches reuse parentWriter.compactLoopStoreVgpr.
+      self.CompactLoopStoreVgpr = self.parentWriter.vgprPool.checkOut(1, tag="CompactLoopStoreVgpr_tmpVgpr")
+      self.parentWriter.compactLoopStoreVgpr = self.CompactLoopStoreVgpr
+      module.add(VMovB32(dst=vgpr(self.CompactLoopStoreVgpr),   src=0, comment="Init vgpr offset"))
+      # module.add(VMovB32(dst=vgpr(self.tmpVgpr+1), src=0, comment="Init vgpr offset"))
 
     # Prewarm VGPR MSB bank -- NonEdge only. Forces the upper-bank toggle
     # for the upcoming ds_load to settle ahead of time so the loop body
@@ -746,19 +814,14 @@ class GlobalWriteBatchWriter:
 
   def _epilogScratchSgpr(self, n: int = 1):
     """Scratch sgpr for epilogue address math.
-    CompactLoopStore: borrow `n` aligned sgpr(s) from the pool so the address
-    math does NOT clobber the row-increment primer chain (which lives in
-    tmpS01 / tmpS01+1). Non-CLS: reuse self.tmpSgpr -- this is the baseline, so
-    CLS=0 codegen is bit-for-bit unchanged. Pair with _epilogScratchFree.
+    CLS: extra pool sgpr so the primer in tmpS01 is not clobbered. Non-CLS: reuse tmpSgpr.
     """
     if self.kernel["CompactLoopStore"]:
       return self.parentWriter.sgprPool.checkOutAligned(n, 1)
     return self.tmpSgpr
 
   def _epilogScratchFree(self, sgprIdx):
-    """Release a scratch sgpr from _epilogScratchSgpr (no-op for non-CLS, which
-    reused self.tmpSgpr and owns nothing).
-    """
+    """Release scratch from _epilogScratchSgpr (no-op when non-CLS reused tmpSgpr)."""
     if self.kernel["CompactLoopStore"]:
       self.parentWriter.sgprPool.checkIn(sgprIdx)
 
@@ -780,12 +843,7 @@ class GlobalWriteBatchWriter:
                                ":vaw:%u"%self.atomicW if self.atomic else "",
                                "" if idx == len(self.batchElements) -1 else "; ")
                                for idx, element in enumerate(self.batchElements)])
-    # setupStoreElementsForBatch must run before the CLS preamble call so
-    # ss.elementAddr[0] is populated. For non-CLS the batch banner is emitted
-    # right after in the else branch (matches baseline ordering); for CLS the
-    # banner is moved into the CLS header block below (after sgpr setup, before
-    # the CLS label) so the per-iter store body is visually a single labelled
-    # unit.
+    # Populate ss.elementAddr before the CLS preamble.
     if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
       self.ss.setupStoreElementsForBatch(self.kernel, self.gwvw, self.batchElements, self.batchElementSgprs, isOptNLL=False, factorDim=self.factorDim)
     else:
@@ -873,15 +931,20 @@ class GlobalWriteBatchWriter:
 
       module.add(SMovB32(dst=sgpr("CLSm0Base"), src=hex(0x0), comment="CLS M0 base = 0"))
       module.add(SMovB32(dst=sgpr("CLSLoopCounter"), src=hex(self._computeCLSIterCount()), comment="CLS loop iter count"))
+      # trace layout (batch count / body elements / acc length).
+      module.addComment0("batchnum=%u len(self.batchElements)=%u totalAccRegs=%u" % (self.numBatches, len(self.batchElements), getAccToArchLen(self.kernel)))
+      # which cap bounds NEPB (VGPR vs SGPR vs NEPBS).
+      module.addComment0("vgprAllowedNEPB=%s sgprLimNEPB=%s NEPBS=%s numVgprsPerElement=%s gwvw=%u (vgprAllowedNEPB = numVgprAvailable // numVgprsPerElement)" % (
+          str(getattr(self.ss.cfg, "VgprAllowedNEPB", "?")),
+          str(getattr(self.ss.cfg, "numElementsPerBatchLimitedBySgprs", "?")),
+          str(self.kernel["NumElementsPerBatchStore"]),
+          str(self.ss.numVgprsPerElement), self.gwvw))
       module.addComment2(commentStr)
       self.ss._clsLoopLabel = Label(self.parentWriter.labels.getNameInc("CLS"), "")
       module.add(self.ss._clsLoopLabel)
       module.add(SMovB32(dst=mgpr(0), src=sgpr("CLSm0Base"),
           comment="LDS clamp at sgpr(CLSm0Base)"))
-      # CLS M0 step: M0 indirectly offsets the src VGPR index of v_movrelsd_2_b32.
-      # Step = the stride of the CLS iter dim in the SRC formula; taken from the
-      # same layout derivation as the loop iter count (computeCLSLayout) so the
-      # two can never drift apart.
+      # M0 step from computeCLSLayout (src VGPR stride of the CLS iter dim).
       _, _, cls_m0_step = self._computeCLSLayout()
       module.add(SAddU32(dst=sgpr("CLSm0Base"), src0=sgpr("CLSm0Base"), src1=cls_m0_step,
                          comment="CLS M0 step (src coef of CLS iter dim)"))
@@ -1697,8 +1760,14 @@ class GlobalWriteBatchWriter:
             printExit("Use E does not support StoreRemapVectorWidth if GSU == 1.")
             # module.add(addrCalc.incrementToNextRow(self.kernel, "E", self.ss, self.tmpS01, isCompute=True))
           module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01, forceinitrow0=1, overrideAfterPrimerRows=_emitOverrideRows))
-          module.add(VMovB32(vgpr(self.tmpVgpr), addrCalc.rowInc, comment="set shift rows"))
-          module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
+
+          # CLS delayed primer: apply primed rows, then store the next look-ahead.
+          if self.kernel["CompactLoopStore"] and _emitOverrideRows:
+            module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.CompactLoopStoreVgpr), "shift storeRemap coord1"))
+            module.add(VMovB32(vgpr(self.CompactLoopStoreVgpr), _emitOverrideRows, comment="set shift rows"))
+          else:
+            module.add(VMovB32(vgpr(self.tmpVgpr), addrCalc.rowInc, comment="set shift rows"))
+            module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
 
       # When stores are interleaved (GLS=0) with subtile NonEdge guards, the
       # M-guard branch for the last store in N-group K targets the N-group end
@@ -2090,7 +2159,7 @@ class GlobalWriteBatchWriter:
           if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
             convertModule = convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_F32_to_I32, roundType=RoundType.ROUND_TO_NEAREST_EVEN, \
                                         inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], self.cvtVgprStruct, self.tmpS01,
+          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], self.cvtVgprStruct, packTmpS01,
                                      SaturateTypeInt8=SaturateTypeInt8, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         self._epilogScratchFree(packTmpS01)
 
@@ -2232,7 +2301,9 @@ class GlobalWriteBatchWriter:
                 storeCodeModule.add(orphanSkipLabel)
               self.storesIssued += 1
         elif self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
-          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'TD', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store TD not StoreRemapVectorWidth")
+          # elt0/batch0 still forceinitrow0 when rowInc==0.
+          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'TD', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
+                                                   overrideAfterPrimerRows=_emitOverrideRows, comment="store TD not StoreRemapVectorWidth")
           storeCodeModule.add(tmpStoreCode)
           self.storesIssued += 1
         else:
@@ -2247,11 +2318,14 @@ class GlobalWriteBatchWriter:
                                                   labelPrefix="subtile_skip_store")
           # Apply exec mask for partial M/N blocks (regular fp32 store path)
           if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
+            tmpInrSgpr = self._epilogScratchSgpr(2*self.laneSGPRC)
             # wave32: 2 LGs x 8 rows/LG -> shift=1; wave64: 4 LGs x 4 rows/LG -> shift=2
             rowScaleShift = 1 if self.wavelen == 32 else 2
-            self._emitAlign8ExecMask(storeCodeModule, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+            # '*' not '**'; wave64 would pick the wrong slot.
+            self._emitAlign8ExecMask(storeCodeModule, tmpInrSgpr, tmpInrSgpr+1*self.laneSGPRC, blockIdxM, blockIdxN,
                                      mGuardOffset=1, rowScaleShift=rowScaleShift)
-            storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
+            storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpInrSgpr, self.laneSGPRC), "apply exec mask"))
+            self._epilogScratchFree(tmpInrSgpr)
           # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
           tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
                                                    overrideAfterPrimerRows=_emitOverrideRows, comment="store D")
@@ -2649,6 +2723,8 @@ class GlobalWriteBatchWriter:
     isSlc = bool(ntd & 0x2)
     isNT  = bool(ntd & 0x4)
 
+    # align8 exec mask uses scratch, not tmpS01 (primer).
+    tmpInrSgpr = self._epilogScratchSgpr(2*self.laneSGPRC)
     # Reuse cvtVgprStruct.vgprBf16Temp..vgprBf16Inc (+0..+3) as 4 scratch vgprs.
     # The cvtVgpr block is allocated with 2-alignment (64-bit aligned) in KWA so that
     # vgprBf16Temp is at an even VGPR index, satisfying buffer_store_dwordx4's
@@ -2712,13 +2788,13 @@ class GlobalWriteBatchWriter:
         module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vLGDelta),
                            comment="adjusted D addr = addrDVgpr + lane_group*8"))
       if useAlign8:
-        self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+        self._emitAlign8ExecMask(module, tmpInrSgpr, tmpInrSgpr+1*self.laneSGPRC, blockIdxM, blockIdxN,
                                  mGuardOffset=2, rowScaleShift=1)
 
     module.add(self._emitSubtilePackedPermute(vPack, vPermAddr, addrWhilePermuting=emitAddrWhilePermuting))
 
     if useAlign8:
-      tmpS = self.tmpS01
+      tmpS = tmpInrSgpr
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpS, self.laneSGPRC), "apply exec mask"))
 
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
@@ -2739,6 +2815,7 @@ class GlobalWriteBatchWriter:
     # Insert nop to ensure the store has latched its source VGPRs.
     module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
 
+    self._epilogScratchFree(tmpInrSgpr)
     return module
 
   def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0) -> Module:
@@ -2779,6 +2856,8 @@ class GlobalWriteBatchWriter:
     isSlc = bool(ntd & 0x2)
     isNT  = bool(ntd & 0x4)
 
+    # align8 exec mask uses scratch, not tmpS01 (primer).
+    tmpInrSgpr = self._epilogScratchSgpr(2*self.laneSGPRC)
     # Scratch vgprs from the cvtVgprStruct block (overwritten each call):
     #   vPack+0  : 16bit packed dword (vc=0,1)
     #   vPack+1  : wave ID scratch / 16bit packed dword (vc=2,3)
@@ -2819,7 +2898,7 @@ class GlobalWriteBatchWriter:
     #         + waveId0*waveM_stride*bpe            [M-wave offset, if miwg0>1]
     #         + waveId1*waveN_stride*StrideD1J*bpe  [N-wave offset, if miwg1>1]
     # The SRD already encodes wg1*MT1*StrideD1J*bpe (N-WG offset).
-    tmpS = self.tmpS01
+    tmpS = tmpInrSgpr
     mt0bpe = self.kernel["MacroTile0"] * bpe
 
     module.addComment1("compute per-lane orphan vaddr = N_col_off + LG_M_off + wg0_M_off [+ wave offsets]")
@@ -2895,9 +2974,9 @@ class GlobalWriteBatchWriter:
 
     useAlign8 = self.parentWriter.states.storeAlign8
     if useAlign8:
-      self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+      self._emitAlign8ExecMask(module, tmpInrSgpr, tmpInrSgpr+1*self.laneSGPRC, blockIdxM, blockIdxN,
                                mGuardOffset=1, rowScaleShift=2)
-      module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
+      module.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpInrSgpr, self.laneSGPRC), "apply exec mask"))
 
     module.addComment1(f"buffer_store_b64: write 4 {typeStr} M-rows at fixed N-col (orphan subtile)")
     module.add(BufferStoreB64(
@@ -2912,6 +2991,7 @@ class GlobalWriteBatchWriter:
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
 
+    self._epilogScratchFree(tmpInrSgpr)
     return module
 
   def _emitAtomicAdd(self, module: Module):
