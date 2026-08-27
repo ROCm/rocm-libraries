@@ -304,6 +304,24 @@ def test_workspace_and_plan_name_without_compiled_plans():
     assert "out of bounds" in str(excinfo.value)
 
 
+def test_engine_name_accessors_take_an_optional_handle():
+    """The three name-reporting accessors accept a trailing handle keyword.
+
+    Python cannot overload, so the handle-taking C++ forms -- the ones that name
+    plugin-supplied engines -- are reached through a keyword defaulting to None.
+    An unbuilt graph is enough to pin the signature: each accessor refuses it the
+    same way with the keyword as without.
+    """
+    graph = hipdnn.Graph()
+
+    with pytest.raises(RuntimeError):
+        graph.get_plan_name(handle=None)
+    with pytest.raises(RuntimeError):
+        graph.get_plan_name_at_index(0, handle=None)
+    with pytest.raises(RuntimeError):
+        graph.get_engine_configs(handle=None)
+
+
 @pytest.mark.gpu
 def test_manual_plan_index_tuning_loop():
     """The per-plan-index primitives drive the cuDNN-style manual tuning loop."""

@@ -151,6 +151,18 @@ def configMarks(filepath, rootDir, availableArchs):
         if markNamed(ArchSkip) in marks:
             marks.append(pytest.mark.skip)
 
+    # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
+    # fails under FFM emulation only. Turn it into an xfail only when running 
+    # under FFM — keyed on the emulator's HSA_MODEL_MEMFILE backing plus the 
+    # gfx1250 arch — so it never fires on HW or on other emulators/arches, 
+    # where the test must still run.
+    if (
+        os.environ.get("HSA_MODEL_MEMFILE")
+        and "gfx1250" in availableArchs
+        and markNamed("ffm_fail") in marks
+    ):
+        marks.append(pytest.mark.xfail)
+
     validate = True
     validateAll = False
     try:

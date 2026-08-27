@@ -259,9 +259,6 @@ globalParameters["DumpTensors"] = (
 # If PrintMax* is greater than the dimension, the middle elements will be replaced with "..."
 
 
-# device selection
-globalParameters["Platform"] = 0  # select opencl platform
-
 # shouldn't need to change
 globalParameters["ClientExecutionLockPath"] = (
     None  # Path for a file lock to ensure only one client is executed at once.  filelock module is required if this is enabled.
@@ -348,7 +345,6 @@ globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
 )
-globalParameters["ValidateMetadata"] = False  # Set to True to validate custom.config metadata at build time
 
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
@@ -457,12 +453,12 @@ defaultBenchmarkCommonParameters = [
     {"LdsPadMXSA": [ -1 ] },
     {"LdsPadB": [-1]},
     {"LdsPadMXSB": [ -1 ] },
-    {"LdsPadMetadata": [0]},
+    {"LdsPadMetadata": [-1]},
     {"LdsBlockSizePerPadA": [-1]},
     {"LdsBlockSizePerPadMXSA": [ -1 ] },
     {"LdsBlockSizePerPadB": [-1]},
     {"LdsBlockSizePerPadMXSB": [ -1 ] },
-    {"LdsBlockSizePerPadMetadata": [0]},
+    {"LdsBlockSizePerPadMetadata": [-1]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
     {"MaxOccupancy": [40]},
@@ -565,7 +561,7 @@ defaultBenchmarkCommonParameters = [
     {"NonVolatileWS": [0]},
     {"NonVolatileMetadata": [0]},
     {"PreloadKernArgs": [True]},
-    # {"CustomKernel": [{"name": "", "args": [], "macrotile": [0,0,0], "threads": [0,0,0], "grid": [0,0,0]}]},
+    {"CustomKernelName": [""]},
     {"NoReject": [False]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
@@ -839,6 +835,14 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
 ]
 
 
+def validateRuntimeLanguage(runtimeLanguage):
+    if runtimeLanguage is not None and runtimeLanguage not in {"HIP", "HSA"}:
+        printExit(
+            f"Unsupported RuntimeLanguage {runtimeLanguage!r}. "
+            "Supported runtime languages are HIP and HSA."
+        )
+
+
 def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
     Assign Global Parameters
@@ -847,6 +851,8 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
 
     global globalParameters
+
+    validateRuntimeLanguage(config.get("RuntimeLanguage"))
 
     # Minimum Required Version
     if "MinimumRequiredVersion" in config:
