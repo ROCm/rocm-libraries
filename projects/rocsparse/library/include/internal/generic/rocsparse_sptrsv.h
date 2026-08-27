@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -41,7 +41,7 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  \note
-*  This routine does not support batched computation.
+*  This routine supports strided batched computation.
 *
 *
 *  @param[in]

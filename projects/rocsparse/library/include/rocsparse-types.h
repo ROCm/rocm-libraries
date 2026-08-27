@@ -1160,6 +1160,11 @@ typedef enum rocsparse_sptrsm_input_
 typedef enum rocsparse_sptrsm_output_
 {
     rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot \p int64_t based position for output from the SpTRSM descriptor and synchronously return zero_pivot. */
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+    ,
+    rocsparse_sptrsm_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpTRSM calculation for output from the SpTRSM descriptor. */
+    rocsparse_sptrsm_output_singularity_position /**< Get the singularity \p int64_t based position for output from the SpTRSM descriptor. */
+#endif
 } rocsparse_sptrsm_output;
 
 /*! \ingroup types_module

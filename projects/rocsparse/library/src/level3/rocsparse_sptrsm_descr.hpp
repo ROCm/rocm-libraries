@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,6 +47,9 @@ protected:
     rocsparse_solve_mode        m_solve_mode{rocsparse_solve_mode_triangular};
     rocsparse_diagonal_modifier m_diagonal_modifier{rocsparse_diagonal_modifier_none};
 #endif
+#if defined(ROCSPARSE_WITH_TRSM_REFACTORING)
+    int64_t m_batch_count{};
+#endif
 
 public:
     void* get_local_host_alpha()
@@ -72,6 +75,9 @@ public:
 
     rocsparse_sptrsm_stage get_stage() const;
     rocsparse_sptrsm_alg   get_alg() const;
+
+    void    set_batch_count(int64_t);
+    int64_t get_batch_count() const;
 
     int64_t             get_nrhs() const;
     rocsparse_operation get_operation_A() const;

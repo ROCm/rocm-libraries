@@ -26,14 +26,15 @@ set(rocsparse_source
 
 # Auxiliary
   src/auxiliary/rocsparse_auxiliary.cpp
+  src/auxiliary/dnmat_transpose/rocsparse_dnmat_transpose.cpp
+  src/auxiliary/dnmat_copy_data/rocsparse_dnmat_copy_data.cpp
+  src/auxiliary/dnvec_copy_data/rocsparse_dnvec_copy_data.cpp
   src/auxiliary/rocsparse_error.cpp
 # Common
   src/common/rocsparse_singularity.cpp
   src/common/rocsparse_common.cpp
   src/common/rocsparse_valset.cpp
   src/common/rocsparse_conjugate.cpp
-  src/common/rocsparse_dense_transpose_back.cpp
-  src/common/rocsparse_dense_transpose.cpp
   src/common/rocsparse_handle.cpp
   src/common/rocsparse_mat_info.cpp
   src/common/rocsparse_position_t.cpp
@@ -401,23 +402,10 @@ set(rocsparse_source
   src/level3/rocsparse_coomm_template_segmented_atomic.cpp
   src/level3/rocsparse_spmm.cpp
   src/level3/rocsparse_csrsm.cpp
-  src/level3/rocsparse_csrsm_buffer_size_impl.cpp
-  src/level3/rocsparse_csrsm_analysis_impl.cpp
-  src/level3/rocsparse_csrsm_solve_impl.cpp
-  src/level3/rocsparse_csrsm_buffer_size.cpp
-  src/level3/rocsparse_csrsm_analysis.cpp
-  src/level3/rocsparse_csrsm_solve.cpp
-  src/level3/rocsparse_coosm_buffer_size.cpp
-  src/level3/rocsparse_coosm_analysis.cpp
-  src/level3/rocsparse_coosm.cpp
-  src/level3/rocsparse_coosm_buffer_size_impl.cpp
-  src/level3/rocsparse_coosm_analysis_impl.cpp
-  src/level3/rocsparse_coosm_impl.cpp
   src/level3/rocsparse_bsrsm.cpp
   src/level3/rocsparse_bsrsm_buffer_size.cpp
   src/level3/rocsparse_bsrsm_analysis.cpp
   src/level3/rocsparse_bsrsm_solve.cpp
-  src/level3/rocsparse_bsrsm_template_large.cpp
   src/level3/rocsparse_gemmi.cpp
   src/level3/rocsparse_sddmm.cpp
   src/level3/rocsparse_sddmm_coo.cpp
@@ -425,8 +413,6 @@ set(rocsparse_source
   src/level3/rocsparse_sddmm_csr.cpp
   src/level3/rocsparse_sddmm_csc.cpp
   src/level3/rocsparse_sddmm_ell.cpp
-  src/level3/rocsparse_spsm.cpp
-  src/level3/rocsparse_sptrsm.cpp
   src/level3/rocsparse_sptrsm_descr.cpp
 
 # Extra
@@ -685,7 +671,6 @@ set(rocsparse_source
   src/generic/spic0/rocsparse_spic0_get_output.cpp
   src/generic/spic0/rocsparse_spic0.cpp
   src/generic/spic0/rocsparse_spic0_buffer_size.cpp
-
 )
 
 if(BUILD_ROCSPARSE_DEBUGGING)
@@ -717,5 +702,51 @@ if(BUILD_WITH_ILDLT0)
     src/generic/spildlt0/rocsparse_spildlt0_get_output.cpp
     src/generic/spildlt0/rocsparse_spildlt0.cpp
     src/generic/spildlt0/rocsparse_spildlt0_buffer_size.cpp
+  )
+endif()
+
+# Triangular solve (SpTRSM/SpSM) implementation, selected by BUILD_WITH_TRSM_REFACTORING.
+# ON  -> refactored (batched) sources under src/level3/refactored/
+# OFF -> pristine pre-refactoring sources
+if(BUILD_WITH_TRSM_REFACTORING)
+  list(APPEND rocsparse_source
+    src/level3/refactored/rocsparse_xcsrsm_buffer_size.cpp
+    src/level3/refactored/rocsparse_xcsrsm_analysis.cpp
+    src/level3/refactored/rocsparse_xcsrsm_solve.cpp
+    src/level3/refactored/rocsparse_csrsm_buffer_size.cpp
+    src/level3/refactored/rocsparse_csrsm_analysis.cpp
+    src/level3/refactored/rocsparse_csrsm_solve.cpp
+    src/level3/refactored/rocsparse_cscsm_buffer_size.cpp
+    src/level3/refactored/rocsparse_cscsm_analysis.cpp
+    src/level3/refactored/rocsparse_cscsm_solve.cpp
+    src/level3/refactored/rocsparse_coosm_buffer_size.cpp
+    src/level3/refactored/rocsparse_coosm_analysis.cpp
+    src/level3/refactored/rocsparse_coosm_solve.cpp
+    src/level3/refactored/rocsparse_bsrsm_template_large.cpp
+    src/level3/refactored/rocsparse_spsm.cpp
+    src/level3/refactored/rocsparse_sptrsm_set_input.cpp
+    src/level3/refactored/rocsparse_sptrsm_get_output.cpp
+    src/level3/refactored/rocsparse_sptrsm_buffer_size.cpp
+    src/level3/refactored/rocsparse_sptrsm.cpp
+  )
+else()
+  list(APPEND rocsparse_source
+    src/common/rocsparse_dense_transpose.cpp
+    src/common/rocsparse_dense_transpose_back.cpp
+    src/level3/rocsparse_csrsm_buffer_size_impl.cpp
+    src/level3/rocsparse_csrsm_analysis_impl.cpp
+    src/level3/rocsparse_csrsm_solve_impl.cpp
+    src/level3/rocsparse_csrsm_buffer_size.cpp
+    src/level3/rocsparse_csrsm_analysis.cpp
+    src/level3/rocsparse_csrsm_solve.cpp
+    src/level3/rocsparse_coosm_buffer_size.cpp
+    src/level3/rocsparse_coosm_analysis.cpp
+    src/level3/rocsparse_coosm.cpp
+    src/level3/rocsparse_coosm_buffer_size_impl.cpp
+    src/level3/rocsparse_coosm_analysis_impl.cpp
+    src/level3/rocsparse_coosm_impl.cpp
+    src/level3/rocsparse_bsrsm_template_large.cpp
+    src/level3/rocsparse_spsm.cpp
+    src/level3/rocsparse_sptrsm.cpp
   )
 endif()
