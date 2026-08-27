@@ -1026,8 +1026,12 @@ class GlobalWriteBatchWriter:
       module.addComment2(commentStr)
       self.ss._clsLoopLabel = Label(self.parentWriter.labels.getNameInc("CLS"), "")
       module.add(self.ss._clsLoopLabel)
+      # This overwrites the prologue's m0 for the rest of the kernel and never
+      # restores it. CompactLoopStore is gated on HasMovRelsD2B32 (gfx1250), where
+      # m0 no longer bounds DS addressing, so the epilogue's bias / scaleAlphaVec
+      # ds_load inside this loop body are unaffected.
       module.add(SMovB32(dst=mgpr(0), src=sgpr("CLSm0Base"),
-          comment="LDS clamp at sgpr(CLSm0Base)"))
+          comment="CLS M0[9:0] = acc src offset for v_movrelsd_2_b32"))
       # M0 step from computeCLSLayout (src VGPR stride of the CLS iter dim).
       _, _, cls_m0_step = self._computeCLSLayout()
       module.add(SAddU32(dst=sgpr("CLSm0Base"), src0=sgpr("CLSm0Base"), src1=cls_m0_step,
