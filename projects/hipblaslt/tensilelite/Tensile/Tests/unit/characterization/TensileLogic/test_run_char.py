@@ -93,7 +93,8 @@ def passing_validators(monkeypatch):
     monkeypatch.setattr(Run, "handleCustomKernel", lambda s, iim: (s, False))
     monkeypatch.setattr(Run, "_validateMatrixInstruction", lambda s, iim, rel: True)
     monkeypatch.setattr(Run, "_validateWorkGroup", lambda s, rel: True)
-    monkeypatch.setattr(Run, "_validateWorkGroupMappingXCC", lambda s, rel: True)
+    monkeypatch.setattr(Run, "_validateWorkGroupMappingXCC",
+                        lambda s, rel, report=True: True)
     monkeypatch.setattr(Run, "hasCustomKernel", lambda f: False)
 
 
@@ -102,7 +103,9 @@ _CUSTOM = Run.Check(OnlyCustomKernels=True, All=False)
 
 
 def _result(*tup):
-    keep, total, kb, cid = tup
+    # Run._runChecks now returns a 5-tuple; the 5th value (stale_known_bugs) is
+    # characterized in the unit suite (test_TensileLogic_Run.py), not pinned here.
+    keep, total, kb, cid, _stale = tup
     return {"keep": keep, "total": total, "known_bug_skips": kb, "chip_id_failures": cid}
 
 
@@ -132,12 +135,14 @@ def test_runchecks_experimental_skipped(tmp_path, passing_validators, snapshot):
 
 
 def test_runchecks_known_bug_skip(tmp_path, passing_validators, monkeypatch, snapshot):
-    # idx 0 is a known bug (kept without validation); idx 1 would fail (validator
-    # forced False) -> proves the known-bug path bypasses validation.
+    # "sol_a" is a known bug: it is re-validated (validator forced False, so it
+    # still fails) and kept as a known-bug skip; "sol_b" is not listed and fails
+    # -> proves the known-bug path accepts a still-failing listed solution.
     monkeypatch.setattr(Run, "_validateWorkGroup", lambda s, rel: False)
     f = _write_logic(tmp_path / "foo" / "bar.yaml",
-                     [{"SolutionIndex": 0}, {"SolutionIndex": 1}])
-    kb = frozenset({(normalize_logic_relative_path(Path("foo/bar.yaml")), 0)})
+                     [{"SolutionIndex": 0, "SolutionNameMin": "sol_a"},
+                      {"SolutionIndex": 1, "SolutionNameMin": "sol_b"}])
+    kb = frozenset({(normalize_logic_relative_path(Path("foo/bar.yaml")), "sol_a")})
     assert _result(*Run._runChecks(tmp_path, {}, _ALL, kb, [f])) == snapshot
 
 
@@ -275,20 +280,20 @@ def _stub_main(monkeypatch, results, *, verbose=2, known_bugs=frozenset(),
 
 
 def test_main_happy_no_rejects(monkeypatch, capsys, snapshot):
-    _stub_main(monkeypatch, [(2, 2, 0, 0)], verbose=2)
+    _stub_main(monkeypatch, [(2, 2, 0, 0, 0)], verbose=2)
     Run.main()  # no rejects -> returns normally
     assert capsys.readouterr().out == snapshot
 
 
 def test_main_rejects_exit(monkeypatch, capsys, snapshot):
-    _stub_main(monkeypatch, [(1, 2, 0, 0)], verbose=2)
+    _stub_main(monkeypatch, [(1, 2, 0, 0, 0)], verbose=2)
     with pytest.raises(SystemExit) as ei:
         Run.main()
     assert {"exit_code": ei.value.code, "stdout": capsys.readouterr().out} == snapshot
 
 
 def test_main_known_bugs_and_chip_id_failures(monkeypatch, capsys, snapshot):
-    _stub_main(monkeypatch, [(1, 3, 1, 1)], verbose=2)
+    _stub_main(monkeypatch, [(1, 3, 1, 1, 0)], verbose=2)
     with pytest.raises(SystemExit) as ei:
         Run.main()
     assert {"exit_code": ei.value.code, "stdout": capsys.readouterr().out} == snapshot
@@ -298,13 +303,13 @@ def test_main_verbose1_starts_progress_thread(monkeypatch, capsys):
     # Verbose < 2 -> the background progress thread path runs. stdout carries a
     # carriage-return progress artefact (nondeterministic), so we only assert
     # the run completed and printed the totals; no snapshot.
-    _stub_main(monkeypatch, [(1, 1, 0, 0)], verbose=1)
+    _stub_main(monkeypatch, [(1, 1, 0, 0, 0)], verbose=1)
     Run.main()
     assert "Total" in capsys.readouterr().out
 
 
 def test_main_load_known_bugs_error_exits(monkeypatch):
-    _stub_main(monkeypatch, [(1, 1, 0, 0)], verbose=2, kb_raises=ValueError("bad kb"))
+    _stub_main(monkeypatch, [(1, 1, 0, 0, 0)], verbose=2, kb_raises=ValueError("bad kb"))
     with pytest.raises(SystemExit) as ei:
         Run.main()
     assert ei.value.code == 1

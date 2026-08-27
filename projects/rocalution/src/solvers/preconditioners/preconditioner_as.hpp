@@ -32,18 +32,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class AS
-  * \brief Additive Schwarz Preconditioner
-  * \details
-  * The Additive Schwarz preconditioner relies on a preconditioning technique, where the
-  * linear system \f$Ax=b\f$ can be decomposed into small sub-problems based on
-  * \f$A_{i} = R_{i}^{T}AR_{i}\f$, where \f$R_{i}\f$ are restriction operators. Those
-  * restriction operators produce sub-matrices wich overlap. This leads to contributions
-  * from two preconditioners on the overlapped area which are scaled by \f$1/2\f$.
-  * \cite RAS
-  *
-  * Example of a four block-decomposed matrix with Additive Schwarz (overlapping) and
-  * Restricted Additive Schwarz is shown in the rocALUTION API reference figure for
-  * Additive Schwarz preconditioners.
+  * \brief Additive Schwarz preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -101,14 +90,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class RAS
-  * \brief Restricted Additive Schwarz Preconditioner
-  * \details
-  * The Restricted Additive Schwarz preconditioner relies on a preconditioning technique,
-  * where the linear system \f$Ax=b\f$ can be decomposed into small sub-problems based on
-  * \f$A_{i} = R_{i}^{T}AR_{i}\f$, where \f$R_{i}\f$ are restriction operators. The RAS
-  * method is a mixture of block Jacobi and the AS scheme. In this case, the sub-matrices
-  * contain overlapped areas from other blocks, too.
-  * \cite RAS
+  * \brief Restricted Additive Schwarz preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

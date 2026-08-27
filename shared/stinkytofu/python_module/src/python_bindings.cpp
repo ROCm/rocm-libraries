@@ -147,7 +147,9 @@ NB_MODULE(_stinkytofu, m) {
         "lower_logical_module",
         [](PyLogicalModule& module, std::array<int, 3> arch, const nb::object& options_obj) {
             StinkyAsmModule::ModuleOptions moduleOptions{};
-            moduleOptions.SwPrefetchScratchSgpr = -1;
+            // Abs SW-prefetch base SGPR defaults to -1 (off); Tensile overrides via the
+            // options dict below. (Replaces the removed SwPrefetchScratchSgpr default.)
+            moduleOptions.SwInstructionPrefetchAbsBaseSgpr = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 #define SET_MODULE_OPTION_LLM(name, type) \
@@ -480,7 +482,11 @@ NB_MODULE(_stinkytofu, m) {
     // ========================================================================
     // Architecture IDs
     // ========================================================================
-    nb::enum_<GfxArchID>(m, "GfxArch").value("Gfx1250", GfxArchID::Gfx1250, "GFX12.5.0");
+    // Only the architectures this library was built for exist in GfxArchID, so the enum is
+    // exposed from the same list rather than hand-maintained.
+    auto gfxArch = nb::enum_<GfxArchID>(m, "GfxArch");
+#define STINKYTOFU_ARCH(archName) gfxArch.value(#archName, GfxArchID::archName);
+#include "Config/Archs.def"
 
     // ========================================================================
     // Toolchain capability probing (via comgr)
@@ -871,6 +877,18 @@ NB_MODULE(_stinkytofu, m) {
     m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
           "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
           "[\"gfx1250\"]).");
+    m.def(
+        "isMnemonicSupported",
+        [](const std::string& mnemonic, std::array<int, 3> arch) {
+            const auto* info = ArchHelper::getInstance().getArchInfo(arch[0], arch[1], arch[2]);
+            if (!info) return false;
+            const auto& map = info->getMnemonicToIsaOpcodeMap();
+            return map.find(mnemonic) != map.end();
+        },
+        nb::arg("mnemonic"), nb::arg("arch"),
+        "Return True if StinkyTofu has a hardware instruction definition for *mnemonic* on "
+        "[major, minor, stepping]. Lets a generator ask before emitting, instead of finding "
+        "out when the mnemonic fails to lower.");
 
     // ========================================================================
     // Hardware capability dictionaries (replaces rocisa getAsmCaps/etc.)

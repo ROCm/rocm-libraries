@@ -113,6 +113,14 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # the main MIOpen target and with how CK itself was built.
     miopen_apply_ck_compile_definitions(${lib_name} ${gpu_target})
 
+    # Select the wavefront-size-specialized depthwise instance set for this GPU.
+    # CDNA (gfx9xx) uses 64-lane wavefronts; RDNA (gfx10xx/gfx11xx/gfx12xx) uses 32.
+    if(arch_base MATCHES "^gfx9")
+        target_compile_definitions(${lib_name} PRIVATE MIOPEN_CK_DEPTHWISE_WAVE_SIZE=64)
+    else()
+        target_compile_definitions(${lib_name} PRIVATE MIOPEN_CK_DEPTHWISE_WAVE_SIZE=32)
+    endif()
+
     # Choose CK linkage mode:
     #   - Per-arch unbundled archive
     #   - Full CK device_conv_operations archive/target

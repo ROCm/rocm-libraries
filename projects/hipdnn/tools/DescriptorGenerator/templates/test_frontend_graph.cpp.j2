@@ -1,3 +1,4 @@
+{% from "macros.j2" import assign_frontend_data_field %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 #include <gtest/gtest.h>
@@ -25,7 +26,7 @@ TEST(TestGraph{{ op.name }}, BuildGraph)
 {% if tc %}
     {{ param.name }}->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }})
         .set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }})
-        .set_data_type(DataType::FLOAT);
+        .set_data_type(DataType::{{ tc.data_type }});
 {% else %}
     {{ param.name }}->set_dim({1, 2, 3, 4})
         .set_stride({24, 12, 4, 1})
@@ -38,13 +39,18 @@ TEST(TestGraph{{ op.name }}, BuildGraph)
     attributes.set_name("{{ op.frontend.node_class }}");
 {% for df in op.data_fields %}
 {% if df.is_vector %}
-    attributes.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attributes", df, value) }}
 {% elif df.is_mode or df.is_enum %}
 {% if df.effective_frontend_type and df.test_enum_value %}
-    attributes.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attributes", df, value) }}
 {% else %}
     // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
 {% endif %}
+{% elif df.is_scalar %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+    {{ assign_frontend_data_field("attributes", df, value) }}
 {% endif %}
 {% endfor %}
 

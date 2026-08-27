@@ -35,10 +35,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class MultiColored
-  * \brief Base class for all multi-colored preconditioners
-  * \details
-  * Derived multi-colored preconditioners can change the preconditioner matrix format with
-  * SetPrecondMatrixFormat().
+  * \brief Base class for multi-colored preconditioners.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

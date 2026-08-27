@@ -248,7 +248,7 @@ void rocke_gfx1151_dfcp_stage_conv0_w0(rocke_gfx1151_dfcp_build_ctx_t* ctx,
                 rocke_b_land(b, rocke_b_cmp_lt(b, n, c_k0), rocke_b_cmp_lt(b, kg, c_kg)));
             rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, n, c_kg), kg);
             rocke_value_t* safe_off = rocke_b_select(b, valid, off, c0);
-            rocke_value_t* raw_i8 = rocke_b_global_load(b, w0_ptr, safe_off, rocke_i8(), 0);
+            rocke_value_t* raw_i8 = rocke_b_global_load_i8(b, w0_ptr, safe_off, 0);
             rocke_value_t* v
                 = rocke_b_select(b, valid, rocke_gfx1151_dfcp_i8_to_f32(b, raw_i8), zero_f);
             rocke_value_t* sidx2[2];
@@ -436,7 +436,7 @@ void rocke_gfx1151_dfcp_stage_input_footprint(rocke_gfx1151_dfcp_build_ctx_t* ct
             rocke_value_t* off = rocke_b_add(
                 b, rocke_b_mul(b, rocke_b_add(b, rocke_b_mul(b, ih, c_Wi), iw), c_cc), ci);
             rocke_value_t* safe_off = rocke_b_select(b, valid, off, c0);
-            rocke_value_t* raw_i8 = rocke_b_global_load(b, x_ptr, safe_off, rocke_i8(), 0);
+            rocke_value_t* raw_i8 = rocke_b_global_load_i8(b, x_ptr, safe_off, 0);
             rocke_value_t* v
                 = rocke_b_select(b, valid, rocke_gfx1151_dfcp_i8_to_f32(b, raw_i8), zero_f);
             rocke_value_t* sidx2[2];
@@ -579,7 +579,7 @@ void rocke_gfx1151_dfcp_stage_conv1_w1(rocke_gfx1151_dfcp_build_ctx_t* ctx,
         rocke_value_t* valid = rocke_b_land(b, in_range, rocke_b_cmp_lt(b, n, c_k1));
         rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, n, c_bpr), kb);
         rocke_value_t* safe_off = rocke_b_select(b, valid, off, c0);
-        rocke_value_t* byte = rocke_b_global_load(b, w1_ptr, safe_off, rocke_i8(), 0);
+        rocke_value_t* byte = rocke_b_global_load_i8(b, w1_ptr, safe_off, 0);
         rocke_value_t* lo_i32 = NULL;
         rocke_value_t* hi_i32 = NULL;
         rocke_value_t* lo_h;
@@ -654,7 +654,7 @@ void rocke_gfx1151_dfcp_stage_conv1_w1_i8(rocke_gfx1151_dfcp_build_ctx_t* ctx,
         rocke_value_t* valid = rocke_b_land(b, in_range, rocke_b_cmp_lt(b, n, c_k1));
         rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, n, c_bpr), kb);
         rocke_value_t* safe_off = rocke_b_select(b, valid, off, c0);
-        rocke_value_t* byte = rocke_b_global_load(b, w1_ptr, safe_off, rocke_i8(), 0);
+        rocke_value_t* byte = rocke_b_global_load_i8(b, w1_ptr, safe_off, 0);
         rocke_value_t* lo_i32 = NULL;
         rocke_value_t* hi_i32 = NULL;
         rocke_value_t* lo_i8;

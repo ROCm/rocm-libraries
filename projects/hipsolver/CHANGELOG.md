@@ -10,8 +10,18 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed hipsolverDnXpotrs calling 32-bit potrs instead of 64-bit potrs.
+
 ### Known issues
 ### Upcoming changes
+
+
+## hipSOLVER 3.6.0 for ROCm 10.0.0
+
+### Changed
+
+* Minor internal changes
 
 
 ## hipSOLVER 3.5.0 for ROCm 7.14.0
