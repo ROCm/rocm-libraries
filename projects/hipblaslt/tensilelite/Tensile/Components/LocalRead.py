@@ -853,8 +853,12 @@ class LocalReadMFMA(LocalRead):
         vectorWidth  = kernel["VectorWidth%s"%tc]
 
         numSubTiles = kernel["numSubTiles"]
-        MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
-                            kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
+        # contigOut: contiguous per-wave tiles -> read stride drops the *MIWaveGroup factor.
+        contigOut = kernel.get("UseSubtileImpl") or kernel.get("WaveContiguousOutput")
+        waveGroupStride0 = 1 if contigOut else kernel["MIWaveGroup"][0]
+        waveGroupStride1 = 1 if contigOut else kernel["MIWaveGroup"][1]
+        MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * waveGroupStride0 * kernel["VectorWidthA"], \
+                            kernel["MatrixInstN"] * kernel["MatrixInstBN"] * waveGroupStride1 * kernel["VectorWidthB"]]
 
         LdsPad           = kernel["LdsPad%s"%tc] if kernel["LdsBlockSizePerPad%s"%tc] == 0 else 0
         tileStride       = 1
