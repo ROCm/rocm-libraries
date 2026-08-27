@@ -109,7 +109,9 @@ struct RocprimDeviceSegmentedScanNameGenerator
     static std::string GetName(int /*index*/)
     {
         std::string n = type_tag<typename Params::input_type>() + "_"
-                        + type_tag<typename Params::output_type>();
+                        + type_tag<typename Params::output_type>() + "_S"
+                        + std::to_string(Params::min_segment_length) + "_"
+                        + std::to_string(Params::max_segment_length);
         if constexpr(Params::use_identity_iterator) n += "_Ident";
         if constexpr(Params::use_graphs) n += "_Graphs";
         return n;
