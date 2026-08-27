@@ -28,7 +28,17 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE,
+              bool     SLEEP,
+              typename I,
+              typename J,
+              typename T
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+              ,
+              bool OP_A_CONJUGATE = false
+#endif
+              >
     ROCSPARSE_DEVICE_ILF void csrsm_device(rocsparse_operation transB,
                                            J                   m,
                                            J                   nrhs,
@@ -99,8 +109,17 @@ namespace rocsparse
                 scsr_col_ind[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
                                                    ? csr_col_ind[hipThreadIdx_x + j] - idx_base
                                                    : -1;
-                scsr_val[hipThreadIdx_x]
-                    = (hipThreadIdx_x < row_end - j) ? csr_val[hipThreadIdx_x + j] : -1;
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
+                                               ? (!OP_A_CONJUGATE)
+                                                     ? csr_val[hipThreadIdx_x + j]
+                                                     : rocsparse::conj(csr_val[hipThreadIdx_x + j])
+                                               : static_cast<T>(0);
+#else
+                scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
+                                               ? csr_val[hipThreadIdx_x + j]
+                                               : static_cast<T>(0);
+#endif
 
                 // Wait for preload to finish
                 __syncthreads();
@@ -235,4 +254,5 @@ namespace rocsparse
                 &done_array[row + id], 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
         }
     }
+
 }
