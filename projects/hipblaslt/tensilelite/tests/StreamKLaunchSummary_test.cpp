@@ -101,11 +101,11 @@ namespace
         hip::HipAMDGPU      device;
     };
 
-    // The summary now uses a deeply-indented "key = value" layout whose column
-    // widths are chosen per-section for alignment. Collapsing runs of spaces to a
-    // single space lets the assertions below match on the stable tokens
-    // ("changedBy = ...", "source = ...", etc.) without pinning exact whitespace.
-    // Newlines are preserved so section boundaries still matter.
+    // The summary is a deeply-indented "key = value" block whose column widths are
+    // chosen per-section for alignment. Collapsing runs of spaces to a single space
+    // lets the assertions below match on the stable tokens ("changedBy = ...",
+    // "source = ...", etc.) without pinning exact column widths. Newlines are left
+    // intact so a token can never be matched across a line break.
     std::string collapseSpaces(std::string const& s)
     {
         std::string out;
@@ -155,8 +155,10 @@ TEST(StreamKLaunchSummaryTest, SnapshotMatchesHelpersForDynamicPartialTiles)
     EXPECT_TRUE(d.isDynamic);
     EXPECT_EQ(d.reduction, origami::reduction_t::tree);
     EXPECT_EQ(d.tiles, tiles);
+    EXPECT_EQ(d.tiles, 1056u) << "4096/128 * 4224/128 = 32 * 33";
     // getSKGrid() reproduces the pre-fallback grid the snapshot records.
     EXPECT_EQ(d.skGridPreFallback, grid);
+    EXPECT_EQ(d.skGridPreFallback, 256u) << "min(tiles, cuCount * CUOccupancy) = min(1056, 256)";
     ASSERT_NE(tiles % grid, 0u) << "test needs partial tiles";
 
     // No fallback fires here, so selected == pre-fallback == final launch grid.
@@ -218,16 +220,18 @@ TEST(StreamKLaunchSummaryTest, Sk5OffResolvesStaticSk3)
     EXPECT_FALSE(d.isDynamic) << "SK5-OFF must take the static (SK3) sub-path";
     EXPECT_EQ(d.numQueues, 8u); // baked count still reported (informational)
     // SK3-static: no per-XCD work-queue region in the workspace it reserves.
-    if(d.workspaceAllocated)
-        EXPECT_EQ(d.requiredWorkspaceBytes, solution.partialTileSize(d.skGrid))
-            << "static SK3 workspace = partialTileSize(grid), no work-queue region";
+    ASSERT_TRUE(d.workspaceAllocated)
+        << "scenario must actually reserve a workspace, otherwise the sizing check below "
+           "would silently assert nothing";
+    EXPECT_EQ(d.requiredWorkspaceBytes, solution.partialTileSize(d.skGrid))
+        << "static SK3 workspace = partialTileSize(grid), no work-queue region";
 }
 
 // ---------------------------------------------------------------------------
 // SK3 static with partial tiles: partials present, skTiles>0, workspace>0,
 // not dynamic, not DP-only.
 // ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, Sk3StaticPartialTiles)
+TEST(StreamKLaunchSummaryTest, Sk3StaticPartialTilesReserveWorkspace)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 3);
@@ -281,8 +285,10 @@ TEST(StreamKLaunchSummaryTest, ForceDpOnlyIsDpOnlyNoWorkspace)
     EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
     EXPECT_FALSE(d.workspaceAllocated);
     // Force-DP-only launches on exactly the hardware CU count (mirrors
-    // StreamKForceDPOnlyTest.UsesHardwareCuCount). The param does NOT reset the
-    // grid to tiles (that is the runtime fallback), so finalGrid == selectedGrid.
+    // StreamKForceDPOnlyTest.UsesHardwareCuCount). With clusterDim == 1 the param
+    // alone does not reset the grid to tiles -- only the cluster-multicast clamp
+    // (clusterDim.x*clusterDim.y > 1) and the runtime workspace-DP fallback do --
+    // so finalGrid == selectedGrid here.
     EXPECT_EQ(d.skGrid, static_cast<size_t>(_CPX_CU));
     EXPECT_EQ(d.finalGrid, static_cast<size_t>(_CPX_CU));
     EXPECT_EQ(d.finalGrid, d.selectedGrid);
@@ -343,10 +349,12 @@ TEST(StreamKLaunchSummaryTest, SelectedVsFinalGridAttribution)
     EXPECT_GT(d.selectedGrid, 0u);
     EXPECT_EQ(d.finalGrid, d.tiles);
     EXPECT_NE(d.selectedGrid, d.finalGrid);
-    // Exactly one of the grid-changing fallbacks is attributed, and it is the
-    // workspace-DP one for this scenario.
+    // The workspace-DP fallback is the flag responsible for the change here, and
+    // the fixed-grid override did not fire.
     EXPECT_TRUE(d.workspaceDPFallbackFired);
     EXPECT_FALSE(d.fixedGridUsed);
+    EXPECT_FALSE(d.treeBoundsFallbackFired);
+    EXPECT_FALSE(d.clusterDPGridClamped);
 }
 
 // ---------------------------------------------------------------------------
@@ -395,11 +403,19 @@ TEST(StreamKLaunchSummaryTest, DpOnlySourceDistinguishesParamVsRuntime)
 // ---------------------------------------------------------------------------
 // Dynamic-path partials-workspace reservation rule.
 //
-// The dynamic (SK4 / SK5-dynamic) path reserves the partials workspace based on
-// tiles%grid divisibility (the same rule the static SK3 path uses), independent
-// of dynamicPartialsSlots (skTiles*skSplit). The three tests below pin that
-// behaviour across the combinations of dynamicPartialsSlots (0 vs >0) and
-// tiles%grid (==0 vs !=0).
+// The dynamic (SK4 / SK5-dynamic) path reserves the partials workspace under the
+// same guard the static path uses -- reduction==parallel OR tiles%grid!=0 -- and
+// the dynamic path is always tree reduction, so divisibility alone decides. The
+// reservation is independent of dynamicPartialsSlots (skTiles*skSplit). The three
+// tests below pin that by varying dynamicPartialsSlots (0 vs >0) against tiles%grid
+// (==0 vs !=0); the fourth combination (slots>0 and tiles%grid!=0) adds nothing,
+// since indivisibility alone already forces the reservation.
+//
+// All three use a plain mock AMDGPU with no analyticalHardware, so
+// streamKBakedQueueCount() is 0 and solve() would reject this device/solution pair
+// at its dynamic-queue guard before ever sizing a workspace. Calling
+// computeStreamKDecisions() directly is what lets the sizing rule be tested in
+// isolation from that rejection.
 // ---------------------------------------------------------------------------
 
 // Case A: dynamicSlots == 0 (no split stream-k tiles) AND tiles % grid != 0.
@@ -483,7 +499,9 @@ TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace)
     EXPECT_TRUE(d.partialsPresent) << "override produced split stream-k tiles";
     EXPECT_GT(d.dynamicPartialsSlots, 0u) << "skTiles*skSplit > 0";
     // totalItems = (tiles - skTiles) + skTiles*skSplit
-    EXPECT_EQ(d.totalItems, (d.tiles - d.skTiles) + d.skTiles * d.skSplit);
+    //            = (1024 - 256) + 256*4 = 1792.
+    EXPECT_EQ(d.skSplit, 4u) << "itersPerTile=8, skSplit override 4 -> 4 work items per tile";
+    EXPECT_EQ(d.totalItems, 1792u);
 
     // No workspace reserved despite dynamicSlots>0, because tiles%grid==0 gates
     // the partials reservation. requiredWorkspaceSize agrees (also 0).
@@ -495,7 +513,7 @@ TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace)
 // ---------------------------------------------------------------------------
 // Non-StreamK solutions produce an inert (mode==0) snapshot.
 // ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, NonStreamKProducesEmptySnapshot)
+TEST(StreamKLaunchSummaryTest, NonStreamKProducesInertSnapshot)
 {
     ContractionSolution solution; // streamK defaults to 0
     auto                problem = makeGemmProblem(512, 512, 512);
@@ -512,7 +530,7 @@ TEST(StreamKLaunchSummaryTest, NonStreamKProducesEmptySnapshot)
 
 // ---------------------------------------------------------------------------
 // The printed summary is well-formed and reports the key fields, including the
-// new selected-vs-final grid attribution. Exercises the formatting path.
+// selected-vs-final grid attribution. Exercises the formatting path.
 // ---------------------------------------------------------------------------
 TEST(StreamKLaunchSummaryTest, PrintSummaryEmitsFields)
 {
@@ -529,9 +547,9 @@ TEST(StreamKLaunchSummaryTest, PrintSummaryEmitsFields)
     solution.printStreamKLaunchSummary(os, problem, d);
     const std::string line = collapseSpaces(os.str());
 
-    // Deeply-indented multi-line labeled block. The leading token is preserved
-    // verbatim, and the labeled fields carry the same information as before, now
-    // as aligned "key = value" pairs (whitespace-collapsed for matching).
+    // Deeply-indented multi-line labeled block. The leading "LAUNCH SUMMARY" token
+    // and the kernel name are emitted verbatim on the first line; the remaining
+    // fields are aligned "key = value" pairs (whitespace-collapsed for matching).
     EXPECT_NE(line.find("LAUNCH SUMMARY"), std::string::npos);
     EXPECT_NE(line.find("test_streamk_kernel"), std::string::npos);
     EXPECT_NE(line.find("reduction = tree"), std::string::npos);
@@ -601,8 +619,8 @@ TEST(StreamKLaunchSummaryTest, PrintSummaryNaWorkQueueWhenNotDynamic)
     const std::string line = collapseSpaces(os.str());
 
     // Non-dynamic -> work-queue fields are NA, and the misleading numeric
-    // per-XCD field is NOT printed. The header now sits on its own line, with the
-    // NA note indented beneath it.
+    // per-XCD field is NOT printed. The "work-queue:" header is on its own line
+    // with the NA note indented beneath it.
     EXPECT_NE(line.find("isDynamic = no"), std::string::npos);
     EXPECT_NE(line.find("work-queue:"), std::string::npos);
     EXPECT_NE(line.find("NA (work-queues not used)"), std::string::npos);
@@ -616,4 +634,235 @@ TEST(StreamKLaunchSummaryTest, PrintSummaryNaWorkQueueWhenNotDynamic)
     EXPECT_NE(line.find("tiles:"), std::string::npos);
     EXPECT_NE(line.find("workspace:"), std::string::npos);
     EXPECT_NE(line.find("fallbacks:"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// StreamKForceDPOnly cluster-multicast grid clamp (gfx1250 ClusterDim path).
+//
+// This clamp is the third "reset the grid to tiles" clamp inside getSKGridImpl,
+// running AFTER the tree-fixup-bounds fallback. It fires on the conjunction of
+// three SOLUTION-side properties -- SK3, streamKForceDPOnly, and a cluster whose
+// x*y extent exceeds 1 -- so the launch runs exactly one work-group per output
+// tile (a multicast broadcast, not a K-split). It consults no hardware field, so
+// it is reproducible on the same mock AMDGPU the other static-SK3 tests use; no
+// gfx1250 device and no analytical hardware are required. streamKForceDPOnly
+// also short-circuits getSKReduction() to tree, which keeps the scenario fully
+// deterministic.
+//
+// The tests below pin the resulting REPORT behaviour: the clamp is visible in
+// the snapshot, it is what makes selectedGrid differ from finalGrid, and it wins
+// the changedBy attribution over the earlier clamps it supersedes.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, ClusterDpMulticastClampsGridToTiles)
+{
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3);
+    solution.sizeMapping.streamKForceDPOnly = 1;
+    // ClusterDim.x * ClusterDim.y == 4 > 1 -> multicast cluster launch.
+    solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
+
+    // 4096x4224 -> tiles = 32*33 = 1056; the CU-count grid the selection logic
+    // picks is 64, so the clamp is observable (64 != 1056).
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
+
+    auto d = solution.computeStreamKDecisions(problem, device);
+
+    ASSERT_EQ(d.streamKMode, 3);
+    ASSERT_TRUE(d.forceDPOnly);
+
+    // The clamp fired, and it is the thing that moved the grid.
+    EXPECT_TRUE(d.clusterDPGridClamped);
+    EXPECT_EQ(d.selectedGrid, static_cast<size_t>(_CPX_CU))
+        << "selection still picks the CU-count grid before the clamp";
+    EXPECT_NE(d.selectedGrid, d.finalGrid) << "cluster-DP clamp changed the grid";
+    EXPECT_EQ(d.finalGrid, d.tiles) << "cluster multicast launches one work-group per tile";
+    EXPECT_EQ(d.skGrid, d.finalGrid);
+    // The clamp lives inside getSKGridImpl, so it is already reflected in the
+    // pre-(workspace)-fallback grid.
+    EXPECT_EQ(d.skGridPreFallback, d.tiles);
+
+    // ...and no OTHER grid-changing fallback is credited for it.
+    EXPECT_FALSE(d.fixedGridUsed);
+    EXPECT_FALSE(d.treeBoundsFallbackFired);
+    EXPECT_FALSE(d.workspaceDPFallbackFired)
+        << "forceDPOnly suppresses the partials reservation, so no workspace fallback";
+
+    // getSKGrid() -- the same helper solve() calls -- reproduces the clamped grid,
+    // so the report is not describing a grid the launch does not use.
+    EXPECT_EQ(solution.getSKGrid(problem, device, d.tiles, d.reduction), d.finalGrid);
+
+    // Force-DP-only semantics are unchanged by the clamp: every tile stays whole.
+    EXPECT_TRUE(d.dpOnly);
+    EXPECT_EQ(d.skTiles, 0u);
+    EXPECT_FALSE(d.partialsPresent);
+    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
+    EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, device));
+}
+
+// ---------------------------------------------------------------------------
+// The clamp is a conjunction, and the report must not claim it on any of the
+// near-miss configurations. Each sub-case below flips exactly one of the three
+// conditions and asserts the grid is left alone.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, ClusterDpGridClampRequiresSk3ForceDpOnlyAndXyCluster)
+{
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
+
+    // (1) Dynamic mode (SK4) with the same DP-only + cluster settings: the
+    // multicast clamp is a static-SK3 construct, so the dynamic grid survives.
+    {
+        ContractionSolution solution;
+        initStreamKSolution(solution, 4);
+        solution.sizeMapping.streamKForceDPOnly = 1;
+        solution.sizeMapping.clusterDim         = TensileLite::dim3(2, 2, 1);
+
+        auto d = solution.computeStreamKDecisions(problem, device);
+
+        EXPECT_FALSE(d.clusterDPGridClamped) << "SK4 is not the static multicast path";
+        EXPECT_EQ(d.finalGrid, d.selectedGrid);
+        EXPECT_NE(d.finalGrid, d.tiles);
+    }
+
+    // (2) SK3 with a multicast cluster but WITHOUT force-DP-only: the clamp is
+    // only sound when every tile is already data-parallel, so it must not fire.
+    {
+        ContractionSolution solution;
+        initStreamKSolution(solution, 3); // leaves streamKForceDPOnly == 0
+        solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
+
+        auto d = solution.computeStreamKDecisions(problem, device);
+
+        ASSERT_FALSE(d.forceDPOnly);
+        EXPECT_FALSE(d.clusterDPGridClamped);
+        EXPECT_EQ(d.finalGrid, d.selectedGrid);
+        EXPECT_NE(d.finalGrid, d.tiles);
+    }
+
+    // (3) SK3 + force-DP-only, but the cluster only extends in z. Multicast peers
+    // are laid out over the x/y tile grid, so a z-only cluster is not a multicast
+    // launch and the grid must be left alone.
+    {
+        ContractionSolution solution;
+        initStreamKSolution(solution, 3);
+        solution.sizeMapping.streamKForceDPOnly = 1;
+        solution.sizeMapping.clusterDim         = TensileLite::dim3(1, 1, 8);
+
+        auto d = solution.computeStreamKDecisions(problem, device);
+
+        EXPECT_FALSE(d.clusterDPGridClamped) << "clusterDim.z does not make a multicast cluster";
+        EXPECT_EQ(d.finalGrid, d.selectedGrid);
+        EXPECT_EQ(d.finalGrid, static_cast<size_t>(_CPX_CU));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The printed summary reports the cluster-multicast clamp: it is named in the
+// fallbacks section, it is credited for the selected-vs-final grid change, and
+// the preFallback grid is surfaced because the clamp moved the grid inside
+// getSKGridImpl. The complementary run (no multicast cluster) prints the
+// negative form and attributes nothing.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, PrintSummaryReportsClusterDpMulticastClamp)
+{
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
+
+    // (1) Multicast cluster -> clamp fires and is reported.
+    ContractionSolution clustered;
+    clustered.kernelName = "test_streamk_cluster_dp";
+    initStreamKSolution(clustered, 3);
+    clustered.sizeMapping.streamKForceDPOnly = 1;
+    clustered.sizeMapping.clusterDim         = TensileLite::dim3(2, 2, 1);
+
+    auto dc = clustered.computeStreamKDecisions(problem, device);
+    ASSERT_TRUE(dc.clusterDPGridClamped) << "scenario must actually trip the clamp";
+
+    std::ostringstream osc;
+    clustered.printStreamKLaunchSummary(osc, problem, dc);
+    const std::string clusteredLine = collapseSpaces(osc.str());
+
+    EXPECT_NE(clusteredLine.find("clusterDPMulticast = yes"), std::string::npos);
+    EXPECT_NE(clusteredLine.find("changedBy = clusterDPMulticast"), std::string::npos);
+    // The other fallbacks are reported as not-fired, so the clamp is unambiguous.
+    EXPECT_NE(clusteredLine.find("fixedGrid = no"), std::string::npos);
+    EXPECT_NE(clusteredLine.find("workspaceDPFallback = no"), std::string::npos);
+    EXPECT_NE(clusteredLine.find("treeBoundsFallback = no"), std::string::npos);
+    // selected != final, and the intra-getSKGridImpl clamp surfaces preFallback.
+    EXPECT_NE(clusteredLine.find("selected = " + std::to_string(dc.selectedGrid)),
+              std::string::npos);
+    EXPECT_NE(clusteredLine.find("final = " + std::to_string(dc.tiles)), std::string::npos);
+    EXPECT_NE(clusteredLine.find("preFallback = " + std::to_string(dc.tiles)), std::string::npos);
+    // dp-only is still sourced from the param, not from a runtime fallback.
+    EXPECT_NE(clusteredLine.find("source = forceDPOnly(param)"), std::string::npos);
+
+    // (2) Same solution without a multicast cluster -> negative form, and the
+    // grid is not attributed to anything.
+    ContractionSolution plain;
+    plain.kernelName = "test_streamk_no_cluster";
+    initStreamKSolution(plain, 3);
+    plain.sizeMapping.streamKForceDPOnly = 1; // clusterDim stays {1, 1, 1}
+
+    auto dp = plain.computeStreamKDecisions(problem, device);
+    ASSERT_FALSE(dp.clusterDPGridClamped);
+
+    std::ostringstream osp;
+    plain.printStreamKLaunchSummary(osp, problem, dp);
+    const std::string plainLine = collapseSpaces(osp.str());
+
+    EXPECT_NE(plainLine.find("clusterDPMulticast = no"), std::string::npos);
+    EXPECT_NE(plainLine.find("changedBy = none"), std::string::npos);
+    EXPECT_EQ(plainLine.find("changedBy = clusterDPMulticast"), std::string::npos);
+    // Nothing moved the grid, so preFallback is suppressed.
+    EXPECT_EQ(plainLine.find("preFallback"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// changedBy attribution names the clamp that actually produced the launch grid,
+// not merely the first one that fired. The skFixedGrid override picks 32 and the
+// cluster-multicast clamp then overwrites it with tiles, so 32 is NOT the
+// launched grid and crediting "fixedGrid" would be a lie.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, ClusterDpClampWinsAttributionOverFixedGrid)
+{
+    ContractionSolution solution;
+    solution.kernelName = "test_streamk_cluster_over_fixed";
+    initStreamKSolution(solution, 3);
+    solution.sizeMapping.streamKForceDPOnly = 1;
+    solution.sizeMapping.clusterDim         = TensileLite::dim3(2, 2, 1);
+
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
+    device.skFixedGrid   = 32;
+
+    auto d = solution.computeStreamKDecisions(problem, device);
+
+    ASSERT_TRUE(d.fixedGridUsed);
+    ASSERT_TRUE(d.clusterDPGridClamped);
+    EXPECT_EQ(d.selectedGrid, 32u) << "the override is what selection produced";
+    EXPECT_EQ(d.finalGrid, d.tiles) << "but the cluster clamp produced the launch grid";
+
+    std::ostringstream os;
+    solution.printStreamKLaunchSummary(os, problem, d);
+    const std::string line = collapseSpaces(os.str());
+
+    EXPECT_NE(line.find("changedBy = clusterDPMulticast"), std::string::npos);
+    EXPECT_EQ(line.find("changedBy = fixedGrid"), std::string::npos)
+        << "the fixed grid was overwritten; it did not produce the launch grid";
+    // Both are still reported as having fired in the fallbacks section.
+    EXPECT_NE(line.find("fixedGrid = yes"), std::string::npos);
+    EXPECT_NE(line.find("clusterDPMulticast = yes"), std::string::npos);
 }
