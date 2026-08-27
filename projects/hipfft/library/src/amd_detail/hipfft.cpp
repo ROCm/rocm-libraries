@@ -2254,7 +2254,7 @@ hipfftResult hipfftXtSetJITCallback(hipfftHandle         plan,
                                     void**               cbdata)
 try
 {
-    if(!plan)
+    if(!plan || plan->initialized())
         return HIPFFT_INVALID_PLAN;
 
     // Return an error if we're neither clearing callbacks nor setting
