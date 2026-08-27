@@ -448,6 +448,11 @@ inline bool isBufferMemStore(const StinkyInstruction& inst) {
     return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst);
 }
 
+inline bool isVmemTexStore(const StinkyInstruction& inst) {
+    return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst) ||
+           isGlobalStoreAsyncFromLds(inst);
+}
+
 /// Check if instruction is a scheduling fence pseudo-instruction.
 /// Fences emit no assembly but carry MemTokenData ordering constraints.
 inline bool isFence(const StinkyInstruction& inst) {
