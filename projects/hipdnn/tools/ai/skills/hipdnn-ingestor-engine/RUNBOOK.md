@@ -457,17 +457,51 @@ print('kernels:', len(d['kernelDescriptors']))"
 Exit 1 is a `ConfigError` — read it; usually a mistyped field, a knob on a non-int field,
 or a kernel `arch` outside its pack's `arch`.
 
-Then place the authored descriptors under the packager's source root at your
-`authored_subpath`, and confirm the build points at that root:
+**Step 5 does not need this copy.** All three validation rungs and the desk check run
+against `/tmp/$SLUG/descriptors` and `/tmp/${SLUG}_pack` directly — verified end to end on
+a kernel this runbook was not written from. The copy below is what makes a **CMake build**
+pick your descriptors up, so it is a step-7 prerequisite. Doing it now is fine; if
+anything below blocks you, go do step 5 first rather than stalling.
+
+Then place the authored descriptors under **the packager's actual source root**. Do not
+guess it — the build tells you, and it is a CMake cache variable a build may point
+anywhere:
 
 ```bash
-cp -r /tmp/$SLUG/descriptors/rocKE/$SLUG \
-      $PROVIDER/descriptor-packaging/examples/descriptors/rocKE/
 grep PRODUCTION_SOURCE_ROOT $BUILD/CMakeCache.txt
 ```
 
 An empty `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` means production packaging is dormant
-and your descriptors are never packed at all.
+and your descriptors are never packed at all — fix that before copying anything. When it
+is set, copy into it, preserving your `authored_subpath`:
+
+```bash
+SRC_ROOT=$(grep '^HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT' $BUILD/CMakeCache.txt | cut -d= -f2-)
+test -n "$SRC_ROOT" || echo "PACKAGING DORMANT -- nothing will be packed"
+mkdir -p "$SRC_ROOT/rocKE"
+cp -r /tmp/$SLUG/descriptors/rocKE/$SLUG "$SRC_ROOT/rocKE/"
+```
+
+On a typical configured build `$SRC_ROOT` resolves to
+`$PROVIDER/descriptor-packaging/examples/descriptors` — that tree is **both** the
+packager's production source root **and** a pinned test fixture, and nothing warns you.
+`tests/test_hkp_pack_layout.py:562` asserts its directory set **exactly**:
+
+```python
+assert rel_dirs == {"hip/pointwise_add", "rocKE/gfx942_tiled_attention"}
+```
+
+So the copy above turns a green suite red, and the failure names neither your integration
+nor the copy that caused it. This is expected and the fix is one line: **add your
+`rocKE/$SLUG` to that set, in the same commit as the descriptors.** Do not work around it
+by copying somewhere else — somewhere else is not packed.
+
+```bash
+PYTHONPATH=$PROVIDER/descriptor-packaging/python:$PROVIDER/rocke/library:$PROVIDER/rocke/platform/python:/opt/rocm-kpack/python \
+  python3 -m pytest $PROVIDER/descriptor-packaging/tests/test_hkp_pack_layout.py -q
+```
+
+**GATE:** still green. Placing descriptors must not break the packager's own tests.
 
 ---
 
@@ -509,14 +543,31 @@ print('errors:', [g for g in d['diagnostics'] if g['severity'] in ('ERROR','FATA
 Expect `WARN`s about the `provenance` extension key — the packager writes it, the loader
 ignores it. Correct, not a problem.
 
-**If `hipdnn_validate_descriptors` does not exist**, it is because the build was not
-configured with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON` (default OFF). Say so by flag name
-and state that structural validation did not run. Never report a bundle as validated when
-the binary was never invoked.
+**If `hipdnn_validate_descriptors` does not exist**, there are three different causes and
+they need different actions. Do not guess — this command tells them apart:
 
 ```bash
-grep HIPDNN_ENABLE_KERNEL_INGESTOR $BUILD/CMakeCache.txt
+if   [ ! -d "$BUILD" ];                                  then echo "NO BUILD -- $BUILD does not exist"
+elif [ ! -f "$BUILD/CMakeCache.txt" ];                   then echo "NOT CONFIGURED -- no CMakeCache.txt"
+elif ! grep -q "HIPDNN_ENABLE_KERNEL_INGESTOR:BOOL=ON" "$BUILD/CMakeCache.txt"
+then echo "INGESTOR OFF -- configured without -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON"
+else echo "CONFIGURED AND ON -- binary missing means the build did not run or failed"
+fi
 ```
+
+- **NO BUILD / NOT CONFIGURED.** This is the *normal* state at step 5 if you are working
+  in a fresh worktree: `$BUILD` is defined at the top of this file as "an existing build,
+  or one you configure at step 7", and step 5 runs before step 7. Nothing is wrong. Either
+  configure one now with **`skill://hipdnn-superbuild`** (do not hand-roll a configure),
+  or point `$BUILD` at another worktree that already has one — the validator only reads
+  your packed tree, so a sibling's binary is a valid substitution as long as its own cache
+  says `HIPDNN_ENABLE_KERNEL_INGESTOR:BOOL=ON`. Say which you did.
+- **INGESTOR OFF.** Reconfigure with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON` (default OFF).
+- **CONFIGURED AND ON.** The build never ran, or it failed. Build, and read the error.
+
+In every case, if you do not run the validator, state by name that structural validation
+did not run, and which of the three causes applied. Never report a bundle as validated
+when the binary was never invoked.
 
 ### 5d. Desk-check the shipped set — no GPU required
 
