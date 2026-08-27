@@ -52,13 +52,6 @@ FAMILY_MAP = {
     },
 }
 
-# Set MIOPEN_DEVICE_ARCH when running. This pins Handle::GetDeviceName() (used by the StaticFDBSync
-# skip + DB-basename selection) to the target arch. It is plausibly redundant now that we fetch the
-# per-family artifact and run under the matching rocjitsu config (the emulated device should already
-# report the arch) -- a leftover from the abandoned one-artifact-many-arches idea. Kept on for now
-# as the known-good behavior; flip to False (or drop) once a CI run confirms it's unnecessary.
-SET_MIOPEN_DEVICE_ARCH = True
-
 # StaticFDBSync's default thread fan-out (min(hw_concurrency, 32)) can deadlock/stall under the
 # rocjitsu KMD interposer on some CK builds (observed: gfx942 hangs at ~200 find-db lines, gfx950
 # runs pathologically slowly). Cap it via MIOPEN_DBSYNC_MAX_THREADS; 1 = fully serial, which cannot
@@ -196,8 +189,6 @@ def main():
     )
     env_base["LD_PRELOAD"] = str(kmd)
     env_base["MIOPEN_DBSYNC_MAX_THREADS"] = str(DBSYNC_MAX_THREADS)
-    if SET_MIOPEN_DEVICE_ARCH:
-        env_base["MIOPEN_DEVICE_ARCH"] = arch
 
     for cu in cus:
         print(f"::group::StaticFDBSync {arch} @ {cu} CU", flush=True)
