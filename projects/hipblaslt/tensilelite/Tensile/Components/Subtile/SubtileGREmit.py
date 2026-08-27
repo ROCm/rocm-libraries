@@ -1247,12 +1247,39 @@ def _tluCoopWaveId(writer, kernel, module, tileInfo, dst):
   if coop <= 1:
     module.add(VMovB32(dst=vgpr(dst), src=0, comment="%s: single fetching wave" % tc))
     return False
-  if coop == int(getattr(tileInfo, "numWaves", 1)):
-    wavesize = kernel["WavefrontSize"]
-    module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(wavesize.bit_length() - 1),
-               src=vgpr("Serial"), comment="%s: waveId (all %d waves fetch)" % (tc, coop)))
-    return True
-  return _tluWaveAxisId(writer, kernel, module, tc, dst)
+  perStrip = max(1, int(getattr(tileInfo, "grWavesPerStrip", 1)))
+  kSplit = max(1, coop // perStrip)
+  if kSplit <= 1:
+    return _tluWaveAxisId(writer, kernel, module, tc, dst)
+  # index = (axisId % perStrip) * kSplit + otherId, a bijection onto [0, coop).
+  wavesize = kernel["WavefrontSize"]
+  mWaves = kernel["MIWaveGroup"][0]
+  wid = writer.vgprPool.checkOut(1, tag="_tluCoopWaveId_wid_%s" % tc)
+  module.add(VLShiftRightB32(dst=vgpr(wid), shiftHex=hex(wavesize.bit_length() - 1),
+             src=vgpr("Serial"), comment="%s: waveId" % tc))
+  if tc == 'A':
+    module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(mWaves.bit_length() - 1),
+               src=vgpr(wid), comment="%s: otherId = waveId / %d" % (tc, mWaves)))
+  else:
+    module.add(VAndB32(dst=vgpr(dst), src0=vgpr(wid), src1=hex(mWaves - 1),
+               comment="%s: otherId = waveId %% %d" % (tc, mWaves)))
+  if perStrip > 1:
+    ax = writer.vgprPool.checkOut(1, tag="_tluCoopWaveId_ax_%s" % tc)
+    if tc == 'A':
+      module.add(VAndB32(dst=vgpr(ax), src0=vgpr(wid), src1=hex(mWaves - 1),
+                 comment="%s: axisId = waveId %% %d" % (tc, mWaves)))
+    else:
+      module.add(VLShiftRightB32(dst=vgpr(ax), shiftHex=hex(mWaves.bit_length() - 1),
+                 src=vgpr(wid), comment="%s: axisId = waveId / %d" % (tc, mWaves)))
+    module.add(VAndB32(dst=vgpr(ax), src0=vgpr(ax), src1=hex(perStrip - 1),
+               comment="%s: axisId %% %d" % (tc, perStrip)))
+    module.add(VLShiftLeftB32(dst=vgpr(ax), shiftHex=hex(kSplit.bit_length() - 1),
+               src=vgpr(ax), comment="%s: * %d K slices" % (tc, kSplit)))
+    module.add(VAddU32(dst=vgpr(dst), src0=vgpr(dst), src1=vgpr(ax),
+               comment="%s: fetch-group index" % tc))
+    writer.vgprPool.checkIn(ax)
+  writer.vgprPool.checkIn(wid)
+  return True
 
 
 def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
@@ -1275,8 +1302,10 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
   _idOk = (_tluCoopWaveId(writer, kernel, module, tileInfo, dst) if wavesPerStrip > 1
            else _tluWaveAxisId(writer, kernel, module, tc, dst))
   if not _idOk:
+    # No free-dim step, but the other-axis waves may still be taking K slices of
+    # the single strip this wave owns.
     writer.vgprPool.checkIn(dst)
-    return None
+    return _tluKSliceGlobalOffset(writer, kernel, module, tileInfo) if wavesPerStrip <= 1 else None
   if wavesPerStrip > 1:
     # Shared strip: it already spans every axis-wave's free-dim
     # extent, so waves do not step along the free dim -- they share the strip
@@ -1313,6 +1342,54 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
   module.add(SMovB32(dst=sgpr(tmpS), src=hex(strideBytes), comment="%s: free-dim wave stride" % tc))
   module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr(tmpS), src1=vgpr(dst),
         comment="%s: wave free-dim global offset = axisId*%d" % (tc, strideBytes)))
+  writer.sgprPool.checkIn(tmpS)
+  # Whole-strip ownership plus a K split: the other-axis waves take a slice of
+  # this strip's K rows on top of the free-dim step.
+  kOff = _tluKSliceGlobalOffset(writer, kernel, module, tileInfo)
+  if kOff is not None:
+    module.add(VAddU32(dst=vgpr(dst), src0=vgpr(dst), src1=vgpr(kOff),
+          comment="%s: + K-slice offset" % tc))
+    writer.vgprPool.checkIn(kOff)
+  return dst
+
+
+def _tluKSliceGlobalOffset(writer, kernel, module, tileInfo):
+  """Global byte offset of this wave's K slice within the strip it fetches.
+
+  Returns None when the strip is not K-split across the other-axis waves.
+  """
+  tc = tileInfo.tc
+  coop = int(getattr(tileInfo, "grCoopWaves", 1))
+  perStrip = max(1, int(getattr(tileInfo, "grWavesPerStrip", 1)))
+  kSplit = max(1, coop // perStrip)
+  if kSplit <= 1:
+    return None
+  dst = writer.vgprPool.checkOut(1, tag="_tluKSlice_%s" % tc)
+  mWaves = kernel["MIWaveGroup"][0]
+  wavesize = kernel["WavefrontSize"]
+  module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(wavesize.bit_length() - 1),
+             src=vgpr("Serial"), comment="%s: waveId" % tc))
+  if tc == 'A':
+    module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(mWaves.bit_length() - 1),
+               src=vgpr(dst), comment="%s: otherId = waveId / %d" % (tc, mWaves)))
+  else:
+    module.add(VAndB32(dst=vgpr(dst), src0=vgpr(dst), src1=hex(mWaves - 1),
+               comment="%s: otherId = waveId %% %d" % (tc, mWaves)))
+  if selectTLUColScatter(tileInfo) is not None:
+    kRowsPerWave = int(tileInfo.numGRPerSubtile)
+  else:
+    kRows = int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1])
+    kRowsPerWave = kRows // kSplit
+  unrollIdx = kernel["ProblemType"]["IndexUnroll"]
+  strideK = writer.strideRef(tc, unrollIdx)
+  tmpS = writer.sgprPool.checkOut(1, tag="_tluKSlice_s_%s" % tc, preventOverflow=False)
+  module.add(SMovB32(dst=sgpr(tmpS), src=hex(kRowsPerWave), comment="%s: K rows per slice" % tc))
+  module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr(tmpS), src1=vgpr(dst),
+        comment="%s: K-slice base = otherId*%d" % (tc, kRowsPerWave)))
+  module.add(VMulLOU32(dst=vgpr(dst), src0=strideK, src1=vgpr(dst),
+        comment="%s: K row * strideK (elements)" % tc))
+  module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(1), src=vgpr(dst),
+        comment="%s: elements -> bytes (fp4)" % tc))
   writer.sgprPool.checkIn(tmpS)
   return dst
 
@@ -1407,7 +1484,10 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   # K rows) rather than interleaved within one block, so a wave still advances
   # m0 by its own single-wave block, not by the cooperative total.
   _coopWaves = int(getattr(tileInfo, "grCoopWaves", 1))
-  if _coopWaves > 1 and int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1:
+  if isTLU1 and _coopWaves > 1:
+    # TLU=1 only: loadRatioGR folds in every cooperating wave, so undo it to get
+    # the bytes a single wave's own load block covers.  TLU=0 keeps the
+    # cooperative stride, which is what its m0 walk expects.
     subtileOffset = int(subtileOffset // _coopWaves)
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
   swz = selectTLUSwizzle(tileInfo)
@@ -1580,17 +1660,19 @@ def _grDTLInitBase_tlu(writer, kernel, module, tc, ti):
     perWaveBytes = int(localSub0 * stripStride)
   # The write base must be keyed the same way as the global offset: by the
   # fetching-wave index for shared strips, by the axis id otherwise.
-  if (coopWaves > 1) if wavesPerStrip > 1 else (axisWaves > 1):
+  if (coopWaves > 1) if wavesPerStrip > 1 else (axisWaves > 1 or coopWaves > 1):
     wv = writer.vgprPool.checkOut(1, tag="_grDTLInit_tlu_wave_%s" % tc)
     if wavesPerStrip > 1:
       _tluCoopWaveId(writer, kernel, module, ti, wv)
-    else:
-      _tluWaveAxisId(writer, kernel, module, tc, wv)
+    elif not _tluWaveAxisId(writer, kernel, module, tc, wv):
+      module.add(VMovB32(dst=vgpr(wv), src=0, comment="%s: single axis-wave" % tc))
     tmpS = writer.sgprPool.checkOut(1, tag="_grDTLInit_tlu_s_%s" % tc, preventOverflow=False)
     module.add(SMovB32(dst=sgpr(tmpS), src=hex(perWaveBytes), comment="%s: LDS wave stride" % tc))
     module.add(VMulLOU32(dst=vgpr(wv), src0=sgpr(tmpS), src1=vgpr(wv),
                comment="%s: wave LDS base = axisId*%d" % (tc, perWaveBytes)))
     writer.sgprPool.checkIn(tmpS)
+    if wavesPerStrip <= 1:
+      _grDTLAddKSlice(writer, kernel, module, tc, ti, wv)
     module.add(SNop(waitState=0, comment="wait for VGPR"))
     module.add(VReadfirstlaneB32(dst=sgpr(base), src=vgpr(wv),
                comment="%s: per-wave DTL write base" % tc))
@@ -1902,3 +1984,39 @@ def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
 def globalReadPtrUpdates(tc, writer, kernel):
   ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
   return ti_.emitGRPtrUpdate(writer, kernel)
+
+
+def _grDTLAddKSlice(writer, kernel, module, tc, ti, dstVgpr):
+  """Add this wave's K-slice LDS byte offset within its strip to dstVgpr.
+
+  Mirrors the K term _tluKSliceGlobalOffset adds to the global address, so the
+  DTL write lands where the read expects it.
+  """
+  coop = int(getattr(ti, "grCoopWaves", 1))
+  perStrip = max(1, int(getattr(ti, "grWavesPerStrip", 1)))
+  if max(1, coop // perStrip) <= 1:
+    return
+  from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter
+  _swz = selectTLUSwizzle(ti); _cs = selectTLUColScatter(ti)
+  _pad = int(_cs.padBytes) if _cs else (int(_swz.padBytes) if _swz else 0)
+  blkBytes = int(kernel["WavefrontSize"] * ti.gr.config.loadWidth + _pad)
+  sliceBytes = int(ti.numGRPerSubtile * blkBytes)
+  mWaves = kernel["MIWaveGroup"][0]
+  wavesize = kernel["WavefrontSize"]
+  o = writer.vgprPool.checkOut(1, tag="_grDTLKSlice_%s" % tc)
+  module.add(VLShiftRightB32(dst=vgpr(o), shiftHex=hex(wavesize.bit_length() - 1),
+             src=vgpr("Serial"), comment="%s: waveId" % tc))
+  if tc == 'A':
+    module.add(VLShiftRightB32(dst=vgpr(o), shiftHex=hex(mWaves.bit_length() - 1),
+               src=vgpr(o), comment="%s: otherId = waveId / %d" % (tc, mWaves)))
+  else:
+    module.add(VAndB32(dst=vgpr(o), src0=vgpr(o), src1=hex(mWaves - 1),
+               comment="%s: otherId = waveId %% %d" % (tc, mWaves)))
+  tmpS = writer.sgprPool.checkOut(1, tag="_grDTLKSlice_s_%s" % tc, preventOverflow=False)
+  module.add(SMovB32(dst=sgpr(tmpS), src=hex(sliceBytes), comment="%s: LDS K-slice stride" % tc))
+  module.add(VMulLOU32(dst=vgpr(o), src0=sgpr(tmpS), src1=vgpr(o),
+             comment="%s: K-slice LDS base = otherId*%d" % (tc, sliceBytes)))
+  writer.sgprPool.checkIn(tmpS)
+  module.add(VAddU32(dst=vgpr(dstVgpr), src0=vgpr(dstVgpr), src1=vgpr(o),
+             comment="%s: + K-slice within strip" % tc))
+  writer.vgprPool.checkIn(o)
