@@ -154,6 +154,7 @@ namespace rocsparse
         _rocsparse_dnvec_descr local_alpha(
             1, 1, rocsparse::get_datatype<T>(), alpha, nullptr, 1, 0, handle->pointer_mode);
 
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_compute(handle,
                                                            nrhs,
                                                            trans_A,
