@@ -104,6 +104,70 @@ def, or sinking below the range towards the wait. A range the loop closes
 across its back edge counts too, which is why the climb carries a liveness flag
 of its own alongside the forward scan the placement check runs.
 
+#### Liveness without a CFG — `isSccLiveIn`
+
+`isSccLiveIn(at)` answers "is SCC live at the point in front of `at`". Liveness
+is a property of the code that *follows* a point, so the walk runs forward while
+the answer describes where it started — the name says which point it is about,
+not which way the walk goes. Both the backward anchor climb and the downward
+correction ask it about the spot they are standing on, which is where the
+handshake's `s_cmp_eq_u32` would land.
+
+This pass runs before `CFGBuilderPass`, on one flat block holding the whole
+kernel with its labels and branches still inline, so reading the block top to
+bottom describes the fall-through and nothing else. That is not good enough for
+SCC, whose consumer is typically a branch — the reader is frequently *not* on
+the fall-through, and the code below an unconditional branch may not be
+reachable at all. The flat layout is also the way out: every branch target is a
+label in the same block, so the walk resolves each branch and follows both of
+its edges. It is a worklist over instruction positions, with a `walked` set that
+both merges joins and terminates back edges, and a label index built lazily on
+the first branch so the common case (an SCC access within a few instructions)
+pays nothing for it.
+
+Only a `false` grants permission to clobber SCC, so anything the walk cannot see
+through reads as live. Two things are left:
+
+| Encountered | Answer |
+|---|---|
+| Reads SCC | live |
+| Rewrites SCC | dead — nothing past it wants the old value |
+| Call | **live** — the callee may use SCC as scratch |
+| Branch with no matching label in the block | **live** — target unknown |
+| Branch with a matching label | follow both edges (fall-through only if conditional) |
+| `s_endpgm`, or the end of the block | dead — no successor block to run |
+
+The last row is why the end of the block is not an unknown: with branches
+followed, running out of instructions is a genuine path end rather than an
+artifact of having strolled past a branch. `s_endpgm` is stopped at explicitly
+for the same reason — it ends that path, and the code textually below it belongs
+to some other one.
+
+#### Placement stops vs. liveness stops
+
+`findSccDeadAnchorBelow` and `isSccLiveIn` stop at different things, on purpose,
+because they answer different questions. The first is a *placement* search
+("where may this signal go?"); the second is a *dataflow* question ("does
+anything read SCC from here?").
+
+| | `findSccDeadAnchorBelow` | `isSccLiveIn` |
+|---|---|---|
+| The wait being led (`limit`) | stops — a signal below its own wait is not a handshake | reads through — a value consumed below the wait is live above it |
+| `s_barrier_wait -3` | stops — the signal would lose its token there | reads through — a barrier neither reads nor writes SCC |
+| Segment boundary | stops, except the SCC-reading exit branch that holds the range open | reads through, following the branch |
+
+Each stop rule is load-bearing in its own walk and would be wrong in the other.
+A range that reaches the wait is the shape that leaves the placement walk with
+nothing to return; the caller then aborts rather than clobber (`Rule 3 signal
+anchor: SCC live at the wait`).
+
+What `findSccDeadAnchorBelow` returns is an *anchor* — the instruction the
+handshake is planted in front of, as everywhere else in this pass — not the
+instruction that clobbers SCC, though the two often coincide. A range is held
+open by its last reader, so the first dead point is directly below that reader:
+the clobber when the clobber is what directly follows, and just the next
+instruction along otherwise.
+
 ### Drain hoisting
 
 `StinkyWaitCntInsertionPass` runs before this pass and anchors its counter
@@ -124,8 +188,8 @@ Both instructions block on independent conditions -- a per-wave local counter,
 and peer arrival at the barrier -- and two such waits commute, so the obvious
 "the drain overlaps the barrier latency" argument does not actually hold.
 
-Wait-cnt instructions never write SCC, so hoisting past them does not disturb
-the SCC restore below.
+Wait-cnt instructions never write SCC, so hoisting past them cannot move a
+cluster wait into or out of a live SCC range.
 
 ### Emitted shape (separated anchors)
 

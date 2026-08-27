@@ -1056,6 +1056,69 @@ TEST_F(InsertClusterBarrierPassTest, Rule3SignalAnchorClimbsOutOfLiveSccRange) {
     expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
 }
 
+// Same shape, except the reader is behind a branch, where reading the block top to bottom
+// never arrives:
+//
+//     label_TestLoop:
+//     s_sub_u32 s90, s90, 1   <- SCC def
+//     v_wmma ... (x81)        <- the lead point, and where a fall-through reading settles
+//     s_barrier_signal -1     <- the wait
+//     s_barrier_wait -1 / tensor_load_to_lds
+//     s_branch label_SccUser  <- the only way on
+//     s_cmp_eq_u32 s93, 0     <- the trap: a rewrite nothing reaches
+//     label_SccUser:
+//     s_cselect_b32           <- the reader, and it wants what the def left
+//
+// Read as a straight line the def looks dead from the lead point on, because the rewrite that
+// appears to close its range is the trap -- so the handshake settles there and its
+// `s_cmp_eq_u32 sgprWaveIdx, 0` is what the s_cselect_b32 ends up consuming. Following the
+// branch is the only way to see that the range is live throughout, and the anchor then has to
+// clear it the same way it does when the reader is in plain sight.
+TEST_F(InsertClusterBarrierPassTest, Rule3SignalAnchorFollowsBranchesToFindTheSccReader) {
+    appendGsu1Preheader();
+    openLoop();
+    // Padding, so that "in front of the def" is not just the segment start by default.
+    for (int i = 0; i < 4; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* sccDef = createSSubWritingSgprAndScc(/*sgpr=*/90);
+    // The same stretch Rule3SignalAnchorClimbsOutOfLiveSccRange uses: long enough to put the
+    // lead point between the def and the wait, short enough that clearing the range upward is
+    // still within kRule3SignalMaxLeadCycles.
+    for (int i = 0; i < 16; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    createDsRead(/*destReg=*/100, /*addrReg=*/104);
+    for (int i = 0; i < 64; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createUnconditionalBranch("label_SccUser");
+    StinkyInstruction* unreachableRewrite = createSCmpWritingScc(/*srcSgpr=*/93);
+    createLabel("label_SccUser");
+    StinkyInstruction* sccReader = createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    closeLoop();
+
+    runPass();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    const size_t defIdx = indexOf(sccDef);
+    ASSERT_NE(defIdx, static_cast<size_t>(-1));
+    ASSERT_NE(indexOf(sccReader), static_cast<size_t>(-1));
+
+    // The premise: the trap really does sit between the wait and the reader, so a walk that
+    // read straight down the block would stop there and call the value dead.
+    ASSERT_LT(indexOf(trigger), indexOf(unreachableRewrite));
+    ASSERT_LT(indexOf(unreachableRewrite), indexOf(sccReader));
+
+    StinkyInstruction* handshakeCmp = findClusterWaveCmpAfter(indexOf(loopHead));
+    ASSERT_NE(handshakeCmp, nullptr) << "the pass planted no Rule 3 handshake";
+    const size_t handshakeIdx = indexOf(handshakeCmp);
+
+    EXPECT_LT(handshakeIdx, defIdx)
+        << "the reader is behind a branch, so the def's range is live at the wait and the "
+           "handshake must climb above the def rather than settle inside it:"
+        << blockListing(*bb);
+    EXPECT_GT(handshakeIdx, indexOf(loopHead))
+        << "the scan stopped in front of the def, not by leaving the segment altogether:"
+        << blockListing(*bb);
+}
+
 // Same shape, but with the def..reader range stretched until climbing out of it would put
 // the signal more than kRule3SignalMaxLeadCycles ahead of its wait. Clearing the range then
 // costs more overlap than it buys, so the anchor drops below the reader instead and ends up

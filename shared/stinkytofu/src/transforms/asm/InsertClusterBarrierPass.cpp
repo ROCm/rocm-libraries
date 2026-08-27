@@ -153,37 +153,75 @@ bool readsScc(const StinkyInstruction& inst) {
     return false;
 }
 
-/// Is an SCC value live at the program point immediately in front of \p from, i.e. does
-/// something from there on read SCC before anything rewrites it? The backward anchor scan
-/// starts at that point, so it has to know what it is already standing in.
+/// Is SCC live at the program point in front of \p at, i.e. does anything reachable from there
+/// read it before something rewrites it? Forward walk, backward question: the name says which
+/// point the answer is about, not which way the walk goes.
 ///
-/// A value read only by a successor block is not detected; in the loop bodies this pass
-/// runs on the consuming ``s_cbranch_scc*`` closes the block, so the forward scan sees it.
-bool isSccLiveBefore(StinkyInstruction* from) {
-    BasicBlock* parent = from->getParent();
-    if (parent == nullptr) return false;
-    for (auto it = BasicBlock::iterator(from); it != parent->end(); ++it) {
-        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst == nullptr) continue;
-        if (readsScc(*inst)) return true;
-        if (writesScc(*inst)) return false;
+/// No CFG exists yet, so the walk resolves branches against the labels in the block and follows
+/// both edges. What it cannot see through -- an unresolvable target, a call -- reads as live,
+/// since only a `false` here is permission to clobber SCC. See docs/developer/cluster-barrier.md
+/// ("SCC").
+bool isSccLiveIn(StinkyInstruction* at) {
+    BasicBlock* parent = at->getParent();
+    if (parent == nullptr) return true;
+
+    // Built on the first branch the walk meets rather than up front, so the common case --
+    // an SCC access within a few instructions -- pays nothing for it.
+    std::unordered_map<std::string, StinkyInstruction*> labels;
+    bool labelsBuilt = false;
+    auto branchTarget = [&](const StinkyInstruction& branch) -> StinkyInstruction* {
+        const std::string target = getBranchTarget(branch);
+        if (target.empty()) return nullptr;
+        if (!labelsBuilt) {
+            labelsBuilt = true;
+            for (auto it = parent->begin(); it != parent->end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst == nullptr || !isLabel(*inst)) continue;
+                if (const auto* data = inst->getModifier<LabelData>())
+                    labels.emplace(data->label, inst);
+            }
+        }
+        auto found = labels.find(target);
+        return (found == labels.end()) ? nullptr : found->second;
+    };
+
+    std::vector<BasicBlock::iterator> paths{BasicBlock::iterator(at)};
+    std::unordered_set<const IRBase*> walked;
+    while (!paths.empty()) {
+        auto it = paths.back();
+        paths.pop_back();
+        for (; it != parent->end(); ++it) {
+            // A point already walked answers the same from here on, whichever path arrived.
+            // This is also what ends the walk around a back edge.
+            if (!walked.insert(it.getNodePtr()).second) break;
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr) continue;
+            if (readsScc(*inst)) return true;
+            if (writesScc(*inst)) break;
+            if (isCall(*inst)) return true;
+            if (isEndOfFunction(*inst)) break;
+            if (!isBranch(*inst)) continue;
+            StinkyInstruction* target = branchTarget(*inst);
+            if (target == nullptr) return true;
+            paths.push_back(BasicBlock::iterator(target));
+            // Nothing falls through an unconditional branch, so the code below it is not on
+            // this path at all.
+            if (isUnconditionalBranch(*inst)) break;
+        }
     }
     return false;
 }
 
-/// Walk down from \p from for the first instruction with nothing live in SCC in front of
-/// it, i.e. the first spot below a live range that the handshake may clobber. Stops at
-/// \p limit (the wait anchor) and returns null when the range stays live that far, since
-/// there is then nowhere below it to go.
+/// First spot below a live SCC range that the handshake may be planted at, or null when the
+/// range leaves none. What comes back is an anchor -- the instruction the handshake goes in
+/// *front* of -- which is the SCC clobber only when the clobber directly follows the range's
+/// last reader.
 ///
-/// A range is held open by its last reader, and in a loop body that reader is the exit
-/// branch that closes the segment -- so the spot being looked for is often the first
-/// instruction on the branch's fall-through side. That one branch is therefore stepped over
-/// rather than treated as a wall; every other boundary still ends the walk, and so does this
-/// one when SCC is not what it reads. Stepping over it is safe because the walk only ever
-/// moves towards \p limit, which is the wait: taking the fall-through keeps the signal on the
-/// path its wait is on.
-StinkyInstruction* findSccDeadPointBelow(StinkyInstruction* from, const IRBase* limit) {
+/// The stops below are where the *signal* may not go, which is not where an SCC range ends, so
+/// they are deliberately not the stops isSccLiveIn uses. The one exception steps over the exit
+/// branch that holds a loop body's range open, whose fall-through is the side the wait is on.
+/// See docs/developer/cluster-barrier.md ("SCC").
+StinkyInstruction* findSccDeadAnchorBelow(StinkyInstruction* from, const IRBase* limit) {
     BasicBlock* parent = from->getParent();
     if (parent == nullptr) return nullptr;
     for (auto it = BasicBlock::iterator(from); it != parent->end(); ++it) {
@@ -196,7 +234,7 @@ StinkyInstruction* findSccDeadPointBelow(StinkyInstruction* from, const IRBase* 
         }
         if (isClusterBarrierWait(*inst)) return nullptr;
         if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
-        if (!isSccLiveBefore(inst)) return inst;
+        if (!isSccLiveIn(inst)) return inst;
     }
     return nullptr;
 }
@@ -630,18 +668,12 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // win: a cluster wait or a prior handshake's barrier cannot be crossed just to find a
     // better spot, and neither can a segment edge once the hop budget is spent.
     //
-    // This is not a second notion of liveness competing with isSccLiveBefore. While the climb
-    // walks the text the two are the same thing: same recurrence, and this one starts from
-    // that function's answer at the wait, so it just avoids rescanning at every step. They
-    // part company once the climb follows a latch, and then neither is the whole answer,
-    // because a wrapped anchor has two ways on. This flag describes the way the loop takes,
-    // over the back edge and down to the wait; isSccLiveBefore, which clearScc reads off the
-    // code below the anchor, describes the way that leaves the loop. A climb that comes to
-    // rest of its own accord has to be clear on both, which is why it asks this one and
-    // clearScc the other rather than either standing in for both. A boundary stop is judged
-    // on placement alone, and on purpose: see curSegBeginSccLive, where stepping over a
-    // conditional exit sets this flag by construction and would veto every settled climb.
-    bool sccLive = isSccLiveBefore(referenceAnchor);
+    // `sccLive` is a running fold of the same recurrence over the one path the climb walks,
+    // seeded from isSccLiveIn at the wait so the climb need not rescan at every step. Being
+    // path-local is the point: it follows the latch across the back edge. It is not the last
+    // word either -- every return goes through clearScc, which asks isSccLiveIn again. A
+    // boundary stop is judged on placement alone, and on purpose: see curSegBeginSccLive.
+    bool sccLive = isSccLiveIn(referenceAnchor);
     bool targetMet = false;
     StinkyInstruction* leadPoint = nullptr;
     IRBase* outOfSegmentNomination = nullptr;
@@ -659,9 +691,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // wait is still an answer -- that spot is where the handshake goes anyway -- so the
     // search only runs out of answers once SCC holds something live there too.
     auto resolveSccDeadBelow = [&](StinkyInstruction* from, const IRBase* limit) -> IRBase* {
-        StinkyInstruction* below = findSccDeadPointBelow(from, limit);
+        StinkyInstruction* below = findSccDeadAnchorBelow(from, limit);
         if (below != nullptr) return static_cast<IRBase*>(below);
-        if (!isSccLiveBefore(referenceAnchor)) return defaultAnchor;
+        if (!isSccLiveIn(referenceAnchor)) return defaultAnchor;
         STINKY_UNREACHABLE("Rule 3 signal anchor: SCC live at the wait");
     };
 
@@ -676,7 +708,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     auto clearScc = [&](IRBase* anchor) -> IRBase* {
         if (anchor == defaultAnchor) return anchor;
         auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
-        if (anchorInst == nullptr || !isSccLiveBefore(anchorInst)) return anchor;
+        if (anchorInst == nullptr || !isSccLiveIn(anchorInst)) return anchor;
         return resolveSccDeadBelow(anchorInst, sccLimit(anchorInst));
     };
 
@@ -741,7 +773,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     auto curSegBeginSccLive = [&]() -> bool {
         for (auto probe = curSegBegin; probe != parent->end(); ++probe) {
             auto* probeInst = dyn_cast<StinkyInstruction>(probe.getNodePtr());
-            if (probeInst != nullptr) return isSccLiveBefore(probeInst);
+            if (probeInst != nullptr) return isSccLiveIn(probeInst);
         }
         return false;
     };
@@ -883,8 +915,8 @@ bool isAnyCounterDrain(const StinkyInstruction& inst) {
 /// wait below that drain. A layout that separates the two would need a
 /// different strategy than this one.
 ///
-/// Wait-cnt instructions never write SCC, so hoisting past them does not
-/// disturb the Rule 3 SCC restore.
+/// Wait-cnt instructions never write SCC, so hoisting past them cannot move a
+/// cluster wait into or out of a live SCC range.
 IRBase* hoistAboveLeadingWaitCnts(StinkyInstruction* anchor) {
     BasicBlock* parent = anchor->getParent();
     if (parent == nullptr) return anchor;
@@ -989,10 +1021,10 @@ PreLoopSignalAnchor findPreLoopSignalAnchor(StinkyInstruction* loopHead) {
         if (anchor == nullptr) anchor = loopHead;
 
         auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
-        if (anchorInst == nullptr || !isSccLiveBefore(anchorInst)) {
+        if (anchorInst == nullptr || !isSccLiveIn(anchorInst)) {
             return {anchor, needsWorkgroupBarrier};
         }
-        StinkyInstruction* dead = findSccDeadPointBelow(anchorInst, loopHead);
+        StinkyInstruction* dead = findSccDeadAnchorBelow(anchorInst, loopHead);
         if (dead == nullptr) return {};
         return {dead, needsWorkgroupBarrier};
     }
