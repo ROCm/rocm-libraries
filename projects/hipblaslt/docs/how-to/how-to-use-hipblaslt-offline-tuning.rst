@@ -173,7 +173,7 @@ matching how ``hipblaslt-bench`` selects. The benchmarking effort can be adjuste
    export HIPBLASLT_TUNING_HOT_ITERS=<value>            (Default value is: 1000)
    export HIPBLASLT_TUNING_ROTATING_MB=<value>          (Default value is: 512)
    export HIPBLASLT_TUNING_FLUSH_ICACHE=<0|1>           (Default value is: 1)
-   export HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE=<value>  (Default value is: 0, no limit)
+   export HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE=<value>  (Default value is: 300000, five minutes)
 
 Each candidate is measured the way ``hipblaslt-bench`` measures one: ``HIPBLASLT_TUNING_COLD_ITERS``
 untimed launches, then ``HIPBLASLT_TUNING_HOT_ITERS`` launches timed as a single span and reported as
@@ -211,11 +211,20 @@ ranked kernels instead, which is faster but can miss the best one.
 Tuning one shape this thoroughly takes time. An exhaustive search over several hundred candidates
 takes minutes, and it is paid once per shape in the first process that runs with ``tune``.
 ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` puts a wall-clock ceiling on one shape, covering enumeration
-and setup as well as the timed measurements. A search the ceiling cuts short is discarded rather than
-recorded: candidates are not measured in order of expected performance, so the best of an arbitrary
-prefix is not the best kernel, and caching it would freeze that arbitrary choice in place. Use the
-ceiling to bound how long tuning may run, not as a way to tune faster; to tune faster, reduce the
-candidate list or the iteration counts.
+and setup as well as the timed measurements. It defaults to five minutes, so that a first matmul
+cannot block a live application indefinitely, and 0 removes the ceiling entirely.
+
+A search the ceiling cuts short is discarded rather than recorded: candidates are not measured in
+order of expected performance, so the best of an arbitrary prefix is not the best kernel, and caching
+it would freeze that arbitrary choice in place. The shape falls back to normal selection and is not
+retried in that process, so the ceiling is spent once rather than on every call. Use the ceiling to
+bound how long tuning may run, not as a way to tune faster; to tune faster, reduce the candidate list
+or the iteration counts.
+
+A shape large enough to need more than the ceiling therefore never caches under the default. Tuning
+reports that this is what happened and names the variable to raise, so the fix is to raise or clear
+``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` and tune that shape again. As a rough guide, a
+2048x1024x2048 FP16 shape takes about 146 seconds on MI300X, and the cost grows with the problem.
 
 The ceiling is checked between candidates, since a batch of launches already submitted cannot be
 recalled. One candidate may therefore overrun it by as much as its own measurement takes. A search

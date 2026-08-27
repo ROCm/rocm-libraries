@@ -3561,17 +3561,30 @@ namespace
         /**
          * Wall-clock ceiling for one shape, or zero for no ceiling.
          *
-         * Unlimited by default, because the default search is exhaustive at
-         * bench's iteration counts and any finite ceiling silently turns that
-         * into a partial one. A 10 second default measured 140 of 782
-         * candidates and then persisted the best of that prefix as if it were
-         * the answer; since the candidate list is unranked, which 140 got
-         * measured carries no meaning. A budget is now something a caller opts
-         * into, and a search it cuts short is discarded rather than cached.
+         * Five minutes by default, to bound how long a first matmul can block
+         * inside a live application. An exhaustive search at bench's iteration
+         * counts costs minutes and grows with the shape, so an unlimited
+         * default let a single large shape stall its caller for half an hour.
+         * The three shapes measured in the pull request tune in 53 to 146
+         * seconds, so the default does not truncate them.
+         *
+         * A search the ceiling cuts short is discarded rather than cached.
+         * Candidates are not enumerated in order of expected performance, so
+         * the best of an arbitrary prefix is not the best kernel: an earlier 10
+         * second default measured 140 of 782 candidates and then persisted that
+         * prefix's winner as if it were the answer. The shape is latched
+         * fruitless instead, so the ceiling is spent once per process rather
+         * than on every call for that shape.
+         *
+         * The cost of that choice is that a shape too large to finish inside
+         * the ceiling never caches under the default. It says so and names this
+         * variable when it gives up, and zero restores the unlimited search.
          */
         static double perShapeBudgetUs()
         {
-            return 1000.0 * std::max(0, envInt("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", 0));
+            constexpr int kDefaultBudgetMs = 5 * 60 * 1000;
+            return 1000.0
+                   * std::max(0, envInt("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", kDefaultBudgetMs));
         }
         /**
          * Device memory the rotation may use, so successive launches do not read
