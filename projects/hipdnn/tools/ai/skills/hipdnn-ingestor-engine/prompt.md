@@ -60,7 +60,7 @@ and the fix is to write down what you have and move.
 | 4 | `config.yaml` + `generate.py` exit 0 | Exit 0 and the output tree exists |
 | 5 | Validator exit 0, or the reason it could not run | Ran, or its absence stated by flag name |
 | 6 | **Native pack `.cpp` with zero `FILL THIS OUT`** | `grep -c "FILL THIS OUT"` returns 0 |
-| 7 | Build succeeded; engine in `hipdnn_list_engines` | The grep finds your engine name |
+| 7 | Build succeeded; engine in `hipdnn_list_engines` | Your engine's FNV-1a id appears in the output (the tool prints hashes, not names) |
 | 8 | Tests added under `dnn-providers/integration-tests/`, run on device | A real graph dispatched and matched a reference |
 | 9 | Completion report against all nine stages | — |
 
@@ -620,7 +620,7 @@ If a build already exists, rebuild incrementally rather than reconfiguring:
 ```
 cmake --build <build-dir> -j48 --target hip_kernel_provider hipdnn_list_engines \
     hipdnn_validate_descriptors hip_kernel_provider_integration_tests
-<build-dir>/bin/hipdnn_list_engines | grep <engine-name>
+<build-dir>/bin/hipdnn_list_engines        # then look for your FNV-1a id, NOT your name
 ```
 
 **Packaged dialect: none of those targets pack your descriptors.** Building the provider

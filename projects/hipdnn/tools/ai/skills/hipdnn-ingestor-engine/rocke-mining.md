@@ -22,6 +22,28 @@ This is a required step, not background reading. Its output is the applicability
 | module docstring + field comments | Hard-fault conditions, measured tuning facts, "not yet implemented" notes |
 | `run_<op>_torch` (if present) | Launch-time guards that are NOT in the spec — often the paged/sinks shape checks |
 
+**None of those names are guaranteed — locate them, do not assume them.** Roughly 40% of
+the kernel modules in this tree have no `__post_init__` at all (they validate through a
+free function called from the builder, e.g. `validate_common_spec` in
+`kernels/common/fmha_*.py`), and roughly 45% have no named `<op>_grid`/`<op>_block`
+function (the geometry is implicit in `b.block_id_*()` calls and stated only in the
+module docstring). A discovery command that silently returns nothing is the failure mode
+to watch for here: empty output means "wrong name", not "no rules".
+
+```bash
+# validation: whichever shape this kernel uses
+grep -n "__post_init__\|^def is_valid_spec\|^def supports_\|^def build_" $M
+grep -n "raise ValueError\|ok, why =\|is_valid_spec(\|validate_.*spec(" $M | head
+
+# geometry, step 1: the named-function convention (about half the kernels)
+grep -nA12 -E "^def [a-zA-Z_0-9]+_(grid|block|signature)\(" $M
+
+# geometry, step 2 — run this whenever step 1 printed NOTHING. The grid is then
+# implicit in the block-id reads, and the module docstring usually states it.
+grep -nE "b\.(block|thread)_id_[xyz]" $M
+sed -n '1,25p' $M
+```
+
 Introspect first, to get the field inventory mechanically:
 
 ```

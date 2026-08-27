@@ -191,8 +191,10 @@ forever. Plain `sacct` shows only the live requeued row and hides the failure en
 step's output is `mining.md`.
 
 The budget, because this is where runs die: **draft `mining.md` after the kernel module
-and its spec, before ANY third source.** Then five sources maximum. Rows you are unsure of
-go in marked `UNSURE` and become step-3 questions — that is what step 3 is for.
+and its spec, before ANY third source.** Then **five sources *beyond the kernel module*,
+maximum** — count them and name them in the file. Rows you are unsure of go in marked
+`UNSURE` and become step-3 questions; that is what step 3 is for. Hitting the cap is not
+failure, it is the step working.
 
 Discovery commands for the five deliverables:
 
