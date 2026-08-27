@@ -27,6 +27,7 @@
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
 #include <queue>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/core/Function.hpp"
@@ -94,6 +95,9 @@ struct DAGNode {
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };
 
+// A hard scheduling edge: first must be issued before second.
+using SchedulingDependency = std::pair<StinkyInstruction*, StinkyInstruction*>;
+
 // comparator: return true if a should come *after* b.
 struct CompareByDAGid {
     bool operator()(const DAGNode* a, const DAGNode* b) const {
@@ -160,10 +164,12 @@ class ReadyQueue {
     // Hook called before scheduling each region. \p blockBegin is the start of the basic block
     // (prefix [blockBegin, regionStart) is visible for cross-region / preloop state).
     virtual void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                              IRList::iterator blockBegin) {
+                              IRList::iterator blockBegin,
+                              std::vector<SchedulingDependency>& additionalDependencies) {
         (void)regionStart;
         (void)regionEnd;
         (void)blockBegin;
+        (void)additionalDependencies;
     }
 
     // Hook called after a basic block has been fully scheduled. When the queue is

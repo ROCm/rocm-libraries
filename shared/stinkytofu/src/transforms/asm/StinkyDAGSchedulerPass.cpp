@@ -48,6 +48,27 @@ namespace {
 using namespace stinkytofu;
 using namespace stinkytofu::dag;
 
+static bool hasDAGPath(const std::vector<std::unordered_set<unsigned>>& graph, unsigned from,
+                       unsigned to) {
+    if (from == to) return true;
+
+    std::vector<unsigned> pending{from};
+    std::vector<bool> visited(graph.size(), false);
+    visited[from] = true;
+    while (!pending.empty()) {
+        const unsigned current = pending.back();
+        pending.pop_back();
+        for (unsigned successor : graph[current]) {
+            if (successor == to) return true;
+            if (!visited[successor]) {
+                visited[successor] = true;
+                pending.push_back(successor);
+            }
+        }
+    }
+    return false;
+}
+
 // collapseExecMaskedRegions()/expandExecMaskedGroups(): see ExecMaskGrouping.hpp and
 // docs/developer/exec-mask-grouping.md.
 
@@ -322,9 +343,26 @@ static void scheduleRegionWithMovableSideEffects(
         if (!dagNodes[i].hazardFlags.empty()) dagNodes[i].hazardDeadline = bestDeadline;
     }
 
-    PASS_DEBUG(dag::dumpDAGGraph(regionDag, std::cerr));
+    std::vector<SchedulingDependency> additionalDependencies;
+    readyQueue.onInitRegion(regionStart, regionEnd, blockBegin, additionalDependencies);
+    for (const auto& [predecessor, successor] : additionalDependencies) {
+        auto predecessorIt = instToId.find(predecessor);
+        auto successorIt = instToId.find(successor);
+        if (predecessorIt == instToId.end() || successorIt == instToId.end()) continue;
 
-    readyQueue.onInitRegion(regionStart, regionEnd, blockBegin);
+        DAGNode* predecessorNode = &dagNodes[predecessorIt->second];
+        DAGNode* successorNode = &dagNodes[successorIt->second];
+        if (hasDAGPath(dagGraph, successorNode->id, predecessorNode->id)) {
+            PASS_DEBUG(std::cerr << "[DAG additional dependency] skip cycle-forming edge "
+                                 << predecessorNode->id << " -> " << successorNode->id << "\n");
+            continue;
+        }
+        addEdgeById(predecessorNode, successorNode, dagGraph);
+        PASS_DEBUG(std::cerr << "[DAG additional dependency] add " << predecessorNode->id << " -> "
+                             << successorNode->id << "\n");
+    }
+
+    PASS_DEBUG(dag::dumpDAGGraph(regionDag, std::cerr));
 
     // Kahn's algorithm with stable pick (by original order)
 
