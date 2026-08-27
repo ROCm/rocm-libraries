@@ -2433,7 +2433,7 @@ double compute_tile_latency(const problem_t& problem,
   // to MT_K>K and pay a larger du_waste/oversize tax.  K > 64 is the cleanest
   // unbatched threshold; batched GEMMs are more sensitive to fill/drain, so the
   // K==64 boundary is included for them.
-  const bool exact_one_iter_large_k = K > heuristic_defaults_t::EXACT_ONE_ITER_K_MIN;
+  const bool exact_one_iter_large_k = K >= heuristic_defaults_t::EXACT_ONE_ITER_K_MIN;
 
   // Batched few-iteration fill/drain penalty (batch > 1).  A batched GEMM
   // launches batch*grid tiles, each paying the PGR fill/drain once.  A K-loop
@@ -2471,8 +2471,22 @@ double compute_tile_latency(const problem_t& problem,
       ? no_steady_base + fill_depth_excess * heuristic_defaults_t::UNAMORTIZED_FILL_PENALTY
       : 0.0;
 
+  // M-edge waste: when the whole M fits in a single tile (grid_M == 1, i.e.
+  // M <= MT_M), an oversized MT_M computes MT_M rows but uses only M, wasting
+  // (MT_M - M)/M of the M dimension with no other full M-tile to amortize it.
+  // ETP under-charges this single-tile case, so a modest penalty tips a wide-MT_N
+  // edge tile (e.g. MT_M=80 for M=64) back to an M-clean tile.  Restricted to
+  // grid_M == 1: for grid_M >= 2 the edge is one partial tile among full ones and
+  // ETP already accounts for it, so charging there double-counts and hurts
+  // large-M shapes.  Zero when MT_M divides M (or M >= MT_M).
+  const double m_dd = static_cast<double>(std::max<size_t>(config.mt.m, 1));
+  const double M_problem = static_cast<double>(problem.size.m);
+  const double m_edge_ratio = (M_problem > 0.0 && M_problem <= m_dd)
+      ? (m_dd - M_problem) / M_problem : 0.0;
+
   const double L_du_waste =
       (depth_waste_ratio * heuristic_defaults_t::TAIL_WASTE_PENALTY
+       + m_edge_ratio * heuristic_defaults_t::M_EDGE_PENALTY
        + no_steady_state_ratio + batched_fill_ratio)
       * (L_main_per_iter + heuristic_defaults_t::K_ITER_LOOP_OVERHEAD);
 
