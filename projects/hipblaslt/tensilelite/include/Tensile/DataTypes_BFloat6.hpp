@@ -30,7 +30,7 @@
 
 #define TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_BF6
+
 
 #ifdef _WIN32
 
@@ -308,5 +308,3 @@ namespace std
 } // namespace std
 
 #endif // _WIN32
-
-#endif // TENSILE_USE_BF6

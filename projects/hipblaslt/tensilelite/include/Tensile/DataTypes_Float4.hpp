@@ -30,7 +30,7 @@
 
 #define TENSILE_USE_FP4
 
-#ifdef TENSILE_USE_FP4
+
 
 #ifdef _WIN32
 
@@ -155,5 +155,3 @@ namespace std
 } // namespace std
 
 #endif // _WIN32
-
-#endif // TENSILE_USE_FP4
