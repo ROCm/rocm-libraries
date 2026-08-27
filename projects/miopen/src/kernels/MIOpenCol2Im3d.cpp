@@ -103,8 +103,8 @@ extern "C" __global__ void Col2Im3dU(FLOAT* col,
                                : (im_w - (dilation_w * (wei_w - 1) + 1)) / stride_w + 1;
     unsigned int end_w   = min(col_w, im_w / stride_w + 1);
 
-    uint64_t inner_size     = wei_d * wei_h * wei_w * channels_per_group;
-    uint64_t col_group_size = col_d * col_h * col_w * inner_size;
+    uint64_t inner_size     = uint64_t{wei_d} * wei_h * wei_w * channels_per_group;
+    uint64_t col_group_size = uint64_t{col_d} * col_h * col_w * inner_size;
 
     FLOAT_ACCUM tmp = (FLOAT_ACCUM)0;
 
