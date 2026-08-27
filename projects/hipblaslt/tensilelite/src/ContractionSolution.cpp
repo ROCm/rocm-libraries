@@ -4819,13 +4819,49 @@ namespace TensileLite
                 skGrid = tiles;
             }
 
-            // The flag region holds one int per Stream-K workgroup, so a grid
-            // wider than it would have workgroups writing past the end of their
-            // own region. Every caller reaches skGrid through here, so this is
-            // the one place the bound has to hold. No current part comes close:
-            // gfx950 has 256 CUs and picks 224.
-            skGrid = std::min(skGrid, static_cast<size_t>(StreamKFlagElements));
+            // The flag region holds one int per Stream-K workgroup, indexed by
+            // CTA id ("flag offset based on CTA index" in StreamK.py), so a grid
+            // wider than the region would have workgroups writing past the end
+            // of their own block. Every caller reaches skGrid through here and
+            // this is the last write, so it is the one place the bound has to
+            // hold.
+            //
+            // Only the launches that actually reach the flags are bounded:
+            //
+            //   - atomic and ForceDPOnly kernels never take the pointer at all
+            //     (see the Flags kernarg in singleCallArgs)
+            //   - parallel reduction is passed Flags == nullptr, and the kernel
+            //     branches on that to skip the flag protocol
+            //   - tiles % skGrid == 0 spreads the tiles evenly over the
+            //     workgroups, so no partial tiles exist to fix up. This is the
+            //     same test the workspace sizing uses to decide whether partials
+            //     exist, and it is what excludes every data-parallel path: they
+            //     all arrive at skGrid == tiles, whether from K == 0, from the
+            //     tree-fixup bound above, or from the data-parallel debug knob.
+            //
+            // Clamping outside those cases would shrink a grid that has no flag
+            // region to overrun, and against the data-parallel fallbacks it
+            // would do real harm: the tree-fixup bound sets skGrid = tiles
+            // precisely to leave Stream-K behind, and cutting that back would
+            // return the launch to the K-split it was escaping. No current part
+            // reaches the bound on the paths that are checked; gfx950 has 256
+            // CUs and picks 224.
+            const bool usesFlagRegion = self.sizeMapping.streamKAtomic == 0
+                                        && self.sizeMapping.streamKForceDPOnly == 0
+                                        && reductionStrat != origami::reduction_t::parallel
+                                        && skGrid > 0 && (tiles % skGrid) != 0;
 
+            if(usesFlagRegion && skGrid > static_cast<size_t>(StreamKFlagElements))
+            {
+                if(Debug::Instance().printPropertyEvaluation())
+                {
+                    std::cerr << "TensileLite::DEBUG: kernel '" << self.kernelName
+                              << "' StreamK grid " << skGrid << " exceeds the "
+                              << StreamKFlagElements << "-entry flag region (tiles=" << tiles
+                              << "); clamping the grid to " << StreamKFlagElements << ".\n";
+                }
+                skGrid = StreamKFlagElements;
+            }
 
             return skGrid;
         }
