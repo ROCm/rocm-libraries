@@ -138,11 +138,12 @@ node's scalar attributes; this descriptor carries the constraints over them.
 
     // --- layout. The kernel bakes packed BSHD strides at build time (stride_q_tok = Hq * D
     //     is a Python int, never read from an argument), so exactly one stride_order is legal:
-    //     [0,2,1,3] over the positional axis order above. A family accepting either BHSD or
-    //     BSHD would anchor `{"in": [..., [[0,1,2,3],[0,2,1,3]]]}`; anchor to the literal set
-    //     the kernel accepts, whatever its size. ---
+    //     [3,1,2,0] — one entry per dim position above, giving that dim's stride rank, with 0
+    //     the fastest-varying. A family accepting either BHSD or BSHD would anchor
+    //     `{"in": [..., [[3,2,1,0],[3,1,2,0]]]}`; anchor to the literal set the kernel accepts,
+    //     whatever its size. ---
     "$q.packed", "$k.packed", "$v.packed", "$o.packed",
-    {"==": ["$q.stride_order", [0, 2, 1, 3]]},
+    {"==": ["$q.stride_order", [3, 1, 2, 0]]},
     {"==": ["$k.stride_order", "$q.stride_order"]},
     {"==": ["$v.stride_order", "$q.stride_order"]},
     {"==": ["$o.stride_order", "$q.stride_order"]},

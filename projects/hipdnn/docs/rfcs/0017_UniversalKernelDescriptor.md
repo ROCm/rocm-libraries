@@ -764,15 +764,16 @@ per-kernel applicability test.
 Getting this wrong is a common, silent failure in a prebuilt system: a matcher that gates dtype only
 as `in ["HALF", "BFLOAT16"]` accepts an fp16 graph and may hand it to a bf16 binary, which does not
 fail outright, it just returns wrong numbers. A field missing from the KMD also cannot be pinned, so
-two kernels differing only in an unmodelled baked constant collide on the catalog key. The check is
+two kernels differing only in an unmodelled baked constant collide on the catalog key. One case is
 mechanical, so the loader performs it: a UKD whose source declares a baked constant with no
-corresponding KMD field is a load error.
+corresponding KMD field is a load error. That narrows the gap without closing it — it cannot see
+which concrete instances a kernel pack ships, so a pack whose criteria leave a graph unserved, or
+whose kernels overlap, is still the author's responsibility
+([RFC 0018 §3](0018_UniversalMatchDescriptor.md#3-criteria-vocabulary)).
 
-**The engine's pattern is the topology.** An earlier draft required every pack to nominate one
-"umbrella" matcher checking the complete graph shape, because several per-matcher patterns could
-each verify a disjoint fragment while nothing confirmed the whole. One pattern per engine forecloses
-that: the topology is checked once, structurally, before any criterion runs, and a matcher can only
-constrain what the pattern already bound. The rule and its pack-level loader check are gone.
+**The engine's pattern is the topology.** One pattern per engine means the topology is checked once,
+structurally, before any criterion runs, and a matcher can only constrain what the pattern already
+bound.
 
 **Architecture is handled at pack selection, not as a runtime criterion, at least for AOT.** A pack
 carries code objects for the arches it targets, so its per-architecture `kpack` manifest gates both
@@ -847,7 +848,7 @@ it constrains them:
   "criteria": {"and": [
     {"in":    ["$q.dtype", ["BFLOAT16"]]},
     {"==":    ["$q.rank", 4]},                                  // (batch, heads, query positions, head size)
-    {"==":    ["$q.stride_order", [0, 1, 2, 3]]}, "$q.packed",  // densely packed in that order
+    {"==":    ["$q.stride_order", [3, 2, 1, 0]]}, "$q.packed",  // densely packed, head size fastest
     {"in":    ["$k.dtype", ["BFLOAT16"]]},
     {"==":    ["$k.rank", 4]},                                  // (batch, heads, key positions, head size)
     {"in":    ["$v.dtype", ["BFLOAT16"]]},
@@ -917,7 +918,10 @@ is unimplemented.
 **Precomputed fields** sit between the built-ins and the native matcher: values the schema layer
 derives once and exposes as ordinary tokens, so a matcher compares them instead of
 re-deriving them. `$q.packed` and `$q.stride_order` are the layout examples, standing in for
-`inferLayout`'s dense-stride arithmetic. `$q.value_f32` is the other kind: a tensor's
+`inferLayout`'s dense-stride arithmetic. `$q.stride_order` is indexed by logical dimension and
+holds that dimension's stride rank: `0` is the fastest-varying (unit-stride) dimension and
+`rank - 1` the slowest, so a rank-4 NHWC tensor over logical `(n, c, h, w)` is `[3, 0, 2, 1]`.
+`$q.value_f32` is the other kind: a tensor's
 compile-time `value` is a tagged union over eight differently-typed arms in the schema, and the
 expression language has no discriminator syntax to unwrap one, so the schema layer coerces whichever
 arm is set to `f32` once and publishes it as a single typed token, present only when the tensor
@@ -1020,9 +1024,9 @@ chain as a single kernel.
   "scope": "graph",   // no $kernel.* token, so one failure prunes the whole pack
   "criteria": {"and": [
     {"in":    ["$x.dtype", ["FLOAT16"]]},
-    {"==":    ["$x.stride_order", [0, 2, 3, 1]]}, "$x.packed",  // NHWC
+    {"==":    ["$x.stride_order", [3, 0, 2, 1]]}, "$x.packed",  // NHWC
     {"in":    ["$y.dtype", ["FLOAT16"]]},
-    {"==":    ["$y.stride_order", [0, 2, 3, 1]]}, "$y.packed",  // NHWC
+    {"==":    ["$y.stride_order", [3, 0, 2, 1]]}, "$y.packed",  // NHWC
     {"==":    ["$y.rank", 4]},                    // (n, out channels, out h, out w)
     {"==":    ["$bias.rank", 1]},                 // one element per output channel
     {"==":    ["$bias.dims[0]", "$y.dims[1]"]},
@@ -1111,8 +1115,8 @@ bound tensor, an attribute, a scalar operand's value, a computed expression, or 
 plan-allocated workspace. These name the same schema fields the criteria use: a `dim` source is
 the field `$q.dims[2]`, an `expr` source is a formula in the same token language, and together
 they describe the full kernel call as data, letting the launcher assemble it without per-kernel
-code. In `dim` and `stride` sources, `axis` indexes the tensor's logical dimension order,
-independent of its physical `stride_order`.
+code. In `dim` and `stride` sources, `axis` selects a logical dimension, the same indexing
+`$q.dims` and `$q.strides` use; `$q.stride_order[axis]` is that dimension's stride rank.
 
 **A `scalar` source resolves whenever its value exists.** A scalar operand carries its value one
 of two ways ([RFC 0016](0016_RuntimePassByValueTensors.md)): baked into the graph at build time,

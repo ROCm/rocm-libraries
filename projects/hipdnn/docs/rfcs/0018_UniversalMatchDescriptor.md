@@ -79,7 +79,7 @@ engine's own UHD `features_signature`. A reference none of them can resolve is r
 rather than failing closed later on a live graph.
 
 This document turns the criteria half of that frame into a concrete format and a concrete evaluation
-stage. It specifies the criteria schema, the layout representation as a stride-order index array,
+stage. It specifies the criteria schema, the layout representation as a stride-rank array,
 the native-matcher escape hatch, deterministic arbitration, and how criteria are compiled, memoized,
 and cached over the binding the engine publishes. The static (compile-time) matcher is sketched as
 options, not fully designed, in this iteration.
@@ -97,7 +97,7 @@ evaluate over ([§2](#2-the-symbol-table-criteria-read)).
 | The reader's contract on the engine's binding: which namespace roots criteria may name and what each yields | Yes ([§2](#2-the-symbol-table-criteria-read)) | The `nodes` format: [RFC 0020 § 4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative); the published field set: [RFC 0020 § 6.1](0020_UniversalEngineDescriptor.md#61-the-published-field-set-normative) |
 | Criteria (UMD) as one JsonLogic expression: dtype (exact/set/relation), rank, dim relations, divisibility, stride order, packed, attribute, `virtual`, cross-tensor relation, optional operand, device property, `$kernel.*` pins | Yes ([§3](#3-criteria-vocabulary)) | None |
 | The expression language criteria are written in: grammar, operators, type system, semantics, interpreter | None: the descriptor expression language follow-up owns it, with [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) the interim authority and [§4](#4-the-shared-expression-language) the recap | Operator additions, to that follow-up |
-| Layout as a stride-order index array, with named aliases | Yes ([§5](#5-layout-and-stride-order-criteria)) | None |
+| Layout as a stride-rank array, with named aliases | Yes ([§5](#5-layout-and-stride-order-criteria)) | None |
 | Escape hatch for checks needing C++, beside the descriptor rather than inside the expression language | Yes ([§6](#6-the-native-matcher-escape-hatch)) | None |
 | Composite criteria: `(A AND B) OR C` as one criteria expression, via JsonLogic `and`/`or`/`!`/`if` | Yes ([§7](#7-composite-criteria)) | None |
 | Stage two of matching: criteria evaluated per pack, memoized per `$kernel.*` projection, cached at applicability | Yes ([§8](#8-the-matcher-compilation-indexing-and-caching)) | None |
@@ -131,9 +131,8 @@ what each yields, and what the criteria may assume about when they are bound.
 | `$device` | device properties read from the `Handle`, such as `$device.lds_size` | the runtime |
 
 The exact fields under each root, their types, and the reserved-root rule are [RFC 0020 §
-6.1](0020_UniversalEngineDescriptor.md#61-the-published-field-set-normative); this RFC does not
-re-enumerate them, because a second copy of that table is a second thing to keep in step with the
-op-schema registry. [Appendix A.2](#a2-variable-references-and-resolution) fixes the rules a reader
+6.1](0020_UniversalEngineDescriptor.md#61-the-published-field-set-normative).
+[Appendix A.2](#a2-variable-references-and-resolution) fixes the rules a reader
 needs on top of it: reference syntax, and what a read yields when the thing read is absent.
 
 **A `$` marks a reference.** Any JSON string beginning with `$` is a reference into that table;
@@ -161,7 +160,7 @@ Quantities like head size, batch, and head count are **not** attributes; they ar
 dims (for SDPA, `q.dims[3]`, `q.dims[0]`, `q.dims[1]`), reached positionally as `$q.dims[i]` and
 never as an attribute read ([RFC 0020 §
 5](0020_UniversalEngineDescriptor.md#5-the-graph-model-the-pattern-matches)). Layout is likewise not
-stored on a tensor: it is derived from the stride order and compared as a stride-order index array
+stored on a tensor: it is derived from the stride order and compared as a stride-rank array
 ([§5](#5-layout-and-stride-order-criteria)).
 
 ---
@@ -185,7 +184,7 @@ JsonLogic sub-expression that expresses each. The residue — the handful of che
 | **Rank** | `{"==": ["$q.rank", 4]}` | `validateDimensionCount`, rank == 4 |
 | **Dim (value / relation)** | `{"==": ["$q.dims[3]", 128]}`; relate with `{"==": ["$k.dims[3]", "$q.dims[3]"]}` | dim reads and cross-tensor dim relations |
 | **Divisibility** | `{"divisible": [{"*": ["$y.dims[0]", "$y.dims[2]", "$y.dims[3]"]}, "$kernel.MPerBlock"]}` | tile-fit / GEMM-dim gates |
-| **Layout** | `{"==": ["$q.stride_order", [0, 1, 2, 3]]}` ([§5](#5-layout-and-stride-order-criteria)) | `validateSupportedLayout` |
+| **Layout** | `{"==": ["$q.stride_order", [3, 2, 1, 0]]}` ([§5](#5-layout-and-stride-order-criteria)) | `validateSupportedLayout` |
 | **Packing** | `"$q.packed"` (a bound boolean) | `validatePackedTensors` |
 | **Cross-tensor layout** | `{"==": ["$x.stride_order", "$y.stride_order"]}` (per pair) | `validateConsistentLayouts` |
 | **Attribute (value)** | `{"==": ["$sdpa_fwd.causal_mask", false]}`; absent-or `{"or": [{"not_present": ["$sdpa_fwd.dropout_probability"]}, {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]}` | per-attr value gates |
@@ -214,21 +213,23 @@ matchers at all and rest on the engine's pattern alone, a prebuilt pack in pract
 Getting this wrong fails silently rather than loudly: a matcher gating dtype only as
 `{"in": ["$q.dtype", ["FLOAT16", "BFLOAT16"]]}` accepts an fp16 graph and may hand it to a bf16
 binary, which returns wrong numbers instead of an error. A field missing from the KMD also cannot be
-pinned, so two kernels differing only in an unmodelled baked constant collide on the catalog key. The
-check is mechanical, so the loader performs it: a UKD whose source declares a baked constant with no
-corresponding KMD field is a load error. That check is a KDP/KMD-loader responsibility and is
+pinned, so two kernels differing only in an unmodelled baked constant collide on the catalog key.
+One case is mechanical, so the loader performs it: a UKD whose source declares a baked constant with
+no corresponding KMD field is a load error. That check is a KDP/KMD-loader responsibility and is
 specified by [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria); the UMD's part
 is to publish the `$kernel.*` fields it reads ([§2](#2-the-symbol-table-criteria-read))
 so the loader can perform it.
 
-**The engine's pattern is the topology.** An earlier draft required every pack to nominate one
-"umbrella" matcher checking the complete graph shape, because several per-matcher patterns could each
-verify a disjoint fragment while nothing confirmed the whole. One pattern per engine forecloses that:
-the topology is checked once, structurally, before any criterion runs, and a matcher can only
-constrain what the pattern already bound. The rule and its pack-level loader check are gone, and with
-them the class of loose match they existed to prevent.
+**That check narrows the gap; it does not close it.** It catches a baked constant with no field to
+pin it against, and a catalog-key collision is loud when it happens. Neither covers the case where
+the field exists, the matcher pins it, and the pack still ships a set of concrete instances whose
+criteria leave a graph unserved or two kernels overlapping — that depends on which instances the
+kernel pack actually contains, which no per-descriptor check sees. Authoring a matcher against the
+set a pack ships remains the author's responsibility.
 
----
+**The engine's pattern is the topology.** One pattern per engine means the topology is checked once,
+structurally, before any criterion runs, and a matcher can only constrain what the pattern already
+bound.
 
 ---
 
@@ -249,8 +250,10 @@ table of [§2](#2-the-symbol-table-criteria-read); every other JSON scalar is a 
 **Criteria are boolean-rooted; the UDD's dispatch formulas are value-rooted.** Both are the same
 language over the same symbol table — a criterion decides applicability, a formula yields a grid,
 block, or workspace number
-([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)) — so one parser,
-validator, and interpreter serve both subsystems.
+([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)) — and the engine's UHD
+writes its `features_signature` entries over that same table
+([RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)), so one parser,
+validator, and interpreter serve all three subsystems.
 
 **The operator set is closed.** A descriptor cannot introduce an operation, so a check that needs
 real C++ is a native matcher listed beside the descriptor, never a nested extension point
@@ -262,7 +265,7 @@ real C++ is a native matcher listed beside the descriptor, never a nested extens
 {"==": ["$q.dims[3]", 128]}                                 // head dimension (last axis)
 {"==": ["$k.dims[3]", "$q.dims[3]"]}                        // cross-tensor dim relation
 {"in": ["$q.dtype", ["BFLOAT16", "FP8_E4M3"]]}              // dtype set
-{"==": ["$q.stride_order", [0, 1, 2, 3]]}, "$q.packed"      // layout + packed
+{"==": ["$q.stride_order", [3, 2, 1, 0]]}, "$q.packed"      // layout + packed
 {"or": [{"not_present": ["$attn_mask"]},
         {"==": ["$attn_mask.dtype", "$q.dtype"]}]}          // composition (§8)
 ```
@@ -273,31 +276,28 @@ real C++ is a native matcher listed beside the descriptor, never a nested extens
 
 hipDNN tensors store no layout enum; layout is implied by stride order
 ([RFC 0020 § 5](0020_UniversalEngineDescriptor.md#5-the-graph-model-the-pattern-matches)). The UMD represents layout the way
-[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) writes it: an **ordered list
-of logical dimension indices, outermost (largest-stride) first**. Entry `i` names the logical
-dimension stored at physical position `i`, so the array reads as the layout it describes:
-`[0, 2, 3, 1]` over an `(n, c, h, w)` logical dim order spells N, H, W, C.
+[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) writes it, which is the
+encoding hipDNN already computes: an array indexed by **logical dimension**, entry `d` giving the
+**stride rank** of logical dimension `d`, **lower meaning faster-varying**. Entry value `0` marks the
+unit-stride dimension, so the array reads as the packing order it describes: `[3, 0, 2, 1]` over an
+`(n, c, h, w)` logical dim order puts C fastest, then W, then H, then N — NHWC.
 
 ```jsonc
-{"==": ["$q.stride_order", [0, 1, 2, 3]]}   // descending-stride packed (BHSD, rank-4)
-{"==": ["$x.stride_order", [0, 2, 3, 1]]}   // NHWC over an NCHW logical dim order
+{"==": ["$q.stride_order", [3, 2, 1, 0]]}   // descending-stride packed (BHSD, rank-4)
+{"==": ["$x.stride_order", [3, 0, 2, 1]]}   // NHWC over an NCHW logical dim order
 ```
 
-- The array is a permutation of `0..rank-1`. Entry `i` is the logical dimension at physical position
-  `i`, counting from the slowest-varying, so `[0,1,2,3]` is descending-stride packed and `[0,2,3,1]`
-  places the channel dim last, hence fastest-varying (NHWC). The `axis` used everywhere else (dims,
-  strides, `args_signature`) indexes the logical dimension order, independent of this physical
-  layout, consistent with RFC 0017 §6.
-- **This is not the encoding `extractStrideOrder` returns.** That helper
+- The array is a permutation of `0..rank-1`. Entry `d` is the stride rank of logical dimension `d`,
+  counting up from the fastest-varying, so `[3,2,1,0]` is descending-stride packed and `[3,0,2,1]`
+  gives the channel dim rank `0`, hence fastest-varying (NHWC). It is indexed the same way as
+  `dims`, `strides`, and the `axis` of `args_signature` — all four select a logical dimension —
+  so a tensor's layout is read off the same axis numbering the rest of a descriptor uses.
+- This is the encoding `extractStrideOrder` returns
   (`projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp:146`, called from
-  `ApplicabilityChecks.cpp:22`) produces the inverse: a per-dimension stride *rank*, entry `d`
-  giving the rank of logical dimension `d`, higher meaning slower-varying. The two forms are exact
-  inverses carrying identical information — `[0,2,3,1]` and `[3,0,2,1]` are the same NHWC layout —
-  so the binding layer converts once when it publishes `$q.stride_order`, and descriptors are
-  authored in the RFC 0017 form throughout. Nothing in the graph model changes; only the spelling a
-  matcher author writes.
+  `ApplicabilityChecks.cpp:22`), so the binding layer publishes `$q.stride_order` as the data SDK
+  already computes it. One spelling serves descriptors and the shipped code alike.
 - **Named aliases** are provided for the common cases and expand to the array literal at compile time,
-  so `{"==": ["$x.stride_order", "nhwc"]}` compiles to a comparison against `[0, 2, 3, 1]`
+  so `{"==": ["$x.stride_order", "nhwc"]}` compiles to a comparison against `[3, 0, 2, 1]`
   (A.5). The array remains the single canonical form. The four convolution aliases are exactly the
   layouts `validateSupportedLayout` accepts today — NCHW/NHWC at rank 4, NCDHW/NDHWC at rank 5
   (`ApplicabilityChecks.cpp:76`); `bhsd` is an addition for the attention families, which that
@@ -305,12 +305,11 @@ dimension stored at physical position `i`, so the array reads as the layout it d
 - **Cross-tensor consistency** is a JsonLogic equality between stride orders,
   `{"==": ["$x.stride_order", "$y.stride_order"]}` (one per pair, joined by the top-level `and`),
   lowering `validateConsistentLayouts`; layout-agnostic tensors (rank-1 scalars, pass-by-value) are
-  skipped as they are today. Equality is convention-independent, so a cross-tensor check reads the
-  same under either form.
+  skipped as they are today.
 - **Packing** is the separate bound boolean `$q.packed` (written `"$q.packed"`), since a supported
   stride order does not imply the tensor is gap-free; it lowers `validatePackedTensors`.
 - `$q.stride_order` is an ordinary bound value ([§2](#2-the-symbol-table-criteria-read)),
-  so a `stride_order == [0,1,2,3]` gate is expressible directly.
+  so a `stride_order == [3,2,1,0]` gate is expressible directly.
 
 ---
 
@@ -932,9 +931,10 @@ The design borrows established ideas; none is a dependency. These informed the m
   [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)
   as the interim authority; a UMD's criteria are its boolean-rooted form over
   the five namespaces of [§2](#2-the-symbol-table-criteria-read), a UDD's dispatch formulas
-  its value-rooted form over the same table ([§4](#4-the-shared-expression-language)).
-- **Stride-order layout:** layout represented as an ordered list of logical dimension indices,
-  outermost first, since tensors carry no layout enum ([§5](#5-layout-and-stride-order-criteria)).
+  and the engine's UHD `features_signature` entries its value-rooted form over the same table
+  ([§4](#4-the-shared-expression-language)).
+- **Stride-order layout:** layout represented as a per-logical-dimension stride-rank array, lower
+  meaning faster-varying, since tensors carry no layout enum ([§5](#5-layout-and-stride-order-criteria)).
 - **Native criterion:** the pack-scoped escape hatch; a `GraphCriterionFn` named by a
   `MatchDescriptor`'s `matchSymbol` and conjoined with a UMD's criteria by the ingestor, for logic
   the built-in operators cannot state. It **reads** the engine's binding and returns a verdict. It
@@ -1047,15 +1047,15 @@ descriptor in the pack ([§6](#6-the-native-matcher-escape-hatch)).
 
 A `stride_order` comparison accepts either an integer array or an alias string; aliases expand to the
 array at compile time, and the array is the single canonical form ([§5](#5-layout-and-stride-order-criteria)).
-An array MUST be a permutation of `0 .. rank-1` listing logical dimension indices outermost
-(largest-stride) first, matching
+An array MUST be a permutation of `0 .. rank-1` giving, for each logical dimension `d`, that
+dimension's stride rank, `0` being the fastest-varying, matching
 [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria).
 
 | Alias | Array | | Alias | Array |
 |---|---|---|---|---|
-| `nchw` | `[0,1,2,3]` | | `ndhwc` | `[0,2,3,4,1]` |
-| `nhwc` | `[0,2,3,1]` | | `bhsd` | `[0,1,2,3]` |
-| `ncdhw` | `[0,1,2,3,4]` | | | |
+| `nchw` | `[3,2,1,0]` | | `ndhwc` | `[4,0,3,2,1]` |
+| `nhwc` | `[3,0,2,1]` | | `bhsd` | `[3,2,1,0]` |
+| `ncdhw` | `[4,3,2,1,0]` | | | |
 
 Every alias is fixed-rank, so an alias compared against a tensor the criteria pin to a different rank
 is refused at compile rather than declining silently at match time.

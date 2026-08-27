@@ -620,8 +620,9 @@ field-classification rules, and the generation pipeline). Names are never inferr
 **Tensors expose dims, strides, dtype, and a virtual flag, but no layout enum and no rank field.**
 `TensorAttributes` (`tensor_attributes_generated.h`) offers `dims()`, `strides()` (both nullable
 vectors), `data_type()`, `uid()`, and `virtual_()`. Rank is `dims()->size()`. Layout is not stored;
-it is derived from the stride order, which is why the pattern publishes a stride-order index array
-and a criterion compares layout as one ([RFC 0018 §
+it is derived from the strides, which is why the pattern publishes `stride_order`, an array indexed
+by logical dimension holding that dimension's stride rank, and a criterion compares layout as one
+([RFC 0018 §
 5](0018_UniversalMatchDescriptor.md#5-layout-and-stride-order-criteria)). Quantities like head
 size, batch, and head count are **not** attributes; they are specific tensor dims (for SDPA,
 `q.dims[3]`, `q.dims[0]`, `q.dims[1]`). A criterion reaches them positionally as `$q.dims[i]`, never
