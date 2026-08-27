@@ -83,19 +83,27 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedOffsetSetsTensorLinkInSc
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
 
-    // Sanity: lowering produced a well-formed graph (in0, out0).
-    ASSERT_EQ(graphT.tensors.size(), 2u);
+    // Sanity: lowering produced a well-formed graph (in0, in0Offset, out0).
+    ASSERT_EQ(graphT.tensors.size(), 3u);
+
+    auto findTensorIt = [&](int64_t uid) {
+        return std::find_if(graphT.tensors.begin(), graphT.tensors.end(), [uid](const auto& t) {
+            return t->uid == uid;
+        });
+    };
 
     // The primary input tensor must carry the ragged-offset link (by UID) in the
     // serialized schema; this is the sole source of truth for ragged-ness.
-    const auto in0It = std::find_if(graphT.tensors.begin(),
-                                    graphT.tensors.end(),
-                                    [](const auto& t) { return t->uid == K_PW_TENSOR_IN0_UID; });
+    const auto in0It = findTensorIt(K_PW_TENSOR_IN0_UID);
     ASSERT_NE(in0It, graphT.tensors.end()) << "input tensor IN0 missing from serialized graph";
     ASSERT_TRUE((*in0It)->ragged_offset_tensor_uid.has_value())
         << "IN0 must carry ragged_offset_tensor_uid in the serialized schema.";
     EXPECT_EQ((*in0It)->ragged_offset_tensor_uid.value(), K_RAGGED_OFFSET_UID)
         << "IN0's ragged_offset_tensor_uid must point at the ragged-offset aux tensor.";
+
+    auto in0OffsetIt = findTensorIt(K_RAGGED_OFFSET_UID);
+    ASSERT_NE(in0OffsetIt, graphT.tensors.end())
+        << "input tensor IN0's ragged offset missing from serialized graph";
 }
 
 // A graph with no ragged offsets must serialize with no ragged-offset link on

@@ -42,6 +42,11 @@ public:
 
     std::string toString() const override;
 
+    std::shared_ptr<TensorDescriptor> getRaggedOffsetDesc() const
+    {
+        return _raggedOffset;
+    }
+
 private:
     void setName(hipdnnBackendAttributeType_t attributeType,
                  int64_t elementCount,
@@ -60,6 +65,7 @@ private:
                         void* arrayOfElements) const;
 
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT _data;
+    std::shared_ptr<TensorDescriptor> _raggedOffset;
 };
 
 } // namespace hipdnn_backend
