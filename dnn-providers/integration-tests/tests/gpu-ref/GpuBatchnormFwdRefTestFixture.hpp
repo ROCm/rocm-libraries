@@ -84,8 +84,8 @@ void runGpuVsCpuBatchnormFwd(const std::vector<int64_t>& ioDims, const TensorLay
       inhat = |(x-MEAN) * INV_VARIANCE| -> range ~[0, 1e-2]
       y = |SCALE_BIAS_RANGE| * inhat + |SCALE_BIAS_RANGE| -> range ~[0, 1e-2]
 
-      The expected output values of the order of magnitued 1e-2 will be above all the tolerance
-      thresholds and provide test coverage.
+      Expected output values on the order of 1e-2 will be above all the tolerance thresholds and
+      provide test coverage.
     */
 
     unsigned int seed = getGlobalTestSeed();

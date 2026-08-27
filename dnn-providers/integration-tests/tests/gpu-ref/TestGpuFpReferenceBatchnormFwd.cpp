@@ -697,7 +697,7 @@ TEST_P(TestGpuBatchnormFwdRef5DBfp16, MatchesCpuRef)
 }
 
 // ============================================================================
-// 3D (NCH/NHC) tests
+// 3D (NCL/NLC) tests
 // ============================================================================
 
 INSTANTIATE_TEST_SUITE_P(Quick,

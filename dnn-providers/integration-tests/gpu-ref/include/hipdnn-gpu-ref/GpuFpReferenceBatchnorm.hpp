@@ -160,7 +160,7 @@ private:
             return true;
         };
 
-        // Validate all affine tensors have the same rank as the input tensor
+        // Validate all affine tensors are channel only
         for(const auto& [name, dims, strides] : affineTensorProps)
         {
             if(!isValidAffineShapeForIo(dims))

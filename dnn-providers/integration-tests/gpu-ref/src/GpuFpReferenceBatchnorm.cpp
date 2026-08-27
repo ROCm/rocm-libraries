@@ -59,7 +59,7 @@ inline unsigned int checkedNarrowToUInt(int64_t value)
     if(value < static_cast<int64_t>(std::numeric_limits<unsigned int>::min())
        || value > static_cast<int64_t>(std::numeric_limits<unsigned int>::max()))
     {
-        throw std::runtime_error(" value " + std::to_string(value) + " exceeds int range");
+        throw std::runtime_error(" value " + std::to_string(value) + " exceeds unsigned int range");
     }
     return static_cast<unsigned int>(value);
 }
