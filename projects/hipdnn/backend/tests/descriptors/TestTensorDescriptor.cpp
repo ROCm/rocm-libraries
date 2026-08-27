@@ -1541,7 +1541,7 @@ TEST_F(TestTensorDescriptor, SetUnfinalizedRaggedOffset)
                              strides.data());
     tensorDesc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
 
-    auto rawOffset = tensorDesc.get();
+    auto rawOffset = wrapper.get();
 
     ASSERT_ANY_THROW(desc->setAttribute(HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,

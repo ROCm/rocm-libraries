@@ -226,19 +226,20 @@ inline Error
                                                    "tensor byte alignment"));
     }
 
-    // Link the ragged-offset aux tensor by UID so the lowered graph carries the
-    // ragged-tensor relationship. The aux tensor is gathered alongside node I/O
-    // (see BaseNode::gather_hipdnn_tensors), so its UID is assigned before
-    // lowering begins.
+    // Lower the ragged-offset aux as its own tensor descriptor and link it, so the
+    // backend can resolve the aux's dims/strides/dtype rather than a bare UID.
+    // createOrFindTensorDesc dedups a shared or also-an-input aux by UID and
+    // finalizes it before it is referenced here.
     if(tensor->has_ragged_offset())
     {
-        const auto raggedOffset = tensor->get_ragged_offset();
+        const auto& raggedOffset = tensor->get_ragged_offset();
+        HIPDNN_CHECK_ERROR(createOrFindTensorDesc(tensorDescs, raggedOffset));
         HIPDNN_CHECK_ERROR(
-            setDescriptorAttrScalar(desc.get(),
-                                    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
-                                    HIPDNN_TYPE_INT64,
-                                    raggedOffset->get_uid(),
-                                    "tensor ragged offset UID " + std::to_string(uid)));
+            setDescriptorAttrTensorRef(desc.get(),
+                                       HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                       raggedOffset->get_uid(),
+                                       tensorDescs,
+                                       "tensor ragged offset " + std::to_string(uid)));
     }
 
     if(!std::holds_alternative<std::monostate>(tensor->get_value_variant()))

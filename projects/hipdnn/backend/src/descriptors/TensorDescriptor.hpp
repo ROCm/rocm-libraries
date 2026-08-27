@@ -47,6 +47,14 @@ public:
         return _raggedOffset;
     }
 
+    // Reconnects the aux object after deserialize: fromFlatBuffer restores
+    // ragged_offset_tensor_uid but not the descriptor pointer, so the tensor map
+    // owner re-links it once every tensor is built.
+    void setRaggedOffsetDesc(std::shared_ptr<TensorDescriptor> raggedOffset)
+    {
+        _raggedOffset = std::move(raggedOffset);
+    }
+
 private:
     void setName(hipdnnBackendAttributeType_t attributeType,
                  int64_t elementCount,
