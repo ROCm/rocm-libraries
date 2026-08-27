@@ -605,6 +605,18 @@ def setup_multiple_abquant_dispatchers(
     if not configs:
         return []
 
+    _ABQUANT_SUPPORTED_LAYOUTS = ("rcr",)
+    bad = [c for c in configs if c.layout not in _ABQUANT_SUPPORTED_LAYOUTS]
+    if bad:
+        raise ValueError(
+            f"grouped_gemm_abquant bridge only supports layouts "
+            f"{_ABQUANT_SUPPORTED_LAYOUTS}; "
+            f"got unsupported layouts: "
+            f"{sorted({c.layout for c in bad})}. "
+            f"Non-rcr layout support requires changes to the ctypes stride "
+            f"derivation in grouped_gemm_abquant_ctypes_lib.cpp (plan Step 7)."
+        )
+
     arch = gfx_arch or _detect_gpu_arch()
     base_dir = output_dir or Path(tempfile.mkdtemp(prefix="abquant_dispatcher_"))
     base_dir.mkdir(parents=True, exist_ok=True)

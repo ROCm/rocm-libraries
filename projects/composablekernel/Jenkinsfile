@@ -142,7 +142,7 @@ pipeline {
         booleanParam(
             name: "RUN_DISPATCHER_CORRECTNESS_TESTS",
             defaultValue: false,
-            description: "Smoke-tier verification of JIT-compiled dispatcher kernels on gfx942 + gfx950: gemm_universal sweep at budget 64 plus parity, grouped, multi_d, multi_abd, batched_gemm, batched_contraction, rowcolquant, tensorquant on both arches, stream_k on gfx942, and mx_gemm + aquant + bquant + abquant on gfx950 (per-arch subset; default: OFF)")
+            description: "Smoke-tier verification of JIT-compiled dispatcher kernels on gfx942 + gfx950: gemm_universal sweep at budget 64 plus parity, grouped, multi_d (all 4 layouts), multi_abd, batched_gemm, batched_contraction (fp16+bf16+fp32), stream_k, rowcolquant, tensorquant, aquant, abquant on both arches; bquant C4 (fp8/bf8) on both arches; mx_gemm + bquant H3 (mx_*) on gfx950 only (ISA limitation); rcr layouts only for quant operators (default: OFF)")
         booleanParam(
             name: "BUILD_INSTANCES_ONLY",
             defaultValue: false,

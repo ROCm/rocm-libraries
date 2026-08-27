@@ -1679,11 +1679,9 @@ def dispatcherVariantCmd(String arch, String variant) {
 // ---------------------------------------------------------------------------
 // Coverage against the 13 dispatcher operators with a bridge on develop.
 //
-// All 13 are invoked. Eleven are covered across their full documented dtype x
-// layout x arch surface: Multi-ABD, Batched GEMM, MX Gemm, grouped_gemm_bquant,
-// grouped_gemm_rowcol, grouped_gemm_tensor, gemm_universal, StreamK, Multi-D,
-// Batched Contraction, grouped_gemm_abquant. The other two run, but over a
-// narrowed surface -- listed under "gaps" below.
+// All 13 are invoked. Twelve are fully covered; one (grouped_gemm_bquant non-rcr
+// layouts) runs but over a narrowed surface. grouped_gemm_bquant C4 (fp8/bf8)
+// now runs on both archs; H3 (mx_*) is gfx950-only at the ISA level and not a gap.
 //
 // One non-obvious detail: gemm_universal's int8 coverage comes from
 // test_gemm_parity.py's _INT_DTYPES, not from the sweep. test_gemm_search_space
@@ -1695,24 +1693,19 @@ def dispatcherVariantCmd(String arch, String variant) {
 // this lane; none is a matter of adding a flag to the commands below, except
 // where noted:
 //
-//   grouped_gemm_aquant on         Its preshuffleaq builders hardcode
-//   gfx942                         warp_tile_k=128, the gfx950 value; gfx942
-//                                  wants 64. Needs abquant's arch-aware helper
-//                                  ported over before it can be widened.
 //   grouped_gemm_{a,ab,b}quant     All three config builders hardcode
 //   non-rcr layouts                layout="rcr", and the ctypes libs assert
 //                                  packed rcr strides, so a non-rcr kernel
 //                                  would build and then be rejected at every
-//                                  call.
+//                                  call. Fixing requires ctypes stride
+//                                  derivation from the compile-time layout
+//                                  types (see plan Step 7).
 //
 // Seven further operators (preshuffle, the non-grouped gemm_*quant family,
 // batched-contraction multi-ABD) have no dispatcher bridge on develop and so
 // cannot be covered from here at all. preshuffle is a partial exception: it
 // exists in gemm_utils but is absent from test_gemm_search_space's _VARIANTS,
 // so wiring it up is a real change, not a flag.
-//
-// Both remaining gaps are quant-side and share a shape: the arch-aware work is
-// already done in grouped_gemm_abquant_utils and needs porting, not inventing.
 // ---------------------------------------------------------------------------
 def runDispatcherCorrectnessTests(String arch, String compiler) {
     def budget = 64
@@ -1794,12 +1787,12 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
         run_ok python3 ../dispatcher/tests/test_streamk_registry.py --arch ${arch} --datatypes fp16 --layouts rcr && \
         run_ok python3 ../dispatcher/tests/test_streamk_gpu_correctness.py --gfx ${arch}"""
     }
-    // aquant and bquant are still gfx950-only: their config builders hardcode a
-    // warp_tile_k tuned for gfx950 (128), and on gfx942 get_k_warp_tile() takes
-    // the other branch of CK_GFX950_SUPPORT, so such a kernel builds and runs
-    // and returns zeros. Widening them means porting abquant's arch-aware
-    // _preshuffleb_warp_tile_k first. This is why the lane fans out to a gfx950
-    // node as well as gfx942 -- see the stage comment in the Jenkinsfile.
+    // bquant is still gfx950-only: its config builders hardcode warp_tile_k
+    // tuned for gfx950 (128), and on gfx942 get_k_warp_tile() takes the other
+    // branch of CK_GFX950_SUPPORT, so such a kernel builds and runs and returns
+    // zeros. Widening it means porting abquant's arch-aware _preshuffleb_warp_tile_k.
+    // This is why the lane fans out to a gfx950 node as well as gfx942 -- see the
+    // stage comment in the Jenkinsfile.
     //
     // mx_gemm is gfx950 for a harder reason: the scale-MFMA builtins
     // (__builtin_amdgcn_mfma_scale_f32_*_f8f6f4) do not exist in the gfx942 ISA,
@@ -1812,9 +1805,14 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
     if (arch == "gfx950") {
         execute_cmd += """ && \
         run_ok python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \
-        python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py && \
-        run_ok python3 ../dispatcher/tests/test_aquant_gpu_correctness.py --gfx ${arch}"""
+        python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py"""
     }
+    // aquant runs on both archs. Its non-preshuffleaq builders use standard fp8
+    // MFMA (warp_tile_k=32), present on gfx942. _preshuffleaq_warp_tile_k() is
+    // now arch-aware (128 gfx950, 64 gfx942), and the test's preshuffleaq cases
+    // are gated behind PRESHUFFLEAQ_SUPPORTED_ARCHS pending one CI run on gfx942.
+    execute_cmd += """ && \
+        run_ok python3 ../dispatcher/tests/test_aquant_gpu_correctness.py --gfx ${arch}"""
     // abquant runs on both archs. Its Python layer was already arch-aware --
     // _eightwaves_warp_tile_k / _preshuffleb_warp_tile_k carry correct gfx942
     // branches -- and its compv3 pipeline uses standard fp8 MFMA that gfx942
