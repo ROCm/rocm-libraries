@@ -68,6 +68,7 @@
 #include <algorithm>
 #include <array>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -801,6 +802,40 @@ private:
         return hasValidGraphDesc() && _graphDescFinalized;
     }
 
+    /// Resolve an engine ID to the display name to report for it.
+    ///
+    /// The name comes from the plugin manager, which records it once when the
+    /// engine is admitted, so this reads a cached index rather than building a
+    /// descriptor. The manager is shared by every handle, which is why the
+    /// answer does not depend on which one is passed.
+    ///
+    /// A null handle, an ID no loaded engine carries, or a backend too old to
+    /// export the entry point all fall back to the static registry, and to the
+    /// hexadecimal ID for an engine the registry does not carry either. A name
+    /// is never worth failing a build over.
+    static std::string engineNameFor(hipdnnHandle_t handle, int64_t engineId)
+    {
+        if(handle != nullptr)
+        {
+            size_t engineNameLen = 0;
+            if(detail::hipdnnBackend()->getEngineNameByIdExt(
+                   handle, engineId, nullptr, &engineNameLen)
+                   == HIPDNN_STATUS_SUCCESS
+               && engineNameLen > 0)
+            {
+                std::vector<char> engineName(engineNameLen);
+                if(detail::hipdnnBackend()->getEngineNameByIdExt(
+                       handle, engineId, engineName.data(), &engineNameLen)
+                   == HIPDNN_STATUS_SUCCESS)
+                {
+                    return {engineName.data()};
+                }
+            }
+        }
+
+        return hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
+    }
+
     void assignUnsetTensorUids()
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
@@ -1279,21 +1314,23 @@ private:
                         config,
                         spec.supportsExhaustive,
                         /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                        /*exhaustiveNotRunReason=*/std::string{},
+                        engineNameFor(handle, spec.engineId)));
                     ++filteredCount;
                     continue;
                 }
                 if(_barredEngineIds.count(spec.engineId) > 0)
                 {
-                    nonBenchmarkedResults.push_back(autotune::detail::makeBarredResult(
-                        spec.engineId,
-                        spec.knobSettings,
-                        spec.workspaceSize,
-                        int64_t{-1},
-                        config,
-                        spec.supportsExhaustive,
-                        /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                    nonBenchmarkedResults.push_back(
+                        autotune::detail::makeBarredResult(spec.engineId,
+                                                           spec.knobSettings,
+                                                           spec.workspaceSize,
+                                                           int64_t{-1},
+                                                           config,
+                                                           spec.supportsExhaustive,
+                                                           /*ranExhaustive=*/false,
+                                                           /*exhaustiveNotRunReason=*/std::string{},
+                                                           engineNameFor(handle, spec.engineId)));
                     ++barredCount;
                     continue;
                 }
@@ -1473,7 +1510,8 @@ private:
                         "Plan failed compile: " + compileErr.get_message(),
                         spec.supportsExhaustive,
                         primingOutcomes[specIdx].ranExhaustive,
-                        primingOutcomes[specIdx].exhaustiveNotRunReason));
+                        primingOutcomes[specIdx].exhaustiveNotRunReason,
+                        engineNameFor(handle, spec.engineId)));
                     ++failedCompileCount;
                     continue;
                 }
@@ -1492,7 +1530,8 @@ private:
                         "Plan failed finalize: " + finErr.get_message(),
                         spec.supportsExhaustive,
                         primingOutcomes[specIdx].ranExhaustive,
-                        primingOutcomes[specIdx].exhaustiveNotRunReason));
+                        primingOutcomes[specIdx].exhaustiveNotRunReason,
+                        engineNameFor(handle, spec.engineId)));
                     ++failedFinalizeCount;
                     continue;
                 }
@@ -1512,7 +1551,8 @@ private:
                         config,
                         spec.supportsExhaustive,
                         primingOutcomes[specIdx].ranExhaustive,
-                        primingOutcomes[specIdx].exhaustiveNotRunReason));
+                        primingOutcomes[specIdx].exhaustiveNotRunReason,
+                        engineNameFor(handle, spec.engineId)));
                     ++barredCount;
                     continue;
                 }
@@ -1538,7 +1578,8 @@ private:
                         maxWorkspaceSize,
                         spec.supportsExhaustive,
                         primingOutcomes[specIdx].ranExhaustive,
-                        primingOutcomes[specIdx].exhaustiveNotRunReason));
+                        primingOutcomes[specIdx].exhaustiveNotRunReason,
+                        engineNameFor(handle, spec.engineId)));
                     ++workspaceSkippedCount;
                     continue;
                 }
@@ -1646,22 +1687,24 @@ private:
                         "Plan failed to finalize during build_plans.",
                         supportsExhaustive,
                         /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                        /*exhaustiveNotRunReason=*/std::string{},
+                        engineNameFor(handle, plan.engineId)));
                     ++failedFinalizeCount;
                     continue;
                 }
 
                 if(plan.barred)
                 {
-                    nonBenchmarkedResults.push_back(autotune::detail::makeBarredResult(
-                        plan.engineId,
-                        plan.knobSettings,
-                        plan.workspaceSize,
-                        plan.workspaceSize,
-                        config,
-                        supportsExhaustive,
-                        /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                    nonBenchmarkedResults.push_back(
+                        autotune::detail::makeBarredResult(plan.engineId,
+                                                           plan.knobSettings,
+                                                           plan.workspaceSize,
+                                                           plan.workspaceSize,
+                                                           config,
+                                                           supportsExhaustive,
+                                                           /*ranExhaustive=*/false,
+                                                           /*exhaustiveNotRunReason=*/std::string{},
+                                                           engineNameFor(handle, plan.engineId)));
                     ++barredCount;
                     continue;
                 }
@@ -1678,7 +1721,8 @@ private:
                         config,
                         supportsExhaustive,
                         /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                        /*exhaustiveNotRunReason=*/std::string{},
+                        engineNameFor(handle, plan.engineId)));
                     ++filteredCount;
                     continue;
                 }
@@ -1694,7 +1738,8 @@ private:
                         maxWorkspaceSize,
                         supportsExhaustive,
                         /*ranExhaustive=*/false,
-                        /*exhaustiveNotRunReason=*/std::string{}));
+                        /*exhaustiveNotRunReason=*/std::string{},
+                        engineNameFor(handle, plan.engineId)));
                     ++workspaceSkippedCount;
                     continue;
                 }
@@ -1770,7 +1815,8 @@ private:
                                                         info.knobSettings,
                                                         info.estimatedWorkspaceSize,
                                                         info.compiledWorkspaceSize,
-                                                        config);
+                                                        config,
+                                                        engineNameFor(handle, info.engineId));
 
             {
                 const char* iterLabel = "max";
@@ -3276,13 +3322,17 @@ public:
      *
      * Requires build_operation_graph() to have been called first.
      *
+     * @param handle Handle the engine-name query goes through. A null handle skips
+     *               the query, leaving EngineConfigInfo::engineName resolved from the
+     *               built-in registry alone.
      * @param[out] configs Output vector of EngineConfigInfo structs
      * @param modes Heuristic modes for engine ranking
      * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
      *         if the graph has not been built.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error get_engine_configs(std::vector<EngineConfigInfo>& configs,
+    Error get_engine_configs(hipdnnHandle_t handle,
+                             std::vector<EngineConfigInfo>& configs,
                              const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
     {
         configs.clear();
@@ -3309,7 +3359,7 @@ public:
             info.engineId = engineIds[i];
 
             // Resolve engine name with hex fallback for unknown engines
-            info.engineName = detail::resolveEngineName(engineIds[i]);
+            info.engineName = engineNameFor(handle, engineIds[i]);
 
             // Get knobs for this engine (failure is non-fatal; info.knobs stays empty)
             auto knobErr = get_knobs_for_engine(engineIds[i], info.knobs);
@@ -3339,6 +3389,26 @@ public:
         }
 
         return {ErrorCode::OK, ""};
+    }
+
+    /**
+     * @brief Query available engine configurations without a handle
+     *
+     * The legacy form of get_engine_configs(). Identical except that
+     * EngineConfigInfo::engineName comes from the built-in registry, with a
+     * hexadecimal fallback, and so misses plugin-supplied names. Pass a handle to
+     * the overload above to reach those.
+     *
+     * @param[out] configs Output vector of EngineConfigInfo structs
+     * @param modes Heuristic modes for engine ranking
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
+     *         if the graph has not been built.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_engine_configs(std::vector<EngineConfigInfo>& configs,
+                             const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+    {
+        return get_engine_configs(nullptr, configs, modes);
     }
 
     // --- Autotune: Plan Spec Collection ---
@@ -3648,7 +3718,7 @@ public:
         }
 
         std::vector<EngineConfigInfo> configs;
-        HIPDNN_CHECK_ERROR(get_engine_configs(configs, modes));
+        HIPDNN_CHECK_ERROR(get_engine_configs(nullptr, configs, modes));
         return add_engine_configs(configs);
     }
 
@@ -4030,13 +4100,15 @@ public:
      *
      * Constructs a human-readable name from the plan's engine ID.
      *
+     * @param handle Handle to resolve the name through
      * @param plan_index Zero-based index into the compiled plan vector
      * @param[out] name Output parameter for the plan name (resolved backend engine
-     *             name, or hex fallback such as "0x1A2B" for unknown engines)
+     *             name, or hex fallback such as "0x0000000000001A2B" for unknown
+     *             engines)
      * @return ErrorCode::OK on success, ErrorCode::INVALID_VALUE if plan_index
      *         is out of bounds
      */
-    Error get_plan_name_at_index(int64_t plan_index, std::string& name) const
+    Error get_plan_name_at_index(hipdnnHandle_t handle, int64_t plan_index, std::string& name) const
     {
         if(plan_index < 0 || static_cast<size_t>(plan_index) >= _compiledPlans.size())
         {
@@ -4046,9 +4118,27 @@ public:
         }
 
         const auto& plan = _compiledPlans[static_cast<size_t>(plan_index)];
-        name = detail::resolveEngineName(plan.engineId);
+
+        name = engineNameFor(handle, plan.engineId);
 
         return {ErrorCode::OK, ""};
+    }
+
+    /**
+     * @brief Get the name of a plan at a specific index, without a handle
+     *
+     * The legacy form of get_plan_name_at_index(), resolving from the built-in
+     * registry alone. A plugin-supplied engine gets the hexadecimal rendering of its
+     * ID; pass a handle to the overload above for the name it declares.
+     *
+     * @param plan_index Zero-based index into the compiled plan vector
+     * @param[out] name Output parameter for the plan name
+     * @return ErrorCode::OK on success, ErrorCode::INVALID_VALUE if plan_index
+     *         is out of bounds
+     */
+    Error get_plan_name_at_index(int64_t plan_index, std::string& name) const
+    {
+        return get_plan_name_at_index(nullptr, plan_index, name);
     }
 
     /**
@@ -4146,10 +4236,15 @@ public:
     /**
      * @brief Store engine names for deferred plan barring
      *
-     * Resolves each engine name to an engine ID and adds it to the
-     * barred engine ID set. Plans matching barred engine IDs are barred
-     * during @c build_plans() and @c autotuneImpl(). Accumulates across
-     * calls (set union).
+     * Resolves each name to an engine ID and adds it to the barred engine ID
+     * set. Plans whose engine matches are barred during @c build_plans() and
+     * @c autotuneImpl(). Accumulates across calls (set union), and is cleared
+     * along with the rest of the filter state by @c create_execution_plans().
+     *
+     * Resolution goes through @c engineNameOrIdToId, so a registered name, a
+     * name a plugin declared, and the hexadecimal ID an unnamed engine displays
+     * under all reach the engine they name. A name that resolves to no available
+     * engine bars nothing.
      *
      * @param engine_names Engine names to deselect (e.g. {"MIOPEN_ENGINE"})
      * @return Reference to @c *this for method chaining
@@ -4162,13 +4257,13 @@ public:
         }
         for(const auto& name : engine_names)
         {
-            if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(name))
-            {
-                HIPDNN_FE_LOG_WARN("deselect_engines(): unknown engine name '" << name
-                                                                               << "', skipping");
-                continue;
-            }
-            _barredEngineIds.insert(hipdnn_data_sdk::utilities::engineNameToId(name));
+            const int64_t engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(name);
+            // Hexadecimal to match how hipdnn_list_engines and the name fallback
+            // spell an ID, so a resolved ID can be grepped against either.
+            HIPDNN_FE_LOG_INFO("deselect_engines(): '"
+                               << name << "' -> engine ID "
+                               << hipdnn_data_sdk::utilities::formatEngineIdHex(engineId));
+            _barredEngineIds.insert(engineId);
         }
         HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter (" << _barredEngineIds.size()
                                                                         << " engine(s))");
@@ -4232,13 +4327,29 @@ public:
      * Convenience wrapper that calls get_plan_name_at_index() with the
      * current active plan index.
      *
+     * @param handle Handle to resolve the name through
+     * @param[out] name Output parameter for the plan name
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE if no
+     *         active plan exists
+     */
+    Error get_plan_name(hipdnnHandle_t handle, std::string& name) const
+    {
+        return get_plan_name_at_index(handle, static_cast<int64_t>(_activePlanIndex), name);
+    }
+
+    /**
+     * @brief Get the name of the currently active plan, without a handle
+     *
+     * The legacy form of get_plan_name(), resolving the name as the handle-free
+     * get_plan_name_at_index() does.
+     *
      * @param[out] name Output parameter for the plan name
      * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE if no
      *         active plan exists
      */
     Error get_plan_name(std::string& name) const
     {
-        return get_plan_name_at_index(static_cast<int64_t>(_activePlanIndex), name);
+        return get_plan_name(nullptr, name);
     }
 
     // NOLINTEND(readability-identifier-naming)
@@ -5266,11 +5377,11 @@ public:
      *
      * Applies an element-wise function to three input tensors.
      * Currently only BINARY_SELECT uses this overload:
-     * `out[i] = in0[i] ? in1[i] : in2[i]`
+     * `out[i] = in2[i] ? in0[i] : in1[i]`
      *
-     * @param in0 Condition tensor (selector mask)
-     * @param in1 Value selected where in0 is non-zero
-     * @param in2 Value selected where in0 is zero
+     * @param in0 Value selected where in2 is true
+     * @param in1 Value selected where in2 is false
+     * @param in2 Condition tensor (selector mask)
      * @param attributes Configuration specifying the pointwise mode
      * @return out0: Output tensor
      *
@@ -6060,6 +6171,18 @@ public:
 
     /**
      * @brief Set the preferred engine by name
+     *
+     * The name is resolved to an engine ID here, not at plan-build time, so
+     * @c get_preferred_engine_id_ext() returns a value as soon as this returns.
+     * At plan-build time that ID is matched against the ranked candidates, and
+     * selection falls back to the heuristics' own top choice if none carries it.
+     *
+     * Resolution goes through @c engineNameOrIdToId, so the hexadecimal ID an
+     * unnamed engine displays under resolves to that engine rather than to the
+     * hash of its spelling. Only the ID survives a round trip through a backend
+     * graph descriptor, so this is what keeps such a preference from being
+     * silently dropped on deserialize.
+     *
      * @param engineName Engine name to look up; empty string clears the preference
      * @return Reference to this Graph for method chaining
      */
@@ -6074,7 +6197,7 @@ public:
             return *this;
         }
 
-        auto engineId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
+        auto engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(engineName);
         _preferredEngineId = engineId;
 
         HIPDNN_FE_LOG_INFO("Engine name '" << engineName << "' mapped to ID: " << engineId);

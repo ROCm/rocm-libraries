@@ -131,6 +131,21 @@ public:
     virtual hipdnnStatus_t backendSetGlobalLogLevelExt(hipdnnSeverity_t level) = 0;
     virtual hipdnnStatus_t backendGetGlobalLogLevelExt(hipdnnSeverity_t* level) = 0;
 
+    /// Resolves a loaded engine's ID to the name it carries, following the two-call
+    /// pattern of hipdnnGetEngineNameById_ext.
+    ///
+    /// Declared last, and not pure, so an implementation written against an earlier
+    /// header keeps compiling. What it inherits is HIPDNN_STATUS_NOT_SUPPORTED, which
+    /// callers read as "this backend cannot name engines" and answer from the built-in
+    /// registry instead.
+    virtual hipdnnStatus_t getEngineNameByIdExt(hipdnnHandle_t /*handle*/,
+                                                int64_t /*engineId*/,
+                                                char* /*engineName*/,
+                                                size_t* /*engineNameLen*/)
+    {
+        return HIPDNN_STATUS_NOT_SUPPORTED;
+    }
+
     // HIPDNN_HIDDEN on accessor functions ensures each shared object has its own backendInstance
     HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend> getInstance()
     {
