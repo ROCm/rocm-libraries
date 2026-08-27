@@ -83,21 +83,381 @@ delegates_to_existing_plan: false
 # shape can only be served by the narrow tile. 8 kernels, one per dtype x head_size x
 # causal cell.
 
+# VARIANT SET -- sized from REAL WORKLOADS, not from a test matrix.
+#
+# The first cut of this engine shipped 56 kernels at Sq in {256, 288, 512}: a set chosen
+# to exercise the matcher. It passed every gate and served ZERO real graphs -- of 3654
+# SDPA graphs across dnn-benchmarking's model + microbench suites, 118 were servable by
+# this kernel and NOT ONE matched a shipped variant.
+#
+# This set is derived from those workloads instead. Every shape below appears in a real
+# model trace under Workloads/models/ (llama3.1, qwen3 8b/32b/30b-moe/235b-moe, gpt_oss,
+# auto_regressive_dit, ltx2, mad_llama3_1_8b_train). It serves 38/38 of the real model
+# graphs this kernel can build.
+#
+#   production shapes (block_n=64) .... one per (model family x sequence length x mask)
+#   cross-attention ................... auto_regressive_dit runs Sq != Skv (Skv=62208)
+#   fp16 capability coverage .......... no real trace uses fp16 at a servable shape, but
+#                                       the engine advertises it, so it is backed
+#   block_n=32 tuning twins ........... representative subset, so `score` has a real
+#                                       choice without doubling the whole set
+#
+# Not served, deliberately, and reported at step 9: varlen (2245 of 3654 real graphs --
+# by far the largest single gap and a kernel-side limitation, not a variant-set one),
+# paged KV, sinks, sliding-window, and head sizes outside {64, 128} (D192 alone is 500
+# real graphs).
+
 packs:
   - name: attention_dense
     arch: [gfx942]
     kernels:
-      - name: attention_dense.bf16_d64_mha256_causal_bn32.gfx942
+      - name: attention_dense.dit_bf16_d128_b1_hq9_kv9_sq1024_skv62208_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 1024
+            seqlen_kv: 62208
+            num_query_heads: 9
+            num_kv_heads: 9
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 9
+          num_kv_heads: 9
+          seqlen_q: 1024
+          seqlen_kv: 62208
+          batch: 1
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.dit_bf16_d128_b1_hq9_kv9_sq2048_skv62208_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 2048
+            seqlen_kv: 62208
+            num_query_heads: 9
+            num_kv_heads: 9
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 9
+          num_kv_heads: 9
+          seqlen_q: 2048
+          seqlen_kv: 62208
+          batch: 1
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.dit_bf16_d128_b1_hq9_kv9_sq4096_skv62208_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 4096
+            seqlen_kv: 62208
+            num_query_heads: 9
+            num_kv_heads: 9
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 9
+          num_kv_heads: 9
+          seqlen_q: 4096
+          seqlen_kv: 62208
+          batch: 1
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.dit_bf16_d128_b1_hq9_kv9_sq8192_skv62208_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 8192
+            seqlen_kv: 62208
+            num_query_heads: 9
+            num_kv_heads: 9
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 9
+          num_kv_heads: 9
+          seqlen_q: 8192
+          seqlen_kv: 62208
+          batch: 1
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq2048_skv2048_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 64
+            causal: false
+            dtype: fp16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: FP16
+          head_size: 64
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 1
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 64
+            causal: true
+            dtype: fp16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: FP16
+          head_size: 64
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq4096_skv4096_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 64
+            causal: false
+            dtype: fp16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: FP16
+          head_size: 64
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 1
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 64
+            causal: true
+            dtype: fp16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: FP16
+          head_size: 64
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq2048_skv2048_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: fp16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: FP16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 1
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: fp16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: FP16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq4096_skv4096_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: fp16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: FP16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 1
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: fp16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: FP16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq2048_skv2048_causal_bn32.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
             batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 128
+            num_kv_heads: 128
             head_size: 64
             causal: true
             dtype: bf16
@@ -106,26 +466,26 @@ packs:
         metadata:
           dtype: BF16
           head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
+          num_query_heads: 128
+          num_kv_heads: 128
+          seqlen_q: 2048
+          seqlen_kv: 2048
           batch: 2
           causal: 1
           block_n: 32
           block_m: 256
         priority: 0
-      - name: attention_dense.bf16_d64_mha256_causal_bn64.gfx942
+      - name: attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq2048_skv2048_causal_bn64.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
             batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 128
+            num_kv_heads: 128
             head_size: 64
             causal: true
             dtype: bf16
@@ -134,418 +494,26 @@ packs:
         metadata:
           dtype: BF16
           head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
+          num_query_heads: 128
+          num_kv_heads: 128
+          seqlen_q: 2048
+          seqlen_kv: 2048
           batch: 2
           causal: 1
           block_n: 64
           block_m: 256
         priority: 0
-      - name: attention_dense.bf16_d64_mha256_full_bn32.gfx942
+      - name: attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq4096_skv4096_causal_bn32.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
             batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 64
-            causal: false
-            dtype: bf16
-            block_n: 32
-            waves_per_eu: 4
-        metadata:
-          dtype: BF16
-          head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d64_mha256_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 64
-            causal: false
-            dtype: bf16
-            block_n: 64
-            waves_per_eu: 4
-        metadata:
-          dtype: BF16
-          head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_mha256_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 128
-            causal: true
-            dtype: bf16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_mha256_causal_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 128
-            causal: true
-            dtype: bf16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_mha256_full_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 128
-            causal: false
-            dtype: bf16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_mha256_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 128
-            causal: false
-            dtype: bf16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_mha256_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 64
-            causal: true
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_mha256_causal_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 64
-            causal: true
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_mha256_full_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 64
-            causal: false
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_mha256_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 64
-            causal: false
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_mha256_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 128
-            causal: true
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_mha256_causal_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 128
-            causal: true
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_mha256_full_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 128
-            causal: false
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_mha256_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 128
-            causal: false
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d64_gqa256_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 128
+            num_kv_heads: 128
             head_size: 64
             causal: true
             dtype: bf16
@@ -554,26 +522,26 @@ packs:
         metadata:
           dtype: BF16
           head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
+          num_query_heads: 128
+          num_kv_heads: 128
+          seqlen_q: 4096
+          seqlen_kv: 4096
           batch: 2
           causal: 1
           block_n: 32
           block_m: 256
         priority: 0
-      - name: attention_dense.bf16_d64_gqa256_causal_bn64.gfx942
+      - name: attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq4096_skv4096_causal_bn64.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
             batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 128
+            num_kv_heads: 128
             head_size: 64
             causal: true
             dtype: bf16
@@ -582,418 +550,26 @@ packs:
         metadata:
           dtype: BF16
           head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
+          num_query_heads: 128
+          num_kv_heads: 128
+          seqlen_q: 4096
+          seqlen_kv: 4096
           batch: 2
           causal: 1
           block_n: 64
           block_m: 256
         priority: 0
-      - name: attention_dense.bf16_d64_gqa256_full_bn32.gfx942
+      - name: attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq8192_skv8192_causal_bn32.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
             batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 64
-            causal: false
-            dtype: bf16
-            block_n: 32
-            waves_per_eu: 4
-        metadata:
-          dtype: BF16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d64_gqa256_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 64
-            causal: false
-            dtype: bf16
-            block_n: 64
-            waves_per_eu: 4
-        metadata:
-          dtype: BF16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_gqa256_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 128
-            causal: true
-            dtype: bf16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_gqa256_causal_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 128
-            causal: true
-            dtype: bf16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_gqa256_full_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 128
-            causal: false
-            dtype: bf16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_gqa256_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 128
-            causal: false
-            dtype: bf16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_gqa256_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 64
-            causal: true
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_gqa256_causal_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 64
-            causal: true
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_gqa256_full_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 64
-            causal: false
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_gqa256_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 64
-            causal: false
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_gqa256_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 128
-            causal: true
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_gqa256_causal_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 128
-            causal: true
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 1
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_gqa256_full_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 128
-            causal: false
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_gqa256_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 256
-            num_query_heads: 8
-            num_kv_heads: 2
-            head_size: 128
-            causal: false
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 2
-          seqlen_q: 256
-          seqlen_kv: 256
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d64_mha512_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 128
+            num_kv_heads: 128
             head_size: 64
             causal: true
             dtype: bf16
@@ -1002,26 +578,26 @@ packs:
         metadata:
           dtype: BF16
           head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
+          num_query_heads: 128
+          num_kv_heads: 128
+          seqlen_q: 8192
+          seqlen_kv: 8192
           batch: 2
           causal: 1
           block_n: 32
           block_m: 256
         priority: 0
-      - name: attention_dense.bf16_d64_mha512_causal_bn64.gfx942
+      - name: attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq8192_skv8192_causal_bn64.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
             batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 128
+            num_kv_heads: 128
             head_size: 64
             causal: true
             dtype: bf16
@@ -1030,418 +606,26 @@ packs:
         metadata:
           dtype: BF16
           head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
+          num_query_heads: 128
+          num_kv_heads: 128
+          seqlen_q: 8192
+          seqlen_kv: 8192
           batch: 2
           causal: 1
           block_n: 64
           block_m: 256
         priority: 0
-      - name: attention_dense.bf16_d64_mha512_full_bn32.gfx942
+      - name: attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq16384_skv16384_causal_bn32.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
             batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 64
-            causal: false
-            dtype: bf16
-            block_n: 32
-            waves_per_eu: 4
-        metadata:
-          dtype: BF16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d64_mha512_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 64
-            causal: false
-            dtype: bf16
-            block_n: 64
-            waves_per_eu: 4
-        metadata:
-          dtype: BF16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_mha512_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 128
-            causal: true
-            dtype: bf16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 1
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_mha512_causal_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 128
-            causal: true
-            dtype: bf16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 1
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_mha512_full_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 128
-            causal: false
-            dtype: bf16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d128_mha512_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 128
-            causal: false
-            dtype: bf16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: BF16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_mha512_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 64
-            causal: true
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 1
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_mha512_causal_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 64
-            causal: true
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 1
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_mha512_full_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 64
-            causal: false
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_mha512_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 64
-            causal: false
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_mha512_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 128
-            causal: true
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 1
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_mha512_causal_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 128
-            causal: true
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 1
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_mha512_full_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 128
-            causal: false
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_mha512_full_bn64.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 512
-            seqlen_kv: 512
-            num_query_heads: 8
-            num_kv_heads: 8
-            head_size: 128
-            causal: false
-            dtype: fp16
-            block_n: 64
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 128
-          num_query_heads: 8
-          num_kv_heads: 8
-          seqlen_q: 512
-          seqlen_kv: 512
-          batch: 2
-          causal: 0
-          block_n: 64
-          block_m: 256
-        priority: 0
-      - name: attention_dense.bf16_d64_tile32_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 288
-            num_query_heads: 4
-            num_kv_heads: 4
+            seqlen_q: 16384
+            seqlen_kv: 16384
+            num_query_heads: 128
+            num_kv_heads: 128
             head_size: 64
             causal: true
             dtype: bf16
@@ -1450,208 +634,1300 @@ packs:
         metadata:
           dtype: BF16
           head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 288
+          num_query_heads: 128
+          num_kv_heads: 128
+          seqlen_q: 16384
+          seqlen_kv: 16384
           batch: 2
           causal: 1
           block_n: 32
           block_m: 256
         priority: 0
-      - name: attention_dense.bf16_d64_tile32_full_bn32.gfx942
+      - name: attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq16384_skv16384_causal_bn64.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
             batch: 2
-            seqlen_q: 256
-            seqlen_kv: 288
-            num_query_heads: 4
-            num_kv_heads: 4
+            seqlen_q: 16384
+            seqlen_kv: 16384
+            num_query_heads: 128
+            num_kv_heads: 128
             head_size: 64
-            causal: false
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 4
+        metadata:
+          dtype: BF16
+          head_size: 64
+          num_query_heads: 128
+          num_kv_heads: 128
+          seqlen_q: 16384
+          seqlen_kv: 16384
+          batch: 2
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq32768_skv32768_causal_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 128
+            num_kv_heads: 128
+            head_size: 64
+            causal: true
             dtype: bf16
             block_n: 32
             waves_per_eu: 4
         metadata:
           dtype: BF16
           head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 288
+          num_query_heads: 128
+          num_kv_heads: 128
+          seqlen_q: 32768
+          seqlen_kv: 32768
           batch: 2
-          causal: 0
+          causal: 1
           block_n: 32
           block_m: 256
         priority: 0
-      - name: attention_dense.bf16_d128_tile32_causal_bn32.gfx942
+      - name: attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq32768_skv32768_causal_bn64.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
             batch: 2
-            seqlen_q: 256
-            seqlen_kv: 288
-            num_query_heads: 4
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 128
+            num_kv_heads: 128
+            head_size: 64
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 4
+        metadata:
+          dtype: BF16
+          head_size: 64
+          num_query_heads: 128
+          num_kv_heads: 128
+          seqlen_q: 32768
+          seqlen_kv: 32768
+          batch: 2
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_full_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 2
+          causal: 0
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 2
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_causal_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 2
+          causal: 1
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 2
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_full_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 2
+          causal: 0
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 2
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_causal_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 2
+          causal: 1
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 2
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_full_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 8192
+          seqlen_kv: 8192
+          batch: 2
+          causal: 0
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 8192
+          seqlen_kv: 8192
+          batch: 2
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_causal_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 8192
+          seqlen_kv: 8192
+          batch: 2
+          causal: 1
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 8192
+          seqlen_kv: 8192
+          batch: 2
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_full_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 16384
+            seqlen_kv: 16384
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 16384
+          seqlen_kv: 16384
+          batch: 2
+          causal: 0
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 16384
+            seqlen_kv: 16384
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 16384
+          seqlen_kv: 16384
+          batch: 2
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_causal_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 16384
+            seqlen_kv: 16384
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 16384
+          seqlen_kv: 16384
+          batch: 2
+          causal: 1
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 16384
+            seqlen_kv: 16384
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 16384
+          seqlen_kv: 16384
+          batch: 2
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_full_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 32768
+          seqlen_kv: 32768
+          batch: 2
+          causal: 0
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 32768
+          seqlen_kv: 32768
+          batch: 2
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_causal_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 32768
+          seqlen_kv: 32768
+          batch: 2
+          causal: 1
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 2
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 32768
+          seqlen_kv: 32768
+          batch: 2
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.ltx2_bf16_d128_b1_hq32_kv32_sq6144_skv6144_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 6144
+            seqlen_kv: 6144
+            num_query_heads: 32
+            num_kv_heads: 32
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 32
+          seqlen_q: 6144
+          seqlen_kv: 6144
+          batch: 1
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.ltx2_bf16_d128_b1_hq32_kv32_sq37632_skv37632_full_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 37632
+            seqlen_kv: 37632
+            num_query_heads: 32
+            num_kv_heads: 32
+            head_size: 128
+            causal: false
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 32
+          seqlen_q: 37632
+          seqlen_kv: 37632
+          batch: 1
+          causal: 0
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq2048_skv2048_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 64
             num_kv_heads: 4
             head_size: 128
             causal: true
             dtype: bf16
-            block_n: 32
+            block_n: 64
             waves_per_eu: 2
         metadata:
           dtype: BF16
           head_size: 128
-          num_query_heads: 4
+          num_query_heads: 64
           num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 288
-          batch: 2
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 1
           causal: 1
-          block_n: 32
+          block_n: 64
           block_m: 256
         priority: 0
-      - name: attention_dense.bf16_d128_tile32_full_bn32.gfx942
+      - name: attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq4096_skv4096_causal_bn64.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 288
-            num_query_heads: 4
+            batch: 1
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 64
             num_kv_heads: 4
             head_size: 128
-            causal: false
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 4
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq8192_skv8192_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 64
+            num_kv_heads: 4
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 4
+          seqlen_q: 8192
+          seqlen_kv: 8192
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq32768_skv32768_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 64
+            num_kv_heads: 4
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 4
+          seqlen_q: 32768
+          seqlen_kv: 32768
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq2048_skv2048_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 32
+            num_kv_heads: 4
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 4
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq4096_skv4096_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 32
+            num_kv_heads: 4
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 4
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq8192_skv8192_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 32
+            num_kv_heads: 4
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 4
+          seqlen_q: 8192
+          seqlen_kv: 8192
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq32768_skv32768_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 32
+            num_kv_heads: 4
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 4
+          seqlen_q: 32768
+          seqlen_kv: 32768
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq2048_skv2048_causal_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
             dtype: bf16
             block_n: 32
             waves_per_eu: 2
         metadata:
           dtype: BF16
           head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 288
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d64_tile32_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 288
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 64
-            causal: true
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 288
-          batch: 2
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 1
           causal: 1
           block_n: 32
           block_m: 256
         priority: 0
-      - name: attention_dense.fp16_d64_tile32_full_bn32.gfx942
+      - name: attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq2048_skv2048_causal_bn64.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 288
-            num_query_heads: 4
-            num_kv_heads: 4
-            head_size: 64
-            causal: false
-            dtype: fp16
-            block_n: 32
-            waves_per_eu: 2
-        metadata:
-          dtype: FP16
-          head_size: 64
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 288
-          batch: 2
-          causal: 0
-          block_n: 32
-          block_m: 256
-        priority: 0
-      - name: attention_dense.fp16_d128_tile32_causal_bn32.gfx942
-        kernel_source:
-          kind: rocke
-          source: kernels/gfx942/attention_dense.py
-          builder: build_attention_dense
-          spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 288
-            num_query_heads: 4
-            num_kv_heads: 4
+            batch: 1
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 64
+            num_kv_heads: 8
             head_size: 128
             causal: true
-            dtype: fp16
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq4096_skv4096_causal_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
             block_n: 32
             waves_per_eu: 2
         metadata:
-          dtype: FP16
+          dtype: BF16
           head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 288
-          batch: 2
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 1
           causal: 1
           block_n: 32
           block_m: 256
         priority: 0
-      - name: attention_dense.fp16_d128_tile32_full_bn32.gfx942
+      - name: attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq4096_skv4096_causal_bn64.gfx942
         kernel_source:
           kind: rocke
           source: kernels/gfx942/attention_dense.py
           builder: build_attention_dense
           spec:
-            batch: 2
-            seqlen_q: 256
-            seqlen_kv: 288
-            num_query_heads: 4
-            num_kv_heads: 4
+            batch: 1
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 64
+            num_kv_heads: 8
             head_size: 128
-            causal: false
-            dtype: fp16
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq8192_skv8192_causal_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
             block_n: 32
             waves_per_eu: 2
         metadata:
-          dtype: FP16
+          dtype: BF16
           head_size: 128
-          num_query_heads: 4
-          num_kv_heads: 4
-          seqlen_q: 256
-          seqlen_kv: 288
-          batch: 2
-          causal: 0
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 8192
+          seqlen_kv: 8192
+          batch: 1
+          causal: 1
           block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq8192_skv8192_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 8192
+          seqlen_kv: 8192
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq32768_skv32768_causal_bn32.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 32
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 32768
+          seqlen_kv: 32768
+          batch: 1
+          causal: 1
+          block_n: 32
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq32768_skv32768_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 64
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 64
+          num_kv_heads: 8
+          seqlen_q: 32768
+          seqlen_kv: 32768
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 2048
+            seqlen_kv: 2048
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 2048
+          seqlen_kv: 2048
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 4096
+            seqlen_kv: 4096
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 4096
+          seqlen_kv: 4096
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq8192_skv8192_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 8192
+          seqlen_kv: 8192
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq32768_skv32768_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 32768
+            seqlen_kv: 32768
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 32768
+          seqlen_kv: 32768
+          batch: 1
+          causal: 1
+          block_n: 64
+          block_m: 256
+        priority: 0
+      - name: attention_dense.train8b_bf16_d128_b3_hq32_kv8_sq8192_skv8192_causal_bn64.gfx942
+        kernel_source:
+          kind: rocke
+          source: kernels/gfx942/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 3
+            seqlen_q: 8192
+            seqlen_kv: 8192
+            num_query_heads: 32
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+            waves_per_eu: 2
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 32
+          num_kv_heads: 8
+          seqlen_q: 8192
+          seqlen_kv: 8192
+          batch: 3
+          causal: 1
+          block_n: 64
           block_m: 256
         priority: 0
