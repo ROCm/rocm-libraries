@@ -122,10 +122,10 @@ bool isSegmentBoundary(const StinkyInstruction& inst) {
     return isLabel(inst) || isBranch(inst) || isCall(inst);
 }
 
-StinkyInstruction* findPrecedingWorkgroupBarrierSignalInSegment(BasicBlock::iterator segmentBegin,
+StinkyInstruction* findPrecedingWorkgroupBarrierSignalInSegment(BasicBlock::iterator segBegin,
                                                                 StinkyInstruction* anchor) {
     auto it = BasicBlock::iterator(anchor);
-    while (it != segmentBegin) {
+    while (it != segBegin) {
         --it;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
@@ -443,8 +443,13 @@ IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBas
     return defaultAnchor;
 }
 
-/// Start of the segment holding \p pos, i.e. just past the closest boundary above it.
-BasicBlock::iterator segmentBeginBefore(BasicBlock::iterator pos, BasicBlock::iterator bbBegin) {
+/// The two below bound the segment holding \p pos as a half-open range, the way begin() and
+/// end() do: a boundary belongs to neither of the segments it separates, so the first
+/// instruction of one is just past the boundary above it, and the boundary below is one past
+/// the last.
+///
+/// First instruction of the segment holding \p pos.
+BasicBlock::iterator segmentBegin(BasicBlock::iterator pos, BasicBlock::iterator bbBegin) {
     auto it = pos;
     while (it != bbBegin) {
         --it;
@@ -454,10 +459,10 @@ BasicBlock::iterator segmentBeginBefore(BasicBlock::iterator pos, BasicBlock::it
     return bbBegin;
 }
 
-/// First segment boundary at or below \p pos, which closes the segment holding it.
-/// Used as the forward limit for SCC queries about an anchor that climbed into an
-/// earlier segment, where the wait anchor sits above rather than below.
-const IRBase* segmentEndAfter(BasicBlock::iterator pos, BasicBlock::iterator bbEnd) {
+/// The boundary that closes the segment holding \p pos, i.e. one past its last instruction.
+/// Used as the forward limit for SCC queries about an anchor that climbed into an earlier
+/// segment, where the wait anchor sits above rather than below.
+const IRBase* segmentEnd(BasicBlock::iterator pos, BasicBlock::iterator bbEnd) {
     for (auto it = pos; it != bbEnd; ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst != nullptr && isSegmentBoundary(*inst)) return it.getNodePtr();
@@ -684,7 +689,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // the limit there, since the wait is no longer ahead of the anchor to be found.
     auto sccLimit = [&](StinkyInstruction* anchorInst) -> const IRBase* {
         if (!crossedLoopHead) return referenceAnchor;
-        return segmentEndAfter(BasicBlock::iterator(anchorInst), parent->end());
+        return segmentEnd(BasicBlock::iterator(anchorInst), parent->end());
     };
 
     // Nothing below the range to correct to. Giving up the lead and co-locating with the
@@ -843,7 +848,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
                 crossedLoopHead = true;
             }
             ++hops;
-            curSegBegin = segmentBeginBefore(it, bbBegin);
+            curSegBegin = segmentBegin(it, bbBegin);
             continue;
         }
         if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
