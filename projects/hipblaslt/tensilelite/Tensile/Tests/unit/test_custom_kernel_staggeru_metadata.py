@@ -72,7 +72,12 @@ KERNEL_NAMES = getAllCustomKernelNames()
 # suite where a change to a custom kernel will actually run it.
 MAX_WORKERS = min(32, (os.cpu_count() or 4) * 2)
 
-_TARGET = re.compile(r'^\.amdgcn_target\s+"amdgcn-amd-amdhsa--([a-z0-9]+)', re.MULTILINE)
+# Tensile emits the directive in column 0, but kernels that reach CustomKernels/ from
+# other toolchains do not: llc and hipcc both indent it. Leading whitespace is legal
+# assembly, so accept it rather than reformatting generated sources.
+_TARGET = re.compile(
+    r'^[ \t]*\.amdgcn_target\s+"amdgcn-amd-amdhsa--([a-z0-9]+)', re.MULTILINE
+)
 
 # One decoded instruction, recognised by the address/encoding comment
 # llvm-objdump appends; labels, section headers and blank lines lack it.
@@ -489,7 +494,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # adding or retuning a custom kernel forces the reconciliation to be redone
 # rather than shifting the ground truth underneath the gate.
 EXPECTED_CENSUS = {
-    "kernels": 119,
+    "kernels": 126,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -497,9 +502,12 @@ EXPECTED_CENSUS = {
     # SupportCustomStaggerU: False and why the gate refuses them.
     "declaredNonZeroWithLiteralStagger": 24,
     "declaredNonZeroReadingPackedArgument": 4,
-    "declaredZero": 60,
+    # Includes the six kernels built outside Tensile (aiter, ck, rocroller,
+    # triton, wave), which declare StaggerU: 0 because they do not implement
+    # the in-loop wrap at all; the disassembly confirms none of them staggers.
+    "declaredZero": 66,
     # No StaggerU key at all, so they inherit the default of 32.
-    "undeclared": 31,
+    "undeclared": 32,
 }
 
 
