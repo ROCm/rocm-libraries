@@ -1097,7 +1097,7 @@ def supports_attention_dense(
 
 
 def build_attention_dense(
-    spec: AttentionDenseSpec,
+    spec: Gfx942AttentionDenseSpec,
     *,
     arch: str = "gfx942",
 ) -> KernelDef:

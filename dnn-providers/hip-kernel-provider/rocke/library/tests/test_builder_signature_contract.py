@@ -164,6 +164,16 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "head_size",
         "num_query_heads",
     ),
+    # The gfx942 dense spec is a subclass of gfx950's and inherits its required
+    # set; every gfx942-only knob it adds is defaulted, four of them to `None`.
+    "kernels.gfx942.attention_dense.Gfx942AttentionDenseSpec": (
+        "batch",
+        "head_size",
+        "num_kv_heads",
+        "num_query_heads",
+        "seqlen_kv",
+        "seqlen_q",
+    ),
     "kernels.gfx942.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
         "block_size",
         "dtype",
