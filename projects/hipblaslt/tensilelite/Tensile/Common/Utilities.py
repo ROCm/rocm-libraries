@@ -58,6 +58,12 @@ def isSubtileMultiDU(kernel) -> bool:
     du = kernel["DepthU"]
     return kernel.get("_DepthUA", du) < du or kernel.get("_DepthUB", du) < du
 
+
+def plsinWeaveLookahead(macroTile0: int, macroTile1: int) -> int:
+    """Return the hardware-validated PLSIN terminal-MFMA lead."""
+    return 3 if (macroTile0, macroTile1) in ((192, 256), (256, 192)) else 2
+
+
 def _parsePlsinDebugEnv():
     """Parse the single TENSILE_PLSIN_DEBUG umbrella into a {name: value} map.
 

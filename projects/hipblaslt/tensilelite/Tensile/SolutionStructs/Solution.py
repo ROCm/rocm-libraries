@@ -60,7 +60,7 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
-from Tensile.Common.Utilities import plsinDebugEnv
+from Tensile.Common.Utilities import plsinDebugEnv, plsinWeaveLookahead
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -1696,18 +1696,15 @@ class Solution(collections.abc.Mapping):
                            min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
       # Overlap feasibility: the weave only weaves store-pairs with pair index >=
       # weaveLA. numStorePairs = MIWT0*MIWT1//2; at or below the threshold no pair
-      # is woven, so PLSIN would be pure overhead. This reads the same
-      # TENSILE_PLSIN_DEBUG="TENSILE_WEAVE_LA=..." override and the same production default as the
-      # scheduler (Components/Subtile/LogicalScheduler.py), so the gate and the
-      # weave move together; pinning a separate constant here made the two
-      # disagree whenever the override was set.
+      # is woven, so PLSIN would be pure overhead. Read the same helper and
+      # TENSILE_WEAVE_LA test override as the scheduler so eligibility and emission
+      # cannot disagree.
       #
-      # The default 2 admits the numStorePairs==4 tiles (MT64x128 / MT128x64 /
-      # MT32x256 / MT256x32). Do NOT lower it to 0 to admit the numStorePairs==2
-      # tiles: 0 weaves nothing at all, so the already-eligible tiles lose their
-      # overlap (-2.2pp measured). Admitting those needs the weave depth decoupled
-      # from this threshold, not a lower threshold.
-      weaveLA = int(plsinDebugEnv("TENSILE_WEAVE_LA", "2"))
+      # MT192x256/MT256x192 use 3 for gfx950 ACC-read correctness; other eligible
+      # tiles, including MT256x256, retain the validated default of 2.
+      weaveLA = int(plsinDebugEnv(
+        "TENSILE_WEAVE_LA",
+        str(plsinWeaveLookahead(state["MacroTile0"], state["MacroTile1"]))))
       overlapPossible = bool(miwt) and len(miwt) == 2 and \
                         (miwt[0] * miwt[1] // 2) > weaveLA
       streamKFixupSafe = True

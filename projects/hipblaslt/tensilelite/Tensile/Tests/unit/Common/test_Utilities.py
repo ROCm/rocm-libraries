@@ -49,6 +49,7 @@ from Tensile.Common.Utilities import (
     print2,
     printExit,
     printWarning,
+    plsinWeaveLookahead,
     roundUp,
     roundUpToNearestMultiple,
     setVerbosity,
@@ -57,6 +58,13 @@ from Tensile.Common.Utilities import (
     versionIsCompatible,
     wmmaV3InputVgprLayout,
 )
+
+
+def test_plsin_weave_lookahead_by_macro_tile():
+    assert plsinWeaveLookahead(256, 256) == 2
+    assert plsinWeaveLookahead(192, 256) == 3
+    assert plsinWeaveLookahead(256, 192) == 3
+
 
 @pytest.fixture
 def mock_openFile():

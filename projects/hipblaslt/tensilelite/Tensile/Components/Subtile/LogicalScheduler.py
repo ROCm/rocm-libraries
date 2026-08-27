@@ -43,7 +43,7 @@ from rocisa.instruction import SAddCU32, SSubBU32, SCSelectB32, SCSelectB64, \
     MFMAInstruction, MXMFMAInstruction
 
 from ...Common.GlobalParameters import globalParameters
-from ...Common import plsinDebugEnv
+from ...Common import plsinDebugEnv, plsinWeaveLookahead
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
@@ -3680,19 +3680,11 @@ class LogicalScheduler:
         plainLabel = Label(f"{label}_PlainNLL", "")
         # Runtime front guard: fall through to FUSED only when both hold, else PLAIN.
         module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
-        # 4d-3b weave: pull the terminal-subIterK (last K) MFMAs OUT of the FUSED loop
-        # and stash them grouped by store-pair (accBase//8) so the fused store can
-        # interleave each pair's 2 MFMAs across its ds_bpermute window. If extraction
-        # is not well-formed (unexpected acc layout), groups is None -> store falls
-        # back to emitting all MFMAs up front (monolithic 4d-3a, still correct).
-        # LA = how many store-pairs ahead a pair's terminal MFMAs are issued (the
-        # MFMA->accvgpr_read latency window). The first LA pairs keep their MFMAs in
-        # the loop (natural large distance); pairs >= LA are woven.
-        # Must stay in step with the eligibility gate's default in
-        # SolutionStructs/Solution.py (assignPostLoopStoreInNll), which admits a
-        # tile only when numStorePairs > weaveLA so at least one pair is left in
-        # the loop to hide the woven ones under.
-        weaveLA = int(plsinDebugEnv("TENSILE_WEAVE_LA", "2"))  # test-only override
+        # gfx950 validation shows that MT192x256 needs one extra store-pair of
+        # MFMA->ACC-read distance; MT256x256 and the other eligible tiles retain 2.
+        weaveLA = int(plsinDebugEnv(
+            "TENSILE_WEAVE_LA",
+            str(plsinWeaveLookahead(kernel["MacroTile0"], kernel["MacroTile1"]))))
         fusedEmitted = copy.deepcopy(emitted_3d)
         # Macro tiles larger than 256x256 peak at 256 arch VGPRs in the loop, so the
         # fused store's temporaries (valuC window, coord0/1, and the element batch)
@@ -3739,7 +3731,8 @@ class LogicalScheduler:
                         lendTiles.append((_t.regList.indices[0], len(_t.regList.indices)))
             writer.states.subtileFusedLendVgprs = lendTiles
         else:
-            weaveGroups = self._extractTerminalMfmaGroups(fusedEmitted, keepInLoop=weaveLA)
+            weaveGroups = self._extractTerminalMfmaGroups(
+                fusedEmitted, keepInLoop=weaveLA)
             writer.states.subtileFusedLendVgprs = []
         savedGroups = writer.states.subtileWeaveMfmaGroups
         savedMaster = writer.states.subtileWeaveMfmaGroupsMaster
