@@ -82,6 +82,21 @@ def _hook_body(rendered: str, key: str) -> str:
     return match.group(1)
 
 
+def _hook_statement(body: str) -> str:
+    """The hook body with '//'-only comment lines dropped, so a check can
+    require the REMAINING code be EXACTLY the placeholder statement -- not
+    merely end with it. `body.strip().endswith(...)` alone would still pass
+    if a template regression inserted real logic (a branch, a helper call)
+    ahead of the placeholder `return`; this is what actually distinguishes a
+    stub from a hook that quietly started doing work."""
+    kept = [
+        line
+        for line in body.splitlines()
+        if line.strip() and not line.strip().startswith("//")
+    ]
+    return "\n".join(kept).strip()
+
+
 class TestEveryHookIsAPlaceholder:
     """Every hook body is a TODO placeholder -- none silently emitted as a
     working body. A hook that renders real logic instead of a `TODO` marker
@@ -106,9 +121,9 @@ class TestEveryHookIsAPlaceholder:
             "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
         body = _hook_body(rendered, "graph_match")
-        assert body.strip().endswith("return std::nullopt;"), (
-            "graph_match's stub must return std::nullopt (declining every graph) "
-            f"until filled in; got:\n{body}"
+        assert _hook_statement(body) == "return std::nullopt;", (
+            "graph_match's stub must be EXACTLY 'return std::nullopt;' "
+            f"(declining every graph), no other code, until filled in; got:\n{body}"
         )
 
     def test_kernel_match_returns_the_documented_false(
@@ -118,18 +133,20 @@ class TestEveryHookIsAPlaceholder:
             "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
         body = _hook_body(rendered, "kernel_match")
-        assert body.strip().endswith(
-            "return false;"
-        ), f"kernel_match's stub must return false until filled in; got:\n{body}"
+        assert _hook_statement(body) == "return false;", (
+            "kernel_match's stub must be EXACTLY 'return false;', no other "
+            f"code, until filled in; got:\n{body}"
+        )
 
     def test_score_returns_the_documented_zero(self, generator, scale_add_config):
         rendered = generator._render_template(
             "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
         body = _hook_body(rendered, "score")
-        assert body.strip().endswith(
-            "return 0.0;"
-        ), f"score's stub must return 0.0 until filled in; got:\n{body}"
+        assert _hook_statement(body) == "return 0.0;", (
+            "score's stub must be EXACTLY 'return 0.0;', no other code, "
+            f"until filled in; got:\n{body}"
+        )
 
     def test_operation_matcher_is_a_placeholder_multi_pack(
         self, generator, binary_ops_config
@@ -150,9 +167,10 @@ class TestEveryHookIsAPlaceholder:
             f"found {len(matches)} of {len(binary_ops_config.packs)}"
         )
         for body in matches:
-            assert body.strip().endswith(
-                "return false;"
-            ), f"per-pack operation matcher stub must return false; got:\n{body}"
+            assert _hook_statement(body) == "return false;", (
+                "per-pack operation matcher stub must be EXACTLY "
+                f"'return false;', no other code; got:\n{body}"
+            )
 
 
 class TestSymbolsMatchDescriptors:

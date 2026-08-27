@@ -22,7 +22,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.skill_paths import extract_candidates, git_tracked_paths, resolves
+from tests.skill_paths import (
+    extract_candidates,
+    git_tracked_paths,
+    line_ref_is_valid,
+    resolves,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _SKILL_DIR = _REPO_ROOT / "projects/hipdnn/tools/ai/skills/hipdnn-ingestor-engine"
@@ -73,6 +78,19 @@ class TestEveryRepoPathTheSkillCitesExists:
         dangling = [c for c in candidates if not resolves(c.path, files, dirs)]
         assert not dangling, "dangling path(s) the skill cites:\n" + "\n".join(
             f"  {c.file}:{c.line}: `{c.raw}`" for c in dangling
+        )
+
+    def test_no_stale_line_numbers(self, repo_tracked_paths):
+        """A `path:N`/`path:N-M` citation claims line N exists TODAY --
+        resolving the bare path is not enough (a suffix match survives a
+        file rename, but not edits that shrank the file below N)."""
+        files, _dirs = repo_tracked_paths
+        candidates, _ = _all_candidates()
+        stale = [
+            c for c in candidates if not line_ref_is_valid(c.path, files, _REPO_ROOT)
+        ]
+        assert not stale, "stale line reference(s) the skill cites:\n" + "\n".join(
+            f"  {c.file}:{c.line}: `{c.raw}`" for c in stale
         )
 
     def test_placeholder_skip_count_is_sane(self):
@@ -129,6 +147,28 @@ class TestExtractorCatchesARealDanglingPath:
         candidates, _ = extract_candidates(fixture_text, "fixture.md")
         assert len(candidates) == 2
         assert all(resolves(c.path, files, dirs) for c in candidates)
+
+    def test_synthetic_stale_line_number_is_flagged(self, repo_tracked_paths):
+        """A `path:N` citation whose N exceeds the real file's line count is
+        a stale reference -- bare-path resolution alone would miss it."""
+        files, _dirs = repo_tracked_paths
+        fixture_text = "See `projects/hipdnn/CMakeLists.txt:999999` for the option.\n"
+        candidates, _ = extract_candidates(fixture_text, "fixture.md")
+        assert len(candidates) == 1
+        assert not line_ref_is_valid(candidates[0].path, files, _REPO_ROOT), (
+            "projects/hipdnn/CMakeLists.txt:999999 was accepted as a valid "
+            "line reference -- either the file grew past 999999 lines or "
+            "line_ref_is_valid stopped checking line counts"
+        )
+
+    def test_synthetic_valid_line_number_is_not_flagged(self, repo_tracked_paths):
+        """Companion sanity check: a real, in-range line citation on the
+        same real file must NOT be flagged."""
+        files, _dirs = repo_tracked_paths
+        fixture_text = "See `projects/hipdnn/CMakeLists.txt:1` for the top.\n"
+        candidates, _ = extract_candidates(fixture_text, "fixture.md")
+        assert len(candidates) == 1
+        assert line_ref_is_valid(candidates[0].path, files, _REPO_ROOT)
 
 
 class TestExtractionIsConservative:

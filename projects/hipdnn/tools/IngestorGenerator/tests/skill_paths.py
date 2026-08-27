@@ -104,6 +104,23 @@ def _strip_line_suffix(candidate: str) -> str:
     return _LINE_SUFFIX_RE.sub("", candidate)
 
 
+def parse_line_ref(candidate: str) -> tuple[int, int] | None:
+    """Pull the `:123` or `:123-456` line-range suffix off `candidate` as an
+    inclusive `(start, end)` pair, or `None` if it carries no line suffix.
+
+    A citation naming a specific line (or range) is a claim that the line
+    exists TODAY -- file existence alone does not verify that; a stale line
+    number silently survives file renames, insertions, and deletions above
+    it forever, pointing a reader at the wrong code."""
+    match = _LINE_SUFFIX_RE.search(candidate)
+    if not match:
+        return None
+    start = int(match.group(0).lstrip(":").split("-")[0])
+    end_group = match.group(1)
+    end = int(end_group[1:]) if end_group else start
+    return (start, end)
+
+
 def _strip_ellipsis_prefix(candidate: str) -> str:
     """RUNBOOK/prompt-style elision, e.g. `.../kernel_ingestor_engine/x.cmake`
     stands for some longer real path ending in that suffix."""
@@ -161,18 +178,48 @@ def git_tracked_paths(repo_root: Path) -> tuple[set[str], set[str]]:
     return files, dirs
 
 
+def _find_match(candidate: str, universe: set[str]) -> str | None:
+    """The real repo-relative path in `universe` whose trailing path
+    components equal `candidate`'s -- i.e. resolution regardless of which
+    repo root a `$REPO`/relative prefix was stripped from."""
+    parts = tuple(p for p in candidate.split("/") if p)
+    if not parts:
+        return None
+    n = len(parts)
+    for real in universe:
+        real_parts = real.split("/")
+        if len(real_parts) >= n and tuple(real_parts[-n:]) == parts:
+            return real
+    return None
+
+
 def resolves(candidate: str, files: set[str], dirs: set[str]) -> bool:
     """True if `candidate`'s path components are a suffix of some real
     tracked file or directory's components -- i.e. it resolves regardless of
     which repo root a `$REPO`/relative prefix was stripped from."""
     stripped = _strip_line_suffix(_strip_ellipsis_prefix(candidate).rstrip("/"))
-    parts = tuple(p for p in stripped.split("/") if p)
-    if not parts:
-        return False
-    n = len(parts)
-    universe = dirs | files
-    for real in universe:
-        real_parts = real.split("/")
-        if len(real_parts) >= n and tuple(real_parts[-n:]) == parts:
-            return True
-    return False
+    return _find_match(stripped, dirs | files) is not None
+
+
+def line_ref_is_valid(candidate: str, files: set[str], repo_root: Path) -> bool:
+    """True if `candidate` carries no `:N`/`:N-M` line-range suffix, or the
+    suffix's end line is within the REAL file's current line count.
+
+    A `path:65` citation is a claim that line 65 exists TODAY -- resolving
+    the bare path is not enough: a file rename-proof suffix match still
+    lets a stale line survive edits above it forever, silently pointing a
+    reader at the wrong (or nonexistent) line.
+    """
+    line_ref = parse_line_ref(candidate)
+    if line_ref is None:
+        return True
+    stripped_path = _strip_line_suffix(_strip_ellipsis_prefix(candidate).rstrip("/"))
+    real = _find_match(stripped_path, files)
+    if real is None:
+        # Bare path resolution already reports this candidate as dangling;
+        # don't double-report an unrelated stale-line finding for it.
+        return True
+    _, end = line_ref
+    with (repo_root / real).open("r", encoding="utf-8", errors="replace") as f:
+        line_count = sum(1 for _ in f)
+    return end <= line_count
