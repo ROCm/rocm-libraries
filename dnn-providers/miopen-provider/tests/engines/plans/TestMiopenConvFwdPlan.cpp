@@ -103,13 +103,13 @@ TEST(TestConvFwdParams, PadsOneDimensionalChannelsLastGraphWithChannelStride)
 {
     // NLC tensors: the padded trailing dimension must take the channel count as
     // its stride, not 1, or MIOpen reads the tensor as channels-first.
-    constexpr int64_t channelCount = 4;
-    const std::vector<int64_t> xDims = {1, channelCount, 8};
-    const std::vector<int64_t> xStrides = {32, 1, channelCount};
-    const std::vector<int64_t> wDims = {4, channelCount, 3};
-    const std::vector<int64_t> wStrides = {12, 1, channelCount};
-    const std::vector<int64_t> yDims = {1, channelCount, 6};
-    const std::vector<int64_t> yStrides = {24, 1, channelCount};
+    constexpr int64_t CHANNEL_COUNT = 4;
+    const std::vector<int64_t> xDims = {1, CHANNEL_COUNT, 8};
+    const std::vector<int64_t> xStrides = {32, 1, CHANNEL_COUNT};
+    const std::vector<int64_t> wDims = {4, CHANNEL_COUNT, 3};
+    const std::vector<int64_t> wStrides = {12, 1, CHANNEL_COUNT};
+    const std::vector<int64_t> yDims = {1, CHANNEL_COUNT, 6};
+    const std::vector<int64_t> yStrides = {24, 1, CHANNEL_COUNT};
     const std::vector<int64_t> convPrePadding = {0};
     const std::vector<int64_t> convPostPadding = {0};
     const std::vector<int64_t> convStrides = {1};
@@ -143,7 +143,7 @@ TEST(TestConvFwdParams, PadsOneDimensionalChannelsLastGraphWithChannelStride)
                       tensor->tensorDescriptor(), &dataType, dims.data(), strides.data()),
                   miopenStatusSuccess);
         EXPECT_EQ(dims[3], 1);
-        EXPECT_EQ(strides[3], channelCount);
+        EXPECT_EQ(strides[3], CHANNEL_COUNT);
     }
 }
 

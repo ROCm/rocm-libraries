@@ -189,7 +189,7 @@ inline constexpr size_t MIOPEN_MIN_CONV_SPATIAL_DIM_COUNT = 2;
 /// A 1D convolution runs as a 2D convolution with a trailing size-1 spatial
 /// dimension. Zero padding, unit stride and unit dilation over that dimension
 /// leave the result unchanged.
-inline constexpr size_t paddedConvSpatialDimCount(size_t spatialDimCount)
+constexpr size_t paddedConvSpatialDimCount(size_t spatialDimCount)
 {
     return spatialDimCount < MIOPEN_MIN_CONV_SPATIAL_DIM_COUNT ? MIOPEN_MIN_CONV_SPATIAL_DIM_COUNT
                                                                : spatialDimCount;
