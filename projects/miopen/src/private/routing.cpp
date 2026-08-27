@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Implementation of the MIOpen public-wrapper runtime dispatch seam declared in
-// src/private/routing.hpp (RFC 0001 hipDNN forwarding). Parses the
+// src/private/routing.hpp. Parses the
 // MIOPEN_HIPDNN_FORWARDING environment variable, emits the one-time
 // configuration banner, and answers the per-call routing decision by consulting
 // the compile-time forwarding set.
@@ -73,7 +73,7 @@ ForwardingMode ParseForwardingMode(const char* value)
 
 bool IsInForwardingSet(const char* entryPoint)
 {
-    // The compile-time forwarding set (RFC 0001 routing policy): entry points
+    // The compile-time forwarding set: entry points
     // listed here are redirected to hipDNN when forwarding is enabled. Adding an
     // entry point is a one-line change.
     for(const char* name : std::initializer_list<const char*>{

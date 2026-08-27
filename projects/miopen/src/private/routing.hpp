@@ -1,8 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Runtime dispatch seam for the MIOpen public wrapper (RFC 0001 hipDNN
-// forwarding, feature gating and routing policy). The pass-through stubs in
+// Runtime dispatch seam for the MIOpen public wrapper. The pass-through stubs in
 // src/private/wrapper.cpp consult Dispatch() on every public call to decide
 // whether the call is served by the MIOpen implementation (the _impl symbols in
 // libMIOpen_private.so) or forwarded to hipDNN. The decision is governed at

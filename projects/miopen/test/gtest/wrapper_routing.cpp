@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Unit tests for the MIOpen public-wrapper runtime dispatch seam
-// (src/private/routing.{hpp,cpp}, RFC 0001 hipDNN forwarding). The seam lives in
+// (src/private/routing.{hpp,cpp}). The seam lives in
 // the wrapper library, which only exists when MIOPEN_ENABLE_HIPDNN_WRAPPER is
 // ON, so the whole file compiles to zero tests when the wrapper is OFF. The seam
 // object is compiled into the test-common library (see gtest/CMakeLists.txt)
@@ -99,7 +99,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                              ParseCase{"Yes", ForwardingMode::Enabled}));
 
 // ---------------------------------------------------------------------------
-// IsInForwardingSet: empty in Phase 1, so false for every entry point.
+// IsInForwardingSet: the forwarding set is empty, so false for every entry point.
 // ---------------------------------------------------------------------------
 
 class CPU_WrapperRoutingForwardingSet_NONE : public ::testing::TestWithParam<const char*>
