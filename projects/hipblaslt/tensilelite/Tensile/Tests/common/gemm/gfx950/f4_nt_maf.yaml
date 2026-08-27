@@ -9,7 +9,7 @@ TestParameters:
 
 GlobalParameters:
   NumWarmups: 10
-  EnqueuesPerSync: 100
+  EnqueuesPerSync: 2200
   SyncsPerBenchmark: 1
   PrintSolutionRejectionReason: True
   NumElementsToValidate: -1
@@ -27,7 +27,7 @@ GlobalParameters:
   BoundsCheck: 0
   KeepBuildTmp: True
   CpuThreads: 1
-  RotatingBufferSize: 0
+  RotatingBufferSize: 512
 
 BenchmarkProblems:
 
