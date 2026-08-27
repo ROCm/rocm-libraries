@@ -7,13 +7,16 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <iomanip>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -92,21 +95,22 @@ int main(int argc, char** argv) noexcept
             .default_value(std::string("support_matrix.md"))
             .implicit_value(std::string("support_matrix.md"))
             .help("Generate a markdown support matrix file (default: support_matrix.md).");
-        parser.add_argument("--allow-bundles")
+        parser.add_argument("--no-bundles")
             .default_value(false)
             .implicit_value(true)
-            .help("Enable golden reference bundle test registration. "
-                  "Can also be set via HIPDNN_TEST_ALLOW_BUNDLES=1 env var.");
+            .help("Disable bundle test registration, leaving only the C++ tests built "
+                  "into this binary. Equivalent to HIPDNN_TEST_ALLOW_BUNDLES=0.");
         parser.add_argument("--gd", "--golden-data-dir")
             .help("Path to the integration test bundle data directory. "
-                  "Defaults to <exe>/../lib/integration_test_bundles/. "
+                  "Defaults to <exe>/../lib/integration-test-bundles/. "
                   "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
         // --verification-mode governs BUNDLE tests (how the engine's output is
         // verified). It is independent of --reference-executor, which governs the
         // parameterized tests (which ref executor is exercised as the SUT).
         parser.add_argument("--vm", "--verification-mode")
             .help("How bundle engine output is verified: 'auto' (default; golden -> "
-                  "GPU ref -> CPU ref -> skip), 'golden', 'gpu', or 'cpu'. "
+                  "GPU ref -> CPU ref -> skip), 'golden', 'gpu', 'cpu', or "
+                  "'golden-check' (validate golden data against CPU ref, no engine). "
                   "Can also be set via HIPDNN_TEST_VERIFICATION_MODE env var.");
         parser.add_argument("--capture-bundles")
             .help("Capture C++ graph tests as JSON bundles into the given directory. "
@@ -171,8 +175,9 @@ int main(int argc, char** argv) noexcept
             }
         }
 
-        // Parse --allow-bundles, --golden-data-dir, --verification-mode
-        auto allowBundles = parser.get<bool>("--allow-bundles");
+        // Bundles are on by default; --no-bundles is the explicit opt-out.
+        // HIPDNN_TEST_ALLOW_BUNDLES (handled in TestConfig) overrides.
+        auto allowBundles = !parser.get<bool>("--no-bundles");
 
         std::optional<std::filesystem::path> goldenDataDir;
         if(parser.is_used("--golden-data-dir"))
@@ -317,6 +322,26 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        // Enumerated before any test records support data (see setEngineNames); the
+        // vector keeps enumeration order for the table columns below.
+        std::vector<std::string> loadedEngineNames;
+        if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())
+        {
+            std::map<int64_t, std::string> engineNamesById;
+            size_t numEngines = 0;
+            if(hipdnnGetEngineCount_ext(handle, &numEngines) == HIPDNN_STATUS_SUCCESS)
+            {
+                for(size_t i = 0; i < numEngines; ++i)
+                {
+                    auto info = getEngineInfo(handle, i);
+                    loadedEngineNames.push_back(info.engineName);
+                    engineNamesById.emplace(info.engineId, std::move(info.engineName));
+                }
+            }
+            hipdnn_integration_tests::SupportMatrixCollector::get().setEngineNames(
+                std::move(engineNamesById));
+        }
+
         hipdnn_integration_tests::bundle::registerBundleTests();
 
         const int result = RUN_ALL_TESTS();
@@ -324,6 +349,69 @@ int main(int argc, char** argv) noexcept
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
+
+        // Guard against a silently empty run: bundles are enabled, yet nothing
+        // was selected. This must be checked *after* RUN_ALL_TESTS(). GTest only
+        // applies --gtest_filter inside UnitTestImpl::RunAllTests(), via
+        // FilterTests(), which is the sole place TestInfo::should_run_ is set;
+        // it is default-constructed to false. So test_to_run_count() is
+        // unconditionally 0 before RUN_ALL_TESTS(), no matter how many tests
+        // were registered, and checking it earlier fails every engine-driven run.
+        const auto* unitTest = ::testing::UnitTest::GetInstance();
+        if(unitTest->test_to_run_count() == 0
+           && hipdnn_integration_tests::TestConfig::get().allowBundles())
+        {
+            const auto dataDir = hipdnn_integration_tests::bundle::resolveDataDir();
+            const bool dataDirFound = std::filesystem::exists(dataDir);
+
+            // A run that named an engine, or one whose bundle data is actually
+            // present, is expected to select something. A local build with
+            // neither is allowed to run empty.
+            if(hipdnn_integration_tests::TestConfig::get().hasEngineName() || dataDirFound)
+            {
+                // Print the counts, not a guess: "0 registered" is a build or
+                // discovery problem, "N registered, 0 selected" is a filter
+                // problem. They have different fixes and these numbers are the
+                // only way to tell them apart from a CI log.
+                const int suiteCount = unitTest->total_test_suite_count();
+                std::cerr << "Error: zero tests ran.\n"
+                          << "  registered:      " << unitTest->total_test_count() << " test(s) in "
+                          << suiteCount << " suite(s)\n"
+                          << "  selected:        0 (nothing matched --gtest_filter)\n"
+                          << "  gtest_filter:    " << GTEST_FLAG_GET(filter) << "\n"
+                          << "  bundle data dir: " << dataDir
+                          << (dataDirFound ? " (exists)" : " (MISSING)") << "\n";
+
+                constexpr int MAX_SUITES_TO_LIST = 10;
+                for(int i = 0; i < suiteCount && i < MAX_SUITES_TO_LIST; ++i)
+                {
+                    std::cerr << "  registered suite: " << unitTest->GetTestSuite(i)->name()
+                              << "\n";
+                }
+                if(suiteCount > MAX_SUITES_TO_LIST)
+                {
+                    std::cerr << "  ... and " << (suiteCount - MAX_SUITES_TO_LIST)
+                              << " more suite(s)\n";
+                }
+
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
+        }
+
+        {
+            const int total = unitTest->test_to_run_count();
+            const int passed = unitTest->successful_test_count();
+            const int skip = unitTest->skipped_test_count();
+            const int failed = unitTest->failed_test_count();
+            const double pct = total > 0 ? 100.0 * passed / total : 0.0;
+
+            std::cerr << "\n==== TEST COVERAGE SUMMARY ====\n"
+                      << "Passed:  " << passed << " / " << total << " (" << std::fixed
+                      << std::setprecision(1) << pct << "%)\n"
+                      << "Skipped: " << skip << "\n"
+                      << "Failed:  " << failed << "\n";
+        }
 
         // Generate support matrix if requested
         if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())
@@ -337,16 +425,7 @@ int main(int argc, char** argv) noexcept
             }
             else
             {
-                // Enumerate all loaded engines from the handle
-                size_t numEngines = 0;
-                if(hipdnnGetEngineCount_ext(handle, &numEngines) == HIPDNN_STATUS_SUCCESS)
-                {
-                    for(size_t i = 0; i < numEngines; ++i)
-                    {
-                        auto info = getEngineInfo(handle, i);
-                        allEngineNames.push_back(std::move(info.engineName));
-                    }
-                }
+                allEngineNames = std::move(loadedEngineNames);
             }
 
             hipdnn_integration_tests::SupportMatrixCollector::get().writeMarkdown(allEngineNames);

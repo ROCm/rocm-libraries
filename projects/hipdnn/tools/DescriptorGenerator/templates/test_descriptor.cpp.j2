@@ -21,6 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -37,17 +38,84 @@ public:
         return _wrapper->asDescriptor<{{ op.class_name }}>();
     }
 
-    void setTensors() const
+    void setTensors(std::optional<hipdnnBackendAttributeName_t> excluded = std::nullopt) const
     {
         auto desc = getDescriptor();
 {% for tf in op.tensor_fields %}
-        desc->setAttribute({{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
-                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                           1,
-                           &{{ tf.member_name }});
+        if(!excluded || *excluded != {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }})
+        {
+            desc->setAttribute({{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               &{{ tf.member_name }});
+        }
 {% endfor %}
     }
+{% if op.mode_rules %}
+    void setModeRuleAttributes(
+        {{ op.mode_rule_mode_field.test_c_type }} mode,
+        std::optional<hipdnnBackendAttributeName_t> excluded = std::nullopt) const
+    {
+        auto desc = getDescriptor();
+{% for tf in op.required_tensor_fields %}
+        if(!excluded || *excluded != {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }})
+        {
+            desc->setAttribute({{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               &{{ tf.member_name }});
+        }
+{% endfor %}
+{% if op.has_compute_data_type %}
+        if(!excluded || *excluded != {{ op.compute_data_type_attr }})
+        {
+            const auto computeType = HIPDNN_DATA_FLOAT;
+            desc->setAttribute(
+                {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        }
+{% endif %}
 
+        switch(mode)
+        {
+{% set tf_by_name = op.tensor_field_by_name %}
+{% set mode_field = op.mode_rule_mode_field %}
+{% for rule in op.mode_rules %}
+        case {{ mode_field.enum_def.backend_prefix }}{{ rule.mode }}:
+        {
+{% for tensor_name in rule.required_optional_tensors %}
+{% set tf = tf_by_name[tensor_name] %}
+            if(!excluded || *excluded != {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }})
+            {
+                desc->setAttribute({{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                   1,
+                                   &{{ tf.member_name }});
+            }
+{% endfor %}
+{% for field in op.mode_rule_controlled_scalar_fields %}
+{% set constraint = rule.scalar_constraints | selectattr("field", "equalto", field.name) | list | first %}
+{% if constraint and constraint.equals is not none %}
+            const auto {{ field.camel_name }} = static_cast<{{ field.cpp_type }}>({{ constraint.equals }});
+{% else %}
+            const auto {{ field.camel_name }} = static_cast<{{ field.cpp_type }}>({{ op.test_data.field_values.get(field.name, 0) }});
+{% endif %}
+            desc->setAttribute(
+                {{ field.attr_name }}, {{ field.backend_type }}, 1, &{{ field.camel_name }});
+{% endfor %}
+            break;
+        }
+{% endfor %}
+        default:
+            break;
+        }
+        desc->setAttribute({{ mode_field.attr_name }}, {{ mode_field.backend_type }}, 1, &mode);
+    }
+{% endif %}
+
+
+{# Only emitted when the operation has data fields to set; ops whose descriptor carries just
+   tensors and a compute type would otherwise get an empty hook and dead call sites. #}
+{% if op.data_fields %}
     void {{ op.effective_test_params_method_name }}() const
     {
         auto desc = getDescriptor();
@@ -62,18 +130,30 @@ public:
 {% if df.is_vector %}
         desc->setAttribute(
             {{ df.attr_name }}, {{ df.backend_type }}, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
+{% elif df.is_scalar and df.required %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+        auto {{ df.camel_name }} = static_cast<{{ df.cpp_type }}>({{ value }});
+        desc->setAttribute(
+            {{ df.attr_name }}, {{ df.backend_type }}, 1, &{{ df.camel_name }});
 {% endif %}
 {% endfor %}
     }
+{% endif %}
 
-    void setRequiredAttributes() const
+    void setRequiredAttributes(
+        std::optional<hipdnnBackendAttributeName_t> excluded = std::nullopt) const
     {
-        setTensors();
+        setTensors(excluded);
+{% if op.data_fields %}
         {{ op.effective_test_params_method_name }}();
+{% endif %}
 {% if op.has_compute_data_type %}
-        auto computeType = HIPDNN_DATA_FLOAT;
-        getDescriptor()->setAttribute(
-            {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        if(!excluded || *excluded != {{ op.compute_data_type_attr }})
+        {
+            auto computeType = HIPDNN_DATA_FLOAT;
+            getDescriptor()->setAttribute(
+                {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        }
 {% endif %}
 {% for ef in op.enum_fields %}
         auto {{ ef.camel_name }} = static_cast<int64_t>({{ ef.enum_short_type }}::{{ ef.test_enum_value }});
@@ -115,7 +195,7 @@ protected:
 {% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
 {% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
         {{ tf.member_name }} = createFinalizedTensor(
-            {{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+            {{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}), HIPDNN_DATA_{{ tc.data_type }});
 {% else %}
 {% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
         {{ tf.member_name }} = createFinalizedTensor({{ uid_const }});
@@ -162,22 +242,117 @@ TEST_F(Test{{ op.class_name }}, FinalizeWithRequiredAttributes)
     ASSERT_NO_THROW(getDescriptor()->finalize());
     ASSERT_TRUE(getDescriptor()->isFinalized());
 }
-{% for tf in op.required_tensor_fields %}
 
-TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ tf.pascal_name }}Tensor)
+{% if op.required_tensor_fields or op.has_compute_data_type %}
+// The parameter is the one required attribute to leave unset. Every other required attribute is
+// set, so each case proves the omitted attribute alone is what finalize() rejects.
+class Test{{ op.class_name }}FinalizeFailsWithout
+    : public Test{{ op.class_name }},
+      public ::testing::WithParamInterface<hipdnnBackendAttributeName_t>
 {
-    auto desc = getDescriptor();
-{% for tf2 in op.tensor_fields %}
-{% if tf2.name != tf.name %}
-    desc->setAttribute(
-        {{ op.operation_attr_prefix }}_{{ tf2.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf2.member_name }});
-{% endif %}
-{% endfor %}
-    {{ op.effective_test_params_method_name }}();
+};
 
+TEST_P(Test{{ op.class_name }}FinalizeFailsWithout, FinalizeFailsWithout)
+{
+{% if op.mode_rules %}
+    setModeRuleAttributes({{ op.mode_rule_mode_field.test_backend_value }}, GetParam());
+{% else %}
+    setRequiredAttributes(GetParam());
+{% endif %}
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RequiredAttributes,
+    Test{{ op.class_name }}FinalizeFailsWithout,
+    ::testing::Values(
+{% for tf in op.required_tensor_fields %}
+        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}{% if not loop.last or op.has_compute_data_type %},{% endif %}
+
+{% endfor %}
+{% if op.has_compute_data_type %}
+        {{ op.compute_data_type_attr }}
+{% endif %}
+    ));
+{% endif %}
+{% if op.mode_rules %}
+{% set tf_by_name = op.tensor_field_by_name %}
+{% set df_by_name = op.data_field_by_name %}
+{% set mode_field = op.mode_rule_mode_field %}
+
+// ============================================================================
+// Mode-rule descriptor contract
+// ============================================================================
+{% for rule in op.mode_rules %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeSucceedsFor{{ rule.mode }}Mode)
+{
+    setModeRuleAttributes({{ mode_field.enum_def.backend_prefix }}{{ rule.mode }});
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+    ASSERT_TRUE(getDescriptor()->isFinalized());
+}
+{% for tensor_name in rule.required_optional_tensors %}
+{% set tf = tf_by_name[tensor_name] %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeRejectsMissing{{ tf.pascal_name }}In{{ rule.mode }}Mode)
+{
+    setModeRuleAttributes({{ mode_field.enum_def.backend_prefix }}{{ rule.mode }},
+                          {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }});
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+{% for tf in op.optional_tensor_fields if tf.name not in rule.required_optional_tensors %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeRejects{{ tf.pascal_name }}In{{ rule.mode }}Mode)
+{
+    setModeRuleAttributes({{ mode_field.enum_def.backend_prefix }}{{ rule.mode }});
+    auto desc = getDescriptor();
+    desc->setAttribute({{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &{{ tf.member_name }});
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 {% endfor %}
+{% for constraint in rule.scalar_constraints %}
+{% set field = df_by_name[constraint.field] %}
+{% if constraint.equals is not none %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeRejectsNoncanonical{{ field.pascal_name }}In{{ rule.mode }}Mode)
+{
+    setModeRuleAttributes({{ mode_field.enum_def.backend_prefix }}{{ rule.mode }});
+    const auto {{ field.camel_name }} = static_cast<{{ field.cpp_type }}>({{ constraint.equals + 1 }});
+    getDescriptor()->setAttribute(
+        {{ field.attr_name }}, {{ field.backend_type }}, 1, &{{ field.camel_name }});
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+{% endif %}
+{% if constraint.minimum is not none %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeRejectsBelowMinimum{{ field.pascal_name }}In{{ rule.mode }}Mode)
+{
+    setModeRuleAttributes({{ mode_field.enum_def.backend_prefix }}{{ rule.mode }});
+    const auto {{ field.camel_name }}
+        = static_cast<{{ field.cpp_type }}>({{ constraint.minimum - 1 }});
+    getDescriptor()->setAttribute(
+        {{ field.attr_name }}, {{ field.backend_type }}, 1, &{{ field.camel_name }});
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+{% endif %}
+{% if constraint.maximum_tensor %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeRejectsAboveMaximum{{ field.pascal_name }}In{{ rule.mode }}Mode)
+{
+    setModeRuleAttributes({{ mode_field.enum_def.backend_prefix }}{{ rule.mode }});
+    const auto {{ field.camel_name }} = static_cast<{{ field.cpp_type }}>({{ op.test_data.field_values.get(field.name, 0) + 1 }});
+    getDescriptor()->setAttribute(
+        {{ field.attr_name }}, {{ field.backend_type }}, 1, &{{ field.camel_name }});
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% endif %}
 {% for df in op.required_data_fields %}
 {% if df.is_vector %}
 
@@ -202,43 +377,28 @@ TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ df.name | replace('_', ' 
 }
 {% endif %}
 {% endfor %}
-{% if op.has_compute_data_type %}
-
-TEST_F(Test{{ op.class_name }}, FinalizeFailsWithoutComputeType)
-{
-    setTensors();
-    {{ op.effective_test_params_method_name }}();
-{% for ef in op.enum_fields %}
-    auto {{ ef.camel_name }} = static_cast<int64_t>({{ ef.enum_short_type }}::{{ ef.test_enum_value }});
-    getDescriptor()->setAttribute(
-        {{ ef.attr_name }}, HIPDNN_TYPE_INT64, 1, &{{ ef.camel_name }});
-{% endfor %}
-{% for cf in op.mode_fields %}
-    auto {{ cf.camel_name }} = {{ cf.test_backend_value }};
-    getDescriptor()->setAttribute(
-        {{ cf.attr_name }}, {{ cf.backend_type }}, 1, &{{ cf.camel_name }});
-{% endfor %}
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-{% endif %}
 {% for ef in op.enum_fields %}
 
 TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ ef.enum_short_type }})
 {
     setTensors();
+{% if op.data_fields %}
     {{ op.effective_test_params_method_name }}();
+{% endif %}
     auto computeType = HIPDNN_DATA_FLOAT;
     getDescriptor()->setAttribute(
         {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 {% endfor %}
-{% for cf in op.mode_fields %}
+{% for cf in op.mode_fields if cf.emit_mode_sentinel_check %}
 
 TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ cf.enum_short_type }})
 {
     setTensors();
+{% if op.data_fields %}
     {{ op.effective_test_params_method_name }}();
+{% endif %}
     auto computeType = HIPDNN_DATA_FLOAT;
     getDescriptor()->setAttribute(
         {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -372,6 +532,19 @@ TEST_F(Test{{ op.class_name }}, Set{{ cf.enum_short_type }}WrongElementCount)
         HIPDNN_STATUS_BAD_PARAM);
 }
 {% endfor %}
+{% for sf in op.data_fields if sf.is_scalar %}
+
+TEST_F(Test{{ op.class_name }}, Set{{ sf.pascal_name }})
+{
+    auto desc = getDescriptor();
+{% set value = sf.test_value if sf.test_value is not none else op.test_data.field_values.get(sf.name, 0) %}
+    auto {{ sf.camel_name }} = static_cast<{{ sf.cpp_type }}>({{ value }});
+
+    ASSERT_NO_THROW(
+        desc->setAttribute({{ sf.attr_name }}, {{ sf.backend_type }}, 1, &{{ sf.camel_name }}));
+    EXPECT_EQ(desc->getData().{{ sf.fbs_field }}, {{ sf.camel_name }});
+}
+{% endfor %}
 {% if op.has_compute_data_type %}
 
 TEST_F(Test{{ op.class_name }}, SetComputeDataType)
@@ -463,9 +636,9 @@ TEST_F(Test{{ op.class_name }}, GetAttributeTensorDescriptor)
 // =============================================================================
 // GetAttribute Tests - {{ op.effective_data_fields_section_label }}
 // =============================================================================
-{% if op.vector_fields or op.enum_fields or op.mode_fields %}
+{% if op.vector_fields or op.enum_fields or op.mode_fields or op.scalar_fields %}
 
-TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.effective_error_label | capitalize }}Params)
+TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.name }}Params)
 {
     makeFinalized();
     auto desc = getDescriptor();
@@ -510,6 +683,17 @@ TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.effective_error_label | capita
         {{ cf.attr_name }}, {{ cf.backend_type }}, 1, &{{ cf.camel_name }}Count, &{{ cf.camel_name }}));
     ASSERT_EQ({{ cf.camel_name }}Count, 1);
     EXPECT_EQ({{ cf.camel_name }}, {{ cf.test_backend_value }});
+{% endfor %}
+{% for sf in op.scalar_fields %}
+
+    // {{ sf.name | replace('_', ' ') }}
+{% set value = sf.test_value if sf.test_value is not none else op.test_data.field_values.get(sf.name, 0) %}
+    {{ sf.cpp_type }} {{ sf.camel_name }} = 0;
+    int64_t {{ sf.camel_name }}Count = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        {{ sf.attr_name }}, {{ sf.backend_type }}, 1, &{{ sf.camel_name }}Count, &{{ sf.camel_name }}));
+    ASSERT_EQ({{ sf.camel_name }}Count, 1);
+    EXPECT_EQ({{ sf.camel_name }}, static_cast<{{ sf.cpp_type }}>({{ value }}));
 {% endfor %}
 }
 {% endif %}

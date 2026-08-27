@@ -962,7 +962,9 @@ namespace
                         // Skip experimental libraries
                         if(codeObjectFile.find("Experimental") != std::string::npos)
                             continue;
-                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(codeObjectFile.c_str()));
+                        THROW_IF_HIP_ERROR_MESSAGE(
+                            adapter.loadCodeObjectFile(codeObjectFile.c_str()),
+                            "loading code object: " + codeObjectFile);
                     } while(FindNextFileA(hfine, &finddata));
                 }
                 else
@@ -982,7 +984,8 @@ namespace
                             continue;
                         if(cofile.find("Experimental") != std::string::npos)
                             continue;
-                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(cofile));
+                        THROW_IF_HIP_ERROR_MESSAGE(adapter.loadCodeObjectFile(cofile),
+                                                   "loading code object: " + cofile);
                     }
                 }
                 else if(g == GLOB_NOMATCH)
@@ -1148,6 +1151,12 @@ namespace
                      << e.what() << std::endl;
         rocblas_abort();
     }
+    catch(const rocblas_status& status)
+    {
+        rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile host:\n"
+                     << rocblas_status_to_string(status) << std::endl;
+        rocblas_abort();
+    }
     catch(...)
     {
         rocblas_cerr
@@ -1237,11 +1246,16 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 #ifdef BUILD_WITH_HIPBLASLT
     if constexpr(sizeof(Ti) >= 4)
     {
+        // MI300X (304 CUs) and MI300A (228 CUs) both are gfx942.
+        // Only MI300X uses hipBLASLt for F32; all other types and MI300A fall back to Tensile.
         // TODO remove after tuning
-        if(rocblas_internal_get_arch(prob.handle) == 950 && !prob.handle->isHipBLASLtForcedOn())
-        {
+        if((rocblas_internal_get_arch(prob.handle) == 950
+            || rocblas_internal_get_arch(prob.handle) == 942)
+           && (!std::is_same_v<Ti, float>
+               || (rocblas_internal_get_arch(prob.handle) == 942
+                   && prob.handle->device_properties.multiProcessorCount != 304))
+           && !prob.handle->isHipBLASLtForcedOn())
             return false;
-        }
     }
 
     bool batched = !prob.strided_batch;

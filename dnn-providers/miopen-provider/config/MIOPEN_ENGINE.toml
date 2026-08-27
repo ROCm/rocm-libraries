@@ -49,6 +49,17 @@ filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/5"]
 atol = 1.19
 rtol = 0.3
 
+# Bundle equivalents of Correctness/14 (NDHWC) and /5 (NCDHW) above
+[[tolerance_overrides]]
+filters = ["quick_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0"]
+atol = 1.19
+rtol = 0.2
+
+[[tolerance_overrides]]
+filters = ["quick_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0"]
+atol = 1.19
+rtol = 0.3
+
 # 3D fp32 conv forward accumulates a ~432-term dot product in fp32 on both GPU
 # and CPU reference, giving an ~1-2e-5 absolute error floor independent of
 # output magnitude. The default 1e-5 atol dips below it for small-magnitude
@@ -60,6 +71,20 @@ rtol = 0.3
 filters = ["Smoke/IntegrationGpuConvFwd3dFp32.Correctness/*"]
 atol = 5e-5
 rtol = 1e-5
+
+# Bundle equivalent of the C++ 3D fp32 conv fwd override above
+[[tolerance_overrides]]
+filters = ["quick_ConvolutionFwd_Default.*fp32_ncdhw*", "quick_ConvolutionFwd_Default.*fp32_ndhwc*"]
+atol = 5e-5
+rtol = 1e-5
+
+# MatmulPointwise Variant3 bf16 swish — single-element ULP mismatch at
+# magnitude ~2.0 (diff=3.125e-2, one bf16 ULP). Default atol=0.01 is
+# tighter than bf16 precision allows at this magnitude.
+[[tolerance_overrides]]
+filters = ["quick_MatmulPointwise_Variant3.*bfp16*swish*"]
+atol = 0.035
+rtol = 0.01
 
 # -- Test Skips --
 # Skip tests on specific architectures (or globally if 'archs' is omitted).

@@ -3798,13 +3798,8 @@ void rocfft_plan_t::InitRCCLCommunicator() noexcept
 
         // include the device active at plan creation so it always
         // participates in the communicator
-        int current_device = 0;
-        if(hipGetDevice(&current_device) != hipSuccess || current_device == hipInvalidDeviceId)
-            throw std::runtime_error("hipGetDevice failed");
-        device_set.insert(current_device);
-
-        if(device_set.size() > 1)
-            rccl = rocfft_rccl_comm_t::create(device_set);
+        device_set.insert(rocfft_scoped_device::current_device());
+        rccl = rocfft_rccl_comm_t::create(device_set);
     }
     catch(const std::exception& e)
     {
@@ -4830,8 +4825,17 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
 // TODO allgather for placement, transform_type, precision, dimensions, {lengths}, and
 // number_of_transforms and validate that all ranks' args are identical, before proceeding
 #endif
-    if(dimensions > 3)
+    if(dimensions == 0 || dimensions > 3)
+    {
         return rocfft_status_invalid_dimensions;
+    }
+
+    if(std::any_of(lengths, lengths + dimensions, [](size_t length) { return length == 0; })
+       || number_of_transforms == 0)
+    {
+        return rocfft_status_invalid_arg_value;
+    }
+
     try
     {
         plan->placement     = placement;
@@ -5963,14 +5967,31 @@ void RuntimeCompilePlan(ExecPlan& execPlan)
     std::string kernel_name;
     bool        is_tuning = TuningBenchmarker::GetSingleton().IsProcessingTuning();
 
+    TreeNode* load_node             = nullptr;
+    TreeNode* store_node            = nullptr;
+    std::tie(load_node, store_node) = execPlan.get_load_store_nodes();
+
+    const bool have_load_spirv_cb   = load_node->loadOps && load_node->loadOps->has_spirv();
+    const bool have_store_spirv_cb  = store_node->storeOps && store_node->storeOps->has_spirv();
+    const CallbackType load_cbtype  = load_node->GetCallbackType();
+    const CallbackType store_cbtype = store_node->GetCallbackType();
+
     for(size_t i = 0; i < execPlan.execSeq.size(); ++i)
     {
         auto& node = execPlan.execSeq[i];
 
-        // If this isn't for the local rank, don't compile.
+        // This loop is building kernels that don't need to run
+        // legacy callbacks.  But the compilation needs to know about
+        // the case where the kernel works with complex elements but
+        // the load or store SPIR-V callback works with reals.
+        CallbackType cbtype_real = CallbackType::NONE;
+        if(node == load_node && have_load_spirv_cb && load_cbtype != CallbackType::NONE)
+            cbtype_real = load_cbtype;
+        else if(node == store_node && have_store_spirv_cb && store_cbtype != CallbackType::NONE)
+            cbtype_real = store_cbtype;
 
         node->compiledKernel = RTCKernel::runtime_compile(
-            node->getLeafNode(), execPlan.deviceProp.gcnArchName, kernel_name);
+            node->getLeafNode(), execPlan.deviceProp.gcnArchName, kernel_name, cbtype_real);
 
         // Log kernel name when tuning
         if(is_tuning)
@@ -5982,24 +6003,33 @@ void RuntimeCompilePlan(ExecPlan& execPlan)
         }
     }
 
-    TreeNode* load_node             = nullptr;
-    TreeNode* store_node            = nullptr;
-    std::tie(load_node, store_node) = execPlan.get_load_store_nodes();
+    // Legacy callbacks require a separately-compiled kernel, and are
+    // only possible on plans that don't use planar format for input
+    // or output, and that don't already use JIT callbacks.
+    // gfx1250 hotswap fails with function pointer callbacks, so they
+    // can't work there either.
+    const bool need_legacy_callbacks
+        = !array_type_is_planar(load_node->inArrayType)
+          && !array_type_is_planar(store_node->outArrayType) && !have_load_spirv_cb
+          && !have_store_spirv_cb && strncmp(execPlan.deviceProp.gcnArchName, "gfx1250", 7) != 0;
 
-    // callbacks are only possible on plans that don't use planar format for input or output
-    bool need_callbacks = !array_type_is_planar(load_node->inArrayType)
-                          && !array_type_is_planar(store_node->outArrayType);
-
-    // don't spend time compiling callback
-    if(need_callbacks && !is_tuning)
+    // Only spend time compiling legacy callback kernel if it's
+    // possible for it to be called
+    if(need_legacy_callbacks && !is_tuning)
     {
-        load_node->compiledKernelWithCallbacks = RTCKernel::runtime_compile(
-            load_node->getLeafNode(), execPlan.deviceProp.gcnArchName, kernel_name, true);
+        load_node->compiledKernelWithCallbacks
+            = RTCKernel::runtime_compile(load_node->getLeafNode(),
+                                         execPlan.deviceProp.gcnArchName,
+                                         kernel_name,
+                                         load_node->GetCallbackType());
 
         if(store_node != load_node)
         {
-            store_node->compiledKernelWithCallbacks = RTCKernel::runtime_compile(
-                store_node->getLeafNode(), execPlan.deviceProp.gcnArchName, kernel_name, true);
+            store_node->compiledKernelWithCallbacks
+                = RTCKernel::runtime_compile(store_node->getLeafNode(),
+                                             execPlan.deviceProp.gcnArchName,
+                                             kernel_name,
+                                             store_node->GetCallbackType());
         }
     }
 

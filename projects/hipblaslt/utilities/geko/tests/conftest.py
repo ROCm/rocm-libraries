@@ -97,7 +97,8 @@ def pytest_collection_modifyitems(config, items) -> None:
 
 @pytest.fixture
 def hipblaslt_path(request):
-    return request.config.getoption("--hipblaslt-path")
+    p = request.config.getoption("--hipblaslt-path")
+    return str(Path(p).resolve()) if p is not None else None
 
 
 @pytest.fixture

@@ -64,9 +64,9 @@ inline bool isVGPR(const StinkyRegister& reg) {
 /// `v_cvt_pk_f32_bf8`, `v_cvt_pk_f32_fp8`: `_e32` uses a 7-bit field for the
 /// **in-bank** VGPR index (0..255 per MODE VGPR MSBs). Physical VGPRs 0..1023
 /// map to **logical** indices `phys % 256` within the current 256-register
-/// group; promotion uses that logical span on
-/// **sources only** (not dst). Virtual registers (pending allocation) skip this
-/// rule.
+/// group. Most narrow converts use **sources** for `_e32` vs `_e64`; `v_cvt_f16_f32`
+/// uses the **destination** (verified with `llvm-mc -show-encoding` on gfx1250).
+/// Virtual registers (pending allocation) skip this rule.
 inline bool vgprOperandExceedsVop1CvtE32IndexLimit(const StinkyRegister& reg) {
     if (!isVGPR(reg) || isPseudoReg(reg)) return false;
     if ((reg.reg.idx & StinkyRegister::kVirtualBit) != 0) return false;
@@ -86,6 +86,12 @@ inline bool isVcvtNarrowSrcBankFamily(const char* mnemonic) {
            std::strcmp(mnemonic, "v_cvt_f16_f32") == 0 ||
            std::strcmp(mnemonic, "v_cvt_pk_f32_bf8") == 0 ||
            std::strcmp(mnemonic, "v_cvt_pk_f32_fp8") == 0;
+}
+
+/// `v_cvt_f16_f32` alone promotes on the **destination** VGPR bank index; the
+/// other narrow converts in `isVcvtNarrowSrcBankFamily` use **sources**.
+inline bool isVcvtF16F32DestBankPromotion(const char* mnemonic) {
+    return mnemonic && std::strcmp(mnemonic, "v_cvt_f16_f32") == 0;
 }
 
 /// True if the operand is VCC, vcc_lo, or vcc_hi (vector condition code).
@@ -184,10 +190,10 @@ inline bool parseLiteralStringToInt(const std::string& s, int32_t& out) {
 ///   1) VOP3P modifiers: non-empty **`op_sel`**, **`op_sel_hi`**, or
 ///   **`byte_sel`** forces VOP3 (8 B)
 ///      (all compact VALU, including the narrow converts below).
-///   2) `v_cvt_f32_bf16` / `v_cvt_f32_f16` / `v_cvt_f16_f32`, **when (1) did
-///   not apply**: any **source**
-///      VGPR whose **logical** index (`phys % 256`, plus `num`) spans above
-///      **127** requires `_e64` (8 B); **dst VGPR is not used** for this rule.
+///   2) `v_cvt_f32_bf16` / `v_cvt_f32_f16` / `v_cvt_pk_*`, **when (1) did not
+///   apply**: any **source** VGPR whose **logical** index (`phys % 256`, plus
+///   `num`) spans above **127** requires `_e64` (8 B). **`v_cvt_f16_f32` uses the
+///   destination** VGPR for this rule instead (src index is ignored).
 ///   3) `v_cndmask_b32` / `v_add_co_ci_u32` with three sources: 8 B if the last
 ///   source is not
 ///      VCC; 4 B if the last source is VCC.
@@ -210,8 +216,14 @@ int getEffectiveBaseSizeInBytesImpl(const StinkyInstruction& inst) {
                            // v_cvt_f32_fp8 byte_sel
         }
         if (isVcvtNarrowSrcBankFamily(mnemonic)) {
-            for (const StinkyRegister& s : srcs)
-                if (vgprOperandExceedsVop1CvtE32IndexLimit(s)) return 8;
+            if (isVcvtF16F32DestBankPromotion(mnemonic)) {
+                const auto& destRegs = inst.getDestRegs();
+                if (!destRegs.empty() && vgprOperandExceedsVop1CvtE32IndexLimit(destRegs[0]))
+                    return 8;
+            } else {
+                for (const StinkyRegister& s : srcs)
+                    if (vgprOperandExceedsVop1CvtE32IndexLimit(s)) return 8;
+            }
         }
         // v_cndmask_b32 / v_add_co_ci_u32: 3 sources; 4 bytes iff last source is
         // VCC, else 8 bytes.
@@ -279,10 +291,11 @@ int getEffectiveBaseSizeInBytesImpl(const StinkyInstruction& inst) {
 ///   `fitsInFloat32`.
 /// - `LiteralString`:
 ///   - Exactly `BufferOOB`: +4 (Tensile-style sentinel encodings).
-///   - Prefix `label` (e.g. `label_Activation_None_VW8`): pick comparison
-///   offset = map value when
-///     `labelByteOffset` is non-null and contains this key; otherwise use
-///     `currentByteOffsetBeforeInst`. +4 if that offset > 64, else 0.
+///   - Prefix `label` (e.g. `label_Activation_None_VW8`): always +4. A label
+///     operand is an unresolved `FK_PCRel_4` relocation, so the assembler always
+///     uses the `0xff` inline-literal slot and reserves a 32-bit literal word,
+///     independent of the label's resolved address or its position
+///     (`labelByteOffset` / `currentByteOffsetBeforeInst` are therefore ignored).
 ///   - VALU mnemonic ending in `_f32`: whole token is unsigned `0x` / `0X` hex
 ///   → interpret as float32
 ///     bits; cost like `LiteralDouble` above. Does not apply to SALU or
@@ -290,10 +303,11 @@ int getEffectiveBaseSizeInBytesImpl(const StinkyInstruction& inst) {
 ///   - Anything else: +4 when decimal/hex parsing yields a non-short int32, or
 ///   `asmSetSymbols` binds
 ///     the token to a non-short int (e.g. `0x4100`).
-int getLiteralExtraBytesImpl(const StinkyInstruction& inst,
-                             const std::unordered_map<std::string, int64_t>* labelByteOffset,
-                             int64_t currentByteOffsetBeforeInst,
-                             const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
+int getLiteralExtraBytesImpl(
+    const StinkyInstruction& inst,
+    [[maybe_unused]] const std::unordered_map<std::string, int64_t>* labelByteOffset,
+    [[maybe_unused]] int64_t currentByteOffsetBeforeInst,
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
     if (const HwInstDesc* desc = inst.getHwInstDesc();
         desc && desc->microcode == MicrocodeFormat::MC_SMEM) {
         return 0;
@@ -330,8 +344,7 @@ int getLiteralExtraBytesImpl(const StinkyInstruction& inst,
         return 0;
     }
 
-    auto countLiteralExtra = [&inst, labelByteOffset, currentByteOffsetBeforeInst, asmSetSymbols](
-                                 const StinkyRegister& reg, int& extra) {
+    auto countLiteralExtra = [&inst, asmSetSymbols](const StinkyRegister& reg, int& extra) {
         using T = StinkyRegister::Type;
         if (reg.dataType == T::LiteralInt) {
             if (!isShortLiteralInt(reg.literalInt)) extra += 4;
@@ -343,14 +356,18 @@ int getLiteralExtraBytesImpl(const StinkyInstruction& inst,
             if (lit == "BufferOOB") {
                 extra += 4;
             } else if (lit.size() >= 5 && lit.compare(0, 5, "label") == 0) {
-                if (labelByteOffset) {
-                    auto it = labelByteOffset->find(lit);
-                    if (it != labelByteOffset->end())
-                        extra += (it->second > 64) ? 4 : 0;
-                    else
-                        extra += (currentByteOffsetBeforeInst > 64) ? 4 : 0;
-                } else
-                    extra += (currentByteOffsetBeforeInst > 64) ? 4 : 0;
+                // A label operand is always emitted as a FK_PCRel_4 relocation: it
+                // takes the 0xff inline-literal slot and reserves a 32-bit literal
+                // word, regardless of the eventual resolved address. The value is
+                // unknown at encode time, so the assembler cannot fold it into an
+                // inline short constant (0..64). Verified with
+                // `llvm-mc -triple=amdgcn -mcpu=gfx1250 -show-encoding`:
+                //   s_add_i32 s66, label, 4 -> [0xff,0x84,0x42,0x81,A,A,A,A]  (8 B)
+                //   s_add_i32 s66, label, 0 -> [0xff,0x80,0x42,0x81,A,A,A,A]  (8 B)
+                //   s_add_i32 s66, 0, label -> [0x80,0xff,0x42,0x81,A,A,A,A]  (8 B)
+                //   s_add_i32 s66, 0, 0     -> [0x80,0x80,0x42,0x81]          (4 B)
+                // So a label is always +4, independent of its address or position.
+                extra += 4;
             } else {
                 if (tryAddLiteralExtraForValuF32HexFloatBits(inst, lit, extra))
                     ;
@@ -411,8 +428,9 @@ void addAlignmentPaddingFromDirectiveNode(IRBase* node, int64_t baseByteOffset, 
     const int64_t pad = paddingBytesForCodeAlignment(off, N);
     totalBytes += pad;
     if (debugOut && pad != 0)
-        *debugOut << "  [.align " << N << " padding=" << pad << " bytes, total=" << totalBytes
-                  << " bytes]\n";
+        *debugOut << "  [.align " << N << " padding=" << pad
+                  << " bytes, total=" << (baseByteOffset + totalBytes)
+                  << " bytes, totalBytes in BB=" << totalBytes << " bytes]\n";
 }
 
 void addAlignmentPaddingForLabelInstruction(const StinkyInstruction& inst, int64_t baseByteOffset,
@@ -426,7 +444,8 @@ void addAlignmentPaddingForLabelInstruction(const StinkyInstruction& inst, int64
             totalBytes += pad;
             if (debugOut && pad != 0)
                 *debugOut << "  [label .align " << ld->alignment << " padding=" << pad
-                          << " bytes, total=" << totalBytes << " bytes]\n";
+                          << " bytes, total=" << (baseByteOffset + totalBytes)
+                          << " bytes, totalBytes in BB=" << totalBytes << " bytes]\n";
         }
     }
 }

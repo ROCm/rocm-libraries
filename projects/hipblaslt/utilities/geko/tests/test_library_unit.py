@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from geko.library import Library, LibraryCollection
 from geko.library.library import SUPPORTED_INITIALIZATIONS
@@ -160,3 +161,41 @@ def test_library_collection_validation_and_helpers(tmp_path: Path, monkeypatch: 
     c.dump(tmp_path)
 
     assert called == {"add": 1, "bench": 1, "trim": 1, "dump": 1}
+
+
+def test_dict_library_supports_property_access_and_dump(tmp_path: Path) -> None:
+    data = {
+        "ArchitectureName": "gfx950",
+        "ProblemType": {"TransposeA": 0, "TransposeB": 1, "DataType": 4, "DestDataType": 4},
+        "DefaultSolution": {"StaggerU": 0},
+        "Solutions": [{"SolutionIndex": 0, "StaggerU": 0}],
+        "IndexOrder": [2, 3, 0, 1],
+        "ExactLogic": [[[16, 32, 1, 64], [0, 200.0]]],
+        "PerfMetric": "DeviceEfficiency",
+        "LibraryType": "Equality",
+    }
+
+    lib = Library(data, "dict_lib.yaml")
+    assert lib.format == "dict"
+    assert lib.arch == "gfx950"
+    assert lib.problem["DataType"] == 4
+    assert lib.solutions[0]["SolutionIndex"] == 0
+    assert lib.order == [2, 3, 0, 1]
+    assert lib.sizes == [[[16, 32, 1, 64], [0, 200.0]]]
+    assert lib.metric == "DeviceEfficiency"
+    assert lib.type == "Equality"
+
+    lib.solutions = [{"SolutionIndex": 1, "StaggerU": 1}]
+    lib.order = [1, 0, 2, 3]
+    lib.sizes = [[[8, 8, 1, 8], [1, 100.0]]]
+    lib.metric = "OtherMetric"
+    lib.type = "GridBased"
+
+    out_dir = tmp_path / "out"
+    lib.dump(out_dir)
+    dumped = yaml.safe_load((out_dir / "dict_lib.yaml").read_text())
+    assert dumped["Solutions"][0]["SolutionIndex"] == 1
+    assert dumped["IndexOrder"] == [1, 0, 2, 3]
+    assert dumped["ExactLogic"] == [[[8, 8, 1, 8], [1, 100.0]]]
+    assert dumped["PerfMetric"] == "OtherMetric"
+    assert dumped["LibraryType"] == "GridBased"

@@ -139,7 +139,10 @@ int main() {
     auto image_d = thrust::make_unique<uint8_t[]>(nx * ny * 3);
 
     {
-        hip::wthread world_constructor([=] __device__ () { new (world) hittable_list(random_scene()); });
+        // Use list-initialization {} instead of direct-initialization () here:
+        // on Windows the clang HIP front-end mis-parses `Type name(device_lambda)`
+        // as a declaration and rejects the __device__ specifier (ROCM-25863).
+        hip::wthread world_constructor{[=] __device__ () { new (world) hittable_list(random_scene()); }};
         world_constructor.join();
 
         const int k_threads = 4096;

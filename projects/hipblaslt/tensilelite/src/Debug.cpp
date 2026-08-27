@@ -140,6 +140,11 @@ namespace TensileLite
         return m_streamK5ForceMode;
     }
 
+    bool Debug::usePreciseSMTarget() const
+    {
+        return m_usePreciseSMTarget;
+    }
+
     int Debug::useExperimentalSelection() const
     {
         return m_experimentSelection;
@@ -225,6 +230,10 @@ namespace TensileLite
             if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
                 m_streamK5ForceMode = static_cast<int>(val);
         }
+
+        const char* preciseSMTarget = std::getenv("TENSILE_PRECISE_SM_TARGET");
+        if(preciseSMTarget)
+            m_usePreciseSMTarget = strtol(preciseSMTarget, nullptr, 0) != 0;
 
         const char* exp_select = std::getenv("TENSILE_SOLUTION_SELECTION_METHOD");
         if(exp_select)

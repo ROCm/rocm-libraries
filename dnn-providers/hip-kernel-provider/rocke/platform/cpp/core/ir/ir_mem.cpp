@@ -128,6 +128,28 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
     return rocke_b_global_load(b, ptr, idx, rocke_bf16(), align <= 0 ? 2 : align);
 }
 
+rocke_value_t*
+    rocke_b_global_load_i8(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, int align)
+{
+    return rocke_b_global_load(b, ptr, idx, rocke_i8(), align <= 0 ? 1 : align);
+}
+
+rocke_value_t* rocke_b_global_load_i16(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align)
+{
+    return rocke_b_global_load(b, ptr, idx, rocke_i16(), align <= 0 ? 2 : align);
+}
+
+rocke_value_t* rocke_b_global_load_bf8e5m2(rocke_ir_builder_t* b,
+                                           rocke_value_t* ptr,
+                                           rocke_value_t* idx,
+                                           int align)
+{
+    return rocke_b_global_load(b, ptr, idx, rocke_bf8e5m2(), align <= 0 ? 1 : align);
+}
+
 rocke_value_t* rocke_b_global_load_fp8e4m3(rocke_ir_builder_t* b,
                                            rocke_value_t* ptr,
                                            rocke_value_t* idx,

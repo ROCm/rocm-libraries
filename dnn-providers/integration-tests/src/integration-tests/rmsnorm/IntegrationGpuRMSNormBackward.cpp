@@ -25,8 +25,8 @@ namespace
 // suite reuses the same shape/case generator as forward for both.
 struct RMSNormBackwardTensorIds
 {
-    // inv_rms defaults to a DERIVED fill (recompute-from-x), which the synthesis
-    // pipeline hasn't implemented yet (SynthesizeInputs.cpp: "DERIVED fill not yet
+    // inv_rms defaults to a DERIVED fill (recompute-from-x), which the fill
+    // pipeline hasn't implemented yet (FillInputs.cpp: "DERIVED fill not yet
     // implemented" -> every case SKIPs). Give it a stable uid so the constructor
     // below can override it with a FREE range instead. inv_rms = 1/rms(x) is
     // always strictly positive, so keep it positive and away from zero
@@ -132,7 +132,7 @@ public:
 
     RMSNormBackward()
     {
-        this->synthesis().setRange(RMSNormBackwardTensorIds::INV_RMS_UID, 0.9f, 1.5f);
+        this->inputFillRecipes().setRange(RMSNormBackwardTensorIds::INV_RMS_UID, 0.9f, 1.5f);
     }
 
 protected:
@@ -147,7 +147,7 @@ protected:
         this->registerValidator(outputs.dscale, this->getTolerance(graphObj, outputs.dscale));
         this->registerValidator(outputs.dbias, this->getTolerance(graphObj, outputs.dbias));
 
-        this->synthesis().setGlobalSeed(rmsnormTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(rmsnormTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

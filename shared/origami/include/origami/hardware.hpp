@@ -385,9 +385,11 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(16, 16, 32, data_type_t::BFloat8Float8), 16}, // v_mfma_f32_16x16x32_bf8_f8
 
              // I8
-             {matrix_instruction(32, 32, 16, data_type_t::Int8), 32}, // v_mfma_f32_32x32x16_f8
+             {matrix_instruction(32, 32, 16, data_type_t::Int8), 32}, // v_mfma_i32_32x32x16_i8
+             {matrix_instruction(32, 32, 32, data_type_t::Int8), 32}, // v_mfma_i32_32x32x32_i8
              {matrix_instruction(32, 32, 4, data_type_t::Int8), 64}, // v_mfma_i32_32x32x4_2b_i8
-             {matrix_instruction(16, 16, 32, data_type_t::Int8), 16}, // v_mfma_f32_16x16x32_i8
+             {matrix_instruction(16, 16, 32, data_type_t::Int8), 16}, // v_mfma_i32_16x16x32_i8
+             {matrix_instruction(16, 16, 64, data_type_t::Int8), 16}, // v_mfma_i32_16x16x64_i8
              {matrix_instruction(16, 16, 4, data_type_t::Int8), 32}, // v_mfma_i32_16x16x4_4b_i8
              {matrix_instruction(4, 4, 4, data_type_t::Int8), 8}, // v_mfma_i32_4x4x4_16b_i8
 
