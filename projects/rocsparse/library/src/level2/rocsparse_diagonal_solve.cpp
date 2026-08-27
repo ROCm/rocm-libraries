@@ -39,34 +39,33 @@ namespace rocsparse
 {
     static constexpr uint32_t DIAGONAL_SOLVE_BLOCKSIZE = 256;
 
-    // Grid dimension cap for the column (y) and batch (z) axes.
     static constexpr uint32_t DIAGONAL_SOLVE_GRID_CAP = 65535;
 
     template <typename I, typename J, typename T>
-    static rocsparse_status diagonal_solve_launch(rocsparse_handle        handle,
-                                                  int64_t                 batch_count,
-                                                  int64_t                 m,
-                                                  int64_t                 nrhs,
-                                                  const void*             alpha_,
-                                                  const void*             diag_ind,
-                                                  const void*             transposed_perm,
-                                                  const void*             val,
-                                                  int64_t                 val_batch_stride,
-                                                  const void*             x,
-                                                  int64_t                 x_row_stride,
-                                                  int64_t                 x_col_stride,
-                                                  int64_t                 x_batch_stride,
-                                                  void*                   y,
-                                                  int64_t                 y_row_stride,
-                                                  int64_t                 y_col_stride,
-                                                  int64_t                 y_batch_stride,
-                                                  void*                   zero_pivot,
-                                                  int64_t                 zero_pivot_stride,
-                                                  rocsparse_index_base    base,
-                                                  rocsparse_diagonal_mode diagonal_mode,
-                                                  bool                    conj,
-                                                  bool                    conj_x,
-                                                  bool                    is_host_mode)
+    static rocsparse_status diagonal_solve_launch(rocsparse_handle            handle,
+                                                  int64_t                     batch_count,
+                                                  int64_t                     m,
+                                                  int64_t                     nrhs,
+                                                  const void*                 alpha_,
+                                                  const void*                 diag_ind,
+                                                  const void*                 transposed_perm,
+                                                  const void*                 val,
+                                                  int64_t                     val_batch_stride,
+                                                  const void*                 x,
+                                                  int64_t                     x_row_stride,
+                                                  int64_t                     x_col_stride,
+                                                  int64_t                     x_batch_stride,
+                                                  void*                       y,
+                                                  int64_t                     y_row_stride,
+                                                  int64_t                     y_col_stride,
+                                                  int64_t                     y_batch_stride,
+                                                  void*                       zero_pivot,
+                                                  int64_t                     zero_pivot_stride,
+                                                  rocsparse_index_base        base,
+                                                  rocsparse_diagonal_modifier modifier,
+                                                  bool                        conj,
+                                                  bool                        conj_x,
+                                                  bool                        is_host_mode)
     {
         auto           alpha = reinterpret_cast<const T*>(alpha_);
         const uint32_t gy    = static_cast<uint32_t>(
@@ -98,7 +97,7 @@ namespace rocsparse
             reinterpret_cast<J*>(zero_pivot),
             zero_pivot_stride,
             base,
-            diagonal_mode,
+            modifier,
             conj,
             conj_x,
             is_host_mode);
@@ -106,32 +105,32 @@ namespace rocsparse
     }
 
     template <typename T>
-    static rocsparse_status diagonal_solve_dispatch(rocsparse_handle        handle,
-                                                    rocsparse_indextype     diag_ind_type,
-                                                    rocsparse_indextype     col_type,
-                                                    int64_t                 batch_count,
-                                                    int64_t                 m,
-                                                    int64_t                 nrhs,
-                                                    const void*             alpha,
-                                                    const void*             diag_ind,
-                                                    const void*             transposed_perm,
-                                                    const void*             val,
-                                                    int64_t                 val_batch_stride,
-                                                    const void*             x,
-                                                    int64_t                 x_row_stride,
-                                                    int64_t                 x_col_stride,
-                                                    int64_t                 x_batch_stride,
-                                                    void*                   y,
-                                                    int64_t                 y_row_stride,
-                                                    int64_t                 y_col_stride,
-                                                    int64_t                 y_batch_stride,
-                                                    void*                   zero_pivot,
-                                                    int64_t                 zero_pivot_stride,
-                                                    rocsparse_index_base    base,
-                                                    rocsparse_diagonal_mode diagonal_mode,
-                                                    bool                    conj,
-                                                    bool                    conj_x,
-                                                    bool                    is_host_mode)
+    static rocsparse_status diagonal_solve_dispatch(rocsparse_handle            handle,
+                                                    rocsparse_indextype         diag_ind_type,
+                                                    rocsparse_indextype         col_type,
+                                                    int64_t                     batch_count,
+                                                    int64_t                     m,
+                                                    int64_t                     nrhs,
+                                                    const void*                 alpha,
+                                                    const void*                 diag_ind,
+                                                    const void*                 transposed_perm,
+                                                    const void*                 val,
+                                                    int64_t                     val_batch_stride,
+                                                    const void*                 x,
+                                                    int64_t                     x_row_stride,
+                                                    int64_t                     x_col_stride,
+                                                    int64_t                     x_batch_stride,
+                                                    void*                       y,
+                                                    int64_t                     y_row_stride,
+                                                    int64_t                     y_col_stride,
+                                                    int64_t                     y_batch_stride,
+                                                    void*                       zero_pivot,
+                                                    int64_t                     zero_pivot_stride,
+                                                    rocsparse_index_base        base,
+                                                    rocsparse_diagonal_modifier modifier,
+                                                    bool                        conj,
+                                                    bool                        conj_x,
+                                                    bool                        is_host_mode)
     {
 #define DIAGONAL_SOLVE(I_, J_)                                              \
     diagonal_solve_launch<typename rocsparse::indextype_traits<I_>::type_t, \
@@ -156,7 +155,7 @@ namespace rocsparse
                              zero_pivot,                                    \
                              zero_pivot_stride,                             \
                              base,                                          \
-                             diagonal_mode,                                 \
+                             modifier,                                      \
                              conj,                                          \
                              conj_x,                                        \
                              is_host_mode)
@@ -194,7 +193,7 @@ namespace rocsparse
 
 rocsparse_status rocsparse::diagonal_solve(rocsparse_handle            handle,
                                            rocsparse_operation         trans,
-                                           rocsparse_diagonal_mode     diagonal_mode,
+                                           rocsparse_diagonal_modifier modifier,
                                            const void*                 alpha,
                                            rocsparse_const_spmat_descr A,
                                            rocsparse_indextype         diag_ind_type,
@@ -242,7 +241,7 @@ rocsparse_status rocsparse::diagonal_solve(rocsparse_handle            handle,
                                            zero_pivot,        \
                                            zero_pivot_stride, \
                                            A->descr->base,    \
-                                           diagonal_mode,     \
+                                           modifier,          \
                                            conj,              \
                                            conj_x,            \
                                            is_host_mode)

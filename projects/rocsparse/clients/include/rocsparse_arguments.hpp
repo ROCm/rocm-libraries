@@ -170,7 +170,8 @@ struct Arguments
     uint32_t host_memory_gb;
     uint32_t device_memory_gb;
 
-    int32_t diagonal_mode;
+    int32_t solve_mode;
+    int32_t diagonal_modifier;
 
     // Validate input format.
     // rocsparse_gentest.py is expected to conform to this format.
@@ -320,7 +321,8 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(skip_hardware);
         ROCSPARSE_FORMAT_CHECK(host_memory_gb);
         ROCSPARSE_FORMAT_CHECK(device_memory_gb);
-        ROCSPARSE_FORMAT_CHECK(diagonal_mode);
+        ROCSPARSE_FORMAT_CHECK(solve_mode);
+        ROCSPARSE_FORMAT_CHECK(diagonal_modifier);
     }
 
     template <typename T>
@@ -557,7 +559,8 @@ private:
         print("batch_stride", arg.batch_stride);
         print("ld_multiplier_B", arg.ld_multiplier_B);
         print("ld_multiplier_C", arg.ld_multiplier_C);
-        print("diagonal_mode", arg.diagonal_mode);
+        print("solve_mode", arg.solve_mode);
+        print("diagonal_modifier", arg.diagonal_modifier);
         return str << " }\n";
     }
 };
