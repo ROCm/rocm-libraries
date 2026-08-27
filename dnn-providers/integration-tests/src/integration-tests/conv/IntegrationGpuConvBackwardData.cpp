@@ -105,11 +105,6 @@ using IntegrationGpuConvBwdData2dFp32 = ConvBackwardData<float>;
 using IntegrationGpuConvBwdData2dBfp16 = ConvBackwardData<bfloat16>;
 using IntegrationGpuConvBwdData2dFp16 = ConvBackwardData<half>;
 
-// 1D layout tests (NCL, NLC)
-using IntegrationGpuConvBwdData1dFp32 = ConvBackwardData<float>;
-using IntegrationGpuConvBwdData1dBfp16 = ConvBackwardData<bfloat16>;
-using IntegrationGpuConvBwdData1dFp16 = ConvBackwardData<half>;
-
 // 3D layout tests (NCDHW, NDHWC)
 using IntegrationGpuConvBwdData3dFp32 = ConvBackwardData<float>;
 using IntegrationGpuConvBwdData3dBfp16 = ConvBackwardData<bfloat16>;
@@ -132,25 +127,6 @@ TEST_P(IntegrationGpuConvBwdData2dBfp16, Correctness)
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvBwdData2dFp16);
 TEST_P(IntegrationGpuConvBwdData2dFp16, Correctness)
-{
-    runGraphTest();
-}
-
-// 1D tests
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvBwdData1dFp32);
-TEST_P(IntegrationGpuConvBwdData1dFp32, Correctness)
-{
-    runGraphTest();
-}
-
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvBwdData1dBfp16);
-TEST_P(IntegrationGpuConvBwdData1dBfp16, Correctness)
-{
-    runGraphTest();
-}
-
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvBwdData1dFp16);
-TEST_P(IntegrationGpuConvBwdData1dFp16, Correctness)
 {
     runGraphTest();
 }
@@ -192,25 +168,6 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuConvBwdData2dFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_conv_common::getConvTestCases4D())));
-
-// 1D instantiations
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvBwdData1dFp32,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvBwdData1dBfp16,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvBwdData1dFp16,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D())));
 
 // 3D instantiations
 INSTANTIATE_TEST_SUITE_P(

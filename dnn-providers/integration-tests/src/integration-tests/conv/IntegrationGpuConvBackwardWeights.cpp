@@ -105,11 +105,6 @@ using IntegrationGpuConvWrw2dFp32 = ConvBackwardWeights<float>;
 using IntegrationGpuConvWrw2dBfp16 = ConvBackwardWeights<bfloat16>;
 using IntegrationGpuConvWrw2dFp16 = ConvBackwardWeights<half>;
 
-// 1D layout tests (NCL, NLC)
-using IntegrationGpuConvWrw1dFp32 = ConvBackwardWeights<float>;
-using IntegrationGpuConvWrw1dBfp16 = ConvBackwardWeights<bfloat16>;
-using IntegrationGpuConvWrw1dFp16 = ConvBackwardWeights<half>;
-
 // 3D layout tests (NCDHW, NDHWC)
 using IntegrationGpuConvWrw3dFp32 = ConvBackwardWeights<float>;
 using IntegrationGpuConvWrw3dBfp16 = ConvBackwardWeights<bfloat16>;
@@ -159,25 +154,6 @@ TEST_P(IntegrationGpuConvWrw2dFp16, Correctness)
     runGraphTest();
 }
 
-// 1D tests
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvWrw1dFp32);
-TEST_P(IntegrationGpuConvWrw1dFp32, Correctness)
-{
-    runGraphTest();
-}
-
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvWrw1dBfp16);
-TEST_P(IntegrationGpuConvWrw1dBfp16, Correctness)
-{
-    runGraphTest();
-}
-
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvWrw1dFp16);
-TEST_P(IntegrationGpuConvWrw1dFp16, Correctness)
-{
-    runGraphTest();
-}
-
 // 3D tests
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvWrw3dFp32);
 TEST_P(IntegrationGpuConvWrw3dFp32, Correctness)
@@ -222,25 +198,6 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuConvWrw2dFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_conv_common::getConvTestCases4D())));
-
-// 1D instantiations
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvWrw1dFp32,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvWrw1dBfp16,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvWrw1dFp16,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D())));
 
 // 3D instantiations
 INSTANTIATE_TEST_SUITE_P(

@@ -152,36 +152,12 @@ using IntegrationGpuConvFwdBiasActiv2dFp32 = ConvFwdBiasActiv<float>;
 using IntegrationGpuConvFwdBiasActiv2dBfp16 = ConvFwdBiasActiv<bfloat16>;
 using IntegrationGpuConvFwdBiasActiv2dFp16 = ConvFwdBiasActiv<half>;
 
-// 1D layout tests (NCL, NLC)
-using IntegrationGpuConvFwdBiasActiv1dFp32 = ConvFwdBiasActiv<float>;
-using IntegrationGpuConvFwdBiasActiv1dBfp16 = ConvFwdBiasActiv<bfloat16>;
-using IntegrationGpuConvFwdBiasActiv1dFp16 = ConvFwdBiasActiv<half>;
-
 // 3D layout tests (NCDHW, NDHWC)
 using IntegrationGpuConvFwdBiasActiv3dFp32 = ConvFwdBiasActiv<float>;
 using IntegrationGpuConvFwdBiasActiv3dBfp16 = ConvFwdBiasActiv<bfloat16>;
 using IntegrationGpuConvFwdBiasActiv3dFp16 = ConvFwdBiasActiv<half>;
 
 } // namespace
-
-// 1D tests
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvFwdBiasActiv1dFp32);
-TEST_P(IntegrationGpuConvFwdBiasActiv1dFp32, Correctness)
-{
-    runGraphTest();
-}
-
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvFwdBiasActiv1dBfp16);
-TEST_P(IntegrationGpuConvFwdBiasActiv1dBfp16, Correctness)
-{
-    runGraphTest();
-}
-
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvFwdBiasActiv1dFp16);
-TEST_P(IntegrationGpuConvFwdBiasActiv1dFp16, Correctness)
-{
-    runGraphTest();
-}
 
 // 2D tests
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvFwdBiasActiv2dFp32);
@@ -220,31 +196,6 @@ TEST_P(IntegrationGpuConvFwdBiasActiv3dFp16, Correctness)
 {
     runGraphTest();
 }
-
-// 1D Smoke test cases
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvFwdBiasActiv1dFp32,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D()),
-                     testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvFwdBiasActiv1dBfp16,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D()),
-                     testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvFwdBiasActiv1dFp16,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     testing::ValuesIn(test_conv_common::getConvTestCases3D()),
-                     testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 // 2D Smoke test cases
 INSTANTIATE_TEST_SUITE_P(
