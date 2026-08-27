@@ -76,6 +76,26 @@ since the aux epilogue changes the store path:
 >
 > **Parity holds on all four, independently.** AuxB is the tightest — widest deviation 1.2%.
 >
+> **Re-measured at 10x better resolution (DPM pinned), and it is much tighter than that.** The runs
+> above used the default `auto` power management, where a library-vs-library ratio only resolves to
+> ~15% because the card alternates between two power states. With `rocm-smi --setperflevel high`
+> the resolution is **~1.4%** (see `NAVI32_RUNBOOK.md` §7). BBS `lean100` (98 kernels) vs `wide`
+> (246), 2 reps per point:
+>
+> | shape | wide | lean | lean/wide |
+> |---|---|---|---|
+> | 4096x3584x4096 | 25 800 | 25 815 | **1.0006** |
+> | 1792x1280x512 | 17 211 | 17 217 | 1.0004 |
+> | 768x768x512 | 15 641 | 15 616 | 0.9984 |
+> | 960x320x256 | 7 249 | 7 238 | 0.9984 |
+> | 704x192x512 | 6 626 | 6 661 | 1.0052 |
+>
+> **geomean 1.0006, worst deviation 0.52%**, against a ~1.4% resolution. So the claim strengthens
+> from *"no difference detectable"* to **"a 60% kernel reduction costs at most ~0.5% per shape"** —
+> the pinned figures are absolute-throughput-shifted (see the runbook caveats) and must not be
+> mixed into the `auto` tables above, but as a *ratio* they are the sharpest evidence in this
+> report.
+>
 > **Two caveats on how to read the numbers above this box.** (1) The A/A floor is *not* a
 > significance yardstick: it runs a library against itself, so both arms warm up identically and it
 > is blind to the variance that limits a library-vs-library ratio. (2) That variance is **2-5%** on
