@@ -4619,6 +4619,20 @@ class KernelWriterAssembly(KernelWriter):
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
 
         strideF = self.strideRef(tc, tP['tileIdx'])
+        # A host-swizzled MX scale tensor is block-linear, not row/column-major:
+        # the scale GR walks whole swizzle blocks by Strides<tc>+0 regardless of
+        # layout (see _graTileAssignmentScaleSwizzledCommon, which is the same
+        # code for every TLU).  On TLU=0 the tile index is not the fastest one,
+        # so strideRef already returns that register and the block formula below
+        # fires.  On TLU=1 the tile index IS the fastest one, so strideRef hands
+        # back a constStride literal, the block formula is skipped, and the tile
+        # falls through to the data-shaped K-window branch -- which sizes the
+        # limit from the data DepthU and macro tile and has no meaning for a
+        # scale.  Name the block stride explicitly in that case so both layouts
+        # take the same path.  TLU=0 is untouched: there strideF is already
+        # Strides<tc>+0 under a different symbol.
+        if isMxSwizzledScaleLayout and self.isConstUnitStride(strideF):
+          strideF = sgpr("Strides%s"%tc)
         if not self.isConstUnitStride(strideF):
           if useFixedSrd2:
             # Tile-boundary SRD+2 for UseSubtileImpl (unified for MX scale and data A/B).
