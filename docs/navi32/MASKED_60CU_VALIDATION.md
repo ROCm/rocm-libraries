@@ -173,6 +173,29 @@ Comparison is on the **identical shape subset** in both regimes.
 **Every shipped catalog win survives genuine 60-CU execution** — +17.4% to +22.7% on these
 subsets, against the shipped +18.8% to +23.9% measured on the full 998 at 96 CUs.
 
+> **Re-measured at 10x resolution (DPM pinned), 2026-08-28.** Everything in this document was
+> measured on default power management, where a library-vs-library ratio only resolves to **~15%**
+> — the card alternates between two power states 6.3% apart in throughput, correlated with package
+> power at r = +0.955 while temperature stays flat. Pinning the DPM level
+> (`rocm-smi --setperflevel high`, see `NAVI32_RUNBOOK.md` §7) gives **~1.4%**. BBS `wide`(246) vs
+> `ship`(55), 32-CU emulation, 2 reps:
+>
+> | shape | thin | wide | wide/thin |
+> |---|---|---|---|
+> | 4096x3584x4096 | 20 447 | 25 862 | 1.2648 |
+> | 3584x4096x2048 | 19 232 | 23 166 | 1.2046 |
+> | 2560x4096x512 | 16 447 | 20 783 | 1.2636 |
+> | 1792x1280x512 | 14 668 | 17 220 | 1.1740 |
+> | 960x320x256 | 5 682 | 7 248 | 1.2755 |
+> | **704x192x512** | 6 686 | 6 626 | **0.9910** |
+>
+> **geomean +19.1%**, against **+19.6%** on `auto` — the headline reproduces within half a point.
+>
+> **The per-shape detail is what is new.** At 15% resolution a 0.991 and a 1.27 cannot be told
+> apart; at 1.4% they can. Widening pays **+17% to +27.5% on five of six shapes and is neutral on
+> 704x192x512** — so it is not the uniform gain the averages imply. Pinned figures are
+> absolute-throughput-shifted and are deliberately kept out of the `auto` tables above.
+
 **The 96-CU regime overstates the win by 0 to 3.2 pt, never understates it.** That is not a
 uniform constant to subtract: three of four move down, AuxB is flat. But no ProblemType gains
 from the more faithful regime, so the shipped headline numbers should be read as a **ceiling**
