@@ -4,7 +4,7 @@ description: "Single source of truth for shared CI constants (TheRock ref, Docke
 outputs:
   therock-ref:
     description: "TheRock commit hash to use"
-    value: "cb2adb3ecd28c34cab48a8845b3fffa92a1b0544" # 2026-08-19
+    value: "b45a06045cbb29c85e221748e653ac2521c6e1bf" # 2026-08-26
   kpack-ref:
     description: "rocm-systems commit whose shared/kpack provides the rocm_kpack packing tooling"
     # Copied into dnn-providers/hip-kernel-provider/cmake/KpackPython.cmake and
@@ -13,7 +13,7 @@ outputs:
     value: "a022846cf553c2b135410a5168f97705f1b9c6ac" # 2026-08-22
   baseline-run-id:
     description: "TheRock workflow run ID for prebuilt stage artifacts"
-    value: "32024523555" # Updated by assistant-librarian[bot] on submodule bumps
+    value: "33012920661" # Updated by assistant-librarian[bot] on submodule bumps
   docker-image:
     description: "Docker container image for Linux builds"
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb"

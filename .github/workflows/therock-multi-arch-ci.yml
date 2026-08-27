@@ -15,15 +15,11 @@
 name: TheRock Multi-Arch CI
 
 # TheRock ref: the resolve_therock_ref job picks one concrete ROCm/TheRock SHA
-# for the whole run. On pull_request events it pins to the tip of TheRock@main
-# as it existed at the PR branch's merge-base time, so the pin stays stable
-# while a PR is authored and only advances when the base branch is merged/
-# rebased in (see .github/scripts/resolve_therock_ref.py). Other events use the
-# live tip of main. The setup job checks that ref out and re-exports it as
-# needs.setup.outputs.ref; every downstream build/test/summary job consumes that
-# one SHA. The `uses: ROCm/TheRock/...@main` lines below are the
-# workflow-definition ref (Actions requires a literal there) and are
-# deliberately separate from the build-source `ref:` inputs.
+# for the whole run. The setup job checks out the pinned TheRock SHA and
+# re-exports it as needs.setup.outputs.ref. The `uses:
+# ROCm/TheRock/...@064a788` lines below are the workflow-definition refs
+# (Actions requires a literal there), and the matching `ref:` inputs are the
+# build-source refs consumed by those reusable workflows.
 
 on:
   pull_request:
@@ -57,11 +53,6 @@ on:
         type: string
         default: ""
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
-      therock_ref_override:
-        type: string
-        default: ""
-        description: "Optional explicit TheRock ref (branch/tag/SHA) to build against. Empty resolves the ref per event (merge-base time for PRs, live tip of main otherwise)."
-
 permissions:
   contents: read
   actions: read
@@ -109,7 +100,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
+          ref: 064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -126,38 +117,9 @@ jobs:
             --head-sha "${{ github.event.pull_request.head.sha }}" \
             --config-path ".github/repos-config.json"
 
-  resolve_therock_ref:
-    name: Resolve TheRock ref
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    outputs:
-      therock_ref: ${{ steps.resolve.outputs.therock_ref }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github
-          sparse-checkout-cone-mode: true
-
-      - name: Install dependencies
-        run: pip install requests
-
-      # Picks one concrete TheRock SHA for the whole run. See the header comment
-      # and .github/scripts/resolve_therock_ref.py for the policy. Uses the REST
-      # API only, so no deep clone of this repository is required.
-      - name: Resolve TheRock ref
-        id: resolve
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || '' }}
-        run: python .github/scripts/resolve_therock_ref.py
-
   setup:
-    needs: [ci-env, configure, resolve_therock_ref]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
+    needs: [ci-env, configure]
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
@@ -179,7 +141,7 @@ jobs:
       # Concrete SHA resolved once by resolve_therock_ref; setup re-exports the
       # checked-out commit as needs.setup.outputs.ref for downstream jobs.
       # TODO: After multi-arch CI is fully migrated to TheRock, remove the explicit ref here
-      ref: eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5  # 08/21/2026
+      ref: 064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
       # Pass external repo info for stage-impact analysis
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
@@ -192,7 +154,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -206,7 +168,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: 064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
     permissions:
       contents: read
       id-token: write
@@ -220,7 +182,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@eb36dd0822a5e9a53c47fae4abad0b4a978fd6f5 # 08/21/2026
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -232,7 +194,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: 064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
     permissions:
       contents: read
       id-token: write
@@ -251,7 +213,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: ${{ needs.setup.outputs.ref }}
+          ref: 064a78872ba058cbbe13e96f60e05c71538e7610 # 2026-08-25
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
