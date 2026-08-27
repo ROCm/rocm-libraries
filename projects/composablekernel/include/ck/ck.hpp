@@ -222,6 +222,13 @@
 #endif
 #endif
 
+// LLVM is switching the AMDGPU f16 builtin signatures from __fp16 to _Float16
+// Enable to spell those builtins' operands _Float16; keep disabled
+// for compilers that still declare them with __fp16.
+#ifndef CK_USE_LLVM_BUILTIN_FP16
+#define CK_USE_LLVM_BUILTIN_FP16 0
+#endif
+
 // hardware support _bf16 data type
 #if(defined(__gfx950__) || defined(__gfx12__))
 #define CK_ARCH_SUPPORT_BUILTIN_BF16 1

@@ -261,6 +261,13 @@
 #endif
 #endif
 
+// LLVM is switching the AMDGPU f16 builtin signatures from __fp16 to _Float16
+// Enable to spell those builtins' operands _Float16; keep disabled
+// for compilers that still declare them with __fp16.
+#ifndef CK_TILE_USE_LLVM_BUILTIN_FP16
+#define CK_TILE_USE_LLVM_BUILTIN_FP16 0
+#endif
+
 // SPIR-V constexpr handling: variables that depend on compile-time architecture
 // detection cannot be constexpr under SPIR-V since the target is resolved at runtime.
 // Following rocPRIM's ROCPRIM_AMDGCN_CONSTEXPR pattern.
