@@ -1163,11 +1163,6 @@ class Solution(collections.abc.Mapping):
               if mtTiles % cand == 0:
                 stack = cand
                 break
-            # TEMPORARY experiment override -- remove before commit.
-            import os as _os
-            _forced = _os.environ.get("TENSILE_TLU1_STACK")
-            if _forced and mtTiles % int(_forced) == 0:
-              stack = int(_forced)
             state[f"_ABTilePair{tc}"] = {
               2: "AB_B4_TLU1",
               4: "AB_B4_TLU1_4x1",
