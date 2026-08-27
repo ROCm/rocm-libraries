@@ -115,6 +115,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # HIPDNN_TEST_KPACK_ARCHIVE below, which the parse-level cases open because they need
     # a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
+        compilation/TestKpackArchive.cpp
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
         engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp
