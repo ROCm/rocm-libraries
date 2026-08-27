@@ -273,3 +273,37 @@ non-negotiable (`tests/test_generator.py::TestRequiredTrapAssertions`): that the
 emitted `graph_match` stub's doc comment literally contains the whole-catalog
 blast-radius warning, and that the emitted `Test<Name>Matchers.cpp` constructs
 `DeviceProperties` by value.
+
+### The native stub's own shape (`tests/test_native_stub.py`)
+
+```bash
+.venv/bin/python -m pytest tests/test_native_stub.py
+```
+
+Covers what the two required trap assertions above do not: that every hook body is
+genuinely a `TODO` placeholder (none silently emitted as working logic), that the
+symbol constants the stub declares match what the SAME run's descriptor JSON names,
+that the registration block wires every declared symbol and none more, and basic
+structural soundness (balanced braces, every hook present). `TestRealCompile` also
+host-compiles the emitted stub with `g++`/`clang++` when one is on `PATH` and the
+plugin/data/flatbuffers SDK sources are found beside this checkout (walking up from
+`tools/IngestorGenerator`) plus a vendored `flatbuffers/array.h` (checked at
+`/opt/rocm/include`) -- it generates minimal stand-ins for the CMake-configured
+`version.h`/`CacheRootDefaults.h` headers from their real `.h.in` templates rather
+than skipping outright. Skips (never fails) when any prerequisite is absent, so a
+box without those trees still runs the rest of the suite.
+
+### Fragment/struct arity (`tests/test_fragment_struct_arity.py`)
+
+```bash
+.venv/bin/python -m pytest tests/test_fragment_struct_arity.py
+```
+
+`fragments/ingestor_packs_cpp.j2` once emitted a two-field `s_packs` row against a
+three-field `IngestorPack` struct (the mismatch did not compile as spliced and was
+fixed by hand during a real integration run). This parses the REAL field count out
+of the provider's `IngestorPacks.hpp` and asserts the emitted row's arity matches it
+-- not a hardcoded `3`, which would just re-freeze today's coincidental agreement.
+Skips if the provider source is not found beside this checkout. Also checks that the
+`.hpp`/`.cpp` fragment pair name the same register-function symbol, and that
+`cmake_test_sources.txt` names files this generator's own run actually wrote.
