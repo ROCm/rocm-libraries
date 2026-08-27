@@ -16,68 +16,36 @@ set(HKP_PYTHON_ROOT "${HKP_PKG_DIR}/python")
 set(HKP_TOOL "${HKP_PKG_DIR}/tools/hkp_pack.py")
 set(HKP_FIXTURES "${HKP_PKG_DIR}/tests/fixtures")
 
-# rocm-kpack source for the FetchContent tiers of hkp_resolve_kpack. The default
-# ref is pinned to a known-good SHA for reproducible builds (the tool depends on
-# rocm_kpack's prepare_kernel/get_kernel API). Override the ref to test a newer
-# kpack: set HIPKERNELPROVIDER_KPACK_GIT_REF to any SHA, tag, or branch (e.g.
-# "main"), and HIPKERNELPROVIDER_KPACK_GIT_REPO to fetch from a fork. A branch
-# ref is a moving target: FetchContent re-fetches it only on a clean populate
-# (a wiped _deps/rocm_kpack-* or build dir) — `cmake --fresh` is NOT sufficient,
-# as it clears the cache but leaves _deps/ intact. Pin to a specific newer SHA
-# for a deterministic re-fetch.
-set(HIPKERNELPROVIDER_KPACK_GIT_REPO "https://github.com/ROCm/rocm-kpack.git"
-    CACHE STRING "rocm-kpack git repository to fetch (override for a fork).")
-set(HIPKERNELPROVIDER_KPACK_GIT_REF "e3483286e751060b3a70b792792cc122632c66e8"
-    CACHE STRING "rocm-kpack git ref (SHA, tag, or branch) to fetch. Defaults \
-to a pinned SHA for reproducibility; set to a branch or newer SHA to test the \
-latest tool.")
+include(KpackPython)
 
 # ---------------------------------------------------------------------------
-# hkp_resolve_kpack(<out_var>)
-#   3-tier resolution of the rocm-kpack 'python' directory:
-#   (1) -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR override,
-#   (2)/(3) FetchContent of a pinned rocm-kpack commit. Sets <out_var> to the
-#   resolved python dir. rocm_kpack is load-bearing (the tool cannot pack
-#   without it), so an unresolvable dependency is a hard error.
+# hkp_resolve_kpack(<out_var> <python_exe>)
+#   Resolve the rocm_kpack python dir, or hard-fail: this pipeline cannot pack
+#   without it, so there is no skip path.
+#
+#   Also verifies <python_exe> can import it. Resolution only proves the
+#   directory exists; the import still fails when the interpreter differs from
+#   the one the tree's compiled msgpack/zstandard extensions were built for.
+#   Probing here reports that at configure time instead of mid-build.
 # ---------------------------------------------------------------------------
-function(hkp_resolve_kpack out_var)
-    if(DEFINED HIPKERNELPROVIDER_KPACK_PYTHON_DIR AND EXISTS "${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}")
-        set(${out_var} "${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}" PARENT_SCOPE)
-        message(STATUS "hkp: using rocm_kpack from HIPKERNELPROVIDER_KPACK_PYTHON_DIR=${HIPKERNELPROVIDER_KPACK_PYTHON_DIR}")
-        return()
+function(hkp_resolve_kpack out_var python_exe)
+    kpack_resolve_python_dir(_python_dir)
+    if("${_python_dir}" STREQUAL "")
+        kpack_unset_reason(_reason)
+        message(FATAL_ERROR "hkp: ${_reason}. rocm_kpack is required to pack "
+            "descriptors; there is no skip path.")
     endif()
-
-    # Tiers 2/3: FetchContent of rocm-kpack at the repo/ref configured at the top
-    # of this module (HIPKERNELPROVIDER_KPACK_GIT_REPO/REF). Only the python/ tree
-    # is consumed (download-only, never configured), so a bare populate is used.
-    set(_kpack_repo "${HIPKERNELPROVIDER_KPACK_GIT_REPO}")
-    set(_kpack_tag "${HIPKERNELPROVIDER_KPACK_GIT_REF}")
-    message(STATUS "hkp: fetching rocm_kpack ${_kpack_repo}@${_kpack_tag}")
-    include(FetchContent)
-    FetchContent_Declare(
-        rocm_kpack
-        GIT_REPOSITORY "${_kpack_repo}"
-        GIT_TAG "${_kpack_tag}"
-    )
-    # CMP0169 (CMake >= 3.30) deprecates the single-arg FetchContent_Populate;
-    # keep it valid since only the source tree is needed, not a configured build.
-    if(POLICY CMP0169)
-        cmake_policy(SET CMP0169 OLD)
+    kpack_check_python_deps("${python_exe}" "${_python_dir}" _missing)
+    if(_missing)
+        string(REPLACE ";" ", " _missing_csv "${_missing}")
+        message(FATAL_ERROR
+            "hkp: ${python_exe} cannot import ${_missing_csv} (rocm_kpack "
+            "needs zstandard>=0.20.0 and msgpack). If the resolved tree was "
+            "staged for a different Python, install the dependencies for this "
+            "interpreter or point -DPython3_EXECUTABLE at the one they were "
+            "built for.")
     endif()
-    FetchContent_GetProperties(rocm_kpack)
-    if(NOT rocm_kpack_POPULATED)
-        FetchContent_Populate(rocm_kpack)
-    endif()
-    if(EXISTS "${rocm_kpack_SOURCE_DIR}/python/rocm_kpack/kpack.py")
-        set(${out_var} "${rocm_kpack_SOURCE_DIR}/python" PARENT_SCOPE)
-        message(STATUS "hkp: fetched rocm_kpack into ${rocm_kpack_SOURCE_DIR}/python")
-        return()
-    endif()
-
-    message(FATAL_ERROR
-        "hkp: rocm_kpack could not be resolved (override with "
-        "HIPKERNELPROVIDER_KPACK_PYTHON_DIR or ensure the pinned commit is fetchable). "
-        "rocm_kpack is required to pack; there is no skip path.")
+    set(${out_var} "${_python_dir}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -173,7 +141,7 @@ endfunction()
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
-    hkp_resolve_kpack(_kpack_python)
+    hkp_resolve_kpack(_kpack_python "${Python3_EXECUTABLE}")
     hkp_selected_arches(_arches)
 
     # hipcc is the perl/bat driver that honors --genco; on Windows it is
@@ -214,8 +182,9 @@ endfunction()
 #   Register the pytest suite as two build-tree ctest entries running disjoint
 #   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
 #   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
-#   whose cascade runs each test once per tier with no overlap. Without pytest on
-#   PATH the entries register DISABLED so they list as skipped, not absent.
+#   whose cascade runs each test once per tier with no overlap. When
+#   Python3_EXECUTABLE cannot import pytest the entries register DISABLED so
+#   they list as skipped, not absent.
 # ---------------------------------------------------------------------------
 function(hkp_register_tests kpack_python hipcc)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
@@ -227,36 +196,35 @@ function(hkp_register_tests kpack_python hipcc)
             "the suite compiles kernels for real via --genco and cannot skip.")
     endif()
 
-    # `python` resolves from PATH at test time; the ENVIRONMENT paths are
-    # configure-time absolutes, valid because these entries run only in the
-    # build tree on the configuring machine.
-    set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}" "HKP_HIPCC=${hipcc}")
-    if(kpack_python)
-        list(APPEND _pyenv "HIPKERNELPROVIDER_KPACK_PYTHON_DIR=${kpack_python}")
-    endif()
+    # Runs under Python3_EXECUTABLE, the interpreter hkp_resolve_kpack proved
+    # can import rocm_kpack. Bare PATH `python` may be a different one. The
+    # ENVIRONMENT paths are configure-time absolutes, valid because these
+    # entries run only in the build tree on the configuring machine.
+    set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}" "HKP_HIPCC=${hipcc}"
+        "HIPKERNELPROVIDER_KPACK_PYTHON_DIR=${kpack_python}")
 
-    # When PATH `python` cannot import pytest, register the entries as DISABLED so
-    # they appear in the ctest listing as skipped rather than silently absent.
+    # Without pytest, register the entries as DISABLED so they appear in the
+    # ctest listing as skipped rather than silently absent.
     execute_process(
-        COMMAND python -c "import pytest"
+        COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
         RESULT_VARIABLE _pytest_rc
         OUTPUT_QUIET ERROR_QUIET)
     set(_disabled "")
     if(NOT _pytest_rc EQUAL 0)
         message(STATUS
-            "hkp: pytest not importable by PATH `python`; registering "
+            "hkp: pytest not importable by ${Python3_EXECUTABLE}; registering "
             "descriptor-packaging pytest tests as DISABLED.")
         set(_disabled DISABLED TRUE)
     endif()
 
     add_test(NAME hip-kernel-provider-hkp-pack-quick
-             COMMAND python -m pytest "${HKP_PKG_DIR}/tests" -m quick -v)
+             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m quick -v)
     set_tests_properties(hip-kernel-provider-hkp-pack-quick PROPERTIES
         ENVIRONMENT "${_pyenv}"
         ${_disabled})
 
     add_test(NAME hip-kernel-provider-hkp-pack
-             COMMAND python -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v)
+             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v)
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}"
         ${_disabled})
