@@ -167,6 +167,21 @@ come from the model.
   clocks, more reps, more iterations, interleaved pairing, cold-card warm-up, a robust median —
   **all failed**; clocks in particular are flat to 0.13% while throughput moves 6.5%. What works
   is **aggregating across shapes**, not across repeats. Quote a null as *"no effect above X%"*.
+- **Pin the DPM level for A/B ratio work: `rocm-smi --setperflevel high`, and restore `auto` after.**
+  On `auto` the card alternates between two power states (~145 W and ~170-195 W) whose throughput
+  differs by **6.3%**; throughput tracks package power at **r = +0.955** and temperature is flat, so
+  it is power management, not thermal. Measured effect on a library-vs-library ratio:
+
+  | setperflevel | ratio spread (n=6, x2) | median across reps | power |
+  |---|---|---|---|
+  | `auto` | 15.7% / 15.3% | 1.2364, 1.2887 (**4.2% apart**) | 149-178 W, mixed |
+  | **`high`** | **1.38% / 1.51%** | 1.3247, 1.3251 (**0.03% apart**) | 142-143 W, one mode |
+
+  No root required. **But `high` is a misnomer** — it *lowers* sustained power and absolute
+  throughput (11 842 vs 14 323 GF), and **the ratio value itself moves** (~1.325 vs ~1.26). It is a
+  different operating point, not a quieter one: **pin to detect and rank, unpin for absolute
+  numbers, never mix the two in one table.** Restore `auto` afterwards — the setting is global and
+  persists, so leaving it pinned changes every later run on the host, including other people's.
 - **Warm the GPU once per device before the first timed call, and discard that call.** The GPU
   idles down between invocations, so the **first call after a long idle is an outlier** — and its
   sign is **architecture-dependent**: gfx1201 measures position 0 at **-6.6%** median, gfx1100 at
