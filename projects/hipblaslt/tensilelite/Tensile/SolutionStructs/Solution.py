@@ -1139,7 +1139,13 @@ class Solution(collections.abc.Mapping):
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
             state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
-          elif dtype.is6bitFloat() or dtype.isFloat4():
+          elif dtype.isFloat4():
+            # Only fp4 here, though the row-major branch below also maps 6-bit
+            # onto this geometry: it carries a bpe of 0.5 and names fp4 as the
+            # type it supports, and both bank-conflict layouts select on a bpe
+            # of exactly 0.5.  A 6-bit solution would take fp4 strides and no
+            # swizzle at all, so leave it to the reject below until the layout
+            # covers it.
             # The LDS strip spans the operand's whole macro-tile free dim, so one
             # buffer_load covers as long a contiguous run as the tile allows (a
             # full 128B cacheline once that dim reaches 256 fp4 elements).  The
@@ -1157,6 +1163,11 @@ class Solution(collections.abc.Mapping):
               if mtTiles % cand == 0:
                 stack = cand
                 break
+            # TEMPORARY experiment override -- remove before commit.
+            import os as _os
+            _forced = _os.environ.get("TENSILE_TLU1_STACK")
+            if _forced and mtTiles % int(_forced) == 0:
+              stack = int(_forced)
             state[f"_ABTilePair{tc}"] = {
               2: "AB_B4_TLU1",
               4: "AB_B4_TLU1_4x1",
@@ -2824,6 +2835,15 @@ class Solution(collections.abc.Mapping):
     if tdmInst not in (0, 3):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
       return
+
+    if state["enableTDMMetadata"] and state["ProblemType"]["MetadataLayout"]:
+      # reject if NumWaves > metadata k-major dimension (DepthU * 0.25 // 2)
+      metadataKMajorDimension = (state["DepthU"] * 0.25) // 2
+      if state["NumWaves"] > 1 and metadataKMajorDimension < state["NumWaves"]:
+        reject(state, printRejectionReason,
+               "Metadata Layout 1 can not support NumWaves > metadata k-major dimension (DepthU * 0.25 // 2)"
+               "(DepthU=%d * 0.25 // 2)=%d < NumWaves=%d)" % (state["DepthU"], metadataKMajorDimension, state["NumWaves"]))
+        return
 
     if state.get("PrefetchAcrossPersistent", 0) and (state["enableTDMA"] or state["enableTDMB"]):
       if not (state["enableTDMA"] and state["enableTDMB"]):
