@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 #include "harness/ReferenceCapabilityError.hpp"
+#include "harness/ScratchDirectory.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
@@ -95,12 +96,7 @@ protected:
 
     void SetUp() override
     {
-        auto path
-            = std::filesystem::temp_directory_path()
-              / ("vmode_test_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        _scopedDir = claimScratchDirectory("vmode");
         _tempDir = _scopedDir->path();
     }
 
