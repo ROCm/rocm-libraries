@@ -1274,6 +1274,7 @@ def build_implicit_gemm_conv_wgrad(
             block_m_off_v,
             block_n_off_v,
             dW,
+            group=group_v,
         )
     elif _is_split_k:
         # MFMA split-K: supports fp32, bf16, fp16 via packed atomics.
@@ -1490,6 +1491,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
     block_m_off: Value,
     block_n_off: Value,
     dw_ptr: Value,
+    group: Optional[Value] = None,
 ) -> None:
     """Atomic-add partial WMMA accumulator directly into dW for split-K.
 
@@ -1507,6 +1509,11 @@ def _emit_wgrad_split_k_epilogue_wmma(
     ``is_valid_wgrad_spec`` enforces C%2==0 so the 32-bit-aligned base address
     assumption always holds within a filter position.
 
+    ``group`` (grouped wgrad only): the accumulator row ``c_m`` is per-group
+    ([0, kpg)); fold ``group*kpg`` into the atomic address so each group writes
+    to its own output-channel slab in dW.  Ungrouped (group is None) leaves
+    every address byte-identical to the pre-grouped path.
+
     The caller must zero-initialise dW before launch.
     """
     p = spec.problem
@@ -1521,6 +1528,13 @@ def _emit_wgrad_split_k_epilogue_wmma(
 
     wg_M_v = b.const_i32(_wg_M(p))
     wg_N_v = b.const_i32(_wg_N(p))
+
+    _c_kpg = b.const_i32(p.kpg) if group is not None else None
+
+    def _row_addr(c_m: Value) -> Value:
+        if group is None:
+            return c_m
+        return b.add(c_m, b.mul(group, _c_kpg))
 
     c_map = op.c_layout()
 
@@ -1540,7 +1554,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
             c_n_is_odd = b.mod(c_n, b.const_i32(2))
             is_odd = b.cmp_ne(c_n_is_odd, b.const_i32(0))
             c_n_even = b.sub(c_n, c_n_is_odd)
-            c_off_even = b.add(b.mul(c_m, wg_N_v), c_n_even)
+            c_off_even = b.add(b.mul(_row_addr(c_m), wg_N_v), c_n_even)
             v_even = b.select(is_odd, zero, val)
             v_odd = b.select(is_odd, val, zero)
             vec = b.vec_pack([v_even, v_odd], val.type)
@@ -1563,7 +1577,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
                 if dtype_d == "fp32":
                     m_ok = b.cmp_lt(c_m, wg_M_v)
                     n_ok = b.cmp_lt(c_n, wg_N_v)
-                    c_off = b.add(b.mul(c_m, wg_N_v), c_n)
+                    c_off = b.add(b.mul(_row_addr(c_m), wg_N_v), c_n)
                     with b.scf_if(b.land(m_ok, n_ok)):
                         b.global_atomic_add(dw_ptr, c_off, b.vec_extract(acc, i))
                 else:
