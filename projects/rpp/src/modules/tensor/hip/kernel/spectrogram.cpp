@@ -285,10 +285,6 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
 #ifdef RPP_USE_ROCFFT
     // rocFFT-based implementation path
     {
-        // Setup rocFFT library
-        if (rocfft_setup() != rocfft_status_success)
-            return RPP_ERROR;
-
         // Find the maximum windows required across all inputs in batch
         Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
 
@@ -433,7 +429,6 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         if (execInfo) rocfft_execution_info_destroy(execInfo);
         rocfft_plan_destroy(plan);
         rocfft_plan_description_destroy(desc);
-        rocfft_cleanup();
 
         RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         return RPP_SUCCESS;

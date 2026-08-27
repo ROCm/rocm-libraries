@@ -32,6 +32,12 @@ SOFTWARE.
 #include "errors.hpp"
 #include "handle.hpp"
 
+#ifdef RPP_AUDIO_SUPPORT
+#ifdef RPP_USE_ROCFFT
+#include <rocfft/rocfft.h>
+#endif
+#endif
+
 namespace rpp {
 
 // Get current context
@@ -177,6 +183,14 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
 
     this->SetAllocator(nullptr, nullptr, nullptr);
     impl->PreInitializeBuffer();
+
+#ifdef RPP_AUDIO_SUPPORT
+#ifdef RPP_USE_ROCFFT
+    // Initialize rocFFT library once per handle
+    if (rocfft_setup() != rocfft_status_success)
+        RPP_THROW("rocFFT library initialization failed");
+#endif
+#endif
 }
 
 Handle::Handle(size_t batchSize, Rpp32u numThreads) : impl(new HandleImpl()) {
@@ -197,6 +211,14 @@ void Handle::SetStream(rppAcceleratorQueue_t streamID) const {
 
 void Handle::rpp_destroy_object_gpu() {
     this->rpp_destroy_object_host();
+
+#ifdef RPP_AUDIO_SUPPORT
+#ifdef RPP_USE_ROCFFT
+    // Cleanup rocFFT library once per handle
+    if (rocfft_cleanup() != rocfft_status_success)
+        RPP_THROW("rocFFT library cleanup failed");
+#endif
+#endif
 
     auto status = hipFree(this->GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
     if (status != hipSuccess) RPP_THROW_HIP_STATUS(status, "hipFree failed for scratchBufferHip");
