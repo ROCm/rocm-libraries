@@ -162,6 +162,7 @@ namespace rocsparse
             1, 1, rocsparse::get_datatype<T>(), alpha, nullptr, 1, 0, handle->pointer_mode);
 
         rocsparse_csrsm_info csrsm_info = (info != nullptr) ? info->get_csrsm_info() : nullptr;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
                                                             nrhs,
                                                             trans_A,
