@@ -62,12 +62,9 @@ namespace rocsparse
                                    void*                     temp_buffer);
 
     rocsparse_status gellsv_analysis(rocsparse_handle          handle,
-                                     rocsparse_operation       trans,
                                      int64_t                   m,
                                      int64_t                   n,
                                      const rocsparse_mat_descr descr,
-                                     rocsparse_datatype        ell_val_datatype,
-                                     const void*               ell_val,
                                      rocsparse_indextype       ell_col_ind_indextype,
                                      const void*               ell_col_ind,
                                      int64_t                   ell_width,
@@ -207,8 +204,6 @@ namespace rocsparse
                                       int64_t                   m,
                                       int64_t                   n,
                                       const rocsparse_mat_descr descr,
-                                      rocsparse_datatype        ell_val_datatype,
-                                      const void*               ell_val,
                                       rocsparse_indextype       ell_col_ind_indextype,
                                       const void*               ell_col_ind,
                                       int64_t                   ell_width,
@@ -219,12 +214,9 @@ namespace rocsparse
             rocsparse::trm_info_t* trm_info = new rocsparse::trm_info_t();
 
             THROW_IF_ROCSPARSE_ERROR(rocsparse::gellsv_analysis(handle,
-                                                                trans,
                                                                 m,
                                                                 n,
                                                                 descr,
-                                                                ell_val_datatype,
-                                                                ell_val,
                                                                 ell_col_ind_indextype,
                                                                 ell_col_ind,
                                                                 ell_width,
@@ -236,13 +228,12 @@ namespace rocsparse
             return trm_info;
         }
 
-        template <typename I, typename T>
+        template <typename I>
         rocsparse::trm_info_t* create(rocsparse_handle          handle,
                                       rocsparse_operation       trans,
                                       I                         m,
                                       I                         n,
                                       const rocsparse_mat_descr descr,
-                                      const T*                  ell_val,
                                       const I*                  ell_col_ind,
                                       int64_t                   ell_width,
                                       rocsparse_index_base      idx_base,
@@ -254,8 +245,6 @@ namespace rocsparse
                           static_cast<int64_t>(m),
                           static_cast<int64_t>(n),
                           descr,
-                          rocsparse::get_datatype<T>(),
-                          ell_val,
                           rocsparse::get_indextype<I>(),
                           ell_col_ind,
                           ell_width,
@@ -336,8 +325,6 @@ namespace rocsparse
                                   int64_t                   m,
                                   int64_t                   n,
                                   const rocsparse_mat_descr descr,
-                                  rocsparse_datatype        ell_val_datatype,
-                                  const void*               ell_val,
                                   rocsparse_indextype       ell_col_ind_indextype,
                                   const void*               ell_col_ind,
                                   int64_t                   ell_width,
@@ -352,8 +339,6 @@ namespace rocsparse
                                   m,
                                   n,
                                   descr,
-                                  ell_val_datatype,
-                                  ell_val,
                                   ell_col_ind_indextype,
                                   ell_col_ind,
                                   ell_width,
@@ -362,13 +347,12 @@ namespace rocsparse
                                   temp_buffer);
         }
 
-        template <typename I, typename T>
+        template <typename I>
         rocsparse_status recreate(rocsparse_handle          handle,
                                   rocsparse_operation       trans,
                                   I                         m,
                                   I                         n,
                                   const rocsparse_mat_descr descr,
-                                  const T*                  ell_val,
                                   const I*                  ell_col_ind,
                                   int64_t                   ell_width,
                                   rocsparse_index_base      idx_base,
@@ -382,8 +366,6 @@ namespace rocsparse
                                   static_cast<int64_t>(m),
                                   static_cast<int64_t>(n),
                                   descr,
-                                  rocsparse::get_datatype<T>(),
-                                  ell_val,
                                   rocsparse::get_indextype<I>(),
                                   ell_col_ind,
                                   ell_width,

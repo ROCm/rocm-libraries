@@ -34,8 +34,7 @@ namespace rocsparse
     // lives at ell_col_ind[p * m + row] / ell_val[p * m + row]. Padding entries
     // carry an out-of-range column index. The kernels below scan every slot and
     // skip padded / non-contributing entries, so they do not depend on the
-    // entries being sorted within a row (which lets the transposed ELL matrix be
-    // produced by an unordered atomic scatter).
+    // entries being sorted within a row.
 
     // Analysis kernel for a lower triangular ELL matrix. Each wavefront processes
     // a single row and computes its dependency depth (level) by spin-waiting on
@@ -308,97 +307,6 @@ namespace rocsparse
             rocsparse::nontemporal_store(local_sum, &y[row * y_inc]);
 
             __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
-        }
-    }
-
-    // Transpose helpers -----------------------------------------------------
-    //
-    // The transposed operations are handled by materializing the transpose of
-    // the ELL matrix as another ELL matrix and solving it with a flipped fill
-    // mode. The three kernels below count the entries per column of A (= per row
-    // of A^T), then scatter the entries into the transposed storage.
-
-    // Count the number of valid entries per column (one thread per row).
-    template <uint32_t BLOCKSIZE, typename I>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_transpose_count_kernel(I       m,
-                                      I       n,
-                                      int64_t ell_width,
-                                      const I* __restrict__ ell_col_ind,
-                                      rocsparse_index_base idx_base,
-                                      unsigned long long* __restrict__ counts)
-    {
-        const I row = static_cast<I>(hipBlockIdx_x) * static_cast<I>(BLOCKSIZE)
-                      + static_cast<I>(hipThreadIdx_x);
-        if(row >= m)
-        {
-            return;
-        }
-
-        for(int64_t p = 0; p < ell_width; ++p)
-        {
-            const int64_t idx = p * static_cast<int64_t>(m) + row;
-            const I       col = ell_col_ind[idx] - idx_base;
-            if(col >= 0 && col < n)
-            {
-                atomicAdd(&counts[col], 1ull);
-            }
-        }
-    }
-
-    // Initialize an ELL column index array with a padding sentinel.
-    template <uint32_t BLOCKSIZE, typename I>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_fill_col_ind_kernel(int64_t total, I* __restrict__ col_ind, I pad_value)
-    {
-        const int64_t i = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
-        if(i >= total)
-        {
-            return;
-        }
-        col_ind[i] = pad_value;
-    }
-
-    // Scatter the entries of A into the transposed ELL storage (one thread per
-    // row of A). Entry (row, col) of A becomes entry (col, row) of A^T.
-    template <uint32_t BLOCKSIZE, typename I, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_transpose_scatter_kernel(I       m,
-                                        I       n,
-                                        int64_t ell_width,
-                                        const I* __restrict__ ell_col_ind,
-                                        const T* __restrict__ ell_val,
-                                        rocsparse_index_base idx_base,
-                                        bool                 conj,
-                                        unsigned long long* __restrict__ positions,
-                                        I* __restrict__ t_col_ind,
-                                        T* __restrict__ t_val)
-    {
-        const I row = static_cast<I>(hipBlockIdx_x) * static_cast<I>(BLOCKSIZE)
-                      + static_cast<I>(hipThreadIdx_x);
-        if(row >= m)
-        {
-            return;
-        }
-
-        for(int64_t p = 0; p < ell_width; ++p)
-        {
-            const int64_t idx = p * static_cast<int64_t>(m) + row;
-            const I       col = ell_col_ind[idx] - idx_base;
-            if(col < 0 || col >= n)
-            {
-                continue;
-            }
-
-            const unsigned long long pos = atomicAdd(&positions[col], 1ull);
-
-            // The transposed matrix keeps the same leading dimension (m).
-            const int64_t dest = static_cast<int64_t>(pos) * static_cast<int64_t>(m) + col;
-
-            t_col_ind[dest] = row + idx_base;
-
-            const T v   = ell_val[idx];
-            t_val[dest] = conj ? rocsparse::conj(v) : v;
         }
     }
 }

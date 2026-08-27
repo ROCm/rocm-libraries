@@ -74,10 +74,8 @@ namespace rocsparse
                                                                  diag_type);
     }
 
-    // Solves against whichever matrix it is handed, which is either the matrix
-    // the caller supplied or the materialized transpose cached by the analysis
-    // phase. Everything the kernel needs beyond the vectors - dimensions, ELL
-    // width, index base, fill mode and diagonal type - is read off that matrix.
+    // Everything the kernel needs beyond the vectors - dimensions, ELL width,
+    // index base, fill mode and diagonal type - is read off the matrix.
     template <uint32_t WF_SIZE, bool SLEEP, typename I, typename T>
     static rocsparse_status launch_ellsv_solve_kernel(rocsparse_handle            handle,
                                                       rocsparse_const_spmat_descr A,
@@ -266,6 +264,11 @@ rocsparse_status rocsparse::ellsv_solve_buffer_size(rocsparse_handle            
     ROCSPARSE_CHECKARG_POINTER(2, A);
     ROCSPARSE_CHECKARG_POINTER(3, buffer_size_in_bytes);
 
+    if(trans != rocsparse_operation_none)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    }
+
     const int64_t batch_count = (y) ? y->batch_count : A->batch_count;
 
     if(A->rows == 0 || batch_count == 0)
@@ -312,6 +315,11 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
 
     (void)alpha_stride;
 
+    if(trans != rocsparse_operation_none)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    }
+
     if(A->rows == 0 || A->batch_count == 0)
     {
         return rocsparse_status_success;
@@ -336,19 +344,6 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
 
     rocsparse::trm_info_t* trm_info = ei->get(trans, descr->fill_mode);
 
-    // For a transposed solve the analysis phase materialized A^T and described it
-    // with the opposite fill mode, so the solve simply runs against that matrix.
-    rocsparse_const_spmat_descr solve_matrix
-        = (trans == rocsparse_operation_none) ? A : trm_info->get_transposed_matrix();
-
-    if(solve_matrix == nullptr)
-    {
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-            rocsparse_status_internal_error,
-            "ellsv transpose is not available, it looks like the analysis phase of this "
-            "algorithm was not previously executed.");
-    }
-
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_init_zero_pivot(handle, ei, A));
 
     const bool is_host_mode = (handle->pointer_mode == rocsparse_pointer_mode_host);
@@ -357,8 +352,8 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
     uint32_t wfsize = 0;
     rocsparse::ellsv_select_launch(handle, &sleep, &wfsize);
 
-    rocsparse::ellsv_solve_kernel_t launch = rocsparse::find_ellsv_solve_kernel(
-        wfsize, sleep, solve_matrix->col_type, solve_matrix->data_type);
+    rocsparse::ellsv_solve_kernel_t launch
+        = rocsparse::find_ellsv_solve_kernel(wfsize, sleep, A->col_type, A->data_type);
 
     if(launch == nullptr)
     {
@@ -368,7 +363,7 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
     }
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle,
-                                     solve_matrix,
+                                     A,
                                      alpha,
                                      x,
                                      y,
