@@ -29,15 +29,15 @@
 #include <vector>
 
 // Width of the integer type used for index/offset arithmetic inside
-// generated kernels. Kernels declare such arguments as "kint_type".
+// generated kernels. Kernels declare such arguments as "integer_type".
 enum class KIntType
 {
     U32,
     U64,
 };
 
-// Size of one "kint_type" element, for packing arrays that kernels
-// read through an kint_type pointer.
+// Size of one "integer_type" element, for packing arrays that kernels
+// read through an integer_type pointer.
 static inline size_t rtc_kint_type_size(KIntType itype)
 {
     switch(itype)

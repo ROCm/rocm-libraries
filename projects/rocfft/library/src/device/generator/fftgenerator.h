@@ -1066,10 +1066,10 @@ struct StockhamTransform
     FFTBuffer X{"X", Variable{"offset_lds", rtc_kint_type(KIntType::U32)}, Literal{1}};
 
     Variable dim{"dim", rtc_kint_type(KIntType::U32)};
-    Variable nbatch{"nbatch", "kint_type"};
+    Variable nbatch{"nbatch", "integer_type"};
     Variable lengths{"lengths", rtc_kint_type(KIntType::U32), true, true};
-    Variable stride{"stride", "kint_type", true, true};
-    Variable offset{"offset", "kint_type"};
+    Variable stride{"stride", "integer_type", true, true};
+    Variable offset{"offset", "integer_type"};
 
     Variable write{"write", "bool"};
     Variable thread{"thread", rtc_kint_type(KIntType::U32)};
@@ -1163,13 +1163,13 @@ struct BluesteinTransform
     // chirp signal (first half of chirp buffer)
     FFTBuffer a{"a", Literal{0}, Literal{1}};
     // user data
-    FFTBuffer X{"X", Variable{"offset", "kint_type"}, Variable{"stride0", "kint_type"}};
+    FFTBuffer X{"X", Variable{"offset", "integer_type"}, Variable{"stride0", "integer_type"}};
 
     Variable dim{"dim", rtc_kint_type(KIntType::U32)};
     Variable nbatch{"nbatch", rtc_kint_type(KIntType::U32)};
     Variable lengths{"lengths", rtc_kint_type(KIntType::U32), true, true};
-    Variable stride{"stride", "kint_type", true, true};
-    Variable offset{"offset", "kint_type"};
+    Variable stride{"stride", "integer_type", true, true};
+    Variable offset{"offset", "integer_type"};
 
     Variable write{"write", "bool"};
     Variable thread{"thread", rtc_kint_type(KIntType::U32)};

@@ -59,8 +59,8 @@ struct StockhamKernelCC : public StockhamKernel
     Variable in_bound{"in_bound", "bool"};
     Variable thread{"thread", rtc_kint_type(KIntType::U32)}; // replacing tid_ver
     Variable tid_hor{"tid_hor", rtc_kint_type(KIntType::U32)}; // id along row
-    Variable stride_in{"stride_in", "const kint_type", true};
-    Variable stride_out{"stride_out", "const kint_type", true};
+    Variable stride_in{"stride_in", "const integer_type", true};
+    Variable stride_out{"stride_out", "const integer_type", true};
 
     // large twiddle support
     Multiply ltwd_entries{Parens{ShiftLeft{1, large_twiddle_base}}, 3};
@@ -196,8 +196,8 @@ struct StockhamKernelCC : public StockhamKernel
         Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
         Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
         Variable plength{"plength", rtc_kint_type(KIntType::U32)};
-        Variable global_stride_in{"global_stride_in", "const kint_type"};
-        Variable global_stride_out{"global_stride_out", "const kint_type"};
+        Variable global_stride_in{"global_stride_in", "const integer_type"};
+        Variable global_stride_out{"global_stride_out", "const integer_type"};
 
         StatementList stmts;
         stmts += Declaration{tile_index};
@@ -228,10 +228,10 @@ struct StockhamKernelCC : public StockhamKernel
 
         if(emitGlobalId)
         {
-            stmts += Declaration{Variable{"global_stride_in[3]", "const kint_type"},
+            stmts += Declaration{Variable{"global_stride_in[3]", "const integer_type"},
                                  Literal{"{global_stride_in_0, global_stride_in_1, global_idist}"}};
             stmts
-                += Declaration{Variable{"global_stride_out[3]", "const kint_type"},
+                += Declaration{Variable{"global_stride_out[3]", "const integer_type"},
                                Literal{"{global_stride_out_0, global_stride_out_1, global_odist}"}};
 
             stmts += For{

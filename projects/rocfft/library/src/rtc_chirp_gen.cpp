@@ -25,7 +25,7 @@
 std::string chirp_rtc_kernel_name(rocfft_precision precision, const KIntType& itype)
 {
     std::string kernel_name = "chirp_gen";
-    kernel_name += rtc_index_name(itype);
+    kernel_name += rtc_kint_name(itype);
     kernel_name += rtc_precision_name(precision);
     return kernel_name;
 }
@@ -43,7 +43,7 @@ static std::string chirp_rtc_launch_bounds()
 static std::string chirp_rtc_args()
 {
     std::string args = "(";
-    args += "kint_type N";
+    args += "integer_type N";
     args += ", scalar_type* output";
     args += ")";
     return args;
@@ -53,16 +53,16 @@ static std::string chirp_rtc_body()
 {
     std::string body = "{";
     body += R"_SRC(
-        kint_type i = threadIdx.x + blockIdx.x * blockDim.x;
+        integer_type i = threadIdx.x + blockIdx.x * blockDim.x;
 
         if(i < N)
         {
-            kint_type twoN = 2 * N;
-            kint_type iSq  = i * i;
+            integer_type twoN = 2 * N;
+            integer_type iSq  = i * i;
 
             auto f = (double)iSq / (double)twoN;
 
-            kint_type fRnd = floor(f);
+            integer_type fRnd = floor(f);
 
             auto aLow = iSq;
             auto bLow = twoN * fRnd;

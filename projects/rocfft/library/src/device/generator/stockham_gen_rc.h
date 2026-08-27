@@ -40,12 +40,12 @@ struct StockhamKernelRC : public StockhamKernel
     //
     // locals
     //
-    Variable offset_in{"offset_in", "kint_type"};
-    Variable offset_out{"offset_out", "kint_type"};
-    Variable stride_in{"stride_in", "const kint_type", true};
-    Variable stride_out{"stride_out", "const kint_type", true};
+    Variable offset_in{"offset_in", "integer_type"};
+    Variable offset_out{"offset_out", "integer_type"};
+    Variable stride_in{"stride_in", "const integer_type", true};
+    Variable stride_out{"stride_out", "const integer_type", true};
 
-    Variable stride0_out{"stride0_out", "const kint_type"};
+    Variable stride0_out{"stride0_out", "const integer_type"};
 
     //
     //
@@ -54,10 +54,10 @@ struct StockhamKernelRC : public StockhamKernel
                              "const " + std::string(rtc_kint_type(KIntType::U32))};
     Variable len_along_plane{"len_along_plane",
                              "const " + std::string(rtc_kint_type(KIntType::U32))};
-    Variable stride_load_in{"stride_load_in", "const kint_type"};
-    Variable stride_store_out{"stride_store_out", "const kint_type"};
-    Variable stride_plane_in{"stride_plane_in", "const kint_type"};
-    Variable stride_plane_out{"stride_plane_out", "const kint_type"};
+    Variable stride_load_in{"stride_load_in", "const integer_type"};
+    Variable stride_store_out{"stride_store_out", "const integer_type"};
+    Variable stride_plane_in{"stride_plane_in", "const integer_type"};
+    Variable stride_plane_out{"stride_plane_out", "const integer_type"};
 
     //
     // locals
@@ -143,8 +143,8 @@ struct StockhamKernelRC : public StockhamKernel
 
         Variable plane_id{"plane_id", rtc_kint_type(KIntType::U32)};
         Variable tile_serial_in_batch{"tile_serial_in_batch", rtc_kint_type(KIntType::U32)};
-        Variable global_stride_in{"global_stride_in", "const kint_type"};
-        Variable global_stride_out{"global_stride_out", "const kint_type"};
+        Variable global_stride_in{"global_stride_in", "const integer_type"};
+        Variable global_stride_out{"global_stride_out", "const integer_type"};
 
         stmts += Declaration{
             len_along_block,
@@ -202,10 +202,10 @@ struct StockhamKernelRC : public StockhamKernel
 
         if(emitGlobalId)
         {
-            stmts += Declaration{Variable{"global_stride_in[3]", "const kint_type"},
+            stmts += Declaration{Variable{"global_stride_in[3]", "const integer_type"},
                                  Literal{"{global_stride_in_0, global_stride_in_1, global_idist}"}};
             stmts
-                += Declaration{Variable{"global_stride_out[3]", "const kint_type"},
+                += Declaration{Variable{"global_stride_out[3]", "const integer_type"},
                                Literal{"{global_stride_out_0, global_stride_out_1, global_odist}"}};
 
             offset_2d += For{

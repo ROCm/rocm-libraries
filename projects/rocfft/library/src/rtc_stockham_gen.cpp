@@ -122,7 +122,7 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs&    specs,
         kernel_name += std::to_string(specs.static_dim);
     }
 
-    kernel_name += rtc_index_name(specs.itype);
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(precision);
 
     if(placement == rocfft_placement_inplace)

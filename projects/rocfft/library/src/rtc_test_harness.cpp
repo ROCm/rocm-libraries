@@ -60,7 +60,7 @@ static bool is_cb_arg(const std::string& arg_name)
     return is_cb_ptr(arg_name) || is_cb_lds_bytes(arg_name);
 }
 
-// remove "const" qualifier, real_type_t, kint_type from type
+// remove "const" qualifier, real_type_t, integer_type from type
 std::string cleanup_type(std::string type, const std::string& function_name)
 {
     if(type.compare(0, 6, "const ") == 0)
@@ -74,13 +74,13 @@ std::string cleanup_type(std::string type, const std::string& function_name)
         if(function_name.find("_half") != std::string::npos)
             type = "rocfft_fp16";
     }
-    // "kint_type" is a typedef in the kernel source, which the harness
+    // "integer_type" is a typedef in the kernel source, which the harness
     // does not include.  The kernel name says how wide it is.
-    if(type == "kint_type")
+    if(type == "integer_type")
     {
-        if(function_name.find(rtc_index_name(KIntType::U64)) != std::string::npos)
+        if(function_name.find(rtc_kint_name(KIntType::U64)) != std::string::npos)
             type = rtc_kint_type(KIntType::U64);
-        else if(function_name.find(rtc_index_name(KIntType::U32)) != std::string::npos)
+        else if(function_name.find(rtc_kint_name(KIntType::U32)) != std::string::npos)
             type = rtc_kint_type(KIntType::U32);
     }
     return type;

@@ -48,7 +48,7 @@ std::string transpose_rtc_kernel_name(const TransposeSpecs& specs)
         break;
     }
 
-    kernel_name += rtc_index_name(specs.itype);
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
@@ -111,16 +111,16 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     Variable gridZ{"gridZ", "const " + std::string(rtc_kint_type(KIntType::U32))};
     Variable lengths_var{
         "lengths", "const " + std::string(rtc_kint_type(KIntType::U32)), true, true};
-    Variable stride_in0_var{"stride_in0", "kint_type"};
-    Variable stride_in1_var{"stride_in1", "kint_type"};
-    Variable stride_in2_var{"stride_in2", "kint_type"};
-    Variable stride_in_var{"stride_in", "const kint_type", true, true};
-    Variable idist_var{"idist", "kint_type"};
-    Variable stride_out0_var{"stride_out0", "kint_type"};
-    Variable stride_out1_var{"stride_out1", "kint_type"};
-    Variable stride_out2_var{"stride_out2", "kint_type"};
-    Variable stride_out_var{"stride_out", "const kint_type", true, true};
-    Variable odist_var{"odist", "kint_type"};
+    Variable stride_in0_var{"stride_in0", "integer_type"};
+    Variable stride_in1_var{"stride_in1", "integer_type"};
+    Variable stride_in2_var{"stride_in2", "integer_type"};
+    Variable stride_in_var{"stride_in", "const integer_type", true, true};
+    Variable idist_var{"idist", "integer_type"};
+    Variable stride_out0_var{"stride_out0", "integer_type"};
+    Variable stride_out1_var{"stride_out1", "integer_type"};
+    Variable stride_out2_var{"stride_out2", "integer_type"};
+    Variable stride_out_var{"stride_out", "const integer_type", true, true};
+    Variable odist_var{"odist", "integer_type"};
 
     Function func(kernel_name);
     func.launch_bounds = specs.tileX * specs.tileY;
@@ -229,8 +229,8 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     func.body += Declaration{tile_y_index, "threadIdx.y"};
 
     func.body += CommentLines{"work out offset for dimensions after the first 3"};
-    Variable offset_in{"offset_in", "kint_type"};
-    Variable offset_out{"offset_out", "kint_type"};
+    Variable offset_in{"offset_in", "integer_type"};
+    Variable offset_out{"offset_out", "integer_type"};
     if(specs.grid3D)
     {
         func.body += Declaration{remaining, "blockIdx.z"};

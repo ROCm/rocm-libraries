@@ -48,13 +48,13 @@ struct StockhamPartialPassKernel : public StockhamKernel
     unsigned int              pp_factors_other_prod;
     std::vector<unsigned int> factors_pp_other;
 
-    Variable tile_index{"tile_index", "kint_type"};
-    Variable num_of_tiles{"num_of_tiles", "kint_type"};
+    Variable tile_index{"tile_index", "integer_type"};
+    Variable num_of_tiles{"num_of_tiles", "integer_type"};
     Variable in_bound{"in_bound", "bool"};
     Variable thread{"thread", rtc_kint_type(KIntType::U32)}; // replacing tid_ver
     Variable tid_hor{"tid_hor", rtc_kint_type(KIntType::U32)}; // id along row
-    Variable stride_in{"stride_in", "const kint_type", true};
-    Variable stride_out{"stride_out", "const kint_type", true};
+    Variable stride_in{"stride_in", "const integer_type", true};
+    Variable stride_out{"stride_out", "const integer_type", true};
 
     Variable intrinsic_mode{"intrinsic_mode", "IntrinsicAccessType"};
     Variable apply_large_twiddle{"apply_large_twiddle", "bool"};
@@ -65,12 +65,12 @@ struct StockhamPartialPassKernel : public StockhamKernel
 
     Variable stride_lds_pp{"stride_lds_pp", rtc_kint_type(KIntType::U32)};
     Variable offset_lds_pp{"offset_lds_pp", rtc_kint_type(KIntType::U32)};
-    Variable offset_pp{"offset_pp", "kint_type"};
+    Variable offset_pp{"offset_pp", "integer_type"};
     Variable thread_pp{"thread_pp", rtc_kint_type(KIntType::U32)};
     Variable twiddles_pp{"twiddles_pp", "const scalar_type", true, true};
     Variable twiddles_off_dim{"twiddles_off_dim", "const scalar_type", true, true};
-    Variable global_idx{"global_idx", "kint_type"};
-    Variable transpose_idx{"transpose_idx", "kint_type"};
+    Variable global_idx{"global_idx", "integer_type"};
+    Variable transpose_idx{"transpose_idx", "integer_type"};
 
     ArgumentList device_lds_reg_inout_pp_steps_1_2_arguments()
     {
@@ -762,7 +762,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
 
         Function f{function_name};
         f.arguments   = ArgumentList{global_idx};
-        f.return_type = "kint_type";
+        f.return_type = "integer_type";
         f.qualifier   = "__device__";
 
         StatementList& body = f.body;

@@ -87,9 +87,9 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     Variable tid_hor_lds{"tid_hor_lds", rtc_kint_type(KIntType::U32)};
     Variable tid_hor_pp{"tid_hor_pp", rtc_kint_type(KIntType::U32)};
-    Variable offset_tid_hor{"offset_tid_hor", "kint_type"};
+    Variable offset_tid_hor{"offset_tid_hor", "integer_type"};
 
-    Variable block_idx_pp{"block_idx_pp", "kint_type"};
+    Variable block_idx_pp{"block_idx_pp", "integer_type"};
 
     Variable thread_in_device_twd{"thread_in_device_twd", rtc_kint_type(KIntType::U32)};
 

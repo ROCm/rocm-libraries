@@ -50,7 +50,7 @@ std::string realcomplex_rtc_kernel_name(const RealComplexSpecs& specs)
 
     kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
 
-    kernel_name += rtc_index_name(specs.itype);
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
@@ -83,19 +83,19 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
            + " dim = " + std::to_string(specs.dim) + ";\n";
 
     // function arguments
-    Variable hermitian_size{"hermitian_size", "const kint_type"};
-    Variable lengths0{"lengths0", "const kint_type"};
-    Variable lengths1{"lengths1", "const kint_type"};
-    Variable lengths2{"lengths2", "const kint_type"};
-    Variable nbatch{"nbatch", "const kint_type"};
-    Variable stride_in0{"stride_in0", "const kint_type"};
-    Variable stride_in1{"stride_in1", "const kint_type"};
-    Variable stride_in2{"stride_in2", "const kint_type"};
-    Variable stride_in3{"stride_in3", "const kint_type"};
-    Variable stride_out0{"stride_out0", "const kint_type"};
-    Variable stride_out1{"stride_out1", "const kint_type"};
-    Variable stride_out2{"stride_out2", "const kint_type"};
-    Variable stride_out3{"stride_out3", "const kint_type"};
+    Variable hermitian_size{"hermitian_size", "const integer_type"};
+    Variable lengths0{"lengths0", "const integer_type"};
+    Variable lengths1{"lengths1", "const integer_type"};
+    Variable lengths2{"lengths2", "const integer_type"};
+    Variable nbatch{"nbatch", "const integer_type"};
+    Variable stride_in0{"stride_in0", "const integer_type"};
+    Variable stride_in1{"stride_in1", "const integer_type"};
+    Variable stride_in2{"stride_in2", "const integer_type"};
+    Variable stride_in3{"stride_in3", "const integer_type"};
+    Variable stride_out0{"stride_out0", "const integer_type"};
+    Variable stride_out1{"stride_out1", "const integer_type"};
+    Variable stride_out2{"stride_out2", "const integer_type"};
+    Variable stride_out3{"stride_out3", "const integer_type"};
     Variable input{"input", input_type, true, true};
     Variable output{"output", output_type, true, true};
 
@@ -125,13 +125,13 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
 
     Variable dim_var{"dim", "const " + std::string(rtc_kint_type(KIntType::U32))};
 
-    Variable global_idx{"global_idx", "kint_type"};
+    Variable global_idx{"global_idx", "integer_type"};
     func.body += Declaration{global_idx, "blockIdx.x * blockDim.x + threadIdx.x"};
 
-    Variable idx_0{"idx_0", "const kint_type"};
-    Variable idx_1{"idx_1", "const kint_type"};
-    Variable idx_2{"idx_2", "const kint_type"};
-    Variable idx_batch{"idx_batch", "const kint_type"};
+    Variable idx_0{"idx_0", "const integer_type"};
+    Variable idx_1{"idx_1", "const integer_type"};
+    Variable idx_2{"idx_2", "const integer_type"};
+    Variable idx_batch{"idx_batch", "const integer_type"};
 
     // variable to divide by when counting lengths0 - herm2c
     // allocates threads along hermitian length, but other kernels
@@ -352,7 +352,7 @@ std::string realcomplex_even_rtc_kernel_name(const RealComplexEvenSpecs& specs)
 
     kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
 
-    kernel_name += rtc_index_name(specs.itype);
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
@@ -388,16 +388,16 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     src += "// When N is divisible by 4, one value is handled separately; this is controlled by "
            "Ndiv4.\n";
 
-    Variable              half_N{"half_N", "const kint_type"};
+    Variable              half_N{"half_N", "const integer_type"};
     std::vector<Variable> stride_in;
     std::vector<Variable> stride_out;
     std::vector<Variable> length;
     std::vector<Variable> idx_length;
-    Variable              nbatch{"nbatch", "const kint_type"};
+    Variable              nbatch{"nbatch", "const integer_type"};
     Variable              input{"input", "scalar_type", true, true};
-    Variable              idist{"idist", "const kint_type"};
+    Variable              idist{"idist", "const integer_type"};
     Variable              output{"output", "scalar_type", true, true};
-    Variable              odist{"odist", "const kint_type"};
+    Variable              odist{"odist", "const integer_type"};
     Variable              twiddles{"twiddles", "const scalar_type", true, true};
 
     Function func{kernel_name};
@@ -408,9 +408,9 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     for(unsigned int i = 1; i < specs.lensz; ++i)
     {
         std::string i_str = std::to_string(i);
-        stride_in.emplace_back("stride_in" + i_str, "const kint_type");
-        stride_out.emplace_back("stride_out" + i_str, "const kint_type");
-        length.emplace_back("length" + i_str, "const kint_type");
+        stride_in.emplace_back("stride_in" + i_str, "const integer_type");
+        stride_out.emplace_back("stride_out" + i_str, "const integer_type");
+        length.emplace_back("length" + i_str, "const integer_type");
 
         func.arguments.append(stride_in.back());
         func.arguments.append(stride_out.back());
@@ -425,14 +425,14 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     for(const auto& arg : get_callback_args().arguments)
         func.arguments.append(arg);
 
-    Variable global_idx{"global_idx", "kint_type"};
+    Variable global_idx{"global_idx", "integer_type"};
     func.body += Declaration{global_idx, "blockIdx.x * blockDim.x + threadIdx.x"};
 
     Variable idx_p{"idx_p", "const auto"};
     Variable idx_q{"idx_q", "const auto"};
-    Variable idx_batch{"idx_batch", "const kint_type"};
-    Variable remaining{"remaining", "kint_type"};
-    Variable index_along_d{"index_along_d", "kint_type"};
+    Variable idx_batch{"idx_batch", "const integer_type"};
+    Variable remaining{"remaining", "integer_type"};
+    Variable index_along_d{"index_along_d", "integer_type"};
 
     func.body += Declaration{idx_p, global_idx % half_N};
     func.body += Declaration{idx_q, half_N - idx_p};
@@ -446,8 +446,8 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     If guard{idx_p < quarter_N, {}};
 
     func.body += CommentLines{"unrolled loop to compute index for higher dimensions"};
-    Variable input_offset{"input_offset", "kint_type"};
-    Variable output_offset{"output_offset", "kint_type"};
+    Variable input_offset{"input_offset", "integer_type"};
+    Variable output_offset{"output_offset", "integer_type"};
     func.body += Declaration{input_offset, "0"};
     func.body += Declaration{output_offset, "0"};
     for(unsigned int i = 1; i < specs.lensz; ++i)
@@ -622,7 +622,7 @@ std::string realcomplex_even_transpose_rtc_kernel_name(const RealComplexEvenTran
     kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
     kernel_name += "_tile" + std::to_string(specs.TileX()) + "x" + std::to_string(specs.TileY());
 
-    kernel_name += rtc_index_name(specs.itype);
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
@@ -658,13 +658,13 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     // function arguments
     Variable dim{"dim", rtc_kint_type(KIntType::U32)};
     Variable input{"input", "scalar_type", true, true};
-    Variable idist{"idist", "kint_type"};
+    Variable idist{"idist", "integer_type"};
     Variable output{"output", "scalar_type", true, true};
-    Variable odist{"odist", "kint_type"};
+    Variable odist{"odist", "integer_type"};
     Variable twiddles{"twiddles", "scalar_type", true, true};
     Variable lengths{"lengths", rtc_kint_type(KIntType::U32), true, true};
-    Variable inStride{"inStride", "kint_type", true, true};
-    Variable outStride{"outStride", "kint_type", true, true};
+    Variable inStride{"inStride", "integer_type", true, true};
+    Variable outStride{"outStride", "integer_type", true, true};
     Variable gridY{"gridY", "const " + std::string(rtc_kint_type(KIntType::U32))};
     Variable gridZ{"gridZ", "const " + std::string(rtc_kint_type(KIntType::U32))};
 
@@ -675,10 +675,10 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
         // this helper doesn't need to have its AST transformed or
         // anything, so just add it to source as a string
         src += R"(
-	    __device__ kint_type output_row_base(kint_type            dim,
-	                                      kint_type            output_batch_start,
-	                                      const kint_type* outStride,
-	                                      const kint_type      col)
+	    __device__ integer_type output_row_base(integer_type            dim,
+	                                      integer_type            output_batch_start,
+	                                      const integer_type* outStride,
+	                                      const integer_type      col)
 	    {
 	        if(dim == 2)
 	            return output_batch_start + outStride[1] * col;
@@ -709,10 +709,10 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     func.arguments.append(gridY);
     func.arguments.append(gridZ);
 
-    Variable old_blockIdx_x{"old_blockIdx_x", "kint_type"};
-    Variable old_blockIdx_y{"old_blockIdx_y", "kint_type"};
-    Variable old_blockIdx_z{"old_blockIdx_z", "kint_type"};
-    Variable remaining{"remaining", "kint_type"};
+    Variable old_blockIdx_x{"old_blockIdx_x", "integer_type"};
+    Variable old_blockIdx_y{"old_blockIdx_y", "integer_type"};
+    Variable old_blockIdx_z{"old_blockIdx_z", "integer_type"};
+    Variable remaining{"remaining", "integer_type"};
 
     // if a 1-D grid was provided because creating a natural 3-D grid exceeded allowed limits, then remap it to a 3-D grid.
     if(!specs.grid3D)
@@ -727,17 +727,17 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
 
     func.body += LineBreak{};
 
-    Variable input_batch_start{"input_batch_start", "kint_type"};
-    Variable output_batch_start{"output_batch_start", "kint_type"};
+    Variable input_batch_start{"input_batch_start", "integer_type"};
+    Variable output_batch_start{"output_batch_start", "integer_type"};
 
     const auto kernel_bidx_z = specs.grid3D ? "blockIdx.z" : "old_blockIdx_z";
     if(specs.lensz > specs.dim)
     {
-        Variable dim_batch_idx{"dim_batch_idx", "kint_type"};
+        Variable dim_batch_idx{"dim_batch_idx", "integer_type"};
         func.body += Declaration{dim_batch_idx, kernel_bidx_z};
         func.body += Declaration{input_batch_start, 0};
         func.body += Declaration{output_batch_start, 0};
-        Variable len_dim{"len_dim", "kint_type"};
+        Variable len_dim{"len_dim", "integer_type"};
         func.body += For{len_dim,
                          Literal{specs.dim},
                          len_dim < Literal{specs.lensz},
@@ -777,14 +777,14 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     //
     // generator code has r2c names for shared variables.  names in
     // generated source are adjusted to suit both r2c and c2r.
-    Variable len_row{isR2C ? "len_row" : "len_col", "const kint_type"};
-    Variable tile_size{"tile_size", "const kint_type"};
-    Variable left_col_start{isR2C ? "left_col_start" : "left_row_start", "const kint_type"};
-    Variable middle{"middle", "const kint_type"};
-    Variable cols_to_read{isR2C ? "cols_to_read" : "rows_to_read", "kint_type"};
-    Variable row_limit{isR2C ? "row_limit" : "col_limit", "const kint_type"};
-    Variable row_start{isR2C ? "row_start" : "col_start", "const kint_type"};
-    Variable row_end{isR2C ? "row_end" : "col_end", "kint_type"};
+    Variable len_row{isR2C ? "len_row" : "len_col", "const integer_type"};
+    Variable tile_size{"tile_size", "const integer_type"};
+    Variable left_col_start{isR2C ? "left_col_start" : "left_row_start", "const integer_type"};
+    Variable middle{"middle", "const integer_type"};
+    Variable cols_to_read{isR2C ? "cols_to_read" : "rows_to_read", "integer_type"};
+    Variable row_limit{isR2C ? "row_limit" : "col_limit", "const integer_type"};
+    Variable row_start{isR2C ? "row_start" : "col_start", "const integer_type"};
+    Variable row_end{isR2C ? "row_end" : "col_end", "integer_type"};
 
     // initial values for tile accounting variables.  initialize them
     // to Literals, since the variant needs to be something
@@ -863,8 +863,8 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     func.body += If{left_col_start + tile_size >= middle,
                     {Assign{cols_to_read, middle - left_col_start}}};
 
-    Variable lds_row{"lds_row", "const kint_type"};
-    Variable lds_col{"lds_col", "const kint_type"};
+    Variable lds_row{"lds_row", "const integer_type"};
+    Variable lds_col{"lds_col", "const integer_type"};
     Variable val{"val", "scalar_type"};
     Variable first_elem{"first_elem", "scalar_type"};
     Variable middle_elem{"middle_elem", "scalar_type"};
@@ -887,14 +887,14 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Expression    write_last_idx{""};
 
     // r2c-specific variables
-    Variable input_row_idx{"input_row_idx", "const kint_type"};
-    Variable input_row_base{"input_row_base", "kint_type"};
+    Variable input_row_idx{"input_row_idx", "const integer_type"};
+    Variable input_row_base{"input_row_base", "integer_type"};
 
     // c2r-specific variables
-    Variable input_col_base{"input_col_base", "const kint_type"};
-    Variable input_col_stride{"input_col_stride", "const kint_type"};
-    Variable output_row_base{"output_row_base", "const kint_type"};
-    Variable output_row_stride{"output_row_stride", "const kint_type"};
+    Variable input_col_base{"input_col_base", "const integer_type"};
+    Variable input_col_stride{"input_col_stride", "const integer_type"};
+    Variable output_row_base{"output_row_base", "const integer_type"};
+    Variable output_row_stride{"output_row_stride", "const integer_type"};
 
     func.body += Declaration{lds_row, "threadIdx.y"};
     func.body += Declaration{lds_col, "threadIdx.x"};
@@ -1062,7 +1062,7 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Variable twd_p{"twd_p", "const auto"};
     if(isR2C)
     {
-        Variable col{"col", "kint_type"};
+        Variable col{"col", "integer_type"};
 
         If butterfly{row_start + lds_row < row_end && lds_col < cols_to_read, {}};
 

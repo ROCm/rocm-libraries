@@ -52,7 +52,7 @@ public:
         : itype(itype)
     {
     }
-    // append a value for an argument declared as "kint_type"
+    // append a value for an argument declared as "integer_type"
     void append_kint(size_t value, const std::optional<KIntType>& forced_itype = std::nullopt)
     {
         const auto arg_type = forced_itype.has_value() ? forced_itype.value() : itype;
@@ -153,7 +153,7 @@ struct RTCKernel
 
     // take already-compiled code object and prepare to launch the
     // named kernel.  itype is the width the kernel was generated with,
-    // so that get_launch_args can pack "kint_type" arguments to match.
+    // so that get_launch_args can pack "integer_type" arguments to match.
     RTCKernel(const std::string&                       kernel_name,
               KIntType                                 itype,
               std::shared_future<hipModule_wrapper_t>& module,
@@ -219,7 +219,7 @@ struct RTCKernel
     const int         deviceId = hipInvalidDeviceId;
 
 protected:
-    // Argument buffer that packs arguments declared as "kint_type" at
+    // Argument buffer that packs arguments declared as integer_type" at
     // the width this kernel was generated with.  get_launch_args
     // implementations must build their arguments through this - a
     // default-constructed RTCKernelArgs always packs 32-bit, which
@@ -328,7 +328,7 @@ static const char* rtc_array_type_name(rocfft_array_type type)
     }
 }
 
-static const char* rtc_index_name(KIntType itype)
+static const char* rtc_kint_name(KIntType itype)
 {
     switch(itype)
     {
@@ -338,7 +338,7 @@ static const char* rtc_index_name(KIntType itype)
         return "_i64";
     }
 
-    throw std::runtime_error("Invalid index type");
+    throw std::runtime_error("Invalid integer type");
 }
 
 static const char* rtc_kint_type(KIntType itype)
@@ -351,7 +351,7 @@ static const char* rtc_kint_type(KIntType itype)
         return "unsigned long long";
     }
 
-    throw std::runtime_error("Invalid index type");
+    throw std::runtime_error("Invalid integer type");
 }
 
 static const char* rtc_kint_type_decl(KIntType itype)
@@ -359,12 +359,12 @@ static const char* rtc_kint_type_decl(KIntType itype)
     switch(itype)
     {
     case KIntType::U32:
-        return "typedef unsigned int kint_type;\n";
+        return "typedef unsigned int integer_type;\n";
     case KIntType::U64:
-        return "typedef unsigned long long kint_type;\n";
+        return "typedef unsigned long long integer_type;\n";
     }
 
-    throw std::runtime_error("Invalid index type");
+    throw std::runtime_error("Invalid integer type");
 }
 
 static const char* rtc_precision_name(rocfft_precision precision)
