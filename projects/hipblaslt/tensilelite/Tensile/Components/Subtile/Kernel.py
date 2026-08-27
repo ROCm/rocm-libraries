@@ -487,14 +487,6 @@ class TileInfo:
       # Cooperative GR load counts (scheduler: vmcnt, loop trip count).
       # loadRatioGR uses the global GR tile size (subtileShape * subtileCount),
       # which is the full hardware granularity for one cooperative load round.
-      # For TLU=1 (NT), waves partition the free dim (M for A, N for B) into
-      # disjoint strips; they do NOT cooperate on a single strip's K rows.  So
-      # the per-strip load ratio is a single-wave quantity -- folding numWaves in
-      # would undercount the K loads per strip (numGRPerSubtile).  TLU=0 keeps the
-      # cooperative-K behaviour where multiple waves share one strip.
-      # Shared strips are the exception: grWavesPerStrip waves DO share one
-      # strip's K rows, so its load math is cooperative over exactly that many
-      # waves (not all numWaves -- the other axis' waves need the same data).
       _isTLU1 = isinstance(getattr(gr_cfg, "tag", None), GRTag_TLU1)
       # Waves that COOPERATE ON THE FETCH.  Distinct from grWavesPerStrip, which
       # counts the waves that share a strip when reading it back and which picks
@@ -553,8 +545,7 @@ class TileInfo:
       self.grWindowsPerWave = max(1, int(self.localSubtileGrid[1]) // _winSplit)
       _grLoadWaves = _coopWaves
       # Effective wave count for GR cooperative-load math (numGRPerSubtile,
-      # localGRGranularity).  TLU=1 waves partition free-dim strips instead of
-      # cooperating on K, so their per-strip load math is single-wave.
+      # localGRGranularity): the waves whose loads tile one strip between them.
       self.grLoadWaves = _grLoadWaves
       _grBytesPerLoad      = gr_cfg.bytesPerLoad(_grLoadWaves)
       _globalGRTileSize    = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
