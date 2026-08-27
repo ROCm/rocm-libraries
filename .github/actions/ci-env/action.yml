@@ -4,10 +4,10 @@ description: "Single source of truth for shared CI constants (TheRock ref, Docke
 outputs:
   therock-ref:
     description: "TheRock commit hash to use"
-    value: "cb2adb3ecd28c34cab48a8845b3fffa92a1b0544" # 2026-08-19
+    value: "dbfbbe6b5346b03e54d1474519f69869f8deb315" # 2026-08-27
   baseline-run-id:
     description: "TheRock workflow run ID for prebuilt stage artifacts"
-    value: "32024523555" # Updated by assistant-librarian[bot] on submodule bumps
+    value: "32975957611" # Updated by assistant-librarian[bot] on submodule bumps
   docker-image:
     description: "Docker container image for Linux builds"
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb"
