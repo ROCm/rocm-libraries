@@ -1,7 +1,9 @@
 import copy
 import hashlib
 import json
+import os
 import shutil
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -184,7 +186,7 @@ def _compile_ukd_variant(
     if kind == "hip":
         entry = ks["entry"]
         build = ks["build"]
-        vk = hip_variant_key(hip_source_relpath(rel_dir, source), build)
+        vk = _variant_key_for(ukd, rel_dir)
         if vk not in variant_co:
             variant_co[vk] = compile_hip_variant(
                 hipcc,
@@ -208,7 +210,7 @@ def _compile_ukd_variant(
     elif kind == "rocke":
         builder = ks["builder"]
         spec = ks["spec"]
-        vk = rocke_variant_key(source, builder, spec)
+        vk = _variant_key_for(ukd, rel_dir)
         if vk not in variant_co:
             co_path, captured = compile_rocke_variant(
                 source, builder, spec, arch, inter_arch_dir
@@ -256,9 +258,9 @@ class _VariantJob:
 
     Every field is a str or a plain dict so the record crosses a process
     boundary without a custom reducer. `vk` is computed in the parent by
-    `_variant_key_for`; the worker never recomputes it. `hipcc` travels by value
-    rather than through an environment variable or a module global, keeping the
-    worker a pure function of its argument.
+    `_variant_key_for`; the worker never recomputes it. `hipcc` and `arch`
+    travel by value rather than through an environment variable or a module
+    global, keeping the worker a pure function of its argument.
     """
 
     vk: str
@@ -268,6 +270,7 @@ class _VariantJob:
     source_root: str
     out_dir: str
     hipcc: str
+    arch: str
 
 
 def _selected_entries(doc, arch, ukd_by_id):
@@ -278,28 +281,246 @@ def _selected_entries(doc, arch, ukd_by_id):
     entry dict itself, and `None`. The Descriptor rather than its rel_dir,
     because the walk needs its `path.name` for the error context and for the
     shipped filename as well as its `rel_dir` for the variant key.
+
+    All three arch filters live here and nowhere else, so the prewarm and the
+    serial walk cannot select different variant sets. `ukd_by_id` arrives as a
+    parameter rather than being reached for through `flat`, which leaves the
+    generator no way to enumerate a standalone UKD no KDP references: an orphan
+    is legal input the walk never compiles, and driving selection from
+    `kernelDescriptors` is what makes yielding one structurally impossible.
     """
-    return iter(())
+    if not arch_matches(doc, arch):
+        return
+    for entry in doc["kernelDescriptors"]:
+        if isinstance(entry, str):
+            sdesc = ukd_by_id[entry]
+            if arch_matches(sdesc.doc, arch):
+                yield entry, sdesc.doc, sdesc
+        elif arch_matches(entry, arch):
+            yield None, entry, None
 
 
 def _prewarm_jobs(flat, source_root, arch):
-    """The distinct variant jobs the walk will compile."""
-    return []
+    """The distinct variant jobs the walk will compile.
+
+    Selection comes from the same generator the walk consumes, so the job set
+    equals the walk's set by construction rather than by a second reading of
+    the same filters. Dedup is on the variant key and keeps first-seen order,
+    which is walk order: the pool compiles each distinct variant once, and a
+    failure reported in submission order names the variant the serial path
+    would have named.
+
+    A kind `_variant_key_for` declines to key is dropped here, leaving the walk
+    to reach it and report whatever it produces.
+
+    `out_dir` and `hipcc` are left empty because they belong to the pack run
+    rather than to the selection; `_prewarm_variants` fills them in before
+    dispatch.
+    """
+    ukd_by_id = flat.ukd_by_id()
+    jobs = []
+    seen = set()
+    for kdp in flat.kdps():
+        for sid, ukd, sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+            rel_dir = sdesc.rel_dir if sid is not None else kdp.rel_dir
+            vk = _variant_key_for(ukd, rel_dir)
+            if vk is None or vk in seen:
+                continue
+            seen.add(vk)
+            jobs.append(
+                _VariantJob(
+                    vk=vk,
+                    kind=ukd["kernel_source"]["kind"],
+                    ukd=ukd,
+                    rel_dir=Path(rel_dir).as_posix(),
+                    source_root=str(source_root),
+                    out_dir="",
+                    hipcc="",
+                    arch=arch,
+                )
+            )
+    return jobs
+
+
+def _compile_one_variant(job):
+    """Compile one variant in a worker process, returning a result tuple.
+
+    `(vk, co_path, symbol, None)` on success, `(vk, None, None, "Name: text")`
+    on any failure. Failures are returned rather than raised: rocke and comgr
+    exceptions are not guaranteed picklable, and an exception that cannot cross
+    the process boundary takes the diagnosis with it.
+
+    No key is computed here. `job.vk` was computed in the parent, under
+    whatever key functions were in force there; a key recomputed in the child
+    would resolve the real functions and disagree with the walk.
+    """
+    try:
+        ks = job.ukd["kernel_source"]
+        if job.kind == "hip":
+            co_path = compile_hip_variant(
+                job.hipcc,
+                job.source_root,
+                job.rel_dir,
+                ks["source"],
+                ks["build"],
+                job.arch,
+                job.out_dir,
+            )
+            # The hip symbol is authored, not captured from the artifact, which
+            # is why it is read here rather than returned by the producer.
+            symbol = ks["entry"]
+        else:
+            co_path, symbol = compile_rocke_variant(
+                ks["source"],
+                ks["builder"],
+                ks["spec"],
+                job.arch,
+                job.out_dir,
+            )
+    except Exception as exc:
+        return job.vk, None, None, f"{type(exc).__name__}: {exc}"
+    return job.vk, str(co_path), symbol, None
 
 
 def _pack_jobs():
-    """Worker count for the prewarm."""
-    return 1
+    """Worker count for the prewarm, from `HKP_PACK_JOBS`.
+
+    Unset means `min(32, os.cpu_count() or 1)`. The cap is memory, not cores:
+    each worker holds a full rocke+comgr import, so a 384-core host would
+    exhaust memory long before it ran out of cores.
+
+    `HKP_PACK_JOBS=1` forces serial execution -- the prewarm returns without
+    starting a pool and the walk compiles every variant itself, which is the
+    escape hatch for debugging a compile failure with a single clean traceback.
+
+    An unparseable value is a hard error rather than a silent fallback to the
+    default: a typo that quietly restored 32 workers would look like the knob
+    was honoured.
+
+    An environment variable rather than a CLI flag or a CMake cache variable
+    because it reaches through the CMake custom command with no plumbing.
+    """
+    env = os.environ.get("HKP_PACK_JOBS")
+    if env is None:
+        return min(32, os.cpu_count() or 1)
+    try:
+        return max(0, int(env))
+    except ValueError:
+        raise HkpPackError(
+            f"HKP_PACK_JOBS must be an integer, got '{env}'"
+        ) from None
 
 
 def _variant_key_for(ukd, rel_dir):
-    """Content-hash variant key, or None for a kind the prewarm skips."""
+    """Content-hash variant key, or None for a kind the prewarm skips.
+
+    The single place either key function is called, so the walk and the prewarm
+    cannot key one variant two ways.
+
+    `hip_variant_key` and `rocke_variant_key` are resolved as globals of this
+    module on every call -- never through a function-local import, an alias
+    bound at import time, or a recomputation inside a worker process. Two
+    existing tests monkeypatch those names on this module to collapse every job
+    onto one key; any of those three shortcuts would look up the real function
+    instead, and the tests would silently exercise a different key space than
+    the walk.
+
+    A kind that carries no compilable source yields None rather than raising.
+    The walk stays the sole reporter of whatever failure such a UKD produces:
+    were this to raise, the prewarm would pre-empt it with an error of its own,
+    from a different call site and with a different traceback.
+    """
+    ks = ukd["kernel_source"]
+    kind = ks["kind"]
+    if kind == "hip":
+        return hip_variant_key(
+            hip_source_relpath(rel_dir, ks["source"]), ks["build"]
+        )
+    if kind == "rocke":
+        return rocke_variant_key(ks["source"], ks["builder"], ks["spec"])
     return None
 
 
 def _first_failure(results):
-    """First failing result in submission order, or None."""
-    return None
+    """First failing result in submission order, plus the failure count.
+
+    Returns `(result, count)`, or None when every result succeeded. Submission
+    order is walk order, so the named variant is the one the serial path would
+    have reported; first-completed order would make it depend on scheduling.
+    """
+    failures = [r for r in results if r[3] is not None]
+    if not failures:
+        return None
+    return failures[0], len(failures)
+
+
+def _prewarm_variants(
+    flat,
+    source_root,
+    arch,
+    hipcc,
+    inter_arch_dir,
+    variant_co,
+    variant_symbol,
+    log=print,
+):
+    """Compile this arch's distinct variants concurrently into the caches.
+
+    The walk then finds each key already present and skips the expensive call.
+    Records, symbols and doc rewriting stay entirely the walk's: this only
+    populates two dicts.
+    """
+    jobs = [
+        replace(job, out_dir=str(inter_arch_dir), hipcc=str(hipcc))
+        for job in _prewarm_jobs(flat, source_root, arch)
+        # Defensive rather than load-bearing: the sole caller creates
+        # `variant_co` empty a few lines earlier, so nothing is filtered here
+        # today and there is no case to go looking for.
+        if job.vk not in variant_co
+    ]
+
+    workers = _pack_jobs()
+    if len(jobs) < 2 or workers < 2:
+        return
+    workers = min(workers, len(jobs))
+    log(f"hkp_pack: compiling {len(jobs)} variants for {arch} on {workers} workers")
+
+    # The pool is built here, per arch, and never kept in a module global.
+    # Workers snapshot `sys.path` at process start, so a pool reused across
+    # runs would freeze whichever path list existed when it was first built and
+    # break imports the parent has since arranged. It reads like an obvious
+    # optimisation, and it is not one.
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        try:
+            # `map` yields in submission order, which is what makes the
+            # reported failure deterministic and equal to the serial path's.
+            results = list(pool.map(_compile_one_variant, jobs, chunksize=1))
+        except HkpPackError:
+            raise
+        except Exception as exc:
+            # A worker that is killed rather than raising surfaces here, and
+            # the exception is not an HkpPackError -- so unconverted it would
+            # sail past run_pipeline's per-arch handler and discard every other
+            # arch's work. This is the one failure mode a single-process
+            # compile structurally cannot have.
+            raise HkpPackError(
+                f"the variant compile pool for {arch} failed "
+                f"({type(exc).__name__}: {exc}); a worker process died, "
+                "usually from memory exhaustion -- retry with a lower "
+                "HKP_PACK_JOBS"
+            ) from exc
+
+    outcome = _first_failure(results)
+    if outcome is not None:
+        first, failure_count = outcome
+        raise HkpPackError(
+            f"{failure_count} variant(s) failed to compile for {arch}; "
+            f"first was '{first[0]}': {first[3]}"
+        )
+
+    for vk, co_path, symbol, _err in results:
+        variant_co[vk] = Path(co_path)
+        variant_symbol[vk] = symbol
 
 
 def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=print):
@@ -322,6 +543,17 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
     standalone_ukds = {}
     ukd_by_id = flat.ukd_by_id()
 
+    _prewarm_variants(
+        flat,
+        source_root,
+        arch,
+        hipcc,
+        inter_arch_dir,
+        variant_co,
+        variant_symbol,
+        log,
+    )
+
     for kdp in flat.kdps():
         doc = kdp.doc
         if not arch_matches(doc, arch):
@@ -334,19 +566,17 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
         ukds = []
         entries = []
         new_kds = []
-        for entry in new_doc["kernelDescriptors"]:
-            if isinstance(entry, str):
+        for sid, entry, sdesc in _selected_entries(new_doc, arch, ukd_by_id):
+            if sid is not None:
                 # A reference to a standalone UKD: compile it once per arch and
-                # keep the string in the KDP; it ships as its own file. Skip it
-                # in this shard unless its own arch applies here.
-                sdesc = ukd_by_id[entry]
-                if not arch_matches(sdesc.doc, arch):
+                # keep the string in the KDP; it ships as its own file. Listing
+                # it precedes the compile-once check, so a UKD two KDPs
+                # reference appears in both and is compiled for the first only.
+                entries.append(sid)
+                new_kds.append(sid)
+                if sid in standalone_ukds:
                     continue
-                entries.append(entry)
-                new_kds.append(entry)
-                if entry in standalone_ukds:
-                    continue
-                sukd = sdesc.doc
+                sukd = entry
                 where = f"standalone UKD {sdesc.path.name}"
                 vk, symbol, fields = _compile_ukd_variant(
                     sukd,
@@ -359,7 +589,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                     variant_co,
                     variant_symbol,
                 )
-                standalone_ukds[entry] = StandaloneUKD(
+                standalone_ukds[sid] = StandaloneUKD(
                     id=sukd.get("id"),
                     name=sukd.get("name"),
                     metadata=sukd.get("metadata"),
@@ -374,9 +604,6 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 continue
 
             ukd = entry
-            # An inline UKD ships in this shard only when its own arch applies.
-            if not arch_matches(ukd, arch):
-                continue
             where = f"UKD '{ukd.get('id')}' in {kdp.path.name}"
             vk, symbol, fields = _compile_ukd_variant(
                 ukd,

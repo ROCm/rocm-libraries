@@ -13,6 +13,7 @@ import concurrent.futures
 import inspect
 import json
 import os
+import re
 import sys
 import textwrap
 from pathlib import Path
@@ -650,6 +651,76 @@ def test_worker_inherits_parent_sys_path():
     assert set(expected) <= set(child_path)
 
 
+_MISSING_MODULE = "hkp_parallel_absent/kernels/nowhere.py"
+
+
+@pytest.fixture
+def failing_corpus(tmp_path):
+    """A KDP with two rocke UKDs naming a module that does not exist.
+
+    Two entries rather than one because the prewarm returns without a pool for
+    a single job, and the failure has to come from a real worker process. They
+    carry different specs so they key apart and stay two jobs. The module is
+    absent, so the child raises before it reaches the rocKE compiler and the
+    case needs no toolchain at all.
+    """
+    dest = tmp_path / "failing-corpus"
+    dest.mkdir()
+    entries = [
+        _ukd(
+            f"ukd-absent-{tile}",
+            {
+                "kind": "rocke",
+                "source": _MISSING_MODULE,
+                "builder": _ROCKE_STUB_BUILDER,
+                "spec": {"tile": tile},
+            },
+        )
+        for tile in (64, 128)
+    ]
+    _write_json(
+        dest, "absent.kdp.json", _kdp("kdp-absent", [TARGET_ARCH], entries)
+    )
+    return dest
+
+
+@pytest.mark.quick
+def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
+    """A pool failure reports a count and names one variant, not N tracebacks.
+
+    The assertions are host-independent on purpose. How many jobs fail depends
+    on what the box has -- with no toolchain every rocke job fails in the child
+    -- so the count is matched as a number rather than pinned to one. Which
+    variant is named is not host-dependent and is asserted exactly: it is the
+    first failure in submission order, which is walk order, so the parallel
+    path names the variant the serial path would have named.
+
+    No `PYTHONPATH` export: children inherit the parent's `sys.path` under both
+    start methods, which `test_worker_inherits_parent_sys_path` is the detector
+    for.
+    """
+    monkeypatch.setenv("HKP_PACK_JOBS", "2")
+    flat = load_flat_input(failing_corpus, log=_silent)
+
+    jobs = pipeline._prewarm_jobs(flat, failing_corpus, TARGET_ARCH)
+    assert len(jobs) >= 2, "a single job returns before starting a pool"
+
+    with pytest.raises(HkpPackError) as excinfo:
+        pipeline.compile_intermediate(
+            flat,
+            failing_corpus,
+            TARGET_ARCH,
+            "hipcc",
+            tmp_path / "inter",
+            log=_silent,
+        )
+
+    message = str(excinfo.value)
+    assert re.search(rf"\d+ variant\(s\) failed to compile for {TARGET_ARCH}", message)
+    assert f"'{jobs[0].vk}'" in message
+    assert "module not importable" in message
+
+
 @pytest.mark.quick
 def test_compile_one_variant_returns_errors_and_computes_no_keys(
     tmp_path, monkeypatch
@@ -683,6 +754,7 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(
         source_root=str(tmp_path),
         out_dir=str(tmp_path / "inter"),
         hipcc="hipcc",
+        arch=TARGET_ARCH,
     )
 
     compile_one = getattr(pipeline, "_compile_one_variant", None)

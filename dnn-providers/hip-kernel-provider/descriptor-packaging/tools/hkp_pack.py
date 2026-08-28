@@ -37,6 +37,27 @@ def _parse_args(argv):
         prog="hkp_pack",
         description="Compile authored hip and rocKE UKDs, prune per arch, and "
         "pack a per-arch kpack release tree for the hip-kernel-provider.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "environment:\n"
+            "  HKP_PACK_JOBS  Worker processes used to compile distinct "
+            "variants within one\n"
+            "                 arch. Defaults to min(32, cpu_count). The cap is "
+            "memory: each\n"
+            "                 worker holds a full rocke+comgr import, so a "
+            "many-core host\n"
+            "                 runs out of memory long before it runs out of "
+            "cores. Arches\n"
+            "                 are always packed one at a time.\n"
+            "                 Set HKP_PACK_JOBS=1 to force serial execution -- "
+            "a compile\n"
+            "                 failure then raises from the walk itself, with a "
+            "single clean\n"
+            "                 traceback and nothing else in flight. A value "
+            "that is not an\n"
+            "                 integer is an error, not a fallback to the "
+            "default."
+        ),
     )
     p.add_argument(
         "--source-root",
