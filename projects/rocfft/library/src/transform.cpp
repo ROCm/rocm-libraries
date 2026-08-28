@@ -123,6 +123,15 @@ rocfft_status rocfft_execution_info_set_load_callback(rocfft_execution_info info
                                                       size_t                shared_mem_bytes)
 try
 {
+    log_trace(__func__,
+              "info",
+              info,
+              "cb_functions",
+              cb_functions,
+              "cb_data",
+              cb_data,
+              "shared_mem_bytes",
+              shared_mem_bytes);
     if(!info)
         return rocfft_status_invalid_arg_value;
 
@@ -141,12 +150,44 @@ catch(...)
     return rocfft_handle_exception();
 }
 
+rocfft_status rocfft_execution_info_set_load_callback_data(rocfft_execution_info info,
+                                                           void**                cb_data,
+                                                           size_t                count)
+try
+{
+    log_trace(__func__, "info", info, "cb_data", cb_data, "count", count);
+    if(!info)
+        return rocfft_status_invalid_arg_value;
+
+    // nullptr cannot be combined with a nonzero count
+    if(!cb_data && count)
+        return rocfft_status_invalid_arg_value;
+
+    info->load_cb_data_jit.resize(count);
+    std::copy(cb_data, cb_data + count, info->load_cb_data_jit.begin());
+    info->load_cb_data = count ? info->load_cb_data_jit.data() : nullptr;
+    return rocfft_status_success;
+}
+catch(...)
+{
+    return rocfft_handle_exception();
+}
+
 rocfft_status rocfft_execution_info_set_store_callback(rocfft_execution_info info,
                                                        void**                cb_functions,
                                                        void**                cb_data,
                                                        size_t                shared_mem_bytes)
 try
 {
+    log_trace(__func__,
+              "info",
+              info,
+              "cb_functions",
+              cb_functions,
+              "cb_data",
+              cb_data,
+              "shared_mem_bytes",
+              shared_mem_bytes);
     if(!info)
         return rocfft_status_invalid_arg_value;
 
@@ -158,6 +199,29 @@ try
     info->store_cb_fns       = cb_functions;
     info->store_cb_data      = cb_data;
     info->store_cb_lds_bytes = shared_mem_bytes;
+    return rocfft_status_success;
+}
+catch(...)
+{
+    return rocfft_handle_exception();
+}
+
+rocfft_status rocfft_execution_info_set_store_callback_data(rocfft_execution_info info,
+                                                            void**                cb_data,
+                                                            size_t                count)
+try
+{
+    log_trace(__func__, "info", info, "cb_data", cb_data, "count", count);
+    if(!info)
+        return rocfft_status_invalid_arg_value;
+
+    // nullptr cannot be combined with a nonzero count
+    if(!cb_data && count)
+        return rocfft_status_invalid_arg_value;
+
+    info->store_cb_data_jit.resize(count);
+    std::copy(cb_data, cb_data + count, info->store_cb_data_jit.begin());
+    info->store_cb_data = count ? info->store_cb_data_jit.data() : nullptr;
     return rocfft_status_success;
 }
 catch(...)
