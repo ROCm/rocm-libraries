@@ -3397,20 +3397,26 @@ class Solution(collections.abc.Mapping):
                 miwt = state["MIWaveTile"][idx]
                 miwg = state["MIWaveGroup"][idx]
                 if macDtype.numBytes() == 0.5 and ldstr:
-                  ldsPad = get_fp4_mt_config(mt, "pad", miwt, miwg)
+                  ldsPad = get_fp4_mt_config(mt, "pad", miwt, miwg, state["MatrixInstK"],
+                              state.get(f"enableTDM{tc}", False))
                 elif macDtype.is8bitFloat() and ldstr:
-                  ldsPad = get_fp8_mt_config(mt, "pad", miwt, miwg)
+                  ldsPad = get_fp8_mt_config(mt, "pad", miwt, miwg, state["MatrixInstK"],
+                              state.get(f"enableTDM{tc}", False))
                 elif macDtype.numBytes() == 2 and ldstr:
                   ldsPad = get_fp16_mt_config(mt, "pad", miwg,
                               miInputPerThUnroll=state["MIInputPerThread"],
                               lrvw=state[f"LocalReadVectorWidth{tc}"],
                               miWaveTile=miwt,
-                              vw=vw)
+                              vw=vw,
+                              matrixInstK=state["MatrixInstK"],
+                              usesTDM=state.get(f"enableTDM{tc}", False))
                 elif macDtype.numBytes() == 4:
                   ldsPad = get_fp32_mt_config(mt, "pad",
                               vw, state[f"LocalReadVectorWidth{tc}"], miwg,
                               miInputPerThread=state["MIInputPerThread"],
                               miWaveTile=miwt,
+                              matrixInstK=state["MatrixInstK"],
+                              usesTDM=state.get(f"enableTDM{tc}", False),
                               xf32EmuPack=state.get("UseF32XEmulation", False))
               if state[f"DirectToLds{tc}"]:
                 # TODO: Check if there are cases which benefit from padding, currently set to zero by default
@@ -3456,7 +3462,10 @@ class Solution(collections.abc.Mapping):
               lrvwBytesM = state.get("LocalReadVectorWidthMetadata", 0) // 4
               miInputPerThreadBytesM = state.get("MIInputPerThreadMetadata", 0)
               ldsPadM = get_metadata_mt_config(state["MacroTileMetadata"], "pad",
-                                               miwtM, miwgM, lrvwBytesM, miInputPerThreadBytesM)
+                                               miwtM, miwgM, lrvwBytesM,
+                                               miInputPerThreadBytesM,
+                                               state["MatrixInstK"],
+                                               state.get("enableTDMMetadata", False))
             elif not state["ProblemType"]["TLUMetadata"]:
               # Legacy (MetadataLayout=0) TileMajor-without-LDSTr fallback (not UnrollMajorLDSMetadata).
               ldsPadM = vwM
@@ -3604,7 +3613,10 @@ class Solution(collections.abc.Mapping):
               lrvwBytesM = state.get("LocalReadVectorWidthMetadata", 0) // 4
               miInputPerThreadBytesM = state.get("MIInputPerThreadMetadata", 0)
               LdsBlockSizePerPad = get_metadata_mt_config(state["MacroTileMetadata"], "perBlock",
-                                                          miwtM, miwgM, lrvwBytesM, miInputPerThreadBytesM)
+                                                          miwtM, miwgM, lrvwBytesM,
+                                                          miInputPerThreadBytesM,
+                                                          state["MatrixInstK"],
+                                                          state.get("enableTDMMetadata", False))
         if state["DirectToLdsMetadata"]:
           LdsBlockSizePerPad = 0
         return int(LdsBlockSizePerPad)
@@ -3633,20 +3645,26 @@ class Solution(collections.abc.Mapping):
                   miwt = state["MIWaveTile"][miWaveTileIdx]
                   miwg = state["MIWaveGroup"][miWaveTileIdx]
                   if tmpBpe == 0.5 and state.get("enableLDSTr%s"%tc, False):
-                    LdsBlockSizePerPad = get_fp4_mt_config(mt, "perBlock", miwt, miwg)
+                    LdsBlockSizePerPad = get_fp4_mt_config(mt, "perBlock", miwt, miwg, state["MatrixInstK"],
+                                            state.get(f"enableTDM{tc}", False))
                   elif tmpBpe == 1 and ldsType.is8bitFloat() and state.get("enableLDSTr%s"%tc, False):
-                    LdsBlockSizePerPad = get_fp8_mt_config(mt, "perBlock", miwt, miwg)
+                    LdsBlockSizePerPad = get_fp8_mt_config(mt, "perBlock", miwt, miwg, state["MatrixInstK"],
+                                            state.get(f"enableTDM{tc}", False))
                   elif tmpBpe == 2 and state.get("enableLDSTr%s"%tc, False):
                     LdsBlockSizePerPad = get_fp16_mt_config(mt, "perBlock", miwg,
                                             miInputPerThUnroll=state["MIInputPerThread"],
                                             lrvw=lrvw,
                                             miWaveTile=miwt,
-                                            vw=state[f"VectorWidth{tc}"])
+                                            vw=state[f"VectorWidth{tc}"],
+                                            matrixInstK=state["MatrixInstK"],
+                                            usesTDM=state.get(f"enableTDM{tc}", False))
                   elif tmpBpe == 4:
                     LdsBlockSizePerPad = get_fp32_mt_config(mt, "perBlock",
                                             state[f"VectorWidth{tc}"], lrvw, miwg,
                                             miInputPerThread=state["MIInputPerThread"],
                                             miWaveTile=miwt,
+                                            matrixInstK=state["MatrixInstK"],
+                                            usesTDM=state.get(f"enableTDM{tc}", False),
                                             xf32EmuPack=state.get("UseF32XEmulation", False))
               else:
                 LdsBlockSizePerPad = 0
@@ -5273,20 +5291,28 @@ class Solution(collections.abc.Mapping):
        and auto_LdsPadA and auto_LdsBlockSizePerPadA:
       if state["ProblemType"]["MacDataTypeA"].numBytes() == 0.5:
         halfBankShiftA = get_fp4_mt_config(state["MacroTile0"], "shift",
-                          state["MIWaveTile"][0], state["MIWaveGroup"][0])
+                          state["MIWaveTile"][0], state["MIWaveGroup"][0],
+                          state["MatrixInstK"],
+                          state.get("enableTDMA", False))
       elif state["ProblemType"]["MacDataTypeA"].is8bitFloat():
         halfBankShiftA = get_fp8_mt_config(state["MacroTile0"], "shift",
-                          state["MIWaveTile"][0], state["MIWaveGroup"][0])
+                          state["MIWaveTile"][0], state["MIWaveGroup"][0],
+                          state["MatrixInstK"],
+                          state.get("enableTDMA", False))
 
     halfBankShiftB = 0
     if wmmaV3 and state.get("enableLDSTrB", False) \
        and auto_LdsPadB and auto_LdsBlockSizePerPadB:
       if state["ProblemType"]["MacDataTypeB"].numBytes() == 0.5:
         halfBankShiftB = get_fp4_mt_config(state["MacroTile1"], "shift",
-                          state["MIWaveTile"][1], state["MIWaveGroup"][1])
+                          state["MIWaveTile"][1], state["MIWaveGroup"][1],
+                          state["MatrixInstK"],
+                          state.get("enableTDMB", False))
       elif state["ProblemType"]["MacDataTypeB"].is8bitFloat():
         halfBankShiftB = get_fp8_mt_config(state["MacroTile1"], "shift",
-                          state["MIWaveTile"][1], state["MIWaveGroup"][1])
+                          state["MIWaveTile"][1], state["MIWaveGroup"][1],
+                          state["MatrixInstK"],
+                          state.get("enableTDMB", False))
 
     state["LdsOffsetA"] = halfBankShiftA
     state["LdsOffsetMXSA"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]

@@ -24,6 +24,19 @@
 ################################################################################
 import pytest
 
+# MatrixInstK the tile-major sweeps use, per read path. The tail loop advances
+# mtBytes * MatrixInstK per pass, and that step decides which block sizes the
+# search may offer.
+_K_B64  = 128   # FP4 / FP8  ds_load_tr*_b64
+_K_B128 = 32    # FP16       ds_load_tr16_b128
+_K_B32  = 4     # FP32       ds_load_b32
+_K_XF32 = 32    # XF32       ds_load_b32, MatrixInstruction [16,16,32,1]
+
+# The sweeps are TDM, where the hardware writes LDS itself and no per-thread
+# ds_write constrains the block from below.
+_TDM = True
+
+
 import Tensile.SolutionStructs.LdsPadding as _L
 from Tensile.SolutionStructs.LdsPadding import (
     get_fp4_mt_config,
@@ -50,9 +63,9 @@ from Tensile.SolutionStructs.LdsPadding import (
     ],
 )
 def test_fp4(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
-    assert get_fp4_mt_config(mt, "perBlock", miWaveTile, miWaveGroup) == perBlock
-    assert get_fp4_mt_config(mt, "pad",      miWaveTile, miWaveGroup) == pad
-    assert get_fp4_mt_config(mt, "shift",    miWaveTile, miWaveGroup) == shift
+    assert get_fp4_mt_config(mt, "perBlock", miWaveTile, miWaveGroup, _K_B64, _TDM) == perBlock
+    assert get_fp4_mt_config(mt, "pad",      miWaveTile, miWaveGroup, _K_B64, _TDM) == pad
+    assert get_fp4_mt_config(mt, "shift",    miWaveTile, miWaveGroup, _K_B64, _TDM) == shift
 
 
 # FP8
@@ -71,9 +84,9 @@ def test_fp4(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
     ],
 )
 def test_fp8(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
-    assert get_fp8_mt_config(mt, "perBlock", miWaveTile, miWaveGroup) == perBlock
-    assert get_fp8_mt_config(mt, "pad",      miWaveTile, miWaveGroup) == pad
-    assert get_fp8_mt_config(mt, "shift",    miWaveTile, miWaveGroup) == shift
+    assert get_fp8_mt_config(mt, "perBlock", miWaveTile, miWaveGroup, _K_B64, _TDM) == perBlock
+    assert get_fp8_mt_config(mt, "pad",      miWaveTile, miWaveGroup, _K_B64, _TDM) == pad
+    assert get_fp8_mt_config(mt, "shift",    miWaveTile, miWaveGroup, _K_B64, _TDM) == shift
 
 
 # FP16 / BF16
@@ -91,8 +104,8 @@ def test_fp8(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
     ],
 )
 def test_fp16(mt, miWaveGroup, miWaveTile, perBlock, pad):
-    assert get_fp16_mt_config(mt, "perBlock", miWaveGroup, 16, 8, miWaveTile, 1) == perBlock
-    assert get_fp16_mt_config(mt, "pad",      miWaveGroup, 16, 8, miWaveTile, 1) == pad
+    assert get_fp16_mt_config(mt, "perBlock", miWaveGroup, 16, 8, miWaveTile, 1, _K_B128, _TDM) == perBlock
+    assert get_fp16_mt_config(mt, "pad",      miWaveGroup, 16, 8, miWaveTile, 1, _K_B128, _TDM) == pad
 
 
 # FP32
@@ -113,9 +126,13 @@ def test_fp32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
               perBlock, pad):
     assert get_fp32_mt_config(mt, "perBlock", vw, lrvw, miWaveGroup,
                               miInputPerThread, miWaveTile,
+                              matrixInstK=_K_B32,
+                              usesTDM=_TDM,
                               xf32EmuPack=False) == perBlock
     assert get_fp32_mt_config(mt, "pad", vw, lrvw, miWaveGroup,
                               miInputPerThread, miWaveTile,
+                              matrixInstK=_K_B32,
+                              usesTDM=_TDM,
                               xf32EmuPack=False) == pad
 
 
@@ -136,9 +153,13 @@ def test_xf32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
               perBlock, pad):
     assert get_fp32_mt_config(mt, "perBlock", vw, lrvw, miWaveGroup,
                               miInputPerThread, miWaveTile,
+                              matrixInstK=_K_XF32,
+                              usesTDM=_TDM,
                               xf32EmuPack=True) == perBlock
     assert get_fp32_mt_config(mt, "pad", vw, lrvw, miWaveGroup,
                               miInputPerThread, miWaveTile,
+                              matrixInstK=_K_XF32,
+                              usesTDM=_TDM,
                               xf32EmuPack=True) == pad
 
 
@@ -180,7 +201,7 @@ def test_fp4_pad_is_even_dwords():
     for wg in _WAVE_GROUPS:
         for wt in _WAVE_TILES:
             mt = 16 * wt * wg
-            pad = get_fp4_mt_config(mt, "pad", wt, wg)
+            pad = get_fp4_mt_config(mt, "pad", wt, wg, _K_B64, _TDM)
             assert _pad_bytes_x2(pad, 0.5) % 16 == 0, (mt, wt, wg, pad)
 
 
@@ -188,7 +209,7 @@ def test_fp8_pad_is_even_dwords():
     for wg in _WAVE_GROUPS:
         for wt in _WAVE_TILES:
             mt = 16 * wt * wg
-            pad = get_fp8_mt_config(mt, "pad", wt, wg)
+            pad = get_fp8_mt_config(mt, "pad", wt, wg, _K_B64, _TDM)
             assert _pad_bytes_x2(pad, 1.0) % 16 == 0, (mt, wt, wg, pad)
 
 
@@ -196,7 +217,7 @@ def test_fp16_pad_is_even_dwords():
     for wg in _WAVE_GROUPS:
         for wt in _WAVE_TILES:
             mt = 16 * wt * wg
-            pad = get_fp16_mt_config(mt, "pad", wg, 16, 8, wt, 1)
+            pad = get_fp16_mt_config(mt, "pad", wg, 16, 8, wt, 1, _K_B128, _TDM)
             assert _pad_bytes_x2(pad, 2.0) % 16 == 0, (mt, wt, wg, pad)
 
 
@@ -207,7 +228,7 @@ def test_fp32_pad_is_even_dwords():
             for vw in (1, 2, 4):
                 if wt % vw:
                     continue
-                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt)
+                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt, _K_B32, _TDM)
                 assert _pad_bytes_x2(pad, 4.0) % 16 == 0, (mt, wt, wg, vw, pad)
 
 
@@ -215,7 +236,7 @@ def test_metadata_pad_is_even_dwords():
     for wg in _WAVE_GROUPS:
         for wt in _WAVE_TILES:
             mt = 16 * wt * wg
-            pad = get_metadata_mt_config(mt, "pad", wt, wg, 16, 64)
+            pad = get_metadata_mt_config(mt, "pad", wt, wg, 16, 64, _K_B64, _TDM)
             assert _pad_bytes_x2(pad, 1.0) % 16 == 0, (mt, wt, wg, pad)
 
 
@@ -233,6 +254,16 @@ def test_max_threads_per_bank_counts_each_bank_a_thread_touches():
     assert _L._max_threads_per_bank([0, 4], 2) == 2
     # Same two threads 8 bytes apart: banks {0,1} and {2,3}, no sharing.
     assert _L._max_threads_per_bank([0, 8], 2) == 1
+
+
+def test_no_block_carry_detects_a_carrying_pair():
+    # base 256 and instOffs 256, B=512: (256 % 512) + (256 % 512) == 512,
+    # which is not less than B, so the pair carries and the base/instOffs
+    # padded independently disagrees with padding the combined offset.
+    assert _L._no_block_carry([256], [256], 512) is False
+    # Same base and instOffs at B=1024: (256 % 1024) + (256 % 1024) == 512,
+    # which is less than B, so the pair does not carry.
+    assert _L._no_block_carry([256], [256], 1024) is True
 
 
 def test_b64_wave_costs_doubles_when_not_8_byte_aligned():
@@ -257,9 +288,9 @@ def test_b64_config_is_legal_over_the_reachable_shapes():
         for wt in _WAVE_TILES:
             mt = 16 * wt * wg
             for getter, bpeDS in ((get_fp8_mt_config, 1.0), (get_fp4_mt_config, 0.5)):
-                perBlock = getter(mt, "perBlock", wt, wg)
-                pad = getter(mt, "pad", wt, wg)
-                shift = getter(mt, "shift", wt, wg)
+                perBlock = getter(mt, "perBlock", wt, wg, _K_B64, _TDM)
+                pad = getter(mt, "pad", wt, wg, _K_B64, _TDM)
+                shift = getter(mt, "shift", wt, wg, _K_B64, _TDM)
                 assert shift in (0, 4), (mt, wt, wg, shift)
                 if perBlock == 0:
                     assert pad == 0, (mt, wt, wg, pad)
@@ -292,8 +323,8 @@ def test_fp16_config_is_legal_over_the_reachable_shapes():
         for wt in _WAVE_TILES:
             mt = 16 * wt * wg
             for mipt, lrvw in ((16, 8), (16, 16), (32, 8)):
-                perBlock = get_fp16_mt_config(mt, "perBlock", wg, mipt, lrvw, wt, 1)
-                pad = get_fp16_mt_config(mt, "pad", wg, mipt, lrvw, wt, 1)
+                perBlock = get_fp16_mt_config(mt, "perBlock", wg, mipt, lrvw, wt, 1, _K_B128, _TDM)
+                pad = get_fp16_mt_config(mt, "pad", wg, mipt, lrvw, wt, 1, _K_B128, _TDM)
                 if perBlock == 0:
                     assert pad == 0, (mt, wt, wg, pad)
                     continue
@@ -313,7 +344,7 @@ def test_b64_compute_config_picks_shift_4_when_only_it_is_legal(monkeypatch):
         _L, "_b64_wave_costs",
         lambda half0, half1, B, P, instOffs, wOffsets, shift:
             [1] * len(wOffsets) if (B == 16 and P == 8 and shift == 4) else None)
-    cfg = _L._b64_compute_config(128, 0.5, _L._b64_base_addrs_fp4, 8, (0,), (0,))
+    cfg = _L._b64_compute_config(128, 0.5, _L._b64_base_addrs_fp4, 0, (0,), (0,), 64 * _K_B64)
     assert cfg == {"perBlock": 16, "pad": 8, "shift": 4}
 
 
@@ -337,8 +368,8 @@ def test_fp32_config_is_legal_over_the_reachable_shapes():
             for vw in (1, 2, 4):
                 if wt % vw:
                     continue
-                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt)
-                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt)
+                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM)
+                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt, _K_B32, _TDM)
                 if perBlock == 0:
                     assert pad == 0, (mt, wt, wg, vw, pad)
                     continue
@@ -360,3 +391,40 @@ def test_pick_best_ranks_cost_over_overhead():
         return [5] if cand == high_cost_low_overhead else [1]
 
     assert _L._pick_best(candidates, costFn) == low_cost_high_overhead
+
+
+def test_valid_blocks_divide_the_tail_loop_step():
+    # The tail loop advances the local read address by one compile-time
+    # constant per pass. How much padding a step of incBytes skips is the
+    # same from every starting offset only when the block divides incBytes,
+    # so a block that does not is never offered.
+    for incBytes in (256, 768, 1024, 2048, 192):
+        blocks = _L._valid_blocks(incBytes, readBases=(0,), readOffs=(0,),
+                                  writeMinBytes=0, writeRowBytes=0)
+        for b in blocks:
+            assert incBytes % b == 0, (incBytes, b)
+        for b in _L._TDM_VALID_BLOCK_BYTES:
+            if incBytes % b:
+                assert b not in blocks, (incBytes, b)
+
+
+def test_chosen_block_divides_the_tail_loop_step():
+    # Same property, but on what the entry points actually return.
+    for wg in _WAVE_GROUPS:
+        for wt in _WAVE_TILES:
+            mt = 16 * wt * wg
+            for getter, bpeDS, k in ((get_fp8_mt_config, 1.0, _K_B64),
+                                     (get_fp4_mt_config, 0.5, _K_B64)):
+                perBlock = getter(mt, "perBlock", wt, wg, k, _TDM)
+                if perBlock:
+                    assert int(mt * bpeDS) * k % perBlock == 0, (mt, wt, wg, perBlock)
+            perBlock = get_fp16_mt_config(mt, "perBlock", wg, 16, 8, wt, 1,
+                                          _K_B128, _TDM)
+            if perBlock:
+                assert mt * 2 * _K_B128 % perBlock == 0, (mt, wt, wg, perBlock)
+            for vw in (1, 2, 4):
+                if wt % vw:
+                    continue
+                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM)
+                if perBlock:
+                    assert mt * 4 * _K_B32 % perBlock == 0, (mt, wt, wg, vw, perBlock)
