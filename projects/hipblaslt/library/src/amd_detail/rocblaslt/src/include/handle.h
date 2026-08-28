@@ -215,13 +215,22 @@ struct _rocblaslt_handle
 
         // hipStreamPerThread is a sentinel that resolves to a different stream
         // for every host thread, so every thread would present the same key and
-        // share one block. Key those by thread instead. The legacy null stream
-        // needs no such treatment: it really is one stream shared by all threads.
+        // share one block. Key those by thread instead.
         const void* key = static_cast<const void*>(stream);
         if(stream == hipStreamPerThread)
         {
             static thread_local char perThreadKey;
             key = &perThreadKey;
+        }
+        else if(stream == nullptr)
+        {
+            // The legacy null stream keys as nullptr, which is also the value
+            // the loop below uses to mean "block free": the CAS would succeed
+            // without marking the block owned, so this stream would reserve
+            // nothing and alias whichever stream claims that block next. It
+            // really is one stream shared by all threads, so a plain static.
+            static char legacyNullKey;
+            key = &legacyNullKey;
         }
 
         for(size_t i = 0; i < c_syncSkStreamSlots; ++i)
