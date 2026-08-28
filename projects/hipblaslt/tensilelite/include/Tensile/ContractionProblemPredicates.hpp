@@ -244,20 +244,27 @@ namespace TensileLite
                                 * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
                                    * value[2] * value[4] * value[3] * problem.d().sizes()[2];
 
-                    // This guards the GSU (MBSK) region, which is sized per
-                    // problem and unchanged from before.
-                    bool ret = synchronizerUsage <= GsuSynchronizerElements;
-                    // A group wider than the block cannot be given a private
-                    // region per problem, so it must not run a solution that
-                    // uses these flags at all.
-                    if(problem.groupedGemm())
-                        ret = ret && (problem.groupedGemmCount() <= SynchronizerGroupedSlots);
-                    return ret;
+                    // This guards the GSU (MBSK) region. A non-grouped GEMM is
+                    // handed the base of the whole buffer and may use every
+                    // slot; a grouped GEMM is handed the single slot at its
+                    // problem index, so it is bounded by one slot and the group
+                    // has to fit in the slots that exist.
+                    if(!problem.groupedGemm())
+                        return synchronizerUsage
+                               <= GsuSynchronizerElements * SynchronizerGroupedSlots;
+
+                    return synchronizerUsage <= GsuSynchronizerElements
+                           && problem.groupedGemmCount() <= SynchronizerGroupedSlots;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    uint32_t synchronizerSize
+                        = problem.groupedGemm()
+                              ? GsuSynchronizerElements
+                              : GsuSynchronizerElements * SynchronizerGroupedSlots;
+
                     return debugEvalCmp(
                         problem,
                         stream,
@@ -267,7 +274,7 @@ namespace TensileLite
                             * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2],
                         ">=",
                         "limit",
-                        GsuSynchronizerElements);
+                        synchronizerSize);
                 }
             };
 
