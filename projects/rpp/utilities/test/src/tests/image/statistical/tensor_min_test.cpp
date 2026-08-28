@@ -47,16 +47,14 @@ namespace {
 // dtype for integers, and returns F32 for the float dtypes, per the API contract).
 template <typename Tin, typename Tout>
 void run_tensor_min(const TestConfig& cfg) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
+    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
     const std::size_t outLen = reduction_length(desc);
 
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     // (1) Host golden model.
     std::vector<Tin> input(count);
@@ -70,7 +68,7 @@ void run_tensor_min(const TestConfig& cfg) {
     PinnedArray<Tout> out(cfg.backend, outLen);
     for (std::size_t i = 0; i < outLen; ++i) out[i] = static_cast<Tout>(0);
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_tensor_min(src.ptr(), &desc, out.data(), static_cast<Rpp32u>(outLen), roi.data(),
                               XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

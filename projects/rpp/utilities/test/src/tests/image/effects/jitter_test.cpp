@@ -66,16 +66,14 @@ struct JitterParams {
 
 template <typename T>
 void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
+    RpptDesc desc = make_src_descriptor(cfg);
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32u> kernelSize(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32u> kernelSize(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         kernelSize[i] = op.kernelSize;
         roi[i] = roiVec[i];
     }
@@ -92,7 +90,7 @@ void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_jitter(src.ptr(), &desc, dst.ptr(), &desc, kernelSize.data(), /*seed=*/42u,
                           roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -116,16 +114,14 @@ void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
 
 template <typename T>
 void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
+    RpptDesc desc = make_src_descriptor(cfg);
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32u> kernelSize(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32u> kernelSize(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         kernelSize[i] = op.kernelSize;
         roi[i] = roiVec[i];
     }
@@ -137,7 +133,7 @@ void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_jitter(src.ptr(), &desc, dst.ptr(), &desc, kernelSize.data(), /*seed=*/123u,
                           roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -198,16 +194,14 @@ void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
 
 template <typename T>
 void run_jitter_seed_invariant(const TestConfig& cfg, const JitterParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
+    RpptDesc desc = make_src_descriptor(cfg);
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32u> kernelSize(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32u> kernelSize(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         kernelSize[i] = op.kernelSize;
         roi[i] = roiVec[i];
     }
@@ -219,7 +213,7 @@ void run_jitter_seed_invariant(const TestConfig& cfg, const JitterParams& op) {
         DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
         src.write(input.data(), bytes);
         dst.write(input.data(), bytes);
-        RppHandle handle(cfg.backend, shape.n);
+        RppHandle handle(cfg.backend, cfg.size.n);
         RppStatus status = rppt_jitter(src.ptr(), &desc, dst.ptr(), &desc, kernelSize.data(), seed,
                                        roi.data(), XYWH, handle.get(), cfg.backend);
         EXPECT_EQ(status, RPP_SUCCESS);

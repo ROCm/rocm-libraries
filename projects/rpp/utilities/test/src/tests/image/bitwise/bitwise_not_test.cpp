@@ -41,16 +41,14 @@ namespace {
 
 template <typename T>
 void run_bitwise_not(const TestConfig& cfg) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
+    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
     // ROIs live in host-accessible (pinned for HIP) memory.
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     // (1) Host golden model. golden starts as a copy of the input so the untouched
     // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
@@ -64,7 +62,7 @@ void run_bitwise_not(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_bitwise_not(src.ptr(), &desc, dst.ptr(), &desc, roi.data(), XYWH, handle.get(),
                                cfg.backend),
               RPP_SUCCESS);

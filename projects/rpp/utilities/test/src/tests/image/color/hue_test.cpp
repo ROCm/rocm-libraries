@@ -50,17 +50,15 @@ struct HueParams {
 
 template <typename T>
 void run_hue(const TestConfig& cfg, const HueParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
+    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
     // Parameters live in host-accessible (pinned for HIP) memory.
-    PinnedArray<Rpp32f> hue(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> hue(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         hue[i] = op.hue;
         roi[i] = roiVec[i];
     }
@@ -77,7 +75,7 @@ void run_hue(const TestConfig& cfg, const HueParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_hue(src.ptr(), &desc, dst.ptr(), &desc, hue.data(), roi.data(), XYWH,
                        handle.get(), cfg.backend),
               RPP_SUCCESS);

@@ -68,18 +68,16 @@ RpptChannelOffsets make_offsets(GlitchKind kind) {
 
 template <typename T>
 void run_glitch(const TestConfig& cfg, const GlitchParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // src == dst
+    RpptDesc desc = make_src_descriptor(cfg);  // src == dst
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    PinnedArray<RpptChannelOffsets> offsets(cfg.backend, shape.n);
-    for (Rpp32u n = 0; n < shape.n; ++n) offsets[n] = make_offsets(op.kind);
+    PinnedArray<RpptChannelOffsets> offsets(cfg.backend, cfg.size.n);
+    for (Rpp32u n = 0; n < cfg.size.n; ++n) offsets[n] = make_offsets(op.kind);
 
     // The op writes the ROI-sized region at the destination origin, so golden and device buffer
     // start from the same distinct pattern and only that region is compared.
@@ -93,7 +91,7 @@ void run_glitch(const TestConfig& cfg, const GlitchParams& op) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_glitch(src.ptr(), &desc, dst.ptr(), &desc, offsets.data(), roi.data(), XYWH,
                           handle.get(), cfg.backend),
               RPP_SUCCESS);

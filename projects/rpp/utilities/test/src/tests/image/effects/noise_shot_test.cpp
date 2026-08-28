@@ -68,16 +68,14 @@ constexpr Rpp32f kNontrivialFactor = 0.5f;
 
 template <typename T>
 void run_noise_shot_identity(const TestConfig& cfg) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
+    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32f> factor(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> factor(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         factor[i] = 0.0f;  // the RNG-free identity corner
         roi[i] = roiVec[i];
     }
@@ -91,7 +89,7 @@ void run_noise_shot_identity(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_shot_noise(src.ptr(), &desc, dst.ptr(), &desc, factor.data(), /*seed=*/42u,
                               roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -107,16 +105,14 @@ void run_noise_shot_identity(const TestConfig& cfg) {
 // range), not distribution correctness (that formula is the open question noted above).
 template <typename T>
 void run_noise_shot_valid_range(const TestConfig& cfg) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
+    RpptDesc desc = make_src_descriptor(cfg);
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32f> factor(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> factor(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         factor[i] = kNontrivialFactor;
         roi[i] = roiVec[i];
     }
@@ -128,7 +124,7 @@ void run_noise_shot_valid_range(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_shot_noise(src.ptr(), &desc, dst.ptr(), &desc, factor.data(), /*seed=*/42u,
                               roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -154,16 +150,14 @@ void run_noise_shot_valid_range(const TestConfig& cfg) {
 // this.
 template <typename T>
 void run_noise_shot_seed_invariant(const TestConfig& cfg) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
+    RpptDesc desc = make_src_descriptor(cfg);
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32f> factor(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> factor(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         factor[i] = kNontrivialFactor;
         roi[i] = roiVec[i];
     }
@@ -175,7 +169,7 @@ void run_noise_shot_seed_invariant(const TestConfig& cfg) {
         DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
         src.write(input.data(), bytes);
         dst.write(input.data(), bytes);
-        RppHandle handle(cfg.backend, shape.n);
+        RppHandle handle(cfg.backend, cfg.size.n);
         ASSERT_EQ(rppt_shot_noise(src.ptr(), &desc, dst.ptr(), &desc, factor.data(), seed,
                                   roi.data(), XYWH, handle.get(), cfg.backend),
                   RPP_SUCCESS);

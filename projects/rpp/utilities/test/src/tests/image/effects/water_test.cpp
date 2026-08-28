@@ -62,20 +62,18 @@ constexpr float kFreqX = 5.8f, kFreqY = 1.2f, kPhaseX = 10.0f, kPhaseY = 15.0f;
 
 template <typename T>
 void run_water(const TestConfig& cfg, const WaterParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // src == dst
+    RpptDesc desc = make_src_descriptor(cfg);  // src == dst
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    PinnedArray<Rpp32f> amplX(cfg.backend, shape.n), amplY(cfg.backend, shape.n);
-    PinnedArray<Rpp32f> freqX(cfg.backend, shape.n), freqY(cfg.backend, shape.n);
-    PinnedArray<Rpp32f> phaseX(cfg.backend, shape.n), phaseY(cfg.backend, shape.n);
-    for (Rpp32u n = 0; n < shape.n; ++n) {
+    PinnedArray<Rpp32f> amplX(cfg.backend, cfg.size.n), amplY(cfg.backend, cfg.size.n);
+    PinnedArray<Rpp32f> freqX(cfg.backend, cfg.size.n), freqY(cfg.backend, cfg.size.n);
+    PinnedArray<Rpp32f> phaseX(cfg.backend, cfg.size.n), phaseY(cfg.backend, cfg.size.n);
+    for (Rpp32u n = 0; n < cfg.size.n; ++n) {
         amplX[n] = op.amplitudeX();
         amplY[n] = op.amplitudeY();
         freqX[n] = kFreqX;
@@ -97,7 +95,7 @@ void run_water(const TestConfig& cfg, const WaterParams& op) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_water(src.ptr(), &desc, dst.ptr(), &desc, amplX.data(), amplY.data(),
                          freqX.data(), freqY.data(), phaseX.data(), phaseY.data(), roi.data(), XYWH,
                          handle.get(), cfg.backend),

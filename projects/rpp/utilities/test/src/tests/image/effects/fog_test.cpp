@@ -67,16 +67,14 @@ constexpr float kGrey = 0.6f;
 // NaN, overflow and wrong-intensity-space output; says nothing about the fog layer's shape.
 template <typename T>
 void run_fog(const TestConfig& cfg) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
+    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32f> intensity(cfg.backend, shape.n), grey(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> intensity(cfg.backend, cfg.size.n), grey(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         intensity[i] = kIntensity;
         grey[i] = kGrey;
         roi[i] = roiVec[i];
@@ -89,7 +87,7 @@ void run_fog(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // seeded from the source so "unchanged" means a dead kernel
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_fog(src.ptr(), &desc, dst.ptr(), &desc, intensity.data(), grey.data(),
                        roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -134,16 +132,14 @@ struct FogNegativeParams {
 // RPP_ERROR* an out-of-range scalar maps to.
 template <typename T>
 void run_fog_negative(const TestConfig& cfg, const FogNegativeParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
+    RpptDesc desc = make_src_descriptor(cfg);
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32f> intensity(cfg.backend, shape.n), grey(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> intensity(cfg.backend, cfg.size.n), grey(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         intensity[i] = op.intensity;
         grey[i] = op.grey;
         roi[i] = roiVec[i];
@@ -156,7 +152,7 @@ void run_fog_negative(const TestConfig& cfg, const FogNegativeParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     const RppStatus status = rppt_fog(src.ptr(), &desc, dst.ptr(), &desc, intensity.data(),
                                       grey.data(), roi.data(), XYWH, handle.get(), cfg.backend);
     handle.sync();

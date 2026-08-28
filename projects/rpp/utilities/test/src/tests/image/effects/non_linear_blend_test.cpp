@@ -51,16 +51,14 @@ struct NonLinearBlendParams {
 
 template <typename T>
 void run_non_linear_blend(const TestConfig& cfg, const NonLinearBlendParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
+    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32f> stdDev(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> stdDev(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         stdDev[i] = op.stdDev;
         roi[i] = roiVec[i];
     }
@@ -78,7 +76,7 @@ void run_non_linear_blend(const TestConfig& cfg, const NonLinearBlendParams& op)
     src2.write(input2.data(), bytes);
     dst.write(input1.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_non_linear_blend(src1.ptr(), src2.ptr(), &desc, dst.ptr(), &desc, stdDev.data(),
                                     roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

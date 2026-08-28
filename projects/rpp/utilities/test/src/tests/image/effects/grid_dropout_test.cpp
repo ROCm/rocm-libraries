@@ -52,22 +52,20 @@ constexpr Rpp32u kBoxesInEachImage = kGridW * kGridH;  // 9
 
 template <typename T>
 void run_grid_dropout(const TestConfig& cfg) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
+    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
     // anchorBoxInfoTensor: boxesInEachImage grid holes per image, laid out [n * stride + k].
     PinnedArray<RpptRoiLtrb> boxes(cfg.backend,
-                                   static_cast<std::size_t>(shape.n) * kBoxesInEachImage);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+                                   static_cast<std::size_t>(cfg.size.n) * kBoxesInEachImage);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
 
     // Build the grid of holes deterministically from each image's ROI rectangle. maxHoleW/maxHoleH
     // are the max hole extents across all boxes (passed to the op; the golden ignores them).
     Rpp32u maxHoleW = 0, maxHoleH = 0;
-    for (Rpp32u n = 0; n < shape.n; ++n) {
+    for (Rpp32u n = 0; n < cfg.size.n; ++n) {
         roi[n] = roiVec[n];
         const RoiBounds rb = roi_bounds(roiVec[n], XYWH);
         const Rpp32u cellW = std::max(1u, rb.w / kGridW);
@@ -103,7 +101,7 @@ void run_grid_dropout(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_grid_dropout(src.ptr(), &desc, dst.ptr(), &desc, boxes.data(),
                                 kBoxesInEachImage, maxHoleW, maxHoleH, roi.data(), XYWH,
                                 handle.get(), cfg.backend),

@@ -50,16 +50,14 @@ constexpr Rpp32u kSeed = 42u;
 
 template <typename T>
 void run_gaussian_noise(const TestConfig& cfg) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
+    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32f> mean(cfg.backend, shape.n), stdDev(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> mean(cfg.backend, cfg.size.n), stdDev(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         mean[i] = 0.0f;  // the RNG-free identity corner
         stdDev[i] = 0.0f;
         roi[i] = roiVec[i];
@@ -74,7 +72,7 @@ void run_gaussian_noise(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_gaussian_noise(src.ptr(), &desc, dst.ptr(), &desc, mean.data(), stdDev.data(),
                                   kSeed, roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -102,16 +100,14 @@ struct GaussianNoiseNegativeParams {
 // RPP_ERROR* an out-of-range scalar maps to.
 template <typename T>
 void run_gaussian_noise_negative(const TestConfig& cfg, const GaussianNoiseNegativeParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
+    RpptDesc desc = make_src_descriptor(cfg);
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    PinnedArray<Rpp32f> mean(cfg.backend, shape.n), stdDev(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> mean(cfg.backend, cfg.size.n), stdDev(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         mean[i] = op.mean;
         stdDev[i] = op.stdDev;
         roi[i] = roiVec[i];
@@ -124,7 +120,7 @@ void run_gaussian_noise_negative(const TestConfig& cfg, const GaussianNoiseNegat
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     const RppStatus status =
         rppt_gaussian_noise(src.ptr(), &desc, dst.ptr(), &desc, mean.data(), stdDev.data(), kSeed,
                             roi.data(), XYWH, handle.get(), cfg.backend);
