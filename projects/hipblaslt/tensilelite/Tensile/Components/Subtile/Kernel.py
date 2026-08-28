@@ -471,7 +471,14 @@ class TileInfo:
       self.subtileShape        = list(gr_cfg.subtileShape)
       self.subtileCount        = gr_cfg.subtileCount
       self.subtileStride       = gr_cfg.subtileStride
+      # Strip count along the free dim.  Rounded UP: a macro tile that is not a
+      # multiple of the stack (96 free-dim elements over an 8-tile stack) is
+      # covered by a whole strip whose surplus M tiles are fetched into LDS and
+      # never read back.  Exact for every power-of-two tile, so this is a no-op
+      # there.  Every consumer -- LDS sizing, the GR m0 walk, the LR K-window
+      # stride -- keys off this, so the round-up has to happen once, here.
       self.globalSubtileGrid = list(gr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
+      self.globalSubtileGrid[0] = math.ceil(self.globalSubtileGrid[0])
       # Waves per GR strip along the free dim.  Normally 1: the GR strip is one
       # wave's M extent, so each wave owns whole strips.  When the strip spans
       # GR strip spans several waves' extents, so localMMATileGrid[0] (per wave)
@@ -555,6 +562,7 @@ class TileInfo:
 
       # LR subtile grid — used by LR emit dispatch (may differ from GR)
       self.lrGlobalSubtileGrid = list(lr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
+      self.lrGlobalSubtileGrid[0] = math.ceil(self.lrGlobalSubtileGrid[0])
       self.lrSubtileSize       = lr_cfg.subtileSizeBytes()
       self.lrSubtileShape      = list(lr_cfg.subtileShape)
       self.lrLocalSubtileGrid  = list(self.localSubtileGrid)  # AB: LR iterates over GR subtile grid
@@ -645,9 +653,11 @@ class TileInfo:
       gr_cfg = self.gr.config
       lr_cfg = self.lr.config
       mmaM, mmaK = geometry.mmaTileShape
-      self._check_dim(self.macroTile, gr_cfg.subtileShape[0] * mmaM, self.globalSubtileGrid[0], self.waveGroupSize, 'macroTile[GR]')
+      # The free dim may be over-covered by up to one strip when the macro tile
+      # is not a multiple of the stack; the K dim must still tile exactly.
+      self._check_dim(self.macroTile, gr_cfg.subtileShape[0] * mmaM, self.globalSubtileGrid[0], self.waveGroupSize, 'macroTile[GR]', allowOver=True)
       self._check_dim(self.depthU,    gr_cfg.subtileShape[1] * mmaK, self.globalSubtileGrid[1], 1,                 'depthU[GR]')
-      self._check_dim(self.macroTile, lr_cfg.subtileShape[0] * mmaM, self.lrGlobalSubtileGrid[0], self.waveGroupSize, 'macroTile[LR]')
+      self._check_dim(self.macroTile, lr_cfg.subtileShape[0] * mmaM, self.lrGlobalSubtileGrid[0], self.waveGroupSize, 'macroTile[LR]', allowOver=True)
       self._check_dim(self.depthU,    lr_cfg.subtileShape[1] * mmaK, self.lrGlobalSubtileGrid[1], 1,                 'depthU[LR]')
     elif isinstance(geometry, MXScaleTilePair):
       # GR covers the full scale MMA tile grid (subtileShape = entire grid, globalSubtileGrid=[1,1])
@@ -666,14 +676,22 @@ class TileInfo:
 
   # --- Consistency validation ---
 
-  def _check_dim(self, mt, subtile_span, num_subtiles, wg_size, label):
+  def _check_dim(self, mt, subtile_span, num_subtiles, wg_size, label, allowOver=False):
     """Verify subtile_span * num_subtiles * wg_size == mt for one tile dimension.
 
     subtile_span : elements covered by one subtile in this dim
     num_subtiles : globalSubtileGrid value for this dim (may be float)
     wg_size      : wave group count partitioning this dim (1 = no partitioning)
+    allowOver    : accept over-coverage by less than one subtile.  The free dim
+                   rounds its strip count up, so a macro tile that is not a
+                   multiple of the stack is covered by a strip whose surplus is
+                   loaded but never read.  More than one whole surplus strip
+                   would mean a strip nothing reads at all, which is a bug.
     """
-    if subtile_span * num_subtiles != mt:
+    covered = subtile_span * num_subtiles
+    if allowOver and mt <= covered < mt + subtile_span:
+      return
+    if covered != mt:
       raise ValueError(
         f"TileInfo({self.tc}): {label}={mt} not covered exactly. "
         f"subtile_span({subtile_span}) x globalSubtileGrid({num_subtiles}) "
