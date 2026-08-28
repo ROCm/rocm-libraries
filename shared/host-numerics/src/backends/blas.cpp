@@ -508,4 +508,15 @@ GemmRunInfo referenceGemmWithBlasBackend(const GemmRequest& problem, GemmBackend
     if (!blasSupport) runInfo.fallbackReason = blasSupport.reason;
     return runInfo;
 }
+
+GemmResult referenceGemmWithBlasBackend(const GemmProblem& problem, const GemmOutputOptions& output,
+                                        GemmBackend backend) {
+    const Shape outputShape{problem.a.values.shape()[0], problem.b.values.shape()[1]};
+    const Layout outputLayout =
+        output.layout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
+    Tensor destination(problem.outputType, outputLayout);
+    GemmRequest request(problem, destination, output.selection);
+    GemmRunInfo runInfo = referenceGemmWithBlasBackend(request, backend);
+    return {.output = std::move(destination), .runInfo = std::move(runInfo)};
+}
 }  // namespace roc::host_numerics

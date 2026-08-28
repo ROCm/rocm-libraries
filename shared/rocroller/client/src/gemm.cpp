@@ -142,13 +142,13 @@ namespace rocRoller::Client::GEMMClient
                                             scaleBlockSize);
         }
 
-        const HostReferenceProblem referenceProblem = makeHostReferenceProblem(generatedInputs,
-                                                                               runtimeScaleA,
-                                                                               runtimeScaleB,
-                                                                               scaleBlockSize,
-                                                                               problemParams.alpha,
-                                                                               problemParams.beta);
-        const auto                 floatReference   = computeHostReference(referenceProblem);
+        const auto referenceProblem = makeHostReferenceProblem(generatedInputs,
+                                                               runtimeScaleA,
+                                                               runtimeScaleB,
+                                                               scaleBlockSize,
+                                                               problemParams.alpha,
+                                                               problemParams.beta);
+        const auto floatReference = computeHostReference(referenceProblem);
         const auto                 hostReference    = convertHostReference<D>(floatReference);
         const auto acceptableError = acceptableGEMMError<A, B, D>(problemParams.k, arch.target());
         const auto comparison      = compareHostReference(
@@ -159,13 +159,13 @@ namespace rocRoller::Client::GEMMClient
 
         Log::debug(comparison.message());
 
-        std::cout << "Result: " << (comparison.ok ? "Correct" : "Incorrect") << std::endl;
-        std::cout << "RNorm: " << comparison.relativeNormL2 << std::endl;
-        if(!comparison.ok)
+        std::cout << "Result: " << (comparison.ok() ? "Correct" : "Incorrect") << std::endl;
+        std::cout << "RNorm: " << comparison.statistics.relativeFrobeniusError << std::endl;
+        if(!comparison.ok())
         {
             std::cerr << "WARNING: Result incorrect.  " << comparison.message() << std::endl;
         }
-        return {comparison.ok, comparison.relativeNormL2};
+        return {comparison.ok(), comparison.statistics.relativeFrobeniusError};
     }
 
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)

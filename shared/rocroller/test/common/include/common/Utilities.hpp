@@ -151,7 +151,7 @@ AcceptableError gemmAcceptableError(int K, rocRoller::GPUArchitectureTarget cons
 /**
  * @brief Compare `x` to a reference `r`.
  *
- * The boolean `ok` field of the return value is true if the relative
+ * The `ok()` result is true if the relative
  * L2 norm between `x` and `r` is less than `scale` * `epsilon`.
  *
  * Various norms are computed and included in the return value.
