@@ -19,6 +19,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/KnobWrapper.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
@@ -49,6 +50,7 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
 using ::testing::_;
 using ::testing::Ref;
 using ::testing::Return;
@@ -1035,6 +1037,89 @@ TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
 
     EXPECT_EQ(context.plan().getWorkspaceSize(0), 64U);
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
+}
+
+/// prepare() fails for one kernel and succeeds for the rest: the shape of a code object
+/// that cannot be loaded -- a kpack archive missing from the install, a symbol the module
+/// does not export -- which is a property of that one kernel, not of its pack.
+class FailsToPrepareOneBlockSizeHandler : public IKernelDispatchHandler<TestHandle>
+{
+public:
+    explicit FailsToPrepareOneBlockSizeHandler(int64_t failingBlockSize)
+        : _failingBlockSize(failingBlockSize)
+    {
+    }
+
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        return static_cast<size_t>(kernel.getIntMetadata(BLOCK_SIZE));
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == _failingBlockSize)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "the archive holds no code object for this kernel");
+        }
+        return std::make_unique<PreparedDispatch>();
+    }
+
+    void launch(const TestHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+
+private:
+    int64_t _failingBlockSize;
+};
+
+/// Constructing a GenericPlan runs prepare(), so the ranked front is where an unloadable
+/// code object surfaces -- after applicability already promised the graph. kernel_64 fails,
+/// kernel_128 takes the plan, and the WARN is the only record that a slower kernel is
+/// running.
+TEST(TestIngestorGenericPlanBuilder, FallsBackWhenTheFrontCandidateCannotPrepare)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const FailsToPrepareOneBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xB6));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    // 128, not 64: priority puts kernel_64 at the front, and the next candidate served.
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 128);
+    EXPECT_EQ(context.plan().getWorkspaceSize(0), 128U);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, toString(testId(0x70))))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
+                                          "the archive holds no code object for this "
+                                          "kernel"));
 }
 
 // ---------------------------------------------------------------------------
