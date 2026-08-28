@@ -219,6 +219,16 @@ def _subtileWaveStraddlesStrip(stack, perWaveMTiles):
   return perWaveMTiles % stack != 0 and stack % perWaveMTiles != 0
 
 
+def _subtilePerWaveMTiles(mtTiles, stack, wgSize):
+  # MFMA-M tiles per wave, measured against the strip: a strip is padded out to
+  # a whole stack and the wave owns that padding too.  Shared so the straddle
+  # check and the fetch-group count cannot drift apart.
+  if stack <= 0 or wgSize <= 0:
+    return max(1, int(mtTiles))
+  padded = -(-int(mtTiles) // int(stack)) * int(stack)
+  return max(1, padded // int(wgSize))
+
+
 def _validateSubtileGRKPartition(state, printRejectionReason):
   # TODO: TEMPORARY FIX. Reject gfx950 subtile solutions that hit the GR
   # K-partition bug (see _subtileGRKPartitionIsBuggy). Remove once
@@ -233,14 +243,9 @@ def _validateSubtileGRKPartition(state, printRejectionReason):
   for tc in ("A", "B"):
     tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
     stack = int(tileInfo.subtileShape[0])
-    perWaveMTiles = int(tileInfo.localMMATileGrid[0])
-    # An over-allocated strip is padded out to the stack, and the wave owns the
-    # padding along with the real tiles, so the straddle question is about the
-    # padded extent.  Comparing the raw tile count against a rounded-up stack
-    # would call every non-power-of-two tile a straddle.
     wgSize = state["MIWaveGroup"][0 if tc == 'A' else 1]
-    mtTilesPadded = -(-int(tileInfo.macroTile // state["MatrixInstM"]) // stack) * stack
-    perWaveMTiles = max(1, mtTilesPadded // wgSize)
+    mtTiles = int(tileInfo.macroTile // state["MatrixInstM"])
+    perWaveMTiles = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
     if _subtileWaveStraddlesStrip(stack, perWaveMTiles):
       reject(state, printRejectionReason,
              "UseSubtileImpl=1 leaves a wave straddling an LDS strip on tensor %s: "
@@ -1181,25 +1186,15 @@ class Solution(collections.abc.Mapping):
               if mtTiles % cand == 0:
                 stack = cand
                 break
-            # A macro tile that is not a power of two only divides down to a
-            # small stack -- 224 free-dim elements give 14 MFMA-M tiles and so
-            # a 2-tile stack, a 16B contiguous run per K row.  At that width
-            # the GR lane map pins m_chunk to 0 and spends every lane on a
-            # different K column, so one buffer_load touches 64 cache lines and
-            # uses 16B of each.  The neighbouring strips do fill the rest of
-            # those lines, but only across separate instructions, and nothing
-            # keeps four waves in step to make that land in one line fill.
+            # A narrow stack pins m_chunk to 0 in the GR lane map, so one load
+            # spends every lane on a different K column: 64 cache lines, 16B
+            # taken from each.  Rounding the strip up to a power of two buys a
+            # full-line run per K row; the padding tiles reach LDS and are never
+            # read back (emitSingleDsRead indexes sId0 % stackM).
             #
-            # Round the strip up to the next power of two.  The padding M tiles
-            # are fetched into LDS and never read back -- emitSingleDsRead
-            # indexes tiles as sId0 % stackM with sId0 < mtTiles -- so this buys
-            # a full-line run per K row for a fetch of rounded/mtTiles.
-            # Only when the padding is cheap.  The win is the line fill and the
-            # cost is rounded/mtTiles of extra A traffic, so it turns on how
-            # close the tile already is to the next power of two.  Measured on
-            # 5376x2048x2048: 14 tiles pad to 16 for 1.14x and gain 15% (1201 ->
-            # 1386 TFLOP/s), while 12 tiles pad to 16 for 1.33x and gain nothing
-            # (1467 -> 1471).  Cut between them.
+            # Worth it only while the padding is cheap.  On 5376x2048x2048,
+            # 14 tiles pad to 16 for 1.14x and gain 15% (1201 -> 1386 TFLOP/s);
+            # 12 tiles pad for 1.33x and gain nothing (1467 -> 1471).
             rounded = min(16, 1 << (mtTiles - 1).bit_length()) if mtTiles > 1 else 2
             if rounded > stack and rounded * 4 <= mtTiles * 5:
               stack = rounded
@@ -1217,7 +1212,7 @@ class Solution(collections.abc.Mapping):
             wgSize     = state["MIWaveGroup"][0 if tc == 'A' else 1]
             numWaves   = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
             otherWaves = max(1, numWaves // wgSize)
-            perWave    = max(1, mtTiles // wgSize)
+            perWave    = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
             fetchGroup = max(1, stack // perWave) * otherWaves
             stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * 0.5
             slots      = int(stripBytes // (state["WavefrontSize"] * 16)) \
@@ -2612,6 +2607,10 @@ class Solution(collections.abc.Mapping):
         return False
 
       if numBytes == 0.5:
+        # False on gfx950: the probe assembles ds_load_tr4_b64, the gfx1250
+        # spelling; gfx9 calls it ds_read_b64_tr_b4.  Harmless today (the
+        # subtile path emits it directly), but fixing the probe would flip this
+        # true and reach LDS padding off the subtile path -- own change.
         return asmCaps["HasLDSTrB64B4"]
       elif numBytes == 0.75:
         return asmCaps["HasLDSTrB96B6"]
@@ -5627,6 +5626,8 @@ class Solution(collections.abc.Mapping):
     # UseSubtileImpl drives its own global-read addressing and edge masking
     # (see Components/Subtile), so the classic partial-load guarantees do not
     # apply; treat loads as non-partial to skip the classic graShift path.
+    # This covers every subtile kernel, TN bf16 and fp8 included -- what stands
+    # behind it is the edge coverage in f4_subtile.yaml and subtile_mxfp4.yaml.
     if state["ProblemType"]["TLUA"] and not state["UseSubtileImpl"]:
       state["GuaranteeNoPartialA"] = state["AssertFree0ElementMultiple"]%state["GlobalReadVectorWidthA"]==0
     else:

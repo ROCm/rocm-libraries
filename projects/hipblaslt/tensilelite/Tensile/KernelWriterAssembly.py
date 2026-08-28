@@ -4697,30 +4697,29 @@ class KernelWriterAssembly(KernelWriter):
           prePadElems = self.states.srdShiftLeft[tc]
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), \
                     unrollStride, kernel["DepthU"] - 1, comment="(DepthU-1) * unrollStride (last K row in window)"))
-          # Bring the free span down to what is left of the tensor, the way the
-          # strided branch above clamps numLine with SMinU32.  The last
-          # workgroup along the free dim owns fewer than MT elements whenever
-          # the size leaves a remainder, and spanning the whole MT there puts
-          # the end of the window (MT - remainder) * bpe past the tensor.  The
-          # base has already advanced by DepthU * unrollStride per K window, so
-          # on the final window that overhang is off the end of the allocation
-          # and the loads are real accesses rather than clamped ones.  It stays
-          # hidden while the overhang shares a page with the tail of the tensor,
-          # so it needs both a remainder and an allocation ending on a page
-          # boundary -- macro tile 96 over M 2048 is one such pair.
+          # Clamp the free span to what is left of the tensor, as the strided
+          # branch above does with SMinU32.  The last workgroup owns fewer than
+          # MT whenever the size leaves a remainder, and the base has already
+          # advanced by DepthU * unrollStride, so on the final K window the
+          # overhang is off the end of the allocation -- real accesses, not
+          # clamped ones.  Needs a remainder *and* an allocation ending on a
+          # page to fault: macro tile 96 over M 2048 is one such pair.
           #
-          # Round up to a whole load first.  DirectToLds drops the LDS write for
-          # a load that is not wholly in range, and one lane covers 16B, so a
-          # limit cut to the exact element count silently leaves stale LDS for
-          # the valid elements sharing that lane's chunk with the tail.
-          chunkElems = max(1, int(16 / float(tP["bpeGR"])))
+          # Round up to a whole load first: DirectToLds drops the LDS write for
+          # a partially out-of-range load, so cutting mid-lane leaves stale LDS
+          # for the valid elements sharing that lane.  Width from the geometry,
+          # since AB_B16_TLU1_16x1 carries 32B rather than 16B.
+          grTileInfo = self.states.a.tileInfo if tc == 'A' else \
+                       (self.states.b.tileInfo if tc == 'B' else None)
+          loadBytes  = int(getattr(grTileInfo, "loadWidthGR", 16) or 16)
+          chunkElems = max(1, int(loadBytes / float(tP["bpeGR"])))
           for i in range(0, numDim):
             idx = indices[i]
             if idx == kernel["ProblemType"]["Index0"] or idx == kernel["ProblemType"]["Index1"]:
               module.add(SSubU32(dst=sgpr(stmp+1), src0=self.sizeRef(idx), src1=sgpr(tileStart+0), \
                         comment="numToEnd = size - WG*MT"))
               module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=(chunkElems - 1), \
-                        comment="round up to a whole %uB load (%u elements)"%(16, chunkElems)))
+                        comment="round up to a whole %uB load (%u elements)"%(loadBytes, chunkElems)))
               module.add(SAndB32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=hex(~(chunkElems - 1) & 0xffffffff), \
                         comment="mask off the partial load"))
               module.add(SMinU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=freeSpan, \
