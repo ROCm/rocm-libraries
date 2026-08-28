@@ -38,11 +38,11 @@
 #include <vector>
 
 #include "ProgramOptions.hpp"
-#include <roc/host_numerics/adapters/tensilelite/Reference.hpp>
+#include <TensileLite/Client/HostNumerics/Reference.hpp>
 #include "rocisa/include/enum.hpp"
 #include <Tensile/Activation.hpp>
-#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
-#include <roc/host_numerics/adapters/tensilelite/TensileDataGeneration.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/TensileDataGeneration.hpp>
 #include <roc/host_numerics/validation.hpp>
 
 /*
@@ -180,7 +180,7 @@ namespace
 
         const auto recipe
             = GenerationRecipe::realOnly(std::move(component),
-                                         tensilelite_adapter::dataInitializationSettings(
+                                         TensileLite::Client::HostNumerics::dataInitializationSettings(
                                              42, static_cast<uint64_t>(stream)));
 
         Tensor generated(toHostNumericsScalarType(TypeTraits<T>::value),
@@ -561,7 +561,7 @@ int runGemm(size_t             m,
                 const auto recipe = roc::host_numerics::GenerationRecipe::realOnly(
                     roc::host_numerics::GenerationRecipe::randomEncodedExponent(
                         {.lowerUnbiasedExponent = 0, .upperUnbiasedExponent = 7}),
-                    roc::host_numerics::tensilelite_adapter::dataInitializationSettings(
+                    TensileLite::Client::HostNumerics::dataInitializationSettings(
                         42, stream));
                 roc::host_numerics::generate(generated, recipe);
                 std::memcpy(values.data(), generated.rawEncodedBackingStorage().data(), generated.rawEncodedBackingStorage().size());

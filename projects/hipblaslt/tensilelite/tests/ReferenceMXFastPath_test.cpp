@@ -5,8 +5,8 @@
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
-#include <roc/host_numerics/adapters/tensilelite/Reference.hpp>
-#include <roc/host_numerics/adapters/tensilelite/TensileDataGeneration.hpp>
+#include <TensileLite/Client/HostNumerics/Reference.hpp>
+#include <TensileLite/Client/HostNumerics/TensileDataGeneration.hpp>
 #include <roc/host_numerics/comparison.hpp>
 #include <roc/host_numerics/generation.hpp>
 
@@ -76,7 +76,7 @@ namespace
 
         const auto recipe = GenerationRecipe::realOnly(
             std::move(component),
-            tensilelite_adapter::dataInitializationSettings(seed, stream));
+            TensileLite::Client::HostNumerics::dataInitializationSettings(seed, stream));
         Tensor generated(type, Layout::contiguousLastDimensionFastest(Shape{values.size()}));
         generate(generated, recipe);
 

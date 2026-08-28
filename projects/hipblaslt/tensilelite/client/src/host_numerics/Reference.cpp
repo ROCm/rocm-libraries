@@ -3,9 +3,9 @@
 
 // Product-private TensileLite execution policy around the descriptor adapter.
 
-#include <roc/host_numerics/adapters/tensilelite/GemmInvocationAdapter.hpp>
-#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
-#include <roc/host_numerics/adapters/tensilelite/Reference.hpp>
+#include <TensileLite/Client/HostNumerics/GemmInvocationAdapter.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/Reference.hpp>
 #include <roc/host_numerics/validation.hpp>
 
 #include "TimingInstrumentation.hpp"
@@ -20,8 +20,8 @@ namespace TensileLite
     namespace
     {
         using namespace roc::host_numerics;
-        using Client::reference_adapter::GemmInvocationAdapter;
-        using Client::reference_adapter::TranslationFailure;
+        using Client::HostNumerics::GemmInvocationAdapter;
+        using Client::HostNumerics::TranslationFailure;
 
         [[noreturn]] void throwTranslationFailure(const TranslationFailure& failure)
         {
@@ -34,7 +34,7 @@ namespace TensileLite
                                           OutputSelection               outputSelection,
                                           GemmBackend                    backend)
         {
-            using namespace Client::reference_adapter;
+            using namespace Client::HostNumerics;
 
             auto translation
                 = translateGemmInvocation(problem, inputs, std::move(outputSelection));

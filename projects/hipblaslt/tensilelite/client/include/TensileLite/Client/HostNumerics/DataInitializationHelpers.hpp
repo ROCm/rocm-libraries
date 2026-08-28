@@ -3,14 +3,14 @@
 
 #pragma once
 
-// Product-private TensileLite adapter.
+// TensileLite client-private adapter.
 
 // TensileLite adapter over host-numerics-owned MX generation.
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 #include "DataInitialization.hpp"
-#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
 #include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 #include <roc/host_numerics/mx.hpp>
 
@@ -28,7 +28,7 @@ namespace TensileLite
 {
     namespace Client
     {
-        namespace detail
+        namespace HostNumerics::detail
         {
             inline roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout
                 mxScaleStorageLayoutForArchName(std::string_view archName)
@@ -205,7 +205,7 @@ namespace TensileLite
                 problem.scale            = mxScaleGenerationMode(scaleInitialization);
                 return problem;
             }
-        } // namespace detail
+        } // namespace HostNumerics::detail
     } // namespace Client
 } // namespace TensileLite
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR

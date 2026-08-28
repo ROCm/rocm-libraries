@@ -3,7 +3,7 @@
 
 #pragma once
 
-// Product-private TensileLite adapter.
+// TensileLite client-private adapter.
 
 #include <roc/host_numerics/validation.hpp>
 
