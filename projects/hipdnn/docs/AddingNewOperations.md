@@ -199,7 +199,7 @@ suffix, and is correctly unannotated.
    on any change under `flatbuffers_sdk/schemas/` or to the script, and CI runs pre-commit on
    every pull request, so a stale header fails there.
 1. Add a case to
-   [`TestGraphContentKey.cpp`](../plugin_sdk/tests/ingestor/TestGraphContentKey.cpp): a keyed
+   [`TestGraphContentKey.cpp`](../flatbuffers_sdk/tests/flatbuffer_utilities/TestGraphContentKey.cpp): a keyed
    field needs a differs-implies-unequal case, an ignored field an equal-despite-difference
    case, and a tensor reference both equal-under-renumbering and unequal-under-rewiring.
 

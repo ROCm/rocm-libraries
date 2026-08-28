@@ -60,6 +60,68 @@ RUN curl -fL https://dvc.org/download/linux-deb/dvc-3.67.0 -o /tmp/dvc.deb && \
     rm /tmp/dvc.deb
 
 # ============================================================================
+# rocm_kpack Python tooling
+#
+# hip-kernel-provider packs .co kernels into .kpack archives via rocm_kpack.
+# Staging it at /opt/rocm-kpack/python, which KpackPython.cmake searches by
+# default, lets a container build pack with no flags and no network.
+#
+# From rocm-systems, sparse-checked-out to shared/kpack.
+# ============================================================================
+FROM base AS install_kpack
+
+# Pin copied from the kpack-ref output of .github/actions/ci-env/action.yml;
+# the image build fetches this Dockerfile standalone into an empty context and
+# cannot read it. The kpack-pin-sync pre-commit hook holds them equal.
+#
+# Pinned, not a branch: Docker keys a RUN on the command string, so a warm
+# builder cache would serve stale tooling indefinitely. Set
+# ROCM_SYSTEMS_KPACK_REF to override; =develop tracks the branch. It is
+# deliberately independent of ROCM_SYSTEMS_REF, which selects TheRock's
+# rocm-systems submodule and need not carry a working shared/kpack.
+ARG ROCM_SYSTEMS_KPACK_REF=a022846cf553c2b135410a5168f97705f1b9c6ac
+
+# init + fetch rather than `clone --branch`, which accepts only a branch or tag
+# while these refs are usually commit SHAs. The git wire protocol cannot fetch
+# an abbreviated SHA; pass a full one.
+RUN kpack_ref="$ROCM_SYSTEMS_KPACK_REF" && \
+    echo "Staging rocm_kpack from rocm-systems ref: $kpack_ref" && \
+    mkdir -p /tmp/rocm-systems && cd /tmp/rocm-systems && \
+    git init -q . && \
+    git remote add origin https://github.com/ROCm/rocm-systems.git && \
+    git sparse-checkout init --cone && \
+    git sparse-checkout set shared/kpack && \
+    git fetch --depth 1 --filter=blob:none origin "$kpack_ref" && \
+    git checkout -q FETCH_HEAD && \
+    if [ ! -d shared/kpack/python/rocm_kpack ]; then \
+        echo "rocm-systems ref '$kpack_ref' has no shared/kpack/python/rocm_kpack" >&2; \
+        exit 1; \
+    fi
+
+# --target yields a flat directory that is itself the parent of rocm_kpack/,
+# which is what HIPKERNELPROVIDER_KPACK_PYTHON_DIR expects, with the
+# dependencies beside the package so one PYTHONPATH entry satisfies the import.
+# Installing the checkout takes msgpack and zstandard from kpack's own
+# pyproject.toml.
+#
+# zstandard ships two ~12 MB backends and CPython loads only backend_c;
+# removing the PyPy-only _cffi nearly halves the layer.
+RUN python3 -m pip install --no-cache-dir --no-compile \
+        --target /opt/rocm-kpack/python \
+        /tmp/rocm-systems/shared/kpack && \
+    rm -f /opt/rocm-kpack/python/zstandard/_cffi.*.so && \
+    find /opt/rocm-kpack/python -name '__pycache__' -type d -prune -exec rm -rf {} + && \
+    git -C /tmp/rocm-systems rev-parse HEAD > /opt/rocm-kpack/ROCM_SYSTEMS_COMMIT && \
+    rm -rf /tmp/rocm-systems
+
+# Fails the image build rather than shipping a tree that cannot pack.
+# PYTHONDONTWRITEBYTECODE keeps this import from leaving __pycache__ tagged for
+# this interpreter, which is dead weight for any other Python using the tree.
+RUN PYTHONPATH=/opt/rocm-kpack/python PYTHONDONTWRITEBYTECODE=1 python3 -c \
+        "import rocm_kpack.kpack, rocm_kpack.compression" && \
+    echo "rocm_kpack staged from rocm-systems $(cat /opt/rocm-kpack/ROCM_SYSTEMS_COMMIT)"
+
+# ============================================================================
 # TheRock build environment - system tools + Python venv ready
 #
 # A minimal container with everything needed to build TheRock from source.
@@ -339,10 +401,29 @@ RUN for tool in /usr/bin/llvm*-20; do \
         fi \
     done
 
-RUN python3 -m pip install --break-system-packages pre-commit
+# msgpack/zstandard: runtime deps of rocm_kpack, which the hip-kernel-provider's
+# descriptor-packaging step (HIPDNN_ENABLE_KERNEL_INGESTOR=ON) imports from the
+# base interpreter. rocm_kpack ships as a source tree (vendored into the ROCm
+# artifact this stage installs, at /opt/rocm-kpack/python), not an installed
+# wheel, so pip never pulls its declared deps automatically; without this,
+# configuring with the kernel ingestor enabled fails with
+# "ModuleNotFoundError: No module named 'msgpack'".
+#
+# pytest: the same descriptor-packaging step registers its 165-case pytest
+# suite (descriptor-packaging/tests/) as two ctest entries. Without pytest,
+# HkpPackaging.cmake doesn't fail configure -- it silently registers both
+# entries DISABLED ("hkp: pytest not importable by ... python3; registering
+# descriptor-packaging pytest tests as DISABLED"), so the whole suite goes
+# quietly unexercised instead of erroring.
+RUN python3 -m pip install --break-system-packages pre-commit 'msgpack>=1.0.0' 'zstandard>=0.20.0' pytest
 
 # Create mount point for /opt/rocm (will be empty unless mounted or built upon)
 RUN mkdir -p /opt/rocm
+
+# rocm_kpack tooling. KpackPython.cmake searches this path by default, so a
+# container build needs no kpack flags and never fetches. Outside /opt/rocm
+# because that is a run-time mount point.
+COPY --from=install_kpack /opt/rocm-kpack /opt/rocm-kpack
 
 ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
