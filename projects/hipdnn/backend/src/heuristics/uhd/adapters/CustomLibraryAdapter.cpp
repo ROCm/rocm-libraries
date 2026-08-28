@@ -5,13 +5,13 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
-#include <dlfcn.h> // POSIX dlopen / dlsym / dlclose
-
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace hipdnn_backend::heuristics::uhd
@@ -44,29 +44,43 @@ std::unique_ptr<CustomLibraryAdapter>
         return nullptr;
     }
 
-    // dlopen the library (RTLD_NOW to catch missing symbols at load time)
-    void* libHandle = dlopen(libraryPath.c_str(), RTLD_NOW | RTLD_LOCAL);
-    if(libHandle == nullptr)
+    // plugin::SharedLibrary rather than a dlopen here. The POSIX call this replaced made
+    // the whole ingestor unbuildable on Windows -- <dlfcn.h> does not exist there, and
+    // HIPDNN_ENABLE_KERNEL_INGESTOR=ON is set on the Windows CI lane. The backend already
+    // owned a cross-platform loader for exactly this; a second port would have been a
+    // second thing to keep correct.
+    //
+    // It throws where this function returns nullptr, so the conversion happens here: a
+    // custom_library artifact is author-supplied and may simply be absent or wrong, which
+    // RFC 0019 §5 wants degraded to declared order rather than failed.
+    plugin::SharedLibrary library;
+    try
     {
-        const char* err = dlerror();
-        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: dlopen failed for " << libraryPath << ": "
-                                                                         << (err ? err : "unknown"));
+        library.load(libraryPath);
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: failed to load " << libraryPath << ": "
+                                                                     << error.what());
         return nullptr;
     }
 
-    // Reset dlerror before dlsym (POSIX requirement)
-    dlerror();
-
-    // Lookup the scorer symbol
-    void* sym = dlsym(libHandle, symbolName.c_str());
-    const char* err = dlerror();
-    if(err != nullptr || sym == nullptr)
+    void* sym = nullptr;
+    try
     {
-        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: dlsym failed for symbol '" << symbolName
-                                                                                << "' in "
-                                                                                << libraryPath
-                                                                                << ": " << (err ? err : "symbol not found"));
-        dlclose(libHandle);
+        sym = library.getSymbol(symbolName);
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: symbol '"
+                             << symbolName << "' not found in " << libraryPath << ": "
+                             << error.what());
+        return nullptr;
+    }
+    if(sym == nullptr)
+    {
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: symbol '" << symbolName << "' resolved to "
+                                                              << "null in " << libraryPath);
         return nullptr;
     }
 
@@ -74,17 +88,16 @@ std::unique_ptr<CustomLibraryAdapter>
                                                          << symbolName << "' (features="
                                                          << numFeatures << ")");
 
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) - dlsym returns void*
     return std::unique_ptr<CustomLibraryAdapter>(new CustomLibraryAdapter(
-        libHandle, sym, numFeatures, expectedFeaturesHash, libraryPath));
+        std::move(library), sym, numFeatures, expectedFeaturesHash, libraryPath));
 }
 
-CustomLibraryAdapter::CustomLibraryAdapter(void* libHandle,
+CustomLibraryAdapter::CustomLibraryAdapter(plugin::SharedLibrary library,
                                            void* scorerFunc,
                                            size_t numFeatures,
                                            std::string featuresHash,
                                            std::string libraryPath)
-    : _libHandle(libHandle),
+    : _library(std::move(library)),
       _scorerFunc(scorerFunc),
       _numFeatures(numFeatures),
       _featuresHash(std::move(featuresHash)),
@@ -92,18 +105,9 @@ CustomLibraryAdapter::CustomLibraryAdapter(void* libHandle,
 {
 }
 
-CustomLibraryAdapter::~CustomLibraryAdapter()
-{
-    if(_libHandle != nullptr)
-    {
-        if(dlclose(_libHandle) != 0)
-        {
-            const char* err = dlerror();
-            HIPDNN_SDK_LOG_WARN("CustomLibraryAdapter: dlclose failed for " << _libraryPath
-                                                                             << ": " << (err ? err : "unknown"));
-        }
-    }
-}
+/// Declared, not defaulted in the header, because ~SharedLibrary needs its complete type
+/// and the destructor is the only member that requires it here.
+CustomLibraryAdapter::~CustomLibraryAdapter() = default;
 
 double CustomLibraryAdapter::score(const std::vector<double>& features) const
 {

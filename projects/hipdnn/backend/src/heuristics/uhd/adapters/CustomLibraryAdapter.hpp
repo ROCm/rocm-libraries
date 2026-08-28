@@ -4,6 +4,7 @@
 #pragma once
 
 #include "IUhdAdapter.hpp"
+#include "plugin/SharedLibrary.hpp"
 
 #include <memory>
 #include <string>
@@ -67,14 +68,16 @@ public:
     }
 
 private:
-    CustomLibraryAdapter(void* libHandle,
+    CustomLibraryAdapter(plugin::SharedLibrary library,
                          void* scorerFunc,
                          size_t numFeatures,
                          std::string featuresHash,
                          std::string libraryPath);
 
-    void* _libHandle;    // dlopen handle (opaque on both POSIX and Windows)
-    void* _scorerFunc;   // Function pointer (opaque - cast before calling)
+    /// Owns the loaded module. Unloading is its destructor's job, which is why this
+    /// class declares no unload of its own.
+    plugin::SharedLibrary _library;
+    void* _scorerFunc; // Function pointer (opaque - cast before calling)
     size_t _numFeatures;
     std::string _featuresHash;
     std::string _libraryPath; // For error messages

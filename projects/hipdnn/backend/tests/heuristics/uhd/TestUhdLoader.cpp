@@ -131,8 +131,13 @@ TEST(TestUhdLoader, LoadFromBufferTreeData)
     EXPECT_EQ(config->scoreTransform, "log1p");
     EXPECT_FALSE(config->scoreCalibrated);
 
-    // Relative path should be resolved against basePath
-    EXPECT_EQ(config->modelArtifactPath, "/base/path/model.bin");
+    // Relative path should be resolved against basePath.
+    //
+    // Compared as a path, not a string: UhdLoader joins with std::filesystem, which uses
+    // the native separator, so a literal "/base/path/model.bin" only matches on POSIX.
+    // The assertion went unnoticed until the ingestor was first built on Windows.
+    EXPECT_EQ(std::filesystem::path(config->modelArtifactPath),
+              std::filesystem::path("/base/path/model.bin"));
 
     // Features signature
     ASSERT_EQ(config->featuresSignature.size(), 2);
