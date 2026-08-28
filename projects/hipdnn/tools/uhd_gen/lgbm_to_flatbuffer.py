@@ -8,9 +8,9 @@ by TreeDataAdapter.
 
 Written through the flatc-generated object API. The hand-rolled vtable this
 replaced happened to match gbdt_model.fbs, but only by coincidence -- the sibling
-writer in uhd_to_flatbuffer.py did not, and shipped unloadable buffers for as long
-as it existed. Field identity here is a name, so a schema addition renumbers
-nothing.
+writer that emitted the UHD as a FlatBuffer did not, and shipped unloadable
+buffers for as long as it existed. That one is gone; the UHD is JSON. Field
+identity here is a name, so a schema addition renumbers nothing.
 """
 from __future__ import annotations
 

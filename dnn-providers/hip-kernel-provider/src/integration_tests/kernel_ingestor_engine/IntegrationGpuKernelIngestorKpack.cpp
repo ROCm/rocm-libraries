@@ -681,8 +681,8 @@ TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnDevice)
 TEST_F(IntegrationGpuKernelIngestorKpack, AModelRankedEngineOffersItself)
 {
     // Separated from the ordering assertion below so a packaging failure and a
-    // ranking failure are distinguishable. If the .uhd.fb or model.bin did not
-    // reach the packed tree, the engine still loads -- it degrades to declared
+    // ranking failure are distinguishable. If model.bin did not reach the
+    // packed tree, the engine still loads -- it degrades to declared
     // order -- and only this case's sibling would fail, with no clue why.
     auto graph = buildPointwiseAddGraph();
     ASSERT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
